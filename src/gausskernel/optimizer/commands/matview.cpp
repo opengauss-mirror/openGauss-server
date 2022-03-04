@@ -1193,7 +1193,7 @@ static void ExecCreateMatInc(QueryDesc*queryDesc, Query *query, Relation matview
             if (rel->rd_tam_type == TAM_USTORE) {
                 tmpTuple = UHeapToHeap(rel->rd_att, (UHeapTuple)tuple);
                 tmpTuple->t_xid_base = ((UHeapTuple)tuple)->t_xid_base;
-                HeapTupleSetXmin(tmpTuple, ((UHeapTuple)tuple)->disk_tuple->xid);
+                tmpTuple->t_data->t_choice.t_heap.t_xmin = ((UHeapTuple)tuple)->disk_tuple->xid;
                 tuple = tmpTuple;
             }
             HeapTuple copyTuple = heap_copytuple(tuple);
@@ -2078,6 +2078,9 @@ void insert_into_mlog_table(Relation rel, Oid mlogid, HeapTuple tuple, ItemPoint
 
         for (i = 0, j = 0; i < relAttnumAll; i++) {
             if (relDesc->attrs[i]->attisdropped) {
+                ereport(DEBUG5,
+                        (errmodule(MOD_OPT), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Skip dropped column %d on base table when insert into mlog table", i)));
                 continue;
             }
             values[MlogAttributeNum + j] = rel_values[i];
@@ -2445,6 +2448,12 @@ void check_basetable(Query *query, bool isCreateMatview, bool isIncremental)
                         rte->relname)));
             }
 #endif
+
+            if (rte->is_ustore) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("materialized view is not supported in ustore yet")));
+            }
 
             Relation rel = heap_open(rte->relid, AccessShareLock);
             if (RelationisEncryptEnable(rel)) {

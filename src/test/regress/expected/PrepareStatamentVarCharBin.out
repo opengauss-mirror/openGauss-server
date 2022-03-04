@@ -1,0 +1,86 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_varchar(id INT, name varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),address varchar(50) ENCRYPTED WITH  (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+NOTICE:  relation "t_varchar" already exists, skipping
+INSERT INTO t_varchar (id, name, address) VALUES (?,?,?);
+1,MyName,MyAddress
+SELECT * from t_varchar ORDER BY id;
+ id |  name  |  address  
+----+--------+-----------
+  0 | MyName | MyAddress
+  1 | MyName | MyAddress
+  1 | MyName | MyAddress
+  2 | MyName | MyAddress
+  3 | MyName | MyAddress
+  4 | MyName | MyAddress
+  5 | MyName | MyAddress
+  6 | MyName | MyAddress
+  7 | MyName | MyAddress
+  8 | MyName | MyAddress
+  9 | MyName | MyAddress
+ 10 | MyName | MyAddress
+ 11 | MyName | MyAddress
+ 12 | MyName | MyAddress
+ 13 | MyName | MyAddress
+ 14 | MyName | MyAddress
+ 15 | MyName | MyAddress
+ 16 | MyName | MyAddress
+ 17 | MyName | MyAddress
+ 18 | MyName | MyAddress
+ 19 | MyName | MyAddress
+ 20 | MyName | MyAddress
+ 21 | MyName | MyAddress
+ 22 | MyName | MyAddress
+ 23 | MyName | MyAddress
+ 24 | MyName | MyAddress
+ 25 | MyName | MyAddress
+ 26 | MyName | MyAddress
+ 27 | MyName | MyAddress
+ 28 | MyName | MyAddress
+ 29 | MyName | MyAddress
+ 30 | MyName | MyAddress
+ 31 | MyName | MyAddress
+ 32 | MyName | MyAddress
+ 33 | MyName | MyAddress
+ 34 | MyName | MyAddress
+ 35 | MyName | MyAddress
+ 36 | MyName | MyAddress
+ 37 | MyName | MyAddress
+ 38 | MyName | MyAddress
+ 39 | MyName | MyAddress
+ 40 | MyName | MyAddress
+ 41 | MyName | MyAddress
+ 42 | MyName | MyAddress
+ 43 | MyName | MyAddress
+ 44 | MyName | MyAddress
+ 45 | MyName | MyAddress
+ 46 | MyName | MyAddress
+ 47 | MyName | MyAddress
+ 48 | MyName | MyAddress
+ 49 | MyName | MyAddress
+ 50 | MyName | MyAddress
+ 51 | MyName | MyAddress
+ 52 | MyName | MyAddress
+ 53 | MyName | MyAddress
+ 54 | MyName | MyAddress
+ 55 | MyName | MyAddress
+ 56 | MyName | MyAddress
+ 57 | MyName | MyAddress
+ 58 | MyName | MyAddress
+ 59 | MyName | MyAddress
+ 60 | MyName | MyAddress
+ 61 | MyName | MyAddress
+ 62 | MyName | MyAddress
+ 63 | MyName | MyAddress
+ 64 | MyName | MyAddress
+(66 rows)
+
+drop table t_varchar;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;

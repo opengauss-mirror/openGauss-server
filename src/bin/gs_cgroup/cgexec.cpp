@@ -625,7 +625,6 @@ int cgexec_update_remain_value(char* relpath, u_int64_t cpushares, u_int64_t iow
 {
     struct cgroup* cg = NULL;
     struct cgroup_controller* cgc_cpu = NULL;
-    struct cgroup_controller* cgc_blkio = NULL;
     int ret;
 
     /* allocate new cgroup structure */
@@ -657,24 +656,6 @@ int cgexec_update_remain_value(char* relpath, u_int64_t cpushares, u_int64_t iow
         cgroup_free_controllers(cg);
         cgroup_free(&cg);
         return -1;
-    }
-
-    /* sles sp2 version, to update blkio value */
-    if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-        cgc_blkio = cgroup_get_controller(cg, MOUNT_BLKIO_NAME);
-        if (NULL == cgc_blkio) {
-            fprintf(stderr, "ERROR: failed to add %s controller in %s!\n", MOUNT_BLKIO_NAME, relpath);
-            cgroup_free_controllers(cg);
-            cgroup_free(&cg);
-            return -1;
-        }
-
-        if (ioweight && (0 != (ret = cgroup_set_value_uint64(cgc_blkio, BLKIO_WEIGHT, ioweight)))) {
-            fprintf(stderr, "ERROR: failed to set %s as %lu for %s\n", BLKIO_WEIGHT, ioweight, cgroup_strerror(ret));
-            cgroup_free_controllers(cg);
-            cgroup_free(&cg);
-            return -1;
-        }
     }
 
     /* update controller into kernel */
@@ -778,48 +759,6 @@ static int cgexec_update_remain_cgroup(gscgroup_grp_t* grp, int cls)
 }
 
 /*
- * function name: cgexec_get_blkio_throttle_value
- * description  : retrive the blkio throttle value based on relative path
- *                and the throttle field name
- * arguments    :
- *       relpath: the relative path of one control group
- *          name: the throttle field name in blkio subsystem
- * return value :
- *          NULL: abnormal
- *         other: normal
- *
- */
-static char* cgexec_get_blkio_throttle_value(const char* relpath, const char* name)
-{
-    struct cgroup* cg = NULL;
-    struct cgroup_controller* cgc = NULL;
-    char* val = NULL;
-    int ret = 0;
-
-    /* allocate new cgroup structure */
-    if ((cg = cgexec_get_cgroup(relpath)) == NULL)
-        return NULL;
-
-    /* get controller */
-    cgc = cgroup_get_controller(cg, MOUNT_BLKIO_NAME);
-    if (cgc == NULL) {
-        cgroup_free(&cg);
-        return NULL;
-    }
-
-    ret = cgroup_get_value_string(cgc, name, &val);
-    if (ret) {
-        cgroup_free_controllers(cg);
-        cgroup_free(&cg);
-        return NULL;
-    }
-
-    cgroup_free_controllers(cg);
-    cgroup_free(&cg);
-    return val;
-}
-
-/*
  * function name: cgexec_update_cgroup_value
  * description  : update the Cgroup information
  *                based on the value of group configuration information.
@@ -837,11 +776,7 @@ static int cgexec_update_cgroup_value(gscgroup_grp_t* grp)
     struct cgroup* cg = NULL;
     long cpushares = grp->ainfo.shares;
     struct cgroup_controller* cgc_cpu = NULL;
-    long ioweight = grp->ainfo.weight;
-    struct cgroup_controller* cgc_blkio = NULL;
-    int ret, pass = 0;
-    char* ioval = NULL;
-    errno_t rc;
+    int ret;
 
     /* get the relative path */
     if (NULL == (relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup)))
@@ -900,67 +835,6 @@ static int cgexec_update_cgroup_value(gscgroup_grp_t* grp)
         }
     }
 
-    if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-        /* get the BLKIO controller */
-        cgc_blkio = cgroup_get_controller(cg, MOUNT_BLKIO_NAME);
-        if (NULL == cgc_blkio) {
-            fprintf(stderr, "ERROR: failed to add %s controller in %s!\n", MOUNT_BLKIO_NAME, grp->grpname);
-            goto error;
-        }
-
-        if (0 == cgutil_opt.fixed || cgutil_opt.recover) {
-            /* when it is dynamic value, it updates the blkio.weight value */
-            if (ioweight && (0 != (ret = cgroup_set_value_uint64(cgc_blkio, BLKIO_WEIGHT, ioweight)))) {
-                fprintf(
-                    stderr, "ERROR: failed to set %s as %ld for %s\n", BLKIO_WEIGHT, ioweight, cgroup_strerror(ret));
-                goto error;
-            }
-        } else if (cgutil_opt.fixed || cgutil_opt.recover) {
-            /* when it is fixed value, it updates the following value */
-            if (cgutil_opt.bpsread[0] &&
-                0 != (ret = cgroup_set_value_string(cgc_blkio, BLKIO_BPSREAD, cgutil_opt.bpsread))) {
-                fprintf(stderr,
-                    "ERROR: failed to set %s as %s for %s\n",
-                    BLKIO_BPSREAD,
-                    cgutil_opt.bpsread,
-                    cgroup_strerror(ret));
-                goto error;
-            }
-
-            if (cgutil_opt.iopsread[0] &&
-                0 != (ret = cgroup_set_value_string(cgc_blkio, BLKIO_IOPSREAD, cgutil_opt.iopsread))) {
-                fprintf(stderr,
-                    "ERROR: failed to set %s as %s for %s\n",
-                    BLKIO_IOPSREAD,
-                    cgutil_opt.iopsread,
-                    cgroup_strerror(ret));
-                goto error;
-            }
-
-            if (cgutil_opt.bpswrite[0] &&
-                0 != (ret = cgroup_set_value_string(cgc_blkio, BLKIO_BPSWRITE, cgutil_opt.bpswrite))) {
-                fprintf(stderr,
-                    "ERROR: failed to set %s as %s for %s\n",
-                    BLKIO_BPSWRITE,
-                    cgutil_opt.bpswrite,
-                    cgroup_strerror(ret));
-                goto error;
-            }
-
-            if (cgutil_opt.iopswrite[0] &&
-                0 != (ret = cgroup_set_value_string(cgc_blkio, BLKIO_IOPSWRITE, cgutil_opt.iopswrite))) {
-                fprintf(stderr,
-                    "ERROR: failed to set %s as %s for %s\n",
-                    BLKIO_IOPSWRITE,
-                    cgutil_opt.iopswrite,
-                    cgroup_strerror(ret));
-                goto error;
-            }
-
-            pass++;
-        }
-    }
-
     /* modify the value into kernel */
     if (0 != (ret = cgroup_modify_cgroup(cg))) {
         fprintf(stderr,
@@ -973,63 +847,6 @@ static int cgexec_update_cgroup_value(gscgroup_grp_t* grp)
 
     cgroup_free_controllers(cg);
     cgroup_free(&cg);
-
-    /* save the data into configure file */
-    if (pass && cgutil_opt.bpsread[0]) {
-        ioval = cgexec_get_blkio_throttle_value(relpath, BLKIO_BPSREAD);
-        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1))
-            fprintf(stderr,
-                "ERROR: the blkio value %s for %s can't be saved "
-                "for no spaces in config file.\n",
-                cgutil_opt.bpsread,
-                BLKIO_BPSREAD);
-        else {
-            rc = snprintf_s(grp->ainfo.bpsread, IODATA_LEN, IODATA_LEN - 1, "%s", ioval);
-            securec_check_intval(rc, free(relpath), -1);
-        }
-    }
-
-    if (pass && cgutil_opt.iopsread[0]) {
-        ioval = cgexec_get_blkio_throttle_value(relpath, BLKIO_IOPSREAD);
-        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1))
-            fprintf(stderr,
-                "ERROR: the blkio value %s for %s can't be saved "
-                "for no spaces in config file.\n",
-                cgutil_opt.iopsread,
-                BLKIO_IOPSREAD);
-        else {
-            rc = snprintf_s(grp->ainfo.iopsread, IODATA_LEN, IODATA_LEN - 1, "%s", ioval);
-            securec_check_intval(rc, free(relpath), -1);
-        }
-    }
-
-    if (pass && cgutil_opt.bpswrite[0]) {
-        ioval = cgexec_get_blkio_throttle_value(relpath, BLKIO_BPSWRITE);
-        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1))
-            fprintf(stderr,
-                "ERROR: the blkio value %s for %s can't be saved "
-                "for no spaces in config file.\n",
-                cgutil_opt.bpswrite,
-                BLKIO_BPSWRITE);
-        else {
-            rc = snprintf_s(grp->ainfo.bpswrite, IODATA_LEN, IODATA_LEN - 1, "%s", ioval);
-            securec_check_intval(rc, free(relpath), -1);
-        }
-    }
-
-    if (pass && cgutil_opt.iopswrite[0]) {
-        ioval = cgexec_get_blkio_throttle_value(relpath, BLKIO_IOPSWRITE);
-        if (NULL == ioval || IODATA_LEN < (strlen(ioval) + 1))
-            fprintf(stderr,
-                "ERROR: the blkio value %s for %s can't be saved "
-                "for no spaces in config file.\n",
-                cgutil_opt.iopswrite,
-                BLKIO_IOPSWRITE);
-        else {
-            rc = snprintf_s(grp->ainfo.iopswrite, IODATA_LEN, IODATA_LEN - 1, "%s", ioval);
-            securec_check_intval(rc, free(relpath), -1);
-        }
-    }
 
     free(relpath);
     relpath = NULL;
@@ -1096,7 +913,6 @@ static int cgexec_create_default_cgroup(char* relpath, int cpushares, int ioweig
     int ret;
     struct cgroup* cg = NULL;
     struct cgroup_controller* cgc_cpu = NULL;
-    struct cgroup_controller* cgc_blkio = NULL;
     struct cgroup_controller* cgc_cpuset = NULL;
     struct cgroup_controller* cgc_cpuacct = NULL;
 
@@ -1132,20 +948,6 @@ static int cgexec_create_default_cgroup(char* relpath, int cpushares, int ioweig
         fprintf(stderr, "ERROR: failed to set %s as %d for %s\n", CPU_SHARES, cpushares, cgroup_strerror(ret));
 
         goto error;
-    }
-
-    /* set the blkio.weight value */
-    if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-        cgc_blkio = cgroup_add_controller(cg, MOUNT_BLKIO_NAME);
-        if (NULL == cgc_blkio) {
-            fprintf(stderr, "ERROR: failed to add %s controller for %s!\n", MOUNT_BLKIO_NAME, relpath);
-            goto error;
-        }
-
-        if (ioweight && (0 != (ret = cgroup_set_value_uint64(cgc_blkio, BLKIO_WEIGHT, ioweight)))) {
-            fprintf(stderr, "ERROR: failed to set %s as %d for %s\n", BLKIO_WEIGHT, ioweight, cgroup_strerror(ret));
-            goto error;
-        }
     }
 
     /* set the cpuset.cpus value */
@@ -1354,7 +1156,6 @@ int cgexec_create_new_cgroup(gscgroup_grp_t* grp)
     int ret;
     struct cgroup* cg = NULL;
     struct cgroup_controller* cg_controllers[MOUNT_SUBSYS_KINDS] = {0};
-    errno_t sret;
 
     if (NULL == (relpath = gscgroup_get_relative_path(grp->gid, cgutil_vaddr, current_nodegroup)))
         return -1;
@@ -1399,25 +1200,6 @@ int cgexec_create_new_cgroup(gscgroup_grp_t* grp)
         goto error;
     }
 
-    /* set the blkio.weight value */
-    if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-        cg_controllers[MOUNT_BLKIO_ID] = cgroup_add_controller(cg, MOUNT_BLKIO_NAME);
-        if (NULL == cg_controllers[MOUNT_BLKIO_ID]) {
-            fprintf(stderr, "ERROR: failed to add %s controller for %s!\n", MOUNT_BLKIO_NAME, grp->grpname);
-            goto error;
-        }
-
-        if (grp->ainfo.weight &&
-            (0 != (ret = cgroup_set_value_uint64(cg_controllers[MOUNT_BLKIO_ID], BLKIO_WEIGHT, grp->ainfo.weight)))) {
-            fprintf(stderr,
-                "ERROR: failed to set %s as %d for %s\n",
-                BLKIO_WEIGHT,
-                grp->ainfo.weight,
-                cgroup_strerror(ret));
-            goto error;
-        }
-    }
-
     cg_controllers[MOUNT_CPUSET_ID] = cgroup_add_controller(cg, MOUNT_CPUSET_NAME);
     if (NULL == cg_controllers[MOUNT_CPUSET_ID]) {
         fprintf(stderr, "ERROR: failed to add %s controller for %s!\n", MOUNT_CPUSET_NAME, grp->grpname);
@@ -1458,66 +1240,6 @@ int cgexec_create_new_cgroup(gscgroup_grp_t* grp)
     cgroup_free_controllers(cg);
     cgroup_free(&cg);
 
-    /* update the blkio throttle value */
-    if (grp->ainfo.bpsread[0] &&
-        (0 != (ret = cgexec_set_blkio_throttle_value(relpath, BLKIO_BPSREAD, grp->ainfo.bpsread)))) {
-        fprintf(
-            stderr, "ERROR: failed to set %s as %s for %s\n", BLKIO_BPSREAD, grp->ainfo.bpsread, cgroup_strerror(ret));
-        free(relpath);
-        relpath = NULL;
-        return -1;
-    }
-    /* ok, the blkio throttle values are reverted, then revert configure files. */
-    if (cgutil_opt.revert && grp->ainfo.bpsread[0]) {
-        sret = memset_s(grp->ainfo.bpsread, IODATA_LEN, 0, IODATA_LEN);
-        securec_check_errno(sret, free(relpath), -1);
-    }
-
-    if (grp->ainfo.iopsread[0] &&
-        (0 != (ret = cgexec_set_blkio_throttle_value(relpath, BLKIO_IOPSREAD, grp->ainfo.iopsread)))) {
-        fprintf(stderr,
-            "ERROR: failed to set %s as %s for %s\n",
-            BLKIO_IOPSREAD,
-            grp->ainfo.iopsread,
-            cgroup_strerror(ret));
-        free(relpath);
-        relpath = NULL;
-        return -1;
-    }
-    if (cgutil_opt.revert && grp->ainfo.iopsread[0]) {
-        sret = memset_s(grp->ainfo.iopsread, IODATA_LEN, 0, IODATA_LEN);
-        securec_check_errno(sret, free(relpath), -1);
-    }
-    if (grp->ainfo.bpswrite[0] &&
-        (0 != (ret = cgexec_set_blkio_throttle_value(relpath, BLKIO_BPSWRITE, grp->ainfo.bpswrite)))) {
-        fprintf(stderr,
-            "ERROR: failed to set %s as %s for %s\n",
-            BLKIO_BPSWRITE,
-            grp->ainfo.bpswrite,
-            cgroup_strerror(ret));
-        free(relpath);
-        relpath = NULL;
-        return -1;
-    }
-    if (cgutil_opt.revert && grp->ainfo.bpswrite[0]) {
-        sret = memset_s(grp->ainfo.bpswrite, IODATA_LEN, 0, IODATA_LEN);
-        securec_check_errno(sret, free(relpath), -1);
-    }
-    if (grp->ainfo.iopswrite[0] &&
-        (0 != (ret = cgexec_set_blkio_throttle_value(relpath, BLKIO_IOPSWRITE, grp->ainfo.iopswrite)))) {
-        fprintf(stderr,
-            "ERROR: failed to set %s as %s for %s\n",
-            BLKIO_IOPSWRITE,
-            grp->ainfo.iopswrite,
-            cgroup_strerror(ret));
-        free(relpath);
-        relpath = NULL;
-        return -1;
-    }
-    if (cgutil_opt.revert && grp->ainfo.iopswrite[0]) {
-        sret = memset_s(grp->ainfo.iopswrite, IODATA_LEN, 0, IODATA_LEN);
-        securec_check_errno(sret, free(relpath), -1);
-    }
     free(relpath);
     relpath = NULL;
     return 0;
@@ -2209,7 +1931,7 @@ int cgexec_copy_next_level_cgroup(const char* relpath, gscgroup_grp_t* grp)
 
     /* add the controller */
     for (int i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
-        if ((i == MOUNT_BLKIO_ID && !(cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version())) || i == MOUNT_MEMORY_ID)
+        if (i == MOUNT_BLKIO_ID || i == MOUNT_MEMORY_ID)
             continue;
 
         cgc[i] = cgroup_add_controller(newcg, cgutil_subsys_table[i]);
@@ -3408,7 +3130,6 @@ static int cgexec_update_fixed_class_cgroup(void)
     int i, cls = 0, wd = 0;
     char cpusets[CPUSET_LEN];
     int need_reset = 0;
-    errno_t sret;
 
     /* check if the class exists */
     for (i = CLASSCG_START_ID; i <= CLASSCG_END_ID; i++) {
@@ -3426,30 +3147,6 @@ static int cgexec_update_fixed_class_cgroup(void)
             wd = cgexec_search_workload_group(cls);
 
             if (wd) {
-                if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-                    if ((cgutil_opt.bpsread[0] || cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] ||
-                            cgutil_opt.iopswrite[0]) &&
-                        -1 == cgexec_update_cgroup_value(cgutil_vaddr[wd]))
-                        return -1;
-
-                    if (cgutil_opt.bpsread[0]) {
-                        sret = memset_s(cgutil_opt.bpsread, IODATA_LEN, 0, IODATA_LEN);
-                        securec_check_errno(sret, , -1);
-                    }
-                    if (cgutil_opt.iopsread[0]) {
-                        sret = memset_s(cgutil_opt.iopsread, IODATA_LEN, 0, IODATA_LEN);
-                        securec_check_errno(sret, , -1);
-                    }
-                    if (cgutil_opt.bpswrite[0]) {
-                        sret = memset_s(cgutil_opt.bpswrite, IODATA_LEN, 0, IODATA_LEN);
-                        securec_check_errno(sret, , -1);
-                    }
-                    if (cgutil_opt.iopswrite[0]) {
-                        sret = memset_s(cgutil_opt.iopswrite, IODATA_LEN, 0, IODATA_LEN);
-                        securec_check_errno(sret, , -1);
-                    }
-                }
-
                 if (cgutil_opt.setspct) {
                     /*
                      * step 1 check whether the newly set percentage makes the whole percentage higher than 100%.
@@ -3484,12 +3181,6 @@ static int cgexec_update_fixed_class_cgroup(void)
                 fprintf(stderr, "ERROR: the specified workload group %s doesn't exist!\n", cgutil_opt.wdname);
                 return -1;
             }
-        }
-        if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-            if ((cgutil_opt.bpsread[0] || cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] ||
-                    cgutil_opt.iopswrite[0]) &&
-                (-1 == cgexec_update_cgroup_value(cgutil_vaddr[cls])))
-                return -1;
         }
         if (cgutil_opt.setspct) {
             /*
@@ -3566,12 +3257,6 @@ static int cgexec_update_fixed_backend_cgroup(void)
     }
 
     if (bkd) {
-        if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-            if ((cgutil_opt.bpsread[0] || cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] ||
-                    cgutil_opt.iopswrite[0]) &&
-                (-1 == cgexec_update_cgroup_value(cgutil_vaddr[bkd])))
-                return -1;
-        }
         /* set cpuset by percentage*/
         if (cgutil_opt.setspct) {
             /* the same steps with updating workload groups.*/
@@ -3633,12 +3318,6 @@ static int cgexec_update_fixed_top_cgroup(void)
     }
 
     if (top) {
-        if (cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) {
-            if ((cgutil_opt.bpsread[0] || cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] ||
-                    cgutil_opt.iopswrite[0]) &&
-                (-1 == cgexec_update_cgroup_value(cgutil_vaddr[top])))
-                return -1;
-        }
         if (cgutil_opt.setspct) {
             if ((need_reset = cgexec_check_cpuset_percent(TOPCG_GAUSSDB, top, cpusets)) == -1)
                 return -1;
@@ -3730,8 +3409,8 @@ int cgexec_check_mount_for_upgrade(void)
      * if no system in default point, we need not umount them.
      */
     for (i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
-        /* blkio is invalid, ignore it. */
-        if ((i == MOUNT_BLKIO_ID && !(cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version())) || i == MOUNT_MEMORY_ID)
+        /* ignore blkio and memory. */
+        if (i == MOUNT_BLKIO_ID || i == MOUNT_MEMORY_ID)
             continue;
 
         if (*cgutil_opt.mpoints[i]) {
@@ -3870,7 +3549,7 @@ int cgexec_detect_cgroup_mount(void)
     }
 
     for (i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
-        if (i == MOUNT_BLKIO_ID && !(cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()))
+        if (i == MOUNT_BLKIO_ID)
             continue;
 
         /* a subsys has not mounted, we must make sure its mount point is valid. */
@@ -4061,7 +3740,7 @@ int cgexec_mount_root_cgroup(void)
 
     for (i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
         /* 'blkio' is invalid, ignore it */
-        if (i == MOUNT_BLKIO_ID && !(cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()))
+        if (i == MOUNT_BLKIO_ID)
             continue;
 
         /* If the subsys has not mounted, we will use new point to mount. */
@@ -4148,7 +3827,7 @@ int cgexec_umount_root_cgroup(void)
     }
     for (i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
         /* 'blkio' is invalid, ignore it */
-        if (i == MOUNT_BLKIO_ID && !(cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()))
+        if (i == MOUNT_BLKIO_ID)
             continue;
 
         if (*cgutil_opt.mpoints[i] == '\0') {

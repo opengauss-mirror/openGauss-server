@@ -35,6 +35,7 @@
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "utils/knl_localsysdbcache.h"
 
 const int HASH_ELEM_SIZE = 1024;
 
@@ -52,14 +53,15 @@ typedef struct {
  * RelfilenodeMapInvalidateCallback
  *		Flush mapping entries when pg_class is updated in a relevant fashion.
  */
-static void RelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
+void RelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
 {
     HASH_SEQ_STATUS status;
     RelfilenodeMapEntry* entry = NULL;
+    knl_u_relmap_context *relmap_cxt = GetRelMapCxt();
     /* callback only gets registered after creating the hash */
-    Assert(u_sess->relmap_cxt.RelfilenodeMapHash != NULL);
+    Assert(relmap_cxt->RelfilenodeMapHash != NULL);
 
-    hash_seq_init(&status, u_sess->relmap_cxt.RelfilenodeMapHash);
+    hash_seq_init(&status, relmap_cxt->RelfilenodeMapHash);
     while ((entry = (RelfilenodeMapEntry*)hash_seq_search(&status)) != NULL) {
         /*
          * If relid is InvalidOid, signalling a complete reset, we must remove
@@ -69,21 +71,22 @@ static void RelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
         if (relid == InvalidOid ||        /* complete reset */
             entry->relid == InvalidOid || /* negative cache entry */
             entry->relid == relid) {      /* individual flushed relation */
-            if (hash_search(u_sess->relmap_cxt.RelfilenodeMapHash, (void *) &entry->key, HASH_REMOVE, NULL) == NULL) {
+            if (hash_search(relmap_cxt->RelfilenodeMapHash, (void *) &entry->key, HASH_REMOVE, NULL) == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_RELFILENODEMAP), errmsg("hash table corrupted")));
             }
         }
     }
 }
 
-static void UHeapRelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
+void UHeapRelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
 {
     HASH_SEQ_STATUS status;
     RelfilenodeMapEntry* entry = NULL;
+    knl_u_relmap_context *relmap_cxt = GetRelMapCxt();
     /* callback only gets registered after creating the hash */
-    Assert(u_sess->relmap_cxt.UHeapRelfilenodeMapHash != NULL);
+    Assert(relmap_cxt->UHeapRelfilenodeMapHash != NULL);
 
-    hash_seq_init(&status, u_sess->relmap_cxt.UHeapRelfilenodeMapHash);
+    hash_seq_init(&status, relmap_cxt->UHeapRelfilenodeMapHash);
     while ((entry = (RelfilenodeMapEntry*)hash_seq_search(&status)) != NULL) {
         /*
          * If relid is InvalidOid, signalling a complete reset, we must remove
@@ -93,7 +96,7 @@ static void UHeapRelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
         if (relid == InvalidOid ||        /* complete reset */
             entry->relid == InvalidOid || /* negative cache entry */
             entry->relid == relid) {      /* individual flushed relation */
-            if (hash_search(u_sess->relmap_cxt.UHeapRelfilenodeMapHash,
+            if (hash_search(relmap_cxt->UHeapRelfilenodeMapHash,
                 (void *) &entry->key, HASH_REMOVE, NULL) == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_RELFILENODEMAP), errmsg("hash table corrupted")));
             }
@@ -108,21 +111,21 @@ static void UHeapRelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
 static void InitializeRelfilenodeMap()
 {
     int i;
-
+    knl_u_relmap_context *relmap_cxt = GetRelMapCxt();
     /* build skey */
-    errno_t ret = memset_s(&u_sess->relmap_cxt.relfilenodeSkey, sizeof(u_sess->relmap_cxt.relfilenodeSkey), 0,
-        sizeof(u_sess->relmap_cxt.relfilenodeSkey));
+    errno_t ret = memset_s(&relmap_cxt->relfilenodeSkey, sizeof(relmap_cxt->relfilenodeSkey), 0,
+        sizeof(relmap_cxt->relfilenodeSkey));
     securec_check(ret, "\0", "\0");
 
     for (i = 0; i < 2; i++) {
-        fmgr_info_cxt(F_OIDEQ, &u_sess->relmap_cxt.relfilenodeSkey[i].sk_func, u_sess->cache_mem_cxt);
-        u_sess->relmap_cxt.relfilenodeSkey[i].sk_strategy = BTEqualStrategyNumber;
-        u_sess->relmap_cxt.relfilenodeSkey[i].sk_subtype = InvalidOid;
-        u_sess->relmap_cxt.relfilenodeSkey[i].sk_collation = InvalidOid;
+        fmgr_info_cxt(F_OIDEQ, &relmap_cxt->relfilenodeSkey[i].sk_func, LocalMyDBCacheMemCxt());
+        relmap_cxt->relfilenodeSkey[i].sk_strategy = BTEqualStrategyNumber;
+        relmap_cxt->relfilenodeSkey[i].sk_subtype = InvalidOid;
+        relmap_cxt->relfilenodeSkey[i].sk_collation = InvalidOid;
     }
 
-    u_sess->relmap_cxt.relfilenodeSkey[0].sk_attno = Anum_pg_class_reltablespace;
-    u_sess->relmap_cxt.relfilenodeSkey[1].sk_attno = Anum_pg_class_relfilenode;
+    relmap_cxt->relfilenodeSkey[0].sk_attno = Anum_pg_class_reltablespace;
+    relmap_cxt->relfilenodeSkey[1].sk_attno = Anum_pg_class_relfilenode;
 
     /* Initialize the hash table. */
     HASHCTL ctl;
@@ -131,40 +134,55 @@ static void InitializeRelfilenodeMap()
     ctl.keysize = sizeof(RelfilenodeMapKey);
     ctl.entrysize = sizeof(RelfilenodeMapEntry);
     ctl.hash = tag_hash;
-    ctl.hcxt = u_sess->cache_mem_cxt;
+    if (EnableLocalSysCache()) {
+        Assert(t_thrd.lsc_cxt.lsc->relmap_cxt.RelfilenodeMapHash == NULL);
+        ctl.hcxt = t_thrd.lsc_cxt.lsc->lsc_mydb_memcxt;
 
-    /*
-     * Only create the u_sess->relmap_cxt.RelfilenodeMapHash now, so we don't end up partially
-     * initialized when fmgr_info_cxt() above ERRORs out with an out of memory
-     * error.
-     */
-    u_sess->relmap_cxt.RelfilenodeMapHash =
-        hash_create("RelfilenodeMap cache", 1024, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        /*
+         * Only create the relmap_cxt->RelfilenodeMapHash now, so we don't end up partially
+         * initialized when fmgr_info_cxt() above ERRORs out with an out of memory
+         * error.
+         */
+        t_thrd.lsc_cxt.lsc->relmap_cxt.RelfilenodeMapHash =
+            hash_create("RelfilenodeMap cache", 1024, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
-    /* Watch for invalidation events. */
-    CacheRegisterRelcacheCallback(RelfilenodeMapInvalidateCallback, (Datum)0);
+        /* Watch for invalidation events. */
+        CacheRegisterThreadRelcacheCallback(RelfilenodeMapInvalidateCallback, (Datum)0);
+    } else {
+        ctl.hcxt = u_sess->cache_mem_cxt;
+        /*
+         * Only create the relmap_cxt->RelfilenodeMapHash now, so we don't end up partially
+         * initialized when fmgr_info_cxt() above ERRORs out with an out of memory
+         * error.
+         */
+        u_sess->relmap_cxt.RelfilenodeMapHash =
+            hash_create("RelfilenodeMap cache", 1024, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+        /* Watch for invalidation events. */
+        CacheRegisterSessionRelcacheCallback(RelfilenodeMapInvalidateCallback, (Datum)0);
+    }
 }
 
 static void UHeapInitRelfilenodeMap(void)
 {
     HASHCTL ctl;
     int i;
-
+    knl_u_relmap_context *relmap_cxt = GetRelMapCxt();
     /* build skey */
-    errno_t ret = memset_s(&u_sess->relmap_cxt.uHeapRelfilenodeSkey,
-        sizeof(u_sess->relmap_cxt.relfilenodeSkey), 0, sizeof(u_sess->relmap_cxt.relfilenodeSkey));
+    errno_t ret = memset_s(&relmap_cxt->uHeapRelfilenodeSkey,
+        sizeof(relmap_cxt->relfilenodeSkey), 0, sizeof(relmap_cxt->relfilenodeSkey));
     securec_check(ret, "\0", "\0");
 
     for (i = 0; i < 2; i++) {
-        fmgr_info_cxt(F_OIDEQ, &u_sess->relmap_cxt.uHeapRelfilenodeSkey[i].sk_func,
-            u_sess->cache_mem_cxt);
-        u_sess->relmap_cxt.uHeapRelfilenodeSkey[i].sk_strategy = BTEqualStrategyNumber;
-        u_sess->relmap_cxt.uHeapRelfilenodeSkey[i].sk_subtype = InvalidOid;
-        u_sess->relmap_cxt.uHeapRelfilenodeSkey[i].sk_collation = InvalidOid;
+        fmgr_info_cxt(F_OIDEQ, &relmap_cxt->uHeapRelfilenodeSkey[i].sk_func,
+            LocalMyDBCacheMemCxt());
+        relmap_cxt->uHeapRelfilenodeSkey[i].sk_strategy = BTEqualStrategyNumber;
+        relmap_cxt->uHeapRelfilenodeSkey[i].sk_subtype = InvalidOid;
+        relmap_cxt->uHeapRelfilenodeSkey[i].sk_collation = InvalidOid;
     }
 
-    u_sess->relmap_cxt.uHeapRelfilenodeSkey[0].sk_attno = Anum_pg_class_reltablespace;
-    u_sess->relmap_cxt.uHeapRelfilenodeSkey[1].sk_attno = Anum_pg_class_relfilenode;
+    relmap_cxt->uHeapRelfilenodeSkey[0].sk_attno = Anum_pg_class_reltablespace;
+    relmap_cxt->uHeapRelfilenodeSkey[1].sk_attno = Anum_pg_class_relfilenode;
 
     /* Initialize the hash table. */
     ret = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
@@ -172,18 +190,34 @@ static void UHeapInitRelfilenodeMap(void)
     ctl.keysize = sizeof(RelfilenodeMapKey);
     ctl.entrysize = sizeof(RelfilenodeMapEntry);
     ctl.hash = tag_hash;
-    ctl.hcxt = u_sess->cache_mem_cxt;
+    if (EnableLocalSysCache()) {
+        Assert(relmap_cxt->UHeapRelfilenodeMapHash == NULL);
+        ctl.hcxt = t_thrd.lsc_cxt.lsc->lsc_mydb_memcxt;
 
-    /*
-     * Only create the u_sess->relmap_cxt.RelfilenodeMapHash now, so we don't end up partially
-     * initialized when fmgr_info_cxt() above ERRORs out with an out of memory
-     * error.
-     */
-    u_sess->relmap_cxt.UHeapRelfilenodeMapHash = hash_create("UHeapRelfilenodeMap cache",
-        HASH_ELEM_SIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        /*
+         * Only create the relmap_cxt->RelfilenodeMapHash now, so we don't end up partially
+         * initialized when fmgr_info_cxt() above ERRORs out with an out of memory
+         * error.
+         */
+        relmap_cxt->UHeapRelfilenodeMapHash = hash_create("UHeapRelfilenodeMap cache",
+            HASH_ELEM_SIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
-    /* Watch for invalidation events. */
-    CacheRegisterRelcacheCallback(UHeapRelfilenodeMapInvalidateCallback, (Datum)0);
+        /* Watch for invalidation events. */
+        CacheRegisterThreadRelcacheCallback(UHeapRelfilenodeMapInvalidateCallback, (Datum)0);
+    } else {
+        ctl.hcxt = u_sess->cache_mem_cxt;
+
+        /*
+         * Only create the relmap_cxt->RelfilenodeMapHash now, so we don't end up partially
+         * initialized when fmgr_info_cxt() above ERRORs out with an out of memory
+         * error.
+         */
+        u_sess->relmap_cxt.UHeapRelfilenodeMapHash = hash_create("UHeapRelfilenodeMap cache",
+            HASH_ELEM_SIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+        /* Watch for invalidation events. */
+        CacheRegisterSessionRelcacheCallback(UHeapRelfilenodeMapInvalidateCallback, (Datum)0);
+    }
 }
 
 /*
@@ -203,7 +237,8 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode, bool segment)
     ScanKeyData skey[2];
     Oid relid;
     int rc = 0;
-    if (u_sess->relmap_cxt.RelfilenodeMapHash == NULL) {
+    knl_u_relmap_context *relmap_cxt = GetRelMapCxt();
+    if (relmap_cxt->RelfilenodeMapHash == NULL) {
         InitializeRelfilenodeMap();
     }
 
@@ -228,7 +263,7 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode, bool segment)
      * since querying invalid values isn't supposed to be a frequent thing,
      * but it's basically free.
      */
-    entry = (RelfilenodeMapEntry*)hash_search(u_sess->relmap_cxt.RelfilenodeMapHash, (void*)&key, HASH_FIND, &found);
+    entry = (RelfilenodeMapEntry*)hash_search(relmap_cxt->RelfilenodeMapHash, (void*)&key, HASH_FIND, &found);
 
     if (found)
         return entry->relid;
@@ -254,7 +289,7 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode, bool segment)
         relation = heap_open(RelationRelationId, AccessShareLock);
 
         /* copy scankey to local copy, it will be modified during the scan */
-        rc = memcpy_s(skey, sizeof(skey), u_sess->relmap_cxt.relfilenodeSkey, sizeof(skey));
+        rc = memcpy_s(skey, sizeof(skey), relmap_cxt->relfilenodeSkey, sizeof(skey));
         securec_check(rc, "", "");
 
         /* set scan arguments */
@@ -313,7 +348,7 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode, bool segment)
      */
     if (relid != InvalidOid) {
         entry =
-            (RelfilenodeMapEntry*)hash_search(u_sess->relmap_cxt.RelfilenodeMapHash, (void*)&key, HASH_ENTER, &found);
+            (RelfilenodeMapEntry*)hash_search(relmap_cxt->RelfilenodeMapHash, (void*)&key, HASH_ENTER, &found);
         entry->relid = relid;
     }
     if (found)
@@ -333,7 +368,8 @@ Oid UHeapRelidByRelfilenode(Oid reltablespace, Oid relfilenode)
     ScanKeyData skey[2];
     Oid relid;
     int rc = 0;
-    if (u_sess->relmap_cxt.UHeapRelfilenodeMapHash == NULL)
+    knl_u_relmap_context *relmap_cxt = GetRelMapCxt();
+    if (relmap_cxt->UHeapRelfilenodeMapHash == NULL)
         UHeapInitRelfilenodeMap();
 
     /* pg_class will show 0 when the value is actually u_sess->proc_cxt.MyDatabaseTableSpace */
@@ -357,7 +393,7 @@ Oid UHeapRelidByRelfilenode(Oid reltablespace, Oid relfilenode)
      * since querying invalid values isn't supposed to be a frequent thing,
      * but it's basically free.
      */
-    entry = (RelfilenodeMapEntry*)hash_search(u_sess->relmap_cxt.UHeapRelfilenodeMapHash,
+    entry = (RelfilenodeMapEntry*)hash_search(relmap_cxt->UHeapRelfilenodeMapHash,
         (void*)&key, HASH_FIND, &found);
 
     if (found)
@@ -374,7 +410,7 @@ Oid UHeapRelidByRelfilenode(Oid reltablespace, Oid relfilenode)
         relation = heap_open(RelationRelationId, AccessShareLock);
 
         /* copy scankey to local copy, it will be modified during the scan */
-        rc = memcpy_s(skey, sizeof(skey), u_sess->relmap_cxt.uHeapRelfilenodeSkey, sizeof(skey));
+        rc = memcpy_s(skey, sizeof(skey), relmap_cxt->uHeapRelfilenodeSkey, sizeof(skey));
         securec_check(rc, "", "");
 
         /* set scan arguments */
@@ -406,7 +442,7 @@ Oid UHeapRelidByRelfilenode(Oid reltablespace, Oid relfilenode)
      * new entry if we had entered it above.
      */
     if (relid != InvalidOid) {
-        entry = (RelfilenodeMapEntry*)hash_search(u_sess->relmap_cxt.UHeapRelfilenodeMapHash,
+        entry = (RelfilenodeMapEntry*)hash_search(relmap_cxt->UHeapRelfilenodeMapHash,
             (void*)&key, HASH_ENTER, &found);
         entry->relid = relid;
     }
@@ -441,7 +477,7 @@ Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid &partati
     /* check plain relations by looking in pg_class */
     relation = heap_open(PartitionRelationId, AccessShareLock);
 
-    rc = memcpy_s(skey, sizeof(skey), u_sess->relmap_cxt.relfilenodeSkey, sizeof(skey));
+    rc = memcpy_s(skey, sizeof(skey), GetRelMapCxt()->relfilenodeSkey, sizeof(skey));
     securec_check(rc, "", "");
 
     ScanKeyInit(&skey[0], Anum_pg_partition_reltablespace, BTEqualStrategyNumber, F_OIDEQ,
@@ -538,7 +574,7 @@ Oid UHeapPartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid& pa
     /* check plain relations by looking in pg_class */
     relation = heap_open(PartitionRelationId, AccessShareLock);
 
-    rc = memcpy_s(skey, sizeof(skey), u_sess->relmap_cxt.uHeapRelfilenodeSkey, sizeof(skey));
+    rc = memcpy_s(skey, sizeof(skey), GetRelMapCxt()->uHeapRelfilenodeSkey, sizeof(skey));
     securec_check(rc, "", "");
     skey[0].sk_attno = Anum_pg_partition_reltablespace;
     skey[1].sk_attno = Anum_pg_partition_relfilenode;

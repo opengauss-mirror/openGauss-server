@@ -17,6 +17,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-OBJS = gd.o matrix.o optimizer_gd.o optimizer_ngd.o shuffle_cache.o logregr.o svm.o linregr.o predict.o
+OBJS = gd.o shuffle_cache.o predict.o \
+      logregr.o svm.o linregr.o pca.o multiclass.o \
+      optimizer_gd.o optimizer_ngd.o optimizer_pca.o optimizer_ova.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

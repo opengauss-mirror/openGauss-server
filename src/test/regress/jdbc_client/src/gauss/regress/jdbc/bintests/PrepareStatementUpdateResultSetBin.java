@@ -1,0 +1,70 @@
+package gauss.regress.jdbc.bintests;
+import java.util.ArrayList;
+import java.util.List;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import gauss.regress.jdbc.IBinaryTest;
+import gauss.regress.jdbc.utils.DatabaseConnection4Test;
+
+public class PrepareStatementUpdateResultSetBin implements IBinaryTest {
+	@Override
+	public void execute(DatabaseConnection4Test conn){
+		BinUtils.createCLSettings(conn);
+		conn.executeSql("CREATE TABLE IF NOT EXISTS "
+				+ "t_update_rows_tbl(key int PRIMARY KEY ,"
+				+ "col_varchar varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),"
+				+ "col_int int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),"
+				+ "col_float float ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));");
+		
+		conn.getFileWriter().writeLine("*******inserting data to the t_update_rows_tbl");
+		List<String> parameters;
+		String sqlInsert;
+		sqlInsert = "INSERT INTO t_update_rows_tbl (key, col_varchar, col_int, col_float) VALUES (?,?,?,?);";
+		parameters = new ArrayList<>();
+		parameters.add("1");
+		parameters.add("this_row_will_be_updated");
+		parameters.add("1");
+		parameters.add("1.1");
+		conn.updateDataWithPrepareStmnt(sqlInsert, parameters);
+		
+		parameters = new ArrayList<>();
+		parameters.add("2");
+		parameters.add("this_row_will_not_updated");
+		parameters.add("2");
+		parameters.add("2.2");
+		conn.updateDataWithPrepareStmnt(sqlInsert, parameters);
+		
+		String sqlSelect;
+		conn.getFileWriter().writeLine("*************verify data before the update");
+		sqlSelect = "select * from t_update_rows_tbl order by key";
+		parameters = new ArrayList<>();
+		conn.fetchDataWithPrepareStmnt(sqlSelect, parameters);
+	
+		try {
+		Statement stmt= conn.getConnection().createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_UPDATABLE);
+		sqlSelect = "select * from t_update_rows_tbl order by key";
+	    ResultSet rs = stmt.executeQuery(sqlSelect);
+	    while(rs.next()) {
+	         if(rs.getInt("key")==1) {
+	        	//updating the table columns data 
+	        	rs.updateInt("col_int", 10);
+	            rs.updateString("col_varchar", "this_row_was_updated");
+	            rs.updateFloat("col_float", 10);
+	            rs.updateRow();
+	         }     
+	    }
+	}
+	    catch (Exception e) {
+	            System.out.println("Failed to update result row\n"+ e);
+	    }
+		conn.getFileWriter().writeLine("*************verifying the updated data");
+		sqlSelect = "select * from t_update_rows_tbl order by key";
+		parameters = new ArrayList<>();
+		conn.fetchDataWithPrepareStmnt(sqlSelect, parameters);
+	
+		conn.executeSql("drop table t_update_rows_tbl;");
+		conn.executeSql("DROP COLUMN ENCRYPTION KEY cek1;");
+		conn.executeSql("DROP CLIENT MASTER KEY cmk1;");
+		
+	}		
+}

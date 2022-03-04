@@ -35,74 +35,6 @@
 #include "utils/syscache.h"
 #include "utils/pl_package.h"
 
-const static Oid cstoreSupportType[] = {BOOLOID,
-    HLL_OID, // same as BYTEA
-    BYTEAOID,
-    CHAROID,
-    HLL_HASHVAL_OID, // same as INT8
-    INT8OID,
-    INT2OID,
-    INT4OID,
-    INT1OID,
-    NUMERICOID,
-    BPCHAROID,
-    VARCHAROID,
-    NVARCHAR2OID,
-    SMALLDATETIMEOID,
-    TEXTOID,
-    OIDOID,
-    FLOAT4OID,
-    FLOAT8OID,
-    ABSTIMEOID,
-    RELTIMEOID,
-    TINTERVALOID,
-    INETOID,
-    DATEOID,
-    TIMEOID,
-    TIMESTAMPOID,
-    TIMESTAMPTZOID,
-    INTERVALOID,
-    TIMETZOID,
-    CASHOID,
-    CIDROID,
-    BITOID,
-    VARBITOID,
-    CLOBOID,
-    BOOLARRAYOID, // array
-    HLL_ARRAYOID,
-    BYTEARRAYOID,
-    CHARARRAYOID,
-    HLL_HASHVAL_ARRAYOID,
-    INT8ARRAYOID,
-    INT2ARRAYOID,
-    INT4ARRAYOID,
-    INT1ARRAYOID,
-    ARRAYNUMERICOID,
-    BPCHARARRAYOID,
-    VARCHARARRAYOID,
-    NVARCHAR2ARRAYOID,
-    SMALLDATETIMEARRAYOID,
-    TEXTARRAYOID,
-    FLOAT4ARRAYOID,
-    FLOAT8ARRAYOID,
-    ABSTIMEARRAYOID,
-    RELTIMEARRAYOID,
-    ARRAYTINTERVALOID,
-    INETARRAYOID,
-    DATEARRAYOID,
-    TIMEARRAYOID,
-    TIMESTAMPARRAYOID,
-    TIMESTAMPTZARRAYOID,
-    ARRAYINTERVALOID,
-    ARRAYTIMETZOID,
-    CASHARRAYOID,
-    CIDRARRAYOID,
-    BITARRAYOID,
-    VARBITARRAYOID,
-    BYTEAWITHOUTORDERCOLOID,
-    BYTEAWITHOUTORDERWITHEQUALCOLOID
-};
-
 static int32 typenameTypeMod(ParseState* pstate, const TypeName* typname, Type typ);
 
 static bool IsTypeInBlacklist(Oid typoid);
@@ -408,8 +340,10 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
     }
 
     if (u_sess->plsql_cxt.need_pkg_dependencies && OidIsValid(pkgOid) && !notPkgType) {
+        MemoryContext temp = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
         u_sess->plsql_cxt.pkg_dependencies =
             list_append_unique_oid(u_sess->plsql_cxt.pkg_dependencies, pkgOid);
+        MemoryContextSwitchTo(temp);
     }
 
     if (!OidIsValid(typoid)) {
@@ -982,19 +916,83 @@ fail:
  * The performance of this function relies on compiler to flat the branches. But
  * it is ok if compiler failed to do its job as it is not in critical code path.
  */
-bool IsTypeSupportedByCStore(_in_ Oid typeOid, _in_ int32 typeMod)
+bool IsTypeSupportedByCStore(Oid typeOid)
 {
-    // we don't support user defined type.
-    //
-    if (typeOid >= FirstNormalObjectId) {
-        return false;
+    switch (typeOid) {
+        case BOOLOID:
+        case HLL_OID: // same as BYTEA
+        case BYTEAOID:
+        case CHAROID:
+        case HLL_HASHVAL_OID: // same as INT8
+        case INT8OID:
+        case INT2OID:
+        case INT4OID:
+        case INT1OID:
+        case NUMERICOID:
+        case BPCHAROID:
+        case VARCHAROID:
+        case NVARCHAR2OID:
+        case SMALLDATETIMEOID:
+        case TEXTOID:
+        case OIDOID:
+        case FLOAT4OID:
+        case FLOAT8OID:
+        case ABSTIMEOID:
+        case RELTIMEOID:
+        case TINTERVALOID:
+        case INETOID:
+        case DATEOID:
+        case TIMEOID:
+        case TIMESTAMPOID:
+        case TIMESTAMPTZOID:
+        case INTERVALOID:
+        case TIMETZOID:
+        case CASHOID:
+        case CIDROID:
+        case BITOID:
+        case VARBITOID:
+        case CLOBOID:
+        case BOOLARRAYOID: // array
+        case HLL_ARRAYOID:
+        case BYTEARRAYOID:
+        case CHARARRAYOID:
+        case HLL_HASHVAL_ARRAYOID:
+        case INT8ARRAYOID:
+        case INT2ARRAYOID:
+        case INT4ARRAYOID:
+        case INT1ARRAYOID:
+        case ARRAYNUMERICOID:
+        case BPCHARARRAYOID:
+        case VARCHARARRAYOID:
+        case NVARCHAR2ARRAYOID:
+        case SMALLDATETIMEARRAYOID:
+        case TEXTARRAYOID:
+        case FLOAT4ARRAYOID:
+        case FLOAT8ARRAYOID:
+        case ABSTIMEARRAYOID:
+        case RELTIMEARRAYOID:
+        case ARRAYTINTERVALOID:
+        case INETARRAYOID:
+        case DATEARRAYOID:
+        case TIMEARRAYOID:
+        case TIMESTAMPARRAYOID:
+        case TIMESTAMPTZARRAYOID:
+        case ARRAYINTERVALOID:
+        case ARRAYTIMETZOID:
+        case CASHARRAYOID:
+        case CIDRARRAYOID:
+        case BITARRAYOID:
+        case VARBITARRAYOID:
+        case BYTEAWITHOUTORDERCOLOID:
+        case BYTEAWITHOUTORDERWITHEQUALCOLOID:
+        case VOIDOID:
+            return true;
+        default:
+            break;
     }
 
-    for (uint32 i = 0; i < sizeof(cstoreSupportType) / sizeof(Oid); ++i) {
-        if (cstoreSupportType[i] == typeOid) {
-            return true;
-		}
-    }
+    ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+        errmsg("Vectorize plan failed due to unsupport type: %d", typeOid)));
     return false;
 }
 /*

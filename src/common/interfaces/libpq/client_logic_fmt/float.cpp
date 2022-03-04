@@ -349,9 +349,9 @@ bool float4toa(float4 num, char *ascii)
      * Delete 0 before decimal.
      * For Example: convert 0.123 to .123, or -0.123 to -.123
      */
-    if (num > 0 && num < 1) {
+    if (num > 0 && num < 1 && ascii[0] == '0') {
         check_memmove_s(memmove_s(ascii, MAXFLOATWIDTH + 1, ascii + 1, MAXFLOATWIDTH));
-    } else if (num > -1 && num < 0) {
+    } else if (num > -1 && num < 0 && ascii[1] == '0') {
         check_memmove_s(memmove_s(ascii + 1, MAXFLOATWIDTH, ascii + 2, MAXFLOATWIDTH - 1));
     }
     return true;

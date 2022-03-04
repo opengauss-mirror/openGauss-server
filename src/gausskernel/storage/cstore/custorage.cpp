@@ -792,7 +792,7 @@ void CUStorage::RemoteLoadCU(_in_ CU* cuPtr, _in_ uint64 offset, _in_ int size, 
     int retry_times = 0;
 
 retry:
-    if (remote_address[0] == '\0' || remote_address[0] == ':')
+    if (remote_address[0] == '\0' || remote_address[0] == '@')
         ereport(ERROR, (errcode(ERRCODE_IO_ERROR), (errmodule(MOD_REMOTE), errmsg("remote not available"))));
 
     ereport(LOG,

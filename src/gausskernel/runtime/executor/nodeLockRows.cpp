@@ -202,13 +202,14 @@ lnext:
 
         /* Need to merge the ustore logic with AM logic */
         test = tableam_tuple_lock(bucket_rel, &tuple, &buffer, 
-                                      estate->es_output_cid, lock_mode, erm->noWait, &tmfd,
+                                  estate->es_output_cid, lock_mode, erm->noWait, &tmfd,
 #ifdef ENABLE_MULTIPLE_NODES
-                                      false, false, false, estate->es_snapshot, NULL, true);
+                                  false, false, false, estate->es_snapshot, NULL, true,
 #else
-                                      false, true, false, estate->es_snapshot, NULL, true);
+                                  false, true, false, estate->es_snapshot, NULL, true,
 #endif
-
+                                  false, InvalidTransactionId,
+                                  erm->waitSec);
         ReleaseBuffer(buffer);
 
         switch (test) {

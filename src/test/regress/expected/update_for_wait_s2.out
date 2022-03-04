@@ -1,0 +1,224 @@
+\timing on
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--? Time: .* ms
+/*----------------test1 Locking succeeded. */
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select * from hw_t1 where id1 = 3 for update WAIT 10;
+ id1 | id2 | num 
+-----+-----+-----
+   3 |  31 |  31
+(1 row)
+
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+--time delay
+select pg_sleep(2);--wait session1
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--? Time: .* ms
+--time delay
+/*----------------test2 Locking failed. */
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select * from hw_t1 where id1 = 3 for update WAIT 2;
+ERROR:  could not obtain lock on row in relation,waitSec = 2
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+--time delay
+select pg_sleep(2);--wait session1
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--? Time: .* ms
+--time delay
+/*----------------test3 Locking succeeded. */
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select * from (select * from t1 for update of t1 wait 10) as foo;
+ val | val2 
+-----+------
+   1 |   11
+   2 |   11
+   1 |   11
+   2 |   11
+   3 |   11
+   4 |   11
+   5 |   11
+   6 |   11
+(8 rows)
+
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+--time delay
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--? Time: .* ms
+--time delay
+/*----------------test4 Locking failed. */
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select * from (select * from t1 for update of t1 wait 2) as foo;
+ERROR:  could not obtain lock on row in relation,waitSec = 2
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+--time delay
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--? Time: .* ms
+/*----------------test5 Locking update. */
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select * from hw_t1 where id1 = 2 for update wait 2;
+ERROR:  could not obtain lock on row in relation,waitSec = 2
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--? Time: .* ms
+/*----------------test5_1 Locking update. */
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select * from hw_t1 where id1 = 2 for update wait 2;
+ERROR:  could not obtain lock on row in relation,waitSec = 2
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+/*----------------test6 Locking delete. */
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select * from hw_t1 where id1 = 3 for update WAIT 2;
+ERROR:  could not obtain lock on row in relation,waitSec = 2
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+--? Time: .* ms
+/*----------------test6_1 Locking delete. */
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+select * from hw_t1 where id1 = 2 for update WAIT 2;
+ERROR:  could not obtain lock on row in relation,waitSec = 2
+--? Time: .* ms
+select current_time;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+--? Time: .* ms
+\timing off

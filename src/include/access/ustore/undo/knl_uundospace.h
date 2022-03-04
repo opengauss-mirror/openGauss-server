@@ -23,7 +23,6 @@
 namespace undo {
 #define UNDOSPACE_CLEAN 0
 #define UNDOSPACE_DIRTY 1
-
 #define UNDO_SPACE_META_VERSION 1
 
 /* Information about the undospace persistency metadata. */

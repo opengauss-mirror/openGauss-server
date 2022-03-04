@@ -126,7 +126,7 @@ UPDATE ROOTKEY
 -- print version
 \! gs_ktool -v
 VERSION
-gs_ktool V1.0.0 || KMC V3.0.0.SPC005
+gs_ktool 1.0.0 | KMC 21.1.0.B006
 -- print help
 \! gs_ktool -h
 HELP

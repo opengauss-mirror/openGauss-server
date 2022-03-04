@@ -355,9 +355,6 @@ select count(*) from vector_nestloop_table_01 A where A.col_int not in (select B
 select A.col_int as c1, A.col_char as c2, A.col_vchar from vector_nestloop_table_01 A inner join vector_nestloop_table_01 B on A.col_int = B.col_int where A.col_int=1 and A.col_char = 'test_char_1' and B.col_char = 'test_char_1' order by 1, 2, 3;
 select count(*) from vector_nestloop_table_01 A inner join vector_nestloop_table_01 B on A.col_int = B.col_int where A.col_int=1 and A.col_char = 'test_char_1' and B.col_char = 'test_char_1';
 
-----
---- Special Case: nestloop + hashjoin + operator with parameters pushed down (dts2014111302175/2014120306303)
-----
 CREATE INDEX vecvtor_nestloop_base_index_01 ON VECTOR_NESTLOOP_TABLE_05 USING psort (id) LOCAL(PARTITION b1_p1_id_idx, PARTITION b1_p2_id_idx, PARTITION b1_p3_id_idx) ;
 CREATE INDEX vecvtor_nestloop_base_index_02 ON VECTOR_NESTLOOP_TABLE_06 USING psort (id, c_d_id, c_id) LOCAL(PARTITION b5_p1_id_c_d_id_c_id_idx, PARTITION b5_p2_id_c_d_id_c_id_idx, PARTITION b5_p3_id_c_d_id_c_id_idx, PARTITION b5_p4_id_c_d_id_c_id_idx, PARTITION b5_p5_id_c_d_id_c_id_idx, PARTITION b5_p6_id_c_d_id_c_id_idx) ;
 CREATE INDEX vecvtor_nestloop_base_index_03 ON VECTOR_NESTLOOP_TABLE_07 USING psort (id, c_d_id, c_w_id) LOCAL(PARTITION b7_p1_id_c_d_id_c_w_id_idx, PARTITION b7_p2_id_c_d_id_c_w_id_idx, PARTITION b7_p3_id_c_d_id_c_w_id_idx, PARTITION b7_p4_id_c_d_id_c_w_id_idx, PARTITION b7_p5_id_c_d_id_c_w_id_idx, PARTITION b7_p6_id_c_d_id_c_w_id_idx, PARTITION b7_p7_id_c_d_id_c_w_id_idx, PARTITION b7_p8_id_c_d_id_c_w_id_idx, PARTITION b7_p9_id_c_d_id_c_w_id_idx, PARTITION b7_p10_id_c_d_id_c_w_id_idx, PARTITION b7_p11_id_c_d_id_c_w_id_idx) ;

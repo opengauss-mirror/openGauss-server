@@ -1,0 +1,26 @@
+# Copyright (c) 2022 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
+# This configure file uses PG-exporter format.
+pg_settings:
+  query: "select name, case when vartype = 'bool' then (case when setting = 'on' then 1. else 0. end) else setting::float end as setting, vartype from pg_settings where vartype not in ('enum', 'string');"
+  metrics:
+    - name:
+        usage: "LABEL"
+        description: "Name of setting"
+    - setting:
+        usage: "GAUGE"
+        description: "Value of setting"
+    - vartype:
+        usage: "LABEL"
+        description: "Type of setting"

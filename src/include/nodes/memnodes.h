@@ -178,6 +178,32 @@ typedef struct AllocBlockData {
 #endif
 } AllocBlockData;
 
+/*
+ * AllocChunk
+ *		The prefix of each piece of memory in an AllocBlock
+ *
+ * NB: this MUST match StandardChunkHeader as defined by utils/memutils.h.
+ */
+typedef struct AllocChunkData {
+    /* aset is the owning aset if allocated, or the freelist link if free */
+    void* aset;
+    /* size is always the size of the usable space in the chunk */
+    Size size;
+#ifdef MEMORY_CONTEXT_CHECKING
+    /* when debugging memory usage, also store actual requested size */
+    /* this is zero in a free chunk */
+    Size requested_size;
+#endif
+#ifdef MEMORY_CONTEXT_TRACK
+    const char* file; /* __FILE__ of palloc/palloc0 call */
+    int line;         /* __LINE__ of palloc/palloc0 call */
+#endif
+#ifdef MEMORY_CONTEXT_CHECKING
+    uint32 prenum;    /* prefix magic number */
+#endif
+} AllocChunkData;
+
+#define ALLOC_CHUNKHDRSZ MAXALIGN(sizeof(AllocChunkData))
 #define ALLOC_BLOCKHDRSZ MAXALIGN(sizeof(AllocBlockData))
 /* AsanSetContext is our asan implementation of MemoryContext.
  * Note:

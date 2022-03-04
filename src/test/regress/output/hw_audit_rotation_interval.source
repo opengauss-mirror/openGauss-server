@@ -1,0 +1,7 @@
+-- 设置guc参数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_rotation_interval=1" > /dev/null 2>&1
+-- 间隔60s 获取pg_audit 中最新adt文件编号 查看是否增加了1
+\! num1=`expr $(echo $(ls @abs_srcdir@/tmp_check/datanode1/pg_audit -lt | head -n 2 | awk '{print $9}')| tr -cd "[0-9]") + 1` && sleep 1m && num2=$(echo $(ls @abs_srcdir@/tmp_check/datanode1/pg_audit -lt | head -n 2 | awk '{print $9}')| tr -cd "[0-9]") && [[ $num1 == $num2 ]] && echo 'add a new log after interval-- 60 seconds' || echo 'fail to add new logs'
+add a new log after interval-- 60 seconds
+-- 恢复guc参数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_rotation_interval" > /dev/null 2>&1

@@ -37,14 +37,14 @@ select col1, col2, char_length(col3) from inserttest;
 
 drop table inserttest;
 
-create table s1_DTS2019021501700(id int, num int);
-create sequence ss1_DTS2019021501700;
-select setval('ss1_DTS2019021501700', 10);
-select * from ss1_DTS2019021501700;
-alter table s1_DTS2019021501700 alter column id set default nextval('ss1_DTS2019021501700');
-insert into s1_DTS2019021501700 (num) values (11);
-insert into s1_DTS2019021501700 (num) values (12);
-select * from s1_DTS2019021501700 order by id;
-select * from ss1_DTS2019021501700;
-drop table s1_DTS2019021501700;
-drop sequence ss1_DTS2019021501700;
+create table s1_TESTTABLE(id int, num int);
+create sequence ss1_TESTTABLE;
+select setval('ss1_TESTTABLE', 10);
+select * from ss1_TESTTABLE;
+alter table s1_TESTTABLE alter column id set default nextval('ss1_TESTTABLE');
+insert into s1_TESTTABLE (num) values (11);
+insert into s1_TESTTABLE (num) values (12);
+select * from s1_TESTTABLE order by id;
+select * from ss1_TESTTABLE;
+drop table s1_TESTTABLE;
+drop sequence ss1_TESTTABLE;

@@ -7,8 +7,8 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
- * Portions Copyright (c) 2021, openGauss Contributors
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * src/include/nodes/nodes.h
  *
  * -------------------------------------------------------------------------
@@ -104,6 +104,8 @@ typedef enum NodeTag {
     T_CreateResourcePoolStmt,
     T_AlterResourcePoolStmt,
     T_DropResourcePoolStmt,
+    T_AlterGlobalConfigStmt,
+    T_DropGlobalConfigStmt,
     T_CreateWorkloadGroupStmt,
     T_AlterWorkloadGroupStmt,
     T_DropWorkloadGroupStmt,
@@ -140,6 +142,7 @@ typedef enum NodeTag {
      */
     T_PlanState = 200,
     T_ResultState,
+    T_VecToRowState,
     T_MergeActionState,
     T_ModifyTableState,
     T_DistInsertSelectState,
@@ -181,6 +184,7 @@ typedef enum NodeTag {
 #ifdef PGXC
     T_RemoteQueryState,
 #endif
+    T_TrainModelState,
     T_StreamState,
 
     /*
@@ -288,6 +292,7 @@ typedef enum NodeTag {
     T_RangePartitionindexDefState,
     T_SplitPartitionState,
     T_AddPartitionState,
+    T_AddSubPartitionState,
     T_RangePartitionStartEndDefState,
     T_RownumState,
     T_ListPartitionDefState,
@@ -390,6 +395,7 @@ typedef enum NodeTag {
     T_SetOperationStmt,
     T_GrantStmt,
     T_GrantRoleStmt,
+    T_GrantDbStmt,
     T_AlterDefaultPrivilegesStmt,
     T_ClosePortalStmt,
     T_ClusterStmt,
@@ -539,6 +545,7 @@ typedef enum NodeTag {
     T_PrivGrantee,
     T_FuncWithArgs,
     T_AccessPriv,
+    T_DbPriv,
     T_CreateOpClassItem,
     T_TableLikeClause,
     T_FunctionParameter,
@@ -658,10 +665,9 @@ typedef enum NodeTag {
     /*
      * Vectorized Execution Nodes
      */
-    T_VecToRowState = 2000,
 
     // this must put first for vector engine runtime state
-    T_VecStartState,
+    T_VecStartState = 2001,
 
     T_RowToVecState,
     T_VecAggState,
@@ -724,6 +730,7 @@ typedef enum NodeTag {
     T_ScanMethodHint,
     T_MultiNodeHint,
     T_PredpushHint,
+    T_PredpushSameLevelHint,
     T_SkewHint,
     T_RewriteHint,
     T_GatherHint,
@@ -765,12 +772,8 @@ typedef enum NodeTag {
     // DB4AI
     T_CreateModelStmt = 5000,
     T_PredictByFunction,
-    T_GradientDescent,
-    T_GradientDescentState,
-    T_GradientDescentExpr,
-    T_GradientDescentExprState,
-    T_KMeans,
-    T_KMeansState,
+    T_TrainModel,
+    T_ExplainModelStmt,
     // End DB4AI
 
     /* Plpgsql */

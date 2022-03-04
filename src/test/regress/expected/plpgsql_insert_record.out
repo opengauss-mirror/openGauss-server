@@ -1,0 +1,267 @@
+-- test insert into table values record
+-- check compatibility --
+show sql_compatibility; -- expect A --
+ sql_compatibility 
+-------------------
+ A
+(1 row)
+
+-- create new schema --
+drop schema if exists plpgsql_table;
+NOTICE:  schema "plpgsql_table" does not exist, skipping
+create schema plpgsql_table;
+set current_schema = plpgsql_table;
+set behavior_compat_options='';
+create table record_cursor_tbl(result varchar2(10), mod number);
+insert into record_cursor_tbl values('a',2);
+create or replace procedure record_cursor_p1
+as
+begin
+    for rec in (select a.mod || a.result, a.* from record_cursor_tbl a) loop
+        insert into record_cursor_tbl values(rec);
+        null;
+    end loop;
+end;
+/
+call record_cursor_p1();
+ record_cursor_p1 
+------------------
+ 
+(1 row)
+
+drop procedure record_cursor_p1;
+drop table record_cursor_tbl;
+ 
+set behavior_compat_options='allow_procedure_compile_check';
+create table plpgsql_table.insert_table(a int, b int);
+create table plpgsql_table.insert_table2(a int, b int);
+create type plpgsql_table.ComType as (a int, b int);
+-- normal insert record type.
+create or replace function testInsertRecord() RETURNS int as $$
+declare
+TYPE RR1 is record(a int, b int);
+r RR1;
+r1 ComType;
+TYPE AA1 is varray(100) of RR1;
+TYPE AA2 is varray(100) of ComType;
+TYPE TT1 is table of RR1;
+TYPE TT2 is table of ComType;
+a1 AA1;
+a2 AA2;
+t1 TT1;
+t2 TT2;
+begin
+r = (1,1);
+r1 = (1,1);
+insert into insert_table values r;
+insert into insert_table values r1;
+insert into insert_table values(r.a, r.b);
+
+a1[0] = (2,2);
+a1[1] = (3,3);
+insert into insert_table values a1[0];
+insert into insert_table values a1(1);
+
+a2[0] = (4,4);
+a2[1] = (5,5);
+insert into insert_table values a2[0];
+insert into insert_table values a2(1);
+
+t1(0) = (6,6);
+t1(1) = (7,7);
+insert into insert_table values t1[0];
+insert into insert_table values t1(1);
+
+t2(0) = (8,8);
+t2(1) = (9,9);
+insert into insert_table values t2[0];
+insert into insert_table values t2(1);
+
+return 1;
+end;
+$$ language plpgsql;
+-- insert unsupport type variable.
+create or replace function testInsertRecordError1() RETURNS int as $$
+declare
+i int;
+begin
+i = 1;
+insert into insert_table values i;
+return 1;
+end;
+$$ language plpgsql;
+ERROR:  unsupported insert into table from non record type. at or near "i"
+LINE 6: insert into insert_table values i;
+                                        ^
+create or replace function testInsertRecordError2() RETURNS int as $$
+declare
+TYPE RR1 is record(a int, b int);
+r RR1;
+i int;
+begin
+r = (1,1);
+i = 1;
+insert into insert_table values(1,1) r;
+return 1;
+end;
+$$ language plpgsql;
+ERROR:  syntax error at or near "r"
+LINE 9: insert into insert_table values(1,1) r;
+                                             ^
+create or replace function testInsertRecordError3() RETURNS int as $$
+declare
+TYPE RR1 is record(a int, b int);
+r RR1;
+r1 RR1;;
+begin
+r = (1,1);
+r1 = (2,2);
+insert into insert_table values r, r1;
+return 1;
+end;
+$$ language plpgsql;
+ERROR:  syntax error at or near ";"
+LINE 5: r1 RR1;;
+               ^
+create or replace function testInsertRecordError4() RETURNS int as $$
+declare
+TYPE RR1 is record(a int, b int);
+TYPE AA1 is varray(100) of RR1;
+a1 AA1;
+begin
+a1[0] = (1,1);
+a1[1] = (2,2);
+insert into insert_table values a1;
+return 1;
+end;
+$$ language plpgsql;
+create or replace function testInsertRecordError5() RETURNS int as $$
+declare
+TYPE RR1 is record(a int, b int);
+TYPE AA1 is table of RR1;
+a1 AA1;
+begin
+a1[0] = (1,1);
+a1[1] = (2,2);
+insert into insert_table values a1;
+return 1;
+end;
+$$ language plpgsql;
+create or replace function testInsertRecordError6() RETURNS int as $$
+declare
+TYPE RR1 is record(a int, b int);
+TYPE AA1 is table of RR1;
+a1 AA1;
+begin
+a1[0] = (1,1);
+a1[1] = (2,2);
+insert into insert_table values a1[0], a1[1];
+return 1;
+end;
+$$ language plpgsql;
+ERROR:  syntax error at or near "["
+LINE 9: insert into insert_table values a1[0], a1[1];
+                                                 ^
+select testInsertRecord();
+ testinsertrecord 
+------------------
+                1
+(1 row)
+
+select testInsertRecordError4();
+ERROR:  missing FROM-clause entry for table "a1"
+LINE 1: insert into insert_table values (a1.a,a1.b)
+                                         ^
+QUERY:  insert into insert_table values (a1.a,a1.b)
+CONTEXT:  PL/pgSQL function testinsertrecorderror4() line 9 at SQL statement
+referenced column: testinsertrecorderror4
+select testInsertRecordError5();
+ERROR:  missing FROM-clause entry for table "a1"
+LINE 1: insert into insert_table values (a1.a,a1.b)
+                                         ^
+QUERY:  insert into insert_table values (a1.a,a1.b)
+CONTEXT:  PL/pgSQL function testinsertrecorderror5() line 9 at SQL statement
+referenced column: testinsertrecorderror5
+create or replace function testForInsertRec() RETURNS int as $$
+declare
+begin
+for rec in (select a, b from insert_table) loop
+insert into insert_table2 values rec;
+end loop;
+return 1;
+end;
+$$ language plpgsql;
+create or replace function testForInsertRecError1() RETURNS int as $$
+declare
+begin
+for rec in (select a, b, 1 from insert_table) loop
+insert into insert_table2 values rec;
+end loop;
+return 1;
+end;
+$$ language plpgsql;
+ERROR:  The 3th column in rec record variable does't have alias.
+CONTEXT:  compilation of PL/pgSQL function "testforinsertrecerror1" near line 4
+select testForInsertRec();
+ testforinsertrec 
+------------------
+                1
+(1 row)
+
+select testForInsertRecError1();
+ERROR:  function testforinsertrecerror1() does not exist
+LINE 1: select testForInsertRecError1();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: testforinsertrecerror1
+select * from insert_table;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 1
+ 1 | 1
+ 2 | 2
+ 3 | 3
+ 4 | 4
+ 5 | 5
+ 6 | 6
+ 7 | 7
+ 8 | 8
+ 9 | 9
+(11 rows)
+
+select * from insert_table2;
+ a | b 
+---+---
+ 1 | 1
+ 1 | 1
+ 1 | 1
+ 2 | 2
+ 3 | 3
+ 4 | 4
+ 5 | 5
+ 6 | 6
+ 7 | 7
+ 8 | 8
+ 9 | 9
+(11 rows)
+
+reset behavior_compat_options;
+drop table insert_table;
+drop table insert_table2;
+drop type ComType;
+drop function testInsertRecord;
+drop function testInsertRecordError1;
+ERROR:  function testinsertrecorderror1 does not exist
+drop function testInsertRecordError2;
+ERROR:  function testinsertrecorderror2 does not exist
+drop function testInsertRecordError3;
+ERROR:  function testinsertrecorderror3 does not exist
+drop function testInsertRecordError4;
+drop function testInsertRecordError5;
+drop function testInsertRecordError6;
+ERROR:  function testinsertrecorderror6 does not exist
+drop function testForInsertRec;
+drop function testForInsertRecError1;
+ERROR:  function testforinsertrecerror1 does not exist
+drop schema if exists plpgsql_table;

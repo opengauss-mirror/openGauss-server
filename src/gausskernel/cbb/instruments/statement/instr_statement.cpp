@@ -73,6 +73,7 @@
 
 #define STATEMENT_DETAILS_HEAD_SIZE (1 + 1)     /* [VERSION] + [TRUNCATED] */
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
+#define INSTR_STATEMENT_ATTRNUM 52
 
 /* lock/lwlock's detail information */
 typedef struct {
@@ -206,9 +207,9 @@ static void ReloadInfo()
         ProcessConfigFile(PGC_SIGHUP);
     }
 
-    if (u_sess->sig_cxt.got_PoolReload) {
+    if (IsGotPoolReload()) {
         processPoolerReload();
-        u_sess->sig_cxt.got_PoolReload = false;
+        ResetGotPoolReload(false);
     }
 }
 
@@ -314,8 +315,8 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     const knl_u_statement_context* statementCxt)
 {
     int i = 0;
-    Datum values[51];
-    bool nulls[51] = {false};
+    Datum values[INSTR_STATEMENT_ATTRNUM];
+    bool nulls[INSTR_STATEMENT_ATTRNUM] = {false};
     errno_t rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
     securec_check(rc, "\0", "\0");
 
@@ -373,6 +374,8 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     values[i++] = BoolGetDatum(
         (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold &&
         statementInfo->slow_query_threshold >= 0) ? true : false);
+    SET_TEXT_VALUES(statementInfo->trace_id, i++);
+    Assert(INSTR_STATEMENT_ATTRNUM == i);
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
 
@@ -1440,10 +1443,19 @@ void instr_stmt_report_debug_query_id(uint64 debug_query_id)
     CURRENT_STMT_METRIC_HANDLE->debug_query_id = debug_query_id;
 }
 
+void instr_stmt_report_trace_id(char *trace_id)
+{
+    CHECK_STMT_HANDLE();
+    errno_t rc =
+        memcpy_s(CURRENT_STMT_METRIC_HANDLE->trace_id, MAX_TRACE_ID_SIZE, trace_id, strlen(trace_id) + 1);
+    securec_check(rc, "\0", "\0");
+}
+
 inline void instr_stmt_track_param_query(const char *query)
 {
-    if(query == NULL)
+    if (query == NULL) {
         return;
+    }
     if (CURRENT_STMT_METRIC_HANDLE->params == NULL) {
         CURRENT_STMT_METRIC_HANDLE->query = pstrdup(query);
     } else {

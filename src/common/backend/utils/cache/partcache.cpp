@@ -24,6 +24,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include <sys/file.h>
+#include "access/csnlog.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
@@ -58,7 +59,6 @@
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
-#include "storage/page_compression.h"
 #include "storage/smgr/smgr.h"
 #include "storage/smgr/segment.h"
 #include "catalog/storage.h"
@@ -78,46 +78,9 @@
 #include "catalog/pg_partition.h"
 #include "postmaster/autovacuum.h"
 #include "nodes/makefuncs.h"
-
-/*
- * part 1:macro definitions, global virables, and typedefs
- */
-typedef struct partidcacheent {
-    Oid partoid;
-    Partition partdesc;
-} PartIdCacheEnt;
-
-#define PartitionCacheInsert(PARTITION)                                                            \
-    do {                                                                                           \
-        PartIdCacheEnt* idhentry;                                                                  \
-        bool found = true;                                                                         \
-        idhentry = (PartIdCacheEnt*)hash_search(                                                   \
-            u_sess->cache_cxt.PartitionIdCache, (void*)&((PARTITION)->pd_id), HASH_ENTER, &found); \
-        /* used to give notice if found -- now just keep quiet */                                  \
-        idhentry->partdesc = PARTITION;                                                            \
-    } while (0)
-
-#define PartitionIdCacheLookup(ID, PARTITION)                                                                     \
-    do {                                                                                                          \
-        PartIdCacheEnt* hentry;                                                                                   \
-        hentry = (PartIdCacheEnt*)hash_search(u_sess->cache_cxt.PartitionIdCache, (void*)&(ID), HASH_FIND, NULL); \
-        if (hentry != NULL)                                                                                       \
-            (PARTITION) = hentry->partdesc;                                                                       \
-        else                                                                                                      \
-            (PARTITION) = NULL;                                                                                   \
-    } while (0)
-
-#define PartitionCacheDelete(PARTITION)                                                                               \
-    do {                                                                                                              \
-        PartIdCacheEnt* idhentry;                                                                                     \
-        idhentry = (PartIdCacheEnt*)hash_search(                                                                      \
-            u_sess->cache_cxt.PartitionIdCache, (void*)&((PARTITION)->pd_id), HASH_REMOVE, NULL);                     \
-        if (idhentry == NULL)                                                                                         \
-            ereport(WARNING,                                                                                          \
-                (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("trying to delete a rd_id partdesc that does not exist"))); \
-    } while (0)
-
-#define INITPARTCACHESIZE 100
+#include "utils/knl_relcache.h"
+#include "utils/knl_partcache.h"
+#include "replication/walreceiver.h"
 
 /*
  *part 2: static functions used only in this c source file
@@ -126,12 +89,7 @@ typedef struct partidcacheent {
  */
 static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot);
 static Partition AllocatePartitionDesc(Form_pg_partition relp);
-static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt);
-static void PartitionInitPhysicalAddr(Partition partition);
-static void PartitionDestroyPartition(Partition partition);
 static void PartitionFlushPartition(Partition partition);
-static void PartitionClearPartition(Partition partition, bool rebuild);
-static void PartitionReloadIndexInfo(Partition part);
 
 static void PartitionParseRelOptions(Partition partition, HeapTuple tuple);
 
@@ -172,7 +130,7 @@ static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapsh
     pg_partition_desc = heap_open(PartitionRelationId, AccessShareLock);
     pg_partition_scan = systable_beginscan(pg_partition_desc,
         PartitionOidIndexId,
-        indexOK && u_sess->relcache_cxt.criticalRelcachesBuilt,
+        indexOK && LocalRelCacheCriticalRelcachesBuilt(),
         snapshot,
         1,
         key);
@@ -200,8 +158,8 @@ static Partition AllocatePartitionDesc(Form_pg_partition partp)
     Form_pg_partition partitionForm;
     errno_t rc = 0;
 
-    /* Relcache entries must live in u_sess->cache_mem_cxt */
-    oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    /* Relcache entries must live in LocalMyDBCacheMemCxt() */
+    oldcxt = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
     /*
      * allocate and zero space for new relation descriptor
@@ -235,7 +193,7 @@ static Partition AllocatePartitionDesc(Form_pg_partition partp)
     return partition;
 }
 
-StorageType PartitionGetStorageType(Oid parentOid)
+StorageType PartitionGetStorageType(Partition partition, Oid parentOid)
 {
     HeapTuple  pg_class_tuple;
     StorageType  storageType;
@@ -261,7 +219,7 @@ StorageType PartitionGetStorageType(Oid parentOid)
     return storageType;
 }
 
-static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt)
+Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt)
 {
     Partition partition;
     Oid partid;
@@ -291,7 +249,6 @@ static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, 
      * to partition->pd_part.
      */
     partition = AllocatePartitionDesc(partp);
-
     /*
      * initialize the partition's partition id (partition->pd_id)
      */
@@ -324,7 +281,7 @@ static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, 
             partitionTableOid = partition->pd_part->parentid;
         }
         if (storage_type == INVALID_STORAGE) {
-            storage_type = PartitionGetStorageType(partitionTableOid);
+            storage_type = PartitionGetStorageType(partition, partitionTableOid);
         }
     }
 
@@ -346,24 +303,30 @@ static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, 
     /* Assign value in partitiongetrelation. */
     partition->partMap = NULL;
 
+    if (IS_DISASTER_RECOVER_MODE) {
+        TransactionId xmin = HeapTupleGetRawXmin(pg_partition_tuple);
+        partition->xmin_csn = CSNLogGetDRCommitSeqNo(xmin);
+    } else {
+        partition->xmin_csn = InvalidCommitSeqNo;
+    }
+
     /*
      * now we can free the memory allocated for pg_class_tuple
      */
     heap_freetuple_ext(pg_partition_tuple);
+    /* It's fully valid */
+    partition->pd_isvalid = true;
     /*
      * Insert newly created relation into partcache hash table, if requested.
      */
     if (insertIt) {
-        PartitionCacheInsert(partition);
+        PartitionIdCacheInsertIntoLocal(partition);
     }
-
-    /* It's fully valid */
-    partition->pd_isvalid = true;
 
     return partition;
 }
 
-static void PartitionInitPhysicalAddr(Partition partition)
+void PartitionInitPhysicalAddr(Partition partition)
 {
     partition->pd_node.spcNode = ConvertToRelfilenodeTblspcOid(partition->pd_part->reltablespace);
     if (partition->pd_node.spcNode == GLOBALTABLESPACE_OID) {
@@ -387,12 +350,6 @@ static void PartitionInitPhysicalAddr(Partition partition)
                         partition->pd_id)));
         }
     }
-
-    partition->pd_node.opt = 0;
-    if (partition->rd_options) {
-        SetupPageCompressForRelation(&partition->pd_node, &((StdRdOptions*)(partition->rd_options))->compress,
-                                      PartitionGetPartitionName(partition));
-    }
 }
 
 /*
@@ -402,6 +359,9 @@ static void PartitionInitPhysicalAddr(Partition partition)
  */
 Partition PartitionIdGetPartition(Oid partitionId, StorageType storage_type)
 {
+    if (EnableLocalSysCache()) {
+        return t_thrd.lsc_cxt.lsc->partdefcache.PartitionIdGetPartition(partitionId, storage_type);
+    }
     Partition pd;
     /*
      * first try to find reldesc in the cache
@@ -481,7 +441,7 @@ void PartitionClose(Partition partition)
 }
 
 Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid partfilenode, Oid parttablespace,
-    StorageType storage_type, Datum reloptions)
+    StorageType storage_type)
 {
     Partition part;
     MemoryContext oldcxt;
@@ -489,7 +449,7 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
     /*
      * switch to the cache context to create the partcache entry.
      */
-    oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    oldcxt = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
     /*
      * allocate a new relation descriptor and fill in basic state fields.
@@ -505,7 +465,7 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
     part->pd_newRelfilenodeSubid = InvalidSubTransactionId;
 
     /* must flag that we have rels created in this transaction */
-    u_sess->cache_cxt.part_cache_need_eoxact_work = true;
+    SetPartCacheNeedEoxactWork(true);
 
     /*
      * initialize partition tuple form (caller may add/override data later)
@@ -530,11 +490,6 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
 
     if (partfilenode != InvalidOid) {
         PartitionInitPhysicalAddr(part);
-        /* compressed option was set by PartitionInitPhysicalAddr if part->rd_options != NULL */
-        if (part->rd_options == NULL && reloptions) {
-            StdRdOptions* options = (StdRdOptions*)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
-            SetupPageCompressForRelation(&part->pd_node, &options->compress, PartitionGetPartitionName(part));
-        }
     }
 
     if (storage_type == SEGMENT_PAGE) {
@@ -543,16 +498,17 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
         part->pd_node.bucketNode = InvalidBktId;
     }
 
+    /* It's fully valid */
+    part->pd_isvalid = true;
     /*
      * Okay to insert into the partcache hash tables.
      */
-    PartitionCacheInsert(part);
+    PartitionIdCacheInsertIntoLocal(part);
     /*
      * done building partcache entry.
      */
     (void)MemoryContextSwitchTo(oldcxt);
-    /* It's fully valid */
-    part->pd_isvalid = true;
+    
     /*
      * Caller expects us to pin the returned entry.
      */
@@ -566,7 +522,7 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
  *	Physically delete a partition cache entry and all subsidiary data.
  *	Caller must already have unhooked the entry from the hash table.
  */
-static void PartitionDestroyPartition(Partition partition)
+void PartitionDestroyPartition(Partition partition)
 {
     Assert(PartitionHasReferenceCountZero(partition));
 
@@ -580,13 +536,10 @@ static void PartitionDestroyPartition(Partition partition)
      * Free all the subsidiary data structures of the partcache entry, then the
      * entry itself.
      */
-    if (partition->pd_part) {
-        pfree_ext(partition->pd_part);
-    }
+    pfree_ext(partition->pd_indexattr);
+    pfree_ext(partition->pd_part);
     list_free_ext(partition->pd_indexlist);
-    if (partition->rd_options) {
-        pfree_ext(partition->rd_options);
-    }
+    pfree_ext(partition->rd_options);
     if (partition->partrel) {
         /* in function releaseDummyRelation, owner->nfakerelrefs decrease one due to ResourceOwnerForgetFakerelRef,
          * which is not we expect, so we use ResourceOwnerRememberFakerelRef correspondingly */
@@ -627,7 +580,7 @@ static void PartitionDestroyPartition(Partition partition)
  *	 to match the relation's refcnt status, but we keep it as a crosscheck
  *	 that we're doing what the caller expects.
  */
-static void PartitionClearPartition(Partition partition, bool rebuild)
+void PartitionClearPartition(Partition partition, bool rebuild)
 {
     /*
      * As per notes above, a rel to be rebuilt MUST have refcnt > 0; while of
@@ -681,7 +634,7 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
      */
     if (!rebuild) {
         /* Remove it from the hash table */
-        PartitionCacheDelete(partition);
+        PartitionIdCacheDeleteLocal(partition);
 
         /* And release storage */
         PartitionDestroyPartition(partition);
@@ -715,17 +668,23 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
          * is good because whatever ref counts the entry may have do not
          * necessarily belong to that resource owner.
          */
-        Partition newpart;
+        Partition newpart = NULL;
         Oid save_partid = PartitionGetPartid(partition);
         errno_t rc = 0;
 
         /* Build temporary entry, but don't link it into hashtable */
         int4 tempNode = partition->pd_node.bucketNode;
-        newpart = PartitionBuildDesc(save_partid, INVALID_STORAGE, false);
+        if (EnableLocalSysCache()) {
+            // call build means local doesnt contain relation or it it invalid, so search from global directly
+            newpart = t_thrd.lsc_cxt.lsc->partdefcache.SearchPartitionFromGlobalCopy<false>(save_partid);
+        }
+        if (!RelationIsValid(newpart)) {
+            newpart = PartitionBuildDesc(save_partid, INVALID_STORAGE, false);
+        }
 
         if (NULL == newpart) {
             /* Should only get here if partition was deleted */
-            PartitionCacheDelete(partition);
+            PartitionIdCacheDeleteLocal(partition);
             PartitionDestroyPartition(partition);
             ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_IN_USE), errmsg("partition %u deleted while still in use", save_partid)));
@@ -790,6 +749,7 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
             SWAPFIELD(PartitionMap*, partMap);
         }
 
+        SWAPFIELD(LocalPartitionEntry*, entry);
 #undef SWAPFIELD
 
         /* And now we can throw away the temporary entry */
@@ -838,7 +798,7 @@ void PartitionForgetPartition(Oid partid)
 {
     Partition partition;
 
-    PartitionIdCacheLookup(partid, partition);
+    PartitionIdCacheLookupOnlyLocal(partid, partition);
 
     if (!PointerIsValid(partition)) {
         return; /* not in cache, nothing to do */
@@ -871,7 +831,7 @@ void PartitionCacheInvalidateEntry(Oid partitionId)
 {
     Partition partition;
 
-    PartitionIdCacheLookup(partitionId, partition);
+    PartitionIdCacheLookupOnlyLocal(partitionId, partition);
 
     if (PointerIsValid(partition)) {
         PartitionFlushPartition(partition);
@@ -908,8 +868,13 @@ void PartitionCacheInvalidateEntry(Oid partitionId)
  *	 items.  This should ensure that system catalogs are up to date before
  *	 we attempt to use them to reload information about other open relations.
  */
+
 void PartitionCacheInvalidate(void)
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->partdefcache.InvalidateAll();
+        return;
+    }
     HASH_SEQ_STATUS status;
     PartIdCacheEnt* idhentry = NULL;
     Partition partition;
@@ -966,7 +931,7 @@ void PartitionCloseSmgrByOid(Oid partitionId)
 {
     Partition partition;
 
-    PartitionIdCacheLookup(partitionId, partition);
+    PartitionIdCacheLookupOnlyLocal(partitionId, partition);
 
     if (!PointerIsValid(partition)) {
         return; /* not in cache, nothing to do */
@@ -990,6 +955,10 @@ void PartitionCloseSmgrByOid(Oid partitionId)
  */
 void AtEOXact_PartitionCache(bool isCommit)
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->partdefcache.AtEOXact_PartitionCache(isCommit);
+        return;
+    }
     HASH_SEQ_STATUS status;
     PartIdCacheEnt* idhentry = NULL;
 
@@ -1070,6 +1039,10 @@ void AtEOXact_PartitionCache(bool isCommit)
  */
 void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid)
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->partdefcache.AtEOSubXact_PartitionCache(isCommit, mySubid, parentSubid);
+        return;
+    }
     HASH_SEQ_STATUS status;
     PartIdCacheEnt* idhentry = NULL;
 
@@ -1127,6 +1100,10 @@ void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTran
 
 void PartitionCacheInitialize(void)
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->partdefcache.Init();
+        return;
+    }
     HASHCTL ctl;
     errno_t rc;
 
@@ -1140,6 +1117,7 @@ void PartitionCacheInitialize(void)
     ctl.entrysize = sizeof(PartIdCacheEnt);
     ctl.hash = oid_hash;
     ctl.hcxt = u_sess->cache_mem_cxt;
+    const int INITPARTCACHESIZE = 128;
     u_sess->cache_cxt.PartitionIdCache =
         hash_create("Partcache by OID", INITPARTCACHESIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
@@ -1249,6 +1227,73 @@ bytea* merge_rel_part_reloption(Oid rel_oid, Oid part_oid)
     return merged_rd_options;
 }
 
+void UpdatePartrelPointer(Relation partrel, Relation rel, Partition part)
+{
+    Assert(partrel->rd_refcnt == part->pd_refcnt);
+    Assert(partrel->rd_isvalid == part->pd_isvalid);
+    Assert(partrel->rd_indexvalid == part->pd_indexvalid);
+    Assert(partrel->rd_createSubid == part->pd_createSubid);
+    Assert(partrel->rd_newRelfilenodeSubid == part->pd_newRelfilenodeSubid);
+
+    Assert(partrel->rd_rel->reltoastrelid == part->pd_part->reltoastrelid);
+    Assert(partrel->rd_rel->reltablespace == part->pd_part->reltablespace);
+    Assert(partrel->rd_rel->relfilenode == part->pd_part->relfilenode);
+    Assert(partrel->rd_rel->relpages == part->pd_part->relpages);
+    Assert(partrel->rd_rel->reltuples == part->pd_part->reltuples);
+    Assert(partrel->rd_rel->relallvisible == part->pd_part->relallvisible);
+    Assert(partrel->rd_rel->relcudescrelid == part->pd_part->relcudescrelid);
+    Assert(partrel->rd_rel->relcudescidx == part->pd_part->relcudescidx);
+    Assert(partrel->rd_rel->reldeltarelid == part->pd_part->reldeltarelid);
+    Assert(partrel->rd_rel->reldeltaidx == part->pd_part->reldeltaidx);
+    Assert(partrel->rd_bucketoid == rel->rd_bucketoid);
+
+    partrel->rd_att = rel->rd_att;
+    Assert(partrel->rd_partHeapOid == part->pd_part->indextblid);
+    partrel->rd_index = rel->rd_index;
+    partrel->rd_indextuple = rel->rd_indextuple;
+    partrel->rd_am = rel->rd_am;
+    partrel->rd_indnkeyatts = rel->rd_indnkeyatts;
+    Assert(partrel->rd_tam_type == rel->rd_tam_type);
+
+    partrel->rd_aminfo = rel->rd_aminfo;
+    partrel->rd_opfamily = rel->rd_opfamily;
+    partrel->rd_opcintype = rel->rd_opcintype;
+    partrel->rd_support = rel->rd_support;
+    partrel->rd_supportinfo = rel->rd_supportinfo;
+
+    partrel->rd_indoption = rel->rd_indoption;
+    partrel->rd_indexprs = rel->rd_indexprs;
+    partrel->rd_indpred = rel->rd_indpred;
+    partrel->rd_exclops = rel->rd_exclops;
+    partrel->rd_exclprocs = rel->rd_exclprocs;
+    partrel->rd_exclstrats = rel->rd_exclstrats;
+
+    partrel->rd_amcache = rel->rd_amcache;
+    partrel->rd_indcollation = rel->rd_indcollation;
+    Assert(partrel->rd_id == part->pd_id);
+    partrel->rd_indexlist = part->pd_indexlist;
+    Assert(partrel->rd_oidindex == part->pd_oidindex);
+    Assert(partrel->rd_toastoid == part->pd_toastoid);
+    Assert(partrel->subpartitiontype == part->pd_part->parttype);
+    partrel->pgstat_info = part->pd_pgstat_info;
+    Assert(partrel->parentId == rel->rd_id);
+    Assert(partrel->rd_isblockchain == rel->rd_isblockchain);
+    Assert(partrel->storage_type == rel->storage_type);
+}
+
+static void SetRelationPartitionMap(Relation relation, Partition part)
+{
+    if (!(PartitionHasSubpartition(part) && part->pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION)) {
+        return;
+    }
+    if (part->partMap != NULL) {
+        relation->partMap = part->partMap;
+    } else {
+        RelationInitPartitionMap(relation, true);
+        part->partMap = relation->partMap;
+    }
+}
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -1266,6 +1311,21 @@ Relation partitionGetRelation(Relation rel, Partition part)
     bytea* des_reloption = NULL;
 
     Assert(PointerIsValid(rel) && PointerIsValid(part));
+    /*
+     * If the rel is subpartitiontable and the part is subpartition, we need open Level 1 partition to get subpartition
+     * relation. When the caller gets subpartition, The level-1 partition has been locked. Therefore, partitionOpen used
+     * NoLock here.
+     */
+    if (RelationIsSubPartitioned(rel) && rel->rd_id != part->pd_part->parentid) {
+        Assert(rel->rd_id == partid_get_parentid(part->pd_part->parentid));
+        Partition parentPart = partitionOpen(rel, part->pd_part->parentid, NoLock);
+        Relation parentPartRel = partitionGetRelation(rel, parentPart);
+        relation = partitionGetRelation(parentPartRel, part);
+        releaseDummyRelation(&parentPartRel);
+        partitionClose(rel, parentPart, NoLock);
+        return relation;
+    }
+    Assert(rel->rd_id == part->pd_part->parentid);
 
     /*
      * Memory malloced in merge_rel_part_reloption cannot mount in CacheMemoryContext,
@@ -1276,7 +1336,7 @@ Relation partitionGetRelation(Relation rel, Partition part)
         merge_reloption = merge_rel_part_reloption(RelationGetRelid(rel), PartitionGetPartid(part));
     }
 
-    oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    oldcxt = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
     relation = (Relation)palloc0(sizeof(RelationData));
     if (!IsBootstrapProcessingMode()) {
         ResourceOwnerRememberFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, relation);
@@ -1324,7 +1384,7 @@ Relation partitionGetRelation(Relation rel, Partition part)
         relation->rd_indexcxt = NULL;
     } else {
         Assert(rel->rd_indexcxt != NULL);
-        relation->rd_indexcxt = AllocSetContextCreate(u_sess->cache_mem_cxt,
+        relation->rd_indexcxt = AllocSetContextCreate(LocalMyDBCacheMemCxt(),
             PartitionGetPartitionName(part),
             ALLOCSET_SMALL_MINSIZE,
             ALLOCSET_SMALL_INITSIZE,
@@ -1385,14 +1445,8 @@ Relation partitionGetRelation(Relation rel, Partition part)
         securec_check(ret, "\0", "\0");
     }
 
-    if (PartitionHasSubpartition(part) && part->pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION) {
-        if (part->partMap != NULL) {
-            relation->partMap = part->partMap;
-        } else {
-            RelationInitPartitionMap(relation, true);
-            part->partMap = relation->partMap;
-        }
-    }
+    SetRelationPartitionMap(relation, part);
+
     (void)MemoryContextSwitchTo(oldcxt);
 
     return relation;
@@ -1446,7 +1500,7 @@ void releaseDummyRelation(Relation* relation)
  * Brief		: reload minimal information for an open  index partition
  * Description	:
  */
-static void PartitionReloadIndexInfo(Partition part)
+void PartitionReloadIndexInfo(Partition part)
 {
     HeapTuple pg_partition_tuple;
     Form_pg_partition partForm;
@@ -1638,7 +1692,7 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     part->pd_newRelfilenodeSubid = GetCurrentSubTransactionId();
 
     /* ... and now we have eoxact cleanup work to do */
-    u_sess->cache_cxt.part_cache_need_eoxact_work = true;
+    SetPartCacheNeedEoxactWork(true);
 }
 
 static void PartitionParseRelOptions(Partition partition, HeapTuple tuple)
@@ -1668,13 +1722,13 @@ static void PartitionParseRelOptions(Partition partition, HeapTuple tuple)
     options = heap_reloptions(RELKIND_RELATION, datum, false);
 
     /*
-     * Copy parsed data into u_sess->cache_mem_cxt.  To guard against the
+     * Copy parsed data into LocalMyDBCacheMemCxt().  To guard against the
      * possibility of leaks in the reloptions code, we want to do the actual
      * parsing in the caller's memory context and copy the results into
-     * u_sess->cache_mem_cxt after the fact.
+     * LocalMyDBCacheMemCxt() after the fact.
      */
     if (options != NULL) {
-        partition->rd_options = (bytea*)MemoryContextAlloc(u_sess->cache_mem_cxt, VARSIZE(options));
+        partition->rd_options = (bytea*)MemoryContextAlloc(LocalMyDBCacheMemCxt(), VARSIZE(options));
         rc = memcpy_s(partition->rd_options, VARSIZE(options), options, VARSIZE(options));
         securec_check(rc, "", "");
         pfree_ext(options);
@@ -1850,7 +1904,7 @@ Datum SetWaitCleanGpiRelOptions(Datum oldOptions, bool enable)
 }
 
 /* Update pg_partition's tuple attribute reloptions wait_clean_gpi */
-static void UpdateWaitCleanGpiRelOptions(Relation pgPartition, HeapTuple partTuple, bool enable, bool inplace)
+void UpdateWaitCleanGpiRelOptions(Relation pgPartition, HeapTuple partTuple, bool enable, bool inplace)
 {
     HeapTuple newTuple;
     Datum partOptions;

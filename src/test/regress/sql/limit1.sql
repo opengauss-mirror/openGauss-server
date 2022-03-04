@@ -66,6 +66,8 @@ select a.c1, b.c2, b.c3 from (select c1 from limit_table_03 order by c1 limit 2 
 select a.c1, b.c2, b.c3 from (select c1 from limit_table_03 order by c1 limit 2) a , limit_table_02 b where a.c1=b.c2 order by a.c1;
 select a.c1, b.c2, b.c3 from (select c1 from limit_table_03 order by c1 offset 1) a , limit_table_02 b where a.c1=b.c2 order by a.c1;
 
+explain (verbose, costs off) select * from limit_table_01 where rownum <= 10;
+
 drop table limit_table_01;
 drop table limit_table_02;
 drop table limit_table_03;

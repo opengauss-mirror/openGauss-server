@@ -107,7 +107,7 @@ static void TrRenameClass(TrObjDesc *baseDesc, ObjectAddress *object, const char
 
     if (newName) {
         rc = strncpy_s(rbname, NAMEDATALEN, newName, strlen(newName));
-        securec_check_ss_c(rc, "\0", "\0");
+        securec_check(rc, "\0", "\0");
     } else {
         TrGenObjName(rbname, object->classId, relid);
     }
@@ -250,7 +250,7 @@ static bool TrCanPurge(const TrObjDesc *baseDesc, const ObjectAddress *object, c
     int nkeys;
     bool found = false;
 
-    if (relKind != RELKIND_INDEX && relKind != RELKIND_RELATION) {
+    if (relKind != RELKIND_INDEX && relKind != RELKIND_GLOBAL_INDEX && relKind != RELKIND_RELATION) {
         return false;
     }
 
@@ -1191,7 +1191,7 @@ bool TrCheckRecyclebinDrop(const DropStmt *stmt, ObjectAddresses *objects)
     return rbDrop;
 }
 
-void TrDrop(const ObjectAddresses *objects, DropBehavior behavior)
+void TrDrop(const DropStmt* drop, const ObjectAddresses *objects, DropBehavior behavior)
 {
     Relation depRel;
     Relation baseRel;
@@ -1294,8 +1294,20 @@ void TrRestoreDrop(const TimeCapsuleStmt *stmt)
 {
     TrObjDesc desc;
     ObjectAddress obj;
+    Relation rel;
 
+    desc.relid = 0;
     TrOperFetch(stmt->relation, RB_OBJ_TABLE, &desc, RB_OPER_RESTORE_DROP);
+    if (desc.relid != 0 && (desc.type == RB_OBJ_TABLE)) {
+        stmt->relation->relname = desc.name;
+        rel = heap_openrv(stmt->relation, AccessExclusiveLock);
+        if (rel->rd_tam_type == TAM_HEAP) {
+            heap_close(rel, NoLock);
+            elog(ERROR, "timecapsule does not support astore yet");
+            return;
+        }
+        heap_close(rel, NoLock);
+    }
 
     desc.authid = GetUserId();
     TrOperPrep(&desc, RB_OPER_RESTORE_DROP);

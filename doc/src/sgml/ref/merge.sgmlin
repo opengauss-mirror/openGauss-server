@@ -12,20 +12,26 @@
 
 <refsynopsisdiv>
 <synopsis>
-MERGE [/*+ plan_hint */] INTO table_name [ [ AS ] alias ]
+MERGE [/*+ plan_hint */] INTO table_name [ partition_clause ] [ [ AS ] alias ]
 USING { { table_name | view_name } | subquery } [ [ AS ] alias ]
 ON ( condition )
 [
   WHEN MATCHED THEN
-  UPDATE SET { column_name = { expression | DEFAULT } |
-          ( column_name [, ...] ) = ( { expression | DEFAULT } [, ...] ) } [, ...]
+  UPDATE SET { column_name = { expression | subquery | DEFAULT } |
+          ( column_name [, ...] ) = ( { expression | subquery | DEFAULT } [, ...] ) } [, ...]
   [ WHERE condition ]
 ]
 [
   WHEN NOT MATCHED THEN
   INSERT { DEFAULT VALUES |
-  [ ( column_name [, ...] ) ] VALUES ( { expression | DEFAULT } [, ...] ) [, ...] [ WHERE condition ] }
+  [ ( column_name [, ...] ) ] VALUES ( { expression | subquery | DEFAULT } [, ...] ) [, ...] [ WHERE condition ] }
 ];
+
+where partition_clause can be:
+PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } |
+SUBPARTITION { ( subpartition_name ) | FOR ( subpartition_value [, ...] ) }
+NOTICE: 'partition_clause' is only avaliable in CENTRALIZED mode!
+NOTICE: 'subquery' in the UPDATE and INSERT clauses are only avaliable in CENTRALIZED mode!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

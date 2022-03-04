@@ -20,6 +20,7 @@
 #include "access/ustore/undo/knl_uundospace.h"
 #include "access/ustore/undo/knl_uundoxlog.h"
 #include "access/ustore/undo/knl_uundotxn.h"
+#include "access/ustore/undo/knl_uundoapi.h"
 
 namespace undo {
 #define UNDOZONE_CLEAN 0
@@ -44,7 +45,6 @@ typedef struct UndoZoneMetaInfo {
 #define UNDO_META_FILE "undo/undometa"
 #define UNDO_META_PAGE_SIZE 512
 #define UNDO_WRITE_SIZE (UNDO_META_PAGE_SIZE * 8)
-
 #define UNDO_META_PAGE_CRC_LENGTH 4
 #define UNDO_ZONE_NUMA_GROUP 64
 #define UNDOZONE_COUNT_PER_PAGE ((UNDO_META_PAGE_SIZE - UNDO_META_PAGE_CRC_LENGTH) / sizeof(undo::UndoZoneMetaInfo))
@@ -53,6 +53,17 @@ typedef struct UndoZoneMetaInfo {
 #define UNDOZONE_META_PAGE_COUNT(total, unit, count)                       \
     do {                                                                   \
         count = (total % unit == 0) ? (total / unit) : (total / unit) + 1; \
+    } while (0)
+
+#define GET_UPERSISTENCE(zid, upersistence)                                          \
+    do {                                                                             \
+        if (zid >= (PERSIST_ZONE_COUNT + PERSIST_ZONE_COUNT)) {                      \
+            upersistence = UNDO_TEMP;                                                \
+        } else if (zid >= PERSIST_ZONE_COUNT) {                                      \
+            upersistence = UNDO_UNLOGGED;                                            \
+        } else {                                                                     \
+            upersistence = UNDO_PERMANENT;                                           \
+        }                                                                            \
     } while (0)
 
 /* Find the first 1 and set it to 0, which means the undo zone is used. */
@@ -155,9 +166,17 @@ public:
     {
         return MAKE_UNDO_PTR(zid_, recycle_);
     }
+    inline UndoSlotPtr GetFrozenSlotPtr(void)
+    {
+        return frozenSlotPtr_;
+    }
     inline TransactionId GetRecycleXid(void)
     {
         return recycleXid_;
+    }
+    inline TransactionId GetAttachPid(void)
+    {
+        return attachPid_;
     }
     inline bool Attached(void)
     {
@@ -180,9 +199,17 @@ public:
     {
         forceDiscard_ = UNDO_PTR_GET_OFFSET(discard);
     }
+    inline void SetAttachPid(ThreadId attachPid)
+    {
+        attachPid_ = attachPid;
+    }
     inline void SetAllocate(UndoSlotPtr allocate)
     {
         allocate_ = UNDO_PTR_GET_OFFSET(allocate);
+    }
+    inline void SetFrozenSlotPtr(UndoSlotPtr frozenSlotPtr)
+    {
+        frozenSlotPtr_ = frozenSlotPtr;
     }
     inline void SetRecycle(UndoSlotPtr recycle)
     {
@@ -300,7 +327,7 @@ public:
         return ((allocate_ - recycle_) / BLCKSZ);
     }
     bool CheckNeedSwitch(UndoRecordSize size);
-    bool CheckUndoRecordValid(UndoLogOffset offset, bool checkForceRecycle);
+    UndoRecordState CheckUndoRecordValid(UndoLogOffset offset, bool checkForceRecycle);
     bool CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp);
 
     UndoRecPtr AllocateSpace(uint64 size);
@@ -330,11 +357,13 @@ private:
     UndoSlotBuffer buf_;
     UndoSlotOffset allocate_;
     UndoSlotOffset recycle_;
+    UndoSlotPtr frozenSlotPtr_;
     UndoLogOffset insertUndoPtr_;
     UndoLogOffset discardUndoPtr_;
     UndoLogOffset forceDiscard_;
     UndoPersistence pLevel_;
     TransactionId recycleXid_;
+    ThreadId attachPid_;
     /* Need Lock undo zone before alloc, preventing from checkpoint. */
     LWLock *lock_;
     /* Lsn for undo zone meta. */
@@ -350,10 +379,12 @@ public:
     static int AllocateZone(UndoPersistence upersistence);
     static void ReleaseZone(int zid, UndoPersistence upersistence);
     static UndoZone *SwitchZone(int zid, UndoPersistence upersistence);
-    static UndoZone *GetUndoZone(int zid, bool needInit = false);
+    static UndoZone *GetUndoZone(int zid, bool isNeedInitZone = true, UndoPersistence upersistence = UNDO_PERMANENT);
+    static void InitUndoCxtUzones();
 }; // class UndoZoneGroup
 
 void AllocateZonesBeforXid();
+void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence);
+void InitUndoSpace(UndoZone *uzone, UndoSpaceType type);
 } // namespace undo
-
 #endif // __KNL_UUNDOZONE_H__

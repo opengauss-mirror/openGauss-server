@@ -40,6 +40,7 @@
  */
 #define MAXFNAMELEN 64
 
+
 /* size of the buffer allocated for error message. */
 #define MAX_ERRORMSG_LEN 1000
 
@@ -47,7 +48,6 @@
  * Each page of XLOG file has a header like this:
  */
 #define XLOG_PAGE_MAGIC 0xD074     /* can be used as WAL version indicator */
-#define XLOG_PAGE_MAGIC_OLD 0xD073 /* can be used as WAL old version indicator */
 
 /*
  * The XLOG is split into WAL segments (physical files) of the size indicated
@@ -139,7 +139,7 @@ typedef struct XLogReaderState XLogReaderState;
 
 /* Function type definition for the read_page callback */
 typedef int (*XLogPageReadCB)(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr, int reqLen,
-    XLogRecPtr targetRecPtr, char* readBuf, TimeLineID* pageTLI);
+    XLogRecPtr targetRecPtr, char* readBuf, TimeLineID* pageTLI, char* xlog_path);
 
 typedef struct {
     /* Is this block ref in use? */
@@ -213,16 +213,6 @@ typedef struct XLogRecord {
     /* XLogRecordBlockHeaders and XLogRecordDataHeader follow, no padding */
 } XLogRecord;
 
-typedef struct XLogRecordOld {
-    uint32 xl_tot_len;         /* total len of entire record */
-    ShortTransactionId xl_xid; /* xact id */
-    XLogRecPtrOld xl_prev;     /* ptr to previous record in log */
-    uint8 xl_info;             /* flag bits, see below */
-    RmgrId xl_rmid;            /* resource manager for this record */
-    /* 2 bytes of padding here, initialize to zero */
-    pg_crc32 xl_crc; /* CRC for this record */
-} XLogRecordOld;
-
 struct XLogReaderState {
     /*
      * 
@@ -263,7 +253,8 @@ struct XLogReaderState {
      * Opaque data for callbacks to use.  Not used by XLogReader.
      */
     void* private_data;
-
+        /* Buffer to hold error message */
+    char* errormsg_buf;
     /*
      * Start and end point of last record read.  EndRecPtr is also used as the
      * position to read next, if XLogReadRecord receives an invalid recptr.
@@ -328,20 +319,17 @@ struct XLogReaderState {
     char* readRecordBuf;
     uint32 readRecordBufSize;
 
-    /* Buffer to hold error message */
-    char* errormsg_buf;
-    
-    /* add for batch redo */
-    uint32 refcount;
     // For parallel recovery
     bool isPRProcess;
     bool isDecode;
     bool isFullSync;
+    /* add for batch redo */
+    uint32 refcount;
     bool isTde;
+    uint32 readblocks;
 };
 
 #define SizeOfXLogRecord (offsetof(XLogRecord, xl_crc) + sizeof(pg_crc32c))
-#define SizeOfXLogRecordOld (offsetof(XLogRecordOld, xl_crc) + sizeof(pg_crc32))
 
 typedef struct XLogPageHeaderData {
     uint16 xlp_magic;        /* magic value for correctness checks */
@@ -461,6 +449,8 @@ typedef struct ShareStorageOperateCtl_ {
     uint32 blkSize;
     const ShareStorageOperateIf *opereateIf;
 } ShareStorageOperateCtl;
+
+extern List *readTimeLineHistory(TimeLineID targetTLI);
 
 #endif /* XLOG_BASIC_H */
 

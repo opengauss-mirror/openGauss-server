@@ -836,6 +836,7 @@ ErrCode get_file_lock(const char* path, FileLock* filelock)
         return CODE_UNKOWN_ERROR;
     }
     ret = strcpy_s(newpath, sizeof(newpath), path);
+    securec_check_c(ret, "\0", "\0");
     canonicalize_path(newpath);
     if (checkPath(newpath) != 0) {
         write_stderr(_("realpath(%s) failed : %s!\n"), newpath, strerror(errno));
@@ -1541,6 +1542,14 @@ static void do_help_check_guc(void)
     (void)printf(_("\nOptions for check with -c parameter: \n"));
     (void)printf(_("  -Z NODE-TYPE   only can be \"coordinator\" or \"datanode\"\n"));
 #else
+#ifdef ENABLE_LITE_MODE
+    (void)printf(_("\nChecking GUC parameters:\n"));
+
+    (void)printf(_("    %s check [-Z NODE-TYPE] -D DATADIR {-c \"parameter\", -c "
+                   "\"parameter\", ...}\n"), progname);
+    (void)printf(_("    %s check [-Z NODE-TYPE] -D DATADIR {-c parameter, -c "
+                   "parameter, ...}\n"), progname);
+#else
     (void)printf(_("\nChecking GUC parameters:\n"));
 
     (void)printf(_("    %s check [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c \"parameter\", -c "
@@ -1550,6 +1559,7 @@ static void do_help_check_guc(void)
                    "parameter, ...}\n"),
         progname);
 
+#endif
 #endif
 }
 
@@ -1607,6 +1617,27 @@ static void do_help_config_guc(void)
         _("    e.g. %s set -Z cmagent -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
     (void)printf(_("    e.g. %s set -Z cmagent -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
 #else
+#ifdef ENABLE_LITE_MODE
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--lcname=LCNAME] [--ignore-node=NODES] "
+                "{-c \"parameter = value\" -c \"parameter = value\" ...}\n"), progname);
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--lcname=LCNAME] [--ignore-node=NODES] "
+                "{-c \" parameter = value \" -c \" parameter = value \" ...}\n"), progname);
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--lcname=LCNAME] [--ignore-node=NODES] "
+                "{-c \"parameter = \'value\'\" -c \"parameter = \'value\'\" ...}\n"), progname);
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--lcname=LCNAME] [--ignore-node=NODES] "
+                "{-c \" parameter = \'value\' \" -c \" parameter = \'value\' \" ...}\n"), progname);
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--lcname=LCNAME] [--ignore-node=NODES] {-c \"parameter\" -c \"parameter\" ...}\n"), progname);
+    (void)printf(
+     _("    e.g. %s set -Z datanode -D /datanode/data -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
+    (void)printf(
+     _("    e.g. %s reload -Z datanode -D /datanode/data -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
+
+#else
     (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
                 "[--lcname=LCNAME] [--ignore-node=NODES] "
                 "{-c \"parameter = value\" -c \"parameter = value\" ...}\n"), progname);
@@ -1626,6 +1657,7 @@ static void do_help_config_guc(void)
     (void)printf(
      _("    e.g. %s reload -Z datanode -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
 
+#endif
 #endif
 
 
@@ -1669,6 +1701,32 @@ static void do_help_config_hba(void)
                    "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME HOSTNAME\" \n"),
         progname);
 #else
+#ifdef ENABLE_LITE_MODE
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--ignore-node=NODES] "
+                "-h \"HOSTTYPE DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options\" \n"),
+        progname);
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--ignore-node=NODES] "
+                "-h \"HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK AUTHMEHOD authentication-options\" \n"),
+        progname);
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--ignore-node=NODES] "
+                "-h \"HOSTTYPE DATABASE USERNAME HOSTNAME AUTHMEHOD authentication-options\" \n"),
+        progname);
+
+    (void)printf(_("  If authentication policy need to set/reload DEFAULT OR COMMENT then provide without "
+                "authentication menthod, use the form: \n"));
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME IPADDR IPMASK\" \n"),
+        progname);
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK \" \n"),
+        progname);
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] -D DATADIR "
+                "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME HOSTNAME\" \n"),
+        progname);
+#else
     (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
                 "[--ignore-node=NODES] "
                 "-h \"HOSTTYPE DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options\" \n"),
@@ -1694,6 +1752,7 @@ static void do_help_config_hba(void)
                 "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME HOSTNAME\" \n"),
         progname);
 #endif
+#endif
 
 }
 
@@ -1716,8 +1775,10 @@ static void do_help_common_options(void)
 {
 
     (void)printf(_("\nCommon options:\n"));
+#ifndef ENABLE_LITE_MODE
     (void)printf(_("  -N                      nodename in which this command need to be executed\n"));
     (void)printf(_("  -I                      instance name\n"));
+#endif
     (void)printf(_("  -D, --pgdata=DATADIR    location of the database storage area\n"));
     (void)printf(_("  -c    parameter=value   the parameter to set\n"));
     (void)printf(_("  -c    parameter         the parameter value to DEFAULT (i.e comments in configuration file)\n"));
@@ -2477,7 +2538,9 @@ int main(int argc, char** argv)
     progname = PROG_NAME;
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_guc"));
     arraysize = argc - 1;
+#ifndef ENABLE_LITE_MODE
     bool is_cluster_init = false;
+#endif
 
     if (0 != arraysize) {
         config_param = ((char**)pg_malloc_zero(arraysize * sizeof(char*)));
@@ -2575,10 +2638,12 @@ int main(int argc, char** argv)
                     is_hba_conf = true;
                     temp_config_parameter = xstrdup(optarg);
                     // init cluster static config
+#ifndef ENABLE_LITE_MODE
                     if (!is_cluster_init) {
                         init_gauss_cluster_config();
                         is_cluster_init = true;
                     }
+#endif
                     do_hba_analysis(temp_config_parameter);
                     GS_FREE(temp_config_parameter);
                     break;

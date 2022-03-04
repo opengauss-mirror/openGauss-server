@@ -92,20 +92,6 @@ int set_node_info(const char* node_name, int port, const char* host, NODE_TYPE t
     return 0;
 }
 
-#ifndef ENABLE_LLT
-node_info* find_node_info(const char* node_name)
-{
-    int i;
-    for (i = 0; i < pgxc_clean_node_count; i++) {
-        if (pgxc_clean_node_info[i].node_name == NULL)
-            continue;
-        if (strcmp(pgxc_clean_node_info[i].node_name, node_name) == 0)
-            return &pgxc_clean_node_info[i];
-    }
-    return (NULL);
-}
-#endif
-
 int find_node_index(const char* node_name)
 {
     int i;

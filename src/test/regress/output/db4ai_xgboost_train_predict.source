@@ -1,0 +1,235 @@
+CREATE TABLE db4ai_rain (id INT, Location VARCHAR(20), MinTemp FLOAT, MaxTemp FLOAT, Rainfall FLOAT, WindGustSpeed INT, WindSpeed9am INT,
+            WindSpeed3pm INT, Humidity9am INT, Humidity3pm INT, Pressure9am FLOAT, Pressure3pm FLOAT, Cloud9am INT, Cloud3pm INT,
+            Temp9am FLOAT, Temp3pm FLOAT, RainToday INT, RainTomorrow INT)
+WITH (orientation=row, compression=no);
+COPY db4ai_rain FROM '@abs_srcdir@/data/rain.txt' WITH (FORMAT csv);
+-- Error in FEATURES / TARGET
+CREATE MODEL m using xgboost_binary_logistic FEATURES * TARGET price FROM db4ai_rain;
+ERROR:  FEATURES clause cannot be *
+CREATE MODEL m using xgboost_binary_logistic FEATURES Temp9am,Temp3pm TARGET * FROM db4ai_rain;
+ERROR:  TARGET clause cannot be *
+CREATE MODEL m using xgboost_binary_logistic FROM db4ai_rain;
+ERROR:  Supervised ML algorithms require FEATURES clause
+-- Errors with semantic validation of hyperparameters
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH n_iter=-1;
+ERROR:  Hyperparameter n_iter must be in the range [1,2147483647]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH batch_size=0;
+ERROR:  Hyperparameter batch_size must be in the range [1,2147483647]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH max_depth=-1;
+ERROR:  Hyperparameter max_depth must be in the range [0,2147483647]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH min_child_weight=-1;
+ERROR:  Hyperparameter min_child_weight must be in the range [0,2147483647]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH eta=-0.1;
+ERROR:  Hyperparameter eta must be in the range [0,1]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH seed=-1;
+ERROR:  Hyperparameter seed must be in the range [0,2147483647]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH nthread=-1;
+ERROR:  Hyperparameter nthread must be in the range [0,2147483647]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH booster=10;
+ERROR:  Hyperparameter booster must be a string
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH tree_method=10;
+ERROR:  Hyperparameter tree_method must be a string
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH verbosity=10;
+ERROR:  Hyperparameter verbosity must be in the range [0,3]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH n_iter='a_wrong_parameter';
+ERROR:  Hyperparameter n_iter must be an integer
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH batch_size='a_wrong_parameter';
+ERROR:  Hyperparameter batch_size must be an integer
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH max_depth='a_wrong_parameter';
+ERROR:  Hyperparameter max_depth must be an integer
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH min_child_weight='a_wrong_parameter';
+ERROR:  Hyperparameter min_child_weight must be an integer
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH seed='a_wrong_parameter';
+ERROR:  Hyperparameter seed must be an integer
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH eta='a_wrong_parameter';
+ERROR:  Hyperparameter eta must be a floating point number
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH nthread='a_wrong_parameter';
+ERROR:  Hyperparameter nthread must be an integer
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH booster=10;
+ERROR:  Hyperparameter booster must be a string
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH tree_method=10;
+ERROR:  Hyperparameter tree_method must be a string
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH verbosity='a_wrong_parameter';
+ERROR:  Hyperparameter verbosity must be an integer
+-- Normal mode
+CREATE MODEL m1 USING xgboost_binary_logistic FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
+SELECT id, raintomorrow, round(PREDICT BY m1 (FEATURES raintoday), 1) as pred FROM db4ai_rain;
+ id | raintomorrow | pred 
+----+--------------+------
+  1 |            0 |   .2
+  2 |            0 |   .2
+  3 |            1 |   .2
+  4 |            0 |   .2
+  5 |            0 |   .2
+  6 |            1 |   .2
+  7 |            0 |   .2
+  8 |            0 |   .2
+  9 |            1 |   .2
+ 10 |            0 |   .2
+ 11 |            0 |   .2
+ 12 |            0 |   .2
+ 13 |            0 |   .2
+ 14 |            0 |   .2
+ 15 |            0 |   .2
+ 16 |            0 |   .2
+ 17 |            0 |   .2
+ 18 |            0 |   .2
+ 19 |            0 |   .2
+ 20 |            1 |   .2
+(20 rows)
+
+DROP MODEL m1;
+CREATE MODEL m3 USING xgboost_regression_squarederror FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
+SELECT id, raintomorrow, round(PREDICT BY m3 (FEATURES raintoday), 1) as pred FROM db4ai_rain;
+ id | raintomorrow | pred 
+----+--------------+------
+  1 |            0 |   .2
+  2 |            0 |   .2
+  3 |            1 |   .2
+  4 |            0 |   .2
+  5 |            0 |   .2
+  6 |            1 |   .2
+  7 |            0 |   .2
+  8 |            0 |   .2
+  9 |            1 |   .2
+ 10 |            0 |   .2
+ 11 |            0 |   .2
+ 12 |            0 |   .2
+ 13 |            0 |   .2
+ 14 |            0 |   .2
+ 15 |            0 |   .2
+ 16 |            0 |   .2
+ 17 |            0 |   .2
+ 18 |            0 |   .2
+ 19 |            0 |   .2
+ 20 |            1 |   .2
+(20 rows)
+
+DROP MODEL m3;
+CREATE MODEL m4 USING xgboost_regression_gamma FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
+SELECT id, raintomorrow, round(PREDICT BY m4 (FEATURES raintoday), 1) as pred FROM db4ai_rain;
+ id | raintomorrow | pred 
+----+--------------+------
+  1 |            0 |   .2
+  2 |            0 |   .2
+  3 |            1 |   .2
+  4 |            0 |   .2
+  5 |            0 |   .2
+  6 |            1 |   .2
+  7 |            0 |   .2
+  8 |            0 |   .2
+  9 |            1 |   .2
+ 10 |            0 |   .2
+ 11 |            0 |   .2
+ 12 |            0 |   .2
+ 13 |            0 |   .2
+ 14 |            0 |   .2
+ 15 |            0 |   .2
+ 16 |            0 |   .2
+ 17 |            0 |   .2
+ 18 |            0 |   .2
+ 19 |            0 |   .2
+ 20 |            1 |   .2
+(20 rows)
+
+DROP MODEL m4;
+-- empty resultset
+CREATE MODEL m1 USING xgboost_binary_logistic FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
+SELECT id, raintomorrow, round(PREDICT BY m1 (FEATURES raintoday), 1) as pred FROM db4ai_rain where id < 0;
+ id | raintomorrow | pred 
+----+--------------+------
+(0 rows)
+
+DROP MODEL m1;
+CREATE MODEL m2 USING xgboost_regression_logistic FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
+SELECT id, raintomorrow, round(PREDICT BY m2 (FEATURES raintoday), 1) as pred FROM db4ai_rain where id < 0;
+ id | raintomorrow | pred 
+----+--------------+------
+(0 rows)
+
+DROP MODEL m2;
+CREATE MODEL m3 USING xgboost_regression_squarederror FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
+SELECT id, raintomorrow, round(PREDICT BY m3 (FEATURES raintoday), 1) as pred FROM db4ai_rain where id < 0;
+ id | raintomorrow | pred 
+----+--------------+------
+(0 rows)
+
+DROP MODEL m3;
+CREATE MODEL m4 USING xgboost_regression_gamma FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
+SELECT id, raintomorrow, round(PREDICT BY m4 (FEATURES raintoday), 1) as pred FROM db4ai_rain where id < 0;
+ id | raintomorrow | pred 
+----+--------------+------
+(0 rows)
+
+DROP MODEL m4;
+-- Explain test
+EXPLAIN CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain; 
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Train Model - xgboost_binary_logistic  (cost=0.00..0.00 rows=0 width=0)
+   ->  Seq Scan on db4ai_rain  (cost=0.00..14.44 rows=444 width=20)
+(2 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain; 
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Train Model - xgboost_binary_logistic  (cost=0.00..0.00 rows=0 width=0)
+   ->  Seq Scan on public.db4ai_rain  (cost=0.00..14.44 rows=444 width=20)
+         Output: raintoday, rainfall, temp9am
+(3 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday != 0 FROM db4ai_rain; 
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Train Model - xgboost_binary_logistic  (cost=0.00..0.00 rows=0 width=0)
+   ->  Seq Scan on public.db4ai_rain  (cost=0.00..15.55 rows=444 width=20)
+         Output: (raintoday <> 0), rainfall, temp9am
+(3 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am, windgustspeed::float as transformed_windgust TARGET raintoday FROM db4ai_rain; 
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Train Model - xgboost_binary_logistic  (cost=0.00..0.00 rows=0 width=0)
+   ->  Seq Scan on public.db4ai_rain  (cost=0.00..15.55 rows=444 width=24)
+         Output: raintoday, rainfall, temp9am, (windgustspeed)::double precision
+(3 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m USING xgboost_regression_logistic FEATURES rainfall, temp9am, windgustspeed::float as transformed_windgust TARGET raintoday FROM db4ai_rain; 
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Train Model - xgboost_regression_logistic  (cost=0.00..0.00 rows=0 width=0)
+   ->  Seq Scan on public.db4ai_rain  (cost=0.00..15.55 rows=444 width=24)
+         Output: raintoday, rainfall, temp9am, (windgustspeed)::double precision
+(3 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m USING xgboost_regression_squarederror FEATURES rainfall, temp9am, windgustspeed::float as transformed_windgust TARGET raintoday FROM db4ai_rain; 
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Train Model - xgboost_regression_squarederror  (cost=0.00..0.00 rows=0 width=0)
+   ->  Seq Scan on public.db4ai_rain  (cost=0.00..15.55 rows=444 width=24)
+         Output: raintoday, rainfall, temp9am, (windgustspeed)::double precision
+(3 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m USING xgboost_regression_gamma FEATURES rainfall, temp9am, windgustspeed::float as transformed_windgust TARGET raintoday FROM db4ai_rain; 
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Train Model - xgboost_regression_gamma  (cost=0.00..0.00 rows=0 width=0)
+   ->  Seq Scan on public.db4ai_rain  (cost=0.00..15.55 rows=444 width=24)
+         Output: raintoday, rainfall, temp9am, (windgustspeed)::double precision
+(3 rows)
+
+-- Cleanup
+DROP TABLE IF EXISTS db4ai_rain;
+SELECT 'DB4AI TEST COMPLETED';
+       ?column?       
+----------------------
+ DB4AI TEST COMPLETED
+(1 row)
+

@@ -1297,6 +1297,35 @@ static void inherit_child_hintvalue(Path* new_path, Path* outer_path, Path* inne
 }
 
 /*
+ * @brief set_predpush_same_level_hint
+ *  Set predpush same level hint state. If given hint is valid for the new path, increase the hint value.
+ */
+static void set_predpush_same_level_hint(HintState* hstate, RelOptInfo* rel, Path* path)
+{
+    /*
+     * Guarding conditions.
+     */
+    Assert(path != NULL);
+    if (path->param_info == NULL || rel->reloptkind != RELOPT_BASEREL) {
+        return;
+    }
+
+    if (hstate == NULL || hstate->predpush_same_level_hint == NIL) {
+        return;
+    }
+
+    ListCell *lc = NULL;
+    foreach (lc, hstate->predpush_same_level_hint) {
+        PredpushSameLevelHint *predpushSameLevelHint = (PredpushSameLevelHint*)lfirst(lc);
+        if (is_predpush_same_level_matched(predpushSameLevelHint, rel->relids, path->param_info)) {
+            predpushSameLevelHint->base.state = HINT_STATE_USED;
+            path->hint_value++;
+            break;
+        }
+    }
+}
+
+/*
  * @Description: Set hint values to this new path.
  * @in join_rel: Join relition.
  * @in new_path: New path.
@@ -1326,6 +1355,11 @@ void set_hint_value(RelOptInfo* join_rel, Path* new_path, HintState* hstate)
         set_stream_hint(hstate, new_path, inner_path);
 
         inherit_child_hintvalue(new_path, outer_path, inner_path);
+    }
+
+    /* Use bit-wise and instead, since root is not accessible and permit_predpush is not supported. */
+    if ((PRED_PUSH_FORCE & (uint)u_sess->attr.attr_sql.rewrite_rule)) {
+        set_predpush_same_level_hint(hstate, join_rel, new_path);
     }
 }
 
@@ -2139,6 +2173,7 @@ bool CheckBitmapHeapPathIsCrossbucket(Path* bitmapqual)
 /*
  * Support partiton index unusable.
  * Check if the index in bitmap heap path is unusable. Contains at least one, return false.
+ * Hypothetical index does not support partition index unusable.
  */
 bool check_bitmap_heap_path_index_unusable(Path* bitmapqual, RelOptInfo* baserel)
 {
@@ -2164,6 +2199,9 @@ bool check_bitmap_heap_path_index_unusable(Path* bitmapqual, RelOptInfo* baserel
     } else if (IsA(bitmapqual, IndexPath)) {
         IndexPath* ipath = (IndexPath*)bitmapqual;
         Oid index_oid = ipath->indexinfo->indexoid;
+        if (u_sess->attr.attr_sql.enable_hypo_index && ipath->indexinfo->hypothetical) {
+            return indexUnusable;
+        }
         indexUnusable = checkPartitionIndexUnusable(index_oid, baserel->partItrs, baserel->pruning_result);
         if (!indexUnusable) {
             return indexUnusable;

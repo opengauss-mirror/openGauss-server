@@ -56,10 +56,10 @@ extern bool standbyWillTouchStandbyLocks(XLogReaderState* record);
 #define XLOG_RUNNING_XACTS 0x10
 #define XLOG_STANDBY_UNLOCK 0x20
 #define XLOG_STANDBY_CSN 0x30
-#ifndef ENABLE_MULTIPLE_NODES
+
 #define XLOG_STANDBY_CSN_COMMITTING 0x40
 #define XLOG_STANDBY_CSN_ABORTED 0x50
-#endif
+
 
 typedef struct xl_standby_locks {
     int nlocks;                                   /* number of entries in locks array */
@@ -87,15 +87,15 @@ typedef struct xl_running_xacts {
 /* Recovery handlers for the Standby Rmgr (RM_STANDBY_ID) */
 extern void standby_redo(XLogReaderState* record);
 extern void standby_desc(StringInfo buf, XLogReaderState* record);
-#ifndef ENABLE_MULTIPLE_NODES
+extern const char* standby_type_name(uint8 subtype);
+
 extern void StandbyXlogStartup(void);
 extern void StandbyXlogCleanup(void);
 extern bool StandbySafeRestartpoint(void);
 extern bool RemoveCommittedCsnInfo(TransactionId xid);
-extern void *XLogReleaseAdnGetCommittingCsnList();
+extern void RemoveAllCommittedCsnInfo();
+extern void *XLogReleaseAndGetCommittingCsnList();
 extern void CleanUpMakeCommitAbort(List* committingCsnList);
-
-#endif
 typedef struct xl_running_xacts_old {
     int xcnt;                                       /* # of xact ids in xids[] */
     bool subxid_overflow;                           /* snapshot overflowed, subxids missing */

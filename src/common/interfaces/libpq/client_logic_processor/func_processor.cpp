@@ -31,10 +31,17 @@
 #include "values_processor.h"
 #include "func_hardcoded_values.h"
 
-bool func_processor::run_pre_create_function_stmt(const List* options, StatementData* statement_data, bool is_do_stmt)
+/**
+    process the query in CREATE FUNCTION, CREATE PROCEDURE or DO
+    @param[in] list of DefElem nodes - they are derieved either from the CreateFunctionStmt object or the DoStmt object
+    @param[in] StatementData - the current client logic state machine for the query
+    @return boolean, returns true or false for severe, unexpected errors
+*/
+
+bool func_processor::run_pre_create_function_stmt(const List* options, StatementData *statement_data, bool is_do_stmt)
 {
     FuncHardcodedValues::process(options, statement_data, is_do_stmt);
-    return true;
+    return true; // ignore error
 }
 
 bool func_processor::process(const ExprPartsList* target_expr_vec, StatementData* statement_data)

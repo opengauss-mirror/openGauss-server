@@ -5,8 +5,8 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * src/include/parser/parse_type.h
  *
  * -------------------------------------------------------------------------
@@ -45,7 +45,8 @@ extern Oid typeTypeCollation(Type typ);
 extern Datum stringTypeDatum(Type tp, char* string, int32 atttypmod);
 
 extern Oid typeidTypeRelid(Oid type_id);
-extern bool IsTypeSupportedByCStore(_in_ Oid typeOid, _in_ int32 typeMod);
+extern bool IsTypeSupportedByCStore(_in_ Oid typeOid);
+extern bool CheckTypeSupportRowToVec(List* targetlist, int errLevel);
 extern bool IsTypeSupportedByORCRelation(_in_ Oid typeOid);
 extern bool IsTypeSupportedByTsStore(_in_ int kvtype, _in_ Oid typeOid);
 extern bool IsTypeSupportedByUStore (_in_ Oid typeOid, _in_ int32 typeMod);

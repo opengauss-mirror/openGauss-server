@@ -25,7 +25,11 @@ subdir = src/gausskernel/storage/access/dfs
 top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global
 
+ifeq ($(enable_lite_mode), no)
 SUBDIRS = orc text csv parquet
+else
+SUBDIRS = text csv
+endif
 
 ifeq ($(enable_multiple_nodes), yes)
 SUBDIRS += carbondata

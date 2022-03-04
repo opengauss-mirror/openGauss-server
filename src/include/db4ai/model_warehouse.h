@@ -16,7 +16,7 @@
  *  command.h
  *
  * IDENTIFICATION
- *        src/gausskernel/catalog/model_warehouse.h
+ *        src/include/db4ai/model_warehouse.h
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -39,6 +39,8 @@ struct TrainingInfo{
     const char* name;
     Oid type;
     Datum value;
+    bool open_group;
+    bool close_group;
 };
 
 struct TrainingScore{
@@ -46,23 +48,69 @@ struct TrainingScore{
     double value;
 };
 
+// The model structure is mapped to the gs_model_wareshouse table that contains:
+// - model_name             : unique model name provided by the user
+// - model_owner            : user id of model owner (automatic)
+// - create_time            : timestamp when model is stored (automatic)
+// - processedtuples        : number of tuples processed
+// - discardedtuples        : number of tuples discarded
+// - pre_process_time       : preprocessing time in seconds
+// - exec_time              : trainign time in seconds
+// - iterations             : number of iterations
+// - outputtype             : oid type of prediction
+// - modeltype              : algorithm name
+// - query                  : CREATE MODEL SQL statement
+// - modeldata              : optional binary data of the trained model
+// - weight                 : array of weights for gradient descent, DEPRECATED
+// - hyperparametersnames   : hyperparameters
+// - hyperparametersvalues
+// - hyperparametersoids
+// - coefnames              : extra training info, DEPRECATED
+// - coefvalues             : DEPRECATED
+// - coefoids               : DEPRECATED
+// - trainingscorename      : scores, DEPRECATED
+// - trainingscorevalue     : DEPRECATED
+// - model_describe         : extra description, DEPRECATED
+
+// Serialized model woth a content only known by the algorithm
+typedef enum SerializedModelVersion {
+    DB4AI_MODEL_UNDEFINED   = -1,
+    DB4AI_MODEL_V00         = 0,
+    DB4AI_MODEL_V01         = 1,
+    DB4AI_MODEL_INVALID     = 2 // and above
+} SerializedModelVersion;
+
+typedef struct SerializedModel {
+    SerializedModelVersion version;
+    void *raw_data;
+    Size size;
+} SerializedModel;
+
 // Base class for models
 struct Model{
+    // header, filled by the caller
+    MemoryContext memory_context; // Memory context to allocate all Model fields
     AlgorithmML algorithm;
     const char* model_name;
     const char* sql;
-    double exec_time_secs;
-    double pre_time_secs;
+    List* hyperparameters;      // List of Hyperparamters
+    // model data filled by the algorithm
+    int status;                 // ERRCODE_SUCCESSFUL_COMPLETION (0) or the error code
+    Oid return_type;            // Return type of the model for prediction
+    double pre_time_secs;       // preprocessing time
+    double exec_time_secs;      // total training time
     int64_t processed_tuples;
     int64_t discarded_tuples;
-    List* train_info;      // List of TrainingInfo
-    List* hyperparameters; // List of Hyperparamters
-    List* scores;          // List of TrainingScore
-    Oid return_type;       // Return type of the model
     int32_t num_actual_iterations;
+    List* scores;               // List of TrainingScore
+    SerializedModel data;       // private model data
+
+    // TODO_DB4AI_API: DEPRECATED
+    List* train_info;      // List of TrainingInfo
+    Datum weights;      // optional, float[]
+    Datum model_data;   // optional, varlena (void*)
 };
 
-// Used by all GradientDescent variants
 struct ModelGradientDescent{
     Model model;
     Datum weights;      // Float[]
@@ -70,7 +118,6 @@ struct ModelGradientDescent{
     Datum categories;   // only for categorical, an array of return_type[ncategories]
 };
 
-// Used by K-Means models
 typedef struct WHCentroid {
     double objective_function = DBL_MAX;
     double avg_distance_to_centroid = DBL_MAX;
@@ -95,18 +142,13 @@ struct ModelKMeans {
     WHCentroid* centroids = nullptr;
 };
 
-// Used by XGBoost
-struct ModelBinary {
-    Model model;
-    uint64_t model_len;
-    Datum model_data;    // varlena (void*)
-};
-
-
 // Store the model in the catalog tables
 void store_model(const Model* model);
 
 // Get the model from the catalog tables
-Model* get_model(const char* model_name, bool only_model);
+const Model* get_model(const char* model_name, bool only_model);
+
+// Dump model to log
+void elog_model(int level, const Model *model);
 
 #endif

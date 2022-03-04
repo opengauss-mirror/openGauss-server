@@ -51,16 +51,6 @@ void SetNextTransactionId(TransactionId xid, bool updateLatestCompletedXid)
         ereport(LOG,
                 (errmodule(MOD_TRANS_XACT), errmsg("[from \"g\" msg]setting xid = " XID_FMT ", old_value = " XID_FMT,
                                                    xid, t_thrd.xact_cxt.next_xid)));
-    /* cannot update latesetCompletedXid when we are gtm free mode */
-    if (GTM_MODE && updateLatestCompletedXid && TransactionIdIsNormal(t_thrd.xact_cxt.next_xid)) {
-        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, t_thrd.xact_cxt.next_xid)) {
-            (void)LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
-            /* Advance global latestCompletedXid if CN pass down XID */
-            if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, t_thrd.xact_cxt.next_xid))
-                t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid = t_thrd.xact_cxt.next_xid;
-            LWLockRelease(ProcArrayLock);
-        }
-    }
 
     t_thrd.xact_cxt.next_xid = xid;
 
@@ -113,9 +103,6 @@ TransactionId GetNewTransactionId(bool isSubXact)
      * during PG_TRY/PG_CATCH/PG_END_TRY
      */
     volatile TransactionId xid;
-#ifdef PGXC
-    bool increment_xid = true;
-#endif
 
     /*
      * During bootstrap initialization, we return the special bootstrap
@@ -131,143 +118,14 @@ TransactionId GetNewTransactionId(bool isSubXact)
     if (RecoveryInProgress())
         ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_INITIATION),
                         errmsg("cannot assign TransactionIds during recovery")));
-
-    if (GTM_MODE) {
-#ifdef PGXC
-        /* Initialize transaction ID */
-        xid = InvalidTransactionId;
-
-        if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IsPGXCNodeXactDatanodeDirect()) {
-            /*
-             * Get XID from GTM before acquiring the lock as concurrent connections are
-             * being handled on GTM side even if the lock is acquired in a different
-             * order.
-             */
-            PG_TRY();
-            {
-                if (IsAutoVacuumWorkerProcess() && (t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM) &&
-                    (GetTransactionHandleIfAny(s) == InvalidTransactionHandle))
-                    xid = (TransactionId)BeginTranAutovacuumGTM();
-                else
-                    xid = (TransactionId)GetNewGxidGTM(s, isSubXact);
-            }
-            PG_CATCH();
-            {
-                PG_RE_THROW();
-            }
-            PG_END_TRY();
-        }
-#endif
-        /* acquire lock after receiving gxid from gtm */
-        (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-#ifdef PGXC
-        /* Only remote Coordinator or a Datanode accessed directly by an application can get a GXID */
-        if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IsPGXCNodeXactDatanodeDirect()) {
-            if (TransactionIdIsValid(xid)) {
-                /* Log some information about the new transaction ID obtained */
-                if (IsAutoVacuumWorkerProcess() && (t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM))
-                    ereport(DEBUG1, (errmsg("Assigned new transaction ID from GTM for autovacuum = %lu", xid)));
-                else
-                    ereport(DEBUG1, (errmsg("Assigned new transaction ID from GTM = %lu", xid)));
-
-                if (!TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
-                    increment_xid = false;
-                    ereport(DEBUG1, (errmsg("xid (%lu) was less than ShmemVariableCache->nextXid (%lu)", xid,
-                                            t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
-                } else
-                    t_thrd.xact_cxt.ShmemVariableCache->nextXid = xid;
-            } else {
-                if (IsInitdb || g_instance.status > NoShutdown) {
-                    xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-                    ereport(LOG, (errmsg("Shutdown or Initdb get local xid: %lu",
-                                         t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
-                } else {
-                    /* release lwlock before ereport. */
-                    LWLockRelease(XidGenLock);
-                    ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                                    errmsg("Can not connect to gtm when getting gxid, there is a connection error.")));
-                }
-            }
-        } else if (IS_PGXC_DATANODE || IsConnFromCoord()) {
-            if (IsAutoVacuumWorkerProcess()) {
-                Assert(isSubXact == false);
-                /*
-                 * For an autovacuum worker process, get transaction ID directly from GTM.
-                 * If this vacuum process is a vacuum analyze, its GXID has to be excluded
-                 * from snapshots so use a special function for this purpose.
-                 * For a simple worker get transaction ID like a normal transaction would do.
-                 */
-                if ((t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM) &&
-                    (GetTransactionHandleIfAny(s) == InvalidTransactionHandle))
-                    t_thrd.xact_cxt.next_xid = (TransactionId)BeginTranAutovacuumGTM();
-                else
-                    t_thrd.xact_cxt.next_xid = (TransactionId)GetNewGxidGTM(s, isSubXact);
-            } else if (!IsInitdb && (GetForceXidFromGTM() || !TransactionIdIsValid(t_thrd.xact_cxt.next_xid))) {
-                /*
-                 * In normal processing(not initdb), if CN does not push down `GXID',
-                 * try and get gxid directly from GTM
-                 */
-                if (isSubXact) {
-                    LWLockRelease(XidGenLock);
-                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                                    errmsg("GTM Mode: remote node sub xact can not get gxid directly from gtm")));
-                }
-
-                ereport(DEBUG1, (errmsg("Force get XID from GTM")));
-                t_thrd.xact_cxt.next_xid = (TransactionId)GetNewGxidGTM(s, isSubXact);
-                if (!TransactionIdIsValid(t_thrd.xact_cxt.next_xid)) {
-                    if (g_instance.status > NoShutdown)
-                        ereport(LOG, (errmsg("Can not get a vaild gxid from GTM")));
-                    else {
-                        LWLockRelease(XidGenLock);
-                        ereport(ERROR,
-                                (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Can not get a vaild gxid from GTM")));
-                    }
-                }
-            }
-
-            if (TransactionIdIsValid(t_thrd.xact_cxt.next_xid)) {
-                xid = t_thrd.xact_cxt.next_xid;
-                /* check the next_xid cn passed down in GTM Mode, it should be larger than parent xid */
-                if (isSubXact && TransactionIdFollowsOrEquals(GetParentTransactionIdIfAny(s), xid)) {
-                    LWLockRelease(XidGenLock);
-                    ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                                    errmsg("GTM Mode: remote node sub xact xid should be larger than parent xid.")));
-                }
-                ereport(DEBUG1, (errmsg("TransactionId = %lu", t_thrd.xact_cxt.next_xid)));
-                t_thrd.xact_cxt.next_xid = InvalidTransactionId; /* reset */
-                if (!TransactionIdFollowsOrEquals(xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
-                    /* This should be ok, due to concurrency from multiple coords
-                     * passing down the xids.
-                     * We later do not want to bother incrementing the value
-                     * in shared memory though.
-                     */
-                    increment_xid = false;
-                    ereport(DEBUG1, (errmsg("xid (%lu) does not follow ShmemVariableCache->nextXid (%lu)", xid,
-                                            t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
-                } else
-                    t_thrd.xact_cxt.ShmemVariableCache->nextXid = xid;
-            } else {
-                /* Fallback to default */
-                if (IsInitdb || (g_instance.status > NoShutdown) || useLocalXid) {
-                    xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-                    ereport(LOG, (errmsg("Falling back to local Xid. Was = %lu, now is = %lu", t_thrd.xact_cxt.next_xid,
-                                         t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
-                } else {
-                    LWLockRelease(XidGenLock);
-                    ereport(ERROR, (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
-                                    errmsg("Falling back to local Xid. Was = %lu, now is = %lu",
-                                           t_thrd.xact_cxt.next_xid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
-                }
-            }
-        }
-#else
-        xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-#endif /* PGXC */
-    } else {
-        (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-        xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
+    /* we are about to start streaming switch over, stop new xid to stop any xlog insert. */
+    if (t_thrd.xlog_cxt.LocalXLogInsertAllowed == 0 && g_instance.streaming_dr_cxt.isInSwitchover == true) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_INITIATION),
+                errmsg("cannot assign TransactionIds during streaming disaster recovery")));
     }
+
+    (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
+    xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
 
     /*
      * Check to see if it's safe to assign another XID.
@@ -292,19 +150,8 @@ TransactionId GetNewTransactionId(bool isSubXact)
 
         /* Re-acquire lock and start over */
         (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
-        /* Make the logical same to PG when GTM-Free */
-        if (!GTM_MODE)
-            xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
 
-#ifndef PGXC
-        /*
-         * In the case of Postgres-XC, transaction ID is managed globally at GTM level,
-         * so updating the GXID here based on the cache that might have been changed
-         * by another session when checking for wraparound errors at this local node
-         * level breaks transaction ID consistency of cluster.
-         */
         xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-#endif
     }
 
     /*
@@ -319,29 +166,7 @@ TransactionId GetNewTransactionId(bool isSubXact)
     ExtendCLOG(xid);
     ExtendCSNLOG(xid);
 
-    if (GTM_MODE) {
-        /*
-         * Now advance the nextXid counter.  This must not happen until after we
-         * have successfully completed ExtendCLOG() --- if that routine fails, we
-         * want the next incoming transaction to try it again.	We cannot assign
-         * more XIDs until there is CLOG space for them.
-         */
-#ifdef PGXC
-        /*
-         * But first bring nextXid in sync with global xid. Actually we get xid
-         * externally anyway, so it should not be needed to update nextXid in
-         * theory, but it is required to keep nextXid close to the gxid
-         * especially when vacuumfreeze is run using a standalone backend.
-         */
-        if (increment_xid || !IsPostmasterEnvironment) {
-            t_thrd.xact_cxt.ShmemVariableCache->nextXid = xid;
-            TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
-        }
-#else
-        TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
-#endif
-    } else
-        TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
+    TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
 
     /*
      * We must store the new XID into the shared ProcArray before releasing
@@ -386,8 +211,6 @@ TransactionId GetNewTransactionId(bool isSubXact)
         volatile PGXACT *mypgxact = t_thrd.pgxact;
 
         if (!isSubXact) {
-            if (GTM_MODE)
-                mypgxact->handle = GetTransactionHandleIfAny(s);
             mypgxact->xid = xid;
         } else {
             int nxids = mypgxact->nxids;
@@ -419,7 +242,7 @@ TransactionId GetNewTransactionId(bool isSubXact)
         }
     }
     /* when we use local snapshot, latestcomplete xid is very important for us. CHECK this here */
-    if (!GTM_MODE && TransactionIdFollowsOrEquals(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, xid))
+    if (TransactionIdFollowsOrEquals(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, xid))
         ereport(PANIC, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
                         errmsg("GTM-FREE-MODE: latestCompletedXid %lu larger than next alloc xid %lu.",
                                t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, xid)));

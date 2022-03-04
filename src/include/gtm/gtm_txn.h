@@ -102,6 +102,10 @@ extern void GlobalTransactionIdAbort(GlobalTransactionId transactionId);
 
 extern void GTM_CalculateLatestSnapshot(bool calc_xmin);
 
+extern bool GTM_SetDisasterClusterToEtcd(const char* mainCluster);
+extern char* GTM_GetDisasterClusterFromEtcd();
+extern bool GTM_DelDisasterClusterFromEtcd();
+
 /* in transam/varsup.c */
 extern bool GTM_SetDoVacuum(GTM_TransactionHandle handle);
 extern GlobalTransactionId GTM_GetGlobalTransactionId(GTM_TransactionHandle handle, bool is_sub_xact);
@@ -189,6 +193,8 @@ typedef struct GTM_Transactions {
     volatile GlobalTransactionId gt_backedUpXid; /* backed up, restoration point */
 
     volatile uint64 gt_csn;                    /* current commit sequence number */
+    volatile uint64 gt_consistencyPointCsn;
+    volatile uint64 gt_baseConsistencyPoint;
     GlobalTransactionId gt_oldestXid; /* cluster-wide minimum datfrozenxid */
 
     /*
@@ -293,6 +299,7 @@ void ProcessGXIDListCommand(Port* myport, StringInfo message);
 void ProcessGetNextGXIDTransactionCommand(Port* myport, StringInfo message);
 void ProcessGetNextCSNTransactionCommand(Port* myport, StringInfo message);
 void ProcessGetNextCSNTransactionLiteCommand(Port* myport, StringInfo message);
+void ProcessSetConsistencyPointTransactionCommand(Port* myport, StringInfo message);
 void ProcessGetGlobalXminTransactionCommand(Port* myport, StringInfo message);
 void ProcessGetTimelineTransactionCommand(Port* myport, StringInfo message);
 
@@ -339,6 +346,9 @@ bool GTM_SyncTimelineToStandby(GTM_Timeline timeline);
 bool GTM_SetTimelineToEtcd(GTM_Timeline timeline);
 bool GTM_GetTimelineFromEtcd(GTM_Timeline& timeline);
 
+bool GTM_SetConsistencyPointToEtcd(uint64 cp_csn);
+bool GTM_GetConsistencyPointFromEtcd();
+
 void ProcessWorkloadManagerInitCommand(Port* myport, StringInfo message, bool is_backup);
 void ProcessWorkloadManagerReserveMemCommand(Port* myport, StringInfo message, bool is_backup);
 void ProcessWorkloadManagerReleaseMemCommand(Port* myport, StringInfo message, bool is_backup);
@@ -355,7 +365,11 @@ void ProcessWorkloadManagerDeleteResourcePoolCommand(Port* myport, StringInfo me
  */
 void ProcessGetSnapshotCommand(Port* myport, StringInfo message, bool get_gxid);
 void ProcessGetSnapshotLiteCommand(Port* myport, StringInfo message);
+void ProcessGetSnapshotDRCommand(Port* myport, StringInfo message);
 void ProcessGetSnapshotStatusCommand(Port* myport, StringInfo message);
 void ProcessGetGTMLiteStatusCommand(Port* myport, StringInfo message);
 void GTM_FreeSnapshotData(GTM_Snapshot snapshot);
+void ProcessSetDisasterClusterCommand(Port *myport, GTM_MessageType mtype, StringInfo message);
+void ProcessGetDisasterClusterCommand(Port *myport, GTM_MessageType mtype, StringInfo message);
+void ProcessDelDisasterClusterCommand(Port *myport, GTM_MessageType mtype, StringInfo message);
 #endif

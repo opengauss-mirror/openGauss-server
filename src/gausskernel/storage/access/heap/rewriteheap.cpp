@@ -215,7 +215,9 @@ static void raw_heap_insert(RewriteState state, HeapTuple tup);
 static void RawUHeapInsert(RewriteState state, UHeapTuple tup);
 static void RawHeapCmprAndMultiInsert(RewriteState state, bool is_last);
 static void copyHeapTupleInfo(HeapTuple dest_tup, HeapTuple src_tup, TransactionId freeze_xid, MultiXactId freeze_mxid);
+#ifndef ENABLE_LITE_MODE
 static void rewrite_page_list_write(RewriteState state);
+#endif
 static void rewrite_flush_page(RewriteState state, Page page);
 static void rewrite_end_flush_page(RewriteState state);
 static void rewrite_write_one_page(RewriteState state, Page page);
@@ -986,6 +988,7 @@ bool rewrite_heap_dead_tuple(RewriteState state, HeapTuple old_tuple)
     return false;
 }
 
+#ifndef ENABLE_LITE_MODE
 /*
  * @Description: vacuum full use this api to list write block by adio.   aioDescp->blockDesc.bufHdr = NULL; to figure
  * this is vacuum operate
@@ -1073,6 +1076,7 @@ void rewrite_page_list_write(RewriteState state)
 
     return;
 }
+#endif
 
 /*
  * @Description: rewrite flush page
@@ -1084,6 +1088,7 @@ void rewrite_page_list_write(RewriteState state)
  */
 static void rewrite_flush_page(RewriteState state, Page page)
 {
+#ifndef ENABLE_LITE_MODE
     /* check aio is ready, for init db in single mode, no aio thread */
     if (AioCompltrIsReady() && g_instance.attr.attr_storage.enable_adio_function) {
         /* pass null buffer to lower levels to use fallocate, systables do not use fallocate,
@@ -1130,8 +1135,11 @@ static void rewrite_flush_page(RewriteState state, Page page)
             }
         }
     } else {
+#endif
         smgrextend(state->rs_new_rel->rd_smgr, MAIN_FORKNUM, state->rs_blockno, (char *)page, true);
+#ifndef ENABLE_LITE_MODE
     }
+#endif
     return;
 }
 
@@ -1142,6 +1150,7 @@ static void rewrite_flush_page(RewriteState state, Page page)
  */
 static void rewrite_end_flush_page(RewriteState state)
 {
+#ifndef ENABLE_LITE_MODE
     /* check aio is ready, for init db in single mode, no aio thread */
     if (AioCompltrIsReady() && g_instance.attr.attr_storage.enable_adio_function) {
         if (state->rs_block_count > 0) {
@@ -1156,6 +1165,7 @@ static void rewrite_end_flush_page(RewriteState state)
                                     (int)(pg_atomic_read_u32(&state->rs_buffers_handler[i].state) & BUF_FLAG_MASK))));
         }
     }
+#endif
 }
 
 /*

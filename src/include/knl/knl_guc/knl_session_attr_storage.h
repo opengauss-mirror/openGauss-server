@@ -43,6 +43,8 @@
 typedef struct knl_session_attr_dcf {
     /* parameters can be reloaded while DCF is running */
     int dcf_election_timeout;
+    int dcf_auto_elc_priority_en;
+    int dcf_election_switch_threshold;
     int dcf_run_mode;
     char* dcf_log_level;
     int dcf_max_log_file_size;
@@ -208,6 +210,7 @@ typedef struct knl_session_attr_storage {
     bool enable_twophase_commit;
     int ustats_tracker_naptime;
     int umax_search_length_for_prune;
+    int archive_interval;
 
     /*
      * xlog keep for all standbys even through they are not connect and donnot created replslot.
@@ -216,6 +219,7 @@ typedef struct knl_session_attr_storage {
     int max_size_for_xlog_prune;
     int defer_csn_cleanup_time;
 
+    bool enable_defer_calculate_snapshot;
     bool enable_hashbucket;
     bool enable_segment;
 
@@ -223,8 +227,13 @@ typedef struct knl_session_attr_storage {
     int max_active_gtt;
     int vacuum_gtt_defer_check_age;
 
+    /* for undo */
+    int undo_space_limit_size;
+    int undo_limit_size_transaction;
+
     bool enable_recyclebin;
-    int recyclebin_retention;
+    int recyclebin_retention_time;
+    int undo_retention_time;
     /*
      * !!!!!!!!!!!     Be Carefull     !!!!!!!!!!!
      * Make sure to use the same value in UHeapCalcTupleDataSize and UheapFillDiskTuple when creating a tuple.

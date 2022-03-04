@@ -93,8 +93,8 @@ extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid, Multi
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern bool MultiXactIdIsCurrent(MultiXactId multi);
 extern MultiXactId ReadNextMultiXactId(void);
-extern bool DoMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining, bool nowait);
-extern void MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining);
+extern bool DoMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining, bool nowait, int waitSec = 0);
+extern void MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining, int waitSec = 0);
 extern bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining);
 extern void MultiXactIdSetOldestMember(void);
 extern int GetMultiXactIdMembers(MultiXactId multi, MultiXactMember** members);
@@ -123,5 +123,6 @@ extern void multixact_twophase_postabort(TransactionId xid, uint16 info, void* r
 
 extern void multixact_redo(XLogReaderState* record);
 extern void multixact_desc(StringInfo buf, XLogReaderState* record);
+extern const char* multixact_type_name(uint8 subtype);
 
 #endif /* MULTIXACT_H */

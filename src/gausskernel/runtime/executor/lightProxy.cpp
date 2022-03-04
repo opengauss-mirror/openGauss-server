@@ -45,6 +45,7 @@
 #include "optimizer/streamplan.h"
 #include "gs_ledger/blockchain.h"
 #include "parser/parse_hint.h"
+#include "replication/walreceiver.h"
 
 const int MAX_COMMAND = 51;
 typedef struct commandType {
@@ -108,7 +109,6 @@ extern void pgxc_node_init(PGXCNodeHandle* handle, int sock);
 extern void pgxc_handle_unsupported_stmts(Query* query);
 extern Oid exprType(const Node* expr);
 
-extern bool light_xactnodes_member(bool write, const void* datum);
 extern int light_node_send_begin(PGXCNodeHandle* handle, bool check_gtm_mode);
 extern int light_handle_response(PGXCNodeHandle* conn, lightProxyMsgCtl* msgctl, lightProxy* lp);
 extern void light_node_report_error(lightProxyErrData* combiner);
@@ -431,14 +431,25 @@ void lightProxy::connect()
 {
     List* dn_allocate = NULL;
     errno_t ss_rc = 0;
+    int dnNum = u_sess->pgxc_cxt.NumDataNodes;
+    if (IS_CN_DISASTER_RECOVER_MODE) {
+        dnNum = u_sess->pgxc_cxt.NumTotalDataNodes;
+        if (!u_sess->pgxc_cxt.DisasterReadArrayInit) {
+            disaster_read_array_init();
+        }
+        Assert(m_nodeIdx < u_sess->pgxc_cxt.NumDataNodes);
+        if (u_sess->pgxc_cxt.disasterReadArray[m_nodeIdx] != -1) {
+            m_nodeIdx = u_sess->pgxc_cxt.disasterReadArray[m_nodeIdx];
+        }
+    }
 
     m_handle = &u_sess->pgxc_cxt.dn_handles[m_nodeIdx];
     if (!IS_VALID_CONNECTION(m_handle)) {
-        Assert(m_nodeIdx < u_sess->pgxc_cxt.NumDataNodes);
-        if (m_nodeIdx >= u_sess->pgxc_cxt.NumDataNodes) {
+        Assert(m_nodeIdx < dnNum);
+        if (m_nodeIdx >= dnNum) {
             ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE),
                 errmsg("[LIGHT PROXY] m_nodeIdx error, m_nodeIdx:%d, numDataNodes:%d",
-                    m_nodeIdx, u_sess->pgxc_cxt.NumDataNodes)));
+                    m_nodeIdx, dnNum)));
         }
 
         dn_allocate = lappend_int(dn_allocate, m_nodeIdx);
@@ -566,31 +577,13 @@ void lightProxy::proxyNodeBegin(bool is_read_only)
 
     if (is_read_only) {
         gxid = GetCurrentTransactionIdIfAny();
-    } else if (GTM_MODE) {
-        gxid = GetCurrentTransactionId();
-        if (!GlobalTransactionIdIsValid(gxid)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_CONNECTION_EXCEPTION), errmsg("[LIGHT PROXY] Failed to get new transaction id")));
-        }
-    }
-
-    /*
-     * Send GXID and check for errors
-     */
-    if (GTM_MODE && GlobalTransactionIdIsValid(gxid) &&
-        pgxc_node_send_gxid(m_handle, gxid, false)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                errmsg("[LIGHT PROXY] Failed to send gxid %lu to %s[%u]",
-                    gxid,
-                    m_handle->remoteNodeName,
-                    m_handle->nodeoid)));
     }
 
     /*
      * If the node is already a participant in the transaction, skip it
      */
-    if (light_xactnodes_member(false, m_handle) || light_xactnodes_member(true, m_handle)) {
+    if (list_member(u_sess->pgxc_cxt.XactReadNodes, m_handle) ||
+        list_member(u_sess->pgxc_cxt.XactWriteNodes, m_handle)) {
         if (!is_read_only) {
             RegisterTransactionNodes(1, (void**)&m_handle, true);
         }
@@ -885,15 +878,14 @@ bool lightProxy::processMsg(int msgType, StringInfo msg)
     /*
     * Emit duration logging if appropriate.
     */
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms, queryid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            Assert(false);
             break;
         case 2: {
-            ereport(LOG,
-                (errmsg("duration: %s ms queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id),
-                    errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms queryid %ld unique id %ld", msec_str,
+                u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         }
         default:
@@ -1368,7 +1360,6 @@ bool exec_query_through_light_proxy(List* querytree_list, Node* parsetree, bool 
             list_length(single_exec_node->primarynodelist) == 1) {
             /* GTMLite: need to mark that this is single shard statement */
             u_sess->exec_cxt.single_shard_stmt = true;
-
             if (CmdtypeSupportsHotkey(query->commandType))
                 SendHotkeyToPgstat();
 

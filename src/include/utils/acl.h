@@ -264,7 +264,7 @@ extern void aclitemsort(Acl* acl);
 extern bool aclequal(const Acl* left_acl, const Acl* right_acl);
 
 extern AclMode aclmask(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHow how);
-extern AclMode aclmask_dbe_perf(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHow how);
+extern AclMode aclmask_without_sysadmin(const Acl* acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHow how);
 extern int aclmembers(const Acl* acl, Oid** roleids);
 
 extern bool has_privs_of_role(Oid member, Oid role);
@@ -276,8 +276,9 @@ extern Oid get_role_oid(const char* rolname, bool missing_ok);
 
 extern void select_best_grantor(
     Oid roleId, AclMode privileges, AclMode ddl_privileges, const Acl* acl, Oid ownerId,
-        Oid* grantorId, AclMode* grantOptions, AclMode* ddl_grantOptions, bool is_dbe_perf = false);
-
+        Oid* grantorId, AclMode* grantOptions, AclMode* ddl_grantOptions, bool is_dbe_perf = false,
+            bool isPgCatalog = false);
+extern List * roles_has_privs_of(Oid roleid);
 extern void initialize_acl(void);
 
 /*

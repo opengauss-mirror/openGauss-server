@@ -41,7 +41,7 @@ BEGIN
     RETURN c;
 END; $$
 LANGUAGE plpgsql;
-\df
+\df f_processed_in_plpgsql
                                                                    List of functions
  Schema |          Name          | Result data type  |                Argument data types                 |  Type  | fencedmode | propackage | prokind 
 --------+------------------------+-------------------+----------------------------------------------------+--------+------------+------------+---------
@@ -60,13 +60,12 @@ BEGIN
 SELECT INTO out1, out2 name, balance from accounts LIMIT 1;
 END; $$
 LANGUAGE plpgsql;
-\df
+\df f_processed_out_plpgsql
                                                                           List of functions
- Schema |          Name           | Result data type  |                       Argument data types                        |  Type  | fencedmode | propackage | prokind 
---------+-------------------------+-------------------+------------------------------------------------------------------+--------+------------+------------+---------
- public | f_processed_in_plpgsql  | character varying | a character varying encrypted, b numeric encrypted               | normal | f          | f          | f
- public | f_processed_out_plpgsql | record            | OUT out1 character varying encrypted, OUT out2 numeric encrypted | normal | f          | f          | f
-(2 rows)
+ Schema |          Name           | Result data type |                       Argument data types                        |  Type  | fencedmode | propackage | prokind 
+--------+-------------------------+------------------+------------------------------------------------------------------+--------+------------+------------+---------
+ public | f_processed_out_plpgsql | record           | OUT out1 character varying encrypted, OUT out2 numeric encrypted | normal | f          | f          | f
+(1 row)
 
 -- FAILED
 CREATE OR REPLACE FUNCTION f_processed_out_plpgsql(out1 OUT varchar(100), out2 OUT dec(15,2)) 
@@ -78,19 +77,34 @@ LANGUAGE plpgsql;
 SELECT f_processed_out_plpgsql();
  f_processed_out_plpgsql 
 -------------------------
- (dani, 123.45)
+ (dani,123.45)
 (1 row)
 
-\df
+\df f_processed_out_plpgsql
                                                                           List of functions
- Schema |          Name           | Result data type  |                       Argument data types                        |  Type  | fencedmode | propackage | prokind 
---------+-------------------------+-------------------+------------------------------------------------------------------+--------+------------+------------+---------
- public | f_processed_in_plpgsql  | character varying | a character varying encrypted, b numeric encrypted               | normal | f          | f          | f
- public | f_processed_out_plpgsql | record            | OUT out1 character varying encrypted, OUT out2 numeric encrypted | normal | f          | f          | f
-(2 rows)
+ Schema |          Name           | Result data type |                       Argument data types                        |  Type  | fencedmode | propackage | prokind 
+--------+-------------------------+------------------+------------------------------------------------------------------+--------+------------+------------+---------
+ public | f_processed_out_plpgsql | record           | OUT out1 character varying encrypted, OUT out2 numeric encrypted | normal | f          | f          | f
+(1 row)
 
 DROP FUNCTION f_processed_in_plpgsql;
 DROP FUNCTION f_processed_out_plpgsql;
+CREATE OR REPLACE FUNCTION select1() RETURNS varchar(100) LANGUAGE SQL AS 'SELECT name from accounts;';
+select proname, pronargs, prorettype, proargtypes, proallargtypes, proargnames, prorettype_orig, proargcachedcol, proallargtypes_orig
+from pg_proc join gs_encrypted_proc on pg_proc.oid = func_id where proname = 'select1';
+ proname | pronargs | prorettype | proargtypes | proallargtypes | proargnames | prorettype_orig | proargcachedcol | proallargtypes_orig 
+---------+----------+------------+-------------+----------------+-------------+-----------------+-----------------+---------------------
+ select1 |        0 |       4402 |             |                |             |            1043 |                 | 
+(1 row)
+
+CREATE OR REPLACE FUNCTION select1() RETURNS varchar(100) LANGUAGE SQL AS 'SELECT ''aaa'';';
+select proname, pronargs, prorettype, proargtypes, proallargtypes, proargnames, prorettype_orig, proargcachedcol, proallargtypes_orig
+from pg_proc join gs_encrypted_proc on pg_proc.oid = func_id where proname = 'select1';
+ proname | pronargs | prorettype | proargtypes | proallargtypes | proargnames | prorettype_orig | proargcachedcol | proallargtypes_orig 
+---------+----------+------------+-------------+----------------+-------------+-----------------+-----------------+---------------------
+(0 rows)
+
+DROP FUNCTION select1();
 DROP TABLE accounts;
 DROP COLUMN ENCRYPTION KEY create_replace_cek;
 DROP CLIENT MASTER KEY create_replace_cmk;

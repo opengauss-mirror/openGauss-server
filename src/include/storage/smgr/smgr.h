@@ -137,11 +137,13 @@ enum SMGR_READ_STATUS {
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col = 0);
+extern void smgrshutdown(int code, Datum arg);
 extern bool smgrexists(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum = InvalidBlockNumber);
 extern void smgrsetowner(SMgrRelation* owner, SMgrRelation reln);
 extern void smgrclearowner(SMgrRelation* owner, SMgrRelation reln);
 extern void smgrclose(SMgrRelation reln, BlockNumber blockNum = InvalidBlockNumber);
 extern void smgrcloseall(void);
+extern void smgrcleanblocknumall(void);
 extern void smgrclosenode(const RelFileNodeBackend& rnode);
 extern void smgrcreate(SMgrRelation reln, ForkNumber forknum, bool isRedo);
 extern void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum = InvalidBlockNumber);
@@ -186,9 +188,7 @@ extern void mdForgetDatabaseFsyncRequests(Oid dbid);
 
 /* md sync requests */
 extern void ForgetDatabaseSyncRequests(Oid dbid);
-extern void CheckPointSyncForDw(void);
 extern void CheckPointSyncWithAbsorption(void);
-extern int64 CheckPointGetFsyncRequset();
 /* md sync callbacks */
 extern int SyncMdFile(const FileTag *ftag, char *path);
 extern int UnlinkMdFile(const FileTag *ftag, char *path);

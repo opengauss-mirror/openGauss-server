@@ -9,6 +9,9 @@ OBJS = \
 PGFILEDESC = "pgoutput - standard logical replication output plugin"
 NAME = pgoutput
 
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -fstack-protector-all
+override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -fstack-protector-all
+
 all: all-shared-lib
 
 include $(top_builddir)/src/Makefile.shlib

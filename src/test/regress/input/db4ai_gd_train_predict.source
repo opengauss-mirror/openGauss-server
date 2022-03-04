@@ -19,27 +19,27 @@ CREATE MODEL m using logistic_regression FROM db4ai_houses;
 CREATE MODEL m using logistic_regression FEATURES size,lot FROM db4ai_houses;
 
 -- Errors with semantic validation of hyperparameters
-CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with batch_size = 0;
-CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with decay = 0.0;
-CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with learning_rate = 0.0;
-CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_iterations = 0;
-CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_seconds = -1;
-CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with optimizer = nogd;
-CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with tolerance = 0.0;
-CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with verbose = ttrue;
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with batch_size = 0, seed=1;
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with decay = 0.0, seed=1;
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with learning_rate = 0.0, seed=1;
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_iterations = 0, seed=1;
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_seconds = -1, seed=1;
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with optimizer = nogd, seed=1;
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with tolerance = 0.0, seed=1;
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with verbose = ttrue, seed=1;
 
 
-CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with batch_size = 'a_wrong_parameter';
-CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with decay = 'a_wrong_parameter';
-CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with learning_rate = 'a_wrong_parameter';
-CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_iterations = 'a_wrong_parameter';
-CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_seconds = 'a_wrong_parameter';
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with batch_size = 'a_wrong_parameter', seed=1;
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with decay = 'a_wrong_parameter', seed=1;
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with learning_rate = 'a_wrong_parameter', seed=1;
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_iterations = 'a_wrong_parameter', seed=1;
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_seconds = 'a_wrong_parameter', seed=1;
 
-CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with lambda = 0.0;
-CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with lambda = 'a_wrong_parameter';
-CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with optimizer = 'a_wrong_parameter';
-CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with tolerance = 'a_wrong_parameter';
-CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with verbose = 'a_wrong_parameter';
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with lambda = 0.0, seed=1;
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with lambda = 'a_wrong_parameter', seed=1;
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with optimizer = 'a_wrong_parameter', seed=1;
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with tolerance = 'a_wrong_parameter', seed=1;
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with verbose = 'a_wrong_parameter', seed=1;
 
 
 -- Normal model with logistic_regression
@@ -64,21 +64,76 @@ DROP model m3;
 
 
 -- EXPLAIN test
-EXPLAIN CREATE MODEL m using logistic_regression FEATURES bedroom, bath TARGET price < 100000 FROM db4ai_houses;
+show enable_material;
+EXPLAIN CREATE MODEL m using logistic_regression FEATURES bedroom, bath TARGET price < 100000 FROM db4ai_houses WITH seed=1;
 
-EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath as renamed_bath TARGET price < 100000 as target_price FROM db4ai_houses;
-EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath::float as transformed_bath TARGET price < 100000 FROM db4ai_houses;
-EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath TARGET price < 100000 FROM (SELECT * FROM db4ai_houses);
-EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES bedroom, bath TARGET price FROM (SELECT * FROM db4ai_houses ORDER BY id);
-EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES bedroom, bath TARGET price FROM (SELECT * FROM db4ai_houses ORDER BY id LIMIT 5);
-EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES f1, f2 TARGET price FROM (SELECT bedroom as f1, bath as f2, price FROM db4ai_houses ORDER BY id LIMIT 5);
-EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES f1, f2 TARGET price > 100000 FROM (SELECT AVG(bath) as f1, SUM(bath) as f2, AVG(price) as price FROM db4ai_houses GROUP BY bedroom);
-EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES f1, f2 TARGET price > 100000 FROM (SELECT AVG(bath) as f1, SUM(bath) as f2, AVG(price) as price FROM db4ai_houses GROUP BY bedroom HAVING bedroom < 15);
-EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES bedroom + bath, tax*1.2 as normalized_tax TARGET price < 100000 FROM db4ai_houses;
+EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath as renamed_bath TARGET price < 100000 as target_price FROM db4ai_houses WITH seed=1;
+EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath::float as transformed_bath TARGET price < 100000 FROM db4ai_houses WITH seed=1;
+EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath TARGET price < 100000 FROM (SELECT * FROM db4ai_houses) WITH seed=1;
+EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES bedroom, bath TARGET price FROM (SELECT * FROM db4ai_houses ORDER BY id) WITH seed=1;
+EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES bedroom, bath TARGET price FROM (SELECT * FROM db4ai_houses ORDER BY id LIMIT 5) WITH seed=1;
+EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES f1, f2 TARGET price FROM (SELECT bedroom as f1, bath as f2, price FROM db4ai_houses ORDER BY id LIMIT 5) WITH seed=1;
+EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES f1, f2 TARGET price > 100000 FROM (SELECT AVG(bath) as f1, SUM(bath) as f2, AVG(price) as price FROM db4ai_houses GROUP BY bedroom) WITH seed=1;
+EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES f1, f2 TARGET price > 100000 FROM (SELECT AVG(bath) as f1, SUM(bath) as f2, AVG(price) as price FROM db4ai_houses GROUP BY bedroom HAVING bedroom < 15) WITH seed=1;
+EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES bedroom + bath, tax*1.2 as normalized_tax TARGET price < 100000 FROM db4ai_houses WITH seed=1;
 
+-- Expect no materialization
+EXPLAIN CREATE MODEL m using logistic_regression FEATURES bedroom, bath TARGET price < 100000 as target_price FROM (SELECT * FROM db4ai_houses ORDER BY id) WITH seed=1;
+set enable_material = off;
+EXPLAIN CREATE MODEL m using logistic_regression FEATURES bedroom, bath TARGET price < 100000 as target_price FROM db4ai_houses WITH seed=1;
+set enable_material = on;
 
+-- svm multiclass
+CREATE TABLE db4ai_ecoli (
+	id BIGSERIAL,
+	f1 REAL,
+	f2 REAL,
+	f3 REAL,
+	f4 REAL,
+	f5 REAL,
+	f6 REAL,
+	f7 REAL,
+	cat VARCHAR,
+	PRIMARY KEY (id)
+);
+
+\copy db4ai_ecoli(f1,f2,f3,f4,f5,f6,f7,cat) FROM '@abs_srcdir@/data/ecoli.csv' DELIMITER ',';
+
+CREATE MODEL ecoli_svmc USING multiclass
+   FEATURES f1, f2, f3, f4, f5, f6, f7 TARGET cat
+   FROM db4ai_ecoli WITH seed = 1, max_iterations=250, tolerance=1e-7,
+		learning_rate=2.0, lambda=50;
+
+SELECT id, cat AS target, PREDICT BY ecoli_svmc (FEATURES f1, f2, f3, f4, f5, f6, f7) AS prediction
+    FROM db4ai_ecoli
+    WHERE MOD(id,10)=0
+	ORDER BY id;
+
+SELECT COUNT(*)/(SELECT COUNT(*) FROM db4ai_ecoli) AS accuracy
+FROM (SELECT id, cat AS target, PREDICT BY ecoli_svmc (FEATURES f1, f2, f3, f4, f5, f6, f7) AS prediction
+		FROM db4ai_ecoli
+		WHERE prediction=target
+	);
+
+CREATE MODEL ecoli_logregr USING multiclass
+   FEATURES f1, f2, f3, f4, f5, f6, f7 TARGET cat
+   FROM db4ai_ecoli WITH seed = 1, max_iterations=250, tolerance=1e-7,
+		learning_rate=30.0, classifier='logistic_regression';
+
+SELECT id, cat AS target, PREDICT BY ecoli_logregr (FEATURES f1, f2, f3, f4, f5, f6, f7) AS prediction
+    FROM db4ai_ecoli
+    WHERE MOD(id,10)=1
+	ORDER BY id;
+
+SELECT modelname, modeltype, processedtuples, discardedtuples, outputtype, trainingscoresname, trainingscoresvalue
+  FROM gs_model_warehouse
+  WHERE modelname LIKE 'ecoli%'
+  ORDER BY modelname;
 
 -- Cleanup
+DROP MODEL ecoli_svmc;
+DROP MODEL ecoli_logregr;
 DROP TABLE IF EXISTS db4ai_houses;
+DROP TABLE IF EXISTS db4ai_ecoli;
 
 SELECT 'DB4AI TEST COMPLETED';

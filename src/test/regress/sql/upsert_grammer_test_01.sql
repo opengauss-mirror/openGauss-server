@@ -51,6 +51,16 @@ INSERT INTO t_grammer (c1, c3, c4.a) VALUES(84, '{81, 82, 83}', 850) ON DUPLICAT
 INSERT INTO t_grammer VALUES(91, 1, '{91, 92, 93}', ROW(94, 95)) ON DUPLICATE KEY UPDATE NOTHING;
 INSERT INTO t_grammer (c5, c1, c2, c4) VALUES('{91,92}', 92, DEFAULT, ROW(910, 920)) ON DUPLICATE KEY UPDATE NOTHING;
 
+-- support INSERT with assigned alias
+INSERT INTO t_grammer AS T1 VALUES(991, 1);
+INSERT INTO t_grammer T2 VALUES(992, 1);
+INSERT INTO t_grammer * AS T1 VALUES(993, 1);
+INSERT INTO t_grammer AS T1 VALUES(991, 2) ON DUPLICATE KEY UPDATE T1.C2 = EXCLUDED.C2 + 1;
+INSERT INTO t_grammer T2 VALUES(992, 3) ON DUPLICATE KEY UPDATE T2.C2 = EXCLUDED.C2 + 1 WHERE T2.C1 > 100;
+INSERT INTO t_grammer * AS T1 VALUES(993, 4) ON DUPLICATE KEY UPDATE NOTHING;
+-- excluded is reserved keyword
+INSERT INTO t_grammer * AS excluded VALUES(993, 4) ON DUPLICATE KEY UPDATE NOTHING;
+
 -- UPDATE target: unsupport with schema but support with tablename
 INSERT INTO t_grammer VALUES(0, 0, '{0,0}', ROW(0, 0), '{107, 108}') ON DUPLICATE KEY UPDATE
 	upsert_test.t_grammer.c2 = c2 * 10, upsert_test.t_grammer.c3[1:2] = c5[1:2], upsert_test.t_grammer.c4.a = c1;

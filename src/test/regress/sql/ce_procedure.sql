@@ -2,7 +2,6 @@
 -- unsupport procedure --
 -------------------------
 
---set enable_stream_operator = on;
 ---------------------forall------------------------
 SET CHECK_FUNCTION_BODIES TO ON;
 
@@ -55,10 +54,9 @@ CREATE OR REPLACE PROCEDURE INSERT_IMAGE
 )
 AS
 BEGIN
-	INSERT INTO Image VALUES ( id_param, title_param, artist_param, description_param, dataTime_param, xresolution_param, yresolution_param, resolution_unit_param, imageSize_param, alititude_param, latitude_param, longitude_param, imagePath_param);
+	INSERT INTO Image VALUES ( id_param, artist_param, artist_param, description_param, dataTime_param, xresolution_param, yresolution_param, resolution_unit_param, imageSize_param, alititude_param, latitude_param, longitude_param, imagePath_param);
 END;
 /
-
 CALL INSERT_IMAGE(8, 'img4214196','ZAVIER', 'a river', '2019-11-22 12:45:26', 720, 720, 'px', 1244, 510, 29.75, 105.79, '/DCIM/Camera/img4214196');
 
 CREATE OR REPLACE PROCEDURE UPDATE_DESCRIPTION(title_param IN VARCHAR(30), description_param IN TEXT, result OUT VARCHAR(30))

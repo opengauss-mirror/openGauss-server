@@ -96,6 +96,7 @@ static ArrayType* create_array_envelope(int ndims, int* dimv, const int* lbv, in
 static ArrayType* array_fill_internal(
     ArrayType* dims, ArrayType* lbs, Datum value, bool isnull, Oid elmtype, FunctionCallInfo fcinfo);
 static ArrayType* array_deleteidx_internal(ArrayType *v, int delIndex);
+static void checkEnv();
 
 /*
  * complex_array_in :
@@ -1672,6 +1673,7 @@ Datum array_length(PG_FUNCTION_ARGS)
 
 Datum array_indexby_length(PG_FUNCTION_ARGS)
 {
+    checkEnv();
     if (PG_ARGISNULL(0)) {
         PG_RETURN_INT32(0);
     }
@@ -1712,6 +1714,9 @@ Datum array_indexby_length(PG_FUNCTION_ARGS)
  */
 Datum array_exists(PG_FUNCTION_ARGS)
 {
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
+        PG_RETURN_BOOL(false);
+    }
     ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
     int index = PG_GETARG_INT32(1);
     int* dimv = NULL;
@@ -1781,7 +1786,7 @@ static bool array_index_exists_internal(ArrayType* v, HTAB* table_index, Oid tab
 Datum array_varchar_exists(PG_FUNCTION_ARGS)
 {
     checkEnv();
-    if (PG_ARGISNULL(0)) {
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
         PG_RETURN_BOOL(false);
     }
     ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
@@ -1795,17 +1800,27 @@ Datum array_varchar_exists(PG_FUNCTION_ARGS)
             errmsg("array_varchar_exists must be call in procedure")));
     }
 
+    /* transfer varchar format */
+    bool isTran = false;
+    if (VARATT_IS_1B(index_datum)) {
+        index_datum = transVaratt1BTo4B(index_datum);
+        isTran = true;
+    }
+
     bool result = array_index_exists_internal(v,
                                               u_sess->SPI_cxt.cur_tableof_index->tableOfIndex,
                                               u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType,
                                               index_datum);
+    if (isTran) {
+        pfree(DatumGetPointer(index_datum));
+    }
     PG_RETURN_BOOL(result);
 }
 
 Datum array_integer_exists(PG_FUNCTION_ARGS)
 {
     checkEnv();
-    if (PG_ARGISNULL(0)) {
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
         PG_RETURN_BOOL(false);
     }
     ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
@@ -1963,6 +1978,14 @@ Datum array_varchar_next(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_next must be call in procedure")));
     }
+
+    /* transfer varchar format */
+    bool isTran = false;
+    if (VARATT_IS_1B(index_datum)) {
+        index_datum = transVaratt1BTo4B(index_datum);
+        isTran = true;
+    }
+
     /* turn varchar index */
     HTAB* table_index = u_sess->SPI_cxt.cur_tableof_index->tableOfIndex;
     TableOfIndexKey key;
@@ -1971,9 +1994,15 @@ Datum array_varchar_next(PG_FUNCTION_ARGS)
     index = getTableOfIndexByDatumValue(key, table_index, NULL);
     /* if exist index? */
     if (index < 0) {
+        if (isTran) {
+            pfree(DatumGetPointer(index_datum));
+        }
         PG_RETURN_NULL();
     }
     Datum next_datum = tableOfIndexVarcharNextValue(table_index, &key);
+    if (isTran) {
+        pfree(DatumGetPointer(index_datum));
+    }
     if (next_datum == Datum(0)) {
         PG_RETURN_NULL();
     } else {
@@ -1999,6 +2028,12 @@ Datum array_varchar_prior(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_prior must be call in procedure")));
     }
+    /* transfer varchar format */
+    bool isTran = false;
+    if (VARATT_IS_1B(index_datum)) {
+        index_datum = transVaratt1BTo4B(index_datum);
+        isTran = true;
+    }
     /* turn varchar index */
     HTAB* table_index = u_sess->SPI_cxt.cur_tableof_index->tableOfIndex;
     TableOfIndexKey key;
@@ -2006,10 +2041,15 @@ Datum array_varchar_prior(PG_FUNCTION_ARGS)
     key.exprdatum = index_datum;
     index = getTableOfIndexByDatumValue(key, table_index, NULL);
     if (index < 0) {
+        if (isTran) {
+            pfree(DatumGetPointer(index_datum));
+        }
         PG_RETURN_NULL();
     }
     Datum prior_datum = tableOfIndexVarcharPriorValue(table_index, &key);
-    /* check ? */
+    if (isTran) {
+        pfree(DatumGetPointer(index_datum));
+    }
     if (prior_datum == Datum(0)) {
         PG_RETURN_NULL();
     } else {
@@ -2274,7 +2314,8 @@ static ArrayType* array_index_delete_internal(ArrayType* v, HTAB* table_index, O
     TableOfIndexKey key;
     key.exprtypeid = tableOfIndexType;
     key.exprdatum = index_datum;
-    int index = getTableOfIndexByDatumValue(key, table_index, NULL);
+    PLpgSQL_var* var = NULL;
+    int index = getTableOfIndexByDatumValue(key, table_index, &var);
     if (index < 0) {
         return v;
     }
@@ -2282,6 +2323,17 @@ static ArrayType* array_index_delete_internal(ArrayType* v, HTAB* table_index, O
     ArrayType* array = array_deleteidx_internal(v, index);
     bool found = false;
     (void)hash_search(table_index, (const void*)&key, HASH_REMOVE, &found);
+
+    /* for nest table, need delete inner vars */
+    if (var != NULL && var->tableOfIndex != NULL) {
+        HASH_SEQ_STATUS hashSeq;
+        hash_seq_init(&hashSeq, var->tableOfIndex);
+        TableOfIndexEntry* srcEntry = NULL;
+        while ((srcEntry = (TableOfIndexEntry*)hash_seq_search(&hashSeq)) != NULL) {
+            var->value = (Datum)array_index_delete_internal(DatumGetArrayTypeP(var->value), var->tableOfIndex,
+                                                            var->tableOfIndexType, srcEntry->key.exprdatum);
+        }
+    }
 
     return array;
 }
@@ -2328,10 +2380,19 @@ Datum array_varchar_deleteidx(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("array_varchar_deleteidx must be call in procedure")));
     }
+    /* transfer varchar format */
+    bool isTran = false;
+    if (VARATT_IS_1B(index_datum)) {
+        index_datum = transVaratt1BTo4B(index_datum);
+        isTran = true;
+    }
     ArrayType* array = array_index_delete_internal(v,
                                                    u_sess->SPI_cxt.cur_tableof_index->tableOfIndex,
                                                    u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType,
                                                    index_datum);
+    if (isTran) {
+        pfree(DatumGetPointer(index_datum));
+    }
     PG_RETURN_ARRAYTYPE_P(array);
 }
 
@@ -2497,6 +2558,37 @@ Datum array_delete(PG_FUNCTION_ARGS)
 {
     ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
     ArrayType* array = construct_empty_array(ARR_ELEMTYPE(v));
+    PG_RETURN_ARRAYTYPE_P(array);
+}
+
+static void deleteTableOfIndexElement(HTAB* tableOfIndex)
+{
+    if (tableOfIndex == NULL) {
+        return;
+    }
+    HASH_SEQ_STATUS hashSeq;
+    hash_seq_init(&hashSeq, tableOfIndex);
+    TableOfIndexEntry* srcEntry = NULL;
+    bool found = false;
+    while ((srcEntry = (TableOfIndexEntry*)hash_seq_search(&hashSeq)) != NULL) {
+        if (srcEntry->var != NULL) {
+            deleteTableOfIndexElement(srcEntry->var->tableOfIndex);
+        }
+        (void)hash_search(tableOfIndex, (const void*)&srcEntry->key, HASH_REMOVE, &found);
+    }
+}
+
+Datum array_indexby_delete(PG_FUNCTION_ARGS)
+{
+    checkEnv();
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    ArrayType* array = construct_empty_array(ARR_ELEMTYPE(v));
+    if (u_sess->SPI_cxt.cur_tableof_index->tableOfIndex == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("array_indexby_delete must be call in procedure")));
+    }
+    deleteTableOfIndexElement(u_sess->SPI_cxt.cur_tableof_index->tableOfIndex);
+    
     PG_RETURN_ARRAYTYPE_P(array);
 }
 
@@ -5532,279 +5624,6 @@ Datum array_unnest(PG_FUNCTION_ARGS)
 }
 
 /*
- * check if search is same as replace
- */
-static bool array_same_replace(FunctionCallInfo locfcinfo, Datum search, bool search_isnull,
-                               Datum replace, bool replace_isnull)
-{
-    if (search_isnull != replace_isnull) {
-        return false;
-    } else if (search_isnull == true) {
-        Assert(replace_isnull);
-        return true;
-    } else {
-        locfcinfo->arg[0] = search;
-        locfcinfo->arg[1] = replace;
-        locfcinfo->argnull[0] = search_isnull;
-        locfcinfo->argnull[1] = replace_isnull;
-        locfcinfo->isnull = false;
-        return DatumGetBool(FunctionCallInvoke(locfcinfo));
-    }
-}
-
-/*
- * array_replace/array_remove support
- *
- * Find all array entries matching (not distinct from) search/search_isnull,
- * and delete them if remove is true, else replace them with
- * replace/replace_isnull.  Comparisons are done using the specified
- * collation.  fcinfo is passed only for caching purposes.
- */
-static ArrayType *array_replace_internal(ArrayType *array, Datum search, bool search_isnull, Datum replace,
-                                         bool replace_isnull, bool remove, Oid collation, FunctionCallInfo fcinfo)
-{
-    
-    ArrayType *result = NULL;
-    Oid        element_type;
-    Datum     *values = NULL;
-    bool      *nulls = NULL;
-    int       *dim = NULL;
-    int        ndim;
-    int        nitems;
-    int        nresult;
-    int        i;
-    int32      nbytes = 0;
-    int32      dataoffset;
-    bool       hasnulls = false;
-    int        typlen;
-    bool       typbyval = false;
-    char       typalign;
-    char      *arraydataptr = NULL;
-    bits8     *bitmap = NULL;
-    int        bitmask;
-    bool       changed = false;
-    TypeCacheEntry *typentry = NULL;
-    FunctionCallInfoData locfcinfo;
-    errno_t rc = EOK;
-    
-    element_type = ARR_ELEMTYPE(array);
-    ndim = ARR_NDIM(array);
-    dim = ARR_DIMS(array);
-    nitems = ArrayGetNItems(ndim, dim);
-    /* Return input array unmodified if it is empty */
-    if (nitems <= 0)
-        return array;
-    /*
-     * We can't remove elements from multi-dimensional arrays, since the
-     * result might not be rectangular.
-     */
-    if (remove && ndim > 1)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("removing elements from multidimensional arrays is not supported")));
-    /*
-     * We arrange to look up the equality function only once per series of
-     * calls, assuming the element type doesn't change underneath us.
-     */
-    typentry = (TypeCacheEntry *) fcinfo->flinfo->fn_extra;
-    if (typentry == NULL || typentry->type_id != element_type) {
-        typentry = lookup_type_cache(element_type, TYPECACHE_EQ_OPR_FINFO);
-        if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
-            ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
-                     errmsg("could not identify an equality operator for type %s",
-                            format_type_be(element_type))));
-        fcinfo->flinfo->fn_extra = (void *) typentry;
-    }
-    typlen = typentry->typlen;
-    typbyval = typentry->typbyval;
-    typalign = typentry->typalign;
-    /*
-     * Detoast values if they are toasted.  The replacement value must be
-     * detoasted for insertion into the result array, while detoasting the
-     * search value only once saves cycles.
-     */
-    if (typlen == -1) {
-        if (!search_isnull)
-            search = PointerGetDatum(PG_DETOAST_DATUM(search));
-        if (!replace_isnull)
-            replace = PointerGetDatum(PG_DETOAST_DATUM(replace));
-    }
-    /* Prepare to apply the comparison operator */
-    InitFunctionCallInfoData(locfcinfo, &typentry->eq_opr_finfo, 2, collation, NULL, NULL);
-    /* directly return if search is same as replace */
-    if (!remove && array_same_replace(&locfcinfo, search, search_isnull, replace, replace_isnull)) {
-        return array;
-    }
-    /* Allocate temporary arrays for new values */
-    values = (Datum *) palloc(nitems * sizeof(Datum));
-    nulls = (bool *) palloc(nitems * sizeof(bool));
-    /* Loop over source data */
-    arraydataptr = ARR_DATA_PTR(array);
-    bitmap = ARR_NULLBITMAP(array);
-    bitmask = 1;
-    hasnulls = false;
-    nresult = 0;
-    for (i = 0; i < nitems; i++) {
-        Datum        elt;
-        bool        isNull = false;
-        bool        oprresult = false;
-        bool        skip = false;
-        /* Get source element, checking for NULL */
-        if (bitmap && (*bitmap & bitmask) == 0) {
-            isNull = true;
-            /* If searching for NULL, we have a match */
-            if (search_isnull) {
-                if (remove) {
-                    skip = true;
-                    changed = true;
-                } else if (!replace_isnull) {
-                    values[nresult] = replace;
-                    isNull = false;
-                    changed = true;
-                }
-            }
-        } else {
-            isNull = false;
-            elt = fetch_att(arraydataptr, typbyval, typlen);
-            arraydataptr = att_addlength_datum(arraydataptr, typlen, elt);
-            arraydataptr = (char *) att_align_nominal(arraydataptr, typalign);
-            if (search_isnull) {
-                /* no match possible, keep element */
-                values[nresult] = elt;
-            } else {
-                /* Compare the pair of elements */
-                locfcinfo.arg[0] = elt;
-                locfcinfo.arg[1] = search;
-                locfcinfo.argnull[0] = false;
-                locfcinfo.argnull[1] = false;
-                locfcinfo.isnull = false;
-                oprresult = DatumGetBool(FunctionCallInvoke(&locfcinfo));
-                if (locfcinfo.isnull || !oprresult) {
-                    /* no match, keep element */
-                    values[nresult] = elt;
-                } else {
-                    /* match, so replace or delete */
-                    changed = true;
-                    if (remove) {
-                        skip = true;
-                    } else {
-                        values[nresult] = replace;
-                        isNull = replace_isnull;
-                    }
-                }
-            }
-        }
-        if (!skip) {
-            nulls[nresult] = isNull;
-            if (isNull) {
-                hasnulls = true;
-            } else {
-                /* Update total result size */
-                nbytes = att_addlength_datum(nbytes, typlen, values[nresult]);
-                nbytes = att_align_nominal(nbytes, typalign);
-                /* check for overflow of total request */
-                if (!AllocSizeIsValid(nbytes))
-                    ereport(ERROR,
-                            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                             errmsg("array size exceeds the maximum allowed (%d)",
-                                    (int) MaxAllocSize)));
-            }
-            nresult++;
-        }
-        /* advance bitmap pointer if any */
-        if (bitmap) {
-            bitmask <<= 1;
-            if (bitmask == 0x100) {
-                bitmap++;
-                bitmask = 1;
-            }
-        }
-    }
-    /*
-     * If not changed just return the original array
-     */
-    if (!changed) {
-        pfree(values);
-        pfree(nulls);
-        return array;
-    }
-    /* If all elements were removed return an empty array */
-    if (nresult == 0) {
-        pfree(values);
-        pfree(nulls);
-        return construct_empty_array(element_type);
-    }
-    /* Allocate and initialize the result array */
-    if (hasnulls) {
-        dataoffset = ARR_OVERHEAD_WITHNULLS(ndim, nresult);
-        nbytes += dataoffset;
-    } else {
-        dataoffset = 0;            /* marker for no null bitmap */
-        nbytes += ARR_OVERHEAD_NONULLS(ndim);
-    }
-    result = (ArrayType *) palloc0(nbytes);
-    SET_VARSIZE(result, nbytes);
-    result->ndim = ndim;
-    result->dataoffset = dataoffset;
-    result->elemtype = element_type;
-    rc = memcpy_s(ARR_DIMS(result), nbytes - sizeof(ArrayType), ARR_DIMS(array), ndim * sizeof(int));
-    securec_check(rc, "\0", "\0");
-    rc = memcpy_s(ARR_LBOUND(result), nbytes - (sizeof(ArrayType) + sizeof(int) * ndim),
-                  ARR_LBOUND(array), ndim * sizeof(int));
-    securec_check(rc, "\0", "\0");
-	
-    if (remove) {
-        /* Adjust the result length */
-        ARR_DIMS(result)[0] = nresult;
-    }
-    /* Insert data into result array */
-    CopyArrayEls(result, values, nulls, nresult, typlen, typbyval, typalign, false);
-    pfree(values);
-    pfree(nulls);
-    return result;
-}
-
-/*
- * Remove any occurrences of an element from an array
- *
- * If used on a multi-dimensional array this will raise an error.
- */
-Datum array_remove(PG_FUNCTION_ARGS)
-{
-    ArrayType  *array = NULL;
-    Datum       search = PG_GETARG_DATUM(1);
-    bool        search_isnull = PG_ARGISNULL(1);
-
-    if (PG_ARGISNULL(0))
-        PG_RETURN_NULL();
-
-    array = PG_GETARG_ARRAYTYPE_P(0);
-    array = array_replace_internal(array, search, search_isnull, (Datum) 0, true, true, PG_GET_COLLATION(), fcinfo);
-    PG_RETURN_ARRAYTYPE_P(array);
-}
-
-/*
- * Replace any occurrences of an element in an array
- */
-Datum array_replace(PG_FUNCTION_ARGS)
-{
-    ArrayType  *array = NULL;
-    Datum       search = PG_GETARG_DATUM(1);
-    bool        search_isnull = PG_ARGISNULL(1);
-    Datum       replace = PG_GETARG_DATUM(2);
-    bool        replace_isnull = PG_ARGISNULL(2);
-
-    if (PG_ARGISNULL(0))
-        PG_RETURN_NULL();
-
-    array = PG_GETARG_ARRAYTYPE_P(0);
-    array = array_replace_internal(array, search, search_isnull, replace, replace_isnull, false, PG_GET_COLLATION(),
-                                   fcinfo);
-    PG_RETURN_ARRAYTYPE_P(array);
-}
-
-/*
  * The type, dimension needs to be checked during collection operations.
  */
 static void array_multiset_check(const ArrayType* v1, const ArrayType* v2)
@@ -6084,6 +5903,9 @@ Datum array_union(PG_FUNCTION_ARGS)
     rc = memcpy_s(ARR_LBOUND(result), ndims * sizeof(int), lbs, ndims * sizeof(int));
     securec_check(rc, "", "");
 
+    pfree_ext(dims);
+    pfree_ext(lbs);
+
     /* data area is arg1 then arg2. And make sure the destMax of memcpy_s should never be zero. */
     if (ndatabytes1 > 0) {
         rc = memcpy_s(ARR_DATA_PTR(result), ndatabytes1, dat1, ndatabytes1);
@@ -6357,3 +6179,295 @@ Datum array_except_distinct(PG_FUNCTION_ARGS)
     ArrayType* result = array_except_internal(v1, v2, typentry, true);
     PG_RETURN_ARRAYTYPE_P(result);
 }
+
+/*
+ * check if search is same as replace
+ */
+static bool array_same_replace(FunctionCallInfo locfcinfo, Datum search, bool search_isnull,
+                               Datum replace, bool replace_isnull)
+{
+    if (search_isnull != replace_isnull) {
+        return false;
+    } else if (search_isnull) {
+        Assert(replace_isnull);
+        return true;
+    } else {
+        locfcinfo->arg[0] = search;
+        locfcinfo->arg[1] = replace;
+        locfcinfo->argnull[0] = search_isnull;
+        locfcinfo->argnull[1] = replace_isnull;
+        locfcinfo->isnull = false;
+        return DatumGetBool(FunctionCallInvoke(locfcinfo));
+    }
+}
+
+/*
+ * array_replace/array_remove support
+ *
+ * Find all array entries matching (not distinct from) search/search_isnull,
+ * and delete them if remove is true, else replace them with
+ * replace/replace_isnull.  Comparisons are done using the specified
+ * collation.  fcinfo is passed only for caching purposes.
+ */
+static ArrayType *array_replace_internal(ArrayType *array, Datum search, bool search_isnull, Datum replace,
+                                         bool replace_isnull, bool remove, Oid collation, FunctionCallInfo fcinfo)
+{
+    ArrayType *result = NULL;
+    Oid        element_type;
+    Datum     *values = NULL;
+    bool      *nulls = NULL;
+    int       *dim = NULL;
+    int        ndim;
+    int        nitems;
+    int        nresult;
+    int        i;
+    int32      nbytes = 0;
+    int32      dataoffset;
+    bool       hasnulls = false;
+    int        typlen;
+    bool       typbyval = false;
+    char       typalign;
+    char      *arraydataptr = NULL;
+    bits8     *bitmap = NULL;
+    int        bitmask;
+    bool       changed = false;
+    TypeCacheEntry *typentry = NULL;
+    FunctionCallInfoData locfcinfo;
+    errno_t rc = EOK;
+    
+    element_type = ARR_ELEMTYPE(array);
+    ndim = ARR_NDIM(array);
+    dim = ARR_DIMS(array);
+    nitems = ArrayGetNItems(ndim, dim);
+
+    /* Return input array unmodified if it is empty */
+    if (nitems <= 0)
+        return array;
+
+    /*
+     * We can't remove elements from multi-dimensional arrays, since the
+     * result might not be rectangular.
+     */
+    if (remove && ndim > 1)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("removing elements from multidimensional arrays is not supported")));
+
+    /*
+     * We arrange to look up the equality function only once per series of
+     * calls, assuming the element type doesn't change underneath us.
+     */
+    typentry = (TypeCacheEntry *) fcinfo->flinfo->fn_extra;
+    if (typentry == NULL || typentry->type_id != element_type) {
+        typentry = lookup_type_cache(element_type, TYPECACHE_EQ_OPR_FINFO);
+        if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                     errmsg("could not identify an equality operator for type %s",
+                            format_type_be(element_type))));
+        fcinfo->flinfo->fn_extra = (void *) typentry;
+    }
+    typlen = typentry->typlen;
+    typbyval = typentry->typbyval;
+    typalign = typentry->typalign;
+
+    /*
+     * Detoast values if they are toasted.  The replacement value must be
+     * detoasted for insertion into the result array, while detoasting the
+     * search value only once saves cycles.
+     */
+    if (typlen == -1) {
+        if (!search_isnull)
+            search = PointerGetDatum(PG_DETOAST_DATUM(search));
+        if (!replace_isnull)
+            replace = PointerGetDatum(PG_DETOAST_DATUM(replace));
+    }
+
+    /* Prepare to apply the comparison operator */
+    InitFunctionCallInfoData(locfcinfo, &typentry->eq_opr_finfo, 2, collation, NULL, NULL);
+
+    /* directly return if search is same as replace */
+    if (!remove && array_same_replace(&locfcinfo, search, search_isnull, replace, replace_isnull)) {
+        return array;
+    }
+
+    /* Allocate temporary arrays for new values */
+    values = (Datum *) palloc(nitems * sizeof(Datum));
+    nulls = (bool *) palloc(nitems * sizeof(bool));
+
+    /* Loop over source data */
+    arraydataptr = ARR_DATA_PTR(array);
+    bitmap = ARR_NULLBITMAP(array);
+    bitmask = 1;
+    hasnulls = false;
+    nresult = 0;
+
+    for (i = 0; i < nitems; i++) {
+        Datum        elt;
+        bool        isNull = false;
+        bool        oprresult = false;
+        bool        skip = false;
+
+        /* Get source element, checking for NULL */
+        if (bitmap && (*bitmap & bitmask) == 0) {
+            isNull = true;
+            /* If searching for NULL, we have a match */
+            if (search_isnull) {
+                if (remove) {
+                    skip = true;
+                    changed = true;
+                } else if (!replace_isnull) {
+                    values[nresult] = replace;
+                    isNull = false;
+                    changed = true;
+                }
+            }
+        } else {
+            isNull = false;
+            elt = fetch_att(arraydataptr, typbyval, typlen);
+            arraydataptr = att_addlength_datum(arraydataptr, typlen, elt);
+            arraydataptr = (char *) att_align_nominal(arraydataptr, typalign);
+
+            if (search_isnull) {
+                /* no match possible, keep element */
+                values[nresult] = elt;
+            } else {
+                /* Compare the pair of elements */
+                locfcinfo.arg[0] = elt;
+                locfcinfo.arg[1] = search;
+                locfcinfo.argnull[0] = false;
+                locfcinfo.argnull[1] = false;
+                locfcinfo.isnull = false;
+                oprresult = DatumGetBool(FunctionCallInvoke(&locfcinfo));
+                if (locfcinfo.isnull || !oprresult) {
+                    /* no match, keep element */
+                    values[nresult] = elt;
+                } else {
+                    /* match, so replace or delete */
+                    changed = true;
+                    if (remove) {
+                        skip = true;
+                    } else {
+                        values[nresult] = replace;
+                        isNull = replace_isnull;
+                    }
+                }
+            }
+        }
+
+        if (!skip) {
+            nulls[nresult] = isNull;
+            if (isNull) {
+                hasnulls = true;
+            } else {
+                /* Update total result size */
+                nbytes = att_addlength_datum(nbytes, typlen, values[nresult]);
+                nbytes = att_align_nominal(nbytes, typalign);
+                /* check for overflow of total request */
+                if (!AllocSizeIsValid(nbytes))
+                    ereport(ERROR,
+                            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                             errmsg("array size exceeds the maximum allowed (%d)",
+                                    (int) MaxAllocSize)));
+            }
+            nresult++;
+        }
+
+        /* advance bitmap pointer if any */
+        if (bitmap) {
+            bitmask <<= 1;
+            if (bitmask == 0x100) {
+                bitmap++;
+                bitmask = 1;
+            }
+        }
+    }
+
+    /*
+     * If not changed just return the original array
+     */
+    if (!changed) {
+        pfree(values);
+        pfree(nulls);
+        return array;
+    }
+
+    /* If all elements were removed return an empty array */
+    if (nresult == 0) {
+        pfree(values);
+        pfree(nulls);
+        return construct_empty_array(element_type);
+    }
+
+    /* Allocate and initialize the result array */
+    if (hasnulls) {
+        dataoffset = ARR_OVERHEAD_WITHNULLS(ndim, nresult);
+        nbytes += dataoffset;
+    } else {
+        dataoffset = 0;            /* marker for no null bitmap */
+        nbytes += ARR_OVERHEAD_NONULLS(ndim);
+    }
+    result = (ArrayType *) palloc0(nbytes);
+    SET_VARSIZE(result, nbytes);
+    result->ndim = ndim;
+    result->dataoffset = dataoffset;
+    result->elemtype = element_type;
+    rc = memcpy_s(ARR_DIMS(result), nbytes - sizeof(ArrayType), ARR_DIMS(array), ndim * sizeof(int));
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(ARR_LBOUND(result), nbytes - (sizeof(ArrayType) + sizeof(int) * ndim),
+                  ARR_LBOUND(array), ndim * sizeof(int));
+    securec_check(rc, "\0", "\0");
+	
+    if (remove) {
+        /* Adjust the result length */
+        ARR_DIMS(result)[0] = nresult;
+    }
+
+    /* Insert data into result array */
+    CopyArrayEls(result, values, nulls, nresult, typlen, typbyval, typalign, false);
+
+    pfree(values);
+    pfree(nulls);
+
+    return result;
+}
+
+/*
+ * Remove any occurrences of an element from an array
+ *
+ * If used on a multi-dimensional array this will raise an error.
+ */
+Datum array_remove(PG_FUNCTION_ARGS)
+{
+    ArrayType  *array = NULL;
+    Datum       search = PG_GETARG_DATUM(1);
+    bool        search_isnull = PG_ARGISNULL(1);
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+    array = PG_GETARG_ARRAYTYPE_P(0);
+
+    array = array_replace_internal(array, search, search_isnull, (Datum) 0, true, true, PG_GET_COLLATION(), fcinfo);
+    PG_RETURN_ARRAYTYPE_P(array);
+}
+
+/*
+ * Replace any occurrences of an element in an array
+ */
+Datum array_replace(PG_FUNCTION_ARGS)
+{
+    ArrayType  *array = NULL;
+    Datum       search = PG_GETARG_DATUM(1);
+    bool        search_isnull = PG_ARGISNULL(1);
+    Datum       replace = PG_GETARG_DATUM(2);
+    bool        replace_isnull = PG_ARGISNULL(2);
+
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+    array = PG_GETARG_ARRAYTYPE_P(0);
+
+    array = array_replace_internal(array, search, search_isnull, replace, replace_isnull, false, PG_GET_COLLATION(),
+                                   fcinfo);
+    PG_RETURN_ARRAYTYPE_P(array);
+}
+

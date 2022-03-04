@@ -9,9 +9,11 @@ set(TGT_parquet_INC
     ${PROJECT_SRC_DIR}/lib/gstrace
     ${LIBCGROUP_INCLUDE_PATH}
     ${PROJECT_SRC_DIR}/include/libcomm
-    ${LIBORC_INCLUDE_PATH}
     ${PROTOBUF_INCLUDE_PATH}
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")    
+    ${LIBORC_INCLUDE_PATH}
     ${LIBPARQUET_INCLUDE_PATH}
+endif()    
     ${ZLIB_INCLUDE_PATH}
     ${LIBCURL_INCLUDE_PATH} 
 )

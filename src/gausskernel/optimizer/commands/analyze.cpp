@@ -1527,6 +1527,7 @@ static inline void cleanup_indexes(int nindexes, Relation* Irel, const Relation 
         ivinfo.analyze_only = true;
         ivinfo.estimated_count = true;
         ivinfo.message_level = elevel;
+        ivinfo.invisibleParts = NULL;
 
         /*
          * if not handle the return value of index_vacuum_cleanup(),
@@ -1579,6 +1580,65 @@ static inline void cleanup_indexes(int nindexes, Relation* Irel, const Relation 
     }
 }
 
+static void do_analyze_rel_start_log(bool inh, int elevel, Relation onerel)
+{
+    char* namespace_name =  get_namespace_name(RelationGetNamespace(onerel));
+    if (inh)
+        ereport(elevel,
+            (errmodule(MOD_AUTOVAC),
+            errmsg("analyzing \"%s.%s\" inheritance tree",
+                namespace_name,
+                RelationGetRelationName(onerel))));
+    else
+        ereport(elevel,
+            (errmodule(MOD_AUTOVAC),
+            errmsg("analyzing \"%s.%s\"",
+                namespace_name,
+                RelationGetRelationName(onerel))));
+    pfree_ext(namespace_name);
+}
+
+static int64 do_analyze_calculate_sample_target_rows(int attr_cnt, VacAttrStats** vacattrstats, int nindexes,
+                                                     AnlIndexData* indexdata)
+{
+    int64 targrows = 100;
+    for (int i = 0; i < attr_cnt; i++) {
+        if (targrows < vacattrstats[i]->minrows)
+            targrows = vacattrstats[i]->minrows;
+    }
+
+    for (int ind = 0; ind < nindexes; ind++) {
+        AnlIndexData* thisdata = &indexdata[ind];
+
+        for (int i = 0; i < thisdata->attr_cnt; i++) {
+            if (targrows < thisdata->vacattrstats[i]->minrows)
+                targrows = thisdata->vacattrstats[i]->minrows;
+        }
+    }
+    return targrows;
+}
+
+static void do_analyze_rel_end_log(TimestampTz starttime, Relation onerel, PGRUsage* ru0)
+{
+    /* Log the action if appropriate */
+    if (IsAutoVacuumWorkerProcess() && u_sess->attr.attr_storage.Log_autovacuum_min_duration >= 0) {
+        if (u_sess->attr.attr_storage.Log_autovacuum_min_duration == 0 ||
+            TimestampDifferenceExceeds(
+                starttime, GetCurrentTimestamp(), u_sess->attr.attr_storage.Log_autovacuum_min_duration)) {
+            char* dbname = get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId);
+            char* namespace_name = get_namespace_name(RelationGetNamespace(onerel));
+            ereport(LOG,
+                (errmsg("automatic analyze of table \"%s.%s.%s\" system usage: %s",
+                    dbname,
+                    namespace_name,
+                    RelationGetRelationName(onerel),
+                    pg_rusage_show(ru0))));
+            pfree_ext(dbname);
+            pfree_ext(namespace_name);
+        }
+    }
+}
+
 /*
  *	do_analyze_rel() -- analyze one relation, recursively or not
  *
@@ -1623,16 +1683,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
     bool replicate_needs_extstats = false;
     es_check_availability_for_table(vacstmt, onerel, inh, &replicate_needs_extstats);
 
-    if (inh)
-        ereport(elevel,
-            (errmsg("analyzing \"%s.%s\" inheritance tree",
-                get_namespace_name(RelationGetNamespace(onerel)),
-                RelationGetRelationName(onerel))));
-    else
-        ereport(elevel,
-            (errmsg("analyzing \"%s.%s\"",
-                get_namespace_name(RelationGetNamespace(onerel)),
-                RelationGetRelationName(onerel))));
+    do_analyze_rel_start_log(inh, elevel, onerel);
 
     caller_context = do_analyze_preprocess(onerel->rd_rel->relowner,
         &ru0,
@@ -1670,20 +1721,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
      * possible overflow in Vitter's algorithm.  (Note: that will also be the
      * target in the corner case where there are no analyzable columns.)
      */
-    targrows = 100;
-    for (i = 0; i < attr_cnt; i++) {
-        if (targrows < vacattrstats[i]->minrows)
-            targrows = vacattrstats[i]->minrows;
-    }
-
-    for (int ind = 0; ind < nindexes; ind++) {
-        AnlIndexData* thisdata = &indexdata[ind];
-
-        for (i = 0; i < thisdata->attr_cnt; i++) {
-            if (targrows < thisdata->vacattrstats[i]->minrows)
-                targrows = thisdata->vacattrstats[i]->minrows;
-        }
-    }
+    targrows = do_analyze_calculate_sample_target_rows(attr_cnt, vacattrstats, nindexes, indexdata);
 
     /*
      * If get sample rows on datanode or coordinator or not. there are two cases:
@@ -1882,21 +1920,6 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
     }
 
     if (!inh) {
-        if (RelationIsUstoreFormat(onerel)) {
-            PgStat_StatDBEntry* dbentry = NULL;
-            PgStat_StatTabEntry* tabentry = NULL;
-            dbentry = pgstat_fetch_stat_dbentry(u_sess->proc_cxt.MyDatabaseId);
-            if (dbentry != NULL) {
-                PgStat_StatTabKey tabkey;
-                tabkey.statFlag = RelationIsPartition(onerel) ? onerel->parentId : InvalidOid;
-                tabkey.tableid = RelationGetRelid(onerel);
-                tabentry = (PgStat_StatTabEntry*)hash_search(dbentry->tables, (void*)(&tabkey), HASH_FIND, NULL);
-                if (tabentry && tabentry->n_live_tuples > 0) {
-                    totalrows = tabentry->n_live_tuples;
-                    totaldeadrows = tabentry->n_dead_tuples;
-                }
-            }
-        }
         /* Update the pg_class for relation and index */
         update_pages_and_tuples_pgclass(onerel,
             vacstmt,
@@ -1928,18 +1951,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
     /* Done with indexes */
     vac_close_indexes(nindexes, Irel, NoLock);
 
-    /* Log the action if appropriate */
-    if (IsAutoVacuumWorkerProcess() && u_sess->attr.attr_storage.Log_autovacuum_min_duration >= 0) {
-        if (u_sess->attr.attr_storage.Log_autovacuum_min_duration == 0 ||
-            TimestampDifferenceExceeds(
-                starttime, GetCurrentTimestamp(), u_sess->attr.attr_storage.Log_autovacuum_min_duration))
-            ereport(LOG,
-                (errmsg("automatic analyze of table \"%s.%s.%s\" system usage: %s",
-                    get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId),
-                    get_namespace_name(RelationGetNamespace(onerel)),
-                    RelationGetRelationName(onerel),
-                    pg_rusage_show(&ru0))));
-    }
+    do_analyze_rel_end_log(starttime, onerel, &ru0);
 
     do_analyze_finalize(caller_context, save_userid, save_sec_context, save_nestlevel, analyzemode);
 
@@ -3212,6 +3224,7 @@ void CstoreAnalyzePrefetch(
     }
 
     if (t_thrd.cstore_cxt.InProgressAioCUDispatchCount > 0) {
+#ifndef ENABLE_LITE_MODE
         int tmp_count = t_thrd.cstore_cxt.InProgressAioCUDispatchCount;
         HOLD_INTERRUPTS();
         FileAsyncCURead(dList, t_thrd.cstore_cxt.InProgressAioCUDispatchCount);
@@ -3219,6 +3232,7 @@ void CstoreAnalyzePrefetch(
         RESUME_INTERRUPTS();
 
         FileAsyncCUClose(vfdList, tmp_count);
+#endif
     }
 
     pfree_ext(dList);

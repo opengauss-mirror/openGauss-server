@@ -180,8 +180,6 @@ typedef HeapPageHeaderData* HeapPageHeader;
 #define GetPageHeaderSize(page) (PageIs8BXidHeapVersion(page) ? SizeOfHeapPageHeaderData : SizeOfPageHeaderData)
 
 #define SizeOfHeapPageUpgradeData MAXALIGN(offsetof(HeapPageHeaderData, pd_linp) - offsetof(PageHeaderData, pd_linp))
-    
-#define GET_ITEMID_BY_IDX(buf, i) ((ItemIdData *)(buf + GetPageHeaderSize(buf) + (i) * sizeof(ItemIdData)))
 
 #define PageXLogRecPtrGet(val) \
 	((uint64) (val).xlogid << 32 | (val).xrecoff)
@@ -228,7 +226,6 @@ typedef HeapPageHeaderData* HeapPageHeader;
 #define PG_UHEAP_PAGE_LAYOUT_VERSION 7
 #define PG_HEAP_PAGE_LAYOUT_VERSION 6
 #define PG_COMM_PAGE_LAYOUT_VERSION 5
-#define PG_PAGE_4B_LAYOUT_VERSION 4
 
 /* ----------------------------------------------------------------
  *						page support macros
@@ -269,6 +266,8 @@ typedef HeapPageHeaderData* HeapPageHeader;
     (PageIs8BXidHeapVersion(page) ? ((ItemId)(&((HeapPageHeader)(page))->pd_linp[(offsetNumber)-1])) \
                                   : ((ItemId)(&((PageHeader)(page))->pd_linp[(offsetNumber)-1])))
 
+#define HeapPageGetItemId(page, offsetNumber) ((ItemId)(&((HeapPageHeader)(page))->pd_linp[(offsetNumber)-1])) \
+
 /*
  * PageGetContents
  *		To be used in case the page does not contain item pointers.
@@ -306,10 +305,6 @@ typedef HeapPageHeaderData* HeapPageHeader;
  */
 #define PageGetPageLayoutVersion(page) (((PageHeader)(page))->pd_pagesize_version & 0x00FF)
 
-#define PageIs8BXidVersion(page) (PageGetPageLayoutVersion(page) == PG_COMM_PAGE_LAYOUT_VERSION)
-
-#define PageIs4BXidVersion(page) (PageGetPageLayoutVersion(page) == PG_PAGE_4B_LAYOUT_VERSION)
-
 #define PageIs8BXidHeapVersion(page) (PageGetPageLayoutVersion(page) == PG_HEAP_PAGE_LAYOUT_VERSION)
 
 #define PageIsSegmentVersion(page) (PageGetPageLayoutVersion(page) == PG_SEGMENT_PAGE_LAYOUT_VERSION)
@@ -344,14 +339,14 @@ typedef HeapPageHeaderData* HeapPageHeader;
     (AssertMacro(PageIsValid(page)), (char*)((char*)(page) + ((PageHeader)(page))->pd_special))
 
 #define BTPageGetSpecial(page)                                                                             \
-    (PageIs8BXidVersion(page)                                                                              \
-            ? (AssertMacro(((PageHeader)page)->pd_special == BLCKSZ - MAXALIGN(sizeof(BTPageOpaqueData))), \
-                  (BTPageOpaque)((Pointer)page + BLCKSZ - MAXALIGN(sizeof(BTPageOpaqueData))))             \
-            : NULL)
+(\
+    AssertMacro(((PageHeader)page)->pd_special == BLCKSZ - MAXALIGN(sizeof(BTPageOpaqueData))), \
+    (BTPageOpaque)((Pointer)page + BLCKSZ - MAXALIGN(sizeof(BTPageOpaqueData)))  \
+)
 
 #define HeapPageSetPruneXid(page, xid)                                \
     (((PageHeader)(page))->pd_prune_xid = NormalTransactionIdToShort( \
-         PageIs8BXidHeapVersion(page) ? ((HeapPageHeader)(page))->pd_xid_base : 0, (xid)))
+         ((HeapPageHeader)(page))->pd_xid_base, (xid)))
 
 #define PageSetPruneXid(page, xid)                                \
     (((PageHeader)(page))->pd_prune_xid = NormalTransactionIdToShort( \
@@ -359,7 +354,7 @@ typedef HeapPageHeaderData* HeapPageHeader;
 
 #define HeapPageGetPruneXid(page) \
     (ShortTransactionIdToNormal(  \
-        PageIs8BXidHeapVersion(page) ? ((HeapPageHeader)(page))->pd_xid_base : 0, ((PageHeader)(page))->pd_prune_xid))
+        ((HeapPageHeader)(page))->pd_xid_base, ((PageHeader)(page))->pd_prune_xid))
 
 #define PageGetPruneXid(page) \
     (ShortTransactionIdToNormal(  \
@@ -408,7 +403,6 @@ inline OffsetNumber PageGetMaxOffsetNumber(char* pghr)
 #define PageSetLSNInternal(page, lsn) \
     (((PageHeader)(page))->pd_lsn.xlogid = (uint32)((lsn) >> 32), ((PageHeader)(page))->pd_lsn.xrecoff = (uint32)(lsn))
 
-#ifndef FRONTEND
 inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
 {
     if (check && XLByteLT(LSN, PageGetLSN(page))) {
@@ -416,7 +410,6 @@ inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
     }
     PageSetLSNInternal(page, LSN);
 }
-#endif
 
 #define PageHasFreeLinePointers(page) (((PageHeader)(page))->pd_flags & PD_HAS_FREE_LINES)
 #define PageSetHasFreeLinePointers(page) (((PageHeader)(page))->pd_flags |= PD_HAS_FREE_LINES)
@@ -502,11 +495,10 @@ extern OffsetNumber PageAddItem(
     Page page, Item item, Size size, OffsetNumber offsetNumber, bool overwrite, bool is_heap);
 extern Page PageGetTempPage(Page page);
 extern Page PageGetTempPageCopy(Page page);
-extern Page PageGetTempPageCopySpecial(Page page, bool isbtree);
+extern Page PageGetTempPageCopySpecial(Page page);
 extern void PageRestoreTempPage(Page tempPage, Page oldPage);
 extern void PageRepairFragmentation(Page page);
 extern Size PageGetFreeSpace(Page page);
-extern Size PageGetFreeSpaceForMultipleTuples(Page page, int ntups);
 extern Size PageGetExactFreeSpace(Page page);
 extern Size PageGetHeapFreeSpace(Page page);
 extern void PageIndexTupleDelete(Page page, OffsetNumber offset);
@@ -519,7 +511,6 @@ extern void PageDataDecryptIfNeed(Page page);
 extern char* PageSetChecksumCopy(Page page, BlockNumber blkno, bool is_segbuf = false);
 extern void PageSetChecksumInplace(Page page, BlockNumber blkno);
 
-extern void PageLocalUpgrade(Page page);
 extern void DumpPageInfo(Page page, XLogRecPtr newLsn);
 extern void SegPageInit(Page page, Size pageSize);
 #endif /* BUFPAGE_H */

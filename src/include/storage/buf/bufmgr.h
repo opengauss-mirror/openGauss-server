@@ -20,6 +20,7 @@
 #include "storage/buf/bufpage.h"
 #include "storage/smgr/relfilenode.h"
 #include "utils/relcache.h"
+#include "postmaster/pagerepair.h"
 
 #define SEGMENT_BUFFER_NUM (g_instance.attr.attr_storage.NSegBuffers) // 1GB
 #define SegmentBufferStartID (g_instance.attr.attr_storage.NBuffers)
@@ -28,6 +29,11 @@
 #define BufferIdOfSegmentBuffer(id)  ((id) + SegmentBufferStartID)
 #define IsSegmentBufferID(id) ((id) >= SegmentBufferStartID)
 #define SharedBufferNumber (SegmentBufferStartID)
+
+#define USE_CKPT_THREAD_SYNC (!g_instance.attr.attr_storage.enableIncrementalCheckpoint ||  \
+                               IsBootstrapProcessingMode() ||                               \
+                               pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) < 1)
+
 
 typedef void* Block;
 
@@ -45,7 +51,8 @@ typedef enum BufferAccessStrategyType {
     BAS_BULKREAD,  /* Large read-only scan (hint bit updates are
                     * ok) */
     BAS_BULKWRITE, /* Large multi-block write (e.g. COPY IN) */
-    BAS_VACUUM     /* VACUUM */
+    BAS_VACUUM,     /* VACUUM */
+    BAS_REPAIR      /* repair file */
 } BufferAccessStrategyType;
 
 /* Possible modes for ReadBufferExtended() */
@@ -245,7 +252,7 @@ extern Buffer ReadBufferWithoutRelcache(const RelFileNode &rnode, ForkNumber for
 extern Buffer ReadUndoBufferWithoutRelcache(const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum,
     ReadBufferMode mode, BufferAccessStrategy strategy, char relpersistence);
 extern Buffer ReadBufferForRemote(const RelFileNode &rnode, ForkNumber forkNum, BlockNumber blockNum,
-    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit);
+    ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
 extern void MarkBufferMetaFlag(Buffer bufid, bool flag);
 extern void ForgetBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum);
 extern void ReleaseBuffer(Buffer buffer);
@@ -285,6 +292,12 @@ extern BlockNumber PartitionGetNumberOfBlocksInFork(Relation relation, Partition
 #define RelationGetNumberOfBlocks(reln) RelationGetNumberOfBlocksInFork(reln, MAIN_FORKNUM)
 
 /*
+ * prototypes for functions in segbuffer.cpp
+ */
+extern bool SegPinBuffer(BufferDesc *buf);
+extern void SegUnpinBuffer(BufferDesc *buf);
+
+/*
  * PartitionGetNumberOfBlocks
  *		Determines the current number of pages in the partition.
  */
@@ -292,7 +305,8 @@ extern BlockNumber PartitionGetNumberOfBlocksInFork(Relation relation, Partition
 
 extern bool BufferIsPermanent(Buffer buffer);
 
-extern void RemoteReadBlock(const RelFileNodeBackend& rnode, ForkNumber forkNum, BlockNumber blockNum, char* buf);
+extern void RemoteReadBlock(const RelFileNodeBackend& rnode, ForkNumber forkNum, BlockNumber blockNum,
+    char* buf, const XLogPhyBlock *pblk, int timeout = 60);
 
 #ifdef NOT_USED
 extern void PrintPinnedBufs(void);
@@ -311,7 +325,6 @@ extern bool ConditionalLockBuffer(Buffer buffer);
 extern void LockBufferForCleanup(Buffer buffer);
 extern bool ConditionalLockBufferForCleanup(Buffer buffer);
 extern bool ConditionalLockUHeapBufferForCleanup(Buffer buffer);
-extern bool IsBufferCleanupOK(Buffer buffer);
 extern bool HoldingBufferPinThatDelaysRecovery(void);
 extern void AsyncUnpinBuffer(volatile void* bufHdr, bool forgetBuffer);
 extern void AsyncCompltrPinBuffer(volatile void* bufHdr);
@@ -347,6 +360,10 @@ extern Buffer ReadBuffer_common_for_direct(RelFileNode rnode, char relpersistenc
 extern Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersistence, ForkNumber forkNum,
     BlockNumber blockNum, ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit);
 extern void DropRelFileNodeShareBuffers(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock);
+extern void RangeForgetBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock,
+    BlockNumber endDelBlock);
+
+extern void DropSegRelNodeSharedBuffer(RelFileNode node, ForkNumber forkNum);
 extern int GetThreadBufferLeakNum(void);
 extern void flush_all_buffers(Relation rel, Oid db_id, HTAB *hashtbl = NULL);
 /* in localbuf.c */
@@ -356,5 +373,10 @@ extern bool InsertTdeInfoToCache(RelFileNode rnode, TdeInfo *tde_info);
 extern void RelationInsertTdeInfoToCache(Relation reln);
 extern void PartitionInsertTdeInfoToCache(Relation reln, Partition p);
 extern void wakeup_pagewriter_thread();
+extern int getDuplicateRequest(CheckpointerRequest *requests, int num_requests, bool *skip_slot);
 
+extern void RemoteReadFile(RemoteReadFileKey *key, char *buf, uint32 size, int timeout, uint32* remote_size);
+extern int64 RemoteReadFileSize(RemoteReadFileKey *key, int timeout);
+
+extern bool StartBufferIO(BufferDesc* buf, bool forInput);
 #endif

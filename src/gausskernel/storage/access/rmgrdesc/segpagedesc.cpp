@@ -236,3 +236,32 @@ void segpage_smgr_desc(StringInfo buf, XLogReaderState *record)
         appendStringInfo(buf, "[segpage] UNKNOWN");
     }
 }
+
+const char* segpage_smgr_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_SEG_ATOMIC_OPERATION) {
+        return "segsmgr_atomic_operation";
+    } else if (info == XLOG_SEG_SEGMENT_EXTEND) {
+        return "segsmgr_segment_extend";
+    } else if (info == XLOG_SEG_CREATE_EXTENT_GROUP) {
+        return "segsmgr_create_extend_group";
+    } else if (info == XLOG_SEG_INIT_MAPPAGE) {
+        return "segsmgr_init_mappage";
+    } else if (info == XLOG_SEG_INIT_INVRSPTR_PAGE) {
+        return "segsmgr_init_inversptr_page";
+    } else if (info == XLOG_SEG_ADD_NEW_GROUP) {
+        return "segsmgr_add_new_group";
+    } else if (info == XLOG_SEG_TRUNCATE) {
+        return "segsmgr_truncate";
+    } else if (info == XLOG_SEG_SPACE_SHRINK) {
+        return "segsmgr_space_shrink";
+    } else if (info == XLOG_SEG_SPACE_DROP) {
+        return "segsmgr_space_drop";
+    } else if (info == XLOG_SEG_NEW_PAGE) {
+        return "segsmgr_new_page";
+    } else {
+        return "unknown_type";
+    }
+}
+

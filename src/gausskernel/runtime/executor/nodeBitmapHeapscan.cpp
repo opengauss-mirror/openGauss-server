@@ -497,15 +497,13 @@ bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres)
 
     hscan->rs_base.rs_cbuf = ReleaseAndReadBuffer(hscan->rs_base.rs_cbuf, hscan->rs_base.rs_rd, page);
 
-    /* In single mode and hot standby, we may get a null buffer if index
+    /* In hot standby, we may get a null buffer if index
      * replayed before the tid replayed. This is acceptable, so we return
      * directly without reporting error.
      */
-#ifndef ENABLE_MULTIPLE_NODES
     if (!BufferIsValid(hscan->rs_base.rs_cbuf)) {
         return false;
     }
-#endif
 
     hscan->rs_base.rs_cblock = page;
     buffer = hscan->rs_base.rs_cbuf;

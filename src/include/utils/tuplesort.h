@@ -129,8 +129,7 @@ extern Tuplesortstate* tuplesort_begin_cluster(
 extern Tuplesortstate* tuplesort_begin_index_btree(
     Relation indexRel, bool enforceUnique, int workMem, SortCoordinate coordinate, bool randomAccess, int maxMem);
 extern Tuplesortstate* tuplesort_begin_index_hash(
-    Relation heapRel, Relation indexRel, uint32 high_mask, uint32 low_mask, uint32 max_buckets, 
-    int workMem, bool randomAccess, int maxMem);
+    Relation indexRel, uint32 hash_mask, int workMem, bool randomAccess, int maxMem);
 extern Tuplesortstate* tuplesort_begin_datum(
     Oid datumType, Oid sortOperator, Oid sortCollation, bool nullsFirstFlag, int workMem, bool randomAccess);
 #ifdef PGXC
@@ -144,8 +143,7 @@ extern void tuplesort_set_siblings(Tuplesortstate* state, const int numKeys, con
 extern void tuplesort_puttupleslot(Tuplesortstate* state, TupleTableSlot* slot);
 extern void TuplesortPutheaptuple(Tuplesortstate* state, HeapTuple tup);
 extern void tuplesort_putindextuplevalues(
-    Tuplesortstate* state, Relation rel, ItemPointer self, Datum* values,
-    const bool* isnull, IndexTransInfo* transInfo = NULL);
+    Tuplesortstate* state, Relation rel, ItemPointer self, Datum* values, const bool* isnull);
 extern void tuplesort_putdatum(Tuplesortstate* state, Datum val, bool isNull);
 
 extern void tuplesort_performsort(Tuplesortstate* state);

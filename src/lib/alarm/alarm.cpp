@@ -55,6 +55,8 @@ static char LogicClusterName[CLUSTER_NAME_LEN] = {0};
 char* Alarm_component = NULL;
 THR_LOCAL int AlarmReportInterval = 10;
 
+static int  IP_LEN = 64;  /* default ip len */
+static int  AF_INET6_MAX_BITS = 128;  /* ip mask bit */
 // if report alarm succeed(component), return 0
 #define ALARM_REPORT_SUCCEED 0
 // if report alarm suppress(component), return 2
@@ -383,18 +385,33 @@ static void GetHostIP(const char* myHostName, char* myHostIP, unsigned int myHos
 {
     struct hostent* hp;
     errno_t rc = 0;
+    char* ipstr = NULL;
+    char ipv6[IP_LEN] = {0};
+    char* result = NULL;
 
     hp = gethostbyname(myHostName);
-    if (NULL == hp) {
-        AlarmLog(ALM_LOG, "GET host IP by name failed.\n");
-    } else {
-        char* ipstr = inet_ntoa(*((struct in_addr*)hp->h_addr));
-        size_t len = (strlen(ipstr) < (myHostIPLen - 1)) ? strlen(ipstr) : (myHostIPLen - 1);
-        rc = memcpy_s(myHostIP, myHostIPLen, ipstr, len);
-        securec_check_c(rc, "\0", "\0");
-        myHostIP[len] = '\0';
-        AlarmLog(ALM_LOG, "Host IP: %s \n", myHostIP);
+    if (hp == NULL) {
+        hp = gethostbyname2(myHostName, AF_INET6);
+        if (hp == NULL) {
+            AlarmLog(ALM_LOG, "GET host IP by name failed.\n");
+            return;
+        }
     }
+
+    if (hp->h_addrtype == AF_INET) {
+        ipstr = inet_ntoa(*((struct in_addr*)hp->h_addr));
+    } else if (hp->h_addrtype == AF_INET6) {
+        result = inet_net_ntop(AF_INET6, ((struct in6_addr*)hp->h_addr), AF_INET6_MAX_BITS, ipv6, IP_LEN);
+        if (result == NULL) {
+            AlarmLog(ALM_LOG, "inet_net_ntop failed, error: %d.\n", EAFNOSUPPORT);
+        }
+        ipstr = ipv6;
+    }
+    size_t len = (strlen(ipstr) < (myHostIPLen - 1)) ? strlen(ipstr) : (myHostIPLen - 1);
+    rc = memcpy_s(myHostIP, myHostIPLen, ipstr, len);
+    securec_check_c(rc, "\0", "\0");
+    myHostIP[len] = '\0';
+    AlarmLog(ALM_LOG, "Host IP: %s \n", myHostIP);
 }
 
 static void GetClusterName(char* clusterName, unsigned int clusterNameLen)

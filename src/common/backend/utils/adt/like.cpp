@@ -252,6 +252,11 @@ Datum textlike(PG_FUNCTION_ARGS)
 {
     text* str = PG_GETARG_TEXT_PP(0);
     text* pat = PG_GETARG_TEXT_PP(1);
+    if (unlikely(VARATT_IS_HUGE_TOAST_POINTER(str))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("like 'partten' cannot exceed 1GB")));
+    }
     bool result = false;
     char *s, *p;
     int slen, plen;

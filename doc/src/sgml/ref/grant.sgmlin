@@ -89,8 +89,9 @@ GRANT { { READ | WRITE | ALTER | DROP } [, ...] | ALL [PRIVILEGES] }
     ON DIRECTORY directory_name [, ...]
     TO { [GROUP] role_name | PUBLIC } [, ...]
     [WITH GRANT OPTION];
-GRANT { { EXECUTE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
-    ON PACKAGE package_name [, ...]
+GRANT { { EXECUTE | ALTER | DROP } [, ...] | ALL [ PRIVILEGES ] }
+    ON { PACKAGE package_name [, ...]
+       | ALL PACKAGES IN SCHEMA schema_name [, ...] }
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ];
 GRANT role_name [, ...]
@@ -98,6 +99,12 @@ GRANT role_name [, ...]
    [ WITH ADMIN OPTION ];
 GRANT ALL { PRIVILEGES | PRIVILEGE }
    TO role_name;
+GRANT { CREATE ANY TABLE | ALTER ANY TABLE | DROP ANY TABLE | SELECT ANY TABLE | INSERT ANY TABLE |
+    UPDATE ANY TABLE | DELETE ANY TABLE | CREATE ANY SEQUENCE | CREATE ANY INDEX |
+    CREATE ANY FUNCTION | EXECUTE ANY FUNCTION | CREATE ANY PACKAGE |
+    EXECUTE ANY PACKAGE | CREATE ANY TYPE } [, ...]
+    TO [ GROUP ] role_name [, ...]
+    [ WITH ADMIN OPTION ];
 </synopsis>
 </refsynopsisdiv>
 </refentry>

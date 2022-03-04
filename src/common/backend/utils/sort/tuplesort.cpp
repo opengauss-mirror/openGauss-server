@@ -110,7 +110,6 @@
 #include <limits.h>
 
 #include "access/nbtree.h"
-#include "access/hash.h"
 #include "access/tableam.h"
 #include "access/ustore/knl_utuple.h"
 #include "access/tableam.h"
@@ -416,7 +415,6 @@ struct Tuplesortstate {
      * These variables are specific to the IndexTuple case; they are set by
      * tuplesort_begin_index_xxx and used only by the IndexTuple routines.
      */
-    Relation heapRel;  /* table the index is being built on */
     Relation indexRel; /* index being built */
 
     /* These are specific to the index_btree subcase: */
@@ -424,9 +422,7 @@ struct Tuplesortstate {
     bool enforceUnique; /* complain if we find duplicate tuples */
 
     /* These are specific to the index_hash subcase: */
-    uint32 high_mask;          /* masks for sortable part of hash code */
-    uint32 low_mask;
-    uint32 max_buckets;
+    uint32 hash_mask; /* mask for sortable part of hash code */
 
     /*
      * These variables are specific to the Datum case; they are set by
@@ -974,8 +970,7 @@ Tuplesortstate* tuplesort_begin_index_btree(
 }
 
 Tuplesortstate* tuplesort_begin_index_hash(
-    Relation heapRel, Relation indexRel, uint32 high_mask, uint32 low_mask,
-    uint32 max_buckets, int workMem, bool randomAccess, int maxMem)
+    Relation indexRel, uint32 hash_mask, int workMem, bool randomAccess, int maxMem)
 {
     Tuplesortstate* state = tuplesort_begin_common(workMem, randomAccess);
     MemoryContext oldcontext;
@@ -985,12 +980,11 @@ Tuplesortstate* tuplesort_begin_index_hash(
 #ifdef TRACE_SORT
     if (u_sess->attr.attr_common.trace_sort) {
         elog(LOG,
-            "begin index sort: high_mask = 0x%x, low_mask = 0x%x, "
-            "max_buckets = 0x%x, workMem = %d, randomAccess = %c",
-            high_mask,
-            low_mask,
-            max_buckets,
-            workMem, randomAccess ? 't' : 'f');
+            "begin index sort: hash_mask = 0x%x, workMem = %d, randomAccess = %c, maxMem = %d",
+            hash_mask,
+            workMem,
+            randomAccess ? 't' : 'f',
+            maxMem);
     }
 #endif
 
@@ -1005,12 +999,9 @@ Tuplesortstate* tuplesort_begin_index_hash(
 #endif
     state->reversedirection = reversedirection_index_hash;
 
-    state->heapRel = heapRel;
     state->indexRel = indexRel;
 
-    state->high_mask = high_mask;
-    state->low_mask = low_mask;
-    state->max_buckets = max_buckets;
+    state->hash_mask = hash_mask;
     state->maxMem = maxMem * 1024L;
 
     (void)MemoryContextSwitchTo(oldcontext);
@@ -1445,21 +1436,12 @@ void TuplesortPutheaptuple(Tuplesortstate* state, HeapTuple tup)
  * it from caller-supplied values.
  */
 void tuplesort_putindextuplevalues(
-    Tuplesortstate* state, Relation rel, ItemPointer self, Datum* values, const bool* isnull, IndexTransInfo* transInfo)
+    Tuplesortstate* state, Relation rel, ItemPointer self, Datum* values, const bool* isnull)
 {
     MemoryContext oldcontext = MemoryContextSwitchTo(state->sortcontext);
     SortTuple stup;
     stup.tupindex = 0;
     stup.tuple = index_form_tuple(RelationGetDescr(rel), values, isnull);
-    if (transInfo != NULL) {
-        /* create a larger IndexTuple with corresponding xmin/xmax */
-        IndexTuple itup = CopyIndexTupleAndReserveSpace((IndexTuple)stup.tuple, sizeof(TransactionId) * 2);
-        IndexTransInfo *tupleInfo = (IndexTransInfo*)(((char*)itup) + IndexTupleSize((IndexTuple)stup.tuple));
-        *tupleInfo = *transInfo;
-        /* replace the original IndexTuple */
-        pfree(stup.tuple);
-        stup.tuple = itup;
-    }
 
     ((IndexTuple)stup.tuple)->t_tid = *self;
     USEMEM(state, GetMemoryChunkSpace(stup.tuple));
@@ -3828,8 +3810,8 @@ static int comparetup_index_btree(const SortTuple* a, const SortTuple* b, Tuples
 
 static int comparetup_index_hash(const SortTuple* a, const SortTuple* b, Tuplesortstate* state)
 {
-    Bucket bucket1;
-    Bucket bucket2;
+    uint32 hash1;
+    uint32 hash2;
     IndexTuple tuple1;
     IndexTuple tuple2;
 
@@ -3838,17 +3820,13 @@ static int comparetup_index_hash(const SortTuple* a, const SortTuple* b, Tupleso
      * that the first column of the index tuple is the hash key.
      */
     Assert(!a->isnull1);
-    bucket1 = _hash_hashkey2bucket(DatumGetUInt32(a->datum1),
-                                   state->max_buckets, state->high_mask,
-                                   state->low_mask);
+    hash1 = DatumGetUInt32(a->datum1) & state->hash_mask;
     Assert(!b->isnull1);
-    bucket2 = _hash_hashkey2bucket(DatumGetUInt32(b->datum1),
-                                   state->max_buckets, state->high_mask,
-                                   state->low_mask);
+    hash2 = DatumGetUInt32(b->datum1) & state->hash_mask;
 
-    if (bucket1 > bucket2) {
+    if (hash1 > hash2) {
         return 1;
-    } else if (bucket1 < bucket2) {
+    } else if (hash1 < hash2) {
         return -1;
     }
 

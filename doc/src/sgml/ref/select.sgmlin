@@ -24,12 +24,13 @@ SELECT [/*+ plan_hint */] [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
     [ LIMIT { [offset,] count | ALL } ]
     [ OFFSET start [ ROW | ROWS ] ]
     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
-    [ {FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF table_name [, ...] ] [ NOWAIT ]} [...] ]
+    [ {FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF table_name [, ...] ] [ NOWAIT | WAIT N ]} [...] ]
 TABLE { ONLY { (table_name) | table_name } | table_name [ * ]};
 
 where from_item can be:
 [ ONLY ] table_name [ * ] [ partition_clause ] [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
 [ TABLESAMPLE sampling_method ( argument [, ...] ) [ REPEATABLE ( seed ) ] ]
+[ TIMECAPSULE {TIMESTAMP | CSN} expression ]
 |( select ) [ AS ] alias [ ( column_alias [, ...] ) ]
 |with_query_name [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
 |function_name ( [ argument [, ...] ] ) [ AS ] alias [ ( column_alias [, ...] | column_definition [, ...] ) ]
@@ -46,8 +47,11 @@ where with_query can be:
 with_query_name [ ( column_name [, ...] ) ] AS [ [ NOT ] MATERIALIZED ] ( {select | values | insert | update | delete} )
 where partition_clause can be:
 PARTITION { ( partition_name ) | FOR (  partition_value [, ...] ) }
+SUBPARTITION { ( subpartition_name ) | FOR (  subpartition_value [, ...] )}
 where nlssort_expression_clause can be:
 NLSSORT ( column_name, ' NLS_SORT = { SCHINESE_PINYIN_M | generic_m_ci } ' )
+NOTICE: '[ [ START WITH condition ] CONNECT BY condition [ ORDER SIBLINGS BY expression ] ]' is only avaliable in CENTRALIZED mode!
+NOTICE: 'SUBPARTITION { ( subpartition_name ) | FOR (  subpartition_value [, ...] )}' is only avaliable in CENTRALIZED mode!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

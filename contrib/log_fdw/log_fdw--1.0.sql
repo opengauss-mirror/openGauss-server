@@ -10,12 +10,12 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION log_fdw" to load this file. \quit
 
-CREATE FUNCTION log_fdw_handler()
+CREATE FUNCTION pg_catalog.log_fdw_handler()
 RETURNS fdw_handler
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT  NOT FENCED;
 
-CREATE FUNCTION log_fdw_validator(text[], oid)
+CREATE FUNCTION pg_catalog.log_fdw_validator(text[], oid)
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT NOT FENCED;
@@ -26,7 +26,7 @@ CREATE FOREIGN DATA WRAPPER log_fdw
 
 CREATE SERVER log_srv FOREIGN DATA WRAPPER log_fdw;
 
-create or replace function gs_create_log_tables()
+create or replace function pg_catalog.gs_create_log_tables()
 RETURNS void
 AS $$
 declare

@@ -1441,7 +1441,20 @@ select t11.c1, t12.c2, t13.c2 from t11, t12, t13 where t11.c2 = t12.c3(+) and t1
 
 -------used (+) with un common expression, like is null, is not null--------
 select t11.c1, t12.c2, t13.c2 from t11, t12, t13 where t11.c2 = t12.c3(+) and t11.c3 = t13.c1(+) and t13.c2(+) is not null;
-ERROR:  Operator "(+)" can only be used in common expression.
+ c1 | c2 | c2 
+----+----+----
+ 10 | 10 | 10
+  4 |  4 |  4
+  6 |  6 |  6
+  8 |  8 |  8
+  1 |  1 |  1
+  9 |  9 |  9
+  5 |  5 |  5
+  2 |  2 |  2
+  3 |  3 |  3
+  7 |  7 |  7
+(10 rows)
+
 select t11.c1, t12.c2, t13.c2 from t11, t12, t13 where t11.c2 = t12.c3(+) and t11.c3 = t13.c1(+) and (t13.c2(+) > t12.c1)::bool;
 ERROR:  Operator "(+)" can only be used in common expression.
 drop view plus_v;

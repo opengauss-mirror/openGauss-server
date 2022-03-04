@@ -28,7 +28,10 @@ loginfo="hello test"
 
 $(info, $(LIBS))
 ifneq ($(PORTNAME), win32)
-    override CFLAGS += $(PTHREAD_CFLAGS) -L$(LIBOPENSSL_LIB_PATH) -lssl -lcrypto -L$(LIBCGROUP_LIB_PATH) -lcgroup -lgssapi_krb5_gauss -lkrb5_gauss -lk5crypto_gauss -lcom_err_gauss -lkrb5support_gauss
+    override CFLAGS += $(PTHREAD_CFLAGS) -L$(LIBOPENSSL_LIB_PATH) -lssl -lcrypto -L$(LIBCGROUP_LIB_PATH) -lcgroup
+    ifeq ($(enable_lite_mode), no)
+        override CFLAGS += -lgssapi_krb5_gauss -lkrb5_gauss -lk5crypto_gauss -lcom_err_gauss -lkrb5support_gauss
+    endif
     override CPPFLAGS := -I$(LIBETCDAPI_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) $(CPPFLAGS)
 endif
 

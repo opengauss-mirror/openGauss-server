@@ -86,20 +86,17 @@ static relopt_bool boolRelOpts[] = {
     {{ "autovacuum_enabled", "Enables autovacuum in this relation", RELOPT_KIND_HEAP | RELOPT_KIND_TOAST }, true },
     {{ "user_catalog_table",
        "Declare a table as an additional catalog table, e.g. for the purpose of logical replication",
-       RELOPT_KIND_HEAP },
-     false },
+       RELOPT_KIND_HEAP }, false },
     {{ "fastupdate", "Enables \"fast update\" feature for this GIN index", RELOPT_KIND_GIN }, true },
     {{ "security_barrier", "View acts as a row security barrier", RELOPT_KIND_VIEW }, false },
     {{ "enable_rowsecurity", "Enable row level security or not", RELOPT_KIND_HEAP }, false },
     {{ "force_rowsecurity", "Row security forced for owners or not", RELOPT_KIND_HEAP }, false },
     {{"enable_tsdb_delta", "Enables delta table for this timeseries relation", RELOPT_KIND_HEAP}, false},
     {{ "punctuation_ignore", "Ignore punctuation in zhparser/N-gram text search praser",
-       RELOPT_KIND_ZHPARSER | RELOPT_KIND_NPARSER },
-     true },
+       RELOPT_KIND_ZHPARSER | RELOPT_KIND_NPARSER }, true },
     {{ "grapsymbol_ignore", "ignore grapsymbol in N-gram text search praser", RELOPT_KIND_NPARSER }, false },
     {{ "seg_with_duality", "segmente interfacing idle words with duality in zhparser text search praser",
-       RELOPT_KIND_ZHPARSER },
-     false },
+       RELOPT_KIND_ZHPARSER }, false },
     {{ "multi_short", "segmente long words to short words in zhparser text search praser", RELOPT_KIND_ZHPARSER },
      true },
     {{ "multi_duality", "segmente long words with duality in zhparser text search praser", RELOPT_KIND_ZHPARSER },
@@ -115,10 +112,7 @@ static relopt_bool boolRelOpts[] = {
     {{ "on_commit_delete_rows", "global temp table on commit options", RELOPT_KIND_HEAP}, true},
     {{ "crossbucket", "Enables cross bucket index creation in this index relation", RELOPT_KIND_BTREE}, false },
     {{ "enable_tde", "enable table's level transparent data encryption", RELOPT_KIND_HEAP }, false },
-    {{ "compress_byte_convert", "Whether do byte convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
-     false },
-    {{ "compress_diff_convert", "Whether do diiffer convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
-     false },
+    {{ "hasuids", "Enables uids in this relation", RELOPT_KIND_HEAP }, false },
     /* list terminator */
     {{NULL}}
 };
@@ -228,7 +222,7 @@ static relopt_int intRelOpts[] = {
     },
 
     {{ "rel_cn_oid", "rel oid on coordinator", RELOPT_KIND_HEAP }, 0, 0, 2000000000 },
-
+    {{ "exec_step", "redis exec step", RELOPT_KIND_HEAP }, 0, 1, 4 },
     {{ "init_td", "number of td slots", RELOPT_KIND_HEAP }, UHEAP_DEFAULT_TD, UHEAP_MIN_TD, UHEAP_MAX_TD },
     {{ "bucketcnt", "number of bucket map counts", RELOPT_KIND_HEAP }, 0, 32, 16384 },
     {
@@ -237,18 +231,8 @@ static relopt_int intRelOpts[] = {
             "Number of parallel processes that can be used per executor node for this relation.",
             RELOPT_KIND_HEAP,
         },
-        -1, 0, 32
+        0, 1, 32
     },
-    {{ "compress_level", "Level of page compression.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, -31, 31},
-    {{ "compresstype", "compress type (none, pglz or zstd).", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 2},
-    {{ "compress_chunk_size", "Size of chunk to store compressed page.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
-     BLCKSZ / 2,
-     BLCKSZ / 16,
-     BLCKSZ / 2},
-    {{ "compress_prealloc_chunks", "Number of prealloced chunks for each block.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
-     0,
-     0,
-     7},
     /* list terminator */
     {{NULL}}
 };
@@ -269,6 +253,11 @@ static relopt_int64 int64RelOpts[] = {
      INT64CONST(-1),
      INT64CONST(0),
      INT64CONST(2000000000) },
+    {{ "create_time", "redis tmp table create time",
+       RELOPT_KIND_HEAP },
+     INT64CONST(0),
+     INT64CONST(1),
+     INT64CONST(INT64_MAX) },
     /* list terminator */
     {{NULL}}
 };
@@ -1597,8 +1586,13 @@ void fillTdeRelOptions(List *options, char relkind)
  * @Param[IN] options: input user options.
  * @See also:
  */
-void RowTblCheckCompressionOption(List *options)
+void RowTblCheckCompressionOption(List *options, int8 rowCompress)
 {
+    if (IsCompressedByCmprsInPgclass((RelCompressType) rowCompress)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                        errmsg("row-oriented table does not support compression")));
+    }
+
     ListCell *opt = NULL;
 
     if (options == NULL) {
@@ -1761,7 +1755,8 @@ void ForbidToSetOptionsForColTbl(List *options)
         "enable_tde",
         "encrypt_algo",
         "dek_cipher",
-        "cmk_id"
+        "cmk_id",
+        "hasuids"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "column relation");
@@ -1806,7 +1801,8 @@ void ForbidToSetOptionsForUstoreTbl(List *options)
         "enable_tde",
         "dek_cipher",
         "cmk_id",
-        "encrypt_algo"
+        "encrypt_algo",
+        "hasuids"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "ustore relation");
@@ -1832,7 +1828,8 @@ void forbid_to_set_options_for_timeseries_tbl(List *options)
         "max_batchrow",
         "deltarow_threshold",
         "partial_cluster_rows",
-        "compresslevel"
+        "compresslevel",
+        "hasuids"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "timeseries relation");
@@ -1865,7 +1862,8 @@ void ForbidToSetOptionsForPSort(List *options)
         "enable_tsdb_delta",
         "tsdb_deltamerge_interval",
         "tsdb_deltamerge_threshold",
-        "tsdb_deltainsert_threshold"
+        "tsdb_deltainsert_threshold",
+        "hasuids"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "psort index");
@@ -1930,6 +1928,8 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "append_mode", RELOPT_TYPE_STRING, offsetof(StdRdOptions, append_mode) },
         { "merge_list", RELOPT_TYPE_STRING, offsetof(StdRdOptions, merge_list) },
         { "rel_cn_oid", RELOPT_TYPE_INT, offsetof(StdRdOptions, rel_cn_oid) },
+        { "exec_step", RELOPT_TYPE_INT, offsetof(StdRdOptions, exec_step) },
+        { "create_time", RELOPT_TYPE_INT64, offsetof(StdRdOptions, create_time) },
         { "init_td", RELOPT_TYPE_INT, offsetof(StdRdOptions, initTd) },
         { "append_mode_internal", RELOPT_TYPE_INT, offsetof(StdRdOptions, append_mode_internal) },
         { "start_ctid_internal", RELOPT_TYPE_STRING, offsetof(StdRdOptions, start_ctid_internal) },
@@ -1948,18 +1948,7 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "cmk_id", RELOPT_TYPE_STRING, offsetof(StdRdOptions, cmk_id)},
         { "encrypt_algo", RELOPT_TYPE_STRING, offsetof(StdRdOptions, encrypt_algo)},
         { "enable_tde", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, enable_tde)},
-        { "compresstype", RELOPT_TYPE_INT, 
-          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressType)},
-        { "compress_level", RELOPT_TYPE_INT,
-          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressLevel)},
-        { "compress_chunk_size", RELOPT_TYPE_INT,
-          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressChunkSize)},
-        {"compress_prealloc_chunks", RELOPT_TYPE_INT,
-          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressPreallocChunks)},
-        { "compress_byte_convert", RELOPT_TYPE_BOOL,
-          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressByteConvert)},
-        { "compress_diff_convert", RELOPT_TYPE_BOOL,
-          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
+        { "hasuids", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hasuids) }
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
@@ -2594,32 +2583,14 @@ int8 heaprel_get_compresslevel_from_modes(int16 modes)
 void ForbidUserToSetDefinedOptions(List *options)
 {
     /* the following option must be in tab[] of default_reloptions(). */
-    static const char *unchangedOpt[] = {"orientation", "hashbucket", "bucketcnt", "segment", "encrypt_algo"};
+    static const char *unchangedOpt[] = {"orientation", "hashbucket", "bucketcnt", "segment", "encrypt_algo",
+        "storage_type"};
 
     int firstInvalidOpt = -1;
     if (FindInvalidOption(options, unchangedOpt, lengthof(unchangedOpt), &firstInvalidOpt)) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         (errmsg("Un-support feature"),
                          errdetail("Option \"%s\" doesn't allow ALTER", unchangedOpt[firstInvalidOpt]))));
-    }
-}
-
-/*
- * @Description: compressed parameter cannot be changed by ALTER TABLE statement if table is uncompressed table.
- *   this function do the checking work.
- * @Param[IN] options: input user options
- * @See also:
- */
-void ForbidUserToSetCompressedOptions(List *options)
-{
-    static const char *unSupportOptions[] = {"compresstype",   "compress_chunk_size",   "compress_prealloc_chunks",
-                                             "compress_level", "compress_byte_convert", "compress_diff_convert"};
-    int firstInvalidOpt = -1;
-    if (FindInvalidOption(options, unSupportOptions, lengthof(unSupportOptions), &firstInvalidOpt)) {
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 (errmsg("Un-support feature"), errdetail("Option \"%s\" doesn't allow ALTER on uncompressed table",
-                                                          unSupportOptions[firstInvalidOpt]))));
     }
 }
 
@@ -2648,7 +2619,7 @@ void ForbidOutUsersToSetInnerOptions(List *userOptions)
 void ForbidUserToSetDefinedIndexOptions(List *options)
 {
     /* the following option must be in tab[] of default_reloptions(). */
-    static const char *unchangedOpt[] = {"crossbucket"};
+    static const char *unchangedOpt[] = {"crossbucket", "storage_type"};
 
     int firstInvalidOpt = -1;
     if (FindInvalidOption(options, unchangedOpt, lengthof(unchangedOpt), &firstInvalidOpt)) {
@@ -2895,6 +2866,7 @@ bool get_crossbucket_option(List **options_ptr, bool stmtoptgpi, char *accessmet
 
     return ((res <= 0) ? false : true);
 }
+
 bool is_contain_crossbucket(List *defList)
 {
     ListCell *lc = NULL;
@@ -2915,34 +2887,4 @@ bool is_cstore_option(char relkind, Datum reloptions)
         StdRdOptionsGetStringData(std_opt, orientation, ORIENTATION_ROW)) == 0;
     pfree_ext(std_opt);
     return result;
-}
-
-void SetOneOfCompressOption(const char* defname, TableCreateSupport* tableCreateSupport)
-{
-    if (pg_strcasecmp(defname, "compresstype") == 0) {
-        tableCreateSupport->compressType = true;
-    } else if (pg_strcasecmp(defname, "compress_chunk_size") == 0) {
-        tableCreateSupport->compressChunkSize = true;
-    } else if (pg_strcasecmp(defname, "compress_prealloc_chunks") == 0) {
-        tableCreateSupport->compressPreAllocChunks = true;
-    } else if (pg_strcasecmp(defname, "compress_level") == 0) {
-        tableCreateSupport->compressLevel = true;
-    } else if (pg_strcasecmp(defname, "compress_byte_convert") == 0) {
-        tableCreateSupport->compressByteConvert = true;
-    } else if (pg_strcasecmp(defname, "compress_diff_convert") == 0) {
-        tableCreateSupport->compressDiffConvert = true;
-    }
-}
-
-void CheckCompressOption(TableCreateSupport *tableCreateSupport)
-{
-    if (!tableCreateSupport->compressType && HasCompressOption(tableCreateSupport)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-                        errmsg("compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/"
-                               "compress_diff_convert should be used with compresstype.")));
-    }
-    if (!tableCreateSupport->compressByteConvert && tableCreateSupport->compressDiffConvert) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-                        errmsg("compress_diff_convert should be used with compress_byte_convert.")));
-    }
 }

@@ -35,6 +35,10 @@
 #include "c.h"
 #include "cm/etcdapi.h"
 
+#define DR_MAX_NODE_NUM (1024 * 3)
+/* disaster cluster info form: "num_cn num_slice num_one_slice (slice_num host host1 port slice_name)..." */
+#define MAX_DISASTER_INFO_LEN (DR_MAX_NODE_NUM * 90 + 15)
+
 typedef uint64 GlobalTransactionId; /* 64-bit global transaction ids */
 typedef int16 GTMProxy_ConnID;
 typedef uint32 GTM_StrLen;

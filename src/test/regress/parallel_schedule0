@@ -4,17 +4,49 @@
 # By convention, we put no more than twenty tests in any one parallel group;
 # this limits the number of connections needed to run the tests.
 # ----------
+test: alter_hw_package
+test: hw_grant_package gsc_func gsc_db
+test: uppercase_attribute_name
+test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views
+
+# parse xlog and page
+test: parse_page
+test: parse_xlog
+
+test: gs_dump_package
+test: out_param_func
 
 # test AI4DB
+test: plpgsql_override_out
+test: plpgsql_sql_with_proc_keyword
+test: plsql_show_all_error
+test: pldeveloper_gs_source
 test: index_advisor
 test: pl_debugger_server pl_debugger_client
+test: update_for_wait_s1 update_for_wait_s2
 test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud
+test: large_sequence int16 gs_dump_sequence
+test: gs_dump_tableof
 test: analyze_commands
 #test: single_node_job
 test: single_node_ddl
 test: single_node_sqlbypass
-#test: mediavarchar.cppn
+test: median deferrable
 test: array_funcs first_last_agg
+
+test: hw_pwd_encryption_sm3
+
+
+# test subpartition
+test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index
+test: hw_subpartition_vacuum_partition
+test: gs_dump_subpartition
+test: partition_dml_operations
+
+# test subpartition with segment=on
+test: segment_subpartition_createtable segment_subpartition_scan segment_subpartition_select segment_subpartition_split segment_subpartition_truncate segment_subpartition_update segment_subpartition_gpi segment_subpartition_analyze_vacuum segment_subpartition_alter_table segment_subpartition_add_drop_partition segment_subpartition_tablespace segment_subpartition_ddl_index
+test: segment_subpartition_vacuum_partition
+
 test: get_instr_unique_sql
 
 # run tablespace by itself, and first, because it forces a checkpoint;
@@ -24,14 +56,17 @@ test: single_node_tablespace
 
 #test startwith...connect by
 test: sw_prepare
-test: sw_basic sw_icbc sw_siblings sw_bugfix sw_by_rownum_level
+test: sw_basic sw_icbc sw_siblings sw_bugfix-1 sw_bugfix-2 sw_by_rownum_level
 test: sw_clearup
 
+#--------------
+# any privilege
+# -------------
+test: pri_alter_any_table pri_create_any_function pri_create_any_index pri_create_any_sequence pri_create_any_type pri_dml_any_table pri_execute_any_function pri_indepent_any pri_any_package pri_samenew_schema
 # ----------
 # The first group of parallel tests
 # ----------
-test: single_node_boolean single_node_char single_node_name single_node_varchar single_node_text single_node_int2 single_node_int4 single_node_int8 single_node_oid single_node_float4 single_node_float8 single_node_bit single_node_numeric single_node_txid single_node_uuid single_node_enum single_node_money
-test: single_node_nvarchar
+test: single_node_boolean single_node_char single_node_name single_node_varchar single_node_text single_node_int2 single_node_int4 single_node_int8 single_node_oid single_node_float4 single_node_float8 single_node_bit single_node_numeric single_node_txid single_node_uuid single_node_enum single_node_money single_node_nvarchar
 
 # Depends on things setup during char, varchar and text
 #test: single_node_strings
@@ -41,10 +76,10 @@ test: single_node_numerology
 # ----------
 # The second group of parallel tests
 # ----------
-test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz
-#test: single_node_interval
-test: single_node_abstime single_node_reltime
-#test: single_node_tinterval
+test: single_node_point single_node_lseg single_node_box single_node_path single_node_polygon single_node_circle single_node_date single_node_time single_node_timetz single_node_timestamp single_node_timestamptz 
+#test: single_node_interval 
+test: single_node_abstime single_node_reltime 
+#test: single_node_tinterval 
 test: single_node_inet single_node_macaddr single_node_tstypes single_node_comments
 
 # ----------
@@ -52,11 +87,10 @@ test: single_node_inet single_node_macaddr single_node_tstypes single_node_comme
 # geometry depends on point, lseg, box, path, polygon and circle
 # horology depends on interval, timetz, timestamp, timestamptz, reltime and abstime
 # ----------
-#test: single_node_geometry single_node_horology
+#test: single_node_geometry single_node_horology 
 #test: single_node_regex
-test: single_node_regex_temp
-test: single_node_type_sanity
-#test: single_node_oidjoins single_node_opr_sanity
+test: single_node_regex_temp 
+test: single_node_oidjoins single_node_type_sanity
 
 # ----------
 # These four each depend on the previous one
@@ -79,16 +113,16 @@ test: single_node_create_function_1
 # ----------
 # More groups of parallel tests
 # ----------
-#test: single_node_create_misc
+#test: single_node_create_misc 
 #test: single_node_create_operator
 # These depend on the above two
-#test: single_node_create_index
+#test: single_node_create_index 
 #test: single_node_create_view
 
 # ----------
 # Another group of parallel tests
 # ----------
-test: single_node_create_aggregate
+test: single_node_create_aggregate 
 #test: single_node_create_function_3 single_node_create_cast
 #test: single_node_constraints single_node_triggers single_node_inherit single_node_create_table_like single_node_typed_table
 test: single_node_vacuum
@@ -111,28 +145,26 @@ ignore: single_node_random
 # ----------
 # Another group of parallel tests
 # ----------
-#test: single_node_select_into single_node_select_distinct
-#test: single_node_select_distinct_on single_node_select_implicit single_node_select_having
-test: single_node_select_implicit single_node_select_having
+#test: single_node_select_into single_node_select_distinct 
+#test: single_node_select_distinct_on single_node_select_implicit single_node_select_having 
+test: single_node_select_implicit single_node_select_having 
 #test: single_node_subselect
 test: single_node_union
-#test: single_node_case single_node_join single_node_aggregates
-#test: single_node_transactions
-test: single_node_random
+#test: single_node_case single_node_join single_node_aggregates 
+#test: single_node_transactions 
+test: single_node_random 
 #test: single_node_portals
-#test: single_node_arrays
-#test: single_node_btree_index single_node_hash_index single_node_update
-test: single_node_update
-test: hash_index_001
-test: hash_index_002
+#test: single_node_arrays 
+#test: single_node_btree_index single_node_hash_index single_node_update 
+test: single_node_update 
 #test single_node_namespace
-#test: single_node_prepared_xacts
+#test: single_node_prepared_xacts 
 #test: single_node_delete
 
 # ----------
 # Another group of parallel tests
 # ----------
-#test: single_node_privileges
+#test: single_node_privileges 
 #test: single_node_security_label single_node_collate
 
 #test: single_node_misc
@@ -142,17 +174,17 @@ test: hash_index_002
 # ----------
 # Another group of parallel tests
 # ----------
-#test: single_node_select_views
-#test: single_node_portals_p2
+#test: single_node_select_views 
+#test: single_node_portals_p2 
 test: single_node_foreign_key
 #test: single_node_foreign_key single_node_cluster single_node_dependency
-#test: single_node_guc
-test: single_node_bitmapops single_node_combocid
+#test: single_node_guc 
+test: single_node_bitmapops single_node_combocid 
 #test: single_node_tsearch
-#test: single_node_tsdicts
-#test: single_node_foreign_data
+#test: single_node_tsdicts 
+#test: single_node_foreign_data 
 #single_node_window
-#test: single_node_xmlmap
+#test: single_node_xmlmap 
 #test: single_node_functional_deps single_node_advisory_lock single_node_json single_node_equivclass
 
 # ----------
@@ -162,7 +194,7 @@ test: single_node_bitmapops single_node_combocid
 # ----------
 test: single_node_sequence
 #test: single_node_plancache single_node_limit single_node_plpgsql single_node_copy2 single_node_temp single_node_domain single_node_rangefuncs single_node_prepare single_node_without_oid single_node_conversion single_node_truncate single_node_alter_table single_node_sequence single_node_polymorphism
-#test: single_node_rowtypes
+#test: single_node_rowtypes 
 #test: single_node_returning single_node_largeobject single_node_with single_node_xml
 
 # run stats by itself because its delay may be insufficient under heavy load
@@ -170,7 +202,9 @@ test: single_node_sequence
 
 # run and check forbidden functions are still forbidden to use in single node
 test: single_node_forbidden
-test: single_node_mergeinto merge_1
+
+test: single_node_mergeinto merge_subquery merge_subquery3 merge_1
+test: merge_where_col
 
 # Trigger tests
 test: single_node_triggers
@@ -186,9 +220,11 @@ test: single_node_unsupported_view
 # ----------
 # single_node_commit/rollback tests
 # ----------
-test: single_node_produce_commit_rollback
+test: single_node_produce_commit_rollback 
+test: single_node_function_commit_rollback
 
 test: instr_unique_sql
+test: auto_explain
 test: shutdown
 
 # List/Hash table exchange
@@ -198,10 +234,14 @@ test: hw_partition_hash_exchange
 # List/Hash table truncate
 test: hw_partition_list_truncate hw_partition_hash_truncate
 
+# add/drop partition
+test: hw_partition_add_drop_partition
+
+#test: hw_partition_start_end
 # To check min_max fuc support IP
 test: min_max_support_IP
 
-# interval partition
+# interval partition 
 test: hw_partition_interval
 test: hw_partition_interval_exchange
 test: hw_partition_interval_index
@@ -335,7 +375,7 @@ test: upsert_prepare
 test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
 test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test
 test: upsert_grammer_test_02 upsert_restriction upsert_composite
-test: upsert_trigger_test upsert_explain
+test: upsert_trigger_test upsert_explain upsert_where upsert_where_sublink
 test: upsert_subquery
 test: upsert_clean
 
@@ -354,11 +394,10 @@ test: hw_account_lock
 test: hw_interval_format hw_function_p_3 hw_function_p_4 hw_current_schema hw_functions
 #test: hw_function_p_1 hw_function_p_2#
 test: hw_dba_enable_partition hw_tablespace
-test: hw_procedure_define
+test: hw_procedure_define 
 #test: hw_anonymous_block
 #test: hw_procedure#
-test: hw_grant_all hw_func_return_out
-#test: hw_dynamic_sql
+test: hw_grant_all hw_dynamic_sql hw_func_return_out
 test: hw_package_function
 
 #show plan
@@ -379,9 +418,10 @@ test: tpch01 tpch03 tpch04 libcomm_check_status tpch03_querymem
 test: tpch05 tpch06 tpch07 tpch08
 test: tpch09 tpch10 tpch11 tpch12
 test: tpch13 tpch14 tpch15 tpch16
+#test: tpch_vector_optimal
 test: tpch18 tpch19 tpch20 tpch18_querymem
-test: tpch21 tpch22 tpch11_pretty_performance
-#test: tpch02 tpch17
+test: tpch21 tpch22 tpch11_pretty_performance vector_procedure
+#test: tpch02 tpch17 
 
 #test export
 test: temp__2
@@ -411,10 +451,9 @@ test: xc_misc
 # Those ones can be run in parallel
 test: xc_groupby xc_distkey xc_having
 #test: hw_rewrite_lazyagg hw_light
-test: xc_temp xc_FQS
+test: xc_temp xc_FQS 
 #test: xc_remote hw_pbe
-#test: hw_pbe
-test: xc_FQS_join xc_copy
+test: xc_FQS_join xc_copy 
 #test: xc_alter_table
 test: xc_constraints xc_limit xc_sort
 #test: xc_params xc_returning_step1
@@ -433,7 +472,7 @@ test: xc_dml
 # test cases for CStore
 # ---------------------------
 #test: hw_cstore_alter cstore_alter_table2 cstore_alter_table3 cstore_alter_table4 cstore_alter_table5 cstore_alter_table6 cstore_alter_table8 cstore_alter_table9 cstore_alter_table10 hw_cstore_copy hw_alter_table_instant hw_cstore_copy1
-#test: cstore_alter_table cstore_alter_table1 cstore_alter_table7
+#test: cstore_alter_table cstore_alter_table1 cstore_alter_table7 
 
 test: hw_cstore_tablespace hw_cstore_truncate hw_cstore_update
 #test: hw_cstore_roughcheck
@@ -451,7 +490,7 @@ test: hw_cstore_vacuum
 test: hw_cstore_insert hw_cstore_delete hw_cstore_unsupport
 
 # test on extended statistics
-test: hw_es_multi_column_stats_prepare
+test: hw_es_multi_column_stats_prepare hw_es_multi_column_stats_eqclass
 test: hw_es_multi_column_stats_1 hw_es_multi_column_stats_1_1 hw_es_multi_column_stats_1_2 hw_es_multi_column_stats_1_3 hw_es_multi_column_stats_1_4 hw_es_multi_column_stats_1_5 hw_es_multi_column_stats_1_6 hw_es_multi_column_stats_2_1 hw_es_multi_column_stats_2_2 hw_es_multi_column_stats_2_3 hw_es_multi_column_stats_3 hw_es_multi_column_stats_3_1 hw_es_multi_column_stats_3_2
 test: hw_es_multi_column_stats_end
 
@@ -462,16 +501,16 @@ test: unsupported_features statistic statistic_2
 
 test: hw_setop_writefile
 
-test: vec_nestloop_pre vec_mergejoin_prepare vec_result vec_limit vec_mergejoin_1 vec_mergejoin_2 vec_stream
+test: vec_nestloop_pre vec_mergejoin_prepare vec_result vec_limit vec_mergejoin_1 vec_mergejoin_2 vec_stream force_vector_engine force_vector_engine2
 test: vec_mergejoin_inner vec_mergejoin_left vec_mergejoin_semi vec_mergejoin_anti llvm_vecexpr1 llvm_vecexpr2 llvm_vecexpr3 llvm_target_expr llvm_target_expr2 llvm_target_expr3 llvm_vecexpr_td
 #test: vec_nestloop1
-test: vec_mergejoin_aggregation llvm_vecagg llvm_vecagg2 llvm_vecagg3 llvm_vechashjoin
+test: vec_mergejoin_aggregation llvm_vecagg llvm_vecagg2 llvm_vecagg3 llvm_vechashjoin vector_subpartition
 #test: vec_nestloop_end
 
 # ----------$
 # The first group of parallel tests$
 # ----------$
-test: boolean name oid bit txid uuid
+test: boolean name oid bit txid uuid numeric_hide_tailing_zero rawlike
 #test: float8 numeric char varchar text int2 int4 float4 numeric_2 money
 
 # Depends on things setup during char, varchar and text
@@ -498,8 +537,7 @@ test: interval tinterval macaddr tstypes comments
 # execute two copy tests parallel, to check that copy itself
 # is concurrent safe.(duplicate)
 # ----------
-test: copyselect copy_error_log copy_support_transform
-#test: copy_from_support_parallel
+test: copyselect copy_error_log copy_support_transform copy_from_support_parallel
 #test: copy_eol
 
 # ----------
@@ -513,7 +551,7 @@ test: copyselect copy_error_log copy_support_transform
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-#test: drop_if_exists
+test: drop_if_exists
 #test: constraints
 
 #test: errors subplan_base
@@ -538,7 +576,7 @@ test: alter_table_000 alter_table_002 alter_table_003
 #test: hw_sec_account_lock_unlock rowlevelsecurity
 test: resolve_unknown
 test: query_rewrite
-test: create_schema
+test: create_schema 
 #test: view_dump
 test: hw_function_p_3 hw_function_p_4
 #test: hw_function_p_2
@@ -546,10 +584,11 @@ test: hw_function_p_3 hw_function_p_4
 test: create_c_function
 test: cstore_replication_table_delete
 
-test: hw_cursor_part1 hw_cursor_part2 hw_cursor_part3 hw_cursor_part4 hw_cursor_part7 hw_cursor_part8 hw_cursor_part5 hw_cursor_part6
+test: hw_cursor_part1 hw_cursor_part2 hw_cursor_part3 hw_cursor_part4 hw_cursor_part5 hw_cursor_part6 hw_cursor_part7 hw_cursor_part8
 test: vec_append_part1 vec_append_part2 vec_append_part3
 test: vec_cursor_part1 vec_cursor_part2
 test: vec_delete_part1 vec_delete_part2
+test: vec_set_func
 
 test: alter_schema_db_rename_seq
 
@@ -576,8 +615,7 @@ test: matview_single
 # ----------
 # Another group of parallel tests
 # ----------
-test: hll_hash hll_func hll_para hll_mpp hll_cstore
-#test: hll_misc
+test: hll_hash hll_func hll_para hll_mpp hll_cstore hll_misc
 
 test: function_get_table_def
 
@@ -592,6 +630,9 @@ test: hw_order
 # ----------
 test: hw_pwd_reuse
 #test: hw_auditadmin
+
+test: hw_audit_toughness
+test: hw_audit_detailinfo
 
 test: performance_enhance
 test: explain_fqs
@@ -610,6 +651,21 @@ test: sp_set_policy_plugin_disable
 # so keep this parallel group to at most 19 tests
 # ----------
 #test: plpgsql
+test: select_where_func
+test: arrayinterface_single
+test: plpgsql_table_opengauss  
+test: plpgsql_assign_value_to_array_attribute
+test: plpgsql_array_of_record 
+test: arrayinterface_indexby
+test: arrayinterface_ted
+test: plpgsql_inout_param
+test: plpgsql_cursor_rowtype
+test: plpgsql_assign_list
+test: plpgsql_package_type plpgsql_package_param
+test: plpgsql_record_attrname
+test: plpgsql_insert_record
+test: hw_package_variable
+test: autonomous_cursor
 #test: plancache limit rangefuncs prepare
 test: returning largeobject
 test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
@@ -619,14 +675,14 @@ test: tsdb_delta2_compress
 test: tsdb_xor_compress
 #test: tsdb_aggregate
 
+
 test: readline
 test: hw_to_timestamp hw_view_privilege
 
 test: hw_identifier
 #test: hw_hashint1 hw_smalldatetime_hash hw_rawtype_hash
 #test: hw_nvarchar2_hash cmpr_smallint cmpr_prefix_150left cmpr_uint32_oid
-test: opr_sanity_2 regex
-#test: oidjoins
+test: oidjoins opr_sanity_2 regex
 #test: opr_sanity_1
 
 test: pmk
@@ -650,6 +706,7 @@ test: col_function_1 col_function_2 col_count_distinct_1 col_count_distinct_2 co
 test: directory_test
 test: analyse_verify
 test: create_compositetype
+test: hw_pct_type_and_rowtype
 #test: create_basetype
 #test: tabletype
 #test with recursive
@@ -707,6 +764,7 @@ test: gin_test1 gin_test2 gin_test3
 #==========================================================================================================================================
 # privilege test
 test: predefined_roles
+test: gs_db_privilege
 
 # ----------
 # src/test/regress/parallel_schedule.33
@@ -766,7 +824,6 @@ test: udf_crem create_c_function
 
 # procedure, Function Test
 #test: create_procedure postgres_fdw
-#test: create_procedure
 test: create_function
 test: pg_compatibility
 
@@ -774,12 +831,11 @@ test: pg_compatibility
 # test: gs_basebackup
 
 # autonomous transaction Test
-#test: autonomous_test
 
 #test jdbc pbe for bypass
 test: bypass_pbe
 #test: partition for hash list
-test: pbe_hash_list_partition
+test: pbe_hash_list_partition 
 test: hw_partition_list_insert
 test: hw_partition_list_ddl
 test: hw_partition_hash_insert
@@ -788,28 +844,14 @@ test: hw_partition_hash_dml
 test: hw_partition_hash_dql
 test: hw_partition_list_dml
 test: hw_partition_list_dql
-#test: hw_cipher_sm4
+test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: hw_pwd_encryption_sm3
-# ----------
-# timecapsule
-# ----------
-test: timecapsule_recyclebin_test_9
-test: timecapsule_recyclebin_test_7
-test: timecapsule_recyclebin_test_8
-test: timecapsule_version_test_1
-test: timecapsule_version_test_2
-test: timecapsule_version_test_3
-test: timecapsule_version_test_4
-test: timecapsule_version_test_5
-test: timecapsule_version_test_6
-test: timecapsule_version_test_7
 test: rule_test
 
 #delete limit
 test: delete_limit
 
-#test: hotpatch
 
 # --------------------------
 # DB4AI
@@ -818,7 +860,11 @@ test: db4ai_snapshots
 test: db4ai_gd_train_predict
 test: db4ai_gd_houses
 test: db4ai_gd_snapshots
+test: db4ai_gd_pca_train_predict
 test: db4ai_kmeans_train_predict
+test: db4ai_xgboost_train_predict
+
+test: db4ai_explain_model
 
 test: leaky_function_operator
 
@@ -831,6 +877,8 @@ test: smp
 
 test: cstore_unique_index
 
+test: cast_privileges_test
+
 #generated column test
 test: generated_col
 
@@ -840,17 +888,22 @@ test: ledger_table_case
 # store and restore comment on ora function and procedure
 test: comment_proc
 test: hw_package
-test: procedure_privilege_test
-test: cast_privileges_test
-#test: hw_dbms_sql1
-#test: hw_cipher_sm4
+test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: sequence_cache_test
 test: pg_buffercache_pages
+test: procedure_privilege_test
+
+
+test: toomanyparams
 
 test: test_astore_multixact
-test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test
-#test: row_compression/pg_tablespace_size
-# publication and subscription
-test: publication subscription
+test: component_view_enhancements single_node_user_mapping
+
+# publication and subscription, we need to record audit log for them, so seperate them into two test group
+test: publication
+test: subscription
+test: fdw_audit
+test: gs_global_config_audit
 test: detail
+

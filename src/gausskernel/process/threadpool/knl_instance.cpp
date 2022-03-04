@@ -55,9 +55,8 @@ const int SIZE_OF_TWO_UINT64 = 16;
 
 knl_instance_context g_instance;
 
-#define ALLOCSET_UNDO_MAXSIZE (300 * g_instance.attr.attr_storage.undo_zone_count)
+const int ALLOCSET_UNDO_MAXSIZE = 300 * UNDO_ZONE_COUNT;
 
-extern void InitGlobalSeq();
 extern void InitGlobalVecFuncMap();
 
 static void knl_g_cost_init(knl_g_cost_context* cost_cxt)
@@ -141,6 +140,9 @@ static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
     wal_cxt->lastLRCFlushed = WAL_SCANNED_LRC_INIT;
     wal_cxt->num_locks_in_group = 0;
     wal_cxt->upgradeSwitchMode = NoDemote;
+    wal_cxt->totalXlogIterBytes = 0;
+    wal_cxt->totalXlogIterTimes = 0;
+    wal_cxt->xlogFlushStats = NULL;
 }
 
 static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
@@ -152,6 +154,23 @@ static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
     bgwriter_cxt->unlink_rel_fork_hashtbl = NULL;
     bgwriter_cxt->rel_one_fork_hashtbl_lock = NULL;
 }
+
+static void knl_g_repair_init(knl_g_repair_context *repair_cxt)
+{
+    Assert(repair_cxt != NULL);
+    repair_cxt->page_repair_hashtbl = NULL;
+    repair_cxt->page_repair_hashtbl_lock = NULL;
+    repair_cxt->repair_proc_latch = NULL;
+}
+
+static void knl_g_startup_init(knl_g_startup_context *starup_cxt)
+{
+    Assert(starup_cxt != NULL);
+    starup_cxt->remoteReadPageNum = 0;
+    starup_cxt->badPageHashTbl = NULL;
+    starup_cxt->current_record = NULL;
+}
+
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)
 {
@@ -230,7 +249,7 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
     predo_cxt->redoPf.recovery_done_ptr = 0;
     predo_cxt->redoPf.speed_according_seg = 0;
     predo_cxt->redoPf.local_max_lsn = 0;
-    predo_cxt->redoPf.oldest_segment = 0;
+    predo_cxt->redoPf.oldest_segment = 1;
     knl_g_set_redo_finish_status(0);
     predo_cxt->redoType = DEFAULT_REDO;
     predo_cxt->pre_enable_switch = 0;
@@ -239,6 +258,7 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
         pg_atomic_write_u64(&(predo_cxt->max_page_flush_lsn[i]), 0);
     }
     predo_cxt->permitFinishRedo = 0;
+    predo_cxt->last_replayed_conflict_csn = 0;
     predo_cxt->hotStdby = 0;
     predo_cxt->newestCheckpointLoc = InvalidXLogRecPtr;
     errno_t rc = memset_s(const_cast<CheckPoint *>(&predo_cxt->newestCheckpoint), sizeof(CheckPoint), 0, 
@@ -247,6 +267,25 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
     predo_cxt->unali_buf = (char*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
         NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS * BLCKSZ + BLCKSZ);
     predo_cxt->ali_buf = (char*)TYPEALIGN(BLCKSZ, predo_cxt->unali_buf);
+
+    rc = memset_s(&predo_cxt->redoCpuBindcontrl, sizeof(RedoCpuBindControl), 0, sizeof(RedoCpuBindControl));
+    securec_check(rc, "", "");
+}
+
+static void knl_g_parallel_decode_init(knl_g_parallel_decode_context* pdecode_cxt)
+{
+    Assert(pdecode_cxt != NULL);
+    pdecode_cxt->state = DECODE_INIT;
+    pdecode_cxt->parallelDecodeCtx = NULL;
+    pdecode_cxt->ParallelReaderWorkerStatus.threadId = 0;
+    pdecode_cxt->ParallelReaderWorkerStatus.threadState = PARALLEL_DECODE_WORKER_INVALID;
+    for (int i = 0; i < MAX_PARALLEL_DECODE_NUM; ++i) {
+        pdecode_cxt->ParallelDecodeWorkerStatusList[i].threadId = 0;
+        pdecode_cxt->ParallelDecodeWorkerStatusList[i].threadState = PARALLEL_DECODE_WORKER_INVALID;
+    }
+    pdecode_cxt->totalNum = 0;
+    SpinLockInit(&(pdecode_cxt->rwlock));
+    SpinLockInit(&(pdecode_cxt->destroy_lock));
 }
 
 static void knl_g_cache_init(knl_g_cache_context* cache_cxt)
@@ -277,9 +316,18 @@ void knl_g_cachemem_create()
                                                                              DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
                                                                              false);
     }
+    for (int i = 0; i < MAX_GLOBAL_PRC_NUM; ++i) {
+        g_instance.cache_cxt.global_prc_mem[i] = AllocSetContextCreate(g_instance.instance_context,
+                                                                       "GlobalPackageRuntimeCacheMemory",
+                                                                       ALLOCSET_DEFAULT_MINSIZE,
+                                                                       ALLOCSET_DEFAULT_INITSIZE,
+                                                                       ALLOCSET_DEFAULT_MAXSIZE,
+                                                                       SHARED_CONTEXT,
+                                                                       DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
+                                                                       false);
+    }
     g_instance.plan_cache = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GlobalPlanCache();
-    g_instance.global_session_pkg =
-        New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) PLGlobalPackageRuntimeCache();
+    g_instance.global_session_pkg = PLGlobalPackageRuntimeCache::Instance();
 }
 static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
 {
@@ -300,7 +348,10 @@ static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
     comm_cxt->force_cal_space_info = false;
     comm_cxt->cal_all_space_info_in_progress = false;
     comm_cxt->current_gsrewind_count = 0;
+    comm_cxt->isNeedChangeRole = false;
     comm_cxt->usedDnSpace = NULL;
+    comm_cxt->request_disaster_cluster = true;
+    comm_cxt->lastArchiveRcvTime = 0;
 
 #ifdef USE_SSL
     comm_cxt->libcomm_data_port_list = NULL;
@@ -316,12 +367,16 @@ static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
     knl_g_mctcp_init(&g_instance.comm_cxt.mctcp_cxt);
     knl_g_commutil_init(&g_instance.comm_cxt.commutil_cxt);
     knl_g_parallel_redo_init(&g_instance.comm_cxt.predo_cxt);
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; ++i) {
+        knl_g_parallel_decode_init(&g_instance.comm_cxt.pdecode_cxt[i]);
+    }
 }
 
 static void knl_g_conn_init(knl_g_conn_context* conn_cxt)
 {
     conn_cxt->CurConnCount = 0;
     conn_cxt->CurCMAConnCount = 0;
+    conn_cxt->CurCMAProcCount = 0;
     SpinLockInit(&conn_cxt->ConnCountLock);
 }
 
@@ -332,6 +387,11 @@ static void knl_g_executor_init(knl_g_executor_context* exec_cxt)
     exec_cxt->nodeName = "Local Node";
     exec_cxt->global_application_name = "";
 #endif
+}
+
+static void knl_g_rto_init(knl_g_rto_context *rto_cxt)
+{
+    rto_cxt->rto_standby_data = NULL;
 }
 
 static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
@@ -367,12 +427,18 @@ static void KnlGUndoInit(knl_g_undo_context *undoCxt)
             -1, (g_instance.undo_cxt.uZoneBitmap[i])->nwords * sizeof(bitmapword));
     }
     MemoryContextSwitchTo(oldContext);
-    for (auto i = 0; i < UNDO_ZONE_COUNT; ++i) {
-        undoCxt->uZones[i] = NULL;
-    }
     undoCxt->undoTotalSize = 0;
     undoCxt->undoMetaSize = 0;
     undoCxt->uZoneCount = 0;
+    undoCxt->maxChainSize = 0;
+    undoCxt->undoChainTotalSize = 0;
+    undoCxt->oldestFrozenXid = InvalidTransactionId;
+    undoCxt->oldestXidInUndo = InvalidTransactionId;
+}
+
+static void knl_g_flashback_init(knl_g_flashback_context *flashbackCxt)
+{
+    flashbackCxt->oldestXminInFlashback = InvalidTransactionId;
 }
 
 static void knl_g_libpq_init(knl_g_libpq_context* libpq_cxt)
@@ -470,6 +536,7 @@ static void knl_g_pid_init(knl_g_pid_context* pid_cxt)
     rc = memset_s(pid_cxt, sizeof(knl_g_pid_context), 0, sizeof(knl_g_pid_context));
     pid_cxt->PageWriterPID = NULL;
     pid_cxt->CommReceiverPIDS = NULL;
+    pid_cxt->PgAuditPID = NULL;
     securec_check(rc, "\0", "\0");
 }
 
@@ -528,6 +595,10 @@ static void knl_g_dw_init(knl_g_dw_context *dw_cxt)
     errno_t rc = memset_s(dw_cxt, sizeof(knl_g_dw_context), 0, sizeof(knl_g_dw_context));
     securec_check(rc, "\0", "\0");
     dw_cxt->closed = 1;
+	
+    dw_cxt->old_batch_version = false;
+    dw_cxt->recovery_dw_file_num = 0;
+    dw_cxt->recovery_dw_file_size = 0;
 }
 
 static void knl_g_numa_init(knl_g_numa_context* numa_cxt)
@@ -550,6 +621,7 @@ static void knl_g_archive_obs_init(knl_g_archive_context *archive_cxt)
     archive_cxt->in_switchover = false;
     archive_cxt->in_service_truncate = false;
     archive_cxt->slot_tline = 0;
+    archive_cxt->chosen_walsender_index = -1;
     SpinLockInit(&archive_cxt->barrier_lock);
 }
 
@@ -610,6 +682,11 @@ static void knl_g_spi_plan_init(knl_g_spi_plan_context* spi_plan_cxt)
 static void knl_g_roach_init(knl_g_roach_context* roach_cxt)
 {
     roach_cxt->isRoachRestore = false;
+    roach_cxt->targetTimeInPITR = NULL;
+    roach_cxt->globalBarrierRecordForPITR = NULL;
+    roach_cxt->isXLogForceRecycled = false;
+    roach_cxt->isGtmFreeCsn = false;
+    roach_cxt->targetRestoreTimeFromMedia = NULL;
 }
 
 static void knl_g_streaming_dr_init(knl_g_streaming_dr_context* streaming_dr_cxt)
@@ -618,6 +695,48 @@ static void knl_g_streaming_dr_init(knl_g_streaming_dr_context* streaming_dr_cxt
     streaming_dr_cxt->isInSwitchover = false;
     streaming_dr_cxt->isInteractionCompleted = false;
     streaming_dr_cxt->switchoverBarrierLsn = InvalidXLogRecPtr;
+    streaming_dr_cxt->rpoSleepTime = 0;
+    streaming_dr_cxt->rpoBalanceSleepTime = 0;
+    errno_t rc = memset_s(streaming_dr_cxt->currentBarrierId, MAX_BARRIER_ID_LENGTH, 0,
+                          sizeof(streaming_dr_cxt->currentBarrierId));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(streaming_dr_cxt->targetBarrierId, MAX_BARRIER_ID_LENGTH, 0,
+                  sizeof(streaming_dr_cxt->targetBarrierId));
+    securec_check(rc, "\0", "\0");
+    SpinLockInit(&streaming_dr_cxt->mutex);
+}
+
+static void knl_g_csn_barrier_init(knl_g_csn_barrier_context* csn_barrier_cxt)
+{
+    csn_barrier_cxt->barrier_hash_table = NULL;
+    csn_barrier_cxt->barrier_hashtbl_lock = NULL;
+    csn_barrier_cxt->barrier_context = NULL;
+    errno_t rc = memset_s(csn_barrier_cxt->stopBarrierId, MAX_BARRIER_ID_LENGTH, 0,
+                          sizeof(csn_barrier_cxt->stopBarrierId));
+    securec_check(rc, "\0", "\0");
+}
+
+static void knl_g_audit_init(knl_g_audit_context *audit_cxt)
+{
+    g_instance.audit_cxt.global_audit_context = AllocSetContextCreate(g_instance.instance_context,
+        "GlobalCacheMemory",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE,
+        SHARED_CONTEXT,
+        DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
+        false);
+
+    g_instance.audit_cxt.sys_audit_pipes = NULL;
+    g_instance.audit_cxt.index_file_lock = NULL;
+    g_instance.audit_cxt.audit_indextbl = NULL;
+    g_instance.audit_cxt.audit_indextbl_old = NULL;
+    g_instance.audit_cxt.current_audit_index = 0;
+    g_instance.audit_cxt.thread_num = 1;
+
+    for (int i = 0; i < MAX_AUDIT_NUM; ++i) {
+        g_instance.audit_cxt.audit_coru_fnum[i] = UINT32_MAX;
+    }
 }
 
 void knl_instance_init()
@@ -656,7 +775,6 @@ void knl_instance_init()
     MemoryContextSeal(g_instance.instance_context);
     MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
 
-    InitGlobalSeq();
     InitGlobalVecFuncMap();
     pthread_mutex_init(&g_instance.gpc_reset_lock, NULL);
     g_instance.global_session_seq = 0;
@@ -675,6 +793,8 @@ void knl_instance_init()
     knl_g_wlm_init(g_instance.wlm_cxt);
     knl_g_ckpt_init(&g_instance.ckpt_cxt);
     knl_g_bgwriter_init(&g_instance.bgwriter_cxt);
+    knl_g_repair_init(&g_instance.repair_cxt);
+    knl_g_startup_init(&g_instance.startup_cxt);
     knl_g_shmem_init(&g_instance.shmem_cxt);
     g_instance.ckpt_cxt_ctl = &g_instance.ckpt_cxt;
     g_instance.ckpt_cxt_ctl = (knl_g_ckpt_context*)TYPEALIGN(SIZE_OF_TWO_UINT64, g_instance.ckpt_cxt_ctl);
@@ -682,11 +802,13 @@ void knl_instance_init()
     knl_g_csnminsync_init(&g_instance.csnminsync_cxt);
     knl_g_dw_init(&g_instance.dw_batch_cxt);
     knl_g_dw_init(&g_instance.dw_single_cxt);
+    knl_g_rto_init(&g_instance.rto_cxt);
     knl_g_xlog_init(&g_instance.xlog_cxt);
     knl_g_compaction_init(&g_instance.ts_compaction_cxt);
     KnlGUndoInit(&g_instance.undo_cxt);
     knl_g_numa_init(&g_instance.numa_cxt);
     knl_g_adv_init(&g_instance.adv_cxt);
+    knl_g_flashback_init(&g_instance.flashback_cxt);
 
 #ifdef ENABLE_MOT
     knl_g_mot_init(&g_instance.mot_cxt);
@@ -706,9 +828,8 @@ void knl_instance_init()
     knl_g_spi_plan_init(&g_instance.spi_plan_cxt);
     knl_g_roach_init(&g_instance.roach_cxt);
     knl_g_streaming_dr_init(&g_instance.streaming_dr_cxt);
-	
-    errno_t rc = memset_s(g_instance.stopBarrierId, MAX_BARRIER_ID_LENGTH, 0, sizeof(g_instance.stopBarrierId));
-    securec_check(rc, "\0", "\0");
+    knl_g_csn_barrier_init(&g_instance.csn_barrier_cxt);
+    knl_g_audit_init(&g_instance.audit_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

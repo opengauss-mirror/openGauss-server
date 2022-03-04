@@ -200,8 +200,15 @@ Size SInvalShmemSize(void)
     Size size;
 
     size = offsetof(SISeg, procState);
-    if (g_instance.attr.attr_common.enable_thread_pool)
-        size = add_size(size, mul_size(sizeof(ProcState), MAX_SESSION_SLOT_COUNT));
+    if (g_instance.attr.attr_common.enable_thread_pool) {
+        if (EnableGlobalSysCache()) {
+            /* palloc another g_instance.shmem_cxt.MaxBackends for gsc, register share msg event for threads */
+            size = add_size(size, mul_size(sizeof(ProcState), MAX_THREAD_POOL_SIZE +
+                MAX_SESSION_SLOT_COUNT));
+        } else {
+            size = add_size(size, mul_size(sizeof(ProcState), MAX_SESSION_SLOT_COUNT));
+        }
+    }
     else
         size = add_size(size, mul_size(sizeof(ProcState), (Size)g_instance.shmem_cxt.MaxBackends));
 
@@ -219,12 +226,7 @@ void CreateSharedInvalidationState(void)
     bool found = false;
 
     /* Allocate space in shared memory */
-    size = offsetof(SISeg, procState);
-    if (g_instance.attr.attr_common.enable_thread_pool) {
-        size = add_size(size, mul_size(sizeof(ProcState), MAX_SESSION_SLOT_COUNT));
-    } else {
-        size = add_size(size, mul_size(sizeof(ProcState), (Size)g_instance.shmem_cxt.MaxBackends));
-    }
+    size = SInvalShmemSize();
 
     t_thrd.shemem_ptr_cxt.shmInvalBuffer = (SISeg*)ShmemInitStruct("shmInvalBuffer", size, &found);
 
@@ -362,7 +364,6 @@ static void SharedInvalWorkSessionInit(bool sendOnly)
     stateP = &segP->procState[index];
 
     if (stateP->procPid != 0) {
-        t_thrd.proc_cxt.MyBackendId = InvalidBackendId;
         LWLockRelease(SInvalWriteLock);
         ereport(FATAL,
                 (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
@@ -643,7 +644,7 @@ void SIInsertDataEntries(const SharedInvalidationMessage* data, int n)
  * Note: we assume that "datasize" is not so large that it might be important
  * to break our hold on SInvalReadLock into segments.
  */
-int SIGetDataEntries(SharedInvalidationMessage* data, int datasize)
+int SIGetDataEntries(SharedInvalidationMessage* data, int datasize, bool worksession)
 {
     SISeg* segP = NULL;
     ProcState* stateP = NULL;
@@ -651,9 +652,17 @@ int SIGetDataEntries(SharedInvalidationMessage* data, int datasize)
     int n;
 
     segP = t_thrd.shemem_ptr_cxt.shmInvalBuffer;
+    /* fetch inval msg state info for backend or session */
     if (IS_THREAD_POOL_WORKER) {
-        stateP = &segP->procState[u_sess->session_ctr_index];
+        if (EnableLocalSysCache() && !worksession) {
+            /* GSC is on, and this is a thread pool worker, fetch inval msg slot by backendid */
+            stateP = &segP->procState[t_thrd.proc_cxt.MyBackendId - 1];
+        } else {
+            /* this is a thread pool worker, fetch inval msg slot by session index */
+            stateP = &segP->procState[u_sess->session_ctr_index];
+        }
     } else {
+        /* if not thread pool worker(either threadpool mode or not),  proc slot is located by current backendId */
         stateP = &segP->procState[t_thrd.proc_cxt.MyBackendId - 1];
     }
 

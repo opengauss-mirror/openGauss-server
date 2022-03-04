@@ -41,6 +41,7 @@ static const hintKeyword parsers[] =
 	{HINT_TRUE, TRUE_P},
 	{HINT_FALSE, FALSE_P},
 	{HINT_PRED_PUSH, Predpush_P},
+	{HINT_PRED_PUSH_SAME_LEVEL, PredpushSameLevel_P},
 	{HINT_REWRITE, Rewrite_P},
 	{HINT_GATHER, Gather_P},
 	{HINT_SET, Set_P},

@@ -125,7 +125,6 @@
  * --------------------
  */
 
-#define ALLOC_CHUNKHDRSZ MAXALIGN(sizeof(AllocChunkData))
 #ifdef MEMORY_CONTEXT_CHECKING
 #define ALLOC_MAGICHDRSZ MAXALIGN(sizeof(AllocMagicData))
 #else
@@ -142,27 +141,6 @@ typedef struct AllocMagicData {
     uint32 posnum;
 } AllocMagicData;
 #endif
-
-/*
- * AllocChunk
- *		The prefix of each piece of memory in an AllocBlock
- *
- * NB: this MUST match StandardChunkHeader as defined by utils/memutils.h.
- */
-typedef struct AllocChunkData {
-    /* aset is the owning aset if allocated, or the freelist link if free */
-    void* aset;
-    /* size is always the size of the usable space in the chunk */
-    Size size;
-#ifdef MEMORY_CONTEXT_CHECKING
-    /* when debugging memory usage, also store actual requested size */
-    /* this is zero in a free chunk */
-    Size requested_size;
-    const char* file; /* __FILE__ of palloc/palloc0 call */
-    int line;         /* __LINE__ of palloc/palloc0 call */
-    uint32 prenum;    /* prefix magic number */
-#endif
-} AllocChunkData;
 
 /*
  * AllocPointerIsValid
@@ -232,7 +210,7 @@ static const unsigned char LogTable256[256] = {0,
 
 #ifdef MEMORY_CONTEXT_CHECKING
 #define CHECK_CONTEXT_OWNER(context) \
-    Assert((context->session_id == u_sess->session_id) || (context->thread_id == gs_thread_self()))
+    Assert((context->thread_id == gs_thread_self() || (context->session_id == u_sess->session_id)))
 #else
 #define CHECK_CONTEXT_OWNER(context) ((void)0)
 #endif
@@ -836,6 +814,8 @@ void GenericMemoryAllocator::AllocSetDelete(MemoryContext context)
 template <bool enable_memoryprotect, bool is_shared, bool is_tracked>
 void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, Size size, const char* file, int line)
 {
+    Assert(file != NULL);
+    Assert(line != 0);
     AllocSet set = (AllocSet)context;
     AllocBlock block;
     AllocChunk chunk;
@@ -908,10 +888,12 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
         chunk = (AllocChunk)(((char*)block) + ALLOC_BLOCKHDRSZ);
         chunk->aset = set;
         chunk->size = chunk_size;
-#ifdef MEMORY_CONTEXT_CHECKING
-        chunk->requested_size = size;
+#ifdef MEMORY_CONTEXT_TRACK
         chunk->file = file;
         chunk->line = line;
+#endif
+#ifdef MEMORY_CONTEXT_CHECKING
+        chunk->requested_size = size;
         chunk->prenum = PremagicNum;
         /* set mark to catch clobber of "unused" space */
         if (size < chunk_size)
@@ -973,11 +955,12 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
         chunk->aset = (void*)set;
 
         set->freeSpace -= (chunk->size + ALLOC_CHUNKHDRSZ);
-
-#ifdef MEMORY_CONTEXT_CHECKING
-        chunk->requested_size = size;
+#ifdef MEMORY_CONTEXT_TRACK
         chunk->file = file;
         chunk->line = line;
+#endif
+#ifdef MEMORY_CONTEXT_CHECKING
+        chunk->requested_size = size;
         chunk->prenum = PremagicNum;
         /* set mark to catch clobber of "unused" space */
         if (size < chunk->size)
@@ -1051,11 +1034,13 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
                 availspace -= (availchunk + ALLOC_CHUNKHDRSZ);
 
                 chunk->size = availchunk;
+#ifdef MEMORY_CONTEXT_TRACK
+                chunk->file = NULL;
+                chunk->line = 0;
+#endif
 #ifdef MEMORY_CONTEXT_CHECKING
                 chunk->requested_size = 0; /* mark it free */
                 chunk->prenum = 0;
-                chunk->file = NULL;
-                chunk->line = 0;
 #endif
                 chunk->aset = (void*)set->freelist[a_fidx];
                 set->freelist[a_fidx] = chunk;
@@ -1146,10 +1131,12 @@ void* GenericMemoryAllocator::AllocSetAlloc(MemoryContext context, Size align, S
 
     chunk->aset = (void*)set;
     chunk->size = chunk_size;
-#ifdef MEMORY_CONTEXT_CHECKING
-    chunk->requested_size = size;
+#ifdef MEMORY_CONTEXT_TRACK
     chunk->file = file;
     chunk->line = line;
+#endif
+#ifdef MEMORY_CONTEXT_CHECKING
+    chunk->requested_size = size;
     chunk->prenum = PremagicNum;
     /* set mark to catch clobber of "unused" space */
     if (size < chunk->size)
@@ -1288,17 +1275,18 @@ void GenericMemoryAllocator::AllocSetFree(MemoryContext context, void* pointer)
         int fidx = AllocSetFreeIndex(chunk->size);
 
         chunk->aset = (void*)set->freelist[fidx];
-
         set->freeSpace += chunk->size + ALLOC_CHUNKHDRSZ;
 
-#ifdef MEMORY_CONTEXT_CHECKING
-        /* Reset requested_size to 0 in chunks that are on freelist */
-        AllocMagicData* magic =
-            (AllocMagicData*)(((char*)chunk) + ALLOC_CHUNKHDRSZ + MAXALIGN(chunk->requested_size) - ALLOC_MAGICHDRSZ);
-        chunk->requested_size = 0;
+#ifdef MEMORY_CONTEXT_TRACK
         chunk->file = NULL;
         chunk->line = 0;
+#endif
+#ifdef MEMORY_CONTEXT_CHECKING
+        /* Reset requested_size to 0 in chunks that are on freelist */
+        chunk->requested_size = 0;
         chunk->prenum = 0;
+        AllocMagicData* magic =
+            (AllocMagicData*)(((char*)chunk) + ALLOC_CHUNKHDRSZ + MAXALIGN(chunk->requested_size) - ALLOC_MAGICHDRSZ);
         magic->aset = NULL;
         magic->size = 0;
         magic->posnum = 0;
@@ -1371,16 +1359,17 @@ void* GenericMemoryAllocator::AllocSetRealloc(
      */
     if (oldsize >= (size + ALLOC_MAGICHDRSZ)) {
         size += ALLOC_MAGICHDRSZ;
+#ifdef MEMORY_CONTEXT_TRACK
+        chunk->file = file;
+        chunk->line = line;
+#endif
 #ifdef MEMORY_CONTEXT_CHECKING
 #ifdef RANDOMIZE_ALLOCATED_MEMORY
         /* We can only fill the extra space if we know the prior request */
         if (size > chunk->requested_size)
             randomize_mem((char*)AllocChunkGetPointer(chunk) + chunk->requested_size, size - chunk->requested_size);
 #endif
-
         chunk->requested_size = size;
-        chunk->file = file;
-        chunk->line = line;
         chunk->prenum = PremagicNum;
         /* set mark to catch clobber of "unused" space */
         if (size < oldsize)
@@ -1459,16 +1448,16 @@ void* GenericMemoryAllocator::AllocSetRealloc(
         if (block->next)
             block->next->prev = block;
         chunk->size = chksize;
-
+#ifdef MEMORY_CONTEXT_TRACK
+        chunk->file = file;
+        chunk->line = line;
+#endif
 #ifdef MEMORY_CONTEXT_CHECKING
 #ifdef RANDOMIZE_ALLOCATED_MEMORY
         /* We can only fill the extra space if we know the prior request */
         randomize_mem((char*)AllocChunkGetPointer(chunk) + chunk->requested_size, size - chunk->requested_size);
 #endif
-
         chunk->requested_size = size;
-        chunk->file = file;
-        chunk->line = line;
         chunk->prenum = PremagicNum;
         /* set mark to catch clobber of "unused" space */
         if (size < chunk->size)
@@ -1793,6 +1782,49 @@ void dumpAllocBlock(AllocSet set, StringInfoData* memoryBuf)
 
 #endif /* MEMORY_CONTEXT_CHECKING */
 
+#ifdef MEMORY_CONTEXT_TRACK
+/*
+ * chunk walker
+ */
+static void GetAllocChunkInfo(AllocSet set, AllocBlock blk, StringInfoData* memoryBuf)
+{
+    char* bpoz = ((char*)blk) + ALLOC_BLOCKHDRSZ;
+    while (bpoz < blk->freeptr) {
+        AllocChunk chunk = (AllocChunk)bpoz;
+        Size chsize = chunk->size;
+
+        /* the chunk is free, so skip it */
+        if (chunk->aset != set) {
+            bpoz += ALLOC_CHUNKHDRSZ + chsize;
+            continue;
+        }
+
+        if (memoryBuf != NULL) {
+            appendStringInfo(memoryBuf, "%s:%d, %lu\n", chunk->file, chunk->line, chunk->size);
+        }
+
+        bpoz += ALLOC_CHUNKHDRSZ + chsize;
+    }
+}
+
+void GetAllocBlockInfo(AllocSet set, StringInfoData* memoryBuf)
+{
+    for (AllocBlock blk = set->blocks; blk != NULL; blk = blk->next) {
+        char* bpoz = ((char*)blk) + ALLOC_BLOCKHDRSZ;
+        long blk_used = blk->freeptr - bpoz;
+
+        /* empty block - empty can be keeper-block only (from AllocSetCheck()) */
+        if (!blk_used)
+            continue;
+
+        /* there are chunks in block */
+        GetAllocChunkInfo(set, blk, memoryBuf);
+    }
+
+    return;
+}
+
+#endif
 /*
  * alloc_trunk_size
  *	Given a width, calculate how many bytes are actually allocated

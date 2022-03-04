@@ -315,7 +315,8 @@ retry:
             return 0;
 #endif
         ereport(ERROR,
-            (errcode_for_socket_access(), errmsg("Unexpected EOF on GDS connection \"%s\": %m", m_uri->ToString())));
+            (errcode(ERRCODE_CONNECTION_RESET_BY_PEER),
+                errmsg("Unexpected EOF on GDS connection \"%s\": %m", m_uri->ToString())));
         return -1;
 
     } else if (nread == 0)

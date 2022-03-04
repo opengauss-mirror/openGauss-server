@@ -67,6 +67,10 @@ typedef struct HeapScanDescData {
      */
     HeapTupleData rs_ctup; /* current tuple in scan, if any */
     ParallelHeapScanDesc rs_parallel; /* parallel scan information */
+
+    HeapTupleData* rs_ctupBatch;
+
+    /* this must be the end of this sturcture */
     HeapTupleHeaderData rs_ctbuf_hdr;
 } HeapScanDescData;
 

@@ -5,7 +5,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY IF EXISTS triggerCMK CASCADE;
-NOTICE:  global setting "triggercmk" does not exist
+NOTICE:  client master key "triggercmk" does not exist
 CREATE CLIENT MASTER KEY triggerCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 CREATE COLUMN ENCRYPTION KEY triggerCEK1 WITH VALUES (CLIENT_MASTER_KEY = triggerCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 CREATE COLUMN ENCRYPTION KEY triggerCEK2 WITH VALUES (CLIENT_MASTER_KEY = triggerCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
@@ -150,15 +150,15 @@ INSERT INTO test_trigger_src_tbl VALUES(100,400,500);
 SELECT * FROM test_trigger_src_tbl;
  id1 | id2 | id3 
 -----+-----+-----
- 100 | 200 | 300
  100 | 400 | 500
+ 100 | 200 | 300
 (2 rows)
 
 SELECT * FROM test_trigger_des_tbl;
  id1 | id2 | id3 
 -----+-----+-----
- 100 | 200 | 300
  100 | 400 | 500
+ 100 | 200 | 300
 (2 rows)
 
 --执行UPDATE触发事件并检查触发结果
@@ -166,15 +166,15 @@ UPDATE test_trigger_src_tbl SET id3=400 WHERE id2=200;
 SELECT * FROM test_trigger_src_tbl;
  id1 | id2 | id3 
 -----+-----+-----
- 100 | 400 | 500
  100 | 200 | 400
+ 100 | 400 | 500
 (2 rows)
 
 SELECT * FROM test_trigger_des_tbl;
  id1 | id2 | id3 
 -----+-----+-----
- 100 | 400 | 500
  100 | 200 | 400
+ 100 | 400 | 500
 (2 rows)
 
 --执行DELETE触发事件并检查触发结果
@@ -183,15 +183,15 @@ ERROR(CLIENT): operator is not allowed on datatype of this column
 SELECT * FROM test_trigger_src_tbl;
  id1 | id2 | id3 
 -----+-----+-----
- 100 | 400 | 500
  100 | 200 | 400
+ 100 | 400 | 500
 (2 rows)
 
 SELECT * FROM test_trigger_des_tbl; 
  id1 | id2 | id3 
 -----+-----+-----
- 100 | 400 | 500
  100 | 200 | 400
+ 100 | 400 | 500
 (2 rows)
 
 DROP TRIGGER insert_trigger ON test_trigger_src_tbl;
@@ -199,6 +199,9 @@ DROP TRIGGER update_trigger ON test_trigger_src_tbl;
 DROP TRIGGER delete_trigger ON test_trigger_src_tbl;
 DROP TABLE IF EXISTS test_trigger_src_tbl;
 DROP TABLE IF EXISTS test_trigger_des_tbl;
+DROP FUNCTION tri_delete_func;
+DROP FUNCTION tri_insert_func;
+DROP FUNCTION tri_update_func;
 DROP COLUMN ENCRYPTION KEY triggerCEK1;
 DROP COLUMN ENCRYPTION KEY triggerCEK2;
 DROP CLIENT MASTER KEY triggerCMK;

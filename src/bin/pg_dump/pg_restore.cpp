@@ -69,6 +69,10 @@ extern int optind;
 #include "gauss_sft.h"
 #endif
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 void usage(const char* progname);
 static bool checkDecryptArchive(char** pFileSpec, const ArchiveFormat fm, const char* key);
 static void restore_getopts(int argc, char** argv, struct option* options, RestoreOptions* opts, char** inputFileSpec);
@@ -149,9 +153,13 @@ int main(int argc, char** argv)
         {"role", required_argument, NULL, 2},
         {"section", required_argument, NULL, 3},
         {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
         {"no-publications", no_argument, &no_publications, 1},
+#endif
         {"no-security-labels", no_argument, &no_security_labels, 1},
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
         {"no-subscriptions", no_argument, &no_subscriptions, 1},
+#endif
         {"rolepassword", required_argument, NULL, 5},
         {"with-key", required_argument, NULL, 6},
         {"pipeline", no_argument, NULL, 7},
@@ -769,9 +777,13 @@ void usage(const char* pchProgname)
     printf(_("  --disable-triggers                    disable triggers during data-only restore\n"));
     printf(_("  --no-data-for-failed-tables           do not restore data of tables that could not be\n"
              "                                        created\n"));
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
     printf(_("  --no-publications                     do not restore publications\n"));
+#endif
     printf(_("  --no-security-labels                  do not restore security labels\n"));
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
     printf(_("  --no-subscriptions                    do not restore subscriptions\n"));
+#endif
     printf(_("  --no-tablespaces                      do not restore tablespace assignments\n"));
     printf(_("  --section=SECTION                     restore named section (pre-data, data, or post-data)\n"));
     printf(_("  --use-set-session-authorization       use SET SESSION AUTHORIZATION commands instead of\n"

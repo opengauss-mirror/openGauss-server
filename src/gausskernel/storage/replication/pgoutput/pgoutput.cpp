@@ -37,6 +37,7 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
 static void pgoutput_shutdown(LogicalDecodingContext *ctx);
 static void pgoutput_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn);
 static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
+static void pgoutput_abort_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
 static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, Relation rel,
     ReorderBufferChange *change);
 static bool pgoutput_origin_filter(LogicalDecodingContext *ctx, RepOriginId origin_id);
@@ -68,6 +69,7 @@ void _PG_output_plugin_init(OutputPluginCallbacks *cb)
     cb->begin_cb = pgoutput_begin_txn;
     cb->change_cb = pgoutput_change;
     cb->commit_cb = pgoutput_commit_txn;
+    cb->abort_cb = pgoutput_abort_txn;
     cb->filter_by_origin_cb = pgoutput_origin_filter;
     cb->shutdown_cb = pgoutput_shutdown;
 }
@@ -152,10 +154,10 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
         /* Init publication state. */
         data->publications = NIL;
         t_thrd.publication_cxt.publications_valid = false;
-        CacheRegisterSyscacheCallback(PUBLICATIONOID, publication_invalidation_cb, (Datum)0);
+        CacheRegisterThreadSyscacheCallback(PUBLICATIONOID, publication_invalidation_cb, (Datum)0);
 
         /* Initialize relation schema cache. */
-        init_rel_sync_cache(u_sess->cache_mem_cxt);
+        init_rel_sync_cache(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
     }
 }
 
@@ -204,6 +206,15 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
     OutputPluginPrepareWrite(ctx, true);
     logicalrep_write_commit(ctx->out, txn, commit_lsn);
     OutputPluginWrite(ctx, true);
+}
+
+/*
+ * ABORT callback
+ */
+static void pgoutput_abort_txn(LogicalDecodingContext* ctx, ReorderBufferTXN* txn)
+{
+    /* Should not happen */
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("abort transaction not currently supported")));
 }
 
 /* Check whether the buffer change type is supported, return true if supported */
@@ -426,8 +437,8 @@ static void init_rel_sync_cache(MemoryContext cachectx)
 
     Assert(t_thrd.publication_cxt.RelationSyncCache != NULL);
 
-    CacheRegisterRelcacheCallback(rel_sync_cache_relation_cb, (Datum)0);
-    CacheRegisterSyscacheCallback(PUBLICATIONRELMAP, rel_sync_cache_publication_cb, (Datum)0);
+    CacheRegisterThreadRelcacheCallback(rel_sync_cache_relation_cb, (Datum)0);
+    CacheRegisterThreadSyscacheCallback(PUBLICATIONRELMAP, rel_sync_cache_publication_cb, (Datum)0);
 }
 
 static void RefreshRelationEntry(RelationSyncEntry *entry, PGOutputData *data, Oid relid)
@@ -474,7 +485,7 @@ static void RefreshRelationEntry(RelationSyncEntry *entry, PGOutputData *data, O
             unsigned int u;
             int n;
 
-            if (sscanf_s(relname, "pg_temp_%u%n", &u, &n) == 1 && relname[n] == '\0' &&
+            if (relname != NULL && sscanf_s(relname, "pg_temp_%u%n", &u, &n) == 1 && relname[n] == '\0' &&
                 get_rel_relkind(u) == RELKIND_RELATION) {
                 break;
             }
@@ -490,7 +501,7 @@ static void RefreshRelationEntry(RelationSyncEntry *entry, PGOutputData *data, O
             break;
     }
 
-    list_free(pubids);
+    list_free_ext(pubids);
 
     entry->replicate_valid = true;
 }

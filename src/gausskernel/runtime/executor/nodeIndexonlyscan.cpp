@@ -116,6 +116,7 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     ScanDirection direction;
     IndexScanDesc scandesc;
     TupleTableSlot* slot = NULL;
+    TupleTableSlot* tmpslot = NULL;
     ItemPointer tid;
     bool isVersionScan = TvIsVersionScan(&node->ss);
     bool isUHeap = false;
@@ -135,8 +136,9 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     scandesc = node->ioss_ScanDesc;
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
-
     isUHeap = RelationIsUstoreFormat(node->ss.ss_currentRelation);
+    tmpslot = MakeSingleTupleTableSlot(RelationGetDescr(scandesc->heapRelation),
+        false, scandesc->indexRelation->rd_tam_type);
 
     /*
      * OK, now that we have what we need, fetch the next tuple.
@@ -174,17 +176,16 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
             /* ustore with multi-version ubtree only recheck IndexTuple when xs_recheck_itup is set */
             if (indexScan->xs_recheck_itup) {
                 node->ioss_HeapFetches++;
-                if (!IndexFetchUHeap(indexScan, slot)) {
+                if (!IndexFetchUHeap(indexScan, tmpslot)) {
                     continue; /* this TID indicate no visible tuple */
                 }
-                if (!RecheckIndexTuple(indexScan, slot)) {
+                if (!RecheckIndexTuple(indexScan, tmpslot)) {
                     continue; /* the visible version not match the IndexTuple */
                 }
             }
         } else if (isVersionScan ||
             !visibilitymap_test(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), &node->ioss_VMBuffer)) {
             /* IMPORTANT: We ALWAYS visit the heap to check visibility in VERSION SCAN. */
-
             /*
              * Rats, we have to visit the heap to check visibility.
              */
@@ -258,7 +259,7 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
          */
         if (tuple == NULL)
             PredicateLockPage(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), estate->es_snapshot);
-
+        ExecDropSingleTupleTableSlot(tmpslot);
         return slot;
     }
 
@@ -266,6 +267,7 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
      * if we get here it means the index scan failed so we are at the end of
      * the scan..
      */
+    ExecDropSingleTupleTableSlot(tmpslot);
     return ExecClearTuple(slot);
 }
 

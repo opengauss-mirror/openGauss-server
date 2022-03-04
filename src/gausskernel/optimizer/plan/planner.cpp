@@ -123,7 +123,8 @@ const static Oid VectorEngineUnsupportType[] = {
     LINEOID,
     CIRCLEOID,
     POLYGONOID,
-    PATHOID
+    PATHOID,
+    HASH32OID
     };
 
 extern PGXCNodeAllHandles* connect_compute_pool(int srvtype);
@@ -226,8 +227,7 @@ typedef struct {
  *         With multinode hint:
  *             allow the query to continue, report no warnings or errors.
  */
-typedef struct
-{
+typedef struct {
     int remote_query_count;
     bool has_modify_table;
 
@@ -237,6 +237,11 @@ typedef struct
      */
     List *nodeList;
 } FindNodesContext;
+
+typedef struct {
+    bool has_redis_stream;
+    int broadcast_stream_cnt;
+} FindStreamNodesForLoopContext;
 
 static bool needs_two_level_groupagg(PlannerInfo* root, Plan* plan, Node* distinct_node, List* distributed_key,
     bool* need_redistribute, bool* need_local_redistribute);
@@ -248,10 +253,11 @@ static Plan* mark_group_stream(PlannerInfo* root, List* tlist, Plan* result_plan
 static Plan* mark_distinct_stream(
     PlannerInfo* root, List* tlist, Plan* plan, List* groupcls, Index query_level, List* current_pathkeys);
 static List* get_optimal_distribute_key(PlannerInfo* root, List* groupClause, Plan* plan, double* multiple);
+static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, VectorPlanContext* planContext);
 static bool vector_engine_expression_walker(Node* node, DenseRank_context* context);
 static bool vector_engine_walker(Plan* result_plan, bool check_rescan);
 static Plan* fallback_plan(Plan* result_plan);
-static Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery);
+static Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery, bool forceVectorEngine);
 static Plan* build_vector_plan(Plan* plan);
 static Plan* mark_windowagg_stream(
     PlannerInfo* root, Plan* plan, List* tlist, WindowClause* wc, List* pathkeys, WindowLists* wflists);
@@ -674,12 +680,10 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
         MOD_OPT,
         "resultRelations is not empty when finish creating a plan for a scrollable cursor");
 
-#ifdef STREAMPLAN
     if ((IS_STREAM_PLAN || (IS_PGXC_DATANODE && (!IS_STREAM || IS_STREAM_DATANODE))) && root->query_level == 1) {
         /* remote query and windowagg do not support vectorize rescan, so fallback to row plan */
         top_plan = try_vectorize_plan(top_plan, parse, cursorOptions & CURSOR_OPT_HOLD);
     }
-#endif
 
     top_plan = set_plan_references(root, top_plan);
     delete_redundant_streams_of_remotequery((RemoteQuery *)top_plan);
@@ -1579,6 +1583,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     if (parse->upsertClause) {
         parse->upsertClause->updateTlist = (List*)
             preprocess_expression(root, (Node*)parse->upsertClause->updateTlist, EXPRKIND_TARGET);
+        parse->upsertClause->upsertWhere = (Node*)
+            preprocess_expression(root, (Node*)parse->upsertClause->upsertWhere, EXPRKIND_QUAL);
     }
     root->append_rel_list = (List*)preprocess_expression(root, (Node*)root->append_rel_list, EXPRKIND_APPINFO);
 
@@ -1859,6 +1865,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     /* Fix var's if we have changed var */
     if (root->var_mappings != NIL) {
         fix_vars_plannode(root, plan);
+        root->parse->is_from_inlist2join_rewrite = true;
     }
 
     return plan;
@@ -2662,8 +2669,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         if (parse->rowMarks)
             ereport(ERROR,
                 (errmodule(MOD_OPT), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+#ifndef ENABLE_MULTIPLE_NODES
                     errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed "
                            "with UNION/INTERSECT/EXCEPT"),
+#else
+                    errmsg("SELECT FOR UPDATE/SHARE is not allowed with UNION/INTERSECT/EXCEPT"),
+#endif
                     errdetail("N/A"),
                     errcause("SQL uses unsupported feature."),
                     erraction("Modify SQL statement according to the manual.")));
@@ -4911,9 +4922,9 @@ static void preprocess_rowmarks(PlannerInfo* root)
         /* The strength of lc is not set at old version and distribution. Set it according to forUpdate. */
         if (t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM
 #ifdef ENABLE_MULTIPLE_NODES
-        || true
+            || true
 #endif
-        ) {
+            ) {
             rc->strength = rc->forUpdate ? LCS_FORUPDATE : LCS_FORSHARE;
         }
         switch (rc->strength) {
@@ -4934,6 +4945,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
                 break;
         }
         newrc->noWait = rc->noWait;
+        newrc->waitSec = rc->waitSec;
         newrc->isParent = false;
         newrc->bms_nodeids = ng_get_baserel_data_nodeids(rte->relid, rte->relkind);
 
@@ -4961,6 +4973,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
         else
             newrc->markType = ROW_MARK_COPY;
         newrc->noWait = false; /* doesn't matter */
+        newrc->waitSec = 0;
         newrc->isParent = false;
         newrc->bms_nodeids = (RTE_RELATION == rte->rtekind && RELKIND_FOREIGN_TABLE != rte->relkind 
                               && RELKIND_STREAM != rte->relkind)
@@ -7429,100 +7442,6 @@ bool plan_cluster_use_sort(Oid tableOid, Oid indexOid)
 }
 
 /*
- * plan_create_index_workers
- *		Use the planner to decide how many parallel worker processes
- *		CREATE INDEX should request for use
- *
- * tableOid is the table on which the index is to be built.  indexOid is the
- * OID of an index to be created or reindexed (which must be a btree index).
- *
- * Return value is the number of parallel worker processes to request.  It
- * may be unsafe to proceed if this is 0.  Note that this does not include the
- * leader participating as a worker (value is always a number of parallel
- * worker processes).
- *
- * Note: caller had better already hold some type of lock on the table and
- * index.
- */
-int plan_create_index_workers(Oid tableOid)
-{
-    PlannerInfo *root;
-    Query *query;
-    PlannerGlobal *glob;
-    RangeTblEntry *rte;
-    Relation heap;
-    RelOptInfo *rel;
-    int parallel_workers;
-    RelPageType heap_blocks;
-    double reltuples;
-    double allvisfrac;
-
-    /* Set up largely-dummy planner state */
-    query = makeNode(Query);
-    query->commandType = CMD_SELECT;
-
-    glob = makeNode(PlannerGlobal);
-
-    root = makeNode(PlannerInfo);
-    root->parse = query;
-    root->glob = glob;
-    root->query_level = 1;
-    root->planner_cxt = CurrentMemoryContext;
-    root->wt_param_id = -1;
-
-    /*
-     * Build a minimal RTE.
-     *
-     * Set the target's table to be an inheritance parent.  This is a kludge
-     * that prevents problems within get_relation_info(), which does not
-     * expect that any IndexOptInfo is currently undergoing REINDEX.
-     */
-    rte = makeNode(RangeTblEntry);
-    rte->rtekind = RTE_RELATION;
-    rte->relid = tableOid;
-    rte->relkind = RELKIND_RELATION; /* Don't be too picky. */
-    rte->lateral = false;
-    rte->inh = true;
-    rte->inFromCl = true;
-    query->rtable = list_make1(rte);
-
-    /* Set up RTE/RelOptInfo arrays */
-    setup_simple_rel_arrays(root);
-
-    /* Build RelOptInfo */
-    rel = build_simple_rel(root, 1, RELOPT_BASEREL);
-
-    heap = heap_open(tableOid, NoLock);
-
-    /*
-     * Determine if it's safe to proceed.
-     *
-     * Currently, parallel workers can't access the leader's temporary tables,
-     * or the leader's relmapper.c state, which is needed for builds on mapped
-     * relations.
-     */
-    if (heap->rd_rel->relpersistence == RELPERSISTENCE_TEMP || RelationIsMapped(heap)) {
-        parallel_workers = 0;
-        goto done;
-    }
-    /*
-     * Estimate heap relation size ourselves, since rel->pages cannot be
-     * trusted (heap RTE was marked as inheritance parent)
-     */
-    estimate_rel_size(heap, NULL, &heap_blocks, &reltuples, &allvisfrac, NULL);
-
-    /*
-     * Determine number of workers to scan the heap relation using generic
-     * model
-     */
-    parallel_workers = compute_parallel_worker(rel, heap_blocks, RelationGetParallelWorkers(heap, -1));
-done:
-    heap_close(heap, NoLock);
-
-    return parallel_workers;
-}
-
-/*
  * @@GaussDB@@
  * Target       : data partition
  * Brief        : Use the planner to decide how CLUSTER should implement sorting
@@ -8521,11 +8440,15 @@ static bool IsTypeUnSupportedByVectorEngine(Oid typeOid)
 {
     /* we don't support user defined type. */
     if (typeOid >= FirstNormalObjectId) {
+        ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+            errmsg("Vectorize plan failed due to has unsupport type: %u", typeOid)));
         return true;
     }
 
     for (uint32 i = 0; i < sizeof(VectorEngineUnsupportType) / sizeof(Oid); ++i) {
         if (VectorEngineUnsupportType[i] == typeOid) {
+            ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Vectorize plan failed due to has unsupport type: %u", typeOid)));
             return true;
         }
     }
@@ -8537,7 +8460,7 @@ static bool IsTypeUnSupportedByVectorEngine(Oid typeOid)
  * @param[IN] node:  current expr node
  * @return: bool, true if it has
  */
-bool vector_engine_unsupport_expression_walker(Node* node)
+bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* planContext)
 {
     if (node == NULL) {
         return false;
@@ -8553,14 +8476,19 @@ bool vector_engine_unsupport_expression_walker(Node* node)
         case T_ConvertRowtypeExpr:
         case T_ArrayExpr:
         case T_RowExpr:
+        case T_Rownum:
         case T_XmlExpr:
         case T_CoerceToDomain:
         case T_CoerceToDomainValue:
         case T_CurrentOfExpr:
+            ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Vectorize plan failed due to has unsupport expression: %d", nodeTag(node))));
             return true;
         case T_Var: {
             Var *var = (Var *)node;
             if (var->varattno == InvalidAttrNumber) {
+                ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                    errmsg("Vectorize plan failed due to has system column")));
                 return true;
             } else {
                 return IsTypeUnSupportedByVectorEngine(var->vartype);
@@ -8568,21 +8496,51 @@ bool vector_engine_unsupport_expression_walker(Node* node)
             break;
         }
         case T_Const: {
-                Const* c = (Const *)node;
-                return IsTypeUnSupportedByVectorEngine(c->consttype);
-            }
+            Const* c = (Const *)node;
+            return IsTypeUnSupportedByVectorEngine(c->consttype);
+        }
         case T_Param: {
             Param *par = (Param *)node;
             return IsTypeUnSupportedByVectorEngine(par->paramtype);
         }
+        case T_SubPlan: {
+            SubPlan* subplan = (SubPlan*)node;
+            /* make sure that subplan return type must supported by vector engine */
+            if (!IsTypeSupportedByCStore(subplan->firstColType)) {
+                return true;
+            }
+            break;
+        }
+        /* count the number of complex expression, for vectorized plan of row tables */
+        case T_CoerceViaIO:
+        case T_GroupingFunc:
+        case T_WindowFunc:
+        case T_FuncExpr: {
+            /*
+	     * make sure that expr return type must supported by vector engine.
+	     * When the expression is filter, the type is not checked because
+	     * the result value is not passed up for calculation.
+	     */
+            if (planContext && !planContext->currentExprIsFilter
+                && !IsTypeSupportedByCStore(exprType(node))) {
+                return true;
+            }
+            break;
+        }
         default:
             break;
     }
-    return expression_tree_walker(node, (bool (*)())vector_engine_unsupport_expression_walker, (void*)NULL);
+
+    return expression_tree_walker(node, (bool (*)())vector_engine_unsupport_expression_walker, (void*)planContext);
 }
 
 /*
  * @Description: Try to generate vectorized plan
+ *
+ * The GUC 'try_vector_engine_strategy' is off, the function only processes the plan with
+ * column store relation. Otherwish, the function will force vectorize the plan,
+ * deal with these 8 scans: SeqScan, IndexScan, IndexOnlyScan, BitmapHeapScan, TidScan, FunctionScan,
+ * ValuesScan, ForeignScan.
  *
  * @param[IN] top_plan:  current plan node
  * @param[IN] parse:  query tree
@@ -8592,16 +8550,22 @@ bool vector_engine_unsupport_expression_walker(Node* node)
  */
 Plan* try_vectorize_plan(Plan* top_plan, Query* parse, bool from_subplan, PlannerInfo* subroot)
 {
-    /* If has no column store relation, just leave unchanged */
-    if (!has_column_store_relation(top_plan))
+    /*
+     * If has the three conditions, just leave unchanged:
+     * 1.The GUC 'try_vector_engine_strategy' is off, and it has no column store relation;
+     */
+    if (u_sess->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE &&
+        !has_column_store_relation(top_plan)) {
         return top_plan;
+    }
 
     /*
      * Fallback to original non-vectorized plan, if either the GUC 'enable_vector_engine'
      * is turned off or the plan cannot go through vector_engine_walker.
      */
-    if (!u_sess->attr.attr_sql.enable_vector_engine || vector_engine_walker(top_plan, from_subplan) ||
+    if (!u_sess->attr.attr_sql.enable_vector_engine ||
         (subroot != NULL && subroot->is_under_recursive_tree) ||
+        vector_engine_walker(top_plan, from_subplan) ||
         (ENABLE_PRED_PUSH_ALL(NULL) || (subroot != NULL && SUBQUERY_PREDPUSH(subroot)))) {
         /*
          * Distributed Recursive CTE Support
@@ -8619,7 +8583,8 @@ Plan* try_vectorize_plan(Plan* top_plan, Query* parse, bool from_subplan, Planne
          */
         top_plan = fallback_plan(top_plan);
     } else {
-        top_plan = vectorize_plan(top_plan, from_subplan);
+        bool forceVectorEngine = (u_sess->attr.attr_sql.vectorEngineStrategy != OFF_VECTOR_ENGINE);
+        top_plan = vectorize_plan(top_plan, from_subplan, forceVectorEngine);
 
         if (from_subplan && !IsVecOutput(top_plan))
             top_plan = fallback_plan(top_plan);
@@ -8679,10 +8644,14 @@ static bool vector_engine_expression_walker(Node* node, DenseRank_context* conte
 
         /*
          * Only ROW_NUMBER, RANK, AVG, COUNT, MAX, MIN and SUM are supported now
-         *  and their func oid must be found in hash table g_instance.vec_func_hash.
+         * and their func oid must be found in hash table g_instance.vec_func_hash.
+         *
+         * For the system internal thread, VecFuncHash is not be Initialize,
+         * these scenes do not need to vectorized plan.
          */
-        (void)hash_search(g_instance.vec_func_hash, &funcOid, HASH_FIND, &found);
-
+        if (g_instance.vec_func_hash != NULL) {
+            (void)hash_search(g_instance.vec_func_hash, &funcOid, HASH_FIND, &found);
+        }
         /* If not found means that the Agg function is not yet implemented */
         if (!found)
             return true;
@@ -8709,11 +8678,398 @@ static bool vector_engine_setfunc_walker(Node* node, DenseRank_context* context)
         FuncExpr* expr = (FuncExpr*)node;
 
         if (expr->funcretset == true) {
+            ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Vectorize plan failed due to has set function: %u", expr->funcid)));
             return true;
         }
     }
 
     return expression_tree_walker(node, (bool (*)())vector_engine_setfunc_walker, context);
+}
+
+/*
+ * Check if there is any data type unsupported by cstore. If so, stop rowtovec
+ */
+bool CheckTypeSupportRowToVec(List* targetlist, int errLevel)
+{
+    ListCell* cell = NULL;
+    TargetEntry* entry = NULL;
+    Var* var = NULL;
+    foreach(cell, targetlist) {
+        entry = (TargetEntry*)lfirst(cell);
+        if (IsA(entry->expr, Var)) {
+            var = (Var*)entry->expr;
+            if (var->varattno > 0 && var->varoattno > 0
+                && var->vartype != TIDOID // cstore support for hidden column CTID
+                && !IsTypeSupportedByCStore(var->vartype)) {
+                ereport(errLevel, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("type \"%s\" is not supported in column store",
+                           format_type_with_typemod(var->vartype, var->vartypmod))));
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/*
+ * @Description: Check if the plan node is supported by VecMarkPos
+ *
+ * @param[IN] node: current plan node
+ * @return: bool, true means support
+ */
+static bool VecMarkPosSupport(Plan *plan)
+{
+    if (IsA(plan, Sort) || IsA(plan, Material)) {
+        return true;
+    }
+
+    return false;
+}
+
+static inline bool CheckVectorEngineUnsupportedFeature(Plan* plan, VectorPlanContext* planContext)
+{
+    /* if have set-returning function, not support. */
+    if (vector_engine_setfunc_walker((Node*)(plan->targetlist), NULL))
+        return true;
+
+    /* check whether there is unsupport expression in vector engine */
+    if (vector_engine_unsupport_expression_walker((Node*)plan->targetlist, planContext))
+        return true;
+
+    planContext->currentExprIsFilter = true;
+    if (vector_engine_unsupport_expression_walker((Node*)plan->qual, planContext))
+        return true;
+    planContext->currentExprIsFilter = false;
+
+    return false;
+}
+
+inline void ComputeExprMapCost(Oid typeId, VectorExprContext* context)
+{
+    if (!COL_IS_ENCODE(typeId)) {
+        Cost rowMapExprCost = 0.3;
+        Cost vecMapExprCost = 0.2;
+        context->planContext->rowCost += rowMapExprCost * context->rows;
+        context->planContext->vecCost += vecMapExprCost * context->rows;
+    } else {
+        Cost rowMapExprCost = 0.6;
+        Cost vecMapExprCost = 0.3;
+        context->planContext->rowCost += rowMapExprCost * context->rows;
+        context->planContext->vecCost += vecMapExprCost * context->rows;
+    }
+
+    return;
+}
+
+inline void ComputeExprEvalCost(Oid typeId, VectorExprContext* context)
+{
+    if (!COL_IS_ENCODE(typeId)) {
+        Cost rowExprEvalCost = 0.3;
+        Cost vecExprEvalCost = 0.3;
+        context->planContext->rowCost += rowExprEvalCost * context->rows;
+        context->planContext->vecCost += vecExprEvalCost * context->rows;
+    } else {
+        Cost rowExprEvalCost = 2.5;
+        Cost vecExprEvalCost = 0.8;
+        context->planContext->rowCost += rowExprEvalCost * context->rows;
+        context->planContext->vecCost += vecExprEvalCost * context->rows;
+    }
+
+    return;
+}
+
+/*
+ * @Description: Check if it has unsupport expression and get the costs of expression
+ *
+ * @param[IN] node:  current expr node
+ * @return: bool, true if it has
+ */
+bool VectorEngineCheckExpressionInternal(Node* node, VectorExprContext* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    /* get costs of using row engine and vector engine */
+    if (context) {
+        Cost rowArrayExprCost = 0.2;
+        Cost vecArrayExprCost = 1.3;
+
+        switch (nodeTag(node)) {
+            case T_Var: {
+                Var* var = (Var*)node;
+                int varattno = (int)var->varattno;
+                if (!list_member_int(context->varList, varattno)) {
+                    context->varList = lappend_int(context->varList, varattno);
+                }
+                ComputeExprMapCost(var->vartype, context);
+                return false;
+            }
+            case T_Const: {
+                Const* con = (Const*)node;
+                ComputeExprMapCost(con->consttype, context);
+                return false;
+            }
+            case T_Param: {
+                Param* param = (Param*)node;
+                ComputeExprMapCost(param->paramtype, context);
+                return false;
+            }
+            case T_FuncExpr: {
+                FuncExpr* funcExpr = (FuncExpr*)node;
+                ComputeExprEvalCost(funcExpr->funcresulttype, context);
+                break;
+            }
+            case T_OpExpr: {
+                OpExpr* opExpr = (OpExpr*)node;
+                ComputeExprEvalCost(opExpr->opresulttype, context);
+                break;
+            }
+            case T_Aggref: {
+                Aggref* aggref = (Aggref*)node;
+                /* Aggref compute tuple is it's lefttree output count */
+                int savedRows = context->rows;
+                context->rows = context->lefttreeRows;
+                ComputeExprEvalCost(aggref->aggtrantype, context);
+                expression_tree_walker(node, (bool (*)())VectorEngineCheckExpressionInternal, (void*)context);
+                context->rows = savedRows;
+                return false;;
+            }
+            case T_ScalarArrayOpExpr: {
+                context->planContext->rowCost += rowArrayExprCost * context->rows;
+                context->planContext->vecCost += vecArrayExprCost * context->rows;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())VectorEngineCheckExpressionInternal, (void*)context);
+}
+
+static inline void ComputeQualCost(List* qual, VectorExprContext* context)
+{
+    ListCell* l = NULL;
+    foreach (l, qual) {
+        Expr* node = (Expr*)lfirst(l);
+        ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+            errmsg("[ROWTOVEC OPTIMAL] compute qual. current rows: %f, select: %f",
+            context->rows, node->selec)));
+        VectorEngineCheckExpressionInternal((Node*)node, context);
+        context->rows = context->rows * node->selec;
+    }
+}
+
+/* return true means not support vector engine */
+template<bool isSeqscan>
+bool CostVectorScan(Scan* scanPlan, VectorPlanContext* planContext)
+{
+    if (!planContext->forceVectorEngine || !CheckTypeSupportRowToVec(scanPlan->plan.targetlist, DEBUG2)) {
+        return true;
+    }
+
+    /* only optimal mode need collect costs. */
+    if (u_sess->attr.attr_sql.vectorEngineStrategy != OPT_VECTOR_ENGINE) {
+        return false;
+    }
+
+    Cost rowScanCost = 1.0;
+    Cost vecBatchScanCost = 0.9;
+    Cost rowToVecTransCost = 0.7;
+    Cost origRowCost = planContext->rowCost;
+    Cost origVecCost = planContext->vecCost;
+    VectorExprContext exprContext;
+    exprContext.planContext = planContext;
+    exprContext.varList = NIL;
+    int qualColCount = 0;
+    int dop = SET_DOP(scanPlan->plan.dop);
+    /* seqscan will scan all rows in table, index scan do not. */
+    if (isSeqscan) {
+        exprContext.rows = scanPlan->tableRows / dop;
+        planContext->rowCost += rowScanCost * exprContext.rows;
+        planContext->vecCost += vecBatchScanCost * exprContext.rows;
+    } else {
+        exprContext.rows = scanPlan->plan.plan_rows / dop;
+        planContext->rowCost += rowScanCost * exprContext.rows;
+    }
+
+    ComputeQualCost(scanPlan->plan.qual, &exprContext);
+    if (isSeqscan) {
+        /* batch mode will trans qual column first */
+        qualColCount = list_length(exprContext.varList);
+        planContext->vecCost += rowToVecTransCost * exprContext.rows * qualColCount;
+    }
+    exprContext.rows = scanPlan->plan.plan_rows / dop;
+
+    VectorEngineCheckExpressionInternal((Node*)scanPlan->plan.targetlist, &exprContext);
+    if (isSeqscan) {
+        int lateTransColCount = list_length(exprContext.varList) - qualColCount;
+        planContext->vecCost += rowToVecTransCost * exprContext.rows * lateTransColCount;
+    } else {
+        /* index scan add rowtovec on scan, so the costs is (row scan costs + rowtovec costs) */
+        planContext->vecCost = origVecCost + planContext->rowCost - origRowCost;
+        planContext->vecCost += rowToVecTransCost * exprContext.rows * list_length(scanPlan->plan.targetlist);
+    }
+    planContext->containRowTable = true;
+
+    ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+        errmsg("[ROWTOVEC OPTIMAL] scan cost: row: %f, vec: %f",
+        planContext->rowCost - origRowCost, planContext->vecCost - origVecCost)));
+
+    return false;
+}
+
+static bool CheckWindowsAggExpr(Plan* resultPlan, bool check_rescan, VectorPlanContext* planContext)
+{
+    /* Only default window clause is supported now */
+    if (((WindowAgg*)resultPlan)->frameOptions !=
+        (FRAMEOPTION_RANGE | FRAMEOPTION_START_UNBOUNDED_PRECEDING | FRAMEOPTION_END_CURRENT_ROW))
+        return true;
+
+    /* Check if targetlist contains unsupported feature */
+    DenseRank_context context;
+    context.has_agg = false;
+    context.has_denserank = false;
+    if (vector_engine_expression_walker((Node*)(resultPlan->targetlist), &context))
+        return true;
+
+    /* Only single denserank is supported now */
+    if (context.has_agg && context.has_denserank)
+        return true;
+
+    /*
+     * WindowAgg nodes never have quals, since they can only occur at the
+     * logical top level of a query (ie, after any WHERE or HAVING filters)
+     */
+    WindowAgg* wa = (WindowAgg*)resultPlan;
+    if (vector_engine_unsupport_expression_walker((Node*)wa->startOffset, planContext))
+        return true;
+    if (vector_engine_unsupport_expression_walker((Node*)wa->endOffset, planContext))
+        return true;
+
+    if (vector_engine_walker_internal(resultPlan->lefttree, check_rescan, planContext))
+        return true;
+
+    return false;
+}
+
+static bool CheckForeignScanExpr(Plan* resultPlan, VectorPlanContext* planContext)
+{
+    ForeignScan* fscan = (ForeignScan*)resultPlan;
+    if (IsSpecifiedFDWFromRelid(fscan->scan_relid, GC_FDW) ||
+        IsSpecifiedFDWFromRelid(fscan->scan_relid, LOG_FDW)) {
+        resultPlan->vec_output = false;
+    }
+#ifdef ENABLE_MOT
+    /* do not support row to vector for mot table */
+    if (IsSpecifiedFDWFromRelid(fscan->scan_relid, MOT_FDW)) {
+        resultPlan->vec_output = false;
+        return true;
+    }
+#endif
+    if (!CheckTypeSupportRowToVec(resultPlan->targetlist, DEBUG2)) {
+        resultPlan->vec_output = false;
+        return true;
+    }
+    CostVectorScan<false>((Scan*)resultPlan, planContext);
+
+    return false;
+}
+
+void CostVectorAgg(Plan* plan, VectorPlanContext* planContext)
+{
+    /* only optimal mode need collect costs. */
+    if (u_sess->attr.attr_sql.vectorEngineStrategy != OPT_VECTOR_ENGINE) {
+        return;
+    }
+
+    int dop = SET_DOP(plan->dop);
+    VectorExprContext exprContext;
+    exprContext.planContext = planContext;
+    exprContext.varList = NIL;
+    exprContext.rows = plan->plan_rows / dop;
+    if (likely(plan->lefttree != NULL)) {
+        exprContext.lefttreeRows = plan->lefttree->plan_rows / SET_DOP(plan->lefttree->dop);
+    } else {
+        exprContext.lefttreeRows = plan->plan_rows / dop;
+    }
+    Cost origRowCost = planContext->rowCost;
+    Cost origVecCost = planContext->vecCost;
+
+    VectorEngineCheckExpressionInternal((Node*)plan->targetlist, &exprContext);
+    ComputeQualCost(plan->qual, &exprContext);
+
+    ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+        errmsg("[ROWTOVEC OPTIMAL] agg cost: row: %f, vec: %f",
+        planContext->rowCost - origRowCost, planContext->vecCost - origVecCost)));
+}
+
+void CostVectorNestJoin(Join* join, VectorPlanContext* planContext)
+{
+    /* only optimal mode need collect costs. */
+    if (u_sess->attr.attr_sql.vectorEngineStrategy != OPT_VECTOR_ENGINE) {
+        return;
+    }
+
+    int dop = SET_DOP(join->plan.dop);
+    VectorExprContext exprContext;
+    exprContext.planContext = planContext;
+    exprContext.varList = NIL;
+    exprContext.lefttreeRows = join->plan.righttree->plan_rows / dop;
+    Cost origRowCost = planContext->rowCost;
+    Cost origVecCost = planContext->vecCost;
+
+    /* joinqual execute count is determined by lefttree */
+    exprContext.rows = (join->plan.righttree->plan_rows * join->plan.lefttree->plan_rows) / dop;
+    ComputeQualCost(join->joinqual, &exprContext);
+    ComputeQualCost(join->nulleqqual, &exprContext);
+
+    exprContext.rows = join->plan.plan_rows;
+    VectorEngineCheckExpressionInternal((Node*)join->plan.targetlist, &exprContext);
+
+    ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+        errmsg("[ROWTOVEC OPTIMAL] nestloop cost: row: %f, vec: %f",
+        planContext->rowCost - origRowCost, planContext->vecCost - origVecCost)));
+}
+
+
+void CostVectorHashJoin(Join* join, VectorPlanContext* planContext)
+{
+    /* only optimal mode need collect costs. */
+    if (u_sess->attr.attr_sql.vectorEngineStrategy != OPT_VECTOR_ENGINE) {
+        return;
+    }
+
+    HashJoin* hashjoin = (HashJoin*)join;
+    int dop = SET_DOP(join->plan.dop);
+    VectorExprContext exprContext;
+    exprContext.planContext = planContext;
+    exprContext.varList = NIL;
+    exprContext.lefttreeRows = join->plan.righttree->plan_rows / dop;
+    Cost origRowCost = planContext->rowCost;
+    Cost origVecCost = planContext->vecCost;
+
+    exprContext.rows = hashjoin->joinRows;
+    VectorEngineCheckExpressionInternal((Node*)hashjoin->hashclauses, &exprContext);
+    ComputeQualCost(join->joinqual, &exprContext);
+    ComputeQualCost(join->nulleqqual, &exprContext);
+
+    Cost rowJoinCost = 0.8;
+    Cost rowHashCost = 1.5;
+    Cost vecJoinCost = 0.4;
+    exprContext.rows = hashjoin->joinRows;
+    exprContext.planContext->rowCost += rowHashCost * exprContext.lefttreeRows;
+    exprContext.planContext->rowCost += rowJoinCost * exprContext.rows;
+    exprContext.planContext->vecCost += vecJoinCost * exprContext.rows;
+
+    exprContext.rows = join->plan.plan_rows;
+    VectorEngineCheckExpressionInternal((Node*)join->plan.targetlist, &exprContext);
+
+    ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+        errmsg("[ROWTOVEC OPTIMAL] hashjoin cost: row: %f, vec: %f",
+        planContext->rowCost - origRowCost, planContext->vecCost - origVecCost)));
 }
 
 /*
@@ -8723,32 +9079,46 @@ static bool vector_engine_setfunc_walker(Node* node, DenseRank_context* context)
  * @param[IN] check_rescan:  if need check rescan
  * @return: bool, true means unsupported, false means supported
  */
-static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
+static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, VectorPlanContext* planContext)
 {
     if (result_plan == NULL)
         return false;
 
-    /* if have set-returning function, not support. */
-    if (vector_engine_setfunc_walker((Node*)(result_plan->targetlist), NULL))
+    if (CheckVectorEngineUnsupportedFeature(result_plan, planContext)) {
         return true;
-
-    /* check whether there is unsupport expression in vector engine */
-    if (vector_engine_unsupport_expression_walker((Node*)result_plan->targetlist))
-        return true;
-    if (vector_engine_unsupport_expression_walker((Node*)result_plan->qual))
-        return true;
+    }
 
     switch (nodeTag(result_plan)) {
-        /* Operators below cannot be vectorized */
-        case T_SeqScan:
+        /*
+         * If the GUC 'try_vector_engine_strategy' is off, Operators below cannot be vectorized.
+         * If the GUC 'try_vector_engine_strategy' is force/optimal, 8 scans(SeqScan, IndexScan, IndexOnlyScan,
+         * BitmapHeapScan, TidScan, FunctionScan, ValuesScan, Foreignscan) can be force to vector engine,
+         * unless the targetlist has datatype unsupported by column store.
+         */
+        case T_SeqScan: {
             if (result_plan->isDeltaTable) {
                 return false;
             }
+            
+            return CostVectorScan<true>((Scan*)result_plan, planContext);
+        }
         case T_IndexScan:
         case T_IndexOnlyScan:
         case T_BitmapHeapScan:
         case T_TidScan:
-        case T_FunctionScan:
+        case T_FunctionScan: {
+            if (!planContext->forceVectorEngine || !CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
+                return true;
+            }
+
+            return CostVectorScan<false>((Scan*)result_plan, planContext);
+        }
+        case T_ValuesScan: {
+            if (!CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
+                return true;
+            }
+            break;
+        }
         case T_CteScan:
         case T_LockRows:
         case T_MergeAppend:
@@ -8761,33 +9131,36 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
             if (check_rescan)
                 return true;
 
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
             break;
 
         case T_Stream: {
             check_rescan = false;
             Stream* sj = (Stream*)result_plan;
-            if (vector_engine_unsupport_expression_walker((Node*)sj->distribute_keys))
+            if (vector_engine_unsupport_expression_walker((Node*)sj->distribute_keys, planContext))
                 return true;
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
         } break;
         case T_Limit: {
             Limit* lm = (Limit*)result_plan;
-            if (vector_engine_unsupport_expression_walker((Node*)lm->limitCount))
+            if (vector_engine_unsupport_expression_walker((Node*)lm->limitCount, planContext))
                 return true;
-            if (vector_engine_unsupport_expression_walker((Node*)lm->limitOffset))
+            if (vector_engine_unsupport_expression_walker((Node*)lm->limitOffset, planContext))
                 return true;
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
         } break;
         case T_BaseResult: {
             BaseResult* br = (BaseResult*)result_plan;
-            if (vector_engine_unsupport_expression_walker((Node*)br->resconstantqual))
+            if (vector_engine_unsupport_expression_walker((Node*)br->resconstantqual, planContext))
                 return true;
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
+            if (!CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
+                return true;
+            }
         } break;
         case T_PartIterator:
         case T_SetOp:
@@ -8799,7 +9172,7 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
         case T_Material:
         case T_Hash:
         case T_Sort:
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
             break;
 
@@ -8812,78 +9185,62 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
             if (vector_engine_expression_walker((Node*)(result_plan->qual), NULL))
                 return true;
 
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
 
             /* Check if contains array operator, not support distrtribute on ARRAY type now */
             if (has_array_operator(result_plan))
                 return true;
+            CostVectorAgg(result_plan, planContext);
         } break;
 
         case T_WindowAgg: {
-
-            /* Only default window clause is supported now */
-            if (((WindowAgg*)result_plan)->frameOptions !=
-                (FRAMEOPTION_RANGE | FRAMEOPTION_START_UNBOUNDED_PRECEDING | FRAMEOPTION_END_CURRENT_ROW))
+            if (CheckWindowsAggExpr(result_plan, check_rescan, planContext)) {
                 return true;
-
-            /* Check if targetlist contains unsupported feature */
-            DenseRank_context context;
-            context.has_agg = false;
-            context.has_denserank = false;
-            if (vector_engine_expression_walker((Node*)(result_plan->targetlist), &context))
-                return true;
-
-            /* Only single denserank is supported now */
-            if (context.has_agg && context.has_denserank)
-                return true;
-
-            /*
-             * WindowAgg nodes never have quals, since they can only occur at the
-             * logical top level of a query (ie, after any WHERE or HAVING filters)
-             */
-            WindowAgg* wa = (WindowAgg*)result_plan;
-            if (vector_engine_unsupport_expression_walker((Node*)wa->startOffset))
-                return true;
-            if (vector_engine_unsupport_expression_walker((Node*)wa->endOffset))
-                return true;
-
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
-                return true;
+            }
         } break;
 
         case T_MergeJoin: {
             MergeJoin* mj = (MergeJoin*)result_plan;
-            if (vector_engine_unsupport_expression_walker((Node*)mj->mergeclauses))
+            if (vector_engine_unsupport_expression_walker((Node*)mj->mergeclauses, planContext))
                 return true;
             /* Find unsupport expr *Join* clause */
-            if (vector_engine_unsupport_expression_walker((Node*)mj->join.joinqual))
+            if (vector_engine_unsupport_expression_walker((Node*)mj->join.joinqual, planContext))
                 return true;
-            if (vector_engine_unsupport_expression_walker((Node*)mj->join.nulleqqual))
+            if (vector_engine_unsupport_expression_walker((Node*)mj->join.nulleqqual, planContext))
                 return true;
 
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
-            if (vector_engine_walker(result_plan->righttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->righttree, check_rescan, planContext))
                 return true;
+
+            /*
+             * If the top plan nodes of mergejoin righttree is unsupported by VecMarkPos,
+             * cannot generate vectorized plan.
+             */
+            if (!VecMarkPosSupport(result_plan->righttree)) {
+                return true;
+            }
         } break;
 
         case T_NestLoop: {
             NestLoop* nl = (NestLoop*)result_plan;
             /* Find unsupport expr in *Join* clause */
-            if (vector_engine_unsupport_expression_walker((Node*)nl->join.joinqual))
+            if (vector_engine_unsupport_expression_walker((Node*)nl->join.joinqual, planContext))
                 return true;
-            if (vector_engine_unsupport_expression_walker((Node*)nl->join.nulleqqual))
+            if (vector_engine_unsupport_expression_walker((Node*)nl->join.nulleqqual, planContext))
                 return true;
 
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
             if (IsA(result_plan->righttree, Material) && result_plan->righttree->allParam == NULL)
                 check_rescan = false;
             else
                 check_rescan = true;
-            if (vector_engine_walker(result_plan->righttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->righttree, check_rescan, planContext))
                 return true;
+            CostVectorNestJoin((Join*)result_plan, planContext);
         } break;
 
         case T_HashJoin: {
@@ -8894,27 +9251,26 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
 
             HashJoin* hj = (HashJoin*)result_plan;
             /* Find unsupport expr in *Hash* clause */
-            if (vector_engine_unsupport_expression_walker((Node*)hj->hashclauses))
+            if (vector_engine_unsupport_expression_walker((Node*)hj->hashclauses, planContext))
                 return true;
             /* Find unsupport expr in *Join* clause */
-            if (vector_engine_unsupport_expression_walker((Node*)hj->join.joinqual))
+            if (vector_engine_unsupport_expression_walker((Node*)hj->join.joinqual, planContext))
                 return true;
-            if (vector_engine_unsupport_expression_walker((Node*)hj->join.nulleqqual))
+            if (vector_engine_unsupport_expression_walker((Node*)hj->join.nulleqqual, planContext))
                 return true;
 
-            if (vector_engine_walker(result_plan->lefttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
-            if (vector_engine_walker(result_plan->righttree, check_rescan))
+            if (vector_engine_walker_internal(result_plan->righttree, check_rescan, planContext))
                 return true;
+            CostVectorHashJoin((Join*)result_plan, planContext);
         } break;
 
         case T_Append: {
             Append* append = (Append*)result_plan;
             ListCell* lc = NULL;
             foreach (lc, append->appendplans) {
-                Plan* plan = (Plan*)lfirst(lc);
-
-                if (vector_engine_walker(plan, check_rescan))
+                if (vector_engine_walker_internal((Plan*)lfirst(lc), check_rescan, planContext))
                     return true;
             }
         } break;
@@ -8923,34 +9279,26 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
             ModifyTable* mt = (ModifyTable*)result_plan;
             ListCell* lc = NULL;
             foreach (lc, mt->plans) {
-                Plan* plan = (Plan*)lfirst(lc);
-                if (vector_engine_walker(plan, check_rescan))
+                if (vector_engine_walker_internal((Plan*)lfirst(lc), check_rescan, planContext))
                     return true;
             }
         } break;
 
         case T_SubqueryScan: {
             SubqueryScan* ss = (SubqueryScan*)result_plan;
-
-            if (ss->subplan && vector_engine_walker(ss->subplan, check_rescan))
+            if (ss->subplan && vector_engine_walker_internal(ss->subplan, check_rescan, planContext))
                 return true;
         } break;
 
         case T_ForeignScan: {
-            ForeignScan* fscan = (ForeignScan*)result_plan;
-            if (IsSpecifiedFDWFromRelid(fscan->scan_relid, GC_FDW) ||
-                IsSpecifiedFDWFromRelid(fscan->scan_relid, LOG_FDW)) {
-                result_plan->vec_output = false;
-                return true;
-            }
+            return CheckForeignScanExpr(result_plan, planContext);
         } break;
 
         case T_ExtensiblePlan: {
             ExtensiblePlan* ext_plan = (ExtensiblePlan*)result_plan;
             ListCell* lc = NULL;
             foreach (lc, ext_plan->extensible_plans) {
-                Plan* plan = (Plan*)lfirst(lc);
-                if (vector_engine_walker(plan, check_rescan))
+                if (vector_engine_walker_internal((Plan*)lfirst(lc), check_rescan, planContext))
                     return true;
             }
         } break;
@@ -8960,6 +9308,52 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
     }
 
     return false;
+}
+
+/*
+ * @Description: Walk through the plan tree to see if it's supported in Vector Engine
+ *
+ * @param[IN] result_plan:  current plan node
+ * @param[IN] check_rescan:  if need check rescan
+ * @return: bool, true means unsupported, false means supported
+ */
+static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
+{
+    VectorPlanContext planContext;
+    planContext.containRowTable = false;
+    planContext.currentExprIsFilter = false;
+    planContext.rowCost = 0.0;
+    planContext.vecCost = 0.0;
+
+    /* for OPT_VECTOR_ENGINE, we treat plan can be transformed to vectorized plan,
+     * and if the plan not satisfied rules to vectorize, will return false later.
+     */
+    if (u_sess->attr.attr_sql.vectorEngineStrategy == OFF_VECTOR_ENGINE) {
+        planContext.forceVectorEngine = false;
+    } else {
+        planContext.forceVectorEngine = true;
+    }
+
+    bool res = vector_engine_walker_internal(result_plan, check_rescan, &planContext);
+
+    if (!res && u_sess->attr.attr_sql.vectorEngineStrategy == OPT_VECTOR_ENGINE && planContext.containRowTable) {
+        /* add vectorow cost for using vector engine */
+        Cost vecToRowCost = 0.2;
+        Cost vecToRowCosts = vecToRowCost * result_plan->plan_rows;
+        planContext.vecCost += vecToRowCosts;
+        /* vector cost multiply 1.2 to ensure that performance not degree */
+        planContext.vecCost *= 1.2;
+        ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+            errmsg("[ROWTOVEC OPTIMAL] total cost: row: %f, vector: %f, choose %s",
+            planContext.rowCost, planContext.vecCost,
+            (planContext.vecCost >= planContext.rowCost ? "row" : "vector"))));
+        /* while using vector engine cost is larger than using row engine, do not transform to vector plan */
+        if (planContext.vecCost >= planContext.rowCost) {
+            res = true;
+        }
+    }
+
+    return res;
 }
 
 /*
@@ -9091,6 +9485,12 @@ static Plan* fallback_plan(Plan* result_plan)
     return result_plan;
 }
 
+static inline Plan* make_rowtove_plan(Plan* plan)
+{
+    make_dummy_targetlist(plan);
+    return (Plan *)make_rowtovec(plan);
+}
+
 /*
  * @Description: Generate vectorized plan
  *
@@ -9098,7 +9498,7 @@ static Plan* fallback_plan(Plan* result_plan)
  * @param[IN] ignore_remotequery:  if ignore RemoteQuery node
  * @return: Plan*, vectorized plan
  */
-Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
+Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery, bool forceVectorEngine)
 {
     if (result_plan == NULL)
         return NULL;
@@ -9119,38 +9519,50 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
             result_plan = build_vector_plan(result_plan);
             break;
         case T_ForeignScan:
-            if (IsVecOutput(result_plan))
+            if (IsVecOutput(result_plan)) {
                 return build_vector_plan(result_plan);
-            break;
-        case T_ExtensiblePlan:
-            {
-                ExtensiblePlan* ext_plans = (ExtensiblePlan*)result_plan;
-                ListCell* lc = NULL;
-                List* newPlans = NIL;
-
-                foreach (lc, ext_plans->extensible_plans) {
-                    Plan* plan = (Plan*)lfirst(lc);
-                    lfirst(lc) = vectorize_plan(plan, ignore_remotequery);
-                    if (IsVecOutput(result_plan) &&
-                        !IsVecOutput(plan)) {
-                        if (IsA(plan, ForeignScan)) {
-                            build_vector_plan(plan);
-                        } else {
-                            plan = (Plan*)make_rowtovec(plan);
-                        }
-                    } else if (!IsVecOutput(result_plan) && IsVecOutput(plan))
-                        plan = (Plan*)make_vectorow(plan);
-                    newPlans = lappend(newPlans, plan);
-                }
-                ext_plans->extensible_plans = newPlans;
-                if (IsVecOutput(result_plan)) {
-                    build_vector_plan(result_plan);
-                }
-                break;
+            } else if (forceVectorEngine) {
+                result_plan = make_rowtove_plan(result_plan);
             }
+            break;
+        case T_ExtensiblePlan: {
+            ExtensiblePlan* ext_plans = (ExtensiblePlan*)result_plan;
+            ListCell* lc = NULL;
+            List* newPlans = NIL;
+
+            foreach (lc, ext_plans->extensible_plans) {
+                Plan* plan = (Plan*)lfirst(lc);
+                lfirst(lc) = vectorize_plan(plan, ignore_remotequery, forceVectorEngine);
+                if (IsVecOutput(result_plan) && !IsVecOutput(plan)) {
+                    if (IsA(plan, ForeignScan)) {
+                        build_vector_plan(plan);
+                    } else {
+                        plan = (Plan*)make_rowtovec(plan);
+                    }
+                } else if (!IsVecOutput(result_plan) && IsVecOutput(plan)) {
+                    plan = (Plan*)make_vectorow(plan);
+                }
+                newPlans = lappend(newPlans, plan);
+            }
+            ext_plans->extensible_plans = newPlans;
+            if (IsVecOutput(result_plan)) {
+                build_vector_plan(result_plan);
+            }
+            break;
+        }
         case T_SeqScan: {
-            if (result_plan->isDeltaTable) {
-                result_plan = (Plan*)make_rowtovec(result_plan);
+            if (result_plan->isDeltaTable || forceVectorEngine) {
+                result_plan = make_rowtove_plan(result_plan);
+            }
+            break;
+        }
+        case T_IndexScan:
+        case T_IndexOnlyScan:
+        case T_BitmapHeapScan:
+        case T_TidScan:
+        case T_FunctionScan: {
+            if (forceVectorEngine) {
+                result_plan = make_rowtove_plan(result_plan);
             }
             break;
         }
@@ -9175,24 +9587,22 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
         case T_Stream:
         case T_Material:
         case T_WindowAgg:
-            result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery);
-            if (result_plan->lefttree && IsVecOutput(result_plan->lefttree))
+            result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery, forceVectorEngine);
+            if (result_plan->lefttree && IsVecOutput(result_plan->lefttree)) {
                 return build_vector_plan(result_plan);
-            else if ((result_plan->lefttree && !IsVecOutput(result_plan->lefttree)) &&
+            } else if ((result_plan->lefttree && !IsVecOutput(result_plan->lefttree)) &&
                      u_sess->attr.attr_sql.enable_force_vector_engine) {
                 result_plan->lefttree = (Plan*)make_rowtovec(result_plan->lefttree);
                 return build_vector_plan(result_plan);
             } else if (IsA(result_plan, BaseResult) && result_plan->lefttree == NULL) {
-                make_dummy_targetlist(result_plan);
-                result_plan = (Plan*)make_rowtovec(result_plan);
-                return result_plan;
+                return make_rowtove_plan(result_plan);
             }
             break;
 
         case T_MergeJoin:
         case T_NestLoop:
-            result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery);
-            result_plan->righttree = vectorize_plan(result_plan->righttree, ignore_remotequery);
+            result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery, forceVectorEngine);
+            result_plan->righttree = vectorize_plan(result_plan->righttree, ignore_remotequery, forceVectorEngine);
 
             if (IsVecOutput(result_plan->lefttree) && IsVecOutput(result_plan->righttree)) {
                 return build_vector_plan(result_plan);
@@ -9218,7 +9628,7 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
         case T_Hash:
             break;
         case T_Agg: {
-            result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery);
+            result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery, forceVectorEngine);
             if (IsVecOutput(result_plan->lefttree))
                 return build_vector_plan(result_plan);
         } break;
@@ -9227,8 +9637,9 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
          */
         case T_HashJoin: {
             /* HashJoin supports vector right now */
-            result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery);
-            result_plan->righttree->lefttree = vectorize_plan(result_plan->righttree->lefttree, ignore_remotequery);
+            result_plan->lefttree = vectorize_plan(result_plan->lefttree, ignore_remotequery, forceVectorEngine);
+            result_plan->righttree->lefttree =
+                vectorize_plan(result_plan->righttree->lefttree, ignore_remotequery, forceVectorEngine);
 
             if (IsVecOutput(result_plan->lefttree) && IsVecOutput(result_plan->righttree->lefttree)) {
                 /* Remove hash node */
@@ -9249,7 +9660,7 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
             bool isVec = true;
             foreach (lc, append->appendplans) {
                 Plan* plan = (Plan*)lfirst(lc);
-                plan = vectorize_plan(plan, ignore_remotequery);
+                plan = vectorize_plan(plan, ignore_remotequery, forceVectorEngine);
                 lfirst(lc) = plan;
                 if (!IsVecOutput(plan)) {
                     if (u_sess->attr.attr_sql.enable_force_vector_engine)
@@ -9270,45 +9681,44 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
             }
         } break;
 
-        case T_ModifyTable:
+        case T_ModifyTable: {
             /* ModifyTable doesn't support vector right now */
-            {
-                ModifyTable* mt = (ModifyTable*)result_plan;
-                ListCell* lc = NULL;
-                List* newPlans = NIL;
+            ModifyTable* mt = (ModifyTable*)result_plan;
+            ListCell* lc = NULL;
+            List* newPlans = NIL;
 
-                foreach (lc, mt->plans) {
-                    Plan* plan = (Plan*)lfirst(lc);
-                    lfirst(lc) = vectorize_plan(plan, ignore_remotequery);
-                    if (IsVecOutput(result_plan) &&
-                        !IsVecOutput(plan)) { // If we support vectorize ModifyTable, please remove it
-                        if (IsA(plan, ForeignScan)) {
-                            build_vector_plan(plan);
-                        } else {
-                            plan = (Plan*)make_rowtovec(plan);
-                        }
-                    } else if (!IsVecOutput(result_plan) && IsVecOutput(plan))
-                        plan = (Plan*)make_vectorow(plan);
-                    newPlans = lappend(newPlans, plan);
+            foreach (lc, mt->plans) {
+                Plan* plan = (Plan*)lfirst(lc);
+                lfirst(lc) = vectorize_plan(plan, ignore_remotequery, forceVectorEngine);
+                /* If we support vectorize ModifyTable, please remove it */
+                if (IsVecOutput(result_plan) && !IsVecOutput(plan)) {
+                    if (IsA(plan, ForeignScan)) {
+                        build_vector_plan(plan);
+                    } else {
+                        plan = (Plan*)make_rowtovec(plan);
+                    }
+                } else if (!IsVecOutput(result_plan) && IsVecOutput(plan)) {
+                    plan = (Plan*)make_vectorow(plan);
                 }
-                mt->plans = newPlans;
-                if (IsVecOutput(result_plan)) {
-                    build_vector_plan(result_plan);
-                }
-                break;
+                newPlans = lappend(newPlans, plan);
             }
-
-        case T_SubqueryScan:
-            /* SubqueryScan supports vector right now */
-            {
-                SubqueryScan* ss = (SubqueryScan*)result_plan;
-                if (ss->subplan)
-                    ss->subplan = vectorize_plan(ss->subplan, ignore_remotequery);
-                if (IsVecOutput(ss->subplan)) {  // If we support vectorize ModifyTable, please remove it
-                    build_vector_plan(result_plan);
-                }
+            mt->plans = newPlans;
+            if (IsVecOutput(result_plan)) {
+                build_vector_plan(result_plan);
             }
             break;
+        }
+
+        case T_SubqueryScan: {
+            /* SubqueryScan supports vector right now */
+            SubqueryScan* ss = (SubqueryScan*)result_plan;
+            if (ss->subplan)
+                ss->subplan = vectorize_plan(ss->subplan, ignore_remotequery, forceVectorEngine);
+            if (IsVecOutput(ss->subplan)) {  // If we support vectorize ModifyTable, please remove it
+                build_vector_plan(result_plan);
+            }
+            break;
+        }
 
         default:
             break;
@@ -9409,6 +9819,44 @@ static Plan* build_vector_plan(Plan* plan)
             break;
     }
     return plan;
+}
+
+bool CheckColumnsSuportedByBatchMode(List *targetList, List *qual)
+{
+    List *vars = NIL;
+    ListCell *l = NULL;
+
+    /* Consider the  targetList */
+    foreach (l, targetList) {
+        ListCell *vl = NULL;
+        GenericExprState *gstate = (GenericExprState *)lfirst(l);
+        TargetEntry *tle = (TargetEntry *)gstate->xprstate.expr;
+
+        /* if have set-returning function, not support. */
+        if (vector_engine_setfunc_walker((Node*)tle, NULL)) {
+            return false;
+        }
+
+        /* Pull vars from  the targetlist. */
+        vars = pull_var_clause((Node *)tle, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
+
+        foreach (vl, vars) {
+            Var *var = (Var *)lfirst(vl);
+            if (var->varattno < 0 || !IsTypeSupportedByCStore(var->vartype)) {
+                return false;
+            }
+        }
+    }
+
+    /* Now consider the quals */
+    vars = pull_var_clause((Node *)qual, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
+    foreach (l, vars) {
+        Var *var = (Var *)lfirst(l);
+        if (var->varattno < 0 || !IsTypeSupportedByCStore(var->vartype)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /*
@@ -14152,5 +14600,50 @@ Plan* get_foreign_scan(Plan* plan)
     }
 
     return plan;
+}
+
+static void check_redistribute_stream_walker(Plan* plan, void* context, const char* query_string)
+{
+    if (plan == NULL) {
+        return;
+    }
+    FindStreamNodesForLoopContext *ctx = (FindStreamNodesForLoopContext*)context;
+    if (IsA(plan, Stream) && ((Stream*)plan)->type == STREAM_REDISTRIBUTE) {
+        ctx->has_redis_stream = true;
+        return;
+    }
+    if (IsA(plan, Stream) && ((Stream*)plan)->type == STREAM_BROADCAST) {
+        ctx->broadcast_stream_cnt++;
+        return;
+    }
+    return PlanTreeWalker(plan, check_redistribute_stream_walker, context, NULL);
+}
+
+bool check_stream_for_loop_fetch(Portal portal)
+{
+    if (unlikely(portal == NULL || portal->cplan == NULL)) {
+        return false;
+    }
+    bool has_stream = false;
+    ListCell* lc = NULL;
+    foreach(lc, portal->cplan->stmt_list) {
+        if (has_stream)
+            break;
+        PlannedStmt* plannedstmt = (PlannedStmt*)lfirst(lc);
+        FindStreamNodesForLoopContext context;
+        /* only redistribute stream or more than one broadcast stream may cause hang in loop sql */
+        if (IsA(plannedstmt, PlannedStmt)) {
+            errno_t rc = 0;
+            rc = memset_s(&context, sizeof(FindStreamNodesForLoopContext), 0, sizeof(FindStreamNodesForLoopContext));
+            securec_check(rc, "\0", "\0");
+            context.has_redis_stream = false;
+            context.broadcast_stream_cnt = 0;
+            check_redistribute_stream_walker(plannedstmt->planTree, &context, NULL);
+            has_stream |= context.has_redis_stream;
+            has_stream |= (context.broadcast_stream_cnt > 1);
+        }
+    }
+    portal->hasStreamForPlpgsql = has_stream;
+    return has_stream;
 }
 

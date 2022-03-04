@@ -165,6 +165,7 @@ typedef struct StatementStatContext {
     uint64 unique_query_id;     /* from knl_u_unique_sql_context's unique_sql_id */
     uint64 debug_query_id;      /* from knl_session_context's debug_query_id */
     uint32 unique_sql_cn_id;    /* from knl_session_context's unique_sql_cn_id */
+    char trace_id[MAX_TRACE_ID_SIZE]; /* from knl_session_context's trace_id */
     char* query;                /* from PgBackendStatus's st_activity
                                     or knl_u_unique_sql_context's curr_single_unique_sql */
     TimestampTz start_time;     /* from PgBackendStatus's st_activity_start_timestamp */
@@ -206,6 +207,7 @@ extern void instr_stmt_report_txid(uint64 txid);
 extern void instr_stmt_report_query(uint64 unique_query_id);
 extern void instr_stmt_report_query_plan(QueryDesc *queryDesc);
 extern void instr_stmt_report_debug_query_id(uint64 debug_query_id);
+extern void instr_stmt_report_trace_id(char *trace_id);
 extern void instr_stmt_report_start_time();
 extern void instr_stmt_report_finish_time();
 extern bool instr_stmt_need_track_plan();

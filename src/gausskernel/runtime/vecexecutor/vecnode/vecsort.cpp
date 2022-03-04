@@ -331,6 +331,7 @@ VecSortState* ExecInitVecSort(Sort* node, EState* estate, int eflags)
 
     SO1_printf("ExecInitVecSort: %s\n", "sort node initialized");
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * Consider codegeneration for sort node. In fact, CompareMultiColumn is the
      * hotest function in sort node.
@@ -363,6 +364,7 @@ VecSortState* ExecInitVecSort(Sort* node, EState* estate, int eflags)
             }
         }
     }
+#endif
 
     return sort_stat;
 }

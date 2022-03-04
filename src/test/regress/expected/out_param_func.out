@@ -1,0 +1,1231 @@
+create schema out_param_schema;
+set current_schema= out_param_schema;
+set behavior_compat_options='proc_outparam_override';
+--1--------return 变量
+CREATE or replace FUNCTION func1(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func1(2, null);
+ func1 
+-------
+     1
+(1 row)
+
+call func1(2, NULL);
+ func1 | b 
+-------+---
+     1 | 3
+(1 row)
+
+select * from func1(2,null);
+ func1 | b 
+-------+---
+     1 | 3
+(1 row)
+
+select func1(a => 2, b => null);
+ func1 
+-------
+     1
+(1 row)
+
+select * from func1(a => 2, b => null);
+ func1 | b 
+-------+---
+     1 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func1(a => a, b => b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin
+    select * into result from func1(a => a, b => b);
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: <NULL>
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func1(a, b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    func1(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+declare
+    result text;
+    a integer := 2;
+    b integer := NULL;
+begin
+    func1(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+---inout参数
+CREATE or replace FUNCTION func1_1(in a integer, inout b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func1_1(2, null);
+ func1_1 
+---------
+       1
+(1 row)
+
+call func1_1(2, NULL);
+ func1_1 | b 
+---------+---
+       1 | 3
+(1 row)
+
+select * from func1_1(2,null);
+ func1_1 | b 
+---------+---
+       1 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func1_1(a => a, b => b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func1_1(a, b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    func1_1(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+declare
+    result text;
+    a integer := 2;
+    b integer := NULL;
+begin
+    func1_1(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+--2--------return 变量运算
+CREATE or replace FUNCTION func2(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return b + c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func2(2, null);
+ func2 
+-------
+     4
+(1 row)
+
+call func2(2, NULL);
+ func2 | b 
+-------+---
+     4 | 3
+(1 row)
+
+select * from func2(2,null);
+ func2 | b 
+-------+---
+     4 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func2(a => a, b => b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 4
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func2(a, b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 4
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    func2(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+declare
+    result text;
+    a integer := 2;
+    b integer := NULL;
+begin
+    func2(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+--3------return 常量
+CREATE or replace FUNCTION func3(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return 123;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func3(2, null);
+ func3 
+-------
+   123
+(1 row)
+
+call func3(2, NULL);
+ func3 | b 
+-------+---
+   123 | 3
+(1 row)
+
+select * from func3(2,null);
+ func3 | b 
+-------+---
+   123 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func3(a => a, b => b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 123
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func3(a, b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 123
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    func3(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+declare
+    result text;
+    a integer := 2;
+    b integer := NULL;
+begin
+    func3(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+--4------多out
+CREATE or replace FUNCTION func4(in a integer, out b integer, out d integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        d := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func4(2,NULL,NULL);
+ func4 
+-------
+     1
+(1 row)
+
+call func4(2, NULL,NULL);
+ func4 | b | d 
+-------+---+---
+     1 | 3 | 3
+(1 row)
+
+select * from func4(2, NULL,NULL);
+ func4 | b | d 
+-------+---+---
+     1 | 3 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    result := func4(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    result := func4(a, b, d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    func4(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: <NULL>
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    func4(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: <NULL>
+---inout参数
+CREATE or replace FUNCTION func4_1(in a integer, inout b integer, inout d integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        d := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func4_1(2,NULL,NULL);
+ func4_1 
+---------
+       1
+(1 row)
+
+call func4_1(2, NULL,NULL);
+ func4_1 | b | d 
+---------+---+---
+       1 | 3 | 3
+(1 row)
+
+select * from func4_1(2, NULL,NULL);
+ func4_1 | b | d 
+---------+---+---
+       1 | 3 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    result := func4_1(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    result := func4_1(a, b, d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    func4_1(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: <NULL>
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    func4_1(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: <NULL>
+--5-- 有out+ 无return 不支持，在执行时报错--
+--5.1
+CREATE or replace FUNCTION func5_1(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        --return;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func5_1(2, NULL);
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_1(integer) line 0 at RETURN
+referenced column: func5_1
+call func5_1(2, NULL);
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_1(integer) line 0 at RETURN
+select * from func5_1(2, NULL);
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_1(integer) line 0 at RETURN
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    result := func5_1(a => a, b => b);
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_1(integer) line 0 at RETURN
+SQL statement "CALL func5_1(a => a,b=>b)"
+PL/pgSQL function inline_code_block line 5 at assignment
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    result := func5_1(a, b);
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_1(integer) line 0 at RETURN
+SQL statement "CALL func5_1(a,b)"
+PL/pgSQL function inline_code_block line 5 at assignment
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    func5_1(a => a, b => b);
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_1(integer) line 0 at RETURN
+SQL statement "CALL func5_1(a => a,b=>b)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+--5.2
+CREATE or replace FUNCTION func5_2(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func5_2(2, NULL);
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_2(integer) line 7 at RETURN
+referenced column: func5_2
+call func5_2(2, NULL);
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_2(integer) line 7 at RETURN
+select * from func5_2(2, NULL);
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_2(integer) line 7 at RETURN
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    result := func5_2(a => a, b => b);
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_2(integer) line 7 at RETURN
+SQL statement "CALL func5_2(a => a,b=>b)"
+PL/pgSQL function inline_code_block line 5 at assignment
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    result := func5_2(a, b);
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_2(integer) line 7 at RETURN
+SQL statement "CALL func5_2(a,b)"
+PL/pgSQL function inline_code_block line 5 at assignment
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    func5_2(a => a, b => b);
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+ERROR:  Value assignment for the out parameter in plpgsql language functions, Unsupported return nothing in PL/pgSQL function
+DETAIL:  N/A
+CONTEXT:  PL/pgSQL function func5_2(integer) line 7 at RETURN
+SQL statement "CALL func5_2(a => a,b=>b)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+--6自治事务
+--6.1 单out
+CREATE or replace FUNCTION func6_1(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+	PRAGMA AUTONOMOUS_TRANSACTION; 
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func6_1(2, null);
+ func6_1 
+---------
+       1
+(1 row)
+
+call func6_1(2, NULL);
+ func6_1 | b 
+---------+---
+       1 | 3
+(1 row)
+
+select * from func6_1(2,null);
+ func6_1 | b 
+---------+---
+       1 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func6_1(a => a, b => b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := func6_1(a, b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    func6_1(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+declare
+    result text;
+    a integer := 2;
+    b integer := NULL;
+begin
+    func6_1(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+--6.2 多out
+CREATE or replace FUNCTION func6_2(in a integer, out b integer, out d integer)
+RETURNS int
+AS $$
+DECLARE
+	PRAGMA AUTONOMOUS_TRANSACTION;
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        d := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+select func6_2(2,NULL,NULL);
+ func6_2 
+---------
+       1
+(1 row)
+
+call func6_2(2, NULL,NULL);
+ func6_2 | b | d 
+---------+---+---
+       1 | 3 | 3
+(1 row)
+
+select * from func6_2(2, NULL,NULL);
+ func6_2 | b | d 
+---------+---+---
+       1 | 3 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    result := func6_2(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    result := func6_2(a, b,d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    func6_2(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: <NULL>
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+    d integer := NULL;
+begin  
+    func6_2(a => a, b => b,d => d);
+    raise info 'b is: %', b;
+	 raise info 'd is: %', d;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  d is: 3
+INFO:  result is: <NULL>
+--7 packge
+--7.1普通out出参
+create or replace package pck7_1
+is
+function func7_1(in a int, out b int)
+return int;
+end pck7_1;
+/ 
+CREATE or replace package body pck7_1 as FUNCTION func7_1(in a int, out b integer)
+RETURN int
+AS 
+DECLARE
+	--PRAGMA AUTONOMOUS_TRANSACTION; 
+	c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END;
+end pck7_1;
+/
+select pck7_1.func7_1(2, null);
+ func7_1 
+---------
+       1
+(1 row)
+
+call pck7_1.func7_1(2, NULL);
+ func7_1 | b 
+---------+---
+       1 | 3
+(1 row)
+
+select * from pck7_1.func7_1(2,null);
+ func7_1 | b 
+---------+---
+       1 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := pck7_1.func7_1(a => a, b => b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := pck7_1.func7_1(a, b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    pck7_1.func7_1(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+declare
+    result text;
+    a integer := 2;
+    b integer := NULL;
+begin
+    pck7_1.func7_1(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+--7.2带自治事务out出参
+create or replace package pck7_2
+is
+function func7_2(in a int, out b int)
+return int;
+end pck7_2;
+/ 
+CREATE or replace package body pck7_2 as FUNCTION func7_2(in a int, out b integer)
+RETURN int
+AS 
+DECLARE
+	PRAGMA AUTONOMOUS_TRANSACTION; 
+	c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END;
+end pck7_2;
+/
+select pck7_2.func7_2(2, null);
+ func7_2 
+---------
+       1
+(1 row)
+
+call pck7_2.func7_2(2, NULL);
+ func7_2 | b 
+---------+---
+       1 | 3
+(1 row)
+
+select * from pck7_2.func7_2(2,null);
+ func7_2 | b 
+---------+---
+       1 | 3
+(1 row)
+
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := pck7_2.func7_2(a => a, b => b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin 
+    result := pck7_2.func7_2(a, b);  
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: 1
+declare
+    result integer;
+    a integer := 2;
+    b integer := NULL;
+begin  
+    pck7_2.func7_2(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+declare
+    result text;
+    a integer := 2;
+    b integer := NULL;
+begin
+    pck7_2.func7_2(a => a, b => b);   
+    raise info 'b is: %', b;
+    raise info 'result is: %', result;
+end;
+/
+INFO:  b is: 3
+INFO:  result is: <NULL>
+--8 out出参不允许重载限制
+--8.1 plpgsql语言的带out参数同名函数只能存在一个
+CREATE or replace FUNCTION func8_1(in a integer)
+RETURNS int
+AS $$
+DECLARE
+    b int;
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+CREATE or replace FUNCTION func8_1(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+CREATE or replace FUNCTION func8_1(in a integer, out b integer, out d integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+		d := b;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+ERROR:  "func8_1" functions with plpgsql language and out params are not supported Overloaded.
+DETAIL:  N/A.
+--8.2 同一schema、package下，不允许存在同名的plpgsql语言的out出参函数，但可以replace
+CREATE or replace FUNCTION func8_2(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+CREATE or replace FUNCTION func8_2(in a integer, out b integer, out d integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+		d := b;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+ERROR:  "func8_2" functions with plpgsql language and out params are not supported Overloaded.
+DETAIL:  N/A.
+CREATE or replace FUNCTION func8_2(in a integer, out b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+create or replace package pck8_2
+is
+function func8_2(in a int, out b int)
+return int;
+function func8_2(in a int, out b int, out d integer)
+return int;
+end pck8_2;
+/ 
+ERROR:  "func8_2" functions with plpgsql language and out params are not supported Overloaded.
+DETAIL:  N/A.
+--8.3 同一schema、package下，允许存在同名的psql语言的不带out出参函数
+CREATE or replace FUNCTION func8_3(in a integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+	b int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+CREATE or replace FUNCTION func8_3(in a integer, in b integer)
+RETURNS int
+AS $$
+DECLARE
+    c int;
+    BEGIN
+        c := 1;
+        b := a + c;
+        return c;
+    END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+create or replace package pck8_3
+is
+function func8_3(in a int)
+return int;
+function func8_3(in a int, in b int)
+return int;
+end pck8_3;
+/ 
+select proname from pg_proc where proname = 'func8_3' order by 1;
+ proname 
+---------
+ func8_3
+ func8_3
+ func8_3
+ func8_3
+(4 rows)
+
+create or replace function f1(in a int, out b int) return int
+as
+declare
+c int;
+begin
+c := a - 1;
+b := a + 1;
+return c;
+end;
+/
+select * from generate_series(1,100) where generate_series > f1(90, null);
+ generate_series 
+-----------------
+              90
+              91
+              92
+              93
+              94
+              95
+              96
+              97
+              98
+              99
+             100
+(11 rows)
+
+declare
+res int;
+begin
+res := f1(10, 888); -- out出参传入常量，报错
+raise info 'res is:%',res;
+end;
+/
+ERROR:  when invoking function f1, no destination for argments ""
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+drop function f1;
+create or replace package pck1 is
+type tp1 is record(v01 number, v03 varchar2, v02 number);
+function f1(in a int, out c tp1) return int;
+end pck1;
+/
+create or replace package body pck1 is
+function f1(in a int, out c tp1) return int
+as
+declare
+begin
+c.v01:=a;
+return a;
+end;
+end pck1;
+/
+select pck1.f1(10,(1,'a',2));
+ f1 
+----
+ 10
+(1 row)
+
+select *from pck1.f1(10,(1,'a',2));
+ f1 |   c    
+----+--------
+ 10 | (10,,)
+(1 row)
+
+call pck1.f1(10,(1,'a',2));
+ f1 |   c    
+----+--------
+ 10 | (10,,)
+(1 row)
+
+--clean
+reset behavior_compat_options;
+drop schema out_param_schema cascade;
+NOTICE:  drop cascades to 24 other objects
+DETAIL:  drop cascades to function func1(integer)
+drop cascades to function func1_1(integer,integer)
+drop cascades to function func2(integer)
+drop cascades to function func3(integer)
+drop cascades to function func4(integer)
+drop cascades to function func4_1(integer,integer,integer)
+drop cascades to function func5_1(integer)
+drop cascades to function func5_2(integer)
+drop cascades to function func6_1(integer)
+drop cascades to function func6_2(integer)
+--?.*
+drop cascades to function out_param_schema.func7_1(integer)
+--?.*
+drop cascades to function out_param_schema.func7_2(integer)
+drop cascades to function out_param_schema.func8_1(integer)
+drop cascades to function out_param_schema.func8_1(integer)
+drop cascades to function func8_2(integer)
+drop cascades to function func8_3(integer)
+drop cascades to function func8_3(integer,integer)
+--?.*
+drop cascades to function out_param_schema.func8_3(integer)
+drop cascades to function out_param_schema.func8_3(integer,integer)
+--?.*
+drop cascades to function out_param_schema.f1(integer)

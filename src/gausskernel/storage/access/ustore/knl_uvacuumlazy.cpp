@@ -72,7 +72,7 @@ static int LazyVacuumUPage(Relation onerel, BlockNumber blkno, Buffer buffer, in
     TransactionId oldestXmin);
 static void LazySpaceUalloc(LVRelStats *vacrelstats, BlockNumber relblocks, Relation onerel);
 static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrelstats, Relation *Irel,
-    Relation *IPartRel, Partition *IPart, int nindexes, TransactionId oldestXmin);
+    int nindexes, TransactionId oldestXmin);
 static void LazyVacuumUHeap(Relation onerel, LVRelStats *vacrelstats, TransactionId oldestXmin);
 
 /*
@@ -195,7 +195,7 @@ static void LazyVacuumUHeap(Relation onerel, LVRelStats *vacrelstats, Transactio
  * 		writing any undo;
  */
 static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrelstats, Relation *Irel,
-    Relation *IPartRel, Partition *IPart, int nindexes, TransactionId oldestXmin)
+    int nindexes, TransactionId oldestXmin)
 {
     UHeapTupleData tuple;
     BlockNumber emptyPages;
@@ -239,7 +239,7 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
     for (blkno = scanStartingBlock; blkno < nblocks; blkno++) {
         Buffer buf;
         Page page;
-        TransactionId xid;
+        TransactionId xid = InvalidTransactionId;
         OffsetNumber offnum;
         OffsetNumber maxoff;
         Size freespace;
@@ -248,10 +248,11 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
         bool has_dead_tuples;
 
         /* IO collector and IO scheduler for vacuum */
+#ifdef ENABLE_MULTIPLE_NODES
         if (ENABLE_WORKLOAD_CONTROL) {
             IOSchedulerAndUpdate(IO_TYPE_READ, 1, IO_TYPE_ROW);
         }
-
+#endif
         vacuum_delay_point();
 
         /*
@@ -318,7 +319,7 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
             continue;
         }
 
-        if (UPageIsEmpty((UHeapPageHeaderData *)page, RelationGetInitTd(onerel))) {
+        if (UPageIsEmpty((UHeapPageHeaderData *)page)) {
             emptyPages++;
             freespace = PageGetUHeapFreeSpace(page);
             UnlockReleaseBuffer(buf);
@@ -484,10 +485,11 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
     /* Do post-vacuum cleanup and statistics update for each index */
     for (i = 0; i < nindexes; i++) {
         /* IO collector and IO scheduler for vacuum */
+#ifdef ENABLE_MULTIPLE_NODES
         if (ENABLE_WORKLOAD_CONTROL) {
             IOSchedulerAndUpdate(IO_TYPE_WRITE, 1, IO_TYPE_ROW);
         }
-
+#endif
         indstats[i] = lazy_cleanup_index(Irel[i], indstats[i], vacrelstats, vac_strategy);
     }
 
@@ -509,6 +511,36 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
         errdetail_internal("%s", infobuf.data)));
     pfree(infobuf.data);
     return indstats;
+}
+
+static void LazyScanURel(Relation onerel, LVRelStats *vacrelstats, VacuumStmt *vacstmt, Relation *irel,
+    int nindexes, TransactionId oldestXmin)
+{
+    IndexBulkDeleteResult **indstats = NULL;
+    int idx;
+
+    if (nindexes > 0) {
+        vacrelstats->new_idx_pages = (BlockNumber*)palloc0(nindexes * sizeof(BlockNumber));
+        vacrelstats->new_idx_tuples = (double*)palloc0(nindexes * sizeof(double));
+        vacrelstats->idx_estimated = (bool*)palloc0(nindexes * sizeof(bool));
+    }
+
+    indstats = LazyScanUHeap(onerel, vacrelstats, irel, nindexes, oldestXmin);
+
+    /* Vacuum the Free Space Map */
+    FreeSpaceMapVacuum(onerel);
+
+    for (idx = 0; idx < nindexes; idx++) {
+        /* summarize the index status information */
+        if (indstats[idx] != NULL) {
+            vacrelstats->new_idx_pages[idx] = indstats[idx]->num_pages;
+            vacrelstats->new_idx_tuples[idx] = indstats[idx]->num_index_tuples;
+            vacrelstats->idx_estimated[idx] = indstats[idx]->estimated_count;
+            pfree_ext(indstats[idx]);
+        }
+    }
+
+    pfree_ext(indstats);
 }
 
 /*
@@ -553,8 +585,18 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
      * because like other backends operating on uheap, lazy vacuum also
      * reserves a transaction slot in the page for pruning purpose.
      */
-    TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
-    Assert(TransactionIdIsNormal(oldestXmin));
+    TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+    if (!TransactionIdIsNormal(oldestXmin)) {
+        ereport(WARNING,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmodule(MOD_VACUUM),
+                errmsg("oldestXidInUndo(%lu) is abnormal.", oldestXmin),
+                errdetail("N/A"),
+                errcause("There is a high probability that the DML operation "
+                "has not been performed on any ustore table. "),
+                erraction("Check the value of oldestXidInUndo in undo_cxt.")));
+        return;
+    }
 
     vacrelstats = (LVRelStats *)palloc0(sizeof(LVRelStats));
 
@@ -581,30 +623,7 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
     /* Always enable index vacuuming when the relation has an index. */
     vacrelstats->hasindex = (nindexes > 0);
 
-    /* Do the vacuuming */
-    IndexBulkDeleteResult **indstats = NULL;
-
-    if (RelationIsPartition(onerel)) {
-        indstats = LazyScanUHeap(onerel, vacrelstats, irel, indexrel, indexpart, nindexes, oldestXmin);
-    } else {
-        indstats = LazyScanUHeap(onerel, vacrelstats, irel, NULL, NULL, nindexes, oldestXmin);
-    }
-
-    /* Done with indexes */
-    if (RelationIsPartition(onerel)) {
-        vac_close_part_indexes(nindexes, nindexesGlobal, irel, indexrel, indexpart, NoLock);
-    } else {
-        vac_close_indexes(nindexes, irel, NoLock);
-    }
-
-    FreeSpaceMapVacuum(onerel);
-
-    for (int idx = 0; idx < nindexes; idx++) {
-        /* summarize the index status information */
-        if (indstats[idx] != NULL) {
-            pfree_ext(indstats[idx]);
-        }
-    }
+    LazyScanURel(onerel, vacrelstats, vacstmt, irel, nindexes, oldestXmin);
 
     /*
      * Update statistics in pg_class.
@@ -651,13 +670,76 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
          * will lead to misbehave when update other index usable partitions ---the horrible
          * misdguge as hot update even if update indexes columns.
          */
-        vac_update_pgclass_partitioned_table(vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex,
-            newFrozenXid, InvalidMultiXactId);
+        if (!vacstmt->issubpartition) {
+            vac_update_pgclass_partitioned_table(vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex,
+                newFrozenXid, InvalidMultiXactId);
+        } else {
+            vac_update_pgclass_partitioned_table(vacstmt->parentpartrel, vacstmt->parentpartrel->rd_rel->relhasindex,
+                newFrozenXid, InvalidMultiXactId);
+        }
+
+        /* update stats of local partition indexes */
+        for (int idx = 0; idx < nindexes - nindexesGlobal; idx++) {
+            if (vacrelstats->idx_estimated[idx]) {
+                continue;
+            }
+
+            vac_update_partstats(indexpart[idx],
+                vacrelstats->new_idx_pages[idx],
+                vacrelstats->new_idx_tuples[idx],
+                0,
+                InvalidTransactionId,
+                InvalidMultiXactId);
+
+            vac_update_pgclass_partitioned_table(indexrel[idx], false, InvalidTransactionId, InvalidMultiXactId);
+        }
+
+        /* update stats of global partition indexes */
+        Assert((nindexes - nindexesGlobal) >= 0);
+        Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
+        for (int idx = nindexes - nindexesGlobal; idx < nindexes; idx++) {
+            if (vacrelstats->idx_estimated[idx]) {
+                continue;
+            }
+
+            vac_update_relstats(irel[idx],
+                classRel,
+                vacrelstats->new_idx_pages[idx],
+                vacrelstats->new_idx_tuples[idx],
+                0,
+                false,
+                InvalidTransactionId,
+                InvalidMultiXactId);
+        }
+        heap_close(classRel, RowExclusiveLock);
     } else {
         Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
         vac_update_relstats(onerel, classRel, newRelPages, newRelTuples, newRelAllvisible, nindexes > 0, newFrozenXid,
             InvalidMultiXactId);
+
+        for (int idx = 0; idx < nindexes; idx++) {
+            /* update index status */
+            if (vacrelstats->idx_estimated[idx]) {
+                continue;
+            }
+
+            vac_update_relstats(irel[idx],
+                classRel,
+                vacrelstats->new_idx_pages[idx],
+                vacrelstats->new_idx_tuples[idx],
+                0,
+                false,
+                InvalidTransactionId,
+                InvalidMultiXactId);
+        }
         heap_close(classRel, RowExclusiveLock);
+    }
+
+    /* Done with indexes */
+    if (RelationIsPartition(onerel)) {
+        vac_close_part_indexes(nindexes, nindexesGlobal, irel, indexrel, indexpart, NoLock);
+    } else {
+        vac_close_indexes(nindexes, irel, NoLock);
     }
 
     /* report results to the stats collector, too */
@@ -665,6 +747,13 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
     if (newLiveTuples < 0) {
         newLiveTuples = 0; /* just in case */
     }
+
+    if (nindexes > 0) {
+        pfree_ext(vacrelstats->new_idx_pages);
+        pfree_ext(vacrelstats->new_idx_tuples);
+        pfree_ext(vacrelstats->idx_estimated);
+    }
+
     pgstat_report_vacuum(RelationGetRelid(onerel), onerel->parentId, onerel->rd_rel->relisshared,
         vacrelstats->tuples_deleted);
 

@@ -76,7 +76,7 @@ inline CmkKeyStore get_key_store_from_string(const char *key_store)
     if (key_store == NULL || strlen(key_store) == 0) {
         return CmkKeyStore::INVALID_KEYSTORE;
     }
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS) && (!defined(ENABLE_LITE_MODE))))
     if (strcasecmp(key_store, "gs_ktool") == 0) {
         return CmkKeyStore::GS_KTOOL;
     }

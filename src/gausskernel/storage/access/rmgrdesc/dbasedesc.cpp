@@ -19,6 +19,18 @@
 #include "commands/dbcommands.h"
 #include "lib/stringinfo.h"
 
+const char* dbase_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_DBASE_CREATE) {
+        return "db_create";
+    } else if (info == XLOG_DBASE_DROP) {
+        return "db_drop";
+    } else {
+        return "unkown_type";
+    }
+}
+
 void dbase_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

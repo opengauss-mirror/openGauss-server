@@ -1,0 +1,144 @@
+-- 初始开关关闭, 审计日志查询
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+show audit_xid_info;
+ audit_xid_info 
+----------------
+ 0
+(1 row)
+
+-- 参数设置
+set audit_xid_info=1;
+ERROR:  parameter "audit_xid_info" cannot be changed now
+-- 打开xid开关
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_xid_info=1" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show audit_xid_info;
+ audit_xid_info 
+----------------
+ 1
+(1 row)
+
+CREATE USER audit_user1 PASSWORD 'Gauss@123';
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type='ddl_user' and object_name='audit_user1';
+                       detail_info                       
+---------------------------------------------------------
+ xid=XIDNUM, CREATE USER audit_user1 PASSWORD '********';
+(1 row)
+
+-- DDL
+create database db_audit1;
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type='ddl_database';
+              detail_info              
+---------------------------------------
+ xid=XIDNUM, create database db_audit1;
+(1 row)
+
+-- DCL
+create table t1(id int);
+grant all on table t1 to audit_user1;
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type='grant_role' and object_name='audit_user1';
+                   detail_info                    
+--------------------------------------------------
+ xid=XIDNUM, grant all on table t1 to audit_user1;
+(1 row)
+
+-- DML
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state=1" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show audit_dml_state;
+ audit_dml_state 
+-----------------
+ 1
+(1 row)
+
+create table t2(id int);
+insert into t2 values(1);
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type='dml_action' and object_name='t2';
+             detail_info              
+--------------------------------------
+ xid=XIDNUM, insert into t2 values(1);
+(1 row)
+
+-- DQL
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state_select=1" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show audit_dml_state_select;
+ audit_dml_state_select 
+------------------------
+ 1
+(1 row)
+
+create table t3(id int);
+select * from t3;
+ id 
+----
+(0 rows)
+
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type='dml_action_select' and object_name='t3';
+         detail_info          
+------------------------------
+ xid=XIDNUM, select * from t3;
+(1 row)
+
+-- 关闭xid开关
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_xid_info=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state=0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state_select=0" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show audit_xid_info;
+ audit_xid_info 
+----------------
+ 0
+(1 row)
+
+show audit_dml_state;
+ audit_dml_state 
+-----------------
+ 0
+(1 row)
+
+show audit_dml_state_select;
+ audit_dml_state_select 
+------------------------
+ 0
+(1 row)
+
+-- 恢复
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop user audit_user1;
+drop database db_audit1;
+/* remove hard xid */
+\! security_scripts/post_case_audit.sh @abs_builddir@/results/hw_audit_detailinfo.out

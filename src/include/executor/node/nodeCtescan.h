@@ -55,4 +55,8 @@ extern bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot);
 extern int SibglingsKeyCmp(Datum x, Datum y, SortSupport ssup);
 extern int SibglingsKeyCmpFast(Datum x, Datum y, SortSupport ssup);
 
+extern void markSWLevelBegin(StartWithOpState *node);
+extern void markSWLevelEnd(StartWithOpState *node, int64 rowCount);
+extern TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot);
+extern bool ExecStartWithRowLevelQual(RecursiveUnionState* node, TupleTableSlot* dstSlot);
 #endif /* NODECTESCAN_H */

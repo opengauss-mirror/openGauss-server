@@ -5,6 +5,35 @@ DROP CLIENT MASTER KEY IF EXISTS moneyCMK CASCADE;
 CREATE CLIENT MASTER KEY moneyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 CREATE COLUMN ENCRYPTION KEY moneyCEK WITH VALUES (CLIENT_MASTER_KEY = moneyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 
+
+-- create table IF NOT EXISTS money_type(c1 int, 
+-- c2 money
+-- );
+
+-- -- -92233720368547758.08 to +92233720368547758.07
+-- insert into money_type values(1, 92233720368547758.07);
+-- insert into money_type values(2, -92233720368547758.08);
+-- insert into money_type values(3, 0);
+-- insert into money_type values(4, 12.3456);
+-- insert into money_type values(5, -12.3456);
+-- insert into money_type values(6, 92233720368547758.08);
+-- insert into money_type values(7, -92233720368547758.09);
+
+-- --when insert the encrypted money type,it will lost its form of momey and scope
+-- select * from money_type ORDER BY c1;
+
+-- select * from money_type where c2 = '$12.3456';
+
+-- DELETE FROM money_type where c2 = '$12.3456';
+-- select * from money_type ORDER BY c1;
+
+-- DELETE FROM money_type as alias_test where alias_test.c2 = '$-12.3456';
+-- select * from money_type ORDER BY c1;
+
+-- UPDATE money_type SET c2 = 23.2 where c2 = '$0';
+-- select * from money_type ORDER BY c1;
+
+
 create table IF NOT EXISTS money_type_enc(c1 int, 
 c2 money ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = moneyCEK, ENCRYPTION_TYPE = DETERMINISTIC)
 );

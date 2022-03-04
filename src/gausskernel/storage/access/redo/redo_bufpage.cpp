@@ -611,7 +611,7 @@ bool PageFreeDict(Page page)
  *		The page is PageInit'd with the same special-space size as the
  *		given page, and the special space is copied from the given page.
  */
-Page PageGetTempPageCopySpecial(Page page, bool isbtree)
+Page PageGetTempPageCopySpecial(Page page)
 {
     Size pageSize;
     Page temp;
@@ -622,10 +622,7 @@ Page PageGetTempPageCopySpecial(Page page, bool isbtree)
 
     Assert(!PageIsCompressed(page));
 
-    if (isbtree && PageIs4BXidVersion(page))
-        PageInit(temp, pageSize, PageGetSpecialSize(page) + sizeof(TransactionId));
-    else
-        PageInit(temp, pageSize, PageGetSpecialSize(page));
+    PageInit(temp, pageSize, PageGetSpecialSize(page));
     rc = memcpy_s(PageGetSpecialPointer(temp), PageGetSpecialSize(page), PageGetSpecialPointer(page),
                   PageGetSpecialSize(page));
     securec_check(rc, "", "");

@@ -81,20 +81,24 @@ extern void CacheInvalidateRelmap(Oid databaseId);
 
 extern void CacheInvalidateHeapTupleInplace(Relation relation, HeapTuple tuple);
 
-extern void CacheRegisterSyscacheCallback(int cacheid, SyscacheCallbackFunction func, Datum arg);
-
-extern void CacheRegisterRelcacheCallback(RelcacheCallbackFunction func, Datum arg);
-
-extern void CallSyscacheCallbacks(int cacheid, uint32 hashvalue);
-
 extern void inval_twophase_postcommit(TransactionId xid, uint16 info, void* recdata, uint32 len);
-extern void CacheRegisterPartcacheCallback(PartcacheCallbackFunction func, Datum arg);
+
 extern void CacheInvalidatePartcache(Partition partition);
 extern void CacheInvalidatePartcacheByTuple(HeapTuple partitionTuple);
 extern void CacheInvalidatePartcacheByPartid(Oid partid);
 
 extern void InvalidateSystemCaches(void);
 
+extern void CacheRegisterThreadSyscacheCallback(int cacheid, SyscacheCallbackFunction func, Datum arg);
+extern void CacheRegisterThreadRelcacheCallback(RelcacheCallbackFunction func, Datum arg);
+extern void CacheRegisterThreadPartcacheCallback(PartcacheCallbackFunction func, Datum arg);
+extern void CacheRegisterSessionSyscacheCallback(int cacheid, SyscacheCallbackFunction func, Datum arg);
+extern void CacheRegisterSessionRelcacheCallback(RelcacheCallbackFunction func, Datum arg);
+extern void CacheRegisterSessionPartcacheCallback(PartcacheCallbackFunction func, Datum arg);
+extern void CallThreadSyscacheCallbacks(int cacheid, uint32 hashvalue);
+extern void CallSessionSyscacheCallbacks(int cacheid, uint32 hashvalue);
+extern void InvalidateSessionSystemCaches(void);
+extern void InvalidateThreadSystemCaches(void);
 extern void CacheInvalidateRelcacheAll(void);
 
 #endif /* INVAL_H */

@@ -64,10 +64,10 @@ SELECT substr(data, 1, 200) FROM pg_logical_slot_get_changes('regression_slot', 
  table public.xpto: INSERT: id[integer]:2 toasted_col1[text]:null rand1[double precision]:3077 toasted_col2[text]:'00010002000300040005000600070008000900100011001200130014001500160017001800190020002100
 --?.*
  BEGIN
- table public.xpto: UPDATE: id[integer]:1 toasted_col1[text]:'1234567891011121314151617181920212223242526272829303132333435363738394041424344454647484950515253545556575859606162636465666768697071727374
+ table public.xpto: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 toasted_col1[text]:'123456789101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657
 --?.*
  BEGIN
- table public.xpto: UPDATE: id[integer]:1 toasted_col1[text]:unchanged-toast-datum rand1[double precision]:123.456 toasted_col2[text]:unchanged-toast-datum rand2[double precision]:1578
+ table public.xpto: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 toasted_col1[text]:'123456789101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657
 --?.*
  BEGIN
  table public.xpto: DELETE: id[integer]:1
@@ -76,7 +76,7 @@ SELECT substr(data, 1, 200) FROM pg_logical_slot_get_changes('regression_slot', 
  table public.toasted_key: INSERT: id[integer]:1 toasted_key[text]:'1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123
 --?.*
  BEGIN
- table public.toasted_key: UPDATE: id[integer]:1 toasted_key[text]:unchanged-toast-datum toasted_col1[text]:unchanged-toast-datum toasted_col2[text]:'987654321098765432109876543210987654321098765432109
+ table public.toasted_key: UPDATE: old-key: toasted_key[text]:'123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
 --?.*
  BEGIN
  table public.toasted_key: UPDATE: old-key: toasted_key[text]:'123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
@@ -343,7 +343,7 @@ WHERE data NOT LIKE '%INSERT: %';
                                                                                                regexp_replace                                                                                               
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  BEGIN
- table public.toasted_several: UPDATE: old-key: id[integer]:1 toasted_key[text]:'98765432109876543210..7654321098765432109876543210987654321098765432109876543210' toasted_col2[text]:unchanged-toast-datum
+ table public.toasted_several: UPDATE: old-key: id[integer]:1 toasted_key[text]:'98765432109876543210..876543210987654321098765432109876543210987654321098765432109876543210987654321098765432109876543210'
  table public.toasted_several: DELETE: id[integer]:1 toasted_key[text]:'98765432109876543210987654321..876543210987654321098765432109876543210987654321098765432109876543210987654321098765432109876543210'
 --?.*
 (4 rows)

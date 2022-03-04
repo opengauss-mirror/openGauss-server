@@ -25,7 +25,7 @@ BEGIN
     RETURN c;
 END; $$
 LANGUAGE plpgsql;
-\df
+\df f_processed_in_plpgsql
                                                                    List of functions
  Schema |          Name          | Result data type  |                Argument data types                 |  Type  | fencedmode | propackage | prokind 
 --------+------------------------+-------------------+----------------------------------------------------+--------+------------+------------+---------

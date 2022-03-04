@@ -31,6 +31,8 @@ typedef uintptr_t Datum;
 #define HTONLL(x) ((1 == htonl(1)) ? (x) : ((((uint64_t)htonl((x)&0xFFFFFFFFUL)) << 32) | htonl((uint32_t)((x) >> 32))))
 #define NTOHLL(x) ((1 == ntohl(1)) ? (x) : ((((uint64_t)ntohl((x)&0xFFFFFFFFUL)) << 32) | ntohl((uint32_t)((x) >> 32))))
 
+static const size_t MIN_SIZE_WITH_ELEMENTS = 3;
+
 bool is_clientlogic_datatype(const Oid o)
 {
     return (o == BYTEAWITHOUTORDERWITHEQUALCOLOID || o == BYTEAWITHOUTORDERCOLOID);
@@ -193,6 +195,7 @@ size_t count_sep_in_str(const char *input)
     }
     return result;
 }
+
 /**
  * Parses a char array coming from the database server when loading the cache
  * It is in the form of {elem,elem,elem ...} or "elem elem elem elem"
@@ -201,99 +204,107 @@ size_t count_sep_in_str(const char *input)
  * @param[out] items_out vector of items allocated by this method
  * @return the numbers of items in items_out
  */
-size_t parse_char_array(const char *input, char ***items_out)
+size_t parse_string_array(PGconn* const conn, const char *input, char ***items_out)
 {
     *items_out = NULL;
     char **items = NULL;
     size_t output_length = 0;
 
-    if (input == NULL ||
-        strlen(input) == 0) { /* there are 2 characters for opening and closing brakets {item1,item2....itemn} */
+    if (input == NULL || strlen(input) == 0) {
+        /* there are 2 characters for opening and closing brakets {item1,item2....itemn} */
         return output_length;
     }
-    int start_offset = 0;
+    size_t start_offset = 0;
     if (input[0] == '{') {
         start_offset = 1;
-        /* if input length < 3, it has no item */
-        if (strlen(input) < 3) {
+        if (strlen(input) < MIN_SIZE_WITH_ELEMENTS) {
             return output_length;
         }
     }
     size_t count_of_column = count_sep_in_str(input);
     output_length = count_of_column + 1;
     size_t elem_index = 0;
-    items = (char **)malloc(output_length * sizeof(char *));
+    items = (char **)malloc(output_length * sizeof(char*));
+    *items_out = items;
     if (items == NULL) {
-        fprintf(stderr, "Error: out of memory\n");
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("Error: out of memory?\n"));
         output_length = 0;
         return output_length;
     }
-    *items_out = items;
-    check_memset_s(memset_s(items, output_length * sizeof(char *), 0, output_length * sizeof(char *)));
+    check_memset_s(memset_s(items, output_length * sizeof(char *), 0, output_length * sizeof(char*)));
     size_t begin_index = start_offset;
-    size_t last_index = 0;
-    /* Ignoring the brackets if exists {item1,item2....itemn} */
+    size_t last_index = start_offset;
     for (size_t index = start_offset; index < strlen(input); ++index) {
+        // Ignoring the bracket if exists {item1,item2....itemn}
         last_index = index;
         if (input[index] == ',' || input[index] == ' ' || input[index] == '}') {
             if (elem_index < output_length) {
                 size_t item_len = index - begin_index;
                 items[elem_index] = (char *)malloc((item_len + 1) * sizeof(char));
-                if (items[elem_index] == NULL) {
-                    fprintf(stderr, "Error: out of memory\n");
-                    for (size_t i = 0; i < elem_index; i++) {
-                        libpq_free(items[i]);
-                    }
-                    libpq_free(items);
-                    output_length = 0;
-                    return output_length;
-                }
                 check_strncpy_s(strncpy_s(items[elem_index], item_len + 1, input + begin_index, item_len));
                 items[elem_index][index - begin_index] = 0;
             } else {
-                fprintf(stderr, "Error: index out of bound on parse_char_array %s\n", input);
+                printfPQExpBuffer(&conn->errorMessage,
+                    libpq_gettext("Error: index out of bound on parse_string_array %s\n"), input);
             }
             begin_index = index + 1;
             ++elem_index;
         }
     }
-    if (start_offset == 0) { /* Handle the last item */
+    if (start_offset == 0) { // Handle the last item
         if (elem_index < output_length) {
-            size_t item_len = last_index - begin_index + 1;
+            size_t item_len = last_index + 1 - begin_index;
             items[elem_index] = (char *)malloc((item_len + 1) * sizeof(char));
-            if (items[elem_index] == NULL) {
-                fprintf(stderr, "Error: out of memory\n");
-                for (size_t i = 0; i < elem_index; i++) {
-                    libpq_free(items[i]);
-                }
-                libpq_free(items);
-                output_length = 0;
-                return output_length;
-            }
             check_strncpy_s(strncpy_s(items[elem_index], item_len + 1, input + begin_index, item_len));
-            items[elem_index][last_index - begin_index + 1] = 0;
+            items[elem_index][item_len] = 0;
         }
     }
     return output_length;
 }
+
 /**
  * Parses a char array coming from the database server when loading the cache
+ * It is in the form of {'c','i',..'o'} or "c i ... o"
+ * Note that this method allocates the memory for the items_out parameters and it is up to the caller to free it
+ * @param[in] input the input array string
+ * @param[out] items_out vector of items allocated by this method
+ * @return the numbers of items in items_out*
+ */
+size_t parse_char_array(PGconn* const conn, const char *input, char **items_out)
+{
+    *items_out = NULL;
+    char **items_char = NULL;
+    char *items = NULL;
+    size_t output_length = parse_string_array(conn, input, &items_char);
+    if (output_length > 0) {
+        items = (char*)malloc(output_length * sizeof(char));
+        *items_out = items;
+        for (size_t index = 0; index < output_length; ++index) {
+            items[index] = *(items_char[index]);
+            free(items_char[index]);
+        }
+    }
+    free(items_char);
+    return output_length;
+}
+/**
+ * Parses a oid array coming from the database server when loading the cache
  * It is in the form of {oid1,oid2,...oidn) or "oid1 oid2 ... oidn"
  * Note that this method allocates the memory for the items_out parameters and it is up to the caller to free it
  * @param[in] input the input array string
  * @param[out] items_out vector of items allocated by this method
  * @return the numbers of items in items_out*
  */
-size_t parse_oid_array(const char *input, Oid **items_out)
+size_t parse_oid_array(PGconn* const conn, const char *input, Oid **items_out)
 {
     *items_out = NULL;
     char **items_char = NULL;
     Oid *items = NULL;
-    size_t output_length = parse_char_array(input, &items_char);
+    size_t output_length = parse_string_array(conn, input, &items_char);
     if (output_length > 0) {
         items = (Oid *)malloc(output_length * sizeof(Oid));
         if (items == NULL) {
-            fprintf(stderr, "Error: out of memory\n");
+            printfPQExpBuffer(&conn->errorMessage, libpq_gettext("Error: out of memory\n"));
             for (size_t index = 0; index < output_length; ++index) {
                 free(items_char[index]);
             }

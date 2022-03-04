@@ -17,7 +17,7 @@ distance_functions.h
        Current set of distance functions that can be used (for k-means for example)
 
 IDENTIFICATION
-    src/include/dbmind/db4ai/executor/distance_functions.h
+    src/include/db4ai/distance_functions.h
 
 ---------------------------------------------------------------------------------------
 **/

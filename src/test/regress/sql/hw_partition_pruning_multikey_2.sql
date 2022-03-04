@@ -14,57 +14,57 @@ drop table range_table_LLT;
 
 
 
-create table rt_DTS2014042814100 (a int, b int)
+create table rt_TESTTABLE (a int, b int)
 partition by range(a, b)
 (
-partition rt_DTS2014042814100_p1 values less than(9, 3),
-partition rt_DTS2014042814100_p2 values less than(10, 1)
+partition rt_TESTTABLE_p1 values less than(9, 3),
+partition rt_TESTTABLE_p2 values less than(10, 1)
 );
 
-insert into rt_DTS2014042814100 values (9, 4);
+insert into rt_TESTTABLE values (9, 4);
 
-select * from rt_DTS2014042814100 where b=4;
+select * from rt_TESTTABLE where b=4;
 
-drop table rt_DTS2014042814100;
+drop table rt_TESTTABLE;
 
 
-create table rt_DTS2014042814100 (a int, b int)
+create table rt_TESTTABLE (a int, b int)
 partition by range(a, b)
 (
-partition rt_DTS2014042814100_p1 values less than(9, 1),
-partition rt_DTS2014042814100_p2 values less than(10, 3)
+partition rt_TESTTABLE_p1 values less than(9, 1),
+partition rt_TESTTABLE_p2 values less than(10, 3)
 );
 
-insert into rt_DTS2014042814100 values (9, 4);
+insert into rt_TESTTABLE values (9, 4);
 
-select * from rt_DTS2014042814100 where b=4;
+select * from rt_TESTTABLE where b=4;
 
-drop table rt_DTS2014042814100;
+drop table rt_TESTTABLE;
 
 
-create table rt_DTS2014042814100 (a int, b int, c int)
+create table rt_TESTTABLE (a int, b int, c int)
 partition by range(a, b, c)
 (
-partition rt_DTS2014042814100_p1 values less than(2, 9, 3),
-partition rt_DTS2014042814100_p2 values less than(2, 10, 1)
+partition rt_TESTTABLE_p1 values less than(2, 9, 3),
+partition rt_TESTTABLE_p2 values less than(2, 10, 1)
 );
 
-insert into rt_DTS2014042814100 values (2, 9, 4);
+insert into rt_TESTTABLE values (2, 9, 4);
 
-select * from rt_DTS2014042814100 where c=4;
+select * from rt_TESTTABLE where c=4;
 
-drop table rt_DTS2014042814100;
+drop table rt_TESTTABLE;
 
 
-create table rt_DTS2014042814100 (a int, b int, c int)
+create table rt_TESTTABLE (a int, b int, c int)
 partition by range(a, b, c)
 (
-partition rt_DTS2014042814100_p1 values less than(2, 9, 1),
-partition rt_DTS2014042814100_p2 values less than(2, 10, 3)
+partition rt_TESTTABLE_p1 values less than(2, 9, 1),
+partition rt_TESTTABLE_p2 values less than(2, 10, 3)
 );
 
-insert into rt_DTS2014042814100 values (2, 9, 4);
+insert into rt_TESTTABLE values (2, 9, 4);
 
-select * from rt_DTS2014042814100 where c=4;
+select * from rt_TESTTABLE where c=4;
 
-drop table rt_DTS2014042814100;
+drop table rt_TESTTABLE;

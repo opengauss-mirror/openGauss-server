@@ -17,7 +17,9 @@ subdir=src/bin/pgxc_clean
 
 override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -fpic -D_FORTIFY_SOURCE=2 -O2
 CFLAGS += -Wl,-z,relro,-z,now -s -ftrapv -fPIE
-LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+ifeq ($(enable_lite_mode), no)
+    LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+endif
 LDFLAGS += -pie
 PROGRAM= pgxc_clean
 

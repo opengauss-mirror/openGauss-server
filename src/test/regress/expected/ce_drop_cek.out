@@ -31,6 +31,7 @@ SELECT  count(*), 'count' FROM gs_column_keys;
 SET ROLE test1 PASSWORD "Gauss@123";
 DROP column encryption key test2.test_drop_cek2;
 ERROR:  permission denied for schema test2
+DETAIL:  N/A
 SELECT  count(*), 'count' FROM gs_column_keys;
  count | ?column? 
 -------+----------
@@ -48,6 +49,7 @@ SELECT  count(*), 'count' FROM gs_column_keys;
 SET ROLE test_security_admin PASSWORD "Gauss@123";
 DROP COLUMN ENCRYPTION KEY test1.test_drop_cek1;
 ERROR:  permission denied for schema test1
+DETAIL:  N/A
 SELECT  count(*), 'count' FROM gs_column_keys;
  count | ?column? 
 -------+----------

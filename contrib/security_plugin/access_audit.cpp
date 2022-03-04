@@ -288,8 +288,8 @@ void audit_open_relation(List *list, Var *col_att, PolicyLabelItem *full_column,
     }
 }
 
-static void audit_open_view(RuleLock *rules, Var *col_att, PolicyLabelItem* full_column,
-                            PolicyLabelItem *view_full_column)
+static void audit_cursor_view(RuleLock *rules, Var *col_att, PolicyLabelItem *full_column,
+    PolicyLabelItem *view_full_column)
 {
     if (col_att == NULL)
         return;
@@ -364,7 +364,7 @@ void get_fqdn_by_relid(RangeTblEntry *rte, PolicyLabelItem *full_column, Var *co
             /* schema */
             full_column->m_schema = tbl_rel->rd_rel->relnamespace;
             if (tbl_rel->rd_rules) { /* view */
-                audit_open_view(tbl_rel->rd_rules, col_att, full_column, view_full_column);
+                audit_cursor_view(tbl_rel->rd_rules, col_att, full_column, view_full_column);
                 if (view_full_column) {
                     view_full_column->m_schema = tbl_rel->rd_rel->relnamespace;
                     view_full_column->set_object(rte->relid, O_VIEW);
@@ -499,7 +499,7 @@ void access_audit_policy_run(const List* rtable, CmdType cmd_type)
         /* table object */
         RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
         policy_result pol_result;
-        if (rte == NULL || rte->relname == NULL || rte->rtekind == RTE_REMOTE_DUMMY) {
+        if (rte == NULL || rte->rtekind == RTE_REMOTE_DUMMY) {
             continue;
         }
 
@@ -507,7 +507,8 @@ void access_audit_policy_run(const List* rtable, CmdType cmd_type)
             int recursion_deep = 0;
             handle_subquery(rte, rte->subquery->commandType, &pol_result, &checked_tables, &policy_ids,
                 &security_policy_ids, &recursion_deep);
-        } else if (checked_tables.insert(rte->relname).second) { /* verify if table object already checked */
+        } else if (rte->relname != NULL &&
+            checked_tables.insert(rte->relname).second) { /* verify if table object already checked */
             /* use query plan commandtype here but not get it from rte directly */
             if (!handle_table_entry(rte, cmd_type, &policy_ids, &security_policy_ids, &pol_result)) {
                 continue;

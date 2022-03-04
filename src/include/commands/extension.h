@@ -43,10 +43,10 @@ extern void AlterExtensionNamespace(List* names, const char* newschema);
 
 extern void AlterExtensionOwner_oid(Oid extensionOid, Oid newOwnerId);
 
-extern void RepallocSessionVarsArrayIfNecessary();
-
 /* Retuen true if the extension is supported. */
 extern bool CheckExtensionValid(const char *extentName);
 extern bool CheckExtensionSqlValid(char *queryString);
+
+extern void RepallocSessionVarsArrayIfNecessary();
 
 #endif /* EXTENSION_H */

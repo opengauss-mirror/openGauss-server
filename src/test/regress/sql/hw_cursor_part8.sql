@@ -324,7 +324,7 @@ END;
 
 create table t1(a int);
 --test with query
-create or replace procedure test_cursor() as
+create or replace procedure test_cursor_8() as
 declare
 	cursor cursor1 is 
 	with recursive StepCTE(a)
@@ -353,7 +353,7 @@ select * from pro_cursor_c0019();
 create table test_cursor_table(c1 int,c2 varchar);
 insert into test_cursor_table values(1,'Jack'),(2,'Rose');
 
-create or replace procedure test_cursor() as
+create or replace procedure test_cursor_8() as
 declare
 		type ref_cur is ref cursor;
 		cur1 ref_cur;
@@ -371,9 +371,9 @@ begin
 		CLOSE cur1;
 end
 /
-call test_cursor();
+call test_cursor_8();
 
-create or replace procedure test_cursor() as
+create or replace procedure test_cursor_8() as
 declare
 type ref_cur is ref cursor;
 		cur1 ref_cur;
@@ -394,7 +394,7 @@ begin
 		CLOSE cur1;
 end
 /
-call test_cursor();
+call test_cursor_8();
 
 create type pro_type_04 as ( v_tablefield character varying, v_tablefield2 character varying, v_tablename character varying, v_cur refcursor);
 

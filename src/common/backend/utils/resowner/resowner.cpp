@@ -28,6 +28,8 @@
 #include "storage/predicate.h"
 #include "storage/proc.h"
 #include "storage/smgr/segment.h"
+#include "utils/knl_partcache.h"
+#include "utils/knl_relcache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -49,6 +51,35 @@ typedef struct ResourceOwnerData {
     int nbuffers;    /* number of owned buffer pins */
     Buffer* buffers; /* dynamically allocated array */
     int maxbuffers;  /* currently allocated array size */
+
+
+    int nlocalcatclist;
+    LocalCatCList** localcatclists;
+    int maxlocalcatclists;
+
+    int nlocalcatctup;
+    LocalCatCTup** localcatctups;
+    int maxlocalcatctups;
+
+    int nglobalcatctup;
+    GlobalCatCTup** globalcatctups;
+    int maxglobalcatctups;
+
+    int nglobalcatclist;
+    GlobalCatCList** globalcatclists;
+    int maxglobalcatclist;
+
+    int nglobalbaseentry;
+    GlobalBaseEntry** globalbaseentries;
+    int maxglobalbaseentry;
+
+    int nglobaldbentry;
+    GlobalSysDBCacheEntry** globaldbentries;
+    int maxglobaldbentry;
+
+    int nglobalisexclusive;
+    volatile uint32** globalisexclusives;
+    int maxglobalisexclusive;
 
     /* We have built-in support for remembering catcache references */
     int ncatrefs;       /* number of owned catcache pins */
@@ -111,6 +142,11 @@ typedef struct ResourceOwnerData {
     pthread_mutex_t** pThdMutexs;
     int maxPThdMutexs;
 
+    /* We have built-in support for remembering pthread_rwlock */
+    int nPthreadRWlock;
+    pthread_rwlock_t** pThdRWlocks;
+    int maxPThdRWlocks;
+
     /* We have built-in support for remembering partition map references */
     int npartmaprefs;
     PartitionMap** partmaprefs;
@@ -128,15 +164,16 @@ typedef struct ResourceOwnerData {
 } ResourceOwnerData;
 
 THR_LOCAL ResourceOwner IsolatedResourceOwner = NULL;
-
-/*
- * List of add-on callbacks for resource releasing
- */
-typedef struct ResourceReleaseCallbackItem {
-    struct ResourceReleaseCallbackItem* next;
-    ResourceReleaseCallback callback;
-    void* arg;
-} ResourceReleaseCallbackItem;
+#ifdef MEMORY_CONTEXT_CHECKING
+#define PrintGlobalSysCacheLeakWarning(owner, strinfo) \
+do { \
+    if (EnableLocalSysCache() && LOCAL_SYSDB_RESOWNER != (owner)) { \
+        ereport(WARNING, (errmsg("global syscache reference leak %s %s %d", strinfo, __FILE__, __LINE__))); \
+    } \
+} while(0)
+#else
+#define PrintGlobalSysCacheLeakWarning(owner, strinfo)
+#endif
 
 /* Internal routines */
 static void ResourceOwnerReleaseInternal(
@@ -167,18 +204,22 @@ ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, Memory
 {
     ResourceOwner owner;
 
-    owner = (ResourceOwner)MemoryContextAllocZero(memCxt, sizeof(ResourceOwnerData));
+    MemoryContext context = AllocSetContextCreate(memCxt,
+                                                  "ResourceOwnerCxt",
+                                                  ALLOCSET_DEFAULT_MINSIZE,
+                                                  ALLOCSET_DEFAULT_INITSIZE,
+                                                  ALLOCSET_DEFAULT_MAXSIZE);
+    owner = (ResourceOwner)MemoryContextAllocZero(context, sizeof(ResourceOwnerData));
     owner->name = name;
-    owner->memCxt = memCxt;
+    owner->memCxt = context;
     owner->valid = true;
-
     if (parent) {
         owner->parent = parent;
         owner->nextchild = parent->firstchild;
         parent->firstchild = owner;
     }
 
-    if (parent == NULL && strcmp(name, "TopTransaction") != 0)
+    if (parent == NULL && strcmp(name, "TopTransaction") != 0 && strcmp(name, "InitLocalSysCache") != 0)
         IsolatedResourceOwner = owner;
 
     return owner;
@@ -234,7 +275,6 @@ static void ResourceOwnerReleaseInternal(
 {
     ResourceOwner child;
     ResourceOwner save;
-    ResourceReleaseCallbackItem* item = NULL;
 
     /* Recurse to handle descendants */
     for (child = owner->firstchild; child != NULL; child = child->nextchild) {
@@ -316,16 +356,8 @@ static void ResourceOwnerReleaseInternal(
          * As with buffer pins, warn if any are left at commit time, and
          * release back-to-front for speed.
          */
-        while (owner->nrelrefs > 0) {
-            if (isCommit)
-                PrintRelCacheLeakWarning(owner->relrefs[owner->nrelrefs - 1]);
-            RelationClose(owner->relrefs[owner->nrelrefs - 1]);
-        }
-        while (owner->npartrefs > 0) {
-            if (isCommit)
-                PrintPartCacheLeakWarning(owner->partrefs[owner->npartrefs - 1]);
-            PartitionClose(owner->partrefs[owner->npartrefs - 1]);
-        }
+        ResourceOwnerReleaseRelationRef(owner, isCommit);
+        ResourceOwnerReleasePartitionRef(owner, isCommit);
         // Ditto for pthread mutex
         //
         while (owner->nPthreadMutex > 0) {
@@ -333,6 +365,12 @@ static void ResourceOwnerReleaseInternal(
                 PrintPthreadMutexLeakWarning(owner->pThdMutexs[owner->nPthreadMutex - 1]);
             PthreadMutexUnlock(owner, owner->pThdMutexs[owner->nPthreadMutex - 1]);
         }
+        ResourceOwnerReleaseRWLock(owner, isCommit);
+        ResourceOwnerReleaseGlobalCatCList(owner, isCommit);
+        ResourceOwnerReleaseGlobalCatCTup(owner, isCommit);
+        ResourceOwnerReleaseGlobalBaseEntry(owner, isCommit);
+        ResourceOwnerReleaseGlobalDBEntry(owner, isCommit);
+        ResourceOwnerReleaseGlobalIsExclusive(owner, isCommit);
     } else if (phase == RESOURCE_RELEASE_LOCKS) {
         if (isTopLevel) {
             /*
@@ -367,15 +405,19 @@ static void ResourceOwnerReleaseInternal(
          * release back-to-front for speed.
          */
         while (owner->ncatrefs > 0) {
+            Assert(!EnableLocalSysCache());
             if (isCommit)
                 PrintCatCacheLeakWarning(owner->catrefs[owner->ncatrefs - 1]);
             ReleaseCatCache(owner->catrefs[owner->ncatrefs - 1]);
         }
+        ResourceOwnerReleaseLocalCatCList(owner, isCommit);
+        ResourceOwnerReleaseLocalCatCTup(owner, isCommit);
         /* Ditto for catcache lists */
         while (owner->ncatlistrefs > 0) {
+            Assert(!EnableLocalSysCache());
             if (isCommit)
                 PrintCatCacheListLeakWarning(owner->catlistrefs[owner->ncatlistrefs - 1]);
-            ReleaseCatCacheList(owner->catlistrefs[owner->ncatlistrefs - 1]);
+            ReleaseSysCacheList(owner->catlistrefs[owner->ncatlistrefs - 1]);
         }
         /* Ditto for plancache references */
         while (owner->nplanrefs > 0) {
@@ -410,11 +452,10 @@ static void ResourceOwnerReleaseInternal(
             MemoryContextDelete(memContext);
             ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, memContext);
         }
-    }
 
-    /* Let add-on modules get a chance too */
-    for (item = t_thrd.utils_cxt.ResourceRelease_callbacks; item; item = item->next)
-        (*item->callback)(phase, isCommit, isTopLevel, item->arg);
+        /* Clean up index scans too */
+        ReleaseResources_hash();
+    }
 
     t_thrd.utils_cxt.CurrentResourceOwner = save;
 }
@@ -452,9 +493,17 @@ static void ResourceOwnerFreeOwner(ResourceOwner owner, bool whole)
             pfree(owner->fakepartrefs);
         if (owner->globalMemContexts)
             pfree(owner->globalMemContexts);
+        pfree_ext(owner->localcatclists);
+        pfree_ext(owner->localcatctups);
+        pfree_ext(owner->globalcatctups);
+        pfree_ext(owner->globalcatclists);
+        pfree_ext(owner->globalbaseentries);
+        pfree_ext(owner->globaldbentries);
+        pfree_ext(owner->globalisexclusives);
+        pfree_ext(owner->pThdRWlocks);
     }
-    if (whole)
-        pfree(owner);
+    if (whole && owner->memCxt)
+        MemoryContextDelete(owner->memCxt);
 }
 
 /*
@@ -469,20 +518,7 @@ void ResourceOwnerDelete(ResourceOwner owner)
     Assert(owner != t_thrd.utils_cxt.CurrentResourceOwner);
 
     /* And it better not own any resources, either */
-    Assert(owner->nbuffers == 0);
-    Assert(owner->ncatrefs == 0);
-    Assert(owner->ncatlistrefs == 0);
-    Assert(owner->nrelrefs == 0);
-    Assert(owner->npartrefs == 0);
-    Assert(owner->nfakerelrefs == 0);
-    Assert(owner->nfakepartrefs == 0);
-    Assert(owner->nplanrefs == 0);
-    Assert(owner->ntupdescs == 0);
-    Assert(owner->nsnapshots == 0);
-    Assert(owner->nfiles == 0);
-    Assert(owner->nDataCacheSlots == 0);
-    Assert(owner->nMetaCacheSlots == 0);
-    Assert(owner->nPthreadMutex == 0);
+    Assert(CurrentResourceOwnerIsEmpty(owner));
 
     /*
      * Delete children.  The recursive call will delink the child from me, so
@@ -572,45 +608,6 @@ void ResourceOwnerNewParent(ResourceOwner owner, ResourceOwner newparent)
     } else {
         owner->parent = NULL;
         owner->nextchild = NULL;
-    }
-}
-
-/*
- * Register or deregister callback functions for resource cleanup
- *
- * These functions are intended for use by dynamically loaded modules.
- * For built-in modules we generally just hardwire the appropriate calls.
- *
- * Note that the callback occurs post-commit or post-abort, so the callback
- * functions can only do noncritical cleanup.
- */
-void RegisterResourceReleaseCallback(ResourceReleaseCallback callback, void* arg)
-{
-    ResourceReleaseCallbackItem* item = NULL;
-
-    item = (ResourceReleaseCallbackItem*)MemoryContextAlloc(
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(ResourceReleaseCallbackItem));
-    item->callback = callback;
-    item->arg = arg;
-    item->next = t_thrd.utils_cxt.ResourceRelease_callbacks;
-    t_thrd.utils_cxt.ResourceRelease_callbacks = item;
-}
-
-void UnregisterResourceReleaseCallback(ResourceReleaseCallback callback, const void* arg)
-{
-    ResourceReleaseCallbackItem* item = NULL;
-    ResourceReleaseCallbackItem* prev = NULL;
-
-    prev = NULL;
-    for (item = t_thrd.utils_cxt.ResourceRelease_callbacks; item; prev = item, item = item->next) {
-        if (item->callback == callback && item->arg == arg) {
-            if (prev != NULL)
-                prev->next = item->next;
-            else
-                t_thrd.utils_cxt.ResourceRelease_callbacks = item->next;
-            pfree(item);
-            break;
-        }
     }
 }
 
@@ -1159,7 +1156,6 @@ void ResourceOwnerEnlargeFakepartRefs(ResourceOwner owner)
 
 void ResourceOwnerRememberFakepartRef(ResourceOwner owner, Partition fakepart)
 {
-    ResourceOwnerEnlargeFakepartRefs(owner);
     Assert(owner->nfakepartrefs < owner->maxfakepartrefs);
     owner->fakepartrefs[owner->nfakepartrefs] = fakepart;
     owner->nfakepartrefs++;
@@ -1272,7 +1268,8 @@ void ResourceOwnerForgetPlanCacheRef(ResourceOwner owner, CachedPlan* plan)
             return;
         }
     }
-    ereport(ERROR,
+    int elevel = t_thrd.proc_cxt.proc_exit_inprogress ? WARNING : ERROR;
+    ereport(elevel,
         (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
             errmsg("plancache reference is not owned by resource owner %s", owner->name)));
 }
@@ -1420,15 +1417,13 @@ bool ResourceOwnerForgetSnapshot(ResourceOwner owner, Snapshot snapshot, bool er
         }
     }
 
-    bool allValid = true;
     for (ResourceOwner child = owner->firstchild; child != NULL; child = child->nextchild) {
-        allValid = (allValid && child->valid);
         if (ResourceOwnerForgetSnapshot(child, snapshot, false)) {
             return true;
         }
     }
 
-    if (ereport && allValid) {
+    if (ereport && u_sess->plsql_cxt.spi_xact_context != NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
                 errmsg("snapshot is not owned by resource owner %s", owner->name)));
@@ -1801,3 +1796,543 @@ bool ResourceOwnerIsValid(ResourceOwner owner)
     return owner->valid;
 }
 
+/* Make sure there is room for at least one more entry in a ResourceOwner's
+ * pthread rwlock array.
+ * This is separate from actually inserting an entry because if we run out
+ * of memory, it's critical to do so *before* acquiring the resource.
+ */
+void ResourceOwnerEnlargePthreadRWlock(ResourceOwner owner)
+{
+    int newmax;
+    if (owner->nPthreadRWlock < owner->maxPThdRWlocks)
+        return; /* nothing to do */
+    if (owner->pThdRWlocks == NULL) {
+        newmax = 16;
+        owner->pThdRWlocks = (pthread_rwlock_t**)MemoryContextAlloc(owner->memCxt,
+            newmax * sizeof(pthread_rwlock_t*));
+        owner->maxPThdRWlocks = newmax;
+    } else {
+        newmax = owner->maxPThdRWlocks * 2;
+        owner->pThdRWlocks = (pthread_rwlock_t**)repalloc(owner->pThdRWlocks, newmax * sizeof(pthread_rwlock_t*));
+        owner->maxPThdRWlocks = newmax;
+    }
+}
+
+/* ResourceOwnerRememberPthreadRWlock
+ * Remember that a pthread rwlock is owned by a ResourceOwner
+ */
+void ResourceOwnerRememberPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRWlock)
+{
+    Assert(owner->nPthreadRWlock < owner->maxPThdRWlocks);
+    owner->pThdRWlocks[owner->nPthreadRWlock] = pRWlock;
+    owner->nPthreadRWlock++;
+}
+/* ResourceOwnerForgetPthreadRWlock
+ * Forget that a pthread mutex is owned by a ResourceOwner
+ */
+void ResourceOwnerForgetPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRWlock)
+{
+    pthread_rwlock_t** rwlocks = owner->pThdRWlocks;
+    int ns1 = owner->nPthreadRWlock - 1;
+    int i;
+    for (i = ns1; i >= 0; i--) {
+        if (rwlocks[i] == pRWlock) {
+            while (i < ns1) {
+                rwlocks[i] = rwlocks[i + 1];
+                i++;
+            }
+            owner->nPthreadRWlock = ns1;
+            return;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("pthread rwlock is not owned by resource owner %s", owner->name)));
+}
+
+void ResourceOwnerEnlargeLocalCatCList(ResourceOwner owner)
+{
+    int newmax;
+    if (owner->nlocalcatclist < owner->maxlocalcatclists)
+        return; /* nothing to do */
+    if (owner->localcatclists == NULL) {
+        newmax = 16;
+        owner->localcatclists = (LocalCatCList**)MemoryContextAlloc(owner->memCxt,
+            newmax * sizeof(LocalCatCList*));
+        owner->maxlocalcatclists = newmax;
+    } else {
+        newmax = owner->maxlocalcatclists * 2;
+        owner->localcatclists = (LocalCatCList**)repalloc(owner->localcatclists, newmax * sizeof(LocalCatCList*));
+        owner->maxlocalcatclists = newmax;
+    }
+}
+
+void ResourceOwnerRememberLocalCatCList(ResourceOwner owner, LocalCatCList* list)
+{
+    Assert(owner->nlocalcatclist < owner->maxlocalcatclists);
+    owner->localcatclists[owner->nlocalcatclist] = list;
+    owner->nlocalcatclist++;
+}
+void ResourceOwnerForgetLocalCatCList(ResourceOwner owner, LocalCatCList* list)
+{
+    LocalCatCList** localcatclist = owner->localcatclists;
+    int nc1 = owner->nlocalcatclist - 1;
+    int i;
+    for (i = nc1; i >= 0; i--) {
+        if (localcatclist[i] == list) {
+            while (i < nc1) {
+                localcatclist[i] = localcatclist[i + 1];
+                i++;
+            }
+            owner->nlocalcatclist = nc1;
+            return;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("localcatcache list is not owned by resource owner %s", owner->name)));
+}
+void ResourceOwnerEnlargeLocalCatCTup(ResourceOwner owner)
+{
+    int newmax;
+    if (owner->nlocalcatctup < owner->maxlocalcatctups)
+        return; /* nothing to do */
+    if (owner->localcatctups == NULL) {
+        newmax = 16;
+        owner->localcatctups = (LocalCatCTup**)MemoryContextAlloc(owner->memCxt,
+            newmax * sizeof(LocalCatCTup*));
+        owner->maxlocalcatctups = newmax;
+    } else {
+        newmax = owner->maxlocalcatctups * 2;
+        owner->localcatctups = (LocalCatCTup**)repalloc(owner->localcatctups, newmax * sizeof(LocalCatCTup*));
+        owner->maxlocalcatctups = newmax;
+    }
+}
+void ResourceOwnerRememberLocalCatCTup(ResourceOwner owner, LocalCatCTup* tup)
+{
+    Assert(owner->nlocalcatctup < owner->maxlocalcatctups);
+    owner->localcatctups[owner->nlocalcatctup] = tup;
+    owner->nlocalcatctup++;
+}
+LocalCatCTup* ResourceOwnerForgetLocalCatCTup(ResourceOwner owner, HeapTuple tup)
+{
+    LocalCatCTup** localcatctup = owner->localcatctups;
+    LocalCatCTup* find = NULL;
+    int nc1 = owner->nlocalcatctup - 1;
+    int i;
+    for (i = nc1; i >= 0; i--) {
+        if (&localcatctup[i]->global_ct->tuple == tup) {
+            find = localcatctup[i];
+            while (i < nc1) {
+                localcatctup[i] = localcatctup[i + 1];
+                i++;
+            }
+            owner->nlocalcatctup = nc1;
+            return find;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("localcatcache tuple is not owned by resource owner %s", owner->name)));
+    return NULL; /* keep compiler quiet */
+}
+
+void ResourceOwnerEnlargeGlobalCatCTup(ResourceOwner owner)
+{
+    int newmax;
+    if (owner->nglobalcatctup < owner->maxglobalcatctups)
+        return; /* nothing to do */
+    if (owner->globalcatctups == NULL) {
+        newmax = 16;
+        owner->globalcatctups = (GlobalCatCTup**)MemoryContextAlloc(owner->memCxt,
+            newmax * sizeof(GlobalCatCTup*));
+        owner->maxglobalcatctups = newmax;
+    } else {
+        newmax = owner->maxglobalcatctups * 2;
+        owner->globalcatctups = (GlobalCatCTup**)repalloc(owner->globalcatctups, newmax * sizeof(GlobalCatCTup*));
+        owner->maxglobalcatctups = newmax;
+    }
+}
+void ResourceOwnerRememberGlobalCatCTup(ResourceOwner owner, GlobalCatCTup* tup)
+{
+    Assert(owner->nglobalcatctup < owner->maxglobalcatctups);
+    owner->globalcatctups[owner->nglobalcatctup] = tup;
+    owner->nglobalcatctup++;
+}
+void ResourceOwnerForgetGlobalCatCTup(ResourceOwner owner, GlobalCatCTup* tup)
+{
+    GlobalCatCTup** global_cts = owner->globalcatctups;
+    int nc1 = owner->nglobalcatctup - 1;
+    int i;
+    for (i = nc1; i >= 0; i--) {
+        if (global_cts[i] == tup) {
+            while (i < nc1) {
+                global_cts[i] = global_cts[i + 1];
+                i++;
+            }
+            owner->nglobalcatctup = nc1;
+            return;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("bad global tuple is not owned by resource owner %s", owner->name)));
+}
+void ResourceOwnerEnlargeGlobalCatCList(ResourceOwner owner)
+{
+    int newmax;
+    if (owner->nglobalcatclist < owner->maxglobalcatclist)
+        return; /* nothing to do */
+    if (owner->globalcatclists == NULL) {
+        newmax = 16;
+        owner->globalcatclists = (GlobalCatCList**)MemoryContextAlloc(owner->memCxt,
+            newmax * sizeof(GlobalCatCList*));
+        owner->maxglobalcatclist = newmax;
+    } else {
+        newmax = owner->maxglobalcatclist * 2;
+        owner->globalcatclists = (GlobalCatCList**)repalloc(owner->globalcatclists, newmax * sizeof(GlobalCatCList*));
+        owner->maxglobalcatclist = newmax;
+    }
+}
+void ResourceOwnerRememberGlobalCatCList(ResourceOwner owner, GlobalCatCList* list)
+{
+    Assert(owner->nglobalcatclist < owner->maxglobalcatclist);
+    owner->globalcatclists[owner->nglobalcatclist] = list;
+    owner->nglobalcatclist++;
+}
+void ResourceOwnerForgetGlobalCatCList(ResourceOwner owner, GlobalCatCList* list)
+{
+    GlobalCatCList** global_lists = owner->globalcatclists;
+    int nc1 = owner->nglobalcatclist - 1;
+    int i;
+    for (i = nc1; i >= 0; i--) {
+        if (global_lists[i] == list) {
+            while (i < nc1) {
+                global_lists[i] = global_lists[i + 1];
+                i++;
+            }
+            owner->nglobalcatclist = nc1;
+            return;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("bad global list is not owned by resource owner %s", owner->name)));
+}
+void ResourceOwnerEnlargeGlobalBaseEntry(ResourceOwner owner)
+{
+    int newmax;
+    if (owner->nglobalbaseentry < owner->maxglobalbaseentry)
+        return; /* nothing to do */
+    if (owner->globalbaseentries == NULL) {
+        newmax = 16;
+        owner->globalbaseentries = (GlobalBaseEntry **)MemoryContextAlloc(owner->memCxt,
+            newmax * sizeof(GlobalBaseEntry *));
+        owner->maxglobalbaseentry = newmax;
+    } else {
+        newmax = owner->maxglobalbaseentry * 2;
+        owner->globalbaseentries =
+            (GlobalBaseEntry **)repalloc(owner->globalbaseentries, newmax * sizeof(GlobalBaseEntry *));
+        owner->maxglobalbaseentry = newmax;
+    }
+}
+void ResourceOwnerRememberGlobalBaseEntry(ResourceOwner owner, GlobalBaseEntry* entry)
+{
+    Assert(owner->nglobalbaseentry < owner->maxglobalbaseentry);
+    owner->globalbaseentries[owner->nglobalbaseentry] = entry;
+    owner->nglobalbaseentry++;
+}
+void ResourceOwnerForgetGlobalBaseEntry(ResourceOwner owner, GlobalBaseEntry* entry)
+{
+    GlobalBaseEntry** global_entries = owner->globalbaseentries;
+    int nc1 = owner->nglobalbaseentry - 1;
+    int i;
+    for (i = nc1; i >= 0; i--) {
+        if (global_entries[i] == entry) {
+            while (i < nc1) {
+                global_entries[i] = global_entries[i + 1];
+                i++;
+            }
+            owner->nglobalbaseentry = nc1;
+            return;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("the global base entry is not owned by resource owner %s", owner->name)));
+}
+
+void ResourceOwnerReleaseRWLock(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nPthreadRWlock > 0) {
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "RWLock");
+        }
+        /* unlock do -- */
+        PthreadRWlockUnlock(owner, owner->pThdRWlocks[owner->nPthreadRWlock - 1]);
+    }
+}
+
+void ResourceOwnerReleaseLocalCatCTup(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nlocalcatctup > 0) {
+        LocalCatCTup *ct = owner->localcatctups[owner->nlocalcatctup - 1];
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "LocalCatCTup");
+        }
+        ct->Release();
+        owner->nlocalcatctup--;
+    }
+}
+
+void ResourceOwnerReleaseLocalCatCList(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nlocalcatclist > 0) {
+        LocalCatCList *cl = owner->localcatclists[owner->nlocalcatclist - 1];
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "LocalCatCList");
+        }
+        cl->Release();
+        owner->nlocalcatclist--;
+    }
+}
+
+void ResourceOwnerReleaseRelationRef(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nrelrefs > 0) {
+        Relation rel = owner->relrefs[owner->nrelrefs - 1];
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "Relation");
+            if (!EnableLocalSysCache()) {
+                PrintRelCacheLeakWarning(rel);
+            }
+        }
+        /* close do -- */
+        RelationClose(rel);
+    }
+}
+
+void ResourceOwnerReleasePartitionRef(ResourceOwner owner, bool isCommit)
+{
+    while (owner->npartrefs > 0) {
+        Partition part = owner->partrefs[owner->npartrefs - 1];
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "Partition");
+            PrintPartCacheLeakWarning(part);
+        }
+        /* close do -- */
+        PartitionClose(part);
+    }
+}
+
+void ResourceOwnerReleaseGlobalCatCTup(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nglobalcatctup > 0) {
+        GlobalCatCTup* global_ct = owner->globalcatctups[owner->nglobalcatctup - 1];
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "GlobalCatCTup");
+        }
+        global_ct->Release();
+        owner->nglobalcatctup--;
+    }
+}
+
+void ResourceOwnerReleaseGlobalCatCList(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nglobalcatclist > 0) {
+        GlobalCatCList* global_cl = owner->globalcatclists[owner->nglobalcatclist - 1];
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "GlobalCatCList");
+        }
+        global_cl->Release();
+        owner->nglobalcatclist--;
+}
+}
+
+void ResourceOwnerReleaseGlobalBaseEntry(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nglobalbaseentry > 0) {
+        GlobalBaseEntry *entry = owner->globalbaseentries[owner->nglobalbaseentry - 1];
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "GlobalBaseEntry");
+        }
+        if (unlikely(entry->refcount == 0)) {
+            /* palloc fail */
+            entry->FreeError();
+        } else {
+            entry->Release();
+        }
+        owner->nglobalbaseentry--;
+    }
+}
+
+void ResourceOwnerEnlargeGlobalDBEntry(ResourceOwner owner)
+{
+    int newmax;
+    if (owner->nglobaldbentry < owner->maxglobaldbentry)
+        return; /* nothing to do */
+    if (owner->globaldbentries == NULL) {
+        newmax = 16;
+        owner->globaldbentries = (GlobalSysDBCacheEntry **)MemoryContextAlloc(owner->memCxt,
+            newmax * sizeof(GlobalSysDBCacheEntry *));
+        owner->maxglobaldbentry = newmax;
+    } else {
+        newmax = owner->maxglobaldbentry * 2;
+        owner->globaldbentries =
+            (GlobalSysDBCacheEntry **)repalloc(owner->globaldbentries, newmax * sizeof(GlobalSysDBCacheEntry *));
+        owner->maxglobaldbentry = newmax;
+    }
+}
+
+extern void ResourceOwnerRememberGlobalDBEntry(ResourceOwner owner, GlobalSysDBCacheEntry* entry)
+{
+    Assert(owner->nglobaldbentry < owner->maxglobaldbentry);
+    owner->globaldbentries[owner->nglobaldbentry] = entry;
+    owner->nglobaldbentry++;
+}
+
+extern void ResourceOwnerForgetGlobalDBEntry(ResourceOwner owner, GlobalSysDBCacheEntry* entry)
+{
+    Assert(entry->m_dbOid!= InvalidOid);
+    GlobalSysDBCacheEntry** global_entries = owner->globaldbentries;
+    int nc1 = owner->nglobaldbentry - 1;
+    int i;
+    for (i = nc1; i >= 0; i--) {
+        if (global_entries[i] == entry) {
+            while (i < nc1) {
+                global_entries[i] = global_entries[i + 1];
+                i++;
+            }
+            owner->nglobaldbentry = nc1;
+            return;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("the global rel entry is not owned by resource owner %s", owner->name)));
+}
+
+extern void ResourceOwnerReleaseGlobalDBEntry(ResourceOwner owner, bool isCommit)
+{
+    Assert(owner->nglobaldbentry <= 1);
+    while (owner->nglobaldbentry > 0) {
+        GlobalSysDBCacheEntry *entry = owner->globaldbentries[owner->nglobaldbentry - 1];
+        if (isCommit) {
+            /* print some debug info */
+            PrintGlobalSysCacheLeakWarning(owner, "GlobalDBEntry");
+        }
+        if (unlikely(entry->m_refcount == 0)) {
+            // palloc failed entry
+            entry->Free(entry);
+        } else {
+            entry->Release();
+        }
+        owner->nglobaldbentry--;
+    }
+}
+
+void ResourceOwnerEnlargeGlobalIsExclusive(ResourceOwner owner)
+{
+    int newmax;
+    if (owner->nglobalisexclusive < owner->maxglobalisexclusive)
+        return; /* nothing to do */
+    if (owner->globalisexclusives == NULL) {
+        newmax = 16;
+        owner->globalisexclusives = (volatile uint32 **)MemoryContextAlloc(owner->memCxt, newmax * sizeof(uint32 *));
+        owner->maxglobalisexclusive = newmax;
+    } else {
+        newmax = owner->maxglobalisexclusive * 2;
+        owner->globalisexclusives =
+            (volatile uint32 **)repalloc(owner->globalisexclusives, newmax * sizeof(uint32 *));
+        owner->maxglobalisexclusive = newmax;
+    }
+}
+
+extern void ResourceOwnerRememberGlobalIsExclusive(ResourceOwner owner, volatile uint32 *isexclusive)
+{
+    Assert(owner->nglobalisexclusive < owner->maxglobalisexclusive);
+    Assert(*isexclusive == 1);
+    owner->globalisexclusives[owner->nglobalisexclusive] = isexclusive;
+    owner->nglobalisexclusive++;
+}
+
+extern void ResourceOwnerForgetGlobalIsExclusive(ResourceOwner owner, volatile uint32 *isexclusive)
+{
+    volatile uint32 **global_isexclusives = owner->globalisexclusives;
+    int nc1 = owner->nglobalisexclusive - 1;
+    int i;
+    for (i = nc1; i >= 0; i--) {
+        if (global_isexclusives[i] == isexclusive) {
+            while (i < nc1) {
+                global_isexclusives[i] = global_isexclusives[i + 1];
+                i++;
+            }
+            owner->nglobalisexclusive = nc1;
+            return;
+        }
+    }
+    ereport(ERROR,
+        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+            errmsg("the global isexclusive is not owned by resource owner %s", owner->name)));
+}
+
+extern void ResourceOwnerReleaseGlobalIsExclusive(ResourceOwner owner, bool isCommit)
+{
+    Assert(owner->nglobalisexclusive <= 1);
+    while (owner->nglobalisexclusive > 0) {
+        volatile uint32 *isexclusive = owner->globalisexclusives[owner->nglobalisexclusive - 1];
+        if (isCommit) {
+            /* print some debug info */
+            PrintGlobalSysCacheLeakWarning(owner, "Global IsExclusive");
+        }
+        Assert(*isexclusive == 1);
+        atomic_compare_exchange_u32(isexclusive, 1, 0);
+        owner->nglobalisexclusive--;
+    }
+}
+
+bool CurrentResourceOwnerIsEmpty(ResourceOwner owner)
+{
+    if (owner == NULL || !owner->valid) {
+        return true;
+    }
+    Assert(owner->nbuffers == 0);
+    Assert(owner->nlocalcatclist == 0);
+    Assert(owner->nlocalcatctup == 0);
+    Assert(owner->nglobalcatctup == 0);
+    Assert(owner->nglobalcatclist == 0);
+    Assert(owner->nglobalbaseentry == 0);
+    Assert(owner->nglobaldbentry == 0);
+    Assert(owner->nglobalisexclusive == 0);
+    Assert(owner->ncatrefs == 0);
+    Assert(owner->ncatlistrefs == 0);
+    Assert(owner->nrelrefs == 0);
+    Assert(owner->npartrefs == 0);
+    Assert(owner->nfakerelrefs == 0);
+    Assert(owner->nfakepartrefs == 0);
+    Assert(owner->nplanrefs == 0);
+    Assert(owner->ntupdescs == 0);
+    Assert(owner->nsnapshots == 0);
+    Assert(owner->nfiles == 0);
+    Assert(owner->nDataCacheSlots == 0);
+    Assert(owner->nMetaCacheSlots == 0);
+    Assert(owner->nPthreadMutex == 0);
+    Assert(owner->nPthreadRWlock == 0);
+    Assert(owner->npartmaprefs == 0);
+    Assert(owner->nglobalMemContext == 0);
+    return true;
+}
+/*
+ * ResourceOwnerReleaseAllPlanCacheRefs
+ *              Release the plancache references (only) held by this owner.
+ *
+ * We might eventually add similar functions for other resource types,
+ * but for now, only this is needed.
+ */
+void ResourceOwnerReleaseAllPlanCacheRefs(ResourceOwner owner)
+{
+    ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = owner;
+    ResourceOwnerDecrementNPlanRefs(owner, true);
+    t_thrd.utils_cxt.CurrentResourceOwner = save;
+}

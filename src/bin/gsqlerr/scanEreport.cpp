@@ -202,13 +202,14 @@ static char app_name[FILE_NAME_MAX_LEN];
 void parseOutputParam(int argc,  char* argv[]);
 int checkErrMsgItem(const char* errmodule, ERPARA_INFO_T* pstOutErPara);
 int checkDebugMsgItem(const char* errmodule);
+static void check_env_value(const char* input_env_value);
 /******************************* realize function ************************************/
 int main(int argc, char* argv[])
 {
     char* filerealpath_ptr = NULL;
-    char fileresolved_name[FILE_NAME_MAX_LEN] = {0};
+    char fileresolved_name[PATH_MAX] = {0};
     char* dirrealpath_ptr = NULL;
-    char dirresolved_name[FILE_NAME_MAX_LEN] = {0};
+    char dirresolved_name[PATH_MAX] = {0};
     char cwd[MAXPATH] = {0};
     int lRet = 0;
     char logfilename[MAXPATH] = {0};
@@ -244,6 +245,7 @@ int main(int argc, char* argv[])
     }
 
     g_sProgDir = dirrealpath_ptr;
+    check_env_value(g_sProgDir);
 
     /* get current work directory */
     g_sCurDir = getcwd(cwd, MAXPATH);
@@ -451,6 +453,41 @@ void releaseMem(void)
         input_path = NULL;
     }
     return;
+}
+
+static void check_env_value(const char* input_env_value)
+{
+    const char* danger_character_list[] = {"|",
+        ";",
+        "&",
+        "$",
+        "<",
+        ">",
+        "`",
+        "\\",
+        "'",
+        "\"",
+        "{",
+        "}",
+        "(",
+        ")",
+        "[",
+        "]",
+        "~",
+        "*",
+        "?",
+        "!",
+        "\n",
+        NULL};
+    int i = 0;
+
+    for (i = 0; danger_character_list[i] != NULL; i++) {
+        if (strstr(input_env_value, danger_character_list[i]) != NULL) {
+            fprintf(
+                stderr, "invalid token \"%s\" in input_env_value: (%s)\n", danger_character_list[i], input_env_value);
+            exit(1);
+        }
+    }
 }
 
 int outputLog(FILE* logfd, bool isCloseFd, const char* format, ...)
@@ -1394,7 +1431,8 @@ int saveErrMsg(char* errmsg, char* dir, char* scanfile, int lineno)
 
             if (ERROR_LOCATION_NUM >= pstErrMsgItem->mppdb_err_msg_locnum + 1) {
                 int locNum = pstErrMsgItem->mppdb_err_msg_locnum;
-                pstErrMsgItem->astErrLocate[locNum] = (mppdb_err_msg_location_t*)malloc(sizeof(mppdb_err_msg_location_t));
+                pstErrMsgItem->astErrLocate[locNum] =
+                    (mppdb_err_msg_location_t*)malloc(sizeof(mppdb_err_msg_location_t));
                 if (pstErrMsgItem->astErrLocate[locNum] == NULL) {
                     return outputLog(logfile, false, "Memory alloc failed for err locate\n");
                 }
@@ -1768,7 +1806,8 @@ int compareErrmsg()
                  * 2. else need to malloc memory for old msg item before copy.
                  */
                 for (int i = pstErrMsgItemOld->mppdb_err_msg_locnum; i < pstErrMsgItemNew->mppdb_err_msg_locnum; i++) {
-                    pstErrMsgItemOld->astErrLocate[i] = (mppdb_err_msg_location_t*)malloc(sizeof(mppdb_err_msg_location_t));
+                    pstErrMsgItemOld->astErrLocate[i] =
+                        (mppdb_err_msg_location_t*)malloc(sizeof(mppdb_err_msg_location_t));
                     if (pstErrMsgItemOld->astErrLocate[i] == NULL) {
                         return outputLog(logfile, false, "Memory alloc failed for err locate\n");
                     }

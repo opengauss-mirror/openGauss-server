@@ -118,7 +118,7 @@ static int deal_with_sigup()
          * dynamically modify the ha socket.
          */
         for (j = 1; j < MAX_REPLNODE_NUM; j++) {
-            if (t_thrd.postmaster_cxt.ReplConnChanged[j]) {
+            if (t_thrd.postmaster_cxt.ReplConnChangeType[j] == OLD_REPL_CHANGE_IP_OR_PORT) {
                 break;
             }
         }
@@ -129,7 +129,7 @@ static int deal_with_sigup()
                 }
             }
             for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
-                t_thrd.postmaster_cxt.ReplConnChanged[i] = false;
+                t_thrd.postmaster_cxt.ReplConnChangeType[i] = NO_CHANGE;
             }
             if (g_heartbeat_client != NULL) {
                 /* The client will auto connect later. */
@@ -235,6 +235,9 @@ static void heartbeat_handle_exception(MemoryContext heartbeat_context)
 
     /* Report the error to the server log */
     EmitErrorReport();
+
+    /* release resource held by lsc */
+    AtEOXact_SysDBCache(false);
 
     /* Buffer pins are released here: */
     ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);

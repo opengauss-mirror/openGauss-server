@@ -1,0 +1,162 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS metadata_client_logic_test_tbl(key int,id int PRIMARY KEY ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),char_col varchar(30)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),float_col float ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC))
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "metadata_client_logic_test_tbl_pkey" for table "metadata_client_logic_test_tbl"
+*******inserting data to the metadata_client_logic_test_tbl;
+insert into metadata_client_logic_test_tbl (key, id, char_col, float_col ) values (?,?,?,?);
+1,2,test_data_4_meta_data,1.1
+*************verifying data
+select * from metadata_client_logic_test_tbl;
+
+ key | id |       char_col        | float_col 
+-----+----+-----------------------+-----------
+   1 |  2 | test_data_4_meta_data | 1.1
+(1 row)
+
+create table metadata_simple_test_tbl (key int , id int primary key, char_col varchar(30), float_col float);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "metadata_simple_test_tbl_pkey" for table "metadata_simple_test_tbl"
+*******inserting data to the metadata_simple_test_tbl
+insert into metadata_simple_test_tbl (key, id, char_col, float_col ) values (?,?,?,?);
+1,2,test_data_4_meta_data,1.1
+*************verifying data
+select * from metadata_simple_test_tbl;
+
+ key | id |       char_col        |      float_col      
+-----+----+-----------------------+---------------------
+   1 |  2 | test_data_4_meta_data | 1.10000000000000009
+(1 row)
+
+Testing table with client logic ...
+Column name: key
+Column size(10)
+Ordinal position: 1
+Catalog: null
+Data type (integer value): 4
+Data type name: int4
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: id
+Column size(10)
+Ordinal position: 2
+Catalog: null
+Data type (integer value): 4
+Data type name: int4
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: char_col
+Column size(30)
+Ordinal position: 3
+Catalog: null
+Data type (integer value): 12
+Data type name: varchar
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: float_col
+Column size(17)
+Ordinal position: 4
+Catalog: null
+Data type (integer value): 8
+Data type name: float8
+Decimal value: 17
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+drop table metadata_client_logic_test_tbl;
+DROP CLIENT MASTER KEY cmk1 CASCADE;
+NOTICE:  drop cascades to column encryption key: cek1
+
+Testing table with no client logic ...
+Column name: key
+Column size(10)
+Ordinal position: 1
+Catalog: null
+Data type (integer value): 4
+Data type name: int4
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: id
+Column size(10)
+Ordinal position: 2
+Catalog: null
+Data type (integer value): 4
+Data type name: int4
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: char_col
+Column size(30)
+Ordinal position: 3
+Catalog: null
+Data type (integer value): 12
+Data type name: varchar
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: float_col
+Column size(17)
+Ordinal position: 4
+Catalog: null
+Data type (integer value): 8
+Data type name: float8
+Decimal value: 17
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Testing table with no client logic and with no client logic in connection string ...
+Column name: key
+Column size(10)
+Ordinal position: 1
+Catalog: null
+Data type (integer value): 4
+Data type name: int4
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: id
+Column size(10)
+Ordinal position: 2
+Catalog: null
+Data type (integer value): 4
+Data type name: int4
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: char_col
+Column size(30)
+Ordinal position: 3
+Catalog: null
+Data type (integer value): 12
+Data type name: varchar
+Decimal value: 0
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Column name: float_col
+Column size(17)
+Ordinal position: 4
+Catalog: null
+Data type (integer value): 8
+Data type name: float8
+Decimal value: 17
+ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+drop table metadata_simple_test_tbl;

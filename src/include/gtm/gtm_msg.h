@@ -127,6 +127,12 @@ typedef enum GTM_MessageType {
     MSG_TXN_GET_NEXT_CSN_LITE,          /* gtm-lite commit csn */
     MSG_SNAPSHOT_GET_LITE,              /* Get a GTMLite global snapshot */
     MSG_GET_GTM_LITE_STATUS,            /* Get the status of gtm lite */
+
+    MSG_SET_DISASTER_CLUSTER,
+    MSG_GET_DISASTER_CLUSTER,
+    MSG_DEL_DISASTER_CLUSTER,
+    MSG_SNAPSHOT_GET_DR,
+    MSG_SET_CONSISTENCY_POINT,
     /*
      * Must be at the end
      */
@@ -202,6 +208,11 @@ typedef enum GTM_ResultType {
     GTM_HOTPATCH_RESULT,
     SNAPSHOT_GET_RESULT_LITE,
     GTM_LITE_STATUS_RESULT,
+    DISASTER_CLUSTER_SET_RESULT,
+    DISASTER_CLUSTER_GET_RESULT,
+    DISASTER_CLUSTER_DEL_RESULT,
+    SNAPSHOT_GET_RESULT_DR,
+    TXN_SET_CONSISTENCY_POINT_RESULT,
     RESULT_TYPE_COUNT
 } GTM_ResultType;
 

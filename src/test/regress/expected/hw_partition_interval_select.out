@@ -11,7 +11,7 @@ INTERVAL ('1 day')
 );
 insert into interval_tab1 values(1,'2020-4-7 2:0:0',  1, 1);
 insert into interval_tab1 values(1,'2020-4-8 2:0:0',  1, 1);
-select relname, boundaries from pg_partition;
+select relname, boundaries from pg_partition order by 1,2;
     relname    |          boundaries          
 ---------------+------------------------------
  interval_tab1 | 
@@ -20,7 +20,7 @@ select relname, boundaries from pg_partition;
  sys_p2        | {"Thu Apr 09 00:00:00 2020"}
 (4 rows)
 
-select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
+select * from interval_tab1 where logdate < '2020-4-7 0:0:0' order by 1,2,3,4;
  city_id | logdate | peaktemp | unitsales 
 ---------+---------+----------+-----------
 (0 rows)
@@ -37,7 +37,7 @@ explain (costs off, verbose on) select * from interval_tab1 where logdate < '202
          Selected Partitions:  1
 (7 rows)
 
-select * from interval_tab1 where logdate > '2020-4-6';
+select * from interval_tab1 where logdate > '2020-4-6' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
        1 | Tue Apr 07 02:00:00 2020 |        1 |         1
@@ -56,36 +56,36 @@ explain (costs off, verbose on) select * from interval_tab1 where logdate > '202
          Selected Partitions:  2..3
 (7 rows)
 
-select * from interval_tab1 where logdate = '2020-4-7 2:0:0';
+select * from interval_tab1 where logdate = '2020-4-7 2:0:0' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
        1 | Tue Apr 07 02:00:00 2020 |        1 |         1
 (1 row)
 
 insert into interval_tab1 values(1,'2020-4-7 0:0:0',  1, 1);
-select * from interval_tab1 where logdate = '2020-4-7 0:0:0';
+select * from interval_tab1 where logdate = '2020-4-7 0:0:0' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
        1 | Tue Apr 07 00:00:00 2020 |        1 |         1
 (1 row)
 
-select * from interval_tab1 where logdate != '2020-4-7 0:0:0';
+select * from interval_tab1 where logdate != '2020-4-7 0:0:0' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
        1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Wed Apr 08 02:00:00 2020 |        1 |         1
 (2 rows)
 
-select * from interval_tab1 where logdate >= '2020-4-7 0:0:0';
+select * from interval_tab1 where logdate >= '2020-4-7 0:0:0' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
-       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Wed Apr 08 02:00:00 2020 |        1 |         1
 (3 rows)
 
 insert into interval_tab1 values(1,'2020-4-5 2:0:0',  1, 1);
-select relname, boundaries from pg_partition;
+select relname, boundaries from pg_partition order by 1,2;
     relname    |          boundaries          
 ---------------+------------------------------
  interval_tab1 | 
@@ -96,15 +96,15 @@ select relname, boundaries from pg_partition;
 (5 rows)
 
 insert into interval_tab1 values(1,'2020-4-9 0:0:0',  1, 1);
-select * from interval_tab1 where logdate >= '2020-4-7 0:0:0' and logdate < '2020-4-9 0:0:0';
+select * from interval_tab1 where logdate >= '2020-4-7 0:0:0' and logdate < '2020-4-9 0:0:0' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
-       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Wed Apr 08 02:00:00 2020 |        1 |         1
 (3 rows)
 
-select * from interval_tab1 where logdate > '2020-4-7 0:0:0' and logdate <= '2020-4-9 0:0:0';
+select * from interval_tab1 where logdate > '2020-4-7 0:0:0' and logdate <= '2020-4-9 0:0:0' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
        1 | Tue Apr 07 02:00:00 2020 |        1 |         1
@@ -112,20 +112,20 @@ select * from interval_tab1 where logdate > '2020-4-7 0:0:0' and logdate <= '202
        1 | Thu Apr 09 00:00:00 2020 |        1 |         1
 (3 rows)
 
-select * from interval_tab1 where logdate >= '2020-4-7 0:0:0' and logdate <= '2020-4-9 0:0:0';
+select * from interval_tab1 where logdate >= '2020-4-7 0:0:0' and logdate <= '2020-4-9 0:0:0' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
-       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Wed Apr 08 02:00:00 2020 |        1 |         1
        1 | Thu Apr 09 00:00:00 2020 |        1 |         1
 (4 rows)
 
-select * from interval_tab1 where logdate > '2020-4-6 0:0:0' and logdate <= '2020-4-9 0:0:0';
+select * from interval_tab1 where logdate > '2020-4-6 0:0:0' and logdate <= '2020-4-9 0:0:0' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 
 ---------+--------------------------+----------+-----------
-       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Tue Apr 07 00:00:00 2020 |        1 |         1
+       1 | Tue Apr 07 02:00:00 2020 |        1 |         1
        1 | Wed Apr 08 02:00:00 2020 |        1 |         1
        1 | Thu Apr 09 00:00:00 2020 |        1 |         1
 (4 rows)

@@ -44,10 +44,14 @@
 #include "pgstat.h"
 
 #define TRANS_PARTITION_LINEAR_SPARE_TIME(degree) \
-    ((TRANS_PARTITION_SPARE_TIME * degree) > 1048576 ? 1048576 : (TRANS_PARTITION_SPARE_TIME * degree))
-const int TRANS_PARTITION_SPARE_TIME = 1024;
+    (degree > 3000 ? 3000 : degree)
 
 #define ALLOCSET_UNDO_RECYCLE_MAXSIZE ALLOCSET_DEFAULT_MAXSIZE * 4
+
+typedef struct UndoXmins {
+    TransactionId oldestXmin;
+    TransactionId recycleXmin;
+} UndoXmins;
 
 namespace undo {
 const int EXIT_NUMBER = 2;
@@ -55,6 +59,7 @@ const float FORCE_RECYCLE_PERCENT = 0.8;
 const int FORCE_RECYCLE_RETRY_TIMES = 5;
 const float FORCE_RECYCLE_PUSH_PERCENT = 0.2;
 const long SLOT_BUFFER_CACHE_SIZE = 16384;
+const int UNDO_RECYCLE_TIMEOUT_DELTA = 50;
 
 static uint64 g_recycleLoops = 0;
 static int g_forceRecycleSize = 0;
@@ -76,8 +81,107 @@ void UndoShutdownHandler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
-bool RecycleUndoSpace(UndoZone *zone, TransactionId oldestXmin, TransactionId *oldestRecycleXid,
-    TransactionId forceRecycleXid)
+bool AsyncRollback(UndoZone *zone, UndoSlotPtr recycle, TransactionSlot *slot)
+{
+    if (slot->NeedRollback()) {
+        if (zone->GetPersitentLevel() == UNDO_TEMP || zone->GetPersitentLevel() == UNDO_UNLOGGED) {
+            return true;
+        }
+        UndoRecPtr prev = GetPrevUrp(slot->EndUndoPtr());
+        AddRollbackRequest(slot->XactId(), prev, slot->StartUndoPtr(),
+            slot->DbId(), recycle);
+#ifdef DEBUG_UHEAP
+        UHEAPSTAT_COUNT_UNDO_SPACE_UNRECYCLE();
+#endif
+        ereport(LOG, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT(
+                "rollback zone %d slot %lu: xid %lu, start %lu, "
+                "end %lu, dbid %u. recyclexid %lu loops %lu"),
+                zone->GetZoneId(), recycle, slot->XactId(), slot->StartUndoPtr(), slot->EndUndoPtr(),
+                slot->DbId(), slot->XactId(), g_recycleLoops)));
+        return true;
+    }
+    return false;
+}
+
+void AdvanceFrozenXid(UndoZone *zone, TransactionId *oldestFozenXid,
+    TransactionId oldestXmin, UndoSlotPtr *oldestFrozenSlotPtr)
+{
+    TransactionSlot *slot = NULL;
+    UndoSlotPtr frozenSlotPtr = zone->GetFrozenSlotPtr();
+    UndoSlotPtr recycle = zone->GetRecycle();
+    UndoSlotPtr allocate = zone->GetAllocate();
+    UndoSlotPtr currentSlotPtr =  frozenSlotPtr > recycle ? frozenSlotPtr : recycle;
+    UndoSlotPtr start = INVALID_UNDO_SLOT_PTR;
+    while (currentSlotPtr < allocate) {
+        UndoSlotBuffer& slotBuf = g_slotBufferCache->FetchTransactionBuffer(currentSlotPtr);
+        slotBuf.PrepareTransactionSlot(currentSlotPtr);
+        start = currentSlotPtr;
+        bool finishAdvanceXid = false;
+        while (slotBuf.BufBlock() == UNDO_PTR_GET_BLOCK_NUM(currentSlotPtr) && (currentSlotPtr < allocate)) {
+            slot = slotBuf.FetchTransactionSlot(currentSlotPtr);
+
+    WHITEBOX_TEST_STUB(UNDO_RECYCL_ESPACE_FAILED, WhiteboxDefaultErrorEmit);
+
+            if (slot->StartUndoPtr() == INVALID_UNDO_REC_PTR) {
+                ereport(LOG, (errmodule(MOD_UNDO),
+                    errmsg(UNDOFORMAT(
+                        "invalid slotptr zone %d transaction slot %lu loops %lu."),
+                        zone->GetZoneId(), currentSlotPtr, g_recycleLoops)));
+                finishAdvanceXid = true;
+                break;
+            }
+#ifdef DEBUG_UHEAP
+            UHEAPSTAT_COUNT_UNDO_SPACE_RECYCLE();
+#endif
+            pg_read_barrier();
+            if (!TransactionIdIsValid(slot->XactId())) {
+                ereport(PANIC, (errmodule(MOD_UNDO),
+                    errmsg(UNDOFORMAT(
+                        "recycle xid invalid: zone %d transaction slot %lu loops %lu."),
+                        zone->GetZoneId(), currentSlotPtr, g_recycleLoops)));
+            }
+            ereport(DEBUG1, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT(
+                    "zone id %d, currentSlotPtr %lu. slot xactid %lu, oldestXmin %lu"),
+                    zone->GetZoneId(), currentSlotPtr, slot->XactId(), oldestXmin)));
+            *oldestFrozenSlotPtr = currentSlotPtr;
+            if (!UHeapTransactionIdDidCommit(slot->XactId()) &&
+                TransactionIdPrecedes(slot->XactId(), oldestXmin)) {
+                if (AsyncRollback(zone, currentSlotPtr, slot)) {
+                    *oldestFozenXid = slot->XactId();
+                    ereport(LOG, (errmodule(MOD_UNDO),
+                        errmsg(UNDOFORMAT(
+                            "Transaction add to async rollback queue, zone: %d, oldestFozenXid: %lu,"
+                            "oldestFrozenSlotPtr %lu. oldestXmin %lu"),
+                            zone->GetZoneId(), *oldestFozenXid, *oldestFrozenSlotPtr, oldestXmin)));
+                    finishAdvanceXid = true;
+                    break;
+                }
+            }
+            if (TransactionIdFollowsOrEquals(slot->XactId(), oldestXmin)) {
+                ereport(DEBUG1, (errmodule(MOD_UNDO),
+                    errmsg(UNDOFORMAT(
+                        "zone %d, slotxid %lu, oldestXmin %lu, oldestFozenXid %lu, oldestFrozenSlotPtr %lu."),
+                        zone->GetZoneId(), slot->XactId(), oldestXmin, *oldestFozenXid, *oldestFrozenSlotPtr)));
+                finishAdvanceXid = true;
+                break;
+            }
+            currentSlotPtr = GetNextSlotPtr(currentSlotPtr);
+            *oldestFrozenSlotPtr = currentSlotPtr;
+            if (slotBuf.BufBlock() != UNDO_PTR_GET_BLOCK_NUM(currentSlotPtr)) {
+                g_slotBufferCache->RemoveSlotBuffer(start);
+                slotBuf.Release();
+            }
+        }
+        if (finishAdvanceXid) {
+            break;
+        }
+    }
+}
+
+bool RecycleUndoSpace(UndoZone *zone, TransactionId recycleXmin, TransactionId frozenXid,
+    TransactionId *oldestRecycleXid, TransactionId forceRecycleXid)
 {
     UndoSlotPtr recycle = zone->GetRecycle();
     UndoSlotPtr allocate = zone->GetAllocate();
@@ -90,7 +194,9 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId oldestXmin, TransactionId *o
     bool undoRecycled = false;
     bool result = false;
     UndoSlotPtr start = INVALID_UNDO_SLOT_PTR;
-    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+    
+    *oldestRecycleXid = recycleXmin < frozenXid ? recycleXmin : frozenXid;
 
     if (zone->GetPersitentLevel() == UNDO_PERMANENT) {
         needWal = true;
@@ -118,43 +224,49 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId oldestXmin, TransactionId *o
             if (!TransactionIdIsValid(slot->XactId()) || TransactionIdPrecedes(slot->XactId(), oldestXidInUndo)) {
                 ereport(PANIC, (errmodule(MOD_UNDO),
                     errmsg(UNDOFORMAT(
-                        "recycle xid invalid: zone %d transaction slot %lu xid %lu loops %lu, oldestXidInUndo %lu."),
-                        zone->GetZoneId(), recycle, recycleXid, g_recycleLoops, oldestXidInUndo)));
+                        "recycle xid invalid: zone %d transaction slot %lu, slot XactId %lu, "
+                        "xid %lu loops %lu, oldestXidInUndo %lu."),
+                        zone->GetZoneId(), recycle, slot->XactId(), recycleXid, g_recycleLoops, oldestXidInUndo)));
             }
-            if (TransactionIdPrecedes(slot->XactId(), oldestXmin)) {
+            if (TransactionIdPrecedes(slot->XactId(), recycleXmin)) {
                 Assert(forceRecycle == false);
-                if (!UHeapTransactionIdDidCommit(slot->XactId())) {
-                    if (slot->NeedRollback()) {
-                        *oldestRecycleXid = slot->XactId();
-                        if (zone->GetPersitentLevel() == UNDO_TEMP || zone->GetPersitentLevel() == UNDO_UNLOGGED) {
-                            break;
-                        }
-                        UndoRecPtr prev = GetPrevUrp(slot->EndUndoPtr());
-                        AddRollbackRequest(slot->XactId(), prev, slot->StartUndoPtr(), 
-                            slot->DbId(), recycle);
-#ifdef DEBUG_UHEAP
-                        UHEAPSTAT_COUNT_UNDO_SPACE_UNRECYCLE();
-#endif
-                        ereport(LOG, (errmodule(MOD_UNDO),
-                            errmsg(UNDOFORMAT(
-                                "rollback zone %d slot %lu: xid %lu, start %lu, "
-                                "end %lu, dbid %u. recyclexid %lu loops %lu, oldestXidInUndo %lu."),
-                                zone->GetZoneId(), recycle, slot->XactId(), slot->StartUndoPtr(), slot->EndUndoPtr(),
-                                slot->DbId(), recycleXid, g_recycleLoops, oldestXidInUndo)));
-                        break;
+
+#ifdef ENABLE_WHITEBOX
+                if (TransactionIdPrecedes(slot->XactId(),frozenXid)) {
+                    if (!UHeapTransactionIdDidCommit(slot->XactId()) && slot->NeedRollback()) {
+                        ereport(PANIC, (errmodule(MOD_UNDO),
+                        errmsg(UNDOFORMAT(
+                            "Recycle visibility check wrong: zone %d "
+                            "transaction slot %lu xid %lu slot->XactId() %lu, oldestXidInUndo %lu."),
+                            zone->GetZoneId(), recycle, recycleXid, slot->XactId(), oldestXidInUndo)));
                     }
                 }
-            } else {
-                if (TransactionIdPrecedes(slot->XactId(), forceRecycleXid) &&
-                    UHeapTransactionIdDidCommit(slot->XactId())) {
-                    ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("ForceRecycle: slot=%lu, slotxid=%lu, " 
-                        "recyclexid=%lu, oldestXmin=%lu, startptr=%lu, endptr=%lu."), recycle, slot->XactId(), 
-                        forceRecycleXid, oldestXmin, UNDO_PTR_GET_OFFSET(slot->StartUndoPtr()),
-                        UNDO_PTR_GET_OFFSET(slot->EndUndoPtr()))));
-                    forceRecycle = true;
-                } else {
+#endif
+
+                if (TransactionIdFollowsOrEquals(slot->XactId(), frozenXid)) {
                     break;
                 }
+            } else {
+                bool forceRecycleXidCheck = (TransactionIdIsNormal(forceRecycleXid)
+                    && TransactionIdPrecedes(slot->XactId(), forceRecycleXid));
+                if (!forceRecycleXidCheck) {
+                    break;
+                }
+                bool isInProgress = TransactionIdIsInProgress(slot->XactId());
+                if (isInProgress) {
+                    break;
+                }
+                bool slotTranactionStateCheck = (!UHeapTransactionIdDidCommit(slot->XactId())
+                    && !isInProgress && slot->NeedRollback());
+                if (slotTranactionStateCheck) {
+                    AsyncRollback(zone, recycle, slot);
+                    break;
+                }
+                ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("ForceRecycle: slot=%lu, slotxid=%lu, " 
+                    "recyclexid=%lu, recycleXmin=%lu, startptr=%lu, endptr=%lu."), recycle, slot->XactId(), 
+                    forceRecycleXid, recycleXmin, UNDO_PTR_GET_OFFSET(slot->StartUndoPtr()),
+                    UNDO_PTR_GET_OFFSET(slot->EndUndoPtr()))));
+                forceRecycle = true;
             }
 #ifdef DEBUG_UHEAP
             UHEAPSTAT_COUNT_UNDO_SPACE_RECYCLE();
@@ -178,7 +290,6 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId oldestXmin, TransactionId *o
                 slotBuf.Release();
             }
         }
-
         if (undoRecycled) {
             Assert(TransactionIdIsValid(recycleXid));
             if (zone->GetRecycleXid() >= recycleXid) {
@@ -218,7 +329,7 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId oldestXmin, TransactionId *o
                 xlrec.startSlot = start;
                 xlrec.recycleLoops = g_recycleLoops;
                 xlrec.recycledXid = recycleXid;
-                xlrec.oldestXmin = oldestXmin;
+                xlrec.oldestXmin = recycleXmin;
                 xlrec.endUndoPtr = endUndoPtr;
                 XLogRecPtr lsn = WriteUndoXlog(&xlrec, XLOG_UNDO_DISCARD);
                 zone->SetLSN(lsn);
@@ -226,7 +337,7 @@ bool RecycleUndoSpace(UndoZone *zone, TransactionId oldestXmin, TransactionId *o
                     (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zone %d recycle slot start %lu end %lu from slot %lu "
                                                             "to slot %lu lsn %lu xid %lu loops %lu oldestXmin %lu."),
                         zone->GetZoneId(), startUndoPtr, endUndoPtr, start, recycle, 
-                        lsn, recycleXid, g_recycleLoops, oldestXmin)));
+                        lsn, recycleXid, g_recycleLoops, recycleXmin)));
             }
             END_CRIT_SECTION();
 
@@ -273,9 +384,9 @@ static void UpdateXidHavingUndo(TransactionId *recycleMaxXIDs, uint32 count, Tra
 static bool NeedForceRecycle(void)
 {
     int totalSize = (int)pg_atomic_read_u32(&g_instance.undo_cxt.undoTotalSize);
-    int limitSize = (int)(g_instance.attr.attr_storage.undo_space_limit_size * FORCE_RECYCLE_PERCENT);
+    int limitSize = (int)(u_sess->attr.attr_storage.undo_space_limit_size * FORCE_RECYCLE_PERCENT);
     int metaSize = (int)g_instance.undo_cxt.undoMetaSize;
-    Assert(totalSize >= 0 && limitSize > 0 && metaSize > 0);
+    Assert(totalSize >= 0 && limitSize >= 0 && metaSize >= 0);
     g_forceRecycleSize = totalSize + metaSize - limitSize;
     if (g_forceRecycleSize >= 0) {
         ereport(LOG, (errmodule(MOD_UNDO),
@@ -322,6 +433,8 @@ static void WaitRecycleThread(uint64 nonRecycled)
     int rc = 0;
     rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 
         TRANS_PARTITION_LINEAR_SPARE_TIME(nonRecycled));
+    /* Clear any already-pending wakeups */
+    ResetLatch(&t_thrd.proc->procLatch);
     if (((unsigned int)rc) & WL_POSTMASTER_DEATH) {
         gs_thread_exit(1);
     }
@@ -329,7 +442,7 @@ static void WaitRecycleThread(uint64 nonRecycled)
 
 static void RecycleWaitIfNotUsed()
 {
-   if (g_instance.attr.attr_storage.undo_zone_count == 0
+   if (!g_instance.attr.attr_storage.enable_ustore
 #ifdef ENABLE_MULTIPLE_NODES
         || true
 #endif
@@ -351,9 +464,12 @@ void UndoRecycleMain()
 {
     sigjmp_buf localSigjmpBuf;
     bool recycled = false;
+    bool isFirstRecycle = false;
     TransactionId oldestXidHavingUndo = InvalidTransactionId;
-    uint64 nonRecycled = 0;
+    TransactionId oldestFrozenXidInUndo = InvalidTransactionId;
+    uint64 nonRecycled = 50;
     TransactionId *recycleMaxXIDs = NULL;
+    
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "undo recycler",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     MemoryContext undoRecycleContext = AllocSetContextCreate(t_thrd.top_mem_cxt,
@@ -402,6 +518,8 @@ void UndoRecycleMain()
         HOLD_INTERRUPTS();
         /* Report the error to the server log */
         EmitErrorReport();
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
         LWLockReleaseAll();
         pgstat_report_waitevent(WAIT_EVENT_END);
         AbortBufferIO();
@@ -451,61 +569,87 @@ void UndoRecycleMain()
     }
 
     while (true) {
-        /* Clear any already-pending wakeups */
-        ResetLatch(&t_thrd.proc->procLatch);
         if (t_thrd.undorecycler_cxt.got_SIGHUP) {
             t_thrd.undorecycler_cxt.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
         }
         if (!RecoveryInProgress()) {
-            TransactionId oldestXmin = GetOldestXminForUndo();
-            if (oldestXmin == InvalidTransactionId) {
+            TransactionId recycleXmin = InvalidTransactionId;
+            TransactionId oldestXmin = GetOldestXminForUndo(&recycleXmin);
+            isFirstRecycle = !TransactionIdIsValid(g_instance.undo_cxt.oldestFrozenXid);
+            if (!TransactionIdIsValid(recycleXmin) ||
+            TransactionIdPrecedes(oldestXmin, g_instance.undo_cxt.oldestFrozenXid)) {
                 WaitRecycleThread(nonRecycled);
                 continue;
             }
             recycled = false;
             oldestXidHavingUndo = InvalidTransactionId;
+            oldestFrozenXidInUndo = oldestXmin;
             uint32 idx = 0;
             uint32 retry = 1;
             TransactionId recycleXid;
             TransactionId forceRecycleXid = InvalidTransactionId;
             uint32 recycleMaxXIDCount = 0;
             errno_t ret = 0;
-            if (g_instance.attr.attr_storage.undo_zone_count != 0) {
+            bool isAnyZoneUsed = false;
+            if (g_instance.undo_cxt.uZoneCount != 0) {
                 if (NeedForceRecycle()) {
-                    forceRecycleXid = GetForceRecycleXid(oldestXmin, retry);
+                    forceRecycleXid = GetForceRecycleXid(recycleXmin, retry);
                 }
                 retry:
                 ret = memset_s(recycleMaxXIDs, sizeof(TransactionId) * UNDO_ZONE_COUNT, 0,
                     sizeof(TransactionId) * UNDO_ZONE_COUNT);
                 securec_check(ret, "\0", "\0");
                 recycleMaxXIDCount = 0;
+                isAnyZoneUsed = false;
                 for (idx = 0; idx < UNDO_ZONE_COUNT && !t_thrd.undorecycler_cxt.shutdown_requested; idx++) {
-                    UndoZone *zone = UndoZoneGroup::GetUndoZone(idx);
+                    UndoPersistence upersistence = UNDO_PERMANENT;
+                    GET_UPERSISTENCE(idx, upersistence);
+                    UndoZone *zone = UndoZoneGroup::GetUndoZone(idx, false, upersistence);
+                    TransactionId frozenXid = oldestXmin;
                     if (zone == NULL) {
                         continue;
                     }
                     recycleXid = InvalidTransactionId;
                     if (zone->Used()) {
-                        if (RecycleUndoSpace(zone, oldestXmin, &recycleXid, forceRecycleXid)) {
+                        UndoSlotPtr oldestFrozenSlotPtr = zone->GetFrozenSlotPtr();
+                        AdvanceFrozenXid(zone, &frozenXid, oldestXmin, &oldestFrozenSlotPtr);
+                        zone->SetFrozenSlotPtr(oldestFrozenSlotPtr);
+                        ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(
+                            UNDOFORMAT("oldestFrozenXidInUndo: oldestFrozenXidInUndo=%lu, frozenXid=%lu"
+                            " before RecycleUndoSpace"),
+                            oldestFrozenXidInUndo, frozenXid)));
+                        if (RecycleUndoSpace(zone, recycleXmin, frozenXid, &recycleXid, forceRecycleXid)) {
                             recycled = true;
                         }
+                        isAnyZoneUsed = true;
+                        ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(
+                            UNDOFORMAT("oldestFrozenXidInUndo: oldestFrozenXidInUndo=%lu, frozenXid=%lu"
+                            " after RecycleUndoSpace"),
+                            oldestFrozenXidInUndo, frozenXid)));
+                        oldestFrozenXidInUndo = oldestFrozenXidInUndo > frozenXid ? frozenXid : oldestFrozenXidInUndo;
                         UpdateRecyledXid(recycleMaxXIDs, &recycleMaxXIDCount, recycleXid);
                     }
                 }
             }
+            if (isAnyZoneUsed) {
+                ereport(LOG, (errmodule(MOD_UNDO), errmsg(
+                    UNDOFORMAT("oldestFrozenXidInUndo for update: oldestFrozenXidInUndo=%lu"),
+                    oldestFrozenXidInUndo)));
+                pg_atomic_write_u64(&g_instance.undo_cxt.oldestFrozenXid, oldestFrozenXidInUndo);
+            }
             if (t_thrd.undorecycler_cxt.shutdown_requested) {
                 ShutDownRecycle(recycleMaxXIDs);
             }
-            if (g_instance.attr.attr_storage.undo_zone_count != 0) {
-                UpdateXidHavingUndo(recycleMaxXIDs, recycleMaxXIDCount, &oldestXidHavingUndo, oldestXmin);
+            if (g_instance.undo_cxt.uZoneCount != 0) {
+                UpdateXidHavingUndo(recycleMaxXIDs, recycleMaxXIDCount, &oldestXidHavingUndo, recycleXmin);
                 if (g_forceRecycleSize > 0) {
                     retry++;
-                    forceRecycleXid = GetForceRecycleXid(oldestXmin, retry);
+                    forceRecycleXid = GetForceRecycleXid(recycleXmin, retry);
                     if (TransactionIdIsValid(forceRecycleXid)) {
                         ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(
                             UNDOFORMAT("ForceRecycle: recycleXid=%lu, oldestXmin=%lu, forceRecycleSize=%d, retry=%u."),
-                            forceRecycleXid, oldestXmin, g_forceRecycleSize, retry)));
+                            forceRecycleXid, recycleXmin, g_forceRecycleSize, retry)));
                         goto retry;
                     }
                 }
@@ -513,16 +657,16 @@ void UndoRecycleMain()
                     errmsg(UNDOFORMAT("update oldestXidInUndo = %lu."), oldestXidHavingUndo)));
                 g_recycleLoops++;
             }
-            if (oldestXidHavingUndo != InvalidTransactionId) {
-                TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+            if (oldestXidHavingUndo != InvalidTransactionId && !isFirstRecycle) {
+                TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
                 if (TransactionIdPrecedes(oldestXidHavingUndo, oldestXidInUndo)) {
                     ereport(PANIC, (errmsg(UNDOFORMAT("curr xid having undo %lu < global oldestXidInUndo %lu."), 
                         oldestXidHavingUndo, oldestXidInUndo)));
                 }
-                pg_atomic_write_u64(&g_instance.proc_base->oldestXidInUndo, oldestXidHavingUndo);
+                pg_atomic_write_u64(&g_instance.undo_cxt.oldestXidInUndo, oldestXidHavingUndo);
             }
             if (!recycled) {
-                nonRecycled += 1;
+                nonRecycled += UNDO_RECYCLE_TIMEOUT_DELTA;
                 WaitRecycleThread(nonRecycled);
             } else {
                 nonRecycled = 0;

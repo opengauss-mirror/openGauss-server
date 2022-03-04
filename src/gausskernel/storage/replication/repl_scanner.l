@@ -36,6 +36,14 @@ static char *litbufdup(void);
 static void addlit(char *ytext, int yleng);
 static void addlitchar(unsigned char ychar);
 
+/*
+ * define replication_scanner_yylex for flex >= 2.6
+ */
+#if FLEX_MAJOR_VERSION >= 2 && FLEX_MINOR_VERSION >= 6
+#define YY_DECL int replication_scanner_yylex \
+               (YYSTYPE * yylval_param, YYLTYPE * yylloc_param , yyscan_t yyscanner)
+#endif
+
 %}
 
 %option reentrant

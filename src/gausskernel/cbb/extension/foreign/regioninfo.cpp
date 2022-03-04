@@ -176,6 +176,7 @@ char* readDataFromJsonFile(char* region)
 
 static bool clean_region_info()
 {
+#ifndef ENABLE_LITE_MODE
     Relation rel;
     TableScanDesc scan;
     HeapTuple tuple;
@@ -211,6 +212,10 @@ static bool clean_region_info()
     ereport(LOG, (errmodule(MOD_DFS), errmsg("clean %d region info.", cleanNum)));
 
     return ret;
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+    return true;
+#endif
 }
 
 /**

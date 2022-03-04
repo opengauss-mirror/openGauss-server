@@ -34,6 +34,10 @@
 #else
 #include <gssapi/gssapi.h>
 #endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 /*
  * GTM_Conn stores all the state data associated with a single connection
  * to a backend.
@@ -153,5 +157,9 @@ int gtmpqPutMsgBytes(const void* buf, size_t len, GTM_Conn* conn);
 
 #define SOCK_ERRNO errno
 #define SOCK_ERRNO_SET(e) (errno = (e))
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* LIBPQ_INT_H */

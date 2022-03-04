@@ -742,6 +742,12 @@ void PgxcNodeGetOids(Oid** coOids, Oid** dnOids, int* num_coords, int* num_dns, 
     LWLockRelease(NodeTableLock);
 }
 
+void PgxcNodeGetOidsForInit(Oid** coOids, Oid** dnOids, int* num_coords, int* num_dns, int * num_primaries, bool update_preferred)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+}
+
 void PgxcNodeGetStandbyOids(Oid** coOids, Oid** dnOids, int* numCoords, int* numStandbyDns, bool needInitPGXC)
 {
     LWLockAcquire(NodeTableLock, LW_SHARED);

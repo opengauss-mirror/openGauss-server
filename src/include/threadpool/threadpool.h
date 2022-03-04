@@ -48,6 +48,12 @@
 #define MAX_STREAM_POOL_SIZE 16384
 #define MAX_THREAD_POOL_GROUPS 64
 #define CHAR_SIZE 512
+#define DEFAULT_THREAD_POOL_STREAM_PROC_RATIO 0.2
+
+/* dop max is 8 */
+#define MAX_THREAD_POOL_STREAM_PROC_RATIO 8
+
+
 
 extern ThreadPoolControler* g_threadPoolControler;
 

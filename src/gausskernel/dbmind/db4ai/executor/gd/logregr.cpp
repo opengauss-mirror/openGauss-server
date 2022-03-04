@@ -23,27 +23,28 @@
 
 #include "db4ai/gd.h"
 
-static void logreg_gradients(const GradientDescent *gd_node, const Matrix *features, const Matrix *dep_var,
-    Matrix *weights, Matrix *gradients)
+static void logreg_gradients(GradientsConfig *cfg)
 {
-    Assert(features->rows > 0);
+    Assert(cfg->features->rows > 0);
+
+    GradientsConfigGD *cfg_gd = (GradientsConfigGD *)cfg;
 
     // xT * ((1.0 / (1.0 + exp(-x*w))) - y)
     Matrix sigma;
-    matrix_init(&sigma, features->rows);
-    matrix_mult_vector(features, weights, &sigma);
+    matrix_init(&sigma, cfg->features->rows);
+    matrix_mult_vector(cfg->features, cfg->weights, &sigma);
     matrix_sigmoid(&sigma);
-    matrix_subtract(&sigma, dep_var);
+    matrix_subtract(&sigma, cfg_gd->dep_var);
 
     Matrix x_t;
-    matrix_init_transpose(&x_t, features);
-    matrix_mult_vector(&x_t, &sigma, gradients);
+    matrix_init_transpose(&x_t, cfg->features);
+    matrix_mult_vector(&x_t, &sigma, cfg->gradients);
 
     matrix_release(&x_t);
     matrix_release(&sigma);
 }
 
-static double logreg_test(const GradientDescent *gd_node, const Matrix *features, const Matrix *dep_var,
+static double logreg_test(const GradientDescentState* gd_state, const Matrix *features, const Matrix *dep_var,
     const Matrix *weights, Scores *scores)
 {
     Assert(features->rows > 0);
@@ -80,7 +81,7 @@ static double logreg_test(const GradientDescent *gd_node, const Matrix *features
     // cost = sum(-cost1 - cost2) / N
     matrix_negate(&cost1);
     matrix_subtract(&cost1, &cost2);
-    gd_float tuple_loss = matrix_get_sum(&cost1) / features->rows;
+    float8 tuple_loss = matrix_get_sum(&cost1) / features->rows;
     matrix_release(&cost2);
     matrix_release(&cost1);
 
@@ -88,21 +89,60 @@ static double logreg_test(const GradientDescent *gd_node, const Matrix *features
     return tuple_loss;
 }
 
-static gd_float logreg_predict(const Matrix *features, const Matrix *weights)
+static Datum logreg_predict(const Matrix *features, const Matrix *weights,
+                            Oid return_type, void *extra_data, bool max_binary, bool* categorize)
 {
     // p = 1.0 + exp(-x*w)
-    gd_float r = matrix_dot(features, weights);
+    float8 r = matrix_dot(features, weights);
     r = 1.0 / (1.0 + exp(-r));
-    return r < 0.5 ? 0.0 : 1.0;
+    if (!max_binary)
+        r = (r < 0.5 ? 0.0 : 1.0);
+    *categorize = true;
+    return Float4GetDatum(r);
 }
 
-GradientDescentAlgorithm gd_logistic_regression = {
-    "logistic-regression",
-    GD_DEPENDENT_VAR_BINARY,
-    METRIC_ACCURACY | METRIC_F1 | METRIC_PRECISION | METRIC_RECALL | METRIC_LOSS,
+/////////////////////////////////////////////////////////////////////
+
+// Used by linear regression and logistic regression
+static HyperparameterDefinition regression_hyperparameter_definitions[] = {
+    GD_HYPERPARAMETERS_SUPERVISED
+};
+
+const HyperparameterDefinition* gd_get_hyperparameters_regression(AlgorithmAPI *self, int *definitions_size)
+{
+    Assert(definitions_size != nullptr);
+    *definitions_size = sizeof(regression_hyperparameter_definitions) / sizeof(HyperparameterDefinition);
+    return regression_hyperparameter_definitions;
+}
+
+GradientDescent gd_logistic_regression = {
+    {
+        LOGISTIC_REGRESSION,
+        GD_LOGISTIC_REGRESSION_NAME,
+        ALGORITHM_ML_DEFAULT | ALGORITHM_ML_RESCANS_DATA,
+        gd_metrics_accuracy,
+        gd_get_hyperparameters_regression,
+        gd_make_hyperparameters,
+        gd_update_hyperparameters,
+        gd_create,
+        gd_run,
+        gd_end,
+        gd_predict_prepare,
+        gd_predict,
+        gd_explain
+    },
+    true,
+    0, // default return type
+    0.0, // default feature
     0.0,
     1.0,
+    nullptr,
+    gd_init_optimizer,
+    nullptr,
+    nullptr,
+    nullptr,
     logreg_gradients,
     logreg_test,
     logreg_predict,
+    nullptr,
 };

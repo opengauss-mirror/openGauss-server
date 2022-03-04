@@ -32,10 +32,10 @@
  * a bit nicer.
  */
 #if PG_VERSION_NUM >= 100000
-#define PG_RMGR(symname, name, redo, desc, identify, startup, cleanup, mask, undo, undo_desc) \
+#define PG_RMGR(symname, name, redo, desc, identify, startup, cleanup, mask, undo, undo_desc, type_name) \
   name,
 #else
-#define PG_RMGR(symname, name, redo, desc, identify, startup, cleanup, undo, undo_desc) \
+#define PG_RMGR(symname, name, redo, desc, identify, startup, cleanup, undo, undo_desc, type_name) \
   name,
 #endif
 
@@ -153,7 +153,7 @@ typedef struct
 static int SimpleXLogPageRead_local(XLogReaderState *xlogreader,
                                                                     XLogRecPtr targetPagePtr,
                                                                     int reqLen, XLogRecPtr targetRecPtr, char *readBuf,
-                                                                    TimeLineID *pageTLI);
+                                                                    TimeLineID *pageTLI, char* xlog_path = NULL);
 static XLogReaderState *InitXLogPageRead(XLogReaderData *reader_data,
                                                                         const char *archivedir,
                                                                         TimeLineID tli, uint32 segment_size,
@@ -662,7 +662,7 @@ get_first_record_lsn(const char *archivedir, XLogSegNo	segno,
     if (segno <= 1)
         elog(ERROR, "Invalid WAL segment number " UINT64_FORMAT, segno);
 
-    GetXLogFileName(wal_segment, tli, segno, instance_config.xlog_seg_size);
+    GetXLogFileName(wal_segment, MAXFNAMELEN, tli, segno, instance_config.xlog_seg_size);
 
     xlogreader = InitXLogPageRead(&reader_data, archivedir, tli, wal_seg_size,
                                                         false, false, true);
@@ -716,7 +716,7 @@ get_next_record_lsn(const char *archivedir, XLogSegNo	segno,
     if (segno <= 1)
         elog(ERROR, "Invalid WAL segment number " UINT64_FORMAT, segno);
 
-    GetXLogFileName(wal_segment, tli, segno, instance_config.xlog_seg_size);
+    GetXLogFileName(wal_segment, MAXFNAMELEN, tli, segno, instance_config.xlog_seg_size);
 
     xlogreader = InitXLogPageRead(&reader_data, archivedir, tli, wal_seg_size,
                                                  false, false, true);
@@ -923,7 +923,7 @@ get_gz_error(gzFile gzf)
 static int
 SimpleXLogPageRead_local(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr,
                                                         int reqLen, XLogRecPtr targetRecPtr, char *readBuf,
-                                                        TimeLineID *pageTLI)
+                                                        TimeLineID *pageTLI, char* xlog_path)
 {
     XLogReaderData *reader_data;
     uint32  targetPageOff;
@@ -1027,7 +1027,7 @@ static int switch_next_wal_segment(XLogReaderData *reader_data, bool *isreturn)
     char    xlogfname[MAXFNAMELEN];
     char    partial_file[MAXPGPATH];
 
-    GetXLogFileName(xlogfname, reader_data->tli, reader_data->xlogsegno, wal_seg_size);
+    GetXLogFileName(xlogfname, MAXFNAMELEN, reader_data->tli, reader_data->xlogsegno, wal_seg_size);
 
     nRet = snprintf_s(reader_data->xlogpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", wal_archivedir, xlogfname);
     securec_check_ss_c(nRet, "\0", "\0");
@@ -1682,8 +1682,7 @@ XLogWaitForConsistency(XLogReaderState *xlogreader)
         {
             char    xlogfname[MAXFNAMELEN];
 
-            GetXLogFileName(xlogfname, reader_data->tli, reader_data->xlogsegno,
-                                            wal_seg_size);
+            GetXLogFileName(xlogfname, MAXFNAMELEN, reader_data->tli, reader_data->xlogsegno, wal_seg_size);
 
             elog(VERBOSE, "Thread [%d]: Possible WAL corruption in %s. Wait for other threads to decide is this a failure",
                     reader_data->thread_num, xlogfname);

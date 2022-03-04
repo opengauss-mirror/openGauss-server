@@ -48,7 +48,7 @@ extern void libpqrcv_disconnect(void);
 extern void HaSetRebuildRepInfoError(HaRebuildReason reason);
 extern void SetObsRebuildReason(HaRebuildReason reason);
 extern void libpqrcv_check_conninfo(const char *conninfo);
-extern bool libpqrcv_command(const char *cmd, char **err);
+extern bool libpqrcv_command(const char *cmd, char **err, int *sqlstate);
 
 extern void IdentifyRemoteSystem(bool checkRemote);
 extern void CreateRemoteReplicationSlot(XLogRecPtr startpoint, const char* slotname, bool isLogical);

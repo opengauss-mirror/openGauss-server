@@ -26,6 +26,7 @@
 #include "access/subtrans.h"
 #include "access/twophase.h"
 #include "access/double_write.h"
+#include "catalog/pg_uid_fn.h"
 #include "catalog/storage_gtt.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/ustore/knl_undoworker.h"
@@ -44,6 +45,7 @@
 #include "postmaster/bgwriter.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/pagewriter.h"
+#include "postmaster/pagerepair.h"
 #include "postmaster/postmaster.h"
 #include "postmaster/snapcapturer.h"
 #include "postmaster/rbcleaner.h"
@@ -73,16 +75,21 @@
 #include "storage/dfs/dfs_connector.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
 #include "utils/memprot.h"
+#include "pgaudit.h"
 #ifdef ENABLE_MULTIPLE_NODES
     #include "tsdb/cache/queryid_cachemgr.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
 
 #include "replication/dcf_replication.h"
+#include "commands/verify.h"
 
 /* we use semaphore not LWLOCK, because when thread InitGucConfig, it does not get a t_thrd.proc */
 pthread_mutex_t gLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
 
 extern void SetShmemCxt(void);
+#ifdef ENABLE_MULTIPLE_NODES
+extern void InitDisasterCache();
+#endif
 
 /*
  * RequestAddinShmemSpace
@@ -142,6 +149,7 @@ Size ComputeTotalSizeOfShmem()
         size = add_size(size, PMSignalShmemSize());
         size = add_size(size, ProcSignalShmemSize());
         size = add_size(size, CheckpointerShmemSize());
+        size = add_size(size, PageWriterShmemSize());
         size = add_size(size, AutoVacuumShmemSize());
         size = add_size(size, WalSndShmemSize());
         size = add_size(size, WalRcvShmemSize());
@@ -393,11 +401,18 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      * Set up thread shared fd cache
      */
     InitDataFileIdCache();
+    InitUidCache();
 
     /*
      * Set up seg spc cache
      */
     InitSegSpcCache();
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_DISASTER_RECOVER_MODE) {
+        InitDisasterCache();
+    }
+#endif
 
     /*
      * Set up CStoreSpaceAllocator
@@ -413,10 +428,12 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     }
 #endif   /* ENABLE_MULTIPLE_NODES */
 
+#ifndef ENABLE_LITE_MODE
     /*
      * Set up DfsConnector cache
      */
     dfs::InitOBSConnectorCacheLock();
+#endif
 
     /* set up Dummy server cache */
     InitDummyServrCache();
@@ -426,7 +443,11 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      */
     DfsInsert::InitDfsSpaceCache();
 
-    LsnXlogFlushChkShmInit();   
+    LsnXlogFlushChkShmInit();
+
+    PageRepairHashTblInit();
+    FileRepairHashTblInit();
+    initRepairBadBlockStat();
 
     if (g_instance.ckpt_cxt_ctl->prune_queue_lock == NULL) {
         g_instance.ckpt_cxt_ctl->prune_queue_lock = LWLockAssign(LWTRANCHE_PRUNE_DIRTY_QUEUE);
@@ -438,6 +459,16 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
+    if (g_instance.pid_cxt.PgAuditPID == NULL) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.audit_cxt.global_audit_context);
+        int thread_num = g_instance.attr.attr_security.audit_thread_num;
+        g_instance.pid_cxt.PgAuditPID = (ThreadId*)palloc0(sizeof(ThreadId) * thread_num);
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    if (ENABLE_INCRE_CKPT) {
+        PageWriterSyncShmemInit();
+    }
     if (ENABLE_INCRE_CKPT && g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc == NULL) {
         incre_ckpt_pagewriter_cxt_init();
     }

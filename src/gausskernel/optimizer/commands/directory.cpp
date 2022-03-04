@@ -200,7 +200,6 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
             }
             tup = (HeapTuple) tableam_tops_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
             simple_heap_update(rel, &tup->t_self, tup);
-            CatalogUpdateIndexes(rel, tup);
 
             ReleaseSysCache(oldtup);
             tableam_tops_free_tuple(tup);

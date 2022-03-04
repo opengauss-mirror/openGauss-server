@@ -41,7 +41,7 @@
 #include "optimizer/bucketpruning.h"
 #include "executor/node/nodeSeqscan.h"
 
-
+#ifdef ENABLE_MULTIPLE_NODES
 TableScanDesc GetTableScanDesc(TableScanDesc scan, Relation rel)
 {
     if (scan != NULL && rel != NULL && RELATION_CREATE_BUCKET(scan->rs_rd)) {
@@ -59,6 +59,7 @@ IndexScanDesc GetIndexScanDesc(IndexScanDesc scan)
         return (IndexScanDesc)scan;
     }
 }
+#endif
 
 oidvector *hbkt_load_buckets(Relation relation, BucketInfo *bktInfo)
 {

@@ -21,6 +21,7 @@
 #include "access/heapam.h"
 #include "access/htup.h"
 #include "access/xact.h"
+#include "access/sysattr.h"
 
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
@@ -411,11 +412,15 @@ void RemovePublicationRelById(Oid proid)
     Relation rel;
     HeapTuple tup;
     Form_pg_publication_rel pubrel;
+    ScanKeyData scanKey[1];
+    ScanKeyInit(&scanKey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(proid));
 
     rel = heap_open(PublicationRelRelationId, RowExclusiveLock);
-    tup = SearchSysCache1(PUBLICATIONREL, ObjectIdGetDatum(proid));
+    SysScanDesc scanDesc = systable_beginscan(rel, PublicationRelObjectIndexId, true, NULL, 1, scanKey);
+    tup = systable_getnext(scanDesc);
     if (!HeapTupleIsValid(tup)) {
-        elog(ERROR, "cache lookup failed for publication table %u", proid);
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("could not find tuple for publication %u", proid)));
     }
 
     pubrel = (Form_pg_publication_rel)GETSTRUCT(tup);
@@ -424,8 +429,7 @@ void RemovePublicationRelById(Oid proid)
 
     simple_heap_delete(rel, &tup->t_self);
 
-    ReleaseSysCache(tup);
-
+    systable_endscan(scanDesc);
     heap_close(rel, RowExclusiveLock);
 }
 

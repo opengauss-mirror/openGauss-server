@@ -105,6 +105,7 @@ typedef enum {
 /* Define the default setting for synchonous_commit */
 #define SYNCHRONOUS_COMMIT_ON SYNCHRONOUS_COMMIT_REMOTE_FLUSH
 
+
 /* ----------------
  *		transaction-related XLOG entries
  * ----------------
@@ -256,6 +257,7 @@ typedef struct {
     /* procarray.c */
     TransactionId* allDiffXids; /*different xids between GTM and the local */
     uint32 DiffXidsCount;       /*number of different xids between GTM and the local*/
+    LocalSysDBCache *lsc_dbcache;
 } StreamTxnContext;
 
 #define STCSaveElem(dest, src) ((dest) = (src))
@@ -301,24 +303,19 @@ extern TransactionId GetTopTransactionId(void);
 extern TransactionId GetTopTransactionIdIfAny(void);
 extern TransactionId GetCurrentTransactionId(void);
 extern TransactionId GetCurrentTransactionIdIfAny(void);
-extern GTM_TransactionKey GetCurrentTransactionKey(void);
-extern GTM_TransactionKey GetCurrentTransactionKeyIfAny(void);
 extern GTM_TransactionHandle GetTransactionHandleIfAny(TransactionState s);
 extern GTM_TransactionHandle GetCurrentTransactionHandleIfAny(void);
-extern GTM_Timeline GetCurrentTransactionTimeline(void);
 extern TransactionState GetCurrentTransactionState(void);
 extern TransactionId GetParentTransactionIdIfAny(TransactionState s);
 extern void ResetTransactionInfo(void);
 extern void EndParallelWorkerTransaction(void);
 
 #ifdef PGXC /* PGXC_COORD */
-extern TransactionId GetNewGxidGTM(TransactionState s, bool is_sub_xact);
 extern bool GetCurrentLocalParamStatus(void);
 extern void SetCurrentLocalParamStatus(bool status);
 extern GlobalTransactionId GetTopGlobalTransactionId(void);
 extern void SetTopGlobalTransactionId(GlobalTransactionId gxid);
 #endif
-extern TransactionId GetTransactionIdFromGidStr(char* gid);
 extern TransactionId GetStableLatestTransactionId(void);
 extern void SetCurrentSubTransactionLocked(void);
 extern bool HasCurrentSubTransactionLock(void);
@@ -332,7 +329,6 @@ extern TimestampTz GetCurrentStatementStartTimestamp(void);
 extern TimestampTz GetCurrentStatementLocalStartTimestamp(void);
 extern TimestampTz GetCurrentTransactionStopTimestamp(void);
 extern void SetCurrentStatementStartTimestamp();
-extern void SetStatementStartTimestamp(TimestampTz timestamp);
 #ifdef PGXC
 extern TimestampTz GetCurrentGTMStartTimestamp(void);
 extern TimestampTz GetCurrentStmtsysTimestamp(void);
@@ -373,7 +369,6 @@ extern void BeginInternalSubTransaction(const char* name);
 extern void ReleaseCurrentSubTransaction(bool inSTP = false);
 extern void RollbackAndReleaseCurrentSubTransaction(bool inSTP = false);
 extern bool IsSubTransaction(void);
-extern void SetCurrentTransactionId(TransactionId tid);
 extern bool IsTransactionBlock(void);
 extern bool IsTransactionOrTransactionBlock(void);
 extern char TransactionBlockStatusCode(void);
@@ -389,14 +384,11 @@ extern void CallXactCallbacks(XactEvent event);
 extern bool AtEOXact_GlobalTxn(bool commit, bool is_write = false);
 
 #ifdef PGXC
-extern void RegisterGTMCallback(GTMCallback callback, void* arg);
 extern void RegisterSequenceCallback(GTMCallback callback, void* arg);
-extern void UnregisterGTMCallback(GTMCallback callback, const void* arg);
 extern void RegisterTransactionNodes(int count, void** connections, bool write);
 extern void PrintRegisteredTransactionNodes(void);
 extern void ForgetTransactionNodes(void);
 extern void RegisterTransactionLocalNode(bool write);
-extern bool IsTransactionLocalNode(bool write);
 extern void ForgetTransactionLocalNode(void);
 extern bool IsXidImplicit(const char* xid);
 extern void SaveReceivedCommandId(CommandId cid);
@@ -414,6 +406,7 @@ extern int xactGetCommittedChildren(TransactionId** ptr);
 
 extern void xact_redo(XLogReaderState* record);
 extern void xact_desc(StringInfo buf, XLogReaderState* record);
+extern const char *xact_type_name(uint8 subtype);
 
 extern void xactApplyXLogDropRelation(XLogReaderState* record);
 
@@ -429,10 +422,13 @@ extern bool IsInLiveSubtransaction();
 extern void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, TransactionId* sub_xids);
 extern CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn);
 extern void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* nrelsPtr);
+extern bool XactWillRemoveRelFiles(XLogReaderState *record);
 extern HTAB* relfilenode_hashtbl_create();
 extern CommitSeqNo getLocalNextCSN();
 
 extern void UpdateNextMaxKnownCSN(CommitSeqNo csn);
+extern void XLogInsertStandbyCSNCommitting(TransactionId xid, CommitSeqNo csn,
+    TransactionId *children, uint64 nchildren);
 #ifdef ENABLE_MOT
 extern bool IsMOTEngineUsed();
 extern bool IsMOTEngineUsedInParentTransaction();
@@ -460,9 +456,7 @@ extern void ResetUndoActionsInfo(void);
 extern bool CanPerformUndoActions(void);
 extern void push_unlink_rel_to_hashtbl(ColFileNodeRel *xnodes, int nrels);
 
-extern void XactReserveSPIContext();
-extern void XactResumeSPIContext(bool clean);
-extern void XactCleanExceptionSubTransaction(SubTransactionId head, bool hasAbort);
+extern void XactCleanExceptionSubTransaction(SubTransactionId head);
 extern char* GetCurrentTransactionName();
-
+extern List* GetTransactionList(List *head);
 #endif /* XACT_H */

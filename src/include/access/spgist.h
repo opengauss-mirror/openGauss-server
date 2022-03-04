@@ -186,6 +186,7 @@ extern Datum spgvacuumcleanup(PG_FUNCTION_ARGS);
 /* spgxlog.c */
 extern void spg_redo(XLogReaderState* record);
 extern void spg_desc(StringInfo buf, XLogReaderState* record);
+extern const char* spg_type_name(uint8 subtype);
 extern void spg_xlog_startup(void);
 extern void spg_xlog_cleanup(void);
 extern bool IsSpgistVacuum(XLogReaderState* record);

@@ -179,9 +179,14 @@ ParamListInfo copyDynParam(ParamListInfo srcParamLI)
             get_typlenbyval(srcPrm->ptype, &typLen, &typByVal);
             destPrm->value = datumCopy(srcPrm->value, typByVal, typLen);
         }
-        destPrm->tableOfIndexType = srcPrm->tableOfIndexType;
-        destPrm->tableOfIndex = copyTableOfIndex(srcPrm->tableOfIndex);
-        destPrm->isnestedtable = srcPrm->isnestedtable;
+        destPrm->tabInfo = NULL;
+        if (srcPrm->tabInfo != NULL) {
+            destPrm->tabInfo = (TableOfInfo*)palloc0(sizeof(TableOfInfo));
+            destPrm->tabInfo->tableOfIndexType = srcPrm->tabInfo->tableOfIndexType;
+            destPrm->tabInfo->tableOfIndex = copyTableOfIndex(srcPrm->tabInfo->tableOfIndex);
+            destPrm->tabInfo->isnestedtable = srcPrm->tabInfo->isnestedtable;
+            destPrm->tabInfo->tableOfLayers = srcPrm->tabInfo->tableOfLayers;
+        }
         CopyCursorInfoData(&destPrm->cursor_data, &srcPrm->cursor_data);
     }
 
@@ -270,7 +275,7 @@ static PLpgSQL_expr* copyPLpgsqlExpr(PLpgSQL_expr* srcExpr)
     if (srcExpr == NULL) {
         return NULL;
     }
-    PLpgSQL_expr* destExpr = (PLpgSQL_expr*)palloc(sizeof(PLpgSQL_expr));
+    PLpgSQL_expr* destExpr = (PLpgSQL_expr*)palloc0(sizeof(PLpgSQL_expr));
 
     destExpr->dtype = srcExpr->dtype;
     destExpr->dno = srcExpr->dno;
@@ -279,6 +284,7 @@ static PLpgSQL_expr* copyPLpgsqlExpr(PLpgSQL_expr* srcExpr)
     destExpr->plan = NULL;
     destExpr->func = copyPLpgsqlFunc(srcExpr->func);
     destExpr->paramnos = bms_copy(srcExpr->paramnos);
+    destExpr->out_param_dno = srcExpr->out_param_dno;
 
     destExpr->ns = copyPLpgNsitem(srcExpr->ns);
     destExpr->expr_simple_expr = NULL;
@@ -289,6 +295,10 @@ static PLpgSQL_expr* copyPLpgsqlExpr(PLpgSQL_expr* srcExpr)
     destExpr->expr_simple_in_use = false;
     destExpr->expr_simple_lxid = 0;
     destExpr->isouttype = srcExpr->isouttype;
+    destExpr->is_have_tableof_index_var = srcExpr->is_have_tableof_index_var;
+    destExpr->tableof_var_dno = srcExpr->tableof_var_dno;
+    destExpr->is_have_tableof_index_func = srcExpr->is_have_tableof_index_func;
+    destExpr->tableof_func_dno = srcExpr->tableof_func_dno;
 
     return destExpr;
 }
@@ -381,6 +391,7 @@ static PLpgSQL_function* copyPLpgsqlFunc(PLpgSQL_function* srcFunc)
     destFunc->use_count = srcFunc->use_count;
     destFunc->pre_parse_trig = srcFunc->pre_parse_trig;
     destFunc->tg_relation = NULL;
+    destFunc->is_plpgsql_func_with_outparam = srcFunc->is_plpgsql_func_with_outparam;
 
     return destFunc;
 }
@@ -430,14 +441,18 @@ static PLpgSQL_execstate* copyPLpgEstate(PLpgSQL_execstate* srcEstate)
     PLpgSQL_execstate* destEstate = (PLpgSQL_execstate*)palloc(sizeof(PLpgSQL_execstate));
 
     destEstate->func = NULL;
-    destEstate->retval = (Datum)0;;
+    destEstate->retval = (Datum)0;
     destEstate->retisnull = srcEstate->retisnull;
     destEstate->rettype = srcEstate->rettype;
+    destEstate->paramval = (Datum)0;
+    destEstate->paramisnull = srcEstate->paramisnull;
+    destEstate->paramtype = srcEstate->paramtype;
     destEstate->fn_rettype = srcEstate->fn_rettype;
     destEstate->retistuple = srcEstate->retistuple;
     destEstate->retisset = srcEstate->retisset;
     destEstate->readonly_func = srcEstate->readonly_func;
     destEstate->rettupdesc = NULL;
+    destEstate->paramtupdesc = NULL;
     destEstate->exitlabel = NULL;
     destEstate->cur_error = NULL;
     destEstate->tuple_store = NULL;
@@ -472,6 +487,7 @@ static PLpgSQL_execstate* copyPLpgEstate(PLpgSQL_execstate* srcEstate)
     destEstate->cursor_return_data = NULL;
     destEstate->stack_entry_start = srcEstate->stack_entry_start;
     destEstate->curr_nested_table_type = 0;
+    destEstate->is_exception = false;
 
     return destEstate;
 }

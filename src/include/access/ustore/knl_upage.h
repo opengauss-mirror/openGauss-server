@@ -23,6 +23,8 @@
 
 #define TD_SLOT_INCREMENT_SIZE 2
 #define TD_THRESHOLD_FOR_PAGE_SWITCH 32
+#define FORCE_EXTEND_THRESHOLD 3
+#define DML_MAX_RETRY_TIMES 100000
 
 #define UHEAP_HAS_FREE_LINES 0x0001  /* are there any unused line pointers? */
 #define UHEAP_PAGE_FULL 0x0002       /* not enough free space for new \
@@ -80,6 +82,13 @@
     } while (0)
 
 #define UPageClearPrunable(_page) (((UHeapPageHeaderData *)(_page))->pd_prune_xid = InvalidTransactionId)
+
+#define LimitRetryTimes(retryTimes)                                         \
+    do {                                                                    \
+        if ((retryTimes) > DML_MAX_RETRY_TIMES) {                             \
+            elog(ERROR, "Transaction aborted due to too many retries.");    \
+        }                                                                   \
+    } while (0)
 
 /*
  * RowPtr "flags" has these possible states.  An UNUSED row pointer is available
@@ -251,11 +260,11 @@ typedef struct UHeapPageTDData {
     TD td_info[1];
 } UHeapPageTDData;
 
-inline bool UPageIsEmpty(UHeapPageHeaderData *phdr, uint16 relTdCount)
+typedef UHeapPageHeaderData* UHeapPageHeader;
+
+inline bool UPageIsEmpty(UHeapPageHeaderData *phdr)
 {
     uint16 td_count = phdr->td_count;
-    Assert(td_count >= relTdCount);
-
     uint16 start = (uint16)SizeOfUHeapPageHeaderData + (td_count * sizeof(TD));
     return phdr->pd_lower <= start;
 }
@@ -294,7 +303,7 @@ Size PageGetExactUHeapFreeSpace(Page page);
 extern UHeapFreeOffsetRanges *UHeapGetUsableOffsetRanges(Buffer buffer, UHeapTuple *tuples, int ntuples,
     Size saveFreeSpace);
 
-void UHeapRecordPotentialFreeSpace(Relation rel, Buffer buffer, int delta);
+void UHeapRecordPotentialFreeSpace(Buffer buffer, int delta);
 
 /*
  * UPageGetMaxOffsetNumber

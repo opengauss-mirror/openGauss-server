@@ -184,7 +184,9 @@ void check_debug(PLpgSQL_function* func, PLpgSQL_execstate* estate)
                 func->debug->cur_opt = DEBUG_CONTINUE_HEADER_AFTER;
             }
         } else {
-            entry->func = func;
+            if (entry != NULL) {
+                entry->func = func;
+            }
             /* maintain session's debug server is on base turn on function */
             u_sess->plsql_cxt.cur_debug_server = func->debug;
         }
@@ -259,7 +261,8 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
     switch (*firstChar) {
         case DEBUG_ATTACH_HEADER:
             debug_server_attach(debug, estate);
-            need_wait = true;
+            /* if already get to function's end when attach, no need to wait for next command. */
+            need_wait = debug->stop_next_stmt ? true : false;
             break;
         case DEBUG_LOCALS_HEADER:
             debug_server_local_variables(debug);
@@ -477,7 +480,7 @@ PLDebug_variable* get_debug_variable_var(PLpgSQL_var* node, const char* target)
     } else {
         var->value = OidOutputFunctionCall(form->typoutput, node->value);
     }
-    if (node->pkg != NULL) {
+    if (node->ispkg && node->pkg != NULL) {
         NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
         var->pkgname = AssignStr(NameStr(*pkgName));
     } else {
@@ -539,7 +542,7 @@ PLDebug_variable* get_debug_variable_row(PLpgSQL_row* node, PLpgSQL_execstate* e
         heap_freetuple_ext(tuple);
         pfree(buf);
     }
-    if (node->pkg != NULL) {
+    if (node->ispkg && node->pkg != NULL) {
         NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
         var->pkgname = AssignStr(NameStr(*pkgName));
     } else {
@@ -573,7 +576,7 @@ PLDebug_variable* get_debug_variable_rec(PLpgSQL_rec* node, const char* target)
         var->value = pstrdup(buf->data);
         pfree(buf);
     }
-    if (node->pkg != NULL) {
+    if (node->ispkg && node->pkg != NULL) {
         NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
         var->pkgname = AssignStr(NameStr(*pkgName));
     } else {
@@ -891,7 +894,12 @@ static bool get_cur_info(StringInfo str, PLpgSQL_execstate* estate, DebugInfo* d
 
     /* turn to show code's lineno */
     if (query) {
+        char* maskquery = maskPassword(query);
+        query = (maskquery == NULL) ? query : maskquery;
         appendStringInfo(str, "%u:%s:%d:%s", funcoid, pkgfuncname, lineno, query);
+        if (maskquery != query) {
+            pfree_ext(maskquery);
+        }
     } else {
         if (debug->debugStackIdx == 0) {
             set_debugger_procedure_state(debug->comm->comm_idx, false);
@@ -1008,6 +1016,11 @@ static void debug_server_add_breakpoint(DebugInfo* debug)
     }
     int lineno = (int)pg_strtouint64(new_fir, NULL, int64Size);
     char* query = pstrdup(psave);
+    char* maskquery = (query == NULL) ? NULL : maskPassword(query);
+    if (maskquery != NULL && maskquery != query) {
+        pfree_ext(query);
+        query = maskquery;
+    }
 
     int newIndex = -1;
 
@@ -1146,7 +1159,10 @@ PLDebug_frame* get_frame(DebugInfo* debug)
     frame->frameno = debug->debugStackIdx;
     frame->funcname = quote_qualified_identifier(pkgname, funcname);
     frame->lineno = debug->cur_stmt->lineno;
-    frame->query = get_stmt_query(debug->cur_stmt);
+    char* query = get_stmt_query(debug->cur_stmt);
+    char* maskquery = (query == NULL) ? NULL : maskPassword(query);
+    query = (maskquery == NULL) ? query : maskquery;
+    frame->query = query;
     frame->funcoid = debug->func->fn_oid;
     pfree(funcname);
     return frame;
@@ -1181,6 +1197,7 @@ static PLpgSQL_expr* ConstructAssignExpr(char* value, PLpgSQL_nsitem* ns_top)
     expr->ns = ns_top;
     expr->dno = -1;
     expr->idx = -1;
+    expr->out_param_dno = -1;
     pfree(str.data);
     return expr;
 }

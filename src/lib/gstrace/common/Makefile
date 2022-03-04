@@ -36,7 +36,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
 endif
 
 OBJS = $(top_builddir)/src/common/port/libpgport.a gstrace_infra.o
-LIBS += -lsecurec
+LIBS += -l$(SECURE_C_CHECK)
 override CXXFLAGS := -I$(top_builddir)/src/include $(CXXFLAGS) -DHAVE_UNSETENV
 
 all: libgstrace.a

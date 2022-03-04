@@ -13,6 +13,7 @@ INSERT INTO t_varchar (id, name) VALUES (1, 'MyName');
 SELECT * from t_varchar;
 ALTER table t_varchar RENAME COLUMN name TO newname;
 SELECT c.relname, g.column_name from gs_encrypted_columns g join pg_class c on (g.rel_id=c.oid);
+SELECT * FROM t_varchar where newname = 'MyName';
 
 
 --verify tablename alter 
@@ -21,6 +22,7 @@ SELECT * from t_varchar;
 SELECT relname from pg_class join gs_encrypted_columns on pg_class.oid = gs_encrypted_columns.rel_id;
 ALTER table t_varchar RENAME TO newtable;
 SELECT * FROM newtable;
+SELECT * FROM newtable where newname = 'MyName';
 SELECT relname from pg_class join gs_encrypted_columns on pg_class.oid = gs_encrypted_columns.rel_id;
 DROP TABLE newtable;
 

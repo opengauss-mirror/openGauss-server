@@ -1,0 +1,190 @@
+create table merge_subquery_test1(id int, val int);
+create table merge_subquery_test2(id int, val int);
+insert into merge_subquery_test1 values(generate_series(1, 10), generate_series(1, 5));
+insert into merge_subquery_test2 values(generate_series(1, 5), generate_series(21, 25));
+insert into merge_subquery_test2 values(generate_series(11, 15), generate_series(11, 15));
+explain merge into merge_subquery_test1 mg1
+using merge_subquery_test2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select mg2.val+mg1.val)
+when not matched then
+  insert values(mg2.id, mg2.val);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Merge on merge_subquery_test1 mg1  (cost=58.35..355.67 rows=23091 width=28)
+   ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=28)
+         Hash Cond: (mg2.id = mg1.id)
+         ->  Seq Scan on merge_subquery_test2 mg2  (cost=0.00..31.49 rows=2149 width=14)
+         ->  Hash  (cost=31.49..31.49 rows=2149 width=14)
+               ->  Seq Scan on merge_subquery_test1 mg1  (cost=0.00..31.49 rows=2149 width=14)
+   SubPlan 1
+     ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(8 rows)
+
+  
+merge into merge_subquery_test1 mg1
+using merge_subquery_test2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select mg2.val+mg1.val)
+when not matched then
+  insert values(mg2.id, mg2.val);
+select * from merge_subquery_test1;
+ id | val 
+----+-----
+  6 |   1
+  7 |   2
+  8 |   3
+  9 |   4
+ 10 |   5
+  1 |  22
+  2 |  24
+  3 |  26
+  4 |  28
+  5 |  30
+ 11 |  11
+ 12 |  12
+ 13 |  13
+ 14 |  14
+ 15 |  15
+(15 rows)
+
+delete from merge_subquery_test1 where id > 10;
+  
+explain merge into merge_subquery_test1 mg1
+using merge_subquery_test2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select sum(val) from merge_subquery_test2 mg3)
+when not matched then
+  insert values(mg2.id, mg2.val);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Merge on merge_subquery_test1 mg1  (cost=95.23..392.55 rows=23091 width=28)
+   InitPlan 1 (returns $0)
+     ->  Aggregate  (cost=36.86..36.87 rows=1 width=12)
+           ->  Seq Scan on merge_subquery_test2 mg3  (cost=0.00..31.49 rows=2149 width=4)
+   ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=28)
+         Hash Cond: (mg2.id = mg1.id)
+         ->  Seq Scan on merge_subquery_test2 mg2  (cost=0.00..31.49 rows=2149 width=14)
+         ->  Hash  (cost=31.49..31.49 rows=2149 width=14)
+               ->  Seq Scan on merge_subquery_test1 mg1  (cost=0.00..31.49 rows=2149 width=14)
+(9 rows)
+
+merge into merge_subquery_test1 mg1
+using merge_subquery_test2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select sum(val) from merge_subquery_test2 mg3)
+when not matched then
+  insert values(mg2.id, mg2.val);
+select * from merge_subquery_test1;
+ id | val 
+----+-----
+  6 |   1
+  7 |   2
+  8 |   3
+  9 |   4
+ 10 |   5
+  1 | 180
+  2 | 180
+  3 | 180
+  4 | 180
+  5 | 180
+ 11 |  11
+ 12 |  12
+ 13 |  13
+ 14 |  14
+ 15 |  15
+(15 rows)
+
+delete from merge_subquery_test1 where id > 10;
+explain merge into merge_subquery_test1 mg1
+using merge_subquery_test2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=mg2.val
+when not matched then
+  insert values(mg2.id, (select mg2.val * 2));
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Merge on merge_subquery_test1 mg1  (cost=58.35..355.67 rows=23091 width=28)
+   ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=28)
+         Hash Cond: (mg2.id = mg1.id)
+         ->  Seq Scan on merge_subquery_test2 mg2  (cost=0.00..31.49 rows=2149 width=14)
+         ->  Hash  (cost=31.49..31.49 rows=2149 width=14)
+               ->  Seq Scan on merge_subquery_test1 mg1  (cost=0.00..31.49 rows=2149 width=14)
+   SubPlan 1
+     ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(8 rows)
+
+merge into merge_subquery_test1 mg1
+using merge_subquery_test2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=mg2.val
+when not matched then
+  insert values(mg2.id, (select mg2.val * 2));
+select * from merge_subquery_test1;
+ id | val 
+----+-----
+  6 |   1
+  7 |   2
+  8 |   3
+  9 |   4
+ 10 |   5
+  1 |  21
+  2 |  22
+  3 |  23
+  4 |  24
+  5 |  25
+ 11 |  22
+ 12 |  24
+ 13 |  26
+ 14 |  28
+ 15 |  30
+(15 rows)
+
+delete from merge_subquery_test1 where id > 10;
+explain merge into merge_subquery_test1 mg1
+using merge_subquery_test2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=mg2.val
+when not matched then
+  insert values(mg2.id, (select mg3.val from merge_subquery_test1 mg3 limit 1));
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Merge on merge_subquery_test1 mg1  (cost=58.37..355.69 rows=23091 width=28)
+   InitPlan 1 (returns $0)
+     ->  Limit  (cost=0.00..0.01 rows=1 width=4)
+           ->  Seq Scan on merge_subquery_test1 mg3  (cost=0.00..31.49 rows=2149 width=4)
+   ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=28)
+         Hash Cond: (mg2.id = mg1.id)
+         ->  Seq Scan on merge_subquery_test2 mg2  (cost=0.00..31.49 rows=2149 width=14)
+         ->  Hash  (cost=31.49..31.49 rows=2149 width=14)
+               ->  Seq Scan on merge_subquery_test1 mg1  (cost=0.00..31.49 rows=2149 width=14)
+(9 rows)
+
+merge into merge_subquery_test1 mg1
+using merge_subquery_test2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=mg2.val
+when not matched then
+  insert values(mg2.id, (select mg3.val from merge_subquery_test1 mg3 limit 1));
+select * from merge_subquery_test1;
+ id | val 
+----+-----
+  6 |   1
+  7 |   2
+  8 |   3
+  9 |   4
+ 10 |   5
+  1 |  21
+  2 |  22
+  3 |  23
+  4 |  24
+  5 |  25
+ 11 |   1
+ 12 |   1
+ 13 |   1
+ 14 |   1
+ 15 |   1
+(15 rows)
+
+drop table merge_subquery_test1;
+drop table merge_subquery_test2;

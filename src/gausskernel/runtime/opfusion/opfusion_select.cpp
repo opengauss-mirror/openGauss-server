@@ -99,7 +99,14 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
      * step 1: prepare *
      *******************/
     start_row = m_c_global->m_limitOffset >= 0 ? m_c_global->m_limitOffset : start_row;
-    get_rows = m_c_global->m_limitCount >= 0 ? (m_c_global->m_limitCount + start_row) : max_rows;
+    int64 alreadyfetch = (m_local.m_position > start_row) ? (m_local.m_position - start_row) : 0;
+    /* no limit get fetch size rows */
+    get_rows = max_rows;
+    if (m_c_global->m_limitCount >= 0) {
+        /* fetch size, limit */
+        int64 limit_row = (m_c_global->m_limitCount - alreadyfetch > 0) ? m_c_global->m_limitCount - alreadyfetch : 0;
+        get_rows = (limit_row > max_rows) ? max_rows : limit_row;
+    }
 
     /**********************
      * step 2: begin scan *
@@ -113,21 +120,27 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     unsigned long nprocessed = 0;
     /* put selected tuple into receiver */
     TupleTableSlot* offset_reslot = NULL;
-    while (nprocessed < (unsigned long)start_row && (offset_reslot = m_local.m_scan->getTupleSlot()) != NULL) {
+    while (m_local.m_position < (long)start_row && (offset_reslot = m_local.m_scan->getTupleSlot()) != NULL) {
         tpslot_free_heaptuple(offset_reslot);
-        nprocessed++;
+        m_local.m_position++;
+    }
+    if (m_local.m_position < (long)start_row) {
+        Assert(offset_reslot == NULL);
+        get_rows = 0;
+        m_local.m_isCompleted = true;
     }
     while (nprocessed < (unsigned long)get_rows && (m_local.m_reslot = m_local.m_scan->getTupleSlot()) != NULL) {
         CHECK_FOR_INTERRUPTS();
+        m_local.m_position++;
         nprocessed++;
         (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
         tpslot_free_heaptuple(m_local.m_reslot);
     }
     if (!ScanDirectionIsNoMovement(*(m_local.m_scan->m_direction))) {
-        if (max_rows == 0 || nprocessed < (unsigned long)max_rows) {
+        bool has_complete = (max_rows == 0 || nprocessed < (unsigned long)max_rows);
+        if (has_complete) {
             m_local.m_isCompleted = true;
         }
-        m_local.m_position += nprocessed;
     } else {
         m_local.m_isCompleted = true;
     }

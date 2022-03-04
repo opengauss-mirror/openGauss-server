@@ -24,6 +24,7 @@
 #include "catalog/pg_obsscaninfo.h"
 #include "catalog/pg_type.h"
 #include "db4ai/create_model.h"
+#include "db4ai/hyperparameter_validation.h"
 #include "commands/createas.h"
 #include "commands/defrem.h"
 #include "commands/prepare.h"
@@ -35,6 +36,7 @@
 #include "executor/node/nodeSetOp.h"
 #include "foreign/dummyserver.h"
 #include "foreign/fdwapi.h"
+#include "instruments/generate_report.h"
 #include "nodes/print.h"
 #include "opfusion/opfusion_util.h"
 #include "opfusion/opfusion.h"
@@ -75,6 +77,7 @@
 #include "catalog/pgxc_node.h"
 #include "pgxc/pgxc.h"
 #endif
+#include "db4ai/aifuncs.h"
 
 /* Thread local variables for plan_table. */
 THR_LOCAL bool OnlySelectFromPlanTable = false;
@@ -139,7 +142,8 @@ static void show_expression(
     Node* node, const char* qlabel, PlanState* planstate, List* ancestors, bool useprefix, ExplainState* es);
 static void show_qual(
     List* qual, const char* qlabel, PlanState* planstate, List* ancestors, bool useprefix, ExplainState* es);
-static void show_scan_qual(List* qual, const char* qlabel, PlanState* planstate, List* ancestors, ExplainState* es);
+static void show_scan_qual(List *qual, const char *qlabel, PlanState *planstate, List *ancestors, ExplainState *es,
+    bool show_prefix = false);
 static void show_skew_optimization(const PlanState* planstate, ExplainState* es);
 template <bool generate>
 static void show_bloomfilter(Plan* plan, PlanState* planstate, List* ancestors, ExplainState* es);
@@ -166,6 +170,7 @@ static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es);
 static void show_tidbitmap_info(BitmapHeapScanState *planstate, ExplainState *es);
 static void show_instrumentation_count(const char* qlabel, int which, const PlanState* planstate, ExplainState* es);
 static void show_removed_rows(int which, const PlanState* planstate, int idx, int smpIdx, int* removeRows);
+static int check_integer_overflow(double var);
 static void show_foreignscan_info(ForeignScanState* fsstate, ExplainState* es);
 static void show_dfs_block_info(PlanState* planstate, ExplainState* es);
 static void show_detail_storage_info_text(Instrumentation* instr, StringInfo instr_info);
@@ -174,12 +179,13 @@ static void show_storage_filter_info(PlanState* planstate, ExplainState* es);
 static void show_llvm_info(const PlanState* planstate, ExplainState* es);
 static void show_modifytable_merge_info(const PlanState* planstate, ExplainState* es);
 static void show_recursive_info(RecursiveUnionState* rustate, ExplainState* es);
+static void show_startwith_dfx(StartWithOpState* rustate, ExplainState* es);
 static const char* explain_get_index_name(Oid indexId);
 static void ExplainIndexScanDetails(Oid indexid, ScanDirection indexorderdir, ExplainState* es);
 static void ExplainScanTarget(Scan* plan, ExplainState* es);
 static void ExplainModifyTarget(ModifyTable* plan, ExplainState* es);
 static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es);
-static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es);
+static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es, List* ancestors);
 #ifndef PGXC
 static void show_modifytable_info(ModifyTableState* mtstate, ExplainState* es);
 #endif /* PGXC */
@@ -663,9 +669,12 @@ static void ExplainOneQuery(
              */
             DestReceiverTrainModel* dest_train_model = NULL;
             dest_train_model = (DestReceiverTrainModel*) CreateDestReceiver(DestTrainModel);
-            configure_dest_receiver_train_model(dest_train_model, (AlgorithmML) cm->algorithm, cm->model, queryString);
+            configure_dest_receiver_train_model(dest_train_model, CurrentMemoryContext, (AlgorithmML)cm->algorithm,
+                                                cm->model, queryString, true);
 
-            PlannedStmt* plan = plan_create_model(cm, queryString, params, (DestReceiver*)dest_train_model);
+            PlannedStmt *plan =
+                plan_create_model(cm, queryString, params, (DestReceiver *)dest_train_model, CurrentMemoryContext);
+            print_hyperparameters(DEBUG1, dest_train_model->hyperparameters);
 
             ExplainOnePlan(plan, into, es, queryString, dest, params);
             return;
@@ -1119,6 +1128,13 @@ void ExplainOnePlan(
     /* Create textual dump of plan tree */
     ExplainPrintPlan(es, queryDesc);
 
+    /* Print post-plan-tree explanation info, if there is any. */
+    if (es->post_str != NULL) {
+        appendStringInfo(es->str, "%s\n", es->post_str->data);
+        DestroyStringInfo(es->post_str);
+        es->post_str = NULL;
+    }
+
     /* for explain plan: after explained all nodes */
     if (es->plan && es->planinfo != NULL) {
         es->planinfo->m_planTableData->set_plan_table_ids(queryDesc->plannedstmt->queryId, es);
@@ -1408,7 +1424,7 @@ void ExplainOneQueryForStatistics(QueryDesc* queryDesc)
     u_sess->exec_cxt.under_auto_explain = false;
     u_sess->instr_cxt.global_instr = oldInstr;
 
-    AutoContextSwitch memSwitch(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    AutoContextSwitch memSwitch(g_instance.wlm_cxt->query_resource_track_mcxt);
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan = (char*)palloc0(es.str->len + 1 + 1);
     errno_t rc =
         memcpy_s(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan, es.str->len, es.str->data, es.str->len);
@@ -1529,13 +1545,172 @@ static void show_bucket_info(PlanState* planstate, ExplainState* es, bool is_pre
     }
 }
 
+typedef struct PrintFlags {
+    bool print_number;
+    bool print_twodots;
+    bool print_comma;
+    bool print_prev;
+} PrintFlags;
+
+static void set_print_flags(int i, bool showPrev, bool isLast, PrintFlags* flags)
+{
+    if (i == 0) {
+        flags->print_prev = false;
+        flags->print_number = true;
+        flags->print_twodots = false;
+        flags->print_comma = false;
+    } else if (showPrev) {
+        /* the last partition */
+        if (isLast) {
+            flags->print_prev = false;
+            flags->print_number = true;
+            flags->print_twodots = true;
+            flags->print_comma = false;
+        } else {
+            flags->print_prev = false;
+            flags->print_number = false;
+            flags->print_twodots = false;
+            flags->print_comma = false;
+        }
+    } else {
+        /* the previous has not been printed */
+        if (!flags->print_number)
+            flags->print_prev = true;
+        else
+            flags->print_prev = false;
+
+        flags->print_number = true;
+        flags->print_twodots = false;
+        flags->print_comma = true;
+    }
+}
+
+static void add_pruning_info_nums(StringInfo dest, PrintFlags flags, int partID, int partID_prev)
+{
+    /* first check whether print the previous partition number */
+    if (flags.print_prev) {
+        appendStringInfoString(dest, "..");
+        appendStringInfo(dest, "%d", partID_prev + 1);
+    }
+
+    /* then print the current partition number */
+    if (flags.print_twodots) {
+        appendStringInfoString(dest, "..");
+    } else if (flags.print_comma) {
+        appendStringInfoString(dest, ",");
+    }
+
+    if (flags.print_number) {
+        appendStringInfo(dest, "%d", partID + 1);
+    }
+}
+
+/*
+ * Show number of subpartitions selected for each partition.
+ * If subpartitions is not pruned at all, show "ALL".
+ * The caller should call DestroyStringInfo to free allocated memory.
+ */
+static StringInfo get_subpartition_pruning_info(Scan* scanplan, List* rtable)
+{
+    PruningResult* pr = scanplan->pruningInfo;
+    StringInfo strif = makeStringInfo();
+    ListCell* lc = NULL;
+    bool all = true;
+    RangeTblEntry* rte = rt_fetch(scanplan->scanrelid, rtable);
+    Relation rel = heap_open(rte->relid, AccessShareLock);
+    List* subpartList = RelationGetSubPartitionOidListList(rel);
+    int idx = 0;
+    foreach (lc, pr->ls_selectedSubPartitions) {
+        idx++;
+        if (idx > list_length(subpartList)) {
+            break;
+        }
+        SubPartitionPruningResult* spr = (SubPartitionPruningResult*)lfirst(lc);
+        /* check if all subpartition is selected */
+        int selected = list_length(spr->ls_selectedSubPartitions);
+        int count = list_length((List*)list_nth(subpartList, spr->partSeq));
+        all &= (selected == count);
+        /* save pruning map in strif temporarily */
+        appendStringInfo(strif, "%d:%d", spr->partSeq + 1, selected);
+        if (lc != list_tail(pr->ls_selectedSubPartitions)) {
+            appendStringInfo(strif, ", ");
+        }
+    }
+
+    if (all) {
+        resetStringInfo(strif);
+        appendStringInfo(strif, "ALL");
+    }
+
+    /* clean-ups */
+    ReleaseSubPartitionOidList(&subpartList);
+    heap_close(rel, AccessShareLock);
+    return strif;
+}
+/*
+ * Show subpartition pruning information in the form of:
+ *      Selected Partitions: 1,3
+ *      Selected Subpartitions: 1:1,3:1
+ * Which means select first subpartition of 1 and 3 partition
+ * Note that pretty mode is not supported in this version, since subpartitions can only
+ * be created in Cent deployment for now and pretty is only for stream plans.
+ */
+static void add_subpartition_pruning_info_text(PlanState* planstate, ExplainState* es)
+{
+    Scan* scanplan = (Scan*)planstate->plan;
+    PruningResult* pr = scanplan->pruningInfo;
+    if (pr->ls_selectedSubPartitions == NIL) {
+        return;
+    }
+
+    StringInfo dest = es->str; /* Consider perf_mode = normal only */
+
+    /* Apply indent properly */
+    if (es->wlm_statistics_plan_max_digit) {
+        appendStringInfoSpaces(dest, *es->wlm_statistics_plan_max_digit);
+        appendStringInfoString(dest, " | ");
+        appendStringInfoSpaces(dest, es->indent);
+    } else {
+        appendStringInfoSpaces(dest, es->indent * 2); /* 2 is the coefficient for text format indent */
+    }
+    appendStringInfo(dest, "Selected Subpartitions:  ");
+
+    /* Show the content */
+    if (scanplan->itrs <= 0) {
+        appendStringInfo(dest, "NONE");
+    } else if (scanplan->pruningInfo->expr != NULL) {
+        appendStringInfo(dest, "PART");
+    } else {
+        StringInfo strif = get_subpartition_pruning_info(scanplan, es->rtable);
+        appendStringInfoString(dest, strif->data);
+        DestroyStringInfo(strif);
+    }
+    appendStringInfoChar(dest, '\n');
+}
+
+static void add_subpartition_pruning_info_others(PlanState* planstate, ExplainState* es)
+{
+    Scan* scanplan = (Scan*)planstate->plan;
+    PruningResult* pr = scanplan->pruningInfo;
+    if (pr->ls_selectedSubPartitions == NIL) {
+        return;
+    }
+
+    if (scanplan->itrs <= 0) {
+        ExplainPropertyText("Selected Subpartitions", "NONE", es);
+    } else if (scanplan->pruningInfo->expr != NULL) {
+        ExplainPropertyText("Selected Subpartitions", "PART", es);
+    } else {
+        StringInfo strif = get_subpartition_pruning_info(scanplan, es->rtable);
+        ExplainPropertyText("Selected Subpartitions", strif->data, es);
+        DestroyStringInfo(strif);
+    }
+}
+
 static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pretty)
 {
     Scan* scanplan = (Scan*)planstate->plan;
-    bool print_number = false;
-    bool print_twodots = false;
-    bool print_comma = false;
-    bool print_prev = false;
+    PrintFlags flags = {false, false, false, false};
     int partID = 0;
     int partID_prev = 0;
 
@@ -1581,66 +1756,12 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
                     break;
 
                 // set print flags for the current and the previouse partition number
-                if (i == 0) {
-                    print_prev = false;
-                    print_number = true;
-                    print_twodots = false;
-                    print_comma = false;
-                } else if (partID - partID_prev == 1) {
-                    // the last partition
-                    if (i == scanplan->itrs - 1) {
-                        print_prev = false;
-                        print_number = true;
-                        print_twodots = true;
-                        print_comma = false;
-                    } else {
-                        print_prev = false;
-                        print_number = false;
-                        print_twodots = false;
-                        print_comma = false;
-                    }
-                } else {
-                    // the previous has not been printed
-                    if (!print_number)
-                        print_prev = true;
-                    else
-                        print_prev = false;
-
-                    print_number = true;
-                    print_twodots = false;
-                    print_comma = true;
-                }
+                set_print_flags(i, partID - partID_prev == 1, i == scanplan->itrs - 1, &flags);
 
                 if (is_pretty) {
-                    // first check whether print the previous partition number
-                    if (print_prev) {
-                        appendStringInfoString(es->planinfo->m_detailInfo->info_str, "..");
-                        appendStringInfo(es->planinfo->m_detailInfo->info_str, "%d", partID_prev + 1);
-                    }
-
-                    // then print the current partition number
-                    if (print_twodots)
-                        appendStringInfoString(es->planinfo->m_detailInfo->info_str, "..");
-                    else if (print_comma)
-                        appendStringInfoString(es->planinfo->m_detailInfo->info_str, ",");
-
-                    if (print_number)
-                        appendStringInfo(es->planinfo->m_detailInfo->info_str, "%d", partID + 1);
+                    add_pruning_info_nums(es->planinfo->m_detailInfo->info_str, flags, partID, partID_prev);
                 } else {
-                    // first check whether print the previous partition number
-                    if (print_prev) {
-                        appendStringInfoString(es->str, "..");
-                        appendStringInfo(es->str, "%d", partID_prev + 1);
-                    }
-
-                    // then print the current partition number
-                    if (print_twodots)
-                        appendStringInfoString(es->str, "..");
-                    else if (print_comma)
-                        appendStringInfoString(es->str, ",");
-
-                    if (print_number)
-                        appendStringInfo(es->str, "%d", partID + 1);
+                    add_pruning_info_nums(es->str, flags, partID, partID_prev);
                 }
                 i++;
             }
@@ -1649,6 +1770,10 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
             appendStringInfoChar(es->planinfo->m_detailInfo->info_str, '\n');
         else
             appendStringInfoChar(es->str, '\n');
+
+        if (scanplan->itrs > 0 && scanplan->pruningInfo->expr == NULL) {
+            add_subpartition_pruning_info_text(planstate, es);
+        }
     } else {
         if (scanplan->itrs <= 0) {
             ExplainPropertyText("Selected Partitions", "NONE", es);
@@ -1677,57 +1802,17 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
                     break;
 
                 // set print flags for the current and the previouse partition number
-                if (i == 0) {
-                    print_prev = false;
-                    print_number = true;
-                    print_twodots = false;
-                    print_comma = false;
-                } else if (partID - partID_prev == 1) {
-                    // the last partition
-                    if (i == scanplan->itrs - 1) {
-                        print_prev = false;
-                        print_number = true;
-                        print_twodots = true;
-                        print_comma = false;
-                    } else {
-                        print_prev = false;
-                        print_number = false;
-                        print_twodots = false;
-                        print_comma = false;
-                    }
-                } else {
-                    // the previous has not been printed
-                    if (!print_number) {
-                        print_prev = true;
-                    } else {
-                        print_prev = false;
-                    }
+                set_print_flags(i, partID - partID_prev == 1, i == scanplan->itrs - 1, &flags);
 
-                    print_number = true;
-                    print_twodots = false;
-                    print_comma = true;
-                }
+                add_pruning_info_nums(strif, flags, partID, partID_prev);
 
-                // first check whether print the previous partition number
-                if (print_prev) {
-                    appendStringInfoString(strif, "..");
-                    appendStringInfo(strif, "%d", partID_prev + 1);
-                }
-
-                // then print the current partition number
-                if (print_twodots)
-                    appendStringInfoString(strif, "..");
-                else if (print_comma)
-                    appendStringInfoString(strif, ",");
-
-                if (print_number)
-                    appendStringInfo(strif, "%d", partID + 1);
                 i++;
             }
             /*print out the partition numbers string*/
             ExplainPropertyText("Selected Partitions", strif->data, es);
             pfree_ext(strif->data);
             pfree_ext(strif);
+            add_subpartition_pruning_info_others(planstate, es);
         }
     }
 }
@@ -1788,7 +1873,45 @@ static void ExplainNodePartition(const Plan* plan, ExplainState* es)
     if (flag == 0) {
         appendStringInfo(es->str, "Iterations: %d", ((PartIterator*)plan)->itrs);
     }
-    appendStringInfoChar(es->str, '\n');
+}
+
+static bool GetSubPartitionIterations(const Plan* plan, const ExplainState* es, int* cnt)
+{
+    *cnt = 0;
+    const Plan* curPlan = plan;
+    switch (nodeTag(curPlan->lefttree)) {
+        case T_RowToVec: {
+            RowToVec* rowToVecPlan = (RowToVec*)curPlan->lefttree;
+            Plan* scanPlan = (Plan*)rowToVecPlan->plan.lefttree;
+            if (!(IsA(scanPlan, Scan) || IsA(scanPlan, SeqScan) || IsA(scanPlan, IndexOnlyScan) ||
+                IsA(scanPlan, IndexScan) || IsA(scanPlan, BitmapHeapScan) || IsA(scanPlan, TidScan))) {
+                break;
+            }
+            curPlan = &rowToVecPlan->plan;
+            /* fallthrough */
+        }
+        case T_SeqScan:
+        case T_IndexScan:
+        case T_IndexOnlyScan:
+        case T_BitmapIndexScan:
+        case T_BitmapHeapScan:
+        case T_CStoreScan:
+        case T_TidScan: {
+            PruningResult* pr = ((Scan*)curPlan->lefttree)->pruningInfo;
+            if (pr == NULL || pr->ls_selectedSubPartitions == NIL || pr->expr != NULL) {
+                return false;
+            }
+            ListCell* lc = NULL;
+            foreach (lc, pr->ls_selectedSubPartitions) {
+                SubPartitionPruningResult* spr = (SubPartitionPruningResult*)lfirst(lc);
+                *cnt += list_length(spr->ls_selectedSubPartitions);
+            }
+            return true;
+        }
+        default:
+            return false;
+    }
+    return false; /* Syntactic sugar */
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1960,8 +2083,10 @@ static void ExplainNode(
         case T_WorkTableScan:
         case T_ForeignScan:
         case T_VecForeignScan:
-        case T_GradientDescentState:
             ExplainScanTarget((Scan*)plan, es);
+            break;
+        case T_TrainModel:
+            appendStringInfo(es->str, " - %s", sname);
             break;
         case T_ExtensiblePlan:
             if (((Scan*)plan)->scanrelid > 0)
@@ -2462,7 +2587,7 @@ static void ExplainNode(
                             }
                             es->indent--;
                         } else
-                            show_scan_qual((List*)action->qual, "Update Cond", planstate, ancestors, es);
+                            show_scan_qual((List*)action->qual, "Update Cond", planstate, ancestors, es, true);
                     } else if (!action->matched) {
                         if (mt->remote_insert_plans) {
                             appendStringInfoSpaces(es->str, es->indent * 2);
@@ -2475,7 +2600,7 @@ static void ExplainNode(
                             }
                             es->indent--;
                         } else
-                            show_scan_qual((List*)action->qual, "Insert Cond", planstate, ancestors, es);
+                            show_scan_qual((List*)action->qual, "Insert Cond", planstate, ancestors, es, true);
                     }
                 }
 
@@ -2484,7 +2609,7 @@ static void ExplainNode(
                 ModifyTableState* mtstate = (ModifyTableState*)planstate;
                 if (mtstate->mt_upsert != NULL && 
                     mtstate->mt_upsert->us_action != UPSERT_NONE && mtstate->resultRelInfo->ri_NumIndices > 0) {
-                    show_on_duplicate_info(mtstate, es);
+                    show_on_duplicate_info(mtstate, es, ancestors);
                 }
                 /* non-merge cases */
                 foreach (elt, mt->remote_plans) {
@@ -2522,8 +2647,18 @@ static void ExplainNode(
             break;
         case T_StartWithOp:
             show_startwith_pseudo_entries(planstate, ancestors, es);
+            show_startwith_dfx((StartWithOpState*)planstate, es);
             break;
         case T_SeqScan:
+            show_tablesample(plan, planstate, ancestors, es);
+            if (!((SeqScan*)plan)->scanBatchMode) {
+                show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
+                if (plan->qual) {
+                    show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
+                }
+            }
+            break;
+
         case T_CStoreScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -2747,6 +2882,14 @@ static void ExplainNode(
         case T_RecursiveUnion:
             show_recursive_info((RecursiveUnionState*)planstate, es);
             break;
+        case T_RowToVec:
+            if (IsA(plan->lefttree, SeqScan) && ((SeqScan*)plan->lefttree)->scanBatchMode) {
+                show_scan_qual(plan->lefttree->qual, "Filter", planstate, ancestors, es);
+                if (plan->lefttree->qual) {
+                    show_instrumentation_count("Rows Removed by Filter", 1, planstate->lefttree, es);
+                }
+            }
+            break;
 
         default:
             break;
@@ -2805,7 +2948,7 @@ static void ExplainNode(
             Instrumentation* instr = NULL;
             if (es->detail) {
                 ExplainOpenGroup("Cpus In Detail", "Cpus In Detail", false, es);
-                int dop = planstate->plan->dop;
+                int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
                 for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
 #ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
@@ -2913,6 +3056,12 @@ static void ExplainNode(
                         appendStringInfoSpaces(es->str, es->indent * 2);
                     }
                     ExplainNodePartition(plan, es);
+                    int subPartCnt = 0;
+                    if (GetSubPartitionIterations(plan, es, &subPartCnt)) {
+                        appendStringInfo(es->str, ", Sub Iterations: %d", subPartCnt);
+                    }
+                    appendStringInfoChar(es->str, '\n');
+
                 } else {
 
                     es->planinfo->m_detailInfo->set_plan_name<true, true>();
@@ -2922,6 +3071,10 @@ static void ExplainNode(
                 }
             } else {
                 ExplainPropertyInteger("Iterations", ((PartIterator*)plan)->itrs, es);
+                int subPartCnt = 0;
+                if (GetSubPartitionIterations(plan, es, &subPartCnt)) {
+                    ExplainPropertyInteger("Sub Iterations", subPartCnt, es);
+                }
             }
             break;
 
@@ -3069,6 +3222,9 @@ runnext:
         if (strcmp(pt_operation, "INDEX") == 0 && pt_index_name != NULL && pt_index_owner != NULL)
             es->planinfo->m_planTableData->set_plan_table_objs(
                 planstate->plan->plan_node_id, pt_index_name, pt_operation, pt_index_owner);
+
+        /* 4. set cost and cardinality */
+        es->planinfo->m_planTableData->set_plan_table_cost_card(plan->plan_node_id, plan->total_cost, plan->plan_rows);
     }
 }
 
@@ -3094,6 +3250,11 @@ static void CalculateProcessedRows(
     Plan* plan = planstate->plan;
     switch (nodeTag(plan)) {
         case T_SeqScan:
+            if (!((SeqScan*)plan)->scanBatchMode) {
+                show_removed_rows(1, planstate, idx, smpIdx, &removed_rows);
+                *processed_rows += removed_rows;
+            }
+            break;
         case T_CStoreScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -3330,11 +3491,13 @@ static void show_qual(
 /*
  * Show a qualifier expression for a scan plan node
  */
-static void show_scan_qual(List* qual, const char* qlabel, PlanState* planstate, List* ancestors, ExplainState* es)
+static void show_scan_qual(List *qual, const char *qlabel, PlanState *planstate, List *ancestors, ExplainState *es,
+    bool show_prefix)
 {
     bool useprefix = false;
 
-    useprefix = (IsA(planstate->plan, SubqueryScan) || IsA(planstate->plan, VecSubqueryScan) || es->verbose);
+    useprefix =
+        (show_prefix || IsA(planstate->plan, SubqueryScan) || IsA(planstate->plan, VecSubqueryScan) || es->verbose);
     show_qual(qual, qlabel, planstate, ancestors, useprefix, es);
 }
 
@@ -4312,7 +4475,7 @@ static void show_detail_filenum_info(const PlanState* planstate, ExplainState* e
     int datanode_size = 0;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
     int count_dn_writefile = 0;
 
     if (u_sess->instr_cxt.global_instr)
@@ -4469,7 +4632,7 @@ static void show_detail_execute_info(const PlanState* planstate, ExplainState* e
     int datanode_size = 0;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
 
     if (u_sess->instr_cxt.global_instr)
         datanode_size = u_sess->instr_cxt.global_instr->getInstruNodeNum();
@@ -5127,6 +5290,39 @@ static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es)
     }
 }
 
+static void show_startwith_dfx(StartWithOpState* swstate, ExplainState* es)
+{
+    List* result = NIL;
+    IterationStats* iters = &(swstate->iterStats);
+
+    /* return if not verbose or not actually executed */
+    if (!es->verbose || iters->currentStartTime.tv_sec == 0) {
+        return;
+    }
+
+    const char *qlabel = "Start With Iteration Statistics";
+    bool rotated = (iters->totalIters > SW_LOG_ROWS_FULL) ? true : false;
+    int offset = rotated ? iters->totalIters % SW_LOG_ROWS_HALF : 0;
+    StringInfo si = makeStringInfo();
+
+    for (int i = 0; i < SW_LOG_ROWS_FULL && i < iters->totalIters; i++) {
+        int ri = (i >= SW_LOG_ROWS_HALF && rotated) ?
+                     SW_LOG_ROWS_HALF + (i + offset) % SW_LOG_ROWS_HALF : i;
+        double total_time = (iters->endTimeBuf[ri].tv_sec - iters->startTimeBuf[ri].tv_sec) / 0.001 +
+                            (iters->endTimeBuf[ri].tv_usec - iters->startTimeBuf[ri].tv_usec) * 0.001;
+        appendStringInfo(
+            si, "\nIteration: %d, Row(s): %ld, Time Cost: %.3lf ms",
+            iters->levelBuf[ri], iters->rowCountBuf[ri], total_time);
+        result = lappend(result, pstrdup(si->data));
+        resetStringInfo(si);
+    }
+    DestroyStringInfo(si);
+
+    ExplainPropertyListPostPlanTree(qlabel, result, es);
+
+    list_free_deep(result);
+}
+
 static void show_recursive_info(RecursiveUnionState* rustate, ExplainState* es)
 {
     PlanState* planstate = (PlanState*)rustate;
@@ -5221,7 +5417,7 @@ static void show_datanode_buffers(ExplainState* es, PlanState* planstate)
 {
     Instrumentation* instr = NULL;
     int nodeNum = u_sess->instr_cxt.global_instr->getInstruNodeNum();
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
     int i = 0;
     int j = 0;
 
@@ -5288,7 +5484,7 @@ static void show_analyze_buffers(ExplainState* es, const PlanState* planstate, S
     instr_time blk_write_time_max, blk_write_time_min;
     bool is_execute = false;
     Instrumentation* instr = NULL;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
 
     INSTR_TIME_SET_ZERO(blk_read_time_max);
     INSTR_TIME_SET_ZERO(blk_write_time_max);
@@ -5874,7 +6070,7 @@ static void show_detail_cpu(ExplainState* es, PlanState* planstate)
     bool is_null = false;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
 
     if (u_sess->instr_cxt.global_instr->getInstruNodeNum() > 0) {
         for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
@@ -6807,7 +7003,7 @@ static void get_oper_time(ExplainState* es, PlanState* planstate, const Instrume
 static void show_stream_send_time(ExplainState* es, const PlanState* planstate)
 {
     bool isSend = false;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
 
     /* stream send time will print only es->detail is true and t_thrd.explain_cxt.explain_perf_mode is not normal */
     if (t_thrd.explain_cxt.explain_perf_mode == EXPLAIN_NORMAL || es->detail == false)
@@ -6880,7 +7076,7 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate)
     bool executed = true;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
 
     if (es->detail) {
         if (es->format == EXPLAIN_FORMAT_TEXT)
@@ -7189,7 +7385,7 @@ static void show_instrumentation_count(const char* qlabel, int which, const Plan
 {
     double nfiltered = 0.0;
     Instrumentation* instr = NULL;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
 
     if (!es->analyze || !planstate->instrument)
         return;
@@ -7246,17 +7442,36 @@ static void show_removed_rows(int which, const PlanState* planstate, int idx, in
         u_sess->instr_cxt.global_instr->isFromDataNode(planstate->plan->plan_node_id)) {
         instr = u_sess->instr_cxt.global_instr->getInstrSlot(idx, planstate->plan->plan_node_id, smpIdx);
         if (instr != NULL && instr->nloops > 0) {
-            if (which == 1)
-                *removeRows = instr->nfiltered1;
-            else if (which == 2)
-                *removeRows = instr->nfiltered2;
+            if (which == 1) {
+                *removeRows = check_integer_overflow(instr->nfiltered1);
+            } else if (which == 2) {
+                *removeRows = check_integer_overflow(instr->nfiltered2);
+            }
         }
     } else {
-        if (which == 1)
-            *removeRows = planstate->instrument->nfiltered1;
-        else if (which == 2)
-            *removeRows = planstate->instrument->nfiltered2;
+        if (which == 1) {
+            *removeRows = check_integer_overflow(planstate->instrument->nfiltered1);
+        } else if (which == 2) {
+            *removeRows = check_integer_overflow(planstate->instrument->nfiltered2);
+        }
     }
+}
+
+/*
+ * Check for possible integer overflow when assign a double variable to an int variable.
+ */
+static int check_integer_overflow(double var)
+
+{
+    if (var > (double)PG_INT32_MAX || var < (double)PG_INT32_MIN) {
+        ereport(ERROR,
+            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmodule(MOD_OPT),
+            errmsg("Integer overflow."),
+            errdetail("Integer overflow occurred when assigning a double variable to an int variable."),
+            errcause("Try to assign a double variable to an int variable."),
+            erraction("Please check whether the double variable exceeds the representation range of int.")));
+    }
+    return (int)var;
 }
 
 /*
@@ -7387,7 +7602,7 @@ static void show_analyze_dfs_info(const PlanState* planstate, ExplainState* es)
     Instrumentation* instr = NULL;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
     double total_local_block = 0.0;
     double total_remote_block = 0.0;
     double total_datacache_block_count = 0.0;
@@ -7455,7 +7670,7 @@ static void show_dfs_block_info(PlanState* planstate, ExplainState* es)
         int i = 0;
         int j = 0;
         bool has_info = false;
-        int dop = planstate->plan->dop;
+        int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
 
         if (es->detail) {
             for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
@@ -7718,7 +7933,7 @@ static void show_analyze_storage_info_of_dfs(const PlanState* planstate, Explain
     uint64 total_dynamicfiles = 0;
     uint64 total_staticFiles = 0;
     Instrumentation* instr = NULL;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
     for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
         for (j = 0; j < dop; j++) {
             instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
@@ -7763,7 +7978,7 @@ static void show_analyze_storage_info_of_logft(const PlanState* planstate, Expla
     uint64 total_filename = 0;
     uint64 total_refuted_by_filename = 0;
     uint64 total_incompleted = 0;
-    int dop = planstate->plan->dop;
+    int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
     Instrumentation* instr = NULL;
 
     int node_idx = 0;
@@ -7842,7 +8057,7 @@ static void show_storage_filter_info(PlanState* planstate, ExplainState* es)
         int i = 0;
         int j = 0;
         bool has_info = false;
-        int dop = planstate->plan->dop;
+        int dop = planstate->plan->parallel_enabled ? planstate->plan->dop : 1;
 
         if (es->detail) {
             for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
@@ -8237,7 +8452,7 @@ static void ExplainTargetRel(Plan* plan, Index rti, ExplainState* es)
 /*
  * Show extra information for upsert info
  */
-static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es)
+static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es, List* ancestors)
 {
     ResultRelInfo* resultRelInfo = mtstate->resultRelInfo;
     IndexInfo* indexInfo = NULL;
@@ -8264,6 +8479,21 @@ static void show_on_duplicate_info(ModifyTableState* mtstate, ExplainState* es)
      */
     if (idxNames != NIL) {
         ExplainPropertyList("Conflict Arbiter Indexes", idxNames, es);
+    }
+
+    /* Show ON DUPLICATE KEY UPDATE WHERE quals info if specified */
+    if (mtstate->mt_upsert->us_updateWhere != NIL) {
+        ModifyTable *node = (ModifyTable*)mtstate->ps.plan;
+        Node* expr = NULL;
+        if (IsA(node->upsertWhere, List)) {
+            expr = (Node*)make_ands_explicit((List*)node->upsertWhere);
+        } else {
+            expr = node->upsertWhere;
+        }
+        List* clauseList = list_make1(expr);
+        show_upper_qual(clauseList, "Conflict Filter", &mtstate->ps, ancestors, es);
+        list_free(clauseList);
+        show_instrumentation_count("Rows Removed by Conflict Filter", 1, &mtstate->ps, es);
     }
 }
 #ifndef PGXC
@@ -8385,6 +8615,27 @@ static void ExplainPrettyList(List* data, ExplainState* es)
     }
 
     appendStringInfoChar(es->planinfo->m_verboseInfo->info_str, '\n');
+}
+
+/*
+ * Explain a property like what ExplainPropertyList does but append it to
+ * the end of the plan tree.
+ * We reuse ExplainPropertyList here by temporarily setting and recovering
+ * es->str such that the explation is printed into es->post_str instead.
+ * "data" is a list of C strings.
+ */
+void ExplainPropertyListPostPlanTree(const char* qlabel, List* data, ExplainState* es)
+{
+    if (es->post_str == NULL) {
+        es->post_str = makeStringInfo();
+    }
+    StringInfo str_backup = es->str;
+    int indent_backup = es->indent;
+    es->str = es->post_str;
+    es->indent = 0;
+    ExplainPropertyList(qlabel, data, es);
+    es->str = str_backup;
+    es->indent = indent_backup;
 }
 
 /*
@@ -9910,6 +10161,7 @@ void PlanTable::set_plan_name()
         appendStringInfoSpaces(info_str, 8);
     }
 }
+template void PlanTable::set_plan_name<true, true>();
 
 /* --------------------------------function for explain plan--------------------- */
 /*
@@ -10279,6 +10531,21 @@ void PlanTable::set_plan_table_projection(int plan_node_id, List* tlist)
 }
 
 /*
+ * Description: Set cost and cardinality into PlanTable.
+ * Parameters:
+ * @in plan_cost: plan cost.
+ * @in plan_cardinality: rows accessed by current operation.
+ * Return: void
+ */
+void PlanTable::set_plan_table_cost_card(int plan_node_id, double plan_cost, double plan_cardinality)
+{
+    m_plan_table[plan_node_id - 1]->m_datum->cost = plan_cost;
+    m_plan_table[plan_node_id - 1]->m_datum->cardinality = plan_cardinality;
+    m_plan_table[plan_node_id - 1]->m_isnull[PT_COST] = false;
+    m_plan_table[plan_node_id - 1]->m_isnull[PT_CARDINALITY] = false;
+}
+
+/*
  * Description: Call heap_insert to insert all nodes tuples of the plan into table.
  * Parameters:
  * Return: void
@@ -10321,7 +10588,11 @@ void PlanTable::insert_plan_table_tuple()
         if (m_plan_table[i]->m_datum->projection != NULL)
             new_record[PT_PROJECTION] = CStringGetTextDatum(m_plan_table[i]->m_datum->projection->data);
 
+        new_record[PT_COST] = Float8GetDatum(m_plan_table[i]->m_datum->cost);
+        new_record[PT_CARDINALITY] = Float8GetDatum(m_plan_table[i]->m_datum->cardinality);
+
         tuple = (HeapTuple)heap_form_tuple(plan_table_des, new_record, m_plan_table[i]->m_isnull);
+
         /*
          * Insert new record into plan_table table
          */
@@ -10817,4 +11088,221 @@ static void show_unique_check_info(PlanState *planstate, ExplainState *es)
             }
         }
     }
+}
+
+void ExplainDatumProperty(char const *name, Datum const value, Oid const type, ExplainState* es)
+{
+    Datum output_datum = 0;
+    char const *output = nullptr;
+
+    if (type_is_array_domain(type)) {
+        output_datum = OidFunctionCall2(F_ARRAY_OUT, value, type);
+        output = DatumGetCString(output_datum);
+        ExplainPropertyText(name, output, es);
+    } else {
+        switch (type) {
+            case INT1OID:
+                ExplainPropertyInteger(name, DatumGetInt8(value), es);
+                break;
+            case INT2OID:
+                ExplainPropertyInteger(name, DatumGetInt16(value), es);
+                break;
+            case INT4OID:
+                ExplainPropertyInteger(name, DatumGetInt32(value), es);
+                break;
+            case INT8OID:
+                ExplainPropertyLong(name, DatumGetInt64(value), es);
+                break;
+            case FLOAT4OID:
+                ExplainPropertyFloat(name, DatumGetFloat4(value), 6, es);
+                break;
+            case FLOAT8OID:
+                ExplainPropertyFloat(name, DatumGetFloat8(value), 10, es);
+                break;
+            default:
+                output = Datum_to_string(value, type, type == InvalidOid);
+                ExplainPropertyText(name, output, es);
+                break;
+        }
+    }
+}
+/*
+ * this function explains a group of model information (recursively if necessary)
+ * as provided by the list
+ */
+ListCell* ExplainTrainInfoGroup(List const* group, ExplainState *es, bool const group_opened)
+{
+    ListCell *lc = nullptr;
+    TrainingInfo *train_info = nullptr;
+
+    /*
+     * in a single traversal of the group there will (potentially) be
+     * recursive calls that will print nested sub-groups (by properly
+     * opening and closing them)
+     */
+    foreach(lc, group) {
+        train_info = lfirst_node(TrainingInfo, lc);
+        if (train_info->open_group) {
+            /*
+             * if the cell for some reason has both opening and closing booleans set we ignore it
+             */
+            if (train_info->close_group)
+                continue;
+
+            if (!train_info->name)
+                ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("the name of a group cannot be empty (when opening)")));
+
+            // open the group at the output
+            ExplainOpenGroup(train_info->name, train_info->name, true, es);
+            // here comes a recursive call to print the group
+            List next_group;
+            next_group.length = 0; // not needed for us, not properly set (you are warned)
+            next_group.type = group->type;
+            next_group.head = lnext(lc); // next group continues with the first element of the group
+            next_group.tail = group->tail;
+
+            /*
+             * once we have printed a whole group we gotta fast-forward to the first element after the group.
+             * the returned ListCell is the closing element of the group we just printed (foreach will do the rest)
+             */
+            lc = ExplainTrainInfoGroup(&next_group, es, true);
+            /*
+             * if there are more opening groups than closing one at some point the list will have to get
+             * exhausted and there will be recursive call that cannot cleanly finish
+             */
+            if (!lc)
+                ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("group of name \"%s\" was not closed", train_info->name)));
+
+            auto current_train_info = lfirst_node(TrainingInfo, lc);
+
+            /*
+             * the name of opening and closing groups has to match, otherwise error.
+             * observe that both strings are non-empty (otherwise error before this)
+             */
+            if (strcmp(train_info->name, current_train_info->name) != 0)
+                ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("group of name \"%s\" was not properly closed, closing group name was \"%s\"",
+                               train_info->name, current_train_info->name)));
+            continue;
+        } else if (train_info->close_group) {
+            /*
+             * this is in charge of validating that closing a group is correct (by having opened at the
+             * parent call)
+             */
+            if (!group_opened)
+                ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("badly formed group of name \"%s\" of training information (opening group not found)",
+                               train_info->name)));
+
+            if (!train_info->name)
+                ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("the name of a group cannot be empty (when closing)")));
+
+            ExplainCloseGroup(train_info->name, train_info->name, true, es);
+            // we return the closing ListCell
+            break;
+        } else {
+            /*
+             * we output the next object of the group
+             */
+            ExplainDatumProperty(train_info->name, train_info->value, train_info->type, es);
+        }
+    }
+    return lc;
+}
+void do_model_explain(ExplainState *es, const Model *model)
+{
+    ListCell *lc = nullptr;
+    ExplainBeginOutput(es);
+
+    /*
+     * there is a common part of each model that can be formatted now
+     */
+    ExplainOpenGroup("General information", "General information", true, es);
+    ExplainPropertyText("Name", model->model_name, es);
+    ExplainPropertyText("Algorithm", algorithm_ml_to_string(model->algorithm), es);
+    if (model->sql != NULL)
+        ExplainPropertyText("Query", model->sql, es);
+
+    char const *return_type_str = nullptr;
+    switch (model->return_type) {
+        case BOOLOID:
+            return_type_str = prediction_type_to_string(TYPE_BOOL);
+            break;
+        case BYTEAOID:
+            return_type_str = prediction_type_to_string(TYPE_BYTEA);
+            break;
+        case INT4OID:
+            return_type_str = prediction_type_to_string(TYPE_INT32);
+            break;
+        case INT8OID:
+            return_type_str = prediction_type_to_string(TYPE_INT64);
+            break;
+        case FLOAT4OID:
+            return_type_str = prediction_type_to_string(TYPE_FLOAT32);
+            break;
+        case FLOAT8OID:
+            return_type_str = prediction_type_to_string(TYPE_FLOAT64);
+            break;
+        case FLOAT8ARRAYOID:
+            return_type_str = prediction_type_to_string(TYPE_FLOAT64ARRAY);
+            break;
+        case NUMERICOID:
+            return_type_str = prediction_type_to_string(TYPE_NUMERIC);
+            break;
+        case TEXTOID:
+            return_type_str = prediction_type_to_string(TYPE_TEXT);
+            break;
+        case VARCHAROID:
+            return_type_str = prediction_type_to_string(TYPE_VARCHAR);
+            break;
+        default:
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("invalid return type (%d) for model of name \"%s\"", model->return_type,
+                           model->model_name)));
+    }
+    ExplainPropertyText("Return type", return_type_str, es);
+    ExplainPropertyFloat("Pre-processing time", model->pre_time_secs, 6, es);
+    ExplainPropertyFloat("Execution time", model->exec_time_secs, 6, es);
+    ExplainPropertyInteger("Processed tuples", model->processed_tuples, es);
+    ExplainPropertyInteger("Discarded tuples", model->discarded_tuples, es);
+    ExplainCloseGroup("General information", "General information", true, es);
+
+    /*
+     * hyper-parameters are now output
+     */
+    ExplainOpenGroup("Hyper-parameters", "Hyper-parameters", true, es);
+    foreach(lc, model->hyperparameters) {
+        auto hyperparameter = lfirst_node(Hyperparameter, lc);
+        ExplainDatumProperty(hyperparameter->name, hyperparameter->value, hyperparameter->type, es);
+    }
+    ExplainCloseGroup("Hyper-parameters", "Hyper-parameters", true, es);
+
+    /*
+     * scores are now output
+     */
+    ExplainOpenGroup("Scores", "Scores", true, es);
+    foreach(lc, model->scores) {
+        auto training_score = lfirst_node(TrainingScore, lc);
+        ExplainPropertyFloat(training_score->name, training_score->value, 10, es);
+    }
+    ExplainCloseGroup("Scores", "Scores", true, es);
+
+    /*
+     * Model-dependent information
+     */
+    AlgorithmAPI *algo_api = get_algorithm_api(model->algorithm);
+    if (algo_api->explain && model->data.version > DB4AI_MODEL_V00) {
+        List *train_data = algo_api->explain(algo_api, &model->data, model->return_type);
+        if (train_data) {
+            ExplainOpenGroup("Train data", "Train data", true, es);
+            ExplainTrainInfoGroup(train_data, es, false);
+            ExplainCloseGroup("Train data", "Train data", true, es);
+        }
+    }
+
+    /* emit closing boilerplate */
+    ExplainEndOutput(es);
 }

@@ -23,7 +23,9 @@
 
 #include "client_logic_jni.h"
 #include "org_postgresql_jdbc_ClientLogicImpl.h"
+#ifndef ENABLE_LITE_MODE
 #include <jni.h>
+#endif
 #include <stdio.h>
 #include "libpq-fe.h"
 #include "jni_logger.h"
@@ -86,7 +88,7 @@ struct JniResult {
             return;
         }
         set_error(m_env, object_class, array, status->get_error_code(),
-            status->get_error_message() ? status->get_error_message() : "");
+                  status->get_error_message() ? status->get_error_message() : "");
     }
     /* *
      * sets to return OK success
@@ -104,7 +106,7 @@ struct JniResult {
      * @return true for success and false for failures
      */
     bool convert_string(JNIStringConvertor *string_convertor, jstring java_str, DriverError *status,
-        const char *failure_message) const
+            const char *failure_message) const
     {
         if (string_convertor == NULL || java_str == NULL || status == NULL) {
             return false;
@@ -196,7 +198,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_setKmsIn
     if (!result.from_handle((long)handle, &client_logic_jni, &status, "setKmsInfoImpl")) {
         return result.array;
     }
-    
+
     if (!result.convert_string(&key, key_java, &status, "setKmsInfo dump kms info")) {
         return result.array;
     }
@@ -249,7 +251,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runQuery
         status.set_error(JNI_SYSTEM_ERROR_CODES::STRING_CREATION_FAILED);
         result.set_error_return(&status);
         JNI_LOG_ERROR("Java_org_postgresql_jdbc_ClientLogicImpl_runQueryPreProcessImpl error code:%d text:'%s'",
-            status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
+                      status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
         return result.array;
     }
     const char *original_query_dup = client_logic->get_new_query(original_query.c_str);
@@ -257,7 +259,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runQuery
         status.set_error(JNI_SYSTEM_ERROR_CODES::STRING_CREATION_FAILED);
         result.set_error_return(&status);
         JNI_LOG_ERROR("Java_org_postgresql_jdbc_ClientLogicImpl_runQueryPreProcessImpl error code:%d text:'%s'",
-            status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
+                      status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
         result.set_error_return(&status);
         return result.array;
     }
@@ -280,6 +282,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runQuery
  * @param env pointer to jvm
  * @param
  * @param handle pointer to ClientLogicJNI instance
+ * @param statament_name_java when issued for prepared statement contains the statement name, otherwise an empty string
  * @return java array
  * [0][0] - int status code - zero for success
  * [0][1] - string status description
@@ -300,7 +303,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runQuery
     if (JNI_TRUE == env->IsSameObject(jdbc_cl_impl, NULL)) {
         fprintf(stderr, "Client encryption run_post_query failed jobject %p was invalid\n", jdbc_cl_impl);
     }
-    if (!client_logic->run_post_query(&status)) {
+    if (!client_logic->run_post_query("", &status)) {
         JNI_LOG_ERROR("run_post_query failed: %ld, error code: %d error: '%s'", (long)handle, status.get_error_code(),
             status.get_error_message() ? status.get_error_message() : "");
         result.set_error_return(&status);
@@ -349,7 +352,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runClien
     if (!client_logic->deprocess_value(data_to_process.c_str, data_type, &proccessed_data, length_output, &status)) {
         libpq_free(proccessed_data);
         JNI_LOG_ERROR("Java_org_postgresql_jdbc_ClientLogicImpl_runClientLogicImpl failed:error code: %d error: '%s'",
-            status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
+                      status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
         result.set_error_return(&status);
         return result.array;
     }
@@ -448,8 +451,8 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runClien
         for (size_t index = 0; index < number_of_oids; ++index) {
             original_oids[index] = oids_java[index];
         }
-        if (!client_logic->process_record_data(data_to_process.c_str, original_oids, &proccessed_data,
-            &is_client_logic, length_output, &status)) {
+        if (!client_logic->process_record_data(data_to_process.c_str, original_oids, number_of_oids,
+            &proccessed_data, &is_client_logic, length_output, &status)) {
             libpq_free(proccessed_data);
             JNI_LOG_ERROR(
                 "Java_org_postgresql_jdbc_ClientLogicImpl_runClientLogic4RecordImpl failed:error code: %d error: '%s'",
@@ -506,7 +509,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_prepareQ
         status.set_error(JNI_SYSTEM_ERROR_CODES::STRING_CREATION_FAILED);
         result.set_error_return(&status);
         JNI_LOG_ERROR("prepareQuery failed getting the query string error code:%d text:'%s'", status.get_error_code(),
-            status.get_error_message() ? status.get_error_message() : "");
+                      status.get_error_message() ? status.get_error_message() : "");
         return result.array;
     }
     JNIStringConvertor statement_name;
@@ -516,14 +519,14 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_prepareQ
     client_logic->set_jni_env_and_cl_impl(env, jdbc_cl_impl);
     if (!client_logic->preare_statement(original_query.c_str, statement_name.c_str, parameter_count, &status)) {
         JNI_LOG_ERROR("preare_statement call failed: %ld, error code: %d error: '%s'", (long)handle,
-            status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
+                      status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
         result.set_error_return(&status);
         return result.array;
     }
     if (client_logic->get_statement_data() == NULL) {
         status.set_error(STATEMENT_DATA_EMPTY);
         JNI_LOG_ERROR("preare_statement get_statement_data call failed: %ld, error code: %d error: '%s'", (long)handle,
-            status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
+                      status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
         result.set_error_return(&status);
         return result.array;
     }
@@ -609,7 +612,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceS
     client_logic->set_jni_env_and_cl_impl(env, jdbc_cl_impl);
     if (!client_logic->replace_statement_params(statement_name.c_str, param_values, parameter_count, &status)) {
         JNI_LOG_ERROR("replace_statement_params failed: %ld, error code: %d error: '%s'", (long)handle,
-            status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
+                      status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
         result.set_error_return(&status);
         delete[] param_values;
         delete[] string_convertors;
@@ -634,7 +637,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceS
         }
     }
 
-    for (int i = 0; i < parameter_count; ++i) {
+    for (int i = 0; i < parameter_count && !convert_failure; ++i) {
         /*
          * rawValue in INSERT could be NULL or empty string,
          * we have recgonize it in preare_statement routine and make adjusted_param_values[idx]
@@ -705,7 +708,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceE
         }
         if (status.get_error_code() != 0) {
             JNI_LOG_ERROR("replaceErrorMessage failed: %ld, error code: %d error: '%s'", (long)handle,
-                status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
+                          status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
             result.set_error_return(&status);
             return result.array;
         }
@@ -725,6 +728,25 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceE
         converted_message = NULL;
     }
     return result.array;
+}
+/**
+ * reloads the client logic cache
+ * @param env java environment
+ * @param jdbc_cl_impl pointer back to the Java client logic impl instance
+ * @param handle client logic instance handle
+ */
+JNIEXPORT void JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_reloadCacheImpl (JNIEnv *env,
+    jobject jdbc_cl_impl, jlong handle)
+{
+    ClientLogicJNI *client_logic = NULL;
+    DriverError status(0, "");
+    if (!ClientLogicJNI::from_handle(handle, &client_logic, &status) || client_logic == NULL) {
+        JNI_LOG_DEBUG("reloadCacheImpl failed: %ld, error code: %d error: '%s'", (long)handle, status.get_error_code(),
+                status.get_error_message() ? status.get_error_message() : "");
+        return;
+    }
+    client_logic->set_jni_env_and_cl_impl(env, jdbc_cl_impl);
+    client_logic->reload_cache();
 }
 
 /**
@@ -759,7 +781,7 @@ JNIEXPORT void JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_destroy(JNIEnv *
     DriverError status(0, "");
     if (!ClientLogicJNI::from_handle(handle, &client_logic, &status) || client_logic == NULL) {
         JNI_LOG_DEBUG("Destroy failed: %ld, error code: %d error: '%s'", (long)handle, status.get_error_code(),
-            status.get_error_message() ? status.get_error_message() : "");
+                status.get_error_message() ? status.get_error_message() : "");
         return;
     } else {
         delete client_logic;

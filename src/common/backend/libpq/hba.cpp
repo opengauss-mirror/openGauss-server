@@ -1396,7 +1396,7 @@ static void check_hba_replication(hbaPort* port)
             HbaToken* tok = NULL;
             tok = (HbaToken*)lfirst(cell);
             if (token_is_keyword(tok, "replication") && hba->conntype != ctLocal) {
-                if (hba->auth_method != uaGSS && !AM_WAL_HADR_SENDER) {
+                if (hba->auth_method != uaGSS && !AM_WAL_HADR_SENDER && !AM_WAL_HADR_CN_SENDER) {
                     hba->auth_method = uaTrust;
                 }
                 ereport(LOG,
@@ -1590,7 +1590,7 @@ static void check_hba(hbaPort* port)
                 if (!isUsernameSame && hba->auth_method == uaTrust) {
                     hba->auth_method = get_default_auth_method(port->user_name);
                 }
-            } else if (hba->auth_method == uaTrust) {
+            } else if (hba->auth_method == uaTrust || hba->auth_method == uaPeer) {
                 /* For non-initdb user, password is always needed */
                 hba->auth_method = get_default_auth_method(port->user_name);
             }

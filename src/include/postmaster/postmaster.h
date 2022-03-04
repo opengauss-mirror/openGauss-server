@@ -29,6 +29,8 @@ extern bool FencedUDFMasterMode;
 #define FastShutdown 2
 #define ImmediateShutdown 3
 
+const int ReaperLogBufSize = 1024; /* reaper function log buffer size */
+
 extern volatile int Shutdown;
 
 extern uint32 noProcLogicTid;
@@ -153,7 +155,7 @@ extern int SubPostmasterMain(int argc, char* argv[]);
 #define MAX_BACKENDS 0x3FFFF
 extern void KillGraceThreads(void);
 
-#define MAX_IPADDR_LEN 32
+#define MAX_IPADDR_LEN 64
 #define MAX_PORT_LEN 6
 #define MAX_LISTEN_ENTRY 64
 #define MAX_IP_STR_LEN 64

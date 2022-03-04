@@ -52,6 +52,11 @@
 #define RES_SIGNAL SIGUSR2
 #define FUNC_NAME_LEN 32
 
+#ifdef ENABLE_UT
+#define STATIC
+#else
+#define STATIC static
+#endif
 extern volatile ThreadId PostmasterPid;
 extern bool IsPostmasterEnvironment;
 
@@ -69,7 +74,7 @@ static gs_sigfunc gs_signal_register_handler(GsSignal* gs_signal, int signo, gs_
 static int gs_signal_thread_kill(ThreadId tid, int signo);
 static GsSignalSlot* gs_signal_alloc_slot_for_new_thread(char* name, ThreadId thread_id);
 static void gs_res_signal_handler(int signo, siginfo_t* siginfo, void* context);
-static gs_sigaction_func gs_signal_install_handler(void);
+STATIC gs_sigaction_func gs_signal_install_handler(void);
 static GsSignalSlot* gs_signal_find_slot(ThreadId thread_id);
 static void gs_signal_reset_signal(GsSignal* gssignal);
 
@@ -955,7 +960,7 @@ void gs_signal_startup_siginfo(char* thread_name)
  * Description	:
  * Notes		:
  */
-static gs_sigaction_func gs_signal_install_handler(void)
+STATIC gs_sigaction_func gs_signal_install_handler(void)
 {
     struct sigaction act, oact;
 

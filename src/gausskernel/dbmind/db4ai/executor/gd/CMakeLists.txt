@@ -3,7 +3,10 @@ set(TGT_gd_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/gd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/linregr.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/logregr.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/matrix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pca.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/optimizer_pca.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/optimizer_ova.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/multiclass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/optimizer_gd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/optimizer_ngd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/predict.cpp

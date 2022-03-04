@@ -1,0 +1,54 @@
+DROP USER IF EXISTS test CASCADE;
+NOTICE:  role "test" does not exist, skipping
+CREATE USER test WITH CREATEDB PASSWORD "Gauss@123";
+SET ROLE test PASSWORD 'Gauss@123';
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+\! gs_ktool -g
+GENERATE
+2
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_client_lib/gsjdbc4.jar:@abs_builddir@/jdbc_ce_test/ce_ddl_pbe/. ClientEncryptionPrepareTest @portstring@ > /dev/null 2>&1
+SELECT global_key_name, key_namespace, key_owner FROM gs_client_global_keys;
+ global_key_name | key_namespace | key_owner 
+-----------------+---------------+-----------
+--?.*
+--?.*
+(2 rows)
+
+SELECT column_key_name,  key_namespace, key_owner FROM gs_column_keys;
+ column_key_name | key_namespace | key_owner 
+-----------------+---------------+-----------
+--?.*
+(1 row)
+
+DROP TABLE IF EXISTS products;
+DROP COLUMN ENCRYPTION KEY pre_ImgCEK;
+DROP CLIENT MASTER KEY pre_ImgCMK1 CASCADE;
+DROP CLIENT MASTER KEY pre_ImgCMK CASCADE;
+select  count(*), 'count' FROM gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+select  count(*), 'count' FROM gs_column_keys;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+SELECT  count(*), 'count' FROM gs_encrypted_columns;
+ count | ?column? 
+-------+----------
+     0 | count
+(1 row)
+
+\! gs_ktool -d all
+DELETE ALL
+ 1 2
+RESET ROLE;
+DROP USER IF EXISTS test CASCADE;

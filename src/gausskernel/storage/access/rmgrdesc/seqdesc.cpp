@@ -18,6 +18,16 @@
 
 #include "commands/sequence.h"
 
+const char* seq_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_SEQ_LOG)
+        return "seq_log";
+    else {
+        return "unknown_type";
+    }
+}
+
 void seq_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

@@ -17,7 +17,7 @@ SET(TGT_pgconfig_INC
 SET(pgconfig_DEF_OPTIONS ${MACRO_OPTIONS})
 SET(pgconfig_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS} -fstack-protector-all)
 SET(pgconfig_LINK_OPTIONS ${BIN_LINK_OPTIONS})
-SET(pgconfig_LINK_LIBS libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -lsecurec -lrt -lz -lminiunz)
+SET(pgconfig_LINK_LIBS libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz)
 add_bintarget(pg_config TGT_pgconfig_SRC TGT_pgconfig_INC "${pgconfig_DEF_OPTIONS}" "${pgconfig_COMPILE_OPTIONS}" "${pgconfig_LINK_OPTIONS}" "${pgconfig_LINK_LIBS}")
 add_dependencies(pg_config pgport_static)
 target_link_directories(pg_config PUBLIC

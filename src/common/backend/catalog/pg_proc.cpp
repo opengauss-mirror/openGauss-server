@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * pg_proc.cpp
- *	  routines to support manipulation of the pg_proc relation
+ * routines to support manipulation of the pg_proc relation
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -9,7 +9,7 @@
  *
  *
  * IDENTIFICATION
- *	  src/common/backend/catalog/pg_proc.cpp
+ * src/common/backend/catalog/pg_proc.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -19,6 +19,7 @@
 #include "access/transam.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
@@ -30,6 +31,7 @@
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_type.h"
+#include "client_logic/client_logic_proc.h"
 #include "commands/defrem.h"
 #include "commands/user.h"
 #include "commands/trigger.h"
@@ -40,6 +42,7 @@
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/parse_type.h"
+#include "parser/parse_coerce.h"
 #include "tcop/pquery.h"
 #include "tcop/tcopprot.h"
 #include "utils/acl.h"
@@ -117,29 +120,23 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
     bool isAgg, bool isWindowFunc);
 static bool user_define_func_check(Oid languageId, const char* probin, char** absolutePath, CFunType* function_type);
 static const char* get_file_name(const char* filePath, CFunType function_type);
-static int get_decimal_from_hex(char hex);
+
+#ifndef ENABLE_MULTIPLE_NODES
+static void CheckInParameterConflicts(CatCList* catlist, const char* procedureName, oidvector* inpara_type,
+    oidvector* proc_para_type, Oid languageId, bool isOraStyle, bool replace);
+#endif
 
 static Acl* ProcAclDefault(Oid ownerId)
 {
-    AclMode world_default;
     AclMode owner_default;
     int nacl = 0;
     Acl* acl = NULL;
     AclItem* aip = NULL;
-    world_default = ACL_NO_RIGHTS;
     owner_default = ACL_ALL_RIGHTS_FUNCTION;
-    if (world_default != ACL_NO_RIGHTS)
-        nacl++;
     if (owner_default != ACL_NO_RIGHTS)
         nacl++;
     acl = allocacl(nacl);
     aip = ACL_DAT(acl);
-    if (world_default != ACL_NO_RIGHTS) {
-        aip->ai_grantee = ACL_ID_PUBLIC;
-        aip->ai_grantor = ownerId;
-        ACLITEM_SET_PRIVS_GOPTIONS(*aip, world_default, ACL_NO_RIGHTS);
-        aip++;
-    }
 
     if (owner_default != ACL_NO_RIGHTS) {
         aip->ai_grantee = ownerId;
@@ -244,14 +241,12 @@ static char* get_temp_library(bool absolute_path)
             "%s/pg_plugin/%ld%lu",
             t_thrd.proc_cxt.pkglib_path,
             GetCurrentTransactionStartTimestamp(),
-            (GTM_MODE) ? (GetCurrentTransactionId()) :
-                          (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
+            (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
     } else {
         appendStringInfo(&temp_file_strinfo,
             "$libdir/pg_plugin/%ld%lu",
             GetCurrentTransactionStartTimestamp(),
-            (GTM_MODE) ? (GetCurrentTransactionId()) :
-                          (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
+            (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
     }
 
     return temp_file_strinfo.data;
@@ -561,10 +556,12 @@ static char* getCFunProbin(const char* probin, Oid procNamespace, Oid proowner,
  * @in procNamespace - function's namespace oid
  * @in package - is a package function or not
  * @in packageid - is package oid
+ * @in isOraStyle: Is A db style.
  * @return - new function conflicts old functions or not
  */
-static bool checkPackageFunctionConflicts(
-    const char* procedureName, Datum allParameterTypes, oidvector* parameterTypes, Oid procNamespace, bool package, Oid propackageid)
+static bool checkPackageFunctionConflicts(const char* procedureName,
+    Datum allParameterTypes, oidvector* parameterTypes, Datum parameterModes,
+    Oid procNamespace, bool package, Oid propackageid, Oid languageId, bool isOraStyle, bool replace)
 {
     int inpara_count;
     int allpara_count = 0;
@@ -574,6 +571,9 @@ static bool checkPackageFunctionConflicts(
     oidvector* inpara_type = NULL;
     Oid* p_argtypes = NULL;
     HeapTuple proctup = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool enable_outparam_override = enable_out_param_override();
+#endif
     errno_t rc = EOK;
     if (allParameterTypes != PointerGetDatum(NULL)) {
         arr = DatumGetArrayTypeP(allParameterTypes);
@@ -594,7 +594,7 @@ static bool checkPackageFunctionConflicts(
 
     /* search the function */
     /* Search syscache by name only */
-    CatCList   *catlist = NULL;
+    CatCList *catlist = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
     if (t_thrd.proc->workingVersionNum < 92470) {
         catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(procedureName));
@@ -604,8 +604,9 @@ static bool checkPackageFunctionConflicts(
 #else
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(procedureName));
 #endif
+
     for (int i = 0; i < catlist->n_members; i++) {
-        proctup = &catlist->members[i]->tuple;
+        proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Oid* argtypes = NULL;
         Datum proallargtypes;
         bool isNull = false;
@@ -613,8 +614,9 @@ static bool checkPackageFunctionConflicts(
         Form_pg_proc pform = NULL;
         oidvector* proc_allpara_type = NULL;
         oidvector* proc_para_type = NULL;
+        Datum pro_arg_modes = 0;
         bool result1 = false;
-        bool result3 = false;
+        bool result2 = false;
         if (HeapTupleIsValid(proctup)) {
             pform = (Form_pg_proc)GETSTRUCT(proctup);
             /* compare function's namespace */
@@ -630,7 +632,7 @@ static bool checkPackageFunctionConflicts(
                 ispackage = DatumGetBool(propackage);
             /* only check package function */
             if (ispackage != package) {
-                ReleaseCatCacheList(catlist);
+                ReleaseSysCacheList(catlist);
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("Do not allow package function overload not package function.")));
@@ -644,7 +646,7 @@ static bool checkPackageFunctionConflicts(
                 arr = DatumGetArrayTypeP(proallargtypes); /* ensure not toasted */
                 allnumargs = ARR_DIMS(arr)[0];
                 if (ARR_NDIM(arr) != 1 || allnumargs < 0 || ARR_HASNULL(arr) || ARR_ELEMTYPE(arr) != OIDOID) {
-                    ReleaseCatCacheList(catlist);
+                    ReleaseSysCacheList(catlist);
                     ereport(ERROR,
                         (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
                 }
@@ -657,6 +659,12 @@ static bool checkPackageFunctionConflicts(
                 pfree_ext(argtypes);
             }
 
+            proc_para_type = ProcedureGetArgTypes(proctup);
+#ifndef ENABLE_MULTIPLE_NODES
+            CheckInParameterConflicts(catlist, procedureName, inpara_type, proc_para_type, languageId, isOraStyle,
+                replace);
+#endif
+
             /* No need to compare param type if  param count is not same */
             if (pform->pronargs != allpara_count && pform->pronargs != inpara_count && allnumargs != allpara_count &&
                 allnumargs != inpara_count) {
@@ -666,23 +674,33 @@ static bool checkPackageFunctionConflicts(
                 continue;
             }
 
-            proc_para_type = ProcedureGetArgTypes(proctup);
-
-            /* old function in param type compare new function all param type */
-            if (allpara_type != NULL) {
+            pro_arg_modes = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_proargmodes, &isNull);
+#ifndef ENABLE_MULTIPLE_NODES
+            if (!enable_outparam_override) {
                 result1 = DatumGetBool(
-                    DirectFunctionCall2(oidvectoreq, PointerGetDatum(proc_para_type), PointerGetDatum(allpara_type)));
+                    DirectFunctionCall2(oidvectoreq, PointerGetDatum(proc_para_type), PointerGetDatum(inpara_type)));
+            }
+#endif
+
+            if (proc_allpara_type != NULL && allpara_type != NULL) {
+                /* old function all param type compare new function all param type */
+                result2 = DatumGetBool(DirectFunctionCall2(
+                    oidvectoreq, PointerGetDatum(allpara_type), PointerGetDatum(proc_allpara_type)));
             }
 
-            if (proc_allpara_type != NULL) {
-                if (allpara_type != NULL) {
-                    /* old function all param type compare new function all param type */
-                    result3 = DatumGetBool(DirectFunctionCall2(
-                        oidvectoreq, PointerGetDatum(allpara_type), PointerGetDatum(proc_allpara_type)));
+            result = result1 || result2;
+#ifndef ENABLE_MULTIPLE_NODES
+            if (result && IsPlpgsqlLanguageOid(languageId) && !OidIsValid(propackageid) && !isOraStyle) {
+                if (DatumGetPointer(pro_arg_modes) == NULL) {
+                    result &= (DatumGetPointer(parameterModes) == NULL);
+                } else if (DatumGetPointer(parameterModes) == NULL) {
+                    result = false;
+                } else {
+                    result &= IsProArgModesEqual(parameterModes, pro_arg_modes);
                 }
             }
+#endif
 
-            result = result1 || result3;
             if (proc_allpara_type != NULL) {
                 pfree_ext(proc_allpara_type);
             }
@@ -698,7 +716,7 @@ static bool checkPackageFunctionConflicts(
         pfree_ext(allpara_type);
     }
 
-    ReleaseCatCacheList(catlist);
+    ReleaseSysCacheList(catlist);
     return result;
 }
 
@@ -723,6 +741,7 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
 {
     Datum proargnames;
     bool isnull = false;
+    Oid origin_return_type;
     if (!replace) {
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
@@ -749,9 +768,13 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("function \"%s\" is a masking function,it can not be changed", procedureName)));
     }
-    Oid origin_return_type = oldproc->prorettype;
+    origin_return_type = oldproc->prorettype;
     /* A db donot check function return type when replace */
     if (!isOraStyle) {
+        /*
+         * For client logic type use original return type from gs_cl_proc
+         * and remove all data from gs_cl_proc
+         */
         if(IsClientLogicType(oldproc->prorettype)) {
             Oid functionId = HeapTupleGetOid(oldtup);
             HeapTuple gs_oldtup = SearchSysCache1(GSCLPROCID, functionId);
@@ -759,14 +782,15 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
             if (HeapTupleIsValid(gs_oldtup)) {
                 Datum gs_ret_orig =
                     SysCacheGetAttr(GSCLPROCID, gs_oldtup, Anum_gs_encrypted_proc_prorettype_orig, &isNull);
-                if(!isNull) {
-                    origin_return_type = DatumGetObjectId(gs_ret_orig);
+                /* never should happen, since if the function return type was 
+                client logic we must insert its original type on creation, but
+                since some old code might create by error functions that its
+                original return type is not saved, and for avoid undefined behaviour,
+                it is checked again. */
+                if (!isNull) {
+                    origin_return_type =  ObjectIdGetDatum(gs_ret_orig);
                 }
-                Relation gs_rel = heap_open(ClientLogicProcId, RowExclusiveLock);
-                deleteDependencyRecordsFor(ClientLogicProcId, HeapTupleGetOid(gs_oldtup), true);
-                simple_heap_delete(gs_rel, &gs_oldtup->t_self);
-                heap_close(gs_rel, RowExclusiveLock);
-                ReleaseSysCache(gs_oldtup);
+                delete_proc_client_info(gs_oldtup);
             }
         }
         /*
@@ -1000,7 +1024,7 @@ static bool user_define_func_check(Oid languageId, const char* probin, char** ab
 }
 
 /* ----------------------------------------------------------------
- *		ProcedureCreate
+ * ProcedureCreate
  *
  * Note: allParameterTypes, parameterModes, parameterNames, and proconfig
  * are either arrays of the proper types or NULL.  We declare them Datum,
@@ -1118,8 +1142,12 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
         }
     }
 
+    bool existOutParam = false;
     if (allParameterTypes != PointerGetDatum(NULL)) {
         for (i = 0; i < allParamCount; i++) {
+            if (paramModes[i] == PROARGMODE_OUT || paramModes[i] == PROARGMODE_INOUT) {
+                existOutParam = true;
+            }
             if (paramModes == NULL || paramModes[i] == PROARGMODE_IN || paramModes[i] == PROARGMODE_VARIADIC)
                 continue; /* ignore input-only params */
 
@@ -1145,7 +1173,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
 
     /*
      * Do not allow polymorphic return type unless at least one input argument
-     * is polymorphic.	ANYRANGE return type is even stricter: must have an
+     * is polymorphic. ANYRANGE return type is even stricter: must have an
      * ANYRANGE input (since we can't deduce the specific range type from
      * ANYELEMENT).  Also, do not allow return type INTERNAL unless at least
      * one input argument is INTERNAL.
@@ -1307,7 +1335,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
              * generic arrays, but they support only one-dimensional arrays with no
              * nulls (and no null bitmap).
              */
-            oidvector* dummy = MakeMd5HashArgTypes((oidvector*)allParameterTypes);
+            oidvector* dummy = MakeMd5HashOids((oidvector*)allParameterTypes);
 
             values[Anum_pg_proc_allargtypes - 1] = PointerGetDatum(dummy);
             values[Anum_pg_proc_allargtypesext - 1] = PointerGetDatum(allParameterTypes);
@@ -1418,18 +1446,9 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
     } else {
         /* Check for pre-existing definition */
 #ifndef ENABLE_MULTIPLE_NODES
-        if (t_thrd.proc->workingVersionNum < 92470) {
-            oldtup = SearchSysCache3(PROCNAMEARGSNSP,
-                PointerGetDatum(procedureName),
-                values[Anum_pg_proc_proargtypes - 1],
-                ObjectIdGetDatum(procNamespace));
-        } else {
-            oldtup = SearchSysCache4(PROCALLARGS,
-            PointerGetDatum(procedureName),
-            values[Anum_pg_proc_allargtypes - 1],
-            ObjectIdGetDatum(procNamespace),
-            ObjectIdGetDatum(propackageid));
-        }
+        Oid oldTupleOid = GetOldTupleOid(procedureName, parameterTypes, procNamespace,
+                                          propackageid, values, parameterModes);
+        oldtup = SearchSysCache1(PROCOID, ObjectIdGetDatum(oldTupleOid));
 #else
         oldtup = SearchSysCache3(PROCNAMEARGSNSP,
             PointerGetDatum(procedureName),
@@ -1437,7 +1456,49 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
             ObjectIdGetDatum(procNamespace));
 #endif
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (enable_out_param_override() && !u_sess->attr.attr_common.IsInplaceUpgrade && !IsInitdb && !proIsProcedure &&
+        IsPlpgsqlLanguageOid(languageObjectId)) {
+        bool findOutParamFunc = false;
+        CatCList *catlist = NULL;
+        if (t_thrd.proc->workingVersionNum < 92470) {
+            catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(procedureName));
+        } else {
+            catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(procedureName));
+        }
+        for (int i = 0; i < catlist->n_members; ++i) {
+            HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+            Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
+            bool isNull = false;
+            Datum packageOidDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+            Oid packageOid = InvalidOid;
+            if (!isNull) {
+                packageOid = DatumGetObjectId(packageOidDatum);
+            }
+            if (packageOid == propackageid && procform->pronamespace == procNamespace) {
+                isNull = false;
+                (void)SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_proallargtypes, &isNull);
+                if (!isNull) {
+                    findOutParamFunc = true;
+                    break;
+                }
+            }
+        }
 
+        ReleaseSysCacheList(catlist);
+        if (existOutParam) {
+            if (!HeapTupleIsValid(oldtup) && findOutParamFunc) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                         (errmsg("\"%s\" functions with plpgsql language and out params are not supported Overloaded.",
+                                 procedureName),
+                          errdetail("N/A."),
+                          errcause("functions with plpgsql language and out params are not supported Overloaded."),
+                          erraction("Drop function before create function."))));
+            }
+        }
+    }
+#endif
     if (HeapTupleIsValid(oldtup)) {
         /* There is one; okay to replace it? */
         bool isNull = false;
@@ -1491,7 +1552,8 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
     } else {
         /* checking for package function */
         bool conflicts =
-            checkPackageFunctionConflicts(procedureName, allParameterTypes, parameterTypes, procNamespace, package , propackageid);
+            checkPackageFunctionConflicts(procedureName, allParameterTypes, parameterTypes, parameterModes,
+                procNamespace, package, propackageid, languageObjectId, isOraStyle, replace);
         if (conflicts) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1502,7 +1564,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
         proacl = get_user_default_acl(ACL_OBJECT_FUNCTION, proowner, procNamespace);
         if (proacl != NULL)
             values[Anum_pg_proc_proacl - 1] = PointerGetDatum(proacl);
-        else if (PLSQL_SECURITY_DEFINER){
+        else if (PLSQL_SECURITY_DEFINER && u_sess->attr.attr_common.upgrade_mode == 0){
             values[Anum_pg_proc_proacl - 1] = PointerGetDatum(ProcAclDefault(proowner));
         } else {
             nulls[Anum_pg_proc_proacl - 1] = true;
@@ -1539,6 +1601,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
 
         /* the 'shared dependencies' also change when update. */
         deleteSharedDependencyRecordsFor(ProcedureRelationId, retval, 0);
+        (void) deleteDependencyRecordsFor(ClientLogicProcId, retval, true);
 
         /* send invalid message for for relation holding replaced function as trigger */
         InvalidRelcacheForTriggerFunction(retval, ((Form_pg_proc)GETSTRUCT(tup))->prorettype);
@@ -1774,9 +1837,9 @@ Datum fmgr_c_validator(PG_FUNCTION_ARGS)
  * @param[IN] pstate - parce state
  * @param[IN] left node
  * @param[IN] right node
- * param[IN] ltypeid: left node type id
- * param[IN] rtypeid : right node type id
- * @return: void
+ * @param[IN] ltypeid: left node type id
+ * @param[IN] rtypeid : right node type id
+ * @return: NULL (to match signature of hook)
  */
 Node *sql_create_proc_operator_ref(ParseState *pstate, Node *left, Node *right, Oid *ltypeid, Oid *rtypeid)
 {
@@ -1806,7 +1869,8 @@ Node *sql_create_proc_operator_ref(ParseState *pstate, Node *left, Node *right, 
          * we need to support type casting because the type may be downgraded (for example from double to int and
          * it will be truncated)
          */
-        if (var->vartypmod == (int)*type) {
+        if (var->vartypmod == (int)*type ||
+             can_coerce_type(1, (Oid*)&(var->vartypmod), (Oid*)type, COERCION_ASSIGNMENT)) {
             /* update the parameter data type to the column data type */
             *type = var->vartype;
             /* update the data types in the parser info structure */
@@ -1850,8 +1914,8 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
 
     bool replace = false;
     /*
-     * 3 means the number of arguments of function fmgr_sql_validator, while 'is_place' is the third one,
-     * and 2 is the postion of 'is_place' in PG_FUNCTION_ARGS
+     * 3 means the number of arguments of function fmgr_sql_validator, while 'is_replace' is the third one,
+     * and 2 is the position of 'is_replace' in PG_FUNCTION_ARGS
      */
     if (PG_NARGS() >= 3) {
         replace = PG_GETARG_BOOL(2);
@@ -1997,7 +2061,7 @@ static void sql_function_parse_error_callback(void* arg)
 
 /*
  * Adjust a syntax error occurring inside the function body of a CREATE
- * FUNCTION or DO command.	This can be used by any function validator or
+ * FUNCTION or DO command. This can be used by any function validator or
  * anonymous-block handler, not only for SQL-language functions.
  * It is assumed that the syntax error position is initially relative to the
  * function body string (as passed in).  If possible, we adjust the position
@@ -2115,7 +2179,7 @@ static bool match_prosrc_to_literal(const char* prosrc, const char* literal, int
 
     /*
      * This implementation handles backslashes and doubled quotes in the
-     * string literal.	It does not handle the SQL syntax for literals
+     * string literal. It does not handle the SQL syntax for literals
      * continued across line boundaries.
      *
      * We do the comparison a character at a time, not a byte at a time, so
@@ -2361,90 +2425,6 @@ bool isSameParameterList(List* parameterList1, List* parameterList2)
     }
     return true;
 }
-/*
- * judage the two arglis is same or not
- */
-bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2) 
-{
-    List* argList1 = stmt1->parameters;
-    List* argList2 = stmt2->parameters;
-    ListCell* cell =  NULL;
-    int length1 = list_length(argList1);
-    int length2 = list_length(argList2);
-    
-    if (length1 != length2) {
-        return false;
-    }    
-    FunctionParameter** arr1 = (FunctionParameter**)palloc0(length1 * sizeof(FunctionParameter*));
-    FunctionParameter** arr2 = (FunctionParameter**)palloc0(length2 * sizeof(FunctionParameter*));
-    int length = 0; 
-    foreach(cell, argList1) {
-        arr1[length] = (FunctionParameter*)lfirst(cell);
-        length = length + 1; 
-    }    
-    length = 0; 
-    foreach(cell, argList2) {
-        arr2[length] = (FunctionParameter*)lfirst(cell);
-        length = length + 1; 
-    }    
-    for (int i = 0; i < length1; i++) {
-        FunctionParameter* fp1 = arr1[i];
-        FunctionParameter* fp2 = arr2[i];
-        TypeName* t1 = fp1->argType;
-        TypeName* t2 = fp2->argType;
-        Oid toid1;
-        Oid toid2;
-        Type typtup1;
-        Type typtup2;
-        errno_t rc;
-        typtup1 = LookupTypeName(NULL, t1, NULL);
-        typtup2 = LookupTypeName(NULL, t2, NULL);
-        if (HeapTupleIsValid(typtup1)) {
-            toid1 = typeTypeId(typtup1);
-            ReleaseSysCache(typtup1);
-        } else {
-            toid1 = findPackageParameter(strVal(linitial(t1->names)));
-            if (!OidIsValid(toid1)) {
-                char message[MAXSTRLEN]; 
-                rc = sprintf_s(message, MAXSTRLEN, "type is not exists  %s.", fp1->name);
-                securec_check_ss_c(rc, "", "");
-                InsertErrorMessage(message, stmt1->startLineNumber);
-                ereport(ERROR,
-                    (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("type is not exists  %s.", fp1->name),
-                        errdetail("CommandType: %s", fp1->name),
-                        errcause("System error."),
-                        erraction("Contact Huawei Engineer.")));
-            }
-        }
-        if (HeapTupleIsValid(typtup2)) {
-            toid2 = typeTypeId(typtup2);
-            ReleaseSysCache(typtup2);
-        } else {
-            toid2 = findPackageParameter(strVal(linitial(t2->names)));
-            if (!OidIsValid(toid2)) {
-                char message[MAXSTRLEN]; 
-                rc = sprintf_s(message, MAXSTRLEN, "type is not exists  %s.", fp2->name);
-                securec_check_ss_c(rc, "", "");
-                InsertErrorMessage(message, stmt1->startLineNumber);
-                ereport(ERROR,
-                    (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("type is not exists  %s.", fp2->name),
-                        errdetail("CommandType: %s", fp2->name),
-                        errcause("System error."),
-                        erraction("Contact Huawei Engineer.")));
-            }
-        }
-        if (toid1 != toid2 || fp1->mode != fp2->mode) {
-            pfree(arr1);
-            pfree(arr2);
-            return false;
-        } 
-    }    
-    pfree(arr1);
-    pfree(arr2);
-    return true;
-}
 
 char* getFuncName(List* funcNameList) {
     char* schemaname = NULL;
@@ -2452,6 +2432,30 @@ char* getFuncName(List* funcNameList) {
     char* funcname = NULL;
     DeconstructQualifiedName(funcNameList, &schemaname, &funcname, &pkgname);
     return funcname;
+}
+
+bool isDefinerACL()
+{
+    /*
+     * if in upgrade mode,we can't set package function as definer right.
+     */
+    if (PLSQL_SECURITY_DEFINER && (u_sess->attr.attr_common.upgrade_mode == 0 ||
+        (!OidIsValid(u_sess->upg_cxt.Inplace_upgrade_next_pg_proc_oid) &&
+            u_sess->attr.attr_common.upgrade_mode != 0))) {
+        return true; 
+    }
+    return false;
+}
+
+/* make str md5 hash */
+static void make_md5_hash(char* in_str, char* res_hash)
+{
+    text* in_text = cstring_to_text(in_str);
+    size_t len = VARSIZE_ANY_EXHDR(in_text);
+    if (!pg_md5_hash(VARDATA_ANY(in_text), len, res_hash)) {
+        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+    }
+    pfree_ext(in_text);
 }
 
 /* Return decimal value for a hexadecimal digit */
@@ -2465,9 +2469,9 @@ static int get_decimal_from_hex(char hex)
     }
 }
 
-oidvector* MakeMd5HashArgTypes(oidvector* paramterTypes)
+oidvector* MakeMd5HashOids(oidvector* paramterTypes)
 {
-    char hex[MD5_HASH_LEN + 1];
+    char* hexarr = (char*)palloc0(sizeof(char) * (MD5_HASH_LEN + 1));
 
     Oid* oidvec = paramterTypes->values;
     int parameterCount = paramterTypes->dim1;
@@ -2480,19 +2484,10 @@ oidvector* MakeMd5HashArgTypes(oidvector* paramterTypes)
         appendStringInfoSpaces(&oidvec2str, 1);
     }
     appendStringInfo(&oidvec2str, "%d", oidvec[parameterCount - 1]);
+    /* convert oidvector to text and make md5 hash */
+    make_md5_hash(oidvec2str.data, hexarr);
 
-    /*
-     * convert oidvector to text and make md5 hash
-     */
-    text* in_text = cstring_to_text(oidvec2str.data);
-    size_t len = VARSIZE_ANY_EXHDR(in_text);
-    if (!pg_md5_hash(VARDATA_ANY(in_text), len, hex)) {
-        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
-    }
-    
     pfree_ext(oidvec2str.data);
-    pfree_ext(in_text);
-    in_text = NULL;
 
     /*
      * hex: an MD5 sum is 16 bytes long.
@@ -2500,8 +2495,10 @@ oidvector* MakeMd5HashArgTypes(oidvector* paramterTypes)
      */
     Oid hex2oid[MD5_HASH_LEN];
     for (i = 0; i < MD5_HASH_LEN; i++) {
-        hex2oid[i] = get_decimal_from_hex(hex[i]);
+        hex2oid[i] = get_decimal_from_hex(hexarr[i]);
     }
+
+    pfree_ext(hexarr);
 
     /* Build a oidvector using the hash value and use it as allargtypes field value. */
     return buildoidvector(hex2oid, MD5_HASH_LEN);
@@ -2541,3 +2538,129 @@ Datum ProcedureGetAllArgTypes(HeapTuple tuple, bool* isNull)
     }
     return allargtypes;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+char* ConvertArgModesToString(Datum proArgModes)
+{
+    Assert(DatumGetPointer(proArgModes) != NULL);
+
+    ArrayType* arr = DatumGetArrayTypeP(proArgModes);
+    Datum* arrdatum = NULL;
+    int ndatums;
+    deconstruct_array(arr, CHAROID, 1, true, 'c', &arrdatum, NULL, &ndatums);
+    char* str = (char*) palloc0(sizeof(char) * (ndatums + 1));
+    int i;
+    int left = 0;
+    int right = ndatums - 1;
+    char ch;
+    for (i = 0; i < ndatums; i++) {
+        ch = DatumGetChar(arrdatum[i]);
+        if (ch == 'i') {
+            str[left] = 'i';
+            left++;
+        } else if (ch == 'b') {
+            str[right] = 'b';
+            right--;
+        }
+    }
+    for (i = left; i <= right; i++) {
+        str[i] = 'o';
+    }
+    str[ndatums] = '\0';
+    pfree_ext(arrdatum);
+    return str;
+}
+
+bool IsProArgModesEqual(Datum argModes1, Datum argModes2)
+{
+    bool isEqual = false;
+    if (DatumGetPointer(argModes1) == NULL && DatumGetPointer(argModes2) == NULL) {
+        isEqual = true;
+    } else if (DatumGetPointer(argModes1) != NULL && DatumGetPointer(argModes2) != NULL) {
+        char* str1 = ConvertArgModesToString(argModes1);
+        char* str2 = ConvertArgModesToString(argModes2);
+        if (strcmp(str1, str2) == 0) {
+            isEqual = true;
+        }
+        pfree_ext(str1);
+        pfree_ext(str2);
+    }
+    return isEqual;
+}
+
+bool IsProArgModesEqualByTuple(HeapTuple tup, TupleDesc desc, oidvector* argModes)
+{
+    bool isNull = false;
+    Datum argmodes = heap_getattr(tup, Anum_pg_proc_proargmodes, desc, &isNull);
+    oidvector* oriArgModesVec = ConvertArgModesToMd5Vector(argmodes);
+    
+    bool isEqual = DatumGetBool(
+        DirectFunctionCall2(oidvectoreq, PointerGetDatum(oriArgModesVec), PointerGetDatum(argModes)));
+    
+    pfree_ext(oriArgModesVec);
+    return isEqual;
+}
+
+oidvector* ConvertArgModesToMd5Vector(Datum proArgModes)
+{
+    char* modesStr = NULL;
+    char* hexarr = (char*)palloc0(sizeof(char) * (MD5_HASH_LEN + 1));
+    int i;
+    if (proArgModes != PointerGetDatum(NULL)) {
+        modesStr = ConvertArgModesToString(proArgModes);
+    } else {
+        modesStr = (char*)palloc0(sizeof(char));
+        modesStr[0] = '\0';
+    }
+    make_md5_hash(modesStr, hexarr);
+
+    pfree_ext(modesStr);
+
+    Oid hex2oid[MD5_HASH_LEN];
+    for (i = 0; i < MD5_HASH_LEN; i++) {
+        hex2oid[i] = get_decimal_from_hex(hexarr[i]);
+    }
+
+    pfree_ext(hexarr);
+
+    return buildoidvector(hex2oid, MD5_HASH_LEN);
+}
+
+oidvector* MergeOidVector(oidvector* allArgTypes, oidvector* argModes)
+{
+    Assert(allArgTypes != NULL);
+    Assert(argModes != NULL);
+
+    oidvector* res = NULL;
+
+    int len1 = allArgTypes->dim1;
+    int len2 = argModes->dim1;
+
+    errno_t rc = EOK;
+    Oid* oids = (Oid*)palloc0(sizeof(Oid) * (len1 + len2));
+    rc = memcpy_s(oids, (len1 + len2) * sizeof(Oid), allArgTypes->values, len1 * sizeof(Oid));
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(&oids[len1], len2 * sizeof(Oid), argModes->values, len2 * sizeof(Oid));
+    securec_check(rc, "\0", "\0");
+    
+    res = buildoidvector(oids, len1 + len2);
+
+    pfree_ext(oids);
+
+    return res;
+}
+
+static void CheckInParameterConflicts(CatCList* catlist, const char* procedureName, oidvector* inpara_type,
+    oidvector* proc_para_type, Oid languageId, bool isOraStyle, bool replace)
+{
+    if (IsPlpgsqlLanguageOid(languageId) && !isOraStyle) {
+        bool same = DatumGetBool(
+            DirectFunctionCall2(oidvectoreq, PointerGetDatum(inpara_type), PointerGetDatum(proc_para_type)));
+        if (same && !replace) {
+            ReleaseSysCacheList(catlist);
+            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_FUNCTION),
+                errmsg("function \"%s\" already exists with same argument types", procedureName)));
+        }
+    }
+}
+#endif

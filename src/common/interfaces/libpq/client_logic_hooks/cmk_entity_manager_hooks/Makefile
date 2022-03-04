@@ -13,7 +13,7 @@ include $(top_builddir)/src/Makefile.global
 
 override CPPFLAGS +=  -I. -I$(top_builddir)/src/include -I../encryption_hooks
 override LDFLAGS +=  -L. -L$(LIBOPENSSL_LIB_PATH)
-override LDLIBS += -lsecurec -lssl -lcrypto
+override LDLIBS += -l$(SECURE_C_CHECK) -lssl -lcrypto
 CMKEM_OBJS = common.o cmkem_comm_algorithm.o reg_hook_frame.o
 
 override CPPFLAGS += -ftrapv -fstack-protector-strong

@@ -81,7 +81,6 @@ static AclResult pg_role_aclcheck(Oid role_oid, Oid roleid, AclMode mode);
 static void RoleMembershipCacheCallback(Datum arg, int cacheid, uint32 hashvalue);
 static Oid get_role_oid_or_public(const char* rolname);
 
-static List * roles_has_privs_of(Oid roleid);
 static Oid convert_cmk_name(text *keyname);
 static Oid convert_column_key_name(text *keyname);
 static AclMode convert_cmk_priv_string(text *priv_type_text);
@@ -1351,10 +1350,10 @@ static bool has_privs_of_role_without_sysadmin(Oid member, Oid role)
 
 
 /*
- * aclmask_dbe_perf --- compute bitmask of all privileges of held by roleid
- * when related to schema dbe_perf and objects in schema dbe_perf.
+ * aclmask_without_sysadmin --- compute bitmask of all privileges of held by roleid
+ * when related to schema dbe_perf, snapshot and pg_catalog.
  */
-AclMode aclmask_dbe_perf(const Acl *acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHow how)
+AclMode aclmask_without_sysadmin(const Acl *acl, Oid roleid, Oid ownerId, AclMode mask, AclMaskHow how)
 {
     AclMode result;
     AclMode remaining;
@@ -5220,7 +5219,7 @@ void initialize_acl(void)
          * In normal mode, set a callback on any syscache invalidation of
          * pg_auth_members rows
          */
-        CacheRegisterSyscacheCallback(AUTHMEMROLEMEM, RoleMembershipCacheCallback, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(AUTHMEMROLEMEM, RoleMembershipCacheCallback, (Datum)0);
     }
 }
 
@@ -5263,7 +5262,7 @@ static bool has_rolinherit(Oid roleid)
  * For the benefit of select_best_grantor, the result is defined to be
  * in breadth-first order, ie, closer relationships earlier.
  */
-static List* roles_has_privs_of(Oid roleid)
+List* roles_has_privs_of(Oid roleid)
 {
     List* roles_list = NIL;
     ListCell* l = NULL;
@@ -5299,7 +5298,7 @@ static List* roles_has_privs_of(Oid roleid)
         /* Find roles that memberid is directly a member of */
         memlist = SearchSysCacheList1(AUTHMEMMEMROLE, ObjectIdGetDatum(memberid));
         for (i = 0; i < memlist->n_members; i++) {
-            HeapTuple tup = &memlist->members[i]->tuple;
+            HeapTuple tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, i);
             Oid otherid = ((Form_pg_auth_members)GETSTRUCT(tup))->roleid;
 
             /*
@@ -5373,7 +5372,7 @@ static List* roles_is_member_of(Oid roleid)
         /* Find roles that memberid is directly a member of */
         memlist = SearchSysCacheList1(AUTHMEMMEMROLE, ObjectIdGetDatum(memberid));
         for (i = 0; i < memlist->n_members; i++) {
-            HeapTuple tup = &memlist->members[i]->tuple;
+            HeapTuple tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, i);
             Oid otherid = ((Form_pg_auth_members)GETSTRUCT(tup))->roleid;
 
             /*
@@ -5587,7 +5586,7 @@ bool is_admin_of_role(Oid member, Oid role)
         /* Find roles that memberid is directly a member of */
         memlist = SearchSysCacheList1(AUTHMEMMEMROLE, ObjectIdGetDatum(memberid));
         for (i = 0; i < memlist->n_members; i++) {
-            HeapTuple tup = &memlist->members[i]->tuple;
+            HeapTuple tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, i);
             Oid otherid = ((Form_pg_auth_members)GETSTRUCT(tup))->roleid;
 
             if (otherid == role && ((Form_pg_auth_members)GETSTRUCT(tup))->admin_option) {
@@ -5644,12 +5643,13 @@ static int count_one_bits(AclMode mask)
  * *grantorId: receives the OID of the role to do the grant as
  * *grantOptions: receives the grant options actually held by grantorId
  * isDbePerf: if the object in question belonging to schema dbe_perf
+ * isPgCatalog: if the object in question belonging to schema pg_catalog
  *
  * If no grant options exist, we set grantorId to roleId, grantOptions to 0.
  */
 void select_best_grantor(
     Oid roleId, AclMode privileges, AclMode ddlPrivileges, const Acl* acl, Oid ownerId,
-        Oid* grantorId, AclMode* grantOptions, AclMode* grantDdlOptions, bool isDbePerf)
+    Oid* grantorId, AclMode* grantOptions, AclMode* grantDdlOptions, bool isDbePerf, bool isPgCatalog)
 {
     /* remove ddl privileges flag from Aclitem */
     ddlPrivileges = REMOVE_DDL_FLAG(ddlPrivileges);
@@ -5669,6 +5669,13 @@ void select_best_grantor(
      */
     if (isDbePerf) {
         if (roleId == ownerId || roleId == INITIAL_USER_ID || isMonitoradmin(roleId)) {
+            *grantorId = ownerId;
+            *grantOptions = needed_goptions;
+            *grantDdlOptions = ddl_needed_goptions;
+            return;
+        }
+    } else if (isPgCatalog) {
+        if (roleId == ownerId || roleId == INITIAL_USER_ID) {
             *grantorId = ownerId;
             *grantOptions = needed_goptions;
             *grantDdlOptions = ddl_needed_goptions;

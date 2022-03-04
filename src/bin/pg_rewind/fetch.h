@@ -42,9 +42,7 @@ extern XLogRecPtr libpqGetCurrentXlogInsertLocation(void);
 
 extern void libpqRequestCheckpoint(void);
 
-typedef void (*process_file_callback_t)(const char* path, file_type_t type, size_t oldsize, const char* link_target,
-    const RewindCompressInfo* rewindCompressInfo);
-
+typedef void (*process_file_callback_t)(const char* path, file_type_t type, size_t size, const char* link_target);
 extern BuildErrorCode traverse_datadir(const char* datadir, process_file_callback_t callback);
 
 extern void get_source_slotname(void);

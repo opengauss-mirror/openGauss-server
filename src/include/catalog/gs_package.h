@@ -27,6 +27,7 @@
 #define GS_PACKAGE_H
 
 #include "catalog/genbki.h"
+#include "utils/plpgsql.h"
 
 /* ----------------------------------------------------------------
  *        gs_package definition.
@@ -50,9 +51,25 @@ extern NameData* GetPackageName(Oid packageOid);
 extern Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok=false);
 extern Oid GetPackageNamespace(Oid packageOid);
 extern bool IsExistPackageName(const char* pkgname);
-extern void BuildSessionPackageRuntime(uint64 sessionId, uint64 parentSessionId);
+extern void BuildSessionPackageRuntimeForAutoSession(uint64 sessionId, uint64 parentSessionId,
+    PLpgSQL_execstate* estate = NULL, PLpgSQL_function* func = NULL);
 extern void initAutonomousPkgValue(PLpgSQL_package* targetPkg, uint64 sessionId);
-extern void processAutonmSessionPkgs(PLpgSQL_function* func);
+extern void initAutoSessionPkgsValue(uint64 sessionId);
+extern void SetFuncInfoValue(List* SessionFuncInfo, PLpgSQL_execstate* estate);
+extern void processAutonmSessionPkgsInException(PLpgSQL_function* func);
+extern void initAutoSessionFuncInfoValue(uint64 sessionId, PLpgSQL_execstate* estate);
+extern List *processAutonmSessionPkgs(PLpgSQL_function* func, PLpgSQL_execstate* estate = NULL,
+    bool isAutonm = false);
+extern Portal BuildHoldPortalFromAutoSession();
+extern void restoreAutonmSessionCursors(PLpgSQL_execstate* estate, PLpgSQL_row* row);
+extern void ResetAutoPortalConext(Portal portal);
+extern void BuildSessionPackageRuntimeForParentSession(uint64 sessionId, PLpgSQL_execstate* estate);
+enum FunctionErrorType {FunctionDuplicate, FunctionUndefined, FuncitonDefineError, FunctionReturnTypeError};
+#ifndef ENABLE_MULTIPLE_NODES
+extern Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, Oid procNamespace,
+                          Oid propackageid, Datum* values, Datum parameterModes);
+bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2);
+#endif
 CATALOG(gs_package,7815) BKI_BOOTSTRAP BKI_ROWTYPE_OID(9745) BKI_SCHEMA_MACRO
 {
     Oid         pkgnamespace;   /*package name space*/

@@ -1,16 +1,11 @@
 -- test: sighup
 set enable_default_ustore_table = on;
 
-show vacuum_defer_cleanup_age;
-show version_retention_age;
+show undo_retention_time;
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 900" > /dev/null 2>&1
 select pg_sleep(4);
-show vacuum_defer_cleanup_age;
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
-select pg_sleep(4);
-show version_retention_age;
+show undo_retention_time;
 
 create schema schema_test_3;
 set search_path = schema_test_3;
@@ -109,14 +104,12 @@ select * from pg_class timecapsule csn 0;
 timecapsule table pg_class to timestamp 0;
 timecapsule table pg_class to csn 0;
 
-
-
 drop table if exists tv_lineitem;
 create table tv_lineitem
 (
     l_orderkey    bigint not null
   , l_partkey     bigint not null
-)
+) 
 with (orientation = column)
 ; 
 select * from tv_lineitem timecapsule timestamp 0;
@@ -206,6 +199,7 @@ select * from fb_qtbl_invalid_1 timecapsule csn (select next_csn from gs_get_nex
 select * from fb_qtbl_invalid_1 timecapsule csn -1;
 
 drop table fb_qtbl_invalid_1;
+
 
 --timecapsule query with invalid timestamp
 drop table if exists fb_qtbl_invalid_2;
@@ -521,10 +515,10 @@ begin
     execute immediate 'timecapsule table fb_tbl_normal to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
 end;
 /
--- call pro_fb_tbl_normal_rb1(1);
--- select * from fb_tbl_normal order by id;
--- call pro_fb_tbl_normal_rb1(2);
--- select * from fb_tbl_normal order by id;
+call pro_fb_tbl_normal_rb1(1);
+select * from fb_tbl_normal order by id;
+call pro_fb_tbl_normal_rb1(2);
+select * from fb_tbl_normal order by id;
 call pro_fb_tbl_normal_rb1(3);
 select * from fb_tbl_normal order by id;
 drop table temp;
@@ -534,16 +528,5 @@ drop view dual;
 drop schema schema_test_3 cascade;
 reset search_path;
 
--- reset vacuum_defer_cleanup_age
-show vacuum_defer_cleanup_age;
-show version_retention_age;
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
-select pg_sleep(4);
-show vacuum_defer_cleanup_age;
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
-select pg_sleep(4);
-show version_retention_age;
-
-set enable_default_ustore_table = off;
+set enable_default_ustore_table = off; 
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 0" > /dev/null 2>&1

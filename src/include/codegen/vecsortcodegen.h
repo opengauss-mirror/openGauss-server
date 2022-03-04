@@ -39,6 +39,7 @@ namespace dorado {
 /*
  * VecSortCodeGen class implements specific optimization by using LLVM
  */
+#ifdef ENABLE_LLVM_COMPILE
 class VecSortCodeGen : public BaseObject {
 public:
     /*
@@ -151,5 +152,6 @@ public:
      */
     static llvm::Function* SortAggTexteqCodeGen();
 };
+#endif
 }  // namespace dorado
 #endif

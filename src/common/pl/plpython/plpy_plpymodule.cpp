@@ -1,6 +1,5 @@
 /*
  * Portions Copyright (c) 2021, openGauss Contributors
- *
  * the plpy module
  *
  * src/common/pl/plpython/plpy_plpymodule.cpp

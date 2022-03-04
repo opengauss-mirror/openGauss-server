@@ -42,7 +42,6 @@
 #include <dirent.h>
 #include "utils/hsearch.h"
 #include "storage/smgr/relfilenode.h"
-#include "storage/page_compression.h"
 #include "postmaster/aiocompleter.h"
 
 /*
@@ -61,6 +60,7 @@ typedef struct DataFileIdCacheEntry {
     /* the following are setted in runtime */
     int fd;
     int refcount;
+    int repaired_fd;
 } DataFileIdCacheEntry;
 
 enum FileExistStatus { FILE_EXIST, FILE_NOT_EXIST, FILE_NOT_REG };
@@ -182,10 +182,7 @@ extern int data_sync_elevel(int elevel);
 
 extern bool FdRefcntIsZero(SMgrRelation reln, ForkNumber forkNum);
 extern FileExistStatus CheckFileExists(const char* path);
-
-/* Page compression support routines */
-extern void SetupPageCompressMemoryMap(File file, RelFileNode node, const RelFileNodeForkNum& relFileNodeForkNum);
-extern PageCompressHeader *GetPageCompressMemoryMap(File file, uint32 chunk_size);
+extern bool repair_deleted_file_check(RelFileNodeForkNum fileNode, int fd);
 
 /* Filename components for OpenTemporaryFile */
 // Note that this macro must be the same to macro in initdb.cpp

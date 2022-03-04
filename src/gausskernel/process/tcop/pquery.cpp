@@ -1118,11 +1118,19 @@ bool PortalRun(
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
     int save_compile_status = u_sess->plsql_cxt.compile_status;
+    int savePortalDepth = u_sess->plsql_cxt.portal_depth;
+    bool savedisAllowCommitRollback = false;
+    bool needResetErrMsg = false;
 
     PG_TRY();
     {
         ActivePortal = portal;
         t_thrd.utils_cxt.CurrentResourceOwner = portal->resowner;
+        u_sess->plsql_cxt.portal_depth++;
+        if (u_sess->plsql_cxt.portal_depth > 1) {
+            /* commit rollback procedure not support in multi-layer portal called */
+            needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_TOO_MANY_PORTAL);
+        }
         t_thrd.mem_cxt.portal_mem_cxt = PortalGetHeapMemory(portal);
 
         MemoryContextSwitchTo(t_thrd.mem_cxt.portal_mem_cxt);
@@ -1201,6 +1209,8 @@ bool PortalRun(
     {
         /* Uncaught error while executing portal: mark it dead */
         MarkPortalFailed(portal);
+        u_sess->plsql_cxt.portal_depth = savePortalDepth;
+        stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
 
         /* Restore global vars and propagate error */
         if (saveMemoryContext == saveTopTransactionContext ||
@@ -1218,23 +1228,6 @@ bool PortalRun(
         }
         t_thrd.mem_cxt.portal_mem_cxt = savePortalContext;
 
-        if (ENABLE_WORKLOAD_CONTROL) {
-            /* save error to history info */
-            save_error_message();
-            if (g_instance.wlm_cxt->dynamic_workload_inited) {
-                t_thrd.wlm_cxt.parctl_state.errjmp = 1;
-                if (t_thrd.wlm_cxt.parctl_state.simple == 0)
-                    dywlm_client_release(&t_thrd.wlm_cxt.parctl_state);
-                else
-                    WLMReleaseGroupActiveStatement();
-                dywlm_client_max_release(&t_thrd.wlm_cxt.parctl_state);
-            } else
-                WLMParctlRelease(&t_thrd.wlm_cxt.parctl_state);
-
-            if (IS_PGXC_COORDINATOR && t_thrd.wlm_cxt.collect_info->sdetail.msg) {
-                pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.msg);
-            }
-        }
         ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
             errmsg("%s clear curr_compile_context because of error.", __func__)));
         /* reset nest plpgsql compile */
@@ -1245,6 +1238,9 @@ bool PortalRun(
         PG_RE_THROW();
     }
     PG_END_TRY();
+
+    u_sess->plsql_cxt.portal_depth = savePortalDepth;
+    stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
 
     if (ENABLE_WORKLOAD_CONTROL) {
         t_thrd.wlm_cxt.parctl_state.except = 0;

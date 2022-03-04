@@ -174,6 +174,8 @@ typedef struct {
 #endif
     RedoInterruptCallBackFunc oldStartupIntrruptFunc;
     volatile bool recoveryStop;
+    volatile XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
+    RedoTimeCost *startupTimeCost;
 } LogDispatcher;
 
 typedef struct {
@@ -192,6 +194,7 @@ extern THR_LOCAL RecordBufferState *g_recordbuffer;
 const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
 const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
 extern RedoItem g_redoEndMark;
+extern RedoItem g_terminateMark;
 extern uint32 g_startupTriggerState;
 extern uint32 g_readManagerTriggerFlag;
 
@@ -230,7 +233,6 @@ int GetDispatcherExitCode();
 bool DispatchPtrIsNull();
 uint32 GetBatchCount();
 uint32 GetAllWorkerCount();
-bool OnHotStandBy();
 PGPROC *StartupPidGetProc(ThreadId pid);
 extern void SetStartupBufferPinWaitBufId(int bufid);
 extern void GetStartupBufferPinWaitBufId(int *bufids, uint32 len);
@@ -241,22 +243,19 @@ void **GetXLogInvalidPagesFromWorkers();
 
 /* Other utility functions. */
 uint32 GetSlotId(const RelFileNode node, BlockNumber block, ForkNumber forkNum, uint32 workerCount);
-bool XactWillRemoveRelFiles(XLogReaderState *record);
 bool XactHasSegpageRelFiles(XLogReaderState *record);
-XLogReaderState *NewReaderState(XLogReaderState *readerState, bool bCopyState = false);
+XLogReaderState *NewReaderState(XLogReaderState *readerState);
 void FreeAllocatedRedoItem();
-void DiagLogRedoRecord(XLogReaderState *record, const char *funcName);
 List *CheckImcompleteAction(List *imcompleteActionList);
 void SetPageWorkStateByThreadId(uint32 threadState);
-void UpdateDispatcherStandbyState(HotStandbyState *state);
 void GetReplayedRecPtr(XLogRecPtr *startPtr, XLogRecPtr *endPtr);
 void StartupSendFowarder(RedoItem *item);
 XLogRecPtr GetSafeMinCheckPoint();
 RedoWaitInfo redo_get_io_event(int32 event_id);
 void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen);
-#ifndef ENABLE_MULTIPLE_NODES
 void CheckCommittingCsnList();
-#endif
+void redo_get_wroker_time_count(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
+void DumpDispatcher();
 
 }  // namespace extreme_rto
 

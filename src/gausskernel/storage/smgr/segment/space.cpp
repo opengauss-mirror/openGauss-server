@@ -104,29 +104,10 @@ void spc_write_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, con
 
 void spc_writeback(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks)
 {
-    while (nblocks > 0) {
-        BlockNumber nflush = nblocks;
+    int egid = EXTENT_SIZE_TO_GROUPID(extent_size);
+    SegLogicFile *sf = spc->extent_group[egid][forknum].segfile;
 
-        int slice_start = blocknum / DF_FILE_SLICE_SIZE;
-        int slice_end = (blocknum + nblocks - 1) / DF_FILE_SLICE_SIZE;
-
-        /* cross slice */
-        if (slice_start != slice_end) {
-            nflush = DF_FILE_SLICE_SIZE - (blocknum % DF_FILE_SLICE_SIZE);
-        }
-
-        int egid = EXTENT_SIZE_TO_GROUPID(extent_size);
-        SegPhysicalFile *sf = &spc->extent_group[egid][forknum].segfile->segfiles[slice_start];
-
-        off_t seekpos = (off_t)BLCKSZ * (blocknum % DF_FILE_SLICE_SIZE);
-
-        if (sf->fd < 0) {
-            return;
-        }
-        pg_flush_data(sf->fd, seekpos, (off_t)BLCKSZ * nflush);
-
-        nblocks -= nflush;
-    }
+    df_flush_data(sf, blocknum, nblocks);
 }
 
 BlockNumber spc_size(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum)
@@ -604,8 +585,13 @@ Oid get_valid_relation_oid(Oid spcNode, Oid relNode)
 {
     Oid reloid, oldreloid;
     bool retry = false;
+    uint64 sess_inval_count;
+    uint64 thrd_inval_count = 0;
     for (;;) {
-        uint64 inval_count = u_sess->inval_cxt.SharedInvalidMessageCounter;
+        sess_inval_count = u_sess->inval_cxt.SIMCounter;
+        if (EnableLocalSysCache()) {
+            thrd_inval_count = t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;
+        }
         reloid = get_relation_oid(spcNode, relNode);
 
         if (retry) {
@@ -627,8 +613,15 @@ Oid get_valid_relation_oid(Oid spcNode, Oid relNode)
         }
 
         /* No invalidation message */
-        if (inval_count == u_sess->inval_cxt.SharedInvalidMessageCounter) {
-            return reloid;
+        if (EnableLocalSysCache()) {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter &&
+                thrd_inval_count == t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter) {
+                return reloid;
+            }
+        } else {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter) {
+                return reloid;
+            }
         }
         retry = true;
         oldreloid = reloid;
@@ -873,6 +866,7 @@ void move_extents(SegExtentGroup *seg, BlockNumber target_size)
 
     BlockNumber victim = selector.next();
     while (victim != InvalidBlockNumber) {
+        CHECK_FOR_INTERRUPTS();
         move_one_extent(seg, victim, &ipbuf);
         victim = selector.next();
     }

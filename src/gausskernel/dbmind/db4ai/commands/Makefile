@@ -17,6 +17,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-OBJS = create_model.o predict_by.o
+OBJS = create_model.o predict_by.o explain_model.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

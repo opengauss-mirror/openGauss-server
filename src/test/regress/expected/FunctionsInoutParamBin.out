@@ -1,0 +1,74 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_processed (name text, val INT ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), val2 INT)
+insert into t_processed values('one',1,10),('two',2,20),('three',3,30),('four',4,40),('five',5,50),('six',6,60),('seven',7,70),('eight',8,80),('nine',9,90),('ten',10,100)
+CREATE OR REPLACE FUNCTION f_plaintext_out(out1 INOUT int, out2 INOUT int) AS 'SELECT val, val2 from t_processed where val= out1 ORDER BY name LIMIT 1' LANGUAGE SQL
+CALL f_plaintext_out (1, 1)
+ out1 | out2 
+------+------
+    1 |   10
+(1 row)
+
+f_plaintext_out value of index 1 Type is java.lang.Integer value is 1
+f_plaintext_out value of index 2 Type is java.lang.Integer value is 10
+DROP FUNCTION f_plaintext_out
+CREATE OR REPLACE FUNCTION f_plaintext_out(out1 INOUT int, out2 INOUT int) AS 'SELECT val, val2 from t_processed where val=out1 AND val2=out2 ORDER BY name LIMIT 1' LANGUAGE SQL
+CALL f_plaintext_out (3, 30)
+ out1 | out2 
+------+------
+    3 |   30
+(1 row)
+
+SELECT f_plaintext_out (3, 30)
+ f_plaintext_out 
+-----------------
+ (3,30)
+(1 row)
+
+f_plaintext_out value of index 1 Type is java.lang.Integer value is 3
+f_plaintext_out value of index 2 Type is java.lang.Integer value is 30
+DROP FUNCTION f_plaintext_out
+CREATE OR REPLACE FUNCTION f_plaintext_out(out1 INOUT int, out2 INOUT int) AS $$ BEGIN SELECT val, val2 from t_processed ORDER BY name LIMIT 1 INTO out1, out2; END;$$ LANGUAGE PLPGSQL
+CALL f_plaintext_out (2, 3)
+ out1 | out2 
+------+------
+    8 |   80
+(1 row)
+
+SELECT f_plaintext_out (2, 3)
+ f_plaintext_out 
+-----------------
+ (8,80)
+(1 row)
+
+f_plaintext_out value of index 1 Type is java.lang.Integer value is 8
+f_plaintext_out value of index 2 Type is java.lang.Integer value is 80
+DROP FUNCTION f_plaintext_out
+CREATE OR REPLACE FUNCTION f_plaintext_out(out1 INOUT int, out2 INOUT int) AS $$ BEGIN SELECT val, val2 from t_processed where val=out1 or val2=out2 ORDER BY name LIMIT 1 INTO out1, out2; END; $$ LANGUAGE PLPGSQL
+CALL f_plaintext_out (2, 30)
+ out1 | out2 
+------+------
+    3 |   30
+(1 row)
+
+SELECT f_plaintext_out (2, 30)
+ f_plaintext_out 
+-----------------
+ (3,30)
+(1 row)
+
+f_plaintext_out value of index 1 Type is java.lang.Integer value is 3
+f_plaintext_out value of index 2 Type is java.lang.Integer value is 30
+DROP FUNCTION f_plaintext_out
+DROP TABLE t_processed
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1

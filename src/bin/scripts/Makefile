@@ -21,7 +21,9 @@ PROGRAMS = createdb createlang createuser dropdb droplang dropuser clusterdb vac
 override CPPFLAGS := -I$(top_srcdir)/src/bin/pg_dump -I$(top_srcdir)/src/bin/psql -I$(libpq_srcdir) $(CPPFLAGS)
 
 CFLAGS += -Wl,-z,relro,-z,now
-LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+ifeq ($(enable_lite_mode), no)
+    LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+endif
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"

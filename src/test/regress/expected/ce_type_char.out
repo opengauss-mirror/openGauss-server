@@ -5,7 +5,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY IF EXISTS charCMK CASCADE;
-NOTICE:  global setting "charcmk" does not exist
+NOTICE:  client master key "charcmk" does not exist
 CREATE CLIENT MASTER KEY charCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 CREATE COLUMN ENCRYPTION KEY charCEK WITH VALUES (CLIENT_MASTER_KEY = charCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 create table IF NOT EXISTS char_type(
@@ -99,15 +99,15 @@ SELECT * from char_type order by c1;
 (2 rows)
 
 -- test empty data
-insert into char_type values(12, '', '','','', '','', '', '', '','');
-insert into char_type values(13, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+insert into char_type values(8, '', '','','', '','', '', '', '','');
+insert into char_type values(9, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 SELECT * from char_type order by c1;
  c1 | c2 | c3 | c4 |          c5           | c6 |        c7        |  c8  |  c9   | c10 |                c11                 
 ----+----+----+----+-----------------------+----+------------------+------+-------+-----+------------------------------------
   7 | cc | c  | dd | ccccbbbbaaaaaaaaaaaaa | aa | aaaaaaaaaaaaaaaa | aaaa | aaaaa | a   | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  8 |    |    |    |                       |    |                  |      |       |     | 
   8 | cc | c  | dd | ccc                   | aa | a                | a    | a     | a   | aaaaa
- 12 |    |    |    |                       |    |                  |      |       |     | 
- 13 |    |    |    |                       |    |                  |      |       |     | 
+  9 |    |    |    |                       |    |                  |      |       |     | 
 (4 rows)
 
 create table IF NOT EXISTS char_type_enc1(

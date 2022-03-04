@@ -1,0 +1,50 @@
+DROP USER IF EXISTS test CASCADE;
+CREATE USER test WITH CREATEDB PASSWORD "Gauss@123";
+SET ROLE test PASSWORD 'Gauss@123';
+\! gs_ktool -d all
+\! gs_ktool -g
+\! gs_ktool -g
+
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_client_lib/gsjdbc4.jar:@abs_builddir@/jdbc_ce_test/ce_ddl_pbe/. ClientEncryptionSelectTest @portstring@ > /dev/null 2>&1
+
+SELECT global_key_name, key_namespace, key_owner FROM gs_client_global_keys;
+
+SELECT column_key_name,  key_namespace, key_owner FROM gs_column_keys;
+
+--支持
+select count(*) from creditcard_info;
+select count(*) from creditcard_info1;
+select count(*) from creditcard_info2;
+select count(*) from creditcard_info3;
+select count(*) from creditcard_info2_1;
+select count(*) from creditcard_info3_1;
+select count(*) from creditcard_info4;
+select count(*) from creditcard_info5;
+select count(*) from un_encrypted_table;
+select count(*) from batch_table;
+select count(*) from table_random;
+
+DROP TABLE IF EXISTS creditcard_info;
+DROP TABLE IF EXISTS creditcard_info1;
+DROP TABLE IF EXISTS creditcard_info2;
+DROP TABLE IF EXISTS creditcard_info3;
+DROP TABLE IF EXISTS creditcard_info2_1;
+DROP TABLE IF EXISTS creditcard_info3_1;
+DROP TABLE IF EXISTS creditcard_info4;
+DROP TABLE IF EXISTS creditcard_info5;
+DROP TABLE IF EXISTS  un_encrypted_table;
+DROP TABLE IF EXISTS  batch_table;
+DROP TABLE IF EXISTS  table_random;
+
+DROP COLUMN ENCRYPTION KEY ImgCEK1;
+DROP COLUMN ENCRYPTION KEY ImgCEK;
+DROP CLIENT MASTER KEY ImgCMK1 CASCADE;
+DROP CLIENT MASTER KEY ImgCMK CASCADE;
+
+select  count(*), 'count' FROM gs_client_global_keys;
+select  count(*), 'count' FROM gs_column_keys;
+SELECT  count(*), 'count' FROM gs_encrypted_columns;
+\! gs_ktool -d all
+
+RESET ROLE;
+DROP USER IF EXISTS test CASCADE;

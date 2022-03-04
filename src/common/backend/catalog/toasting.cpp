@@ -40,6 +40,10 @@
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
 #include "utils/partitionmap.h"
+#include "utils/acl.h"
+#include "commands/dbcommands.h"
+#include "catalog/pg_authid.h"
+#include "tcop/utility.h"
 
 /* Potentially set by contrib/pg_upgrade_support functions */
 static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
@@ -638,6 +642,261 @@ static bool binary_upgrade_is_next_part_toast_pg_type_oid_valid()
                         [u_sess->upg_cxt.binary_upgrade_cur_part_toast_pg_type_oid])) {
         return false;
     }
+
+    return true;
+}
+
+static void InitTempToastNamespace(void)
+{
+    char toastNamespaceName[NAMEDATALEN];
+    char PGXCNodeNameSimplified[NAMEDATALEN];
+    Oid toastspaceId;
+    uint32 timeLineId = 0;
+    CreateSchemaStmt* create_stmt = NULL;
+    char str[NAMEDATALEN * 2 + 64] = {0};
+    uint32 tempID = 0;
+    const uint32 NAME_SIMPLIFIED_LEN = 7;
+    uint32 nameLen = strlen(g_instance.attr.attr_common.PGXCNodeName);
+    int ret;
+    errno_t rc;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    Assert(g_instance.exec_cxt.global_application_name != NULL);
+    nameLen = strlen(g_instance.exec_cxt.global_application_name);
+#endif
+
+    if (pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CREATE_TEMP) != ACLCHECK_OK) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create temporary tables in database \"%s\"",
+                    get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId))));
+    }
+
+    check_nodegroup_privilege(GetUserId(), GetUserId(), ACL_CREATE);
+
+    if (RecoveryInProgress())
+        ereport(ERROR,
+            (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION), errmsg("cannot create temporary tables during recovery")));
+
+    timeLineId = get_controlfile_timeline();
+    tempID = __sync_add_and_fetch(&gt_tempID_seed, 1);
+
+    ret = strncpy_s(PGXCNodeNameSimplified,
+        sizeof(PGXCNodeNameSimplified),
+#ifndef ENABLE_MULTIPLE_NODES
+        g_instance.exec_cxt.global_application_name,
+#else
+        g_instance.attr.attr_common.PGXCNodeName,
+#endif
+        nameLen >= NAME_SIMPLIFIED_LEN ? NAME_SIMPLIFIED_LEN : nameLen);
+    securec_check(ret, "\0", "\0");
+
+    HeapTuple tup = NULL;
+    char* bootstrap_username = NULL;
+    tup = SearchSysCache1(AUTHOID, BOOTSTRAP_SUPERUSERID);
+    if (HeapTupleIsValid(tup)) {
+        bootstrap_username = pstrdup(NameStr(((Form_pg_authid)GETSTRUCT(tup))->rolname));
+        ReleaseSysCache(tup);
+    } else {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for role %u", BOOTSTRAP_SUPERUSERID)));
+    }
+    if (!IsInitdb) {
+        ret = snprintf_s(toastNamespaceName,
+            sizeof(toastNamespaceName),
+            sizeof(toastNamespaceName) - 1,
+            "pg_toast_temp_%s_%u_%u_%lu",
+            PGXCNodeNameSimplified,
+            timeLineId,
+            tempID,
+            IS_THREAD_POOL_WORKER ? u_sess->session_id : (uint64)t_thrd.proc_cxt.MyProcPid);
+    } else {
+        ret = snprintf_s(toastNamespaceName,
+            sizeof(toastNamespaceName),
+            sizeof(toastNamespaceName) - 1,
+            "pg_toast_temp_%s",
+            PGXCNodeNameSimplified);
+    }
+
+    securec_check_ss(ret, "\0", "\0");
+
+    toastspaceId = get_namespace_oid(toastNamespaceName, true);
+    if (OidIsValid(toastspaceId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), 
+                errmsg("toast Namespace Named %s has existed, please drop it and try again", toastNamespaceName)));
+    }
+
+    create_stmt = makeNode(CreateSchemaStmt);
+    create_stmt->authid = bootstrap_username;
+    create_stmt->schemaElts = NULL;
+    create_stmt->schemaname = toastNamespaceName;
+    create_stmt->temptype = Temp_Toast;
+    rc = memset_s(str, sizeof(str), 0, sizeof(str));
+    securec_check(rc, "", "");
+    ret = snprintf_s(str,
+        sizeof(str),
+        sizeof(str) - 1,
+        "CREATE SCHEMA %s AUTHORIZATION \"%s\"",
+        toastNamespaceName,
+        bootstrap_username);
+    securec_check_ss(ret, "\0", "\0");
+    ProcessUtility((Node*)create_stmt, str, NULL, false, None_Receiver, false, NULL);
+
+    /* Advance command counter to make namespace visible */
+    CommandCounterIncrement();
+
+    Assert(OidIsValid(u_sess->catalog_cxt.myTempNamespace) && OidIsValid(u_sess->catalog_cxt.myTempToastNamespace));
+
+    u_sess->catalog_cxt.baseSearchPathValid = false;
+}
+
+bool create_toast_by_sid(Oid *toastOid)
+{
+    char toast_relname[NAMEDATALEN];
+    char toast_idxname[NAMEDATALEN];
+    TupleDesc tupdesc;
+    IndexInfo* indexInfo = NULL;
+    Relation toast_rel;
+    Oid namespaceid = 0;
+    Oid collationObjectId[2];
+    Oid classObjectId[2];
+    int16 coloptions[2];
+    errno_t rc = EOK;
+    uint64 session_id = 0;
+    if (OidIsValid(u_sess->plsql_cxt.ActiveLobToastOid)) {
+        *toastOid = u_sess->plsql_cxt.ActiveLobToastOid;
+        return false;
+    }
+
+    session_id = IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
+
+    rc = snprintf_s(toast_relname, sizeof(toast_relname), sizeof(toast_relname) - 1, "pg_temp_toast_%u", session_id);
+    securec_check_ss(rc, "\0", "\0");
+    rc = snprintf_s(
+        toast_idxname, sizeof(toast_idxname), sizeof(toast_idxname) - 1, "pg_temp_toast_%u_index", session_id);
+    securec_check_ss(rc, "\0", "\0");
+    
+    /* this is pretty painful...  need a tuple descriptor */
+    tupdesc = CreateTemplateTupleDesc(3, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "chunk_id", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "chunk_seq", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "chunk_data", BYTEAOID, -1, 0);
+
+    /*
+     * Ensure that the toast table doesn't itself get toasted, or we'll be
+     * toast :-(.  This is essential for chunk_data because type bytea is
+     * toastable; hit the other two just to be sure.
+     */
+    tupdesc->attrs[0]->attstorage = 'p';
+    tupdesc->attrs[1]->attstorage = 'p';
+    tupdesc->attrs[2]->attstorage = 'p';
+    if (OidIsValid(u_sess->catalog_cxt.myTempToastNamespace)) {
+        namespaceid = GetTempToastNamespace();
+    } else {
+        InitTempToastNamespace();
+        namespaceid = GetTempToastNamespace();
+    }
+
+    StorageType storage_type = HEAP_DISK;
+    Datum reloptions = (Datum)0;
+    Oid toast_relid = heap_create_with_catalog(toast_relname,
+        namespaceid,
+        u_sess->proc_cxt.MyDatabaseTableSpace,
+        InvalidOid,
+        InvalidOid,
+        InvalidOid,
+        GetUserId(),
+        tupdesc,
+        NIL,
+        RELKIND_TOASTVALUE,
+        RELPERSISTENCE_PERMANENT,
+        false,
+        false,
+        true,
+        0,
+        ONCOMMIT_NOOP,
+        reloptions,
+        false,
+        true,
+        NULL,
+        REL_CMPRS_NOT_SUPPORT,
+        NULL,
+        true,
+        NULL,
+        storage_type);
+    Assert(toast_relid != InvalidOid);
+
+    toast_rel = heap_open(toast_relid, ShareLock);
+
+    Datum indexReloptions = (Datum)0;
+    List* indexOptions = NULL;
+    if (RelationIsUstoreFormat(toast_rel)) {
+        DefElem* def = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE));
+        indexOptions = list_make1(def);
+        indexReloptions = transformRelOptions((Datum)0, indexOptions, NULL, NULL, false, false);
+    }
+
+    indexInfo = makeNode(IndexInfo);
+    indexInfo->ii_NumIndexAttrs = 2;
+    indexInfo->ii_NumIndexKeyAttrs = indexInfo->ii_NumIndexAttrs;
+    indexInfo->ii_KeyAttrNumbers[0] = 1;
+    indexInfo->ii_KeyAttrNumbers[1] = 2;
+    indexInfo->ii_Expressions = NIL;
+    indexInfo->ii_ExpressionsState = NIL;
+    indexInfo->ii_Predicate = NIL;
+    indexInfo->ii_PredicateState = NIL;
+    indexInfo->ii_ExclusionOps = NULL;
+    indexInfo->ii_ExclusionProcs = NULL;
+    indexInfo->ii_ExclusionStrats = NULL;
+    indexInfo->ii_Unique = true;
+    indexInfo->ii_ReadyForInserts = true;
+    indexInfo->ii_Concurrent = false;
+    indexInfo->ii_BrokenHotChain = false;
+    indexInfo->ii_PgClassAttrId = 0;
+    indexInfo->ii_ParallelWorkers = 0;
+
+    collationObjectId[0] = InvalidOid;
+    collationObjectId[1] = InvalidOid;
+
+    classObjectId[0] = OID_BTREE_OPS_OID;
+    classObjectId[1] = INT4_BTREE_OPS_OID;
+
+    coloptions[0] = 0;
+    coloptions[1] = 0;
+
+    IndexCreateExtraArgs extra;
+    SetIndexCreateExtraArgs(&extra, InvalidOid, false, false);
+
+    index_create(toast_rel,
+        toast_idxname,
+        InvalidOid,
+        InvalidOid,
+        indexInfo,
+        list_make2((void*)"chunk_id", (void*)"chunk_seq"),
+        BTREE_AM_OID,
+        u_sess->proc_cxt.MyDatabaseTableSpace,
+        collationObjectId,
+        classObjectId,
+        coloptions,
+        indexReloptions,
+        true,
+        false,
+        false,
+        false,
+        true,
+        !u_sess->upg_cxt.new_catalog_need_storage,
+        false,
+        &extra,
+        false);
+
+    heap_close(toast_rel, NoLock);
+    u_sess->plsql_cxt.ActiveLobToastOid = toast_relid;
+    *toastOid = toast_relid;
+    /*
+     * Make changes visible
+     */
+    CommandCounterIncrement();
 
     return true;
 }

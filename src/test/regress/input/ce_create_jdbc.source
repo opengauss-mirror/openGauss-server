@@ -1,0 +1,39 @@
+DROP USER IF EXISTS test CASCADE;
+CREATE USER test WITH CREATEDB PASSWORD "Gauss@123";
+SET ROLE test PASSWORD 'Gauss@123';
+\! gs_ktool -d all
+\! gs_ktool -g
+\! gs_ktool -g
+
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_client_lib/gsjdbc4.jar:@abs_builddir@/jdbc_ce_test/ce_ddl_pbe/. ClientEncryptionCreateTest @portstring@ > /dev/null 2>&1
+INSERT INTO ce_t1 VALUES(1);
+INSERT INTO ce_t2 VALUES(1);
+INSERT INTO ce_t3 VALUES(1);
+INSERT INTO ce_t4 VALUES(1);
+INSERT INTO ce_t5 VALUES(1);
+INSERT INTO ce_t6 VALUES(1);
+SELECT * FROM ce_t1;
+SELECT * FROM ce_t2;
+SELECT * FROM ce_t3;
+SELECT * FROM ce_t4;
+SELECT * FROM ce_t5;
+SELECT * FROM ce_t6;
+DROP TABLE IF EXISTS ce_t1;
+DROP TABLE IF EXISTS ce_t2;
+DROP TABLE IF EXISTS ce_t3;
+DROP TABLE IF EXISTS ce_t4;
+DROP TABLE IF EXISTS ce_t5;
+DROP TABLE IF EXISTS ce_t6;
+
+DROP COLUMN ENCRYPTION KEY ImgCEK1;
+DROP COLUMN ENCRYPTION KEY ImgCEK;
+DROP CLIENT MASTER KEY ImgCMK1 CASCADE;
+DROP CLIENT MASTER KEY ImgCMK CASCADE;
+
+select  count(*), 'count' FROM gs_client_global_keys;
+select  count(*), 'count' FROM gs_column_keys;
+SELECT  count(*), 'count' FROM gs_encrypted_columns;
+\! gs_ktool -d all
+
+RESET ROLE;
+DROP USER IF EXISTS test CASCADE;

@@ -5,6 +5,7 @@ list(APPEND TGT_transam_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/clog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/csnlog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/double_write.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/single_double_write.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/multi_redo_api.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/multi_redo_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/multixact.cpp

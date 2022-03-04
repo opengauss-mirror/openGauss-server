@@ -69,12 +69,6 @@
 #define HIBERNATE_FACTOR 50
 
 /*
- * Interval in which standby snapshots are logged into the WAL stream, in
- * milliseconds.
- */
-#define LOG_SNAPSHOT_INTERVAL_MS 15000
-
-/*
  * LSN and timestamp at which we last issued a LogStandbySnapshot(), to avoid
  * doing so too often or repeatedly if there has been no other write activity
  * in the system.
@@ -142,6 +136,9 @@ static void bgwriter_handle_exceptions(WritebackContext wb_context, MemoryContex
 
     /* abort async io, must before LWlock release */
     AbortAsyncListIO();
+
+    /* release resource held by lsc */
+    AtEOXact_SysDBCache(false);
 
     /*
      * These operations are really just a minimal subset of
@@ -276,6 +273,15 @@ void BackgroundWriterMain(void)
         bool can_hibernate = false;
         int rc;
 
+        /*
+         * when double write is disabled, pg_dw_meta will be created with dw_file_num = 0, so
+         * here is for upgrading process. bgwriter will run when enable_incremetal_checkpoint = off.
+         */
+        if (pg_atomic_read_u32(&g_instance.dw_batch_cxt.dw_version) < DW_SUPPORT_REABLE_DOUBLE_WRITE
+            && t_thrd.proc->workingVersionNum >= DW_SUPPORT_REABLE_DOUBLE_WRITE) {
+            dw_upgrade_renable_double_write();
+        }
+
         /* Clear any already-pending wakeups */
         ResetLatch(&t_thrd.proc->procLatch);
 
@@ -349,13 +355,6 @@ void BackgroundWriterMain(void)
             }
             if (now >= timeout) {
                 LogCheckSlot();
-            }
-
-            if (now >= timeout) {
-                uint32 term_cur = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
-				    g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
-				write_term_log(term_cur);
-                g_instance.comm_cxt.localinfo_cxt.set_term = true;
             }
         }
 
@@ -691,7 +690,7 @@ static void drop_rel_all_forks_buffers()
         }
     }
     LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
-    
+
     if (rel_num > 0) {
         DropRelFileNodeAllBuffersUsingHash(rel_bak);
 

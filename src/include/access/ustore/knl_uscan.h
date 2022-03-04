@@ -34,8 +34,14 @@ typedef struct UHeapScanDescData {
 
     /* these fields only used in page-at-a-time mode and for bitmap scans */
     // XXXTAM
+    ItemPointerData rs_mctid; /* marked scan position, if any */
+
+    /* these fields only used in page-at-a-time mode and for bitmap scans */
+    int rs_mindex;                                   /* marked tuple's saved index */
+
     UHeapTuple rs_visutuples[MaxPossibleUHeapTuplesPerPage]; /* visible tuples */
     UHeapTuple rs_cutup;                             /* current tuple in scan, if any */
+    UHeapTuple* rs_ctupBatch;	/* current tuples in scan */
 } UHeapScanDescData;
 
 typedef struct UHeapScanDescData *UHeapScanDesc;
@@ -46,10 +52,13 @@ const uint32 BULKSCAN_BLOCKS_PER_BUFFER = 4;
 UHeapTuple UHeapGetTupleFromPage(UHeapScanDesc scan, ScanDirection dir);
 UHeapTuple UHeapGetNextForVerify(TableScanDesc sscan, ScanDirection direction, bool& isValidRelationPage);
 TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys);
+void UHeapMarkPos(TableScanDesc uscan);
+void UHeapRestRpos(TableScanDesc sscan);
 void UHeapEndScan(TableScanDesc uscan);
 void UHeapRescan(TableScanDesc uscan, ScanKey key);
 HeapTuple UHeapGetNextSlot(TableScanDesc sscan, ScanDirection direction, TupleTableSlot *slot);
 UHeapTuple UHeapGetNextSlotGuts(TableScanDesc sscan, ScanDirection direction, TupleTableSlot *slot);
+UHeapTuple UHeapIndexBuildGetNextTuple(UHeapScanDesc scan, TupleTableSlot *slot);
 UHeapTuple UHeapSearchBuffer(ItemPointer tid, Relation relation, Buffer buffer,
                              Snapshot snapshot, bool *all_dead, UHeapTuple freebuf = NULL);
 bool UHeapScanBitmapNextTuple(TableScanDesc sscan, TBMIterateResult *tbmres, TupleTableSlot *slot);
@@ -57,4 +66,5 @@ bool UHeapScanBitmapNextBlock(TableScanDesc sscan, const TBMIterateResult *tbmre
 bool UHeapGetPage(TableScanDesc sscan, BlockNumber page);
 
 UHeapTuple UHeapGetNext(TableScanDesc sscan, ScanDirection dir);
+extern bool UHeapGetTupPageBatchmode(UHeapScanDesc scan, ScanDirection dir);
 #endif

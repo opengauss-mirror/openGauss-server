@@ -68,7 +68,7 @@ extern void PartitionCacheInitializePhase3(void);
  * Routine to create a partcache entry for an about-to-be-created relation
  */
 Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid partfilenode, Oid parttablespace,
-    StorageType storage_type, Datum reloptions);
+    StorageType storage_type);
 /*
  * Routines for backend startup
  */
@@ -82,6 +82,7 @@ extern void PartitionCacheInvalidate(void);
 extern void PartitionCloseSmgrByOid(Oid partitionId);
 extern void AtEOXact_PartitionCache(bool isCommit);
 extern void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid);
+extern void UpdatePartrelPointer(Relation partrel, Relation rel, Partition part);
 extern Relation partitionGetRelation(Relation rel, Partition part);
 
 void releaseDummyRelation(Relation* relation);
@@ -105,5 +106,6 @@ extern void PartitionSetEnabledClean(
 extern void PartitionSetAllEnabledClean(Oid parentOid);
 extern void PartitionGetAllInvisibleParts(Oid parentOid, OidRBTree** invisibleParts);
 extern bool PartitionMetadataDisabledClean(Relation pgPartition);
+extern void UpdateWaitCleanGpiRelOptions(Relation pgPartition, HeapTuple partTuple, bool enable, bool inplace);
 
 #endif /* RELCACHE_H */

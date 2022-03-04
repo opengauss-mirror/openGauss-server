@@ -122,6 +122,7 @@ typedef struct XlUHeapInsert {
 #define XLZ_UPDATE_SUFFIX_FROM_OLD (1 << 1)
 #define XLZ_NON_INPLACE_UPDATE (1 << 2)
 #define XLZ_HAS_UPDATE_UNDOTUPLE (1 << 3)
+#define XLZ_BLOCK_INPLACE_UPDATE (1 << 4)
 
 /* size=24 alignment=8 */
 typedef struct XlUHeapUpdate {
@@ -268,10 +269,14 @@ typedef struct XlUHeapExtendTdSlots {
 
 extern void UHeapRedo(XLogReaderState *record);
 extern void UHeapDesc(StringInfo buf, XLogReaderState *record);
+extern const char* uheap_type_name(uint8 subtype);
 extern char* GetUndoHeader(XlUndoHeader *xlundohdr, Oid *partitionOid, UndoRecPtr* blkprev);
 extern void UHeap2Redo(XLogReaderState *record);
 extern void UHeap2Desc(StringInfo buf, XLogReaderState *record);
+extern const char* uheap2_type_name(uint8 subtype);
 extern void UHeapUndoRedo(XLogReaderState *record);
 extern void UHeapUndoDesc(StringInfo buf, XLogReaderState *record);
+extern TransactionId UHeapXlogGetCurrentXid(XLogReaderState *record, bool hasCSN);
+extern const char* uheap_undo_type_name(uint8 subtype);
 extern TransactionId UHeapXlogGetCurrentXid(XLogReaderState *record);
 #endif

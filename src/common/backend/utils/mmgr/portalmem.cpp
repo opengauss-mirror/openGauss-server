@@ -206,7 +206,7 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
             ereport(ERROR, (errcode(ERRCODE_DUPLICATE_CURSOR), errmsg("cursor \"%s\" already exists", name)));
         if (dupSilent == false)
             ereport(WARNING, (errcode(ERRCODE_DUPLICATE_CURSOR), errmsg("closing existing cursor \"%s\"", name)));
-        PortalDrop(portal, false, true);
+        PortalDrop(portal, false);
     }
 
     /* make new portal structure */
@@ -222,7 +222,6 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
     /* create a resource owner for the portal */
     portal->resowner = ResourceOwnerCreate(t_thrd.utils_cxt.CurTransactionResourceOwner, "Portal",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
-    RESOWNER_LOG("create", portal->resowner);
 
     /* initialize portal fields that don't start off zero */
     portal->status = PORTAL_NEW;
@@ -244,8 +243,11 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
                       CURSOR_ATTRIBUTE_NUMBER * sizeof(void*));
     securec_check(rc, "\0", "\0");
     portal->funcUseCount = 0;
+    portal->hasStreamForPlpgsql = false;
 #ifndef ENABLE_MULTIPLE_NODES
     portal->streamInfo.Reset();
+    portal->isAutoOutParam = false;
+    portal->isPkgCur = false;
 #endif
     /* put portal in table (sets portal->name) */
     PortalHashTableInsert(portal, name);
@@ -370,11 +372,23 @@ void PortalCreateHoldStore(Portal portal)
      * Create the memory context that is used for storage of the tuple set.
      * Note this is NOT a child of the portal's heap memory.
      */
+#ifndef ENABLE_MULTIPLE_NODES
+    if (portal->isAutoOutParam) {
+        portal->holdContext = GetAvailableHoldContext(u_sess->plsql_cxt.auto_parent_session_pkgs->portalContext);
+    } else {
+        portal->holdContext = AllocSetContextCreate(u_sess->top_portal_cxt,
+            "PortalHoldContext",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+    }
+#else
     portal->holdContext = AllocSetContextCreate(u_sess->top_portal_cxt,
         "PortalHoldContext",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
+#endif
 
     /*
      * Create the tuple store, selecting cross-transaction temp files, and
@@ -495,7 +509,7 @@ void MarkPortalFailed(Portal portal)
  * PortalDrop
  *		Destroy the portal.
  */
-void PortalDrop(Portal portal, bool isTopCommit, bool isInCreate)
+void PortalDrop(Portal portal, bool isTopCommit)
 {
     if (!PortalIsValid(portal)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("portal is NULL")));
@@ -553,19 +567,10 @@ void PortalDrop(Portal portal, bool isTopCommit, bool isInCreate)
      */
     if (portal->resowner && (!isTopCommit || portal->status == PORTAL_FAILED)) {
         bool isCommit = (portal->status != PORTAL_FAILED);
-        if (portal->resowner && isInCreate && ENABLE_SQL_BETA_FEATURE(RESOWNER_DEBUG)) {
-            RESOWNER_LOG("delete for create", portal->resowner);
-            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_BEFORE_LOCKS, isCommit, false);
-            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_LOCKS, isCommit, false);
-            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_AFTER_LOCKS, isCommit, false);
-            portal->resowner = NULL;
-        } else {
-            RESOWNER_LOG("delete", portal->resowner);
-            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_BEFORE_LOCKS, isCommit, false);
-            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_LOCKS, isCommit, false);
-            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_AFTER_LOCKS, isCommit, false);
-            ResourceOwnerDelete(portal->resowner);
-        }
+        ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_BEFORE_LOCKS, isCommit, false);
+        ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_LOCKS, isCommit, false);
+        ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_AFTER_LOCKS, isCommit, false);
+        ResourceOwnerDelete(portal->resowner);
     }
     portal->resowner = NULL;
 
@@ -574,7 +579,12 @@ void PortalDrop(Portal portal, bool isTopCommit, bool isInCreate)
      * conditions; since the tuplestore would have been using cross-
      * transaction storage, its temp files need to be explicitly deleted.
      */
+#ifndef ENABLE_MULTIPLE_NODES
+    /* autonomous transactions procedure out param portal cleaned by its parent session */
+    if (portal->holdStore && !portal->isAutoOutParam) {
+#else
     if (portal->holdStore) {
+#endif
         MemoryContext oldcontext;
 
         oldcontext = MemoryContextSwitchTo(portal->holdContext);
@@ -599,7 +609,11 @@ void PortalDrop(Portal portal, bool isTopCommit, bool isInCreate)
 #endif
 
     /* delete tuplestore storage, if any */
+#ifndef ENABLE_MULTIPLE_NODES
+    if (portal->holdContext && !portal->isAutoOutParam)
+#else
     if (portal->holdContext)
+#endif
         MemoryContextDelete(portal->holdContext);
 
     /* release subsidiary storage */
@@ -614,6 +628,10 @@ void PortalDrop(Portal portal, bool isTopCommit, bool isInCreate)
         u_sess->parser_cxt.param_info = NULL;
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /* reset portal cursor attribute */
+    ResetCursorAtrribute(portal);
+#endif
     /* release portal struct (it's in u_sess->portal_mem_cxt) */
     pfree(portal);
 }
@@ -650,7 +668,7 @@ void PortalHashTableDeleteAll(void)
 /*
  * "Hold" a portal.  Prepare it for access by later transactions.
  */
-static void HoldPortal(Portal portal)
+void HoldPortal(Portal portal)
 {
     /*
      * Note that PersistHoldablePortal() must release all resources
@@ -1211,6 +1229,7 @@ Datum pg_cursor(PG_FUNCTION_ARGS)
         Portal portal = hentry->portal;
         Datum values[6];
         bool nulls[6];
+        char* mask_string = NULL;
 
         /* report only "visible" entries */
         if (!portal->visible)
@@ -1220,7 +1239,13 @@ Datum pg_cursor(PG_FUNCTION_ARGS)
         securec_check(ss_rc, "\0", "\0");
 
         values[0] = CStringGetTextDatum(portal->name);
-        values[1] = CStringGetTextDatum(portal->sourceText);
+        mask_string = maskPassword(portal->sourceText);
+        if (mask_string == NULL) {
+            values[1] = CStringGetTextDatum(portal->sourceText);
+        } else {
+            values[1] = CStringGetTextDatum(mask_string);
+            pfree_ext(mask_string);
+        }
         values[2] = BoolGetDatum(portal->cursorOptions & CURSOR_OPT_HOLD);
         values[3] = BoolGetDatum(portal->cursorOptions & CURSOR_OPT_BINARY);
         values[4] = BoolGetDatum(portal->cursorOptions & CURSOR_OPT_SCROLL);
@@ -1262,9 +1287,10 @@ bool ThereAreNoReadyPortals(void)
  * @in mySubid: current transaction Id.
  * @in funOid: function oid, 0 if in exception block.
  * @in funUseCount：times of function had been used,  0 if in exception block.
+ * @in reset: wether reset cursor's option or not.
  * Return: void
  */
-void ResetPortalCursor(SubTransactionId mySubid, Oid funOid, int funUseCount)
+void ResetPortalCursor(SubTransactionId mySubid, Oid funOid, int funUseCount, bool reset)
 {
     HASH_SEQ_STATUS status;
     PortalHashEnt *hentry = NULL;
@@ -1290,7 +1316,7 @@ void ResetPortalCursor(SubTransactionId mySubid, Oid funOid, int funUseCount)
             continue;
         }
 
-        ResetCursorOption(portal, true);
+        ResetCursorOption(portal, reset);
     }
 }
 
@@ -1337,7 +1363,7 @@ HoldPinnedPortals(void)
             if (portal->status != PORTAL_READY)
                 ereport(ERROR, (errmsg("pinned portal(%s) is not ready to be auto-held, with status[%d]",
                                 portal->name, portal->status)));
-
+       
             HoldPortal(portal);
             portal->autoHeld = true;
         }

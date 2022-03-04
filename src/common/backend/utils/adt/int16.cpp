@@ -18,7 +18,6 @@
  *     Internal 128-bit integer operations.
  *
  * Portions Copyright (c) 2018, Huawei Tech. Co., Ltd.
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *     src/common/backend/utils/adt/int16.cpp

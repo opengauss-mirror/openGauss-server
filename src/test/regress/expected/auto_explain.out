@@ -1,0 +1,732 @@
+set enable_auto_explain = false;
+create or replace function data_table  returns int as $$
+begin
+drop table if exists course;
+drop table if exists stu;
+drop table if exists teacher;
+create table course(cno int,name varchar);
+insert into course values(1,'test1');
+insert into course values(2,'test2');
+insert into course values(3,'test2');
+create table stu(sno int, name varchar,sex varchar,cno int);
+insert into stu values(1,'zhang','M',1);
+insert into stu values(1,'zhang','M',2);
+insert into stu values(2,'wangwei','M',2);
+insert into stu values(3,'liu','F',3);
+create table teacher(tno int,name varchar,sex varchar,cno int);
+insert into teacher values(1,'Yang','F',1);
+insert into teacher values(2,'zhang','F',2);
+insert into teacher values(3,'liu','F',3);
+return 1;
+end;
+$$
+LANGUAGE plpgsql;
+select data_table();
+--?.*
+CONTEXT:  SQL statement "drop table if exists course"
+PL/pgSQL function data_table() line 3 at SQL statement
+referenced column: data_table
+--?.*
+CONTEXT:  SQL statement "drop table if exists stu"
+PL/pgSQL function data_table() line 4 at SQL statement
+referenced column: data_table
+--?.*
+CONTEXT:  SQL statement "drop table if exists teacher"
+PL/pgSQL function data_table() line 5 at SQL statement
+referenced column: data_table
+ data_table 
+------------
+          1
+(1 row)
+
+CREATE OR REPLACE FUNCTION course_delete_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+   DELETE FROM teacher where teacher.cno = OLD.cno;
+    RETURN OLD;
+END;
+$$
+LANGUAGE plpgsql;
+CREATE TRIGGER delete_trigger 
+    AFTER DELETE ON course
+    FOR EACH ROW EXECUTE PROCEDURE course_delete_trigger();
+    
+CREATE OR REPLACE FUNCTION courseUpdate()
+  RETURNS trigger AS $$
+   BEGIN
+      UPDATE teacher SET teacher.cno = NEW.cno  where teacher.cno = NEW.cno;
+      UPDATE student set student.cno = NEW.cno  where student.cno = NEW.cno;
+   END;
+$$
+LANGUAGE plpgsql VOLATILE;
+CREATE TRIGGER course_Update AFTER UPDATE OF "cno" ON "public"."course"
+FOR EACH ROW
+EXECUTE PROCEDURE "public".courseUpdate();
+create or replace function process_test() returns int as $$
+declare status  int;
+begin
+select complicate_process() into status;
+return status;
+END
+$$
+LANGUAGE plpgsql;
+prepare get_stu_lesson(varchar) as select stu.name,course.name from stu left  join course on course.cno = stu.cno where stu.name = $1;
+execute get_stu_lesson('liu');
+ name | name  
+------+-------
+ liu  | test2
+(1 row)
+
+prepare get_stu_info(varchar)  as select stu.name,course.name,teacher.name from stu left  join course on course.cno =stu.cno left join teacher on course.cno = teacher.cno where stu.name = $1;
+set auto_explain_level = notice;
+set enable_auto_explain = true;
+execute get_stu_info('');
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: prepare get_stu_info(varchar)  as select stu.name,course.name,teacher.name from stu left  join course on course.cno =stu.cno left join teacher on course.cno = teacher.cno where stu.name = $1;
+Name: datanode1
+--?.*
+  Output: stu.name, course.name, teacher.name
+--?.*
+  Hash Cond: (teacher.cno = course.cno)
+--?.*
+        Output: teacher.tno, teacher.name, teacher.sex, teacher.cno
+        Exec Nodes: All datanodes
+--?.*
+        Output: stu.name, course.name, course.cno
+        Exec Nodes: All datanodes
+--?.*
+              Output: stu.name, course.name, course.cno
+              Exec Nodes: All datanodes
+              Hash Cond: (course.cno = stu.cno)
+--?.*
+                    Output: course.cno, course.name
+                    Exec Nodes: All datanodes
+--?.*
+                    Output: stu.name, stu.cno
+                    Exec Nodes: All datanodes
+--?.*
+                          Output: stu.name, stu.cno
+                          Exec Nodes: All datanodes
+                          Filter: ((stu.name)::text = ($1)::text)
+Parameter1 value: null 
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ name | name | name 
+------+------+------
+(0 rows)
+
+set enable_auto_explain = false;
+create or replace function open_cursor(myCursor OUT REFCURSOR) as $$
+begin
+open myCursor for select teacher.name,stu.name from teacher left join course on course.cno = teacher.cno left join stu on stu.cno = course.cno;
+END
+$$
+LANGUAGE plpgsql;
+create or replace function complicate_process(status out int)  as $$
+declare sql  varchar;
+numbers int;
+declare docType varchar:='REISSUE';
+declare v_count1 int;
+declare v_count2 int;
+declare tt  REFCURSOR;
+declare teacher_name varchar;
+declare stu_name varchar;
+begin
+status:=0;
+if docType = 'REISSUE' then
+     select count(1) into v_count1 from stu;
+     select count(2) into v_count2 from teacher;
+     if v_count1>0 and v_count2>0 then
+         insert into stu values(4,'liu','F',1);
+         insert into teacher values(4,'li',4);
+     end if;
+end if;
+update teacher set tno =100 where tno = 3;
+select open_cursor() into tt;
+fetch next from tt into teacher_name,stu_name;
+While true
+loop  
+     fetch next from tt into teacher_name,stu_name;  
+     if found then 
+     else
+     Exit ;
+     end if;
+end loop;
+status:=1;
+
+END
+$$
+LANGUAGE plpgsql;
+set auto_explain_level = notice;
+set enable_auto_explain = true;
+select process_test();
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select process_test();
+Name: datanode1
+--?.*
+  Output: process_test()
+
+
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select complicate_process()
+Name: datanode1
+--?.*
+  Output: complicate_process()
+
+
+CONTEXT:  SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select count(1)               from stu
+Name: datanode1
+--?.*
+--?.*
+  Exec Nodes: All datanodes
+--?.*
+        Output: sno, name, sex, cno
+        Exec Nodes: All datanodes
+
+
+CONTEXT:  SQL statement "select count(1)               from stu"
+PL/pgSQL function complicate_process() line 13 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(1)               from stu"
+PL/pgSQL function complicate_process() line 13 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select count(2)               from teacher
+Name: datanode1
+--?.*
+--?.*
+  Exec Nodes: All datanodes
+--?.*
+        Output: tno, name, sex, cno
+        Exec Nodes: All datanodes
+
+
+CONTEXT:  SQL statement "select count(2)               from teacher"
+PL/pgSQL function complicate_process() line 14 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(2)               from teacher"
+PL/pgSQL function complicate_process() line 14 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: insert into stu values(4,'liu','F',1)
+Name: datanode1
+--?.*
+--?.*
+        Output: 4, 'liu'::character varying, 'F'::character varying, 1
+        Exec Nodes: All datanodes
+
+
+CONTEXT:  SQL statement "insert into stu values(4,'liu','F',1)"
+PL/pgSQL function complicate_process() line 16 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "insert into stu values(4,'liu','F',1)"
+PL/pgSQL function complicate_process() line 16 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: insert into teacher values(4,'li',4)
+Name: datanode1
+--?.*
+--?.*
+        Output: 4, 'li'::character varying, '4'::character varying, NULL::integer
+        Exec Nodes: All datanodes
+
+
+CONTEXT:  SQL statement "insert into teacher values(4,'li',4)"
+PL/pgSQL function complicate_process() line 17 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "insert into teacher values(4,'li',4)"
+PL/pgSQL function complicate_process() line 17 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: update teacher set tno =100 where tno = 3
+Name: datanode1
+--?.*
+--?.*
+        Output: 100, name, sex, cno, ctid
+        Exec Nodes: All datanodes
+        Filter: (teacher.tno = 3)
+
+
+CONTEXT:  SQL statement "update teacher set tno =100 where tno = 3"
+PL/pgSQL function complicate_process() line 20 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "update teacher set tno =100 where tno = 3"
+PL/pgSQL function complicate_process() line 20 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select open_cursor()
+Name: datanode1
+--?.*
+  Output: open_cursor()
+
+
+CONTEXT:  SQL statement "select open_cursor()"
+PL/pgSQL function complicate_process() line 21 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select open_cursor()"
+PL/pgSQL function complicate_process() line 21 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select teacher.name,stu.name from teacher left join course on course.cno = teacher.cno left join stu on stu.cno = course.cno
+Name: datanode1
+--?.*
+  Output: teacher.name, stu.name
+  Exec Nodes: All datanodes
+  Hash Cond: (course.cno = stu.cno)
+--?.*
+        Output: teacher.name, course.cno
+        Exec Nodes: All datanodes
+        Hash Cond: (course.cno = teacher.cno)
+--?.*
+              Output: course.cno, course.name
+              Exec Nodes: All datanodes
+--?.*
+              Output: teacher.name, teacher.cno
+              Exec Nodes: All datanodes
+--?.*
+                    Output: teacher.name, teacher.cno
+                    Exec Nodes: All datanodes
+--?.*
+        Output: stu.name, stu.cno
+        Exec Nodes: All datanodes
+--?.*
+              Output: stu.name, stu.cno
+              Exec Nodes: All datanodes
+
+
+CONTEXT:  PL/pgSQL function complicate_process() line 22 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  PL/pgSQL function complicate_process() line 22 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select teacher.name,stu.name from teacher left join course on course.cno = teacher.cno left join stu on stu.cno = course.cno
+Name: datanode1
+--?.*
+  Output: teacher.name, stu.name
+  Hash Cond: (course.cno = stu.cno)
+--?.*
+        Output: teacher.name, course.cno
+        Hash Cond: (course.cno = teacher.cno)
+--?.*
+              Output: course.cno, course.name
+--?.*
+              Output: teacher.name, teacher.cno
+--?.*
+                    Output: teacher.name, teacher.cno
+--?.*
+        Output: stu.name, stu.cno
+--?.*
+              Output: stu.name, stu.cno
+
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select teacher.name,stu.name from teacher left join course on course.cno = teacher.cno left join stu on stu.cno = course.cno
+Name: datanode1
+--?.*
+  Output: teacher.name, stu.name
+  Hash Cond: (course.cno = stu.cno)
+--?.*
+        Output: teacher.name, course.cno
+        Hash Cond: (course.cno = teacher.cno)
+--?.*
+              Output: course.cno, course.name
+--?.*
+              Output: teacher.name, teacher.cno
+--?.*
+                    Output: teacher.name, teacher.cno
+--?.*
+        Output: stu.name, stu.cno
+--?.*
+              Output: stu.name, stu.cno
+
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select teacher.name,stu.name from teacher left join course on course.cno = teacher.cno left join stu on stu.cno = course.cno
+Name: datanode1
+--?.*
+  Output: teacher.name, stu.name
+  Hash Cond: (course.cno = stu.cno)
+--?.*
+        Output: teacher.name, course.cno
+        Hash Cond: (course.cno = teacher.cno)
+--?.*
+              Output: course.cno, course.name
+--?.*
+              Output: teacher.name, teacher.cno
+--?.*
+                    Output: teacher.name, teacher.cno
+--?.*
+        Output: stu.name, stu.cno
+--?.*
+              Output: stu.name, stu.cno
+
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select teacher.name,stu.name from teacher left join course on course.cno = teacher.cno left join stu on stu.cno = course.cno
+Name: datanode1
+--?.*
+  Output: teacher.name, stu.name
+  Hash Cond: (course.cno = stu.cno)
+--?.*
+        Output: teacher.name, course.cno
+        Hash Cond: (course.cno = teacher.cno)
+--?.*
+              Output: course.cno, course.name
+--?.*
+              Output: teacher.name, teacher.cno
+--?.*
+                    Output: teacher.name, teacher.cno
+--?.*
+        Output: stu.name, stu.cno
+--?.*
+              Output: stu.name, stu.cno
+
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select teacher.name,stu.name from teacher left join course on course.cno = teacher.cno left join stu on stu.cno = course.cno
+Name: datanode1
+--?.*
+  Output: teacher.name, stu.name
+  Hash Cond: (course.cno = stu.cno)
+--?.*
+        Output: teacher.name, course.cno
+        Hash Cond: (course.cno = teacher.cno)
+--?.*
+              Output: course.cno, course.name
+--?.*
+              Output: teacher.name, teacher.cno
+--?.*
+                    Output: teacher.name, teacher.cno
+--?.*
+        Output: stu.name, stu.cno
+--?.*
+              Output: stu.name, stu.cno
+
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select teacher.name,stu.name from teacher left join course on course.cno = teacher.cno left join stu on stu.cno = course.cno
+Name: datanode1
+--?.*
+  Output: teacher.name, stu.name
+  Hash Cond: (course.cno = stu.cno)
+--?.*
+        Output: teacher.name, course.cno
+        Hash Cond: (course.cno = teacher.cno)
+--?.*
+              Output: course.cno, course.name
+--?.*
+              Output: teacher.name, teacher.cno
+--?.*
+                    Output: teacher.name, teacher.cno
+--?.*
+        Output: stu.name, stu.cno
+--?.*
+              Output: stu.name, stu.cno
+
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  PL/pgSQL function complicate_process() line 25 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ process_test 
+--------------
+            1
+(1 row)
+
+set enable_auto_explain = false;
+drop table if exists test1;
+--?.*
+create table test1(id number, val number);
+insert into test1 values(generate_series(1,1000), generate_series(1,1000));
+create  OR REPLACE function test_merge_into() returns int as $$
+declare tt  REFCURSOR;
+id_val int;
+begin
+id_val:=103;
+merge into test1 t1 using (select count(*) cnt from test1 where id = id_val) t2 on (cnt <> 0)
+when matched then update set val = val + 1 where id = id_val when not matched then insert values(id_val, 1);
+return 1;
+end;
+$$
+LANGUAGE plpgsql;
+set enable_auto_explain = true;
+set auto_explain_level = notice;
+select test_merge_into();
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select test_merge_into();
+Name: datanode1
+--?.*
+  Output: test_merge_into()
+
+
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: merge into test1 t1 using (select count(*) cnt from test1 where id = id_val) t2 on (cnt <> 0)
+when matched then update set val = val + 1 where id = id_val when not matched then insert values(id_val, 1)
+Name: datanode1
+--?.*
+  Update Cond: (t1.id = ($15)::numeric)
+--?.*
+        Output: (count(*)), t1.id, t1.val, t1.ctid, (count(*))
+        Exec Nodes: All datanodes
+        Join Filter: ((count(*)) <> 0)
+--?.*
+              Output: count(*)
+              Exec Nodes: All datanodes
+--?.*
+                    Output: test1.id, test1.val
+                    Exec Nodes: All datanodes
+                    Filter: (test1.id = ($15)::numeric)
+        ->  Seq Scan on public.test1 t1  (cost=0.00..18.69 rows=869 p-time=0 p-rows=0 width=70)
+              Output: t1.id, t1.val, t1.ctid
+              Exec Nodes: All datanodes
+param1 value: 103 type: int4
+
+
+CONTEXT:  SQL statement "merge into test1 t1 using (select count(*) cnt from test1 where id = id_val) t2 on (cnt <> 0)
+when matched then update set val = val + 1 where id = id_val when not matched then insert values(id_val, 1)"
+PL/pgSQL function test_merge_into() line 6 at SQL statement
+referenced column: test_merge_into
+NOTICE:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "merge into test1 t1 using (select count(*) cnt from test1 where id = id_val) t2 on (cnt <> 0)
+when matched then update set val = val + 1 where id = id_val when not matched then insert values(id_val, 1)"
+PL/pgSQL function test_merge_into() line 6 at SQL statement
+referenced column: test_merge_into
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ test_merge_into 
+-----------------
+               1
+(1 row)
+
+set enable_auto_explain = false;
+drop table if exists course;
+drop table if exists stu;
+drop table if exists teacher;
+drop table if exists test1;

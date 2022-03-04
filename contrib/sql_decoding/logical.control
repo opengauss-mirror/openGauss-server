@@ -1,0 +1,5 @@
+# roach_api extension
+comment = 'sql_decoding wrapper'
+default_version = '1.0'
+module_pathname = '$libdir/sql_decoding'
+relocatable = true

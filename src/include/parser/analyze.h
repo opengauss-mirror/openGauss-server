@@ -42,7 +42,8 @@ extern Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNod
 extern bool analyze_requires_snapshot(Node* parseTree);
 
 extern void CheckSelectLocking(Query* qry);
-extern void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, bool noWait, bool pushedDown);
+extern void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, bool noWait, bool pushedDown,
+                               int waitSec);
 #ifdef ENABLE_MOT
 extern void CheckTablesStorageEngine(Query* qry, StorageEngineType* type);
 extern bool CheckMotIndexedColumnUpdate(Query* qry);
@@ -98,5 +99,6 @@ extern void fixResTargetListWithTableNameRef(Relation rd, RangeVar* rel, List* c
 #endif /* !FRONTEND_PARSER */
 
 extern bool getOperatorPlusFlag();
+
 
 #endif /* ANALYZE_H */

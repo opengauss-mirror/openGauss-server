@@ -189,6 +189,9 @@ extern int GetUniqueSQLTrackType();
 
 #define START_TRX_UNIQUE_SQL_ID 2718638560
 
+#define PUSH_SKIP_UNIQUE_SQL_HOOK() u_sess->unique_sql_cxt.skipUniqueSQLCount++;
+#define POP_SKIP_UNIQUE_SQL_HOOK() u_sess->unique_sql_cxt.skipUniqueSQLCount--;
+
 void InitUniqueSQL();
 void UpdateUniqueSQLStat(Query* query, const char* sql, int64 elapse_start_time,
     PgStat_TableCounts* agg_table_count = NULL, UniqueSQLStat* sql_stat = NULL);

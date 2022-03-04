@@ -30,3 +30,8 @@ void MOTDesc(StringInfo buf, XLogReaderState* record)
     appendStringInfo(buf, "MOT Redo");
 }
 
+const char* MOT_type_name(uint8 subtype)
+{
+    return "mot_data";
+}
+

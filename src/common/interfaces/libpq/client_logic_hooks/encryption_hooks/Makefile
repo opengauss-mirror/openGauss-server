@@ -16,9 +16,11 @@ top_builddir = ../../../../../../
 NAME=client_logic_encryption_hooks
 
 override CPPFLAGS := -DFRONTEND -DPGXC -Wno-write-strings -fstack-protector-all -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/include/libpq -I$(top_builddir)/src/common/interfaces/libpq -I$(top_builddir)/src/common/interfaces/libpq/client_logic_hooks/ -I.
-override CPPFLAGS += -lsecurec -lssl -lcrypto
+override CPPFLAGS += -l$(SECURE_C_CHECK) -lssl -lcrypto
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-override CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
+  ifneq ($(enable_lite_mode), yes)
+    override CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -l$(SECURE_C_CHECK) -L$(LIBKMC_LIB_PATH) -lkmc
+  endif
 endif
 override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -shared
 override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -shared

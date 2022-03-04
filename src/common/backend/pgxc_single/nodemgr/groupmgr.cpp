@@ -59,6 +59,7 @@
 #include "storage/proc.h"
 #include "utils/elog.h"
 #include "utils/snapmgr.h"
+#include "utils/knl_relcache.h"
 
 #define CHAR_BUF_SIZE 512
 #define BUCKET_MAP_SIZE 32
@@ -2691,7 +2692,7 @@ static void PgxcGroupSetSeqNodes(const char* group_name, bool allnodes)
                 appendStringInfoString(&str, query);
             }
 
-            ReleaseCatCache(tp);
+            ReleaseSysCache(tp);
             relation_close(relseq, AccessShareLock);
 
             if (seqName != relName)
@@ -3581,7 +3582,7 @@ char* PgxcGroupGetStmtExecGroupInRedis()
 static void BucketMapCacheAddEntry(Oid groupoid, Datum groupanme_datum, Datum bucketmap_datum, ItemPointer ctid)
 {
     /* BucketmapCache and its underlying element is allocated in u_sess.MEMORY_CONTEXT_EXECUTOR */
-    MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+    MemoryContext oldcontext = MemoryContextSwitchTo(LocalGBucketMapMemCxt());
 
     /* Create bucketmap element */
     BucketMapCache* bmc = (BucketMapCache*)palloc0(sizeof(BucketMapCache));
@@ -3598,7 +3599,7 @@ static void BucketMapCacheAddEntry(Oid groupoid, Datum groupanme_datum, Datum bu
     elog(DEBUG2, "Add [%s][%u]'s bucketmap to BucketMapCache", bmc->groupname, groupoid);
 
     /* Insert element into bucketmap */
-    u_sess->relcache_cxt.g_bucketmap_cache = lappend(u_sess->relcache_cxt.g_bucketmap_cache, bmc);
+    AppendLocalRelCacheGBucketMapCache((ListCell *)bmc);
 
     /* Swith back to original memory context */
     MemoryContextSwitchTo(oldcontext);
@@ -3616,7 +3617,7 @@ static void BucketMapCacheAddEntry(Oid groupoid, Datum groupanme_datum, Datum bu
  */
 static void BucketMapCacheRemoveEntry(Oid groupoid)
 {
-    if (u_sess->relcache_cxt.g_bucketmap_cache == NIL) {
+    if (LocalRelCacheGBucketMapCache() == NIL) {
         /*
          * We may run into here, when a new node group is drop but no table access
          * of its table happened.
@@ -3631,7 +3632,7 @@ static void BucketMapCacheRemoveEntry(Oid groupoid)
     ListCell* next = NULL;
     bool found = false;
 
-    for (cell = list_head(u_sess->relcache_cxt.g_bucketmap_cache); cell; cell = next) {
+    for (cell = list_head(LocalRelCacheGBucketMapCache()); cell; cell = next) {
         BucketMapCache* bmc = (BucketMapCache*)lfirst(cell);
         next = lnext(cell);
         if (bmc->groupoid == groupoid) {
@@ -3642,8 +3643,7 @@ static void BucketMapCacheRemoveEntry(Oid groupoid)
             pfree_ext(bmc->groupname);
 
             /* Remove it from global bucketmap cache list */
-            u_sess->relcache_cxt.g_bucketmap_cache =
-                list_delete_cell(u_sess->relcache_cxt.g_bucketmap_cache, cell, prev);
+            DeteleLocalRelCacheGBucketMapCache(cell, prev);
             pfree_ext(bmc);
             break;
         } else {
@@ -3704,7 +3704,7 @@ static void BucketMapCacheUpdate(BucketMapCache* bmc)
 /*
  * Name: ClearInvalidBucketMapCache()
  *
- * Brief: clear invalid cell in t_thrd.pgxc_cxt.g_bucketmap_cache
+ * Brief: clear invalid cell in LocalRelCacheGBucketMapCache
  *
  * Parameters:
  *    none
@@ -3717,7 +3717,7 @@ static void ClearInvalidBucketMapCache(void)
     ListCell* cell = NULL;
     ListCell* next = NULL;
 
-    for (cell = list_head(u_sess->relcache_cxt.g_bucketmap_cache); cell; cell = next) {
+    for (cell = list_head(LocalRelCacheGBucketMapCache()); cell; cell = next) {
         next = lnext(cell);
         BucketMapCache* bmc = (BucketMapCache*)lfirst(cell);
         HeapTuple tuple = SearchSysCache1(PGXCGROUPOID, ObjectIdGetDatum(bmc->groupoid));
@@ -3728,8 +3728,8 @@ static void ClearInvalidBucketMapCache(void)
         }
         ReleaseSysCache(tuple);
     }
-    if ((unsigned int)list_length(u_sess->relcache_cxt.g_bucketmap_cache) >= u_sess->relcache_cxt.max_bucket_map_size) {
-        u_sess->relcache_cxt.max_bucket_map_size *= 2;
+    if ((unsigned int)list_length(LocalRelCacheGBucketMapCache()) >= LocalRelCacheMaxBucketMapSize()) {
+        EnlargeLocalRelCacheMaxBucketMapSize(2);
     }
 }
 
@@ -3769,23 +3769,23 @@ uint2* BucketMapCacheGetBucketmap(Oid groupoid, int *bucketlen)
 {
     Assert(groupoid != InvalidOid);
 
-    if (u_sess->relcache_cxt.g_bucketmap_cache == NIL) {
+    if (LocalRelCacheGBucketMapCache() == NIL) {
         elog(DEBUG2, "Global bucketmap cache is not setup");
     }
-    if ((unsigned int)list_length(u_sess->relcache_cxt.g_bucketmap_cache) >= u_sess->relcache_cxt.max_bucket_map_size) {
+    if ((unsigned int)list_length(LocalRelCacheGBucketMapCache()) >= LocalRelCacheMaxBucketMapSize()) {
         ClearInvalidBucketMapCache();
     }
-    while (u_sess->relcache_cxt.max_bucket_map_size / 2 >
-               (unsigned int)list_length(u_sess->relcache_cxt.g_bucketmap_cache) &&
-           u_sess->relcache_cxt.max_bucket_map_size / 2 > BUCKET_MAP_SIZE) {
-        u_sess->relcache_cxt.max_bucket_map_size /= 2;
+    while (LocalRelCacheMaxBucketMapSize() / 2 >
+               (unsigned int)list_length(LocalRelCacheGBucketMapCache()) &&
+           LocalRelCacheMaxBucketMapSize() / 2 > BUCKET_MAP_SIZE) {
+        EnlargeLocalRelCacheMaxBucketMapSize(0.5);
     }
 
     ListCell* cell = NULL;
     uint2* bucketmap = NULL;
 
     /* Search bucketmap from cache */
-    foreach (cell, u_sess->relcache_cxt.g_bucketmap_cache) {
+    foreach (cell, LocalRelCacheGBucketMapCache()) {
         BucketMapCache* bmc = (BucketMapCache*)lfirst(cell);
 
         if (bmc->groupoid == groupoid) {

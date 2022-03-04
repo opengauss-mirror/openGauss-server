@@ -27,7 +27,8 @@ SUBDIRS = bootstrap catalog commands client_logic datatype executor foreign gs_p
 	storage vecexecutor access streaming access/obs \
 	hotpatch \
 	gstrace \
-	knl knl/knl_guc threadpool workload
+	knl knl/knl_guc threadpool workload lite
+	
 ifneq ($(enable_multiple_nodes), yes)
     SUBDIRS += storage/smgr storage/lock storage/buf storage/item storage/cstore storage/mot fmgr
 endif
@@ -54,8 +55,11 @@ install: all installdirs
 	$(INSTALL_DATA) utils/errcodes.h '$(DESTDIR)$(includedir_server)/utils'
 	$(INSTALL_DATA) utils/fmgroids.h '$(DESTDIR)$(includedir_server)/utils'
 # These headers are needed by madlib
-	$(INSTALL_DATA) $(with_3rd)/$(BINARYPATH)/cjson/comm/include/cjson/cJSON.h '$(DESTDIR)$(includedir_server)'/cjson/cJSON.h
+	$(MKDIR_P) '$(DESTDIR)$(includedir_server)'/cjson/
+	$(INSTALL_DATA) $(CJSON_INCLUDE_PATH)/cjson/cJSON.h '$(DESTDIR)$(includedir_server)'/cjson/cJSON.h
+ifeq ($(enable_lite_mode), no)
 	$(INSTALL_DATA) $(with_3rd)/$(BINARYPATH)/libobs/comm/include/eSDKOBS.h '$(DESTDIR)$(includedir_server)'/access/obs/eSDKOBS.h
+endif
 	$(INSTALL_DATA) $(srcdir)/access/hash.inl '$(DESTDIR)$(includedir_server)'/access/hash.inl
 # These headers are needed by fdw
 	$(INSTALL_DATA) gssignal/gs_signal.h '$(DESTDIR)$(includedir_server)/gssignal/gs_signal.h'
@@ -102,6 +106,7 @@ install: all installdirs
 	$(INSTALL_DATA) distributelayer/streamTransportCore.h '$(DESTDIR)$(includedir_server)/distributelayer/streamTransportCore.h'
 	$(INSTALL_DATA) fmgr/fmgr_comp.h '$(DESTDIR)$(includedir_server)/fmgr/fmgr_comp.h'
 	$(INSTALL_DATA) fmgr/fmgr_core.h '$(DESTDIR)$(includedir_server)/fmgr/fmgr_core.h'
+	$(INSTALL_DATA) lite/memory_lite.h '$(DESTDIR)$(includedir_server)/lite/memory_lite.h'
 # These headers are needed by postgis
 	$(INSTALL_DATA) access/ustore/undo/knl_uundotype.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundotype.h'
 	$(INSTALL_DATA) access/ustore/knl_uheap.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uheap.h'

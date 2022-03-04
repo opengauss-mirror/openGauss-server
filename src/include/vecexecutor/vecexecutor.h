@@ -43,7 +43,8 @@
     }
 
 extern VectorBatch* VectorEngine(PlanState* node);
-extern VectorBatch* ExecVecProject(ProjectionInfo* projInfo, bool selReSet = true, ExprDoneCond* isDone = NULL);
+extern VectorBatch *ExecVecProject(ProjectionInfo *projInfo, bool selReSet = true,
+    ExprDoneCond *isDone = NULL);
 extern ExprState* ExecInitVecExpr(Expr* node, PlanState* parent);
 
 extern ScalarVector* ExecVecQual(List* qual, ExprContext* econtext, bool resultForNull, bool isReset = true);

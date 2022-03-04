@@ -81,9 +81,6 @@ extern void add_txn_info(
 extern txn_info* find_txn_info(TransactionId gxid);
 extern database_info* find_database_info(const char* database_name);
 extern database_info* add_database_info(const char* database_name);
-#ifndef ENABLE_LLT
-extern node_info* find_node_info(const char* node_name);
-#endif
 extern int find_node_index(const char* node_name);
 extern int set_node_info(const char* node_name, int port, const char* host, NODE_TYPE type, int index);
 extern TXN_STATUS check_txn_global_status(txn_info* txn, bool commit_all_prepared, bool rollback_all_prepared);

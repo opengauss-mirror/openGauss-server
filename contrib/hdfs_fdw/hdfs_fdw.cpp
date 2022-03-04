@@ -363,8 +363,12 @@ void serverOptionValidator(List* ServerOptionList)
      */
     switch (serverType) {
         case T_OBS_SERVER: {
+#ifndef ENABLE_LITE_MODE
             checkOptionNameValidity(ServerOptionList, OBS_SERVER_OPTION);
             break;
+#else
+            FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
         }
         case T_HDFS_SERVER: {
             FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
@@ -405,6 +409,7 @@ void serverOptionValidator(List* ServerOptionList)
     ServerOptionCheckSet(ServerOptionList, serverType, addressFound, cfgPathFound, akFound, sakFound, 
                          encrypt, userNameFound, passWordFound, regionFound, hostName, ak, sk, regionStr);
 
+#ifndef ENABLE_LITE_MODE
     if (T_OBS_SERVER == serverType) {
         if (addressFound && regionFound) {
             ereport(ERROR,
@@ -442,6 +447,8 @@ void serverOptionValidator(List* ServerOptionList)
             checkOBSServerValidity(URL, ak, sk, encrypt);
         }
     }
+#endif
+
     if (T_HDFS_SERVER == serverType && !cfgPathFound) {
         ereport(ERROR,
             (errcode(ERRCODE_FDW_DYNAMIC_PARAMETER_VALUE_NEEDED),
@@ -1434,6 +1441,7 @@ static void HdfsEndForeignScan(ForeignScanState* scanState)
         }
     }
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * LLVM optimization information should be shown. We check the query
      * uses LLVM optimization or not.
@@ -1502,6 +1510,7 @@ static void HdfsEndForeignScan(ForeignScanState* scanState)
             }
         }
     }
+#endif
 
     /* clears all file related memory */
     if (NULL != executionState->fileReader) {

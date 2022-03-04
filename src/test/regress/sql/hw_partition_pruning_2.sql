@@ -237,7 +237,7 @@ SELECT * FROM pruning_partition_table_000 WHERE  C_INT>10;
 
 drop table pruning_partition_table_000;
 
-create table t_pruning_DTS2013091303739_1(c1 int,c2 text)
+create table t_pruning_TESTTABLE_1(c1 int,c2 text)
 partition by range(c1)
 ( 
 	partition p1 values less than(100),
@@ -246,23 +246,23 @@ partition by range(c1)
 );
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_1 where c1 IS NULL;
+select * from t_pruning_TESTTABLE_1 where c1 IS NULL;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_1 where c1 IS NOT NULL;
+select * from t_pruning_TESTTABLE_1 where c1 IS NOT NULL;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_1 where c1=null;
+select * from t_pruning_TESTTABLE_1 where c1=null;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_1 where c2=null;
+select * from t_pruning_TESTTABLE_1 where c2=null;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_1 where c2 IS NULL;
+select * from t_pruning_TESTTABLE_1 where c2 IS NULL;
 
-drop table t_pruning_DTS2013091303739_1;
+drop table t_pruning_TESTTABLE_1;
 
-create table t_pruning_DTS2013091303739_2(c1 int,c2 text)
+create table t_pruning_TESTTABLE_2(c1 int,c2 text)
 partition by range(c1)
 ( 
 	partition p1 values less than(100),
@@ -272,30 +272,30 @@ partition by range(c1)
 );
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_2 where c1 IS NULL;
+select * from t_pruning_TESTTABLE_2 where c1 IS NULL;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_2 where c1 IS NOT NULL;
+select * from t_pruning_TESTTABLE_2 where c1 IS NOT NULL;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_2 where c1=null;
+select * from t_pruning_TESTTABLE_2 where c1=null;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_2 where null=c1;
+select * from t_pruning_TESTTABLE_2 where null=c1;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_2 where c2=null;
+select * from t_pruning_TESTTABLE_2 where c2=null;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_2 where c2 IS NULL;
+select * from t_pruning_TESTTABLE_2 where c2 IS NULL;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_2 where c1 IS NULL and c1>150;
+select * from t_pruning_TESTTABLE_2 where c1 IS NULL and c1>150;
 
 explain (ANALYZE false,VERBOSE false, COSTS false,BUFFERS false,TIMING false)
-select * from t_pruning_DTS2013091303739_2 where c1 IS NULL OR c1<150;
+select * from t_pruning_TESTTABLE_2 where c1 IS NULL OR c1<150;
 
-drop table t_pruning_DTS2013091303739_2;
+drop table t_pruning_TESTTABLE_2;
 
 
 

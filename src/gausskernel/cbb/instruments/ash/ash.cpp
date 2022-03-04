@@ -1065,9 +1065,9 @@ static void ReloadInfo()
         t_thrd.ash_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
     }
-    if (u_sess->sig_cxt.got_PoolReload) {
+    if (IsGotPoolReload()) {
         processPoolerReload();
-        u_sess->sig_cxt.got_PoolReload = false;
+        ResetGotPoolReload(false);
     }
 }
 

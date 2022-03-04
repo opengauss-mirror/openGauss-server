@@ -697,6 +697,14 @@ bool pg_sha256_encrypt(
     return true;
 }
 
+#ifdef ENABLE_LITE_MODE
+bool pg_sha256_encrypt_v1(
+    const char* password, const char* salt_s, size_t salt_len, char* buf, char* client_key_buf)
+{
+    return pg_sha256_encrypt(password, salt_s, salt_len, buf, client_key_buf, ITERATION_COUNT_V1);
+}
+#endif
+
 /* Caller must ensure that the length of the password1 and password2 are the same, and equal to the length */
 int XOR_between_password(const char* password1, const char* password2, char* r, int length)
 {

@@ -52,8 +52,8 @@ UPDATE char_type SET c4 = 'dd' where c4 = 'cc';
 SELECT * from char_type order by c1;
 
 -- test empty data
-insert into char_type values(12, '', '','','', '','', '', '', '','');
-insert into char_type values(13, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+insert into char_type values(8, '', '','','', '','', '', '', '','');
+insert into char_type values(9, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 SELECT * from char_type order by c1;
 
 create table IF NOT EXISTS char_type_enc1(

@@ -135,7 +135,6 @@ copy copy_transform_explicit_cast from '@abs_srcdir@/data/copy_transform_explici
 ERROR:  cannot convert timestamp without time zone to integer
 DETAIL:  column "c_bigint" is of type integer, but expression is of type timestamp without time zone
 drop table copy_transform_explicit_cast;
-----DTS2021042807RJQKP1F00
 CREATE TABLE float_type_t2
 (
 FT_COL INTEGER,

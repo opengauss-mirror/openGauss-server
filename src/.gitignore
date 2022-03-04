@@ -188,10 +188,6 @@
 /include/replication/syncrep_gram.hpp
 /include/stamp-h
 /test/regress/pg_regress
-/test/regress/sql/*.sql
-/test/regress/sql/*/*.sql
-/test/regress/expected/*.out
-/test/regress/expected/*/*.out
 /test/regress/results/
 /test/regress/tmp_check/
 /test/isolation/specparse.cpp

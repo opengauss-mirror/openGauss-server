@@ -47,6 +47,8 @@ CREATE TYPE <replaceable class="parameter">name</replaceable>
 
 CREATE TYPE name AS ENUM
     ( [ 'lable' [, ... ] ] )
+
+CREATE TYPE name AS TABLE OF data_type
 </synopsis>
  </refsynopsisdiv>
 </refentry>

@@ -1,0 +1,176 @@
+\set verbosity verbose
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS ret_cmk2 CASCADE;
+NOTICE:  client master key "ret_cmk2" does not exist
+CREATE CLIENT MASTER KEY ret_cmk2 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY ret_cek2 WITH VALUES (CLIENT_MASTER_KEY = ret_cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_num(id INT, num int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = ret_cek2, ENCRYPTION_TYPE = DETERMINISTIC));
+INSERT INTO t_num (id, num) VALUES (1, 5555);
+INSERT INTO t_num (id, num) VALUES (2, 6666);
+SELECT * from t_num;
+ id | num  
+----+------
+  2 | 6666
+  1 | 5555
+(2 rows)
+
+CREATE FUNCTION select1 () RETURNS t_num LANGUAGE SQL
+AS 'SELECT * from t_num;';
+CREATE FUNCTION select2 () RETURNS t_num LANGUAGE SQL
+AS 'SELECT id, num from t_num;';
+CREATE FUNCTION select3 () RETURNS setof t_num LANGUAGE SQL
+AS 'SELECT * from t_num;';
+CREATE FUNCTION select4 () RETURNS setof t_num LANGUAGE SQL
+AS 'SELECT id, num from t_num;';
+CREATE FUNCTION select5 () RETURNS int LANGUAGE SQL
+AS 'SELECT num from t_num;';
+CREATE FUNCTION select6 () RETURNS setof int LANGUAGE SQL
+AS 'SELECT  num from t_num;';
+CREATE FUNCTION select7 () RETURNS TABLE(a INT, b INT) LANGUAGE SQL
+AS 'SELECT id, num from t_num;';
+CREATE FUNCTION reffunc(refcursor) RETURNS refcursor AS '
+BEGIN
+    OPEN $1 FOR SELECT * FROM t_num;
+    RETURN $1;
+END;
+' LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION get_rows_setof() RETURNS SETOF t_num AS
+$BODY$
+DECLARE
+    r t_num%rowtype;
+BEGIN
+    FOR r IN
+        SELECT * FROM t_num
+    LOOP
+        -- can do some processing here
+        RETURN NEXT r; -- return current row of SELECT
+    END LOOP;
+    RETURN;
+END
+$BODY$
+LANGUAGE plpgsql;
+CREATE FUNCTION f_processed_return_table() RETURNS TABLE(val_p int, val2_p int)
+as
+$BODY$
+begin
+    return query (SELECT id, num from t_num);
+end;
+$BODY$
+language plpgsql ;
+\df select1
+\df select2
+\df select3
+\df select4
+\df select5
+\df select6
+\df select7
+call select1();
+ id | num  
+----+------
+  1 | 5555
+(1 row)
+
+call select2();
+ id | num  
+----+------
+  1 | 5555
+(1 row)
+
+call select3();
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+call select4();
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+call select5();
+ select5 
+---------
+    5555
+(1 row)
+
+call select6();
+ select6 
+---------
+    5555
+    6666
+(2 rows)
+
+call select7();
+ a |  b   
+---+------
+ 1 | 5555
+ 2 | 6666
+(2 rows)
+
+CALL f_processed_return_table();
+ val_p | val2_p 
+-------+--------
+     1 |   5555
+     2 |   6666
+(2 rows)
+
+BEGIN;
+SELECT reffunc('funccursor');
+  reffunc   
+------------
+ funccursor
+(1 row)
+
+FETCH ALL IN funccursor;
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+COMMIT;
+SELECT * FROM get_rows_setof();
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+DROP TABLE t_num CASCADE;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to function select1()
+drop cascades to function select2()
+drop cascades to function select3()
+drop cascades to function select4()
+drop cascades to function get_rows_setof()
+DROP FUNCTION select6; 
+DROP FUNCTION select5; 
+DROP FUNCTION select7; 
+DROP FUNCTION reffunc(refcursor);
+DROP FUNCTION get_rows_setof();
+ERROR:  function get_rows_setof does not exist
+DROP FUNCTION f_processed_return_table();
+SELECT COUNT(*) FROM gs_encrypted_proc;
+ count 
+-------
+     0
+(1 row)
+
+SELECT proname, prorettype, proallargtypes FROM gs_encrypted_proc JOIN pg_proc ON pg_proc.Oid = gs_encrypted_proc.func_id;
+ proname | prorettype | proallargtypes 
+---------+------------+----------------
+(0 rows)
+
+DROP COLUMN ENCRYPTION KEY ret_cek2;
+DROP CLIENT MASTER KEY ret_cmk2;
+\! gs_ktool -d all
+DELETE ALL
+ 1

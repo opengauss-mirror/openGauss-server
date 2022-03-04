@@ -64,7 +64,6 @@
 #endif
 SnapshotData CatalogSnapshotData = {SNAPSHOT_MVCC};
 
-extern THR_LOCAL bool need_reset_xmin;
 /*
  * Elements of the active snapshot stack.
  *
@@ -201,18 +200,6 @@ bool XidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdSta
             snapshot->xmax)));
 #endif
 
-    /*
-     * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
-     * that here).
-     *
-     * We can't do anything useful with xmin, because the xmin only tells us
-     * whether we see it as completed. We have to check the transaction log to
-     * see if the transaction committed or aborted, in any case.
-     */
-    if (GTM_MODE && TransactionIdFollowsOrEquals(xid, snapshot->xmax)) {
-            return false;
-    }
-
 loop:
     csn = TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
 
@@ -283,6 +270,51 @@ loop:
     }
 }
 
+bool UHeapXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot,
+    TransactionIdStatus *hintstatus, Buffer buffer, bool *sync)
+{
+    if (!GTM_LITE_MODE || snapshot->gtm_snapshot_type == GTM_SNAPSHOT_TYPE_LOCAL) {
+        /*
+         * Make a quick range check to eliminate most XIDs without looking at the
+         * CSN log.
+         */
+        if (TransactionIdPrecedes(xid, snapshot->xmin)) {
+            return true;
+        }
+
+        /*
+         * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
+         * that here.
+         */
+        if (GTM_MODE && TransactionIdFollowsOrEquals(xid, snapshot->xmax)) {
+            return false;
+        }
+    }
+
+    return XidVisibleInSnapshot(xid, snapshot, hintstatus, buffer, sync);
+}
+
+bool XidVisibleInDecodeSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdStatus* hintstatus, Buffer buffer)
+{
+    volatile CommitSeqNo csn;
+    *hintstatus = XID_INPROGRESS;
+
+    csn = TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
+    if (COMMITSEQNO_IS_COMMITTED(csn)) {
+        *hintstatus = XID_COMMITTED;
+        if (csn < snapshot->snapshotcsn) {
+            return true;
+        } else {
+            return false;
+        }
+    } else {
+        if (csn == COMMITSEQNO_ABORTED) {
+            *hintstatus = XID_ABORTED;
+        }
+    }
+    return false;
+}
+
 /*
  * CommittedXidVisibleInSnapshot
  *		Is the given XID visible according to the snapshot?
@@ -304,14 +336,6 @@ bool CommittedXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, Buffer 
          */
         if (TransactionIdPrecedes(xid, snapshot->xmin))
             return true;
-
-        /*
-         * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
-         * that here.
-         */
-        if (GTM_MODE && TransactionIdFollowsOrEquals(xid, snapshot->xmax)) {
-            return false;
-        }
     }
 
 loop:
@@ -377,6 +401,32 @@ loop:
         return false;
 }
 
+bool CommittedXidVisibleInDecodeSnapshot(TransactionId xid, Snapshot snapshot, Buffer buffer)
+{
+    CommitSeqNo csn;
+
+    csn = TransactionIdGetCommitSeqNo(xid, true, true, false, snapshot);
+    if (COMMITSEQNO_IS_COMMITTING(csn)) {
+        return false;
+    } else if (!COMMITSEQNO_IS_COMMITTED(csn)) {
+        ereport(WARNING,
+            (errmsg("transaction/csn %lu/%lu was hinted as "
+                    "committed, but was not marked as committed in "
+                    "the transaction log",
+                xid, csn)));
+        /*
+         * We have contradicting evidence on whether the transaction committed or
+         * not. Let's assume that it did. That seems better than erroring out.
+         */
+        return true;
+    }
+
+    if (csn < snapshot->snapshotcsn) {
+        return true;
+    } else {
+        return false;
+    }
+}
 
 /*
  * GetTransactionSnapshot
@@ -966,7 +1016,7 @@ static void SnapshotResetXmin(void)
     if (u_sess->utils_cxt.RegisteredSnapshots == 0 && u_sess->utils_cxt.ActiveSnapshot == NULL) {
         t_thrd.pgxact->xmin = InvalidTransactionId;
         t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
-        need_reset_xmin = true;
+        t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     }
 }
 

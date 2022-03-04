@@ -124,7 +124,9 @@ VectorBatch *distExecVecImport(VecForeignScanState *node)
 
     MemoryContextReset(scanMcxt);
     oldMemoryContext = MemoryContextSwitchTo(scanMcxt);
+#ifndef ENABLE_LITE_MODE
     SetObsMemoryContext(((CopyState)importState)->copycontext);
+#endif
     for (batch->m_rows = 0; batch->m_rows < BatchMaxSize; batch->m_rows++) {
 retry:
         PG_TRY();

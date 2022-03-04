@@ -26,10 +26,14 @@
 
 #include "stdint.h"
 #include "datatypes.h"
-extern void add_rettype_orig(const Oid func_id, const Oid ret_type, const Oid res_type);
-extern void add_allargtypes_orig(const Oid func_id, Datum* all_types_orig, Datum* all_types, const int tup_natts);
-extern void record_proc_depend(const Oid func_id, const Oid gs_encrypted_proc_id);
-extern void verify_rettype_for_out_param(const Oid func_id);
-extern void delete_proc_client_info(Oid func_id);
+#include "postgres_ext.h"
+#include "access/htup.h"
+
+void add_rettype_orig(const Oid func_id, const Oid ret_type, const Oid res_type);
+void add_allargtypes_orig(const Oid func_id, Datum* all_types_orig, Datum* all_types, const int tup_natts, const Oid relid = InvalidOid);
+void record_proc_depend(const Oid func_id, const Oid gs_encrypted_proc_id);
+void verify_rettype_for_out_param(const Oid func_id);
+void delete_proc_client_info(HeapTuple);
+void delete_proc_client_info(Oid func_id);
 
 #endif

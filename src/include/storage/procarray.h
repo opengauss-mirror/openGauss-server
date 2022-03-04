@@ -78,11 +78,9 @@ extern TransactionId GetRecentGlobalXmin(void);
 extern TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin = false,
     bool bRecentGlobalXminNoCheck = false);
 extern TransactionId GetGlobalOldestXmin(void);
-extern TransactionId GetOldestXminForUndo(void);
+extern TransactionId GetOldestXminForUndo(TransactionId * recycleXmin);
 extern void CheckCurrentTimeline(GTM_Timeline timeline);
 extern TransactionId GetOldestActiveTransactionId(TransactionId *globalXmin);
-extern void FixCurrentSnapshotByGxid(TransactionId gxid);
-extern void CheckSnapshotIsValidException(Snapshot snapshot, const char* location);
 extern TransactionId GetOldestSafeDecodingTransactionId(bool catalogOnly);
 extern void CheckSnapshotTooOldException(Snapshot snapshot, const char* location);
 
@@ -158,6 +156,7 @@ extern void SyncWaitXidEnd(TransactionId xid, Buffer buffer);
 extern CommitSeqNo calculate_local_csn_min();
 extern void proc_cancel_invalid_gtm_lite_conn();
 extern void forward_recent_global_xmin(void);
+extern void UpdateXLogMaxCSN(CommitSeqNo xlogCSN);
 
 extern void UpdateCSNLogAtTransactionEND(
     TransactionId xid, int nsubxids, TransactionId* subXids, CommitSeqNo csn, bool isCommit);

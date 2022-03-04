@@ -162,6 +162,7 @@ void plpgsql_ns_additem(int itemtype, int itemno, const char* name, const char* 
     AssertEreport(curr_compile->ns_top != NULL || itemtype == PLPGSQL_NSTYPE_LABEL, MOD_PLSQL, "");
 
     if (curr_compile->plpgsql_curr_compile_package != NULL) {
+        checkCompileMemoryContext(curr_compile->plpgsql_curr_compile_package->pkg_cxt);
         temp = MemoryContextSwitchTo(curr_compile->plpgsql_curr_compile_package->pkg_cxt);
     }
 
@@ -268,7 +269,11 @@ PLpgSQL_nsitem* plpgsql_ns_lookup(
     char* currCompilePackageName = NULL;
     char* currCompilePackageSchemaName = NULL;
     rc = CompileWhich();
-    if (rc == PLPGSQL_COMPILE_PACKAGE_PROC || rc == PLPGSQL_COMPILE_PACKAGE) {
+    if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid)) {
+        NameData* CompilePackageName = GetPackageName(u_sess->plsql_cxt.running_pkg_oid);
+        currCompilePackageName = CompilePackageName->data;
+        currCompilePackageSchemaName = GetPackageSchemaName(u_sess->plsql_cxt.running_pkg_oid);
+    } else if (rc == PLPGSQL_COMPILE_PACKAGE_PROC || rc == PLPGSQL_COMPILE_PACKAGE) {
         currCompilePackageName = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_signature;
         currCompilePackageSchemaName = GetPackageSchemaName();
     }
@@ -280,11 +285,6 @@ PLpgSQL_nsitem* plpgsql_ns_lookup(
                 continue;
             }
             bool isSamePackage = false;
-            if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid) && currCompilePackageName == NULL) {
-                NameData* CompilePackageName = GetPackageName(u_sess->plsql_cxt.running_pkg_oid);
-                currCompilePackageName = CompilePackageName->data;
-                currCompilePackageSchemaName = GetPackageSchemaName(u_sess->plsql_cxt.running_pkg_oid);
-            }
             if (currCompilePackageName != NULL && nsitem->pkgname != NULL) {
                 if (strcmp(currCompilePackageName, nsitem->pkgname) == 0) {
                     if (nsitem->schemaName == NULL) {
@@ -888,7 +888,7 @@ void free_expr(PLpgSQL_expr* expr)
     }
 }
 
-void plpgsql_free_function_memory(PLpgSQL_function* func)
+void plpgsql_free_function_memory(PLpgSQL_function* func, bool fromPackage)
 {
     int i;
 
@@ -897,8 +897,7 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
     /*
      * function which in package not free memory alone 
      */
-    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
-        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+    if (OidIsValid(func->pkg_oid) && !fromPackage) {
         return;
     }
 
@@ -906,7 +905,7 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
     for (i = 0; i < func->ndatums; i++) {
         PLpgSQL_datum* d = func->datums[i];
         if (d != NULL) {
-            if (d->ispkg == true) {
+            if (!func->datum_need_free[i]) {
                 continue;
             }
         } else {
@@ -985,6 +984,10 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
         }
         pfree_ext(func->fn_searchpath);
     }
+    if (func->invalItems != NULL) {
+        list_free_deep(func->invalItems);
+        func->invalItems = NULL;
+    }
 
     /*
      * And finally, release all memory except the PLpgSQL_function struct
@@ -1010,17 +1013,11 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
 void plpgsql_free_package_memory(PLpgSQL_package* pkg)
 {
     int i;
-    ListCell* l;
-    foreach(l, pkg->proc_compiled_list) {
-        if (((PLpgSQL_function*)lfirst(l))->use_count > 0)
-            return;
-    }
-    foreach(l, pkg->proc_compiled_list) {
-        PLpgSQL_function* func = (PLpgSQL_function*)lfirst(l);
-        plpgsql_free_function_memory(func);
-    }
     /* Release plans associated with variable declarations */
     for (i = 0; i < pkg->ndatums; i++) {
+        if (!pkg->datum_need_free[i]) {
+            continue;
+        }
         PLpgSQL_datum* d = pkg->datums[i];
         switch (d->dtype) {
             case PLPGSQL_DTYPE_VARRAY:
@@ -1073,6 +1070,12 @@ void plpgsql_free_package_memory(PLpgSQL_package* pkg)
         }
         pfree_ext(pkg->pkg_searchpath);
     }
+
+    if (pkg->invalItems != NULL) {
+        list_free_deep(pkg->invalItems);
+        pkg->invalItems = NULL;
+    }
+
     /*
      * And finally, release all memory except the PLpgSQL_function struct
      * itself (which has to be kept around because there may be multiple

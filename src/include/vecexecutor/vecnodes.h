@@ -185,6 +185,7 @@ typedef struct RowToVecState {
 
     bool m_fNoMoreRows;            // does it has more rows to output
     VectorBatch* m_pCurrentBatch;  // current active batch in outputing
+    bool m_batchMode;
 } RowToVecState;
 
 typedef struct VecResultState : public ResultState {

@@ -82,6 +82,7 @@ extern bool isPartitionedObject(Oid relid, char relkind, bool missing_ok);
 extern bool isPartitionObject(Oid partid, char partkind, bool missing_ok);
 extern Oid getPartitionIndexOid(Oid indexid, Oid partitionid);
 extern Oid getPartitionIndexTblspcOid(Oid indexid, Oid partitionid);
+extern char* getPartitionIndexName(Oid indexid, Oid partitionid);
 extern Oid indexPartGetHeapPart(Oid indexPart, bool missing_ok);
 extern Oid searchPartitionIndexOid(Oid partitionedIndexid, List *pindex);
 extern List *getPartitionObjectIdList(Oid relid, char relkind);
@@ -97,20 +98,27 @@ extern Oid partitionNameGetPartitionOid (Oid partitionedTableOid,
                                          Oid *partOidForSubPart = NULL);
 extern Oid partitionValuesGetPartitionOid(Relation rel, List *partKeyValueList, LOCKMODE lockMode, bool topClosed,
                                           bool missingOk, bool noWait);
+extern Oid subpartitionValuesGetSubpartitionOid(Relation rel, List *partKeyValueList, List *subpartKeyValueList,
+    LOCKMODE lockMode, bool topClosed, bool missingOk, bool noWait, Oid *partOidForSubPart);
 extern List *searchPartitionIndexesByblid(Oid blid);
 extern List *searchPgPartitionByParentId(char parttype, Oid parentId);
 extern List* searchPgSubPartitionByParentId(char parttype, List *parentOids);
 extern void freePartList(List *l);
 extern void freeSubPartList(List* plist);
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
+extern Oid GetBaseRelOidOfParition(Relation relation);
 
 extern List* relationGetPartitionOidList(Relation rel);
 extern List* RelationGetSubPartitionOidList(Relation rel, LOCKMODE lockmode = AccessShareLock);
 extern List* RelationGetSubPartitionOidListList(Relation rel);
 extern List* relationGetPartitionList(Relation relation, LOCKMODE lockmode);
+extern List* RelationGetPartitionNameList(Relation relation);
+extern void RelationGetSubpartitionInfo(Relation relation, char *subparttype, List **subpartKeyPosList,
+    int2vector **subpartitionKey);
 extern List* indexGetPartitionOidList(Relation indexRelation);
 extern List* indexGetPartitionList(Relation indexRelation, LOCKMODE lockmode);
 extern Relation SubPartitionGetRelation(Relation heap, Partition indexpart, LOCKMODE lockmode);
+extern Partition SubPartitionOidGetPartition(Relation rel, Oid subPartOid, LOCKMODE lockmode);
 extern Relation SubPartitionOidGetParentRelation(Relation rel, Oid subPartOid, LOCKMODE lockmode);
 extern List* RelationGetSubPartitionList(Relation relation, LOCKMODE lockmode);
 extern void  releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode, bool validCheck = true);

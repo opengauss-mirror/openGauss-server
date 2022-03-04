@@ -525,13 +525,10 @@ void AddControlMemoryContext(Instrumentation* instr, MemoryContext context)
 }
 
 /* Exit from a plan node */
-void InstrStopNode(Instrumentation* instr, double n_tuples)
+void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
 {
     instr_time end_time;
-
     CPUUsage cpu_usage;
-    int64 memory_size = 0;
-    int64 control_memory_size = 0;
 
     CPUUsageGetCurrent(&cpu_usage);
 
@@ -552,8 +549,9 @@ void InstrStopNode(Instrumentation* instr, double n_tuples)
     }
 
     /* Add delta of buffer usage since entry to node's totals */
-    if (instr->need_bufusage)
+    if (instr->need_bufusage) {
         BufferUsageAccumDiff(&instr->bufusage, u_sess->instr_cxt.pg_buffer_usage, &instr->bufusage_start);
+    }
 
     CPUUsageAccumDiff(&instr->cpuusage, &cpu_usage, &instr->cpuusage_start);
 
@@ -563,22 +561,26 @@ void InstrStopNode(Instrumentation* instr, double n_tuples)
         instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
     }
 
-    /* calculate the memory context size of this Node */
-    CalculateContextSize(instr->memoryinfo.nodeContext, &memory_size);
-    if (instr->memoryinfo.peakOpMemory < memory_size)
-        instr->memoryinfo.peakOpMemory = memory_size;
+    if (containMemory) {
+        int64 memory_size = 0;
+        int64 control_memory_size = 0;
+        /* calculate the memory context size of this Node */
+        CalculateContextSize(instr->memoryinfo.nodeContext, &memory_size);
+        if (instr->memoryinfo.peakOpMemory < memory_size)
+            instr->memoryinfo.peakOpMemory = memory_size;
 
-    List* control_list = instr->memoryinfo.controlContextList;
-    ListCell* context_cell = NULL;
+        List* control_list = instr->memoryinfo.controlContextList;
+        ListCell* context_cell = NULL;
 
-    /* calculate all control memory */
-    foreach (context_cell, control_list) {
-        MemoryContext context = (MemoryContext)lfirst(context_cell);
-        CalculateContextSize(context, &control_memory_size);
+        /* calculate all control memory */
+        foreach (context_cell, control_list) {
+            MemoryContext context = (MemoryContext)lfirst(context_cell);
+            CalculateContextSize(context, &control_memory_size);
+        }
+
+        if (instr->memoryinfo.peakControlMemory < control_memory_size)
+            instr->memoryinfo.peakControlMemory = control_memory_size;
     }
-
-    if (instr->memoryinfo.peakControlMemory < control_memory_size)
-        instr->memoryinfo.peakControlMemory = control_memory_size;
 }
 
 /* Finish a run cycle for a plan node */

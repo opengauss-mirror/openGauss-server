@@ -320,6 +320,8 @@ void BootStrapProcessMain(int argc, char* argv[])
         }
         InitializeNumLwLockPartitions();
     }
+    g_instance.global_sysdbcache.Init(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+    CreateLocalSysDBCache();
 
     /* Validate we have been given a reasonable-looking t_thrd.proc_cxt.DataDir */
     Assert(t_thrd.proc_cxt.DataDir);

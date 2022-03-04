@@ -110,6 +110,13 @@ insert into creditcard_info1  select * from creditcard_info ;
 ERROR(CLIENT): unencrypted data should not be inserted into encrypted column
 insert into creditcard_info1  select * from creditcard_info2 ;
 ERROR(CLIENT): encrypted data should not be inserted into encrypted column with different keys
+-- error
+INSERT INTO creditcard_info1(id_number, name, credit_card) SELECT id_number, name, credit_card FROM creditcard_info2;
+ERROR(CLIENT): encrypted data should not be inserted into encrypted column with different keys
+INSERT INTO creditcard_info1(id_number, credit_card) SELECT id_number, credit_card FROM creditcard_info2;
+ERROR(CLIENT): encrypted data should not be inserted into encrypted column with different keys
+-- succeed
+INSERT INTO creditcard_info1(id_number, name) SELECT id_number, name FROM creditcard_info2;
 drop table creditcard_info;
 drop table creditcard_info1;
 drop table creditcard_info2;

@@ -7,8 +7,8 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
- * Portions Copyright (c) 2021, openGauss Contributors
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * src/include/utils/rel.h
  *
  * -------------------------------------------------------------------------
@@ -20,7 +20,6 @@
 #include "catalog/pg_am.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_index.h"
-
 
 #include "fmgr.h"
 #include "nodes/bitmapset.h"
@@ -37,7 +36,6 @@
 #include "utils/reltrigger.h"
 #include "utils/partitionmap.h"
 #include "catalog/pg_hashbucket_fn.h"
-#include "catalog/pg_publication.h"
 
 
 #ifndef HDFS
@@ -96,16 +94,6 @@ typedef  struct  RelationBucketKey
     Oid         *bucketKeyType;		/*the data type of partition key*/
 }RelationBucketKey;
 
-/* page compress related reloptions. */
-typedef struct PageCompressOpts {
-    int compressType;                /* compress algorithm */
-    int compressLevel;        /* compress level */
-    uint32 compressChunkSize;        /* chunk size of compressed data */
-    uint32 compressPreallocChunks;    /* prealloced chunks to store compressed data */
-    bool compressByteConvert;  /* byte row-coll-convert */
-    bool compressDiffConvert;  /* make difference convert */
-} PageCompressOpts;
-
 /* describe commit sequence number of object in pg_object */
 typedef struct ObjectCSN
 {
@@ -125,7 +113,6 @@ typedef struct PgObjectOption {
  */
 
 typedef struct RelationData {
-
     RelFileNode rd_node; /* relation physical identifier */
     /* use "struct" here to avoid needing to include smgr.h: */
     struct SMgrRelationData* rd_smgr; /* cached file handle, or NULL */
@@ -165,16 +152,16 @@ typedef struct RelationData {
     /* data managed by RelationGetIndexList: */
     List* rd_indexlist; /* list of OIDs of indexes on relation */
     Oid rd_oidindex;    /* OID of unique index on OID, if any */
-    Oid	rd_pkindex;		/* OID of primary key, if any */
+    Oid rd_pkindex;     /* OID of primary key, if any */
     Oid rd_refSynOid;   /* OID of referenced synonym Oid, if mapping indeed. */
 
     /* data managed by RelationGetIndexAttrBitmap: */
     Bitmapset* rd_indexattr; /* identifies columns used in indexes */
-    Bitmapset* rd_pkattr;    /* cols included in primary key */
     Bitmapset* rd_keyattr;   /* cols that can be ref'd by foreign keys */
+    Bitmapset* rd_pkattr;    /* cols included in primary key */
     Bitmapset* rd_idattr;    /* included in replica identity index */
 
-    PublicationActions* rd_pubactions;  /* publication actions */
+    void* rd_pubactions;  /* publication actions, PublicationActions */
 
     /*
      * The index chosen as the relation's replication identity or
@@ -257,6 +244,7 @@ typedef struct RelationData {
 
     CommitSeqNo rd_changecsn; /* the commit sequence number when the old version expires */
     CommitSeqNo rd_createcsn; /* the commit sequence number when object create */
+    CommitSeqNo xmin_csn;  /* the commit sequence number when the xmin of tuple commit */
 
     /* bucket key info, indicating which keys are used to comoute hash value */
     int rd_bucketmapsize; /* Size of bucket map */
@@ -292,6 +280,10 @@ typedef struct RelationData {
     Oid rd_mlogoid;
     /* Is under the context of creating crossbucket index? */
     bool newcbi;
+
+    bool is_compressed;
+    /* used only for gsc, keep it preserved if you modify the rel, otherwise set it null */
+    struct LocalRelationEntry *entry; 
 } RelationData;
 
 /*
@@ -323,15 +315,10 @@ typedef enum RedisRelAction {
     REDIS_REL_NORMAL,
     REDIS_REL_APPEND,
     REDIS_REL_READ_ONLY,
+    REDIS_REL_END_CATCHUP,
     REDIS_REL_DESTINATION,
     REDIS_REL_RESET_CTID
 } RedisHtlAction;
-
-/* PageCompressOpts->compressType values */
-typedef enum CompressTypeOption {
-    COMPRESS_TYPE_NONE = 0, COMPRESS_TYPE_PGLZ = 1, COMPRESS_TYPE_ZSTD = 2
-} CompressTypeOption;
-
 
 typedef struct StdRdOptions {
     int32 vl_len_;           /* varlena header (do not touch directly!) */
@@ -359,8 +346,11 @@ typedef struct StdRdOptions {
     char* wait_clean_cbi;
     int bucketcnt;          /* number of bucket counts */
     int parallel_workers;   /* max number of parallel workers */
+    bool hasuids;           /* enable uids for this relation */
     /* info for redistribution */
     Oid rel_cn_oid;
+    int exec_step;
+    int64 create_time;
     RedisHtlAction append_mode_internal;
 
     int initTd;
@@ -398,7 +388,6 @@ typedef struct StdRdOptions {
     char* encrypt_algo;
     bool enable_tde;     /* switch flag for table-level TDE encryption */
     bool on_commit_delete_rows; /* global temp table */
-    PageCompressOpts compress; /* page compress related reloptions. */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -590,7 +579,7 @@ typedef struct StdRdOptions {
  *		Returns the rel's frozenxid64.
  */
 extern TransactionId RelationGetRelFrozenxid64(Relation r);
-
+extern TransactionId PartGetRelFrozenxid64(Partition part);
 /*
  * RelationGetRelFileNode
  *		Returns the rel's relfilenode.
@@ -804,6 +793,6 @@ extern void RelationDecrementReferenceCount(Oid relationId);
 
 extern void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info);
 extern char RelationGetRelReplident(Relation r);
-extern void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compressOpts, const char* name);
+
 #endif /* REL_H */
 

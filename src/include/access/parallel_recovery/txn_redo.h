@@ -38,6 +38,5 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker* worker, bool forceAll);
 void MoveTxnItemToApplyQueue(TxnRedoWorker* worker);
 void DumpTxnWorker(TxnRedoWorker* txnWorker);
 bool IsTxnWorkerIdle(TxnRedoWorker* worker);
-void FreeTxnItem();
 }
 #endif

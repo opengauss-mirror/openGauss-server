@@ -154,7 +154,9 @@ int MainLoop(FILE* source, char* querystring)
 
     if (pset.cur_cmd_interactive) {
         const char* val = GetVariable(pset.vars, "HISTSIZE");
-        setHistSize("HISTSIZE", val, val == NULL);
+        if (val != NULL) {
+            setHistSize("HISTSIZE", val, false);
+        }
     }
 
     /* Create working state */
@@ -364,15 +366,10 @@ int MainLoop(FILE* source, char* querystring)
                     }
 #endif
                     success = SendQuery(query_buf->data);
-                    bool is_handle_error = !success && (sqlErrHandle == SQLERROR_HANDLE_EXIT);
-                    if (is_handle_error) {
-                        exit(EXIT_FAILURE);
-                    }
 
                     // Query fail, if need retry, invoke QueryRetryController().
                     //
-                    bool is_retry_on = !success && pset.retry_on;
-                    if (is_retry_on) {
+                    if (!success && pset.retry_on) {
                         success = QueryRetryController(query_buf->data);
                     }
                 } else {

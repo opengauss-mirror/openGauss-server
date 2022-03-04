@@ -1953,6 +1953,8 @@ NON_EXEC_STATIC void CPmonitorMain(void)
             t_thrd.wlm_cxt.wlm_init_done = false;
             AbortCurrentTransaction();
         }
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         /*
          *   Notice: at the most time it isn't necessary to call because

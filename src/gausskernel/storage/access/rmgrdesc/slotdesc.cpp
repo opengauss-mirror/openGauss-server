@@ -41,6 +41,24 @@
 #include "replication/walsender.h"
 #include "replication/syncrep.h"
 
+const char* slot_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_SLOT_CREATE) {
+        return "slot_create";
+    } else if (info == XLOG_SLOT_ADVANCE) {
+        return "slot_advance";
+    } else if (info == XLOG_SLOT_DROP) {
+        return "slot_drop";
+    } else if (info == XLOG_SLOT_CHECK) {
+        return "slot_check";
+    } else if (info == XLOG_TERM_LOG) {
+        return "slot_term_log";
+    } else {
+        return "unknown_type";
+    }
+}
+
 void slot_desc(StringInfo buf, XLogReaderState *record)
 {
     appendStringInfo(buf, "slot info");

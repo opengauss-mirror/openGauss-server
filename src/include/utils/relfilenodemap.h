@@ -19,5 +19,6 @@ extern Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid &
                                        Oid *partitionOid, bool segment);
 extern Oid UHeapRelidByRelfilenode(Oid reltablespace, Oid relfilenode);
 extern Oid UHeapPartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid& partationReltoastrelid);
-
+extern void RelfilenodeMapInvalidateCallback(Datum arg, Oid relid);
+extern void UHeapRelfilenodeMapInvalidateCallback(Datum arg, Oid relid);
 #endif /* RELFILENODEMAP_H */

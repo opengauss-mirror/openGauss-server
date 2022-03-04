@@ -1,0 +1,141 @@
+--
+-- MERGE INTO 
+--
+-- part 1
+-- initial
+CREATE SCHEMA merge_where_col;
+SET current_schema = merge_where_col;
+drop table if exists merge_nest_tab1,dt2;
+NOTICE:  table "merge_nest_tab1" does not exist, skipping
+NOTICE:  table "dt2" does not exist, skipping
+create table merge_nest_tab1(co1 numeric(20,4),co2 varchar2,co3 number,co4 date);
+insert into merge_nest_tab1 values(generate_series(1,10),'hello'||generate_series(1,10),generate_series(1,10)*10,sysdate);
+create table dt2(c1 numeric(20,4),c2 boolean,c3 character(40),c4 binary_double,c5 nchar(20)) WITH (ORIENTATION = COLUMN);
+insert into dt2 values(generate_series(20,50),false,generate_series(20,50)||'gauss',generate_series(20,50)-0.99,'openopen');
+-- we can't use columns of target table in insertion subquery(co1<45) for 'where'
+BEGIN; 
+merge into merge_nest_tab1 a
+USING dt2 b
+    ON a.co1=b.c1-20
+    WHEN NOT matched THEN
+    insert(co1,co2,co3) values(100,
+    (SELECT 666)||'good',
+        (SELECT sum(c.c1)
+        FROM dt2 c
+        INNER JOIN merge_nest_tab1 d
+            ON c.c1=d.co1 ))
+    WHERE co1<45;
+ERROR:  column "co1" does not exist
+LINE 11:     WHERE co1<45;
+                   ^
+HINT:  There is a column named "co1" in table "a", but it cannot be referenced from this part of the query.
+END; 
+-- we can use columns of source table in insertion subquery(c1<45) for 'where'
+BEGIN; 
+merge into merge_nest_tab1 a
+USING dt2 b
+    ON a.co1=b.c1-20
+    WHEN NOT matched THEN
+    insert(co1,co2,co3) values(100,
+    (SELECT 666)||'good',
+        (SELECT sum(c.c1)
+        FROM dt2 c
+        INNER JOIN merge_nest_tab1 d
+            ON c.c1=d.co1 ))
+    WHERE c1<45;
+SELECT co1, co2, co3 FROM merge_nest_tab1 order by 1; 
+   co1    |   co2   | co3 
+----------+---------+-----
+   1.0000 | hello1  |  10
+   2.0000 | hello2  |  20
+   3.0000 | hello3  |  30
+   4.0000 | hello4  |  40
+   5.0000 | hello5  |  50
+   6.0000 | hello6  |  60
+   7.0000 | hello7  |  70
+   8.0000 | hello8  |  80
+   9.0000 | hello9  |  90
+  10.0000 | hello10 | 100
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+ 100.0000 | 666good |    
+(25 rows)
+
+ROLLBACK; 
+-- we can use columns of source table in insert subquery(c1<45) for 'where'
+BEGIN; 
+merge into merge_nest_tab1 a
+USING dt2 b
+    ON a.co1=b.c1-20
+    WHEN matched THEN
+        UPDATE SET a.co3=a.co3 + b.c4,
+         a.co2='hello',
+         a.co4=(SELECT last_day(sysdate))
+    WHERE c1 BETWEEN 1 AND 50;
+SELECT co1, co2, co3 FROM merge_nest_tab1 order by 1; 
+   co1   |  co2  |  co3   
+---------+-------+--------
+  1.0000 | hello |  30.01
+  2.0000 | hello |  41.01
+  3.0000 | hello |  52.01
+  4.0000 | hello |  63.01
+  5.0000 | hello |  74.01
+  6.0000 | hello |  85.01
+  7.0000 | hello |  96.01
+  8.0000 | hello | 107.01
+  9.0000 | hello | 118.01
+ 10.0000 | hello | 129.01
+(10 rows)
+
+ROLLBACK; 
+-- part 2
+-- initial
+drop table if exists tb_a,tb_b;
+NOTICE:  table "tb_a" does not exist, skipping
+NOTICE:  table "tb_b" does not exist, skipping
+create table tb_a(id int, a int, b int, c int, d int);
+create table tb_b(id int, a int, b int, c int, d int);
+insert into tb_a values(1, 1, 1, 1, 1);
+insert into tb_a values(2, 2, 2, 2, 2);
+insert into tb_a values(3, 3, 3, 3, 3);
+insert into tb_a values(4, 4, 4, 4, 4);
+insert into tb_b values(1, 100, 1, 1, 1);
+insert into tb_b values(2, 2, 2, 2, 2);
+insert into tb_b values(3, 3, 3, 3, 3);
+insert into tb_b values(4, 4, 4, 4, 4);
+-- if the column has the same name, the column in the target table takes precedence
+BEGIN; 
+MERGE INTO tb_b bt
+USING tb_a at
+    ON (at.id = bt.id)
+    WHEN MATCHED THEN
+    UPDATE SET a = at.a + 100 WHERE a =100;
+SELECT * FROM tb_b ORDER BY  1; 
+ id |  a  | b | c | d 
+----+-----+---+---+---
+  1 | 101 | 1 | 1 | 1
+  2 |   2 | 2 | 2 | 2
+  3 |   3 | 3 | 3 | 3
+  4 |   4 | 4 | 4 | 4
+(4 rows)
+
+ROLLBACK; 
+-- clean up
+DROP SCHEMA merge_where_col CASCADE;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table merge_nest_tab1
+drop cascades to table dt2
+drop cascades to table tb_a
+drop cascades to table tb_b

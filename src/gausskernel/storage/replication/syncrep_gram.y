@@ -172,4 +172,5 @@ create_syncrep_config(const char *num_sync, List *members, uint8 syncrep_method)
 #undef yylloc
 #undef yylex
 
+#undef yylex
 #include "syncrep_scanner.inc"

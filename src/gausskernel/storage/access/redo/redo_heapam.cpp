@@ -263,7 +263,7 @@ void HeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Transa
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
 
-    htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+    htup->t_infomask &= ~HEAP_XMAX_BITS;
     htup->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
     HeapTupleHeaderClearHotUpdated(htup);
 
@@ -519,7 +519,7 @@ void HeapXlogUpdateOperatorOldpage(RedoBufferInfo *buffer, void *recoreddata, bo
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
 
-    htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+    htup->t_infomask &= ~HEAP_XMAX_BITS;
     htup->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
     if (hot_update)
         HeapTupleHeaderSetHotUpdated(htup);
@@ -662,14 +662,6 @@ void HeapXlogUpdateOperatorNewpage(RedoBufferInfo *buffer, void *recorddata, boo
     PageSetLSN(page, buffer->lsn);
 }
 
-void HeapXlogPageUpgradeOperatorPage(RedoBufferInfo *buffer)
-{
-    Page page = buffer->pageinfo.page;
-
-    PageLocalUpgrade(page);
-    PageSetLSN(page, buffer->lsn);
-}
-
 void HeapXlogLockOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool isTupleLockUpgrade)
 {
     xl_heap_lock *xlrec = (xl_heap_lock *)recorddata;
@@ -687,7 +679,7 @@ void HeapXlogLockOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool isT
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
 
-    htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+    htup->t_infomask &= ~HEAP_XMAX_BITS;
     htup->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
 
     if (isTupleLockUpgrade) {
@@ -932,7 +924,7 @@ static XLogRecParseState *HeapXlogUpdateParseBlock(XLogReaderState *record, uint
         XLogRecSetAuxiBlkNumState(&blockstate->blockparse.extra_rec.blockdatarec, newblk, InvalidForkNumber);
         // OLD BLOCK
 
-        if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED) {
+        if (xlrec->flags & XLH_UPDATE_OLD_ALL_VISIBLE_CLEARED) {
             (*blocknum)++;
             XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
             if (blockstate == NULL) {
@@ -1286,21 +1278,6 @@ static XLogRecParseState *HeapXlogLogicalNewPageParseBlock(XLogReaderState *reco
     return recordstatehead;
 }
 
-static XLogRecParseState *HeapXlogPageUpgradePareseBlock(XLogReaderState *record, uint32 *blocknum)
-{
-    XLogRecParseState *recordstatehead = NULL;
-
-    *blocknum = 1;
-
-    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
-    if (recordstatehead == NULL) {
-        return NULL;
-    }
-
-    XLogRecSetBlockDataState(record, HEAP_PAGE_UPDATE_ORIG_BLOCK_NUM, recordstatehead);
-    return recordstatehead;
-}
-
 XLogRecParseState *Heap2RedoParseIoBlock(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -1328,9 +1305,6 @@ XLogRecParseState *Heap2RedoParseIoBlock(XLogReaderState *record, uint32 *blockn
             break;
         case XLOG_HEAP2_LOGICAL_NEWPAGE:
             recordblockstate = HeapXlogLogicalNewPageParseBlock(record, blocknum);
-            break;
-        case XLOG_HEAP2_PAGE_UPGRADE:
-            recordblockstate = HeapXlogPageUpgradePareseBlock(record, blocknum);
             break;
         default:
             ereport(PANIC, (errmsg("Heap2RedoParseIoBlock: unknown op code %u", info)));
@@ -1617,18 +1591,6 @@ static void HeapXlogMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockDataPars
     }
 }
 
-void HeapXlogPageUpgradeBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
-{
-    XLogBlockDataParse *datadecode = blockdatarec;
-    XLogRedoAction action;
-
-    action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
-    if (BLK_NEEDS_REDO == action) {
-        HeapXlogPageUpgradeOperatorPage(bufferinfo);
-        MakeRedoBufferDirty(bufferinfo);
-    }
-}
-
 void Heap2RedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
 {
     uint8 info = XLogBlockHeadGetInfo(blockhead) & ~XLR_INFO_MASK;
@@ -1645,9 +1607,6 @@ void Heap2RedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
             break;
         case XLOG_HEAP2_MULTI_INSERT:
             HeapXlogMultiInsertBlock(blockhead, blockdatarec, bufferinfo);
-            break;
-        case XLOG_HEAP2_PAGE_UPGRADE:
-            HeapXlogPageUpgradeBlock(blockhead, blockdatarec, bufferinfo);
             break;
         default:
             ereport(PANIC, (errmsg("heap2_redo_block: unknown op code %u", info)));

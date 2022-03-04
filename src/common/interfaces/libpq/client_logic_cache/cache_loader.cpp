@@ -21,6 +21,7 @@
  * -------------------------------------------------------------------------
  */
 #include <iostream>
+#include <stdlib.h>
 #include "cache_loader.h"
 #include "client_logic_common/client_logic_utils.h"
 #include "cache_refresh_type.h"
@@ -444,7 +445,6 @@ bool CacheLoader::fill_global_settings_map(PGconn *conn)
     int arg_key_num = data_fetcher.get_column_index("key");
     int arg_value_num = data_fetcher.get_column_index("value");
     int change_epoch_num = data_fetcher.get_column_index("change_epoch");
-
     CachedGlobalSetting *cached_global_setting(NULL);
     Oid object_oid_prev(0);
     while (data_fetcher.next()) {
@@ -471,7 +471,7 @@ bool CacheLoader::fill_global_settings_map(PGconn *conn)
         bool is_new_object(false);
         if (!object_oid_prev || object_oid != object_oid_prev) {
             cached_global_setting =
-                new (std::nothrow) CachedGlobalSetting(object_oid, get_database_name(), object_name_space, object_name);
+                new(std::nothrow) CachedGlobalSetting(object_oid, get_database_name(), object_name_space, object_name);
             if (cached_global_setting == NULL) {
                 fprintf(stderr, "failed to allocate memory for client master key\n");
                 return false;
@@ -577,7 +577,7 @@ bool CacheLoader::fill_column_settings_info_cache(PGconn *conn)
         bool is_new_object(false);
         if (!object_oid_prev || object_oid != object_oid_prev) {
             column_setting =
-                new (std::nothrow) CachedColumnSetting(object_oid, get_database_name(), object_name_space, object_name);
+                new(std::nothrow) CachedColumnSetting(object_oid, get_database_name(), object_name_space, object_name);
             if (column_setting == NULL) {
                 fprintf(stderr, "failed to allocate memory for column encryption key\n");
                 return false;
@@ -692,7 +692,7 @@ bool CacheLoader::fill_cached_columns(PGconn *conn)
         Oid data_type_oid = (Oid)atoi(data_fetcher[orig_type_oid_num]);
         int data_type_mod = atoi(data_fetcher[orig_type_mod_num]);
 
-        CachedColumn *cached_column = new (std::nothrow) CachedColumn(my_oid, table_oid, database_name, schema_name,
+        CachedColumn *cached_column = new(std::nothrow) CachedColumn(my_oid, table_oid, database_name, schema_name,
             table_name, column_name, column_position, data_type_oid, data_type_mod);
         if (cached_column == NULL) {
             fprintf(stderr, "failed to new CachedColumn object\n");
@@ -736,7 +736,7 @@ const bool CacheLoader::fill_cached_types(PGconn *conn)
     m_cached_types_list.clear();
     while (data_fetcher.next()) {
         Oid oid_value = (Oid)atoi(data_fetcher[typid_num]);
-        CachedType *curr_type = new (std::nothrow) CachedType(oid_value, data_fetcher[typname_num],
+        CachedType *curr_type = new(std::nothrow) CachedType(oid_value, data_fetcher[typname_num],
             data_fetcher[schema_num], data_fetcher[db_num], conn->client_logic->m_cached_column_manager); 
         if (curr_type == NULL) {
             fprintf(stderr, "failed to new CachedType object\n");
@@ -749,11 +749,11 @@ const bool CacheLoader::fill_cached_types(PGconn *conn)
 
 bool CacheLoader::fill_cached_procs(PGconn *conn)
 {
-    const char *query = "select func_id, prorettype_orig, proargcachedcol, proallargtypes_orig,proname,"
-        "pronargs,proargtypes,proallargtypes,proargnames,nspname,current_database() as dbname "
+    const char *query = "select func_id, proargcachedcol, proallargtypes_orig,proname,"
+        "pronargs,proargtypes,proallargtypes,proargnames,proargmodes,nspname,current_database() as dbname, "
+        "EXTRACT(epoch from gs_proc.last_change) as change_epoch "
         "from gs_encrypted_proc gs_proc join pg_proc on gs_proc.func_id = pg_proc.oid "
         " join pg_namespace ON (pg_namespace.oid = pronamespace);";
-
     DataFetcher data_fetcher = conn->client_logic->m_data_fetcher_manager->get_data_fetcher();
     if (!data_fetcher.load(query)) {
         fprintf(stderr, "fill_cached_procs - query to initialize failed or did not return data\n");
@@ -761,50 +761,54 @@ bool CacheLoader::fill_cached_procs(PGconn *conn)
     }
     // getting the index of each column in the response
     int func_oid_num = data_fetcher.get_column_index("func_id");
-    int origin_ret_type_num = data_fetcher.get_column_index("prorettype_orig");
     int cached_col_num = data_fetcher.get_column_index("proargcachedcol");
     int alltypes_orig_num = data_fetcher.get_column_index("proallargtypes_orig");
     int proname_num = data_fetcher.get_column_index("proname");
     int pronargs_num = data_fetcher.get_column_index("pronargs");
     int proargtypes_num = data_fetcher.get_column_index("proargtypes");
     int proallargtypes_num = data_fetcher.get_column_index("proallargtypes");
+    int proargmodes_num = data_fetcher.get_column_index("proargmodes");
     int proargnames_num = data_fetcher.get_column_index("proargnames");
     int dbname_num = data_fetcher.get_column_index("dbname");
     int schema_num = data_fetcher.get_column_index("nspname");
-
+    int change_epoch_num = data_fetcher.get_column_index("change_epoch");
     m_proc_list.clear();
     while (data_fetcher.next()) {
-        CachedProc *curr_proc = new (std::nothrow) CachedProc();
+        update_last_change_epoch(data_fetcher[change_epoch_num]);
+        CachedProc *curr_proc = new(std::nothrow) CachedProc(conn);
         if (curr_proc == NULL) {
             fprintf(stderr, "failed to new CachedProc object\n");
             return false;
         }
-        /* 10: base is decimal */
-        curr_proc->m_func_id = strtoul(data_fetcher[func_oid_num], NULL, 10);
+        curr_proc->m_func_id = strtoul(data_fetcher[func_oid_num], NULL, NUMBER_BASE);
         curr_proc->m_proname = strdup(data_fetcher[proname_num]);
         curr_proc->m_pronargs = atoi(data_fetcher[pronargs_num]);
-        curr_proc->m_prorettype_orig = strtoul(data_fetcher[origin_ret_type_num], NULL, 10);
         curr_proc->m_dbname = strdup(data_fetcher[dbname_num]);
         curr_proc->m_schema_name = strdup(data_fetcher[schema_num]);
 
         if (data_fetcher[cached_col_num] != NULL && strlen(data_fetcher[cached_col_num]) > 0) {
-            parse_oid_array(data_fetcher[cached_col_num], &curr_proc->m_proargcachedcol);
+            parse_oid_array(conn, data_fetcher[cached_col_num], &curr_proc->m_proargcachedcol);
         }
         if (data_fetcher[proargtypes_num] != NULL && strlen(data_fetcher[proargtypes_num]) > 0) {
-            parse_oid_array(data_fetcher[proargtypes_num], &curr_proc->m_proargtypes);
+            parse_oid_array(conn, data_fetcher[proargtypes_num], &curr_proc->m_proargtypes);
         }
         if (data_fetcher[alltypes_orig_num] != NULL && strlen(data_fetcher[alltypes_orig_num]) > 0) {
-            curr_proc->m_nallargtypes_orig =
-                parse_oid_array(data_fetcher[alltypes_orig_num], &curr_proc->m_proallargtypes_orig);
+            curr_proc->m_nallargtypes =
+                    parse_oid_array(conn, data_fetcher[alltypes_orig_num], &curr_proc->m_proallargtypes_orig);
         }
         if (data_fetcher[proallargtypes_num] != NULL && strlen(data_fetcher[proallargtypes_num]) > 0) {
-            parse_oid_array(data_fetcher[proallargtypes_num], &curr_proc->m_proallargtypes);
+            parse_oid_array(conn, data_fetcher[proallargtypes_num], &curr_proc->m_proallargtypes);
         }
         if (data_fetcher[proargnames_num] != NULL && strlen(data_fetcher[proargnames_num]) > 0) {
-            curr_proc->m_nallargtypes = parse_char_array(data_fetcher[proargnames_num], &curr_proc->m_proargnames);
+            curr_proc->m_nargnames =
+                    parse_string_array(conn, data_fetcher[proargnames_num], &curr_proc->m_proargnames);
+        }
+        if (data_fetcher[proargmodes_num] != NULL && strlen(data_fetcher[proargmodes_num]) > 0) {
+            parse_char_array(conn, data_fetcher[proargmodes_num], &curr_proc->m_proargmodes);
         }
         curr_proc->set_original_ids();
-        /* add to maps */
+
+        // add to maps
         m_proc_list.add(curr_proc);
     }
     return true;

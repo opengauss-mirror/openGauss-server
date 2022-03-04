@@ -25,7 +25,6 @@
 #include "libpq/pqformat.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
-#include "utils/guc_sql.h"
 #include "optimizer/pgxcship.h"
 #include "miscadmin.h"
 
@@ -369,20 +368,6 @@ Datum float4in(PG_FUNCTION_ARGS)
 Datum float4out(PG_FUNCTION_ARGS)
 {
     float4 num = PG_GETARG_FLOAT4(0);
-    
-    if (u_sess->attr.attr_sql.for_print_tuple) {
-        char *result = NULL;
-        double var = (double)num;
-        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
-            result = apply_num_format(var);
-        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
-            result = apply_num_width(var);
-        }
-        if (result != NULL) {
-            PG_RETURN_CSTRING(result);
-        }
-    }
-
     char* ascii = (char*)palloc(MAXFLOATWIDTH + 1);
     errno_t rc = EOK;
 
@@ -597,20 +582,6 @@ Datum float8in(PG_FUNCTION_ARGS)
 Datum float8out(PG_FUNCTION_ARGS)
 {
     float8 num = PG_GETARG_FLOAT8(0);
-
-    if (u_sess->attr.attr_sql.for_print_tuple) {
-        char *result = NULL;
-        double var = num;
-        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
-            result = apply_num_format(var);
-        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
-            result = apply_num_width(var);
-        }
-        if (result != NULL) {
-            PG_RETURN_CSTRING(result);
-        }
-    }
-
     char* ascii = (char*)palloc(MAXDOUBLEWIDTH + 1);
     errno_t rc = EOK;
 

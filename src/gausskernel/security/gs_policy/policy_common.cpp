@@ -215,7 +215,7 @@ static bool verify_function_name(Oid namespaceId, const char *funcname)
 #endif
     if (catlist != NULL) {
         for (int i = 0; i < catlist->n_members && !is_found; ++i) {
-            HeapTuple    proctup = &catlist->members[i]->tuple;
+            HeapTuple    proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
             Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
             if (procform != NULL && procform->pronamespace == namespaceId) {
                 Oid funcid = HeapTupleGetOid(proctup);
@@ -617,7 +617,7 @@ void create_policy_label(CreatePolicyLabelStmt *stmt)
             ereport(NOTICE, (errmsg("%s label already defined, skipping", label_name)));
         } else {
             send_manage_message(AUDIT_FAILED);
-            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("%s label already defined", label_name)));
+            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_LABEL), errmsg("%s label already defined", label_name)));
         }
         return;
     }

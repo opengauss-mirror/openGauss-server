@@ -20,6 +20,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
 #include "access/xact.h"
@@ -58,6 +59,7 @@
 #include "catalog/pg_extension_data_source.h"
 #include "catalog/gs_global_chain.h"
 #include "catalog/gs_global_config.h"
+#include "catalog/gs_db_privilege.h"
 #include "commands/dbcommands.h"
 #include "commands/proclang.h"
 #include "commands/sec_rls_cmds.h"
@@ -184,6 +186,7 @@ const struct AclObjKind {
     {ACL_KIND_SEQUENCE, ACL_ALL_RIGHTS_SEQUENCE, ACL_ALL_DDL_RIGHTS_SEQUENCE},
     {ACL_KIND_DATABASE, ACL_ALL_RIGHTS_DATABASE, ACL_ALL_DDL_RIGHTS_DATABASE},
     {ACL_KIND_PROC, ACL_ALL_RIGHTS_FUNCTION, ACL_ALL_DDL_RIGHTS_FUNCTION},
+    {ACL_KIND_PACKAGE, ACL_ALL_RIGHTS_PACKAGE, ACL_ALL_DDL_RIGHTS_PACKAGE},
     {ACL_KIND_LANGUAGE, ACL_ALL_RIGHTS_LANGUAGE, ACL_ALL_DDL_RIGHTS_LANGUAGE},
     {ACL_KIND_LARGEOBJECT, ACL_ALL_RIGHTS_LARGEOBJECT, ACL_ALL_DDL_RIGHTS_LARGEOBJECT},
     {ACL_KIND_NAMESPACE, ACL_ALL_RIGHTS_NAMESPACE, ACL_ALL_DDL_RIGHTS_NAMESPACE},
@@ -247,7 +250,7 @@ static List* getRelationsInNamespace(Oid namespaceId, char relkind);
 static void expand_col_privileges(
     List* colnames, Oid table_oid, AclMode this_privileges, AclMode* col_privileges, int num_col_privileges);
 static void expand_all_col_privileges(
-    Oid table_oid, Form_pg_class classForm, AclMode this_privileges, AclMode* col_privileges, int num_col_privileges, bool relhasbucket);
+    Oid table_oid, Form_pg_class classForm, AclMode this_privileges, AclMode* col_privileges, int num_col_privileges, bool relhasbucket, bool relhasuids);
 static AclMode string_to_privilege(const char* privname);
 static const char* privilege_to_string(AclMode privilege);
 static void restrict_and_check_grant(AclMode* this_privileges, bool is_grant,
@@ -1218,6 +1221,10 @@ void ExecAlterDefaultPrivilegesStmt(AlterDefaultPrivilegesStmt* stmt)
             all_privileges = ACL_ALL_RIGHTS_PACKAGE;
             all_ddl_privileges = ACL_ALL_DDL_RIGHTS_PACKAGE;
             errormsg = gettext_noop("invalid privilege type %s for package");
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("alter default privileges is not support package yet."), errdetail("N/A"),
+                    errcause("alter default privileges is not support package yet."),
+                        erraction("N/A")));
             break;
         case ACL_OBJECT_TYPE:
             all_privileges = ACL_ALL_RIGHTS_TYPE;
@@ -1796,7 +1803,7 @@ static void expand_col_privileges(
  * FirstLowInvalidHeapAttributeNumber, up to relation's last attribute.
  */
 static void expand_all_col_privileges(
-    Oid table_oid, Form_pg_class classForm, AclMode this_privileges, AclMode* col_privileges, int num_col_privileges,  bool relhasbucket)
+    Oid table_oid, Form_pg_class classForm, AclMode this_privileges, AclMode* col_privileges, int num_col_privileges,  bool relhasbucket, bool relhasuids)
 {
     AttrNumber curr_att;
 
@@ -1807,7 +1814,9 @@ static void expand_all_col_privileges(
 
         if (curr_att == InvalidAttrNumber)
             continue;
-
+        if (curr_att == UidAttributeNumber && !relhasuids) {
+            continue;
+        }
         /* Skip OID column if it doesn't exist */
         if (curr_att == ObjectIdAttributeNumber && !classForm->relhasoids)
             continue;
@@ -2157,6 +2166,7 @@ static void ExecGrant_Relation(InternalGrant* istmt)
         if (!istmt->is_grant && ((privileges & ACL_ALL_RIGHTS_COLUMN) != 0 ||
             (REMOVE_DDL_FLAG(ddl_privileges) & ACL_ALL_DDL_RIGHTS_COLUMN) != 0)) {
             bool  hasbucket = false;
+            bool  relhasuids = false;
             bool  isNull = false;
             Datum datum;
 
@@ -2165,10 +2175,16 @@ static void ExecGrant_Relation(InternalGrant* istmt)
                 Assert(OidIsValid(DatumGetObjectId(datum)));
                 hasbucket = true;
             }
+            if (pg_class_tuple->relkind == RELKIND_RELATION) {
+                bytea* options = extractRelOptions(tuple, GetDefaultPgClassDesc(), InvalidOid);
+                relhasuids = StdRdOptionsHasUids(options, pg_class_tuple->relkind);
+                pfree_ext(options);
+            }
+            // get if relhasuids
             expand_all_col_privileges(relOid, pg_class_tuple, privileges & ACL_ALL_RIGHTS_COLUMN,
-                col_privileges, num_col_privileges, hasbucket);
+                col_privileges, num_col_privileges, hasbucket, relhasuids);
             expand_all_col_privileges(relOid, pg_class_tuple, ddl_privileges & ACL_ALL_DDL_RIGHTS_COLUMN,
-                col_ddl_privileges, num_col_privileges, hasbucket);
+                col_ddl_privileges, num_col_privileges, hasbucket, relhasuids);
             have_col_privileges = true;
         }
 
@@ -3163,7 +3179,7 @@ static void ExecGrant_Package(InternalGrant* istmt)
             istmt->ddl_privileges,
             pkgId,
             grantorId,
-            ACL_KIND_PROC,
+            ACL_KIND_PACKAGE,
             NameStr(gs_package_tuple->pkgname),
             0,
             NULL);
@@ -3417,10 +3433,12 @@ static void ExecGrant_Namespace(InternalGrant* istmt)
             noldmembers = aclmembers(old_acl, &oldmembers);
         }
 
-        /* Determine ID to do the grant as, and available grant options */
-        /* Need special treatment for special schema dbe_perf and schema snapshot*/
+        /*
+         * Determine ID to do the grant as, and available grant options.
+         * Need special treatment for schema dbe_perf, snapshot and pg_catalog.
+         */
         select_best_grantor(GetUserId(), istmt->privileges, istmt->ddl_privileges, old_acl, ownerId,
-            &grantorId, &avail_goptions, &avail_ddl_goptions, IsMonitorSpace(nspid));
+            &grantorId, &avail_goptions, &avail_ddl_goptions, IsMonitorSpace(nspid), IsSystemNamespace(nspid));
 
         /*
          * Restrict the privileges to what we can actually grant, and emit the
@@ -4845,6 +4863,8 @@ static AclMode pg_aclmask(
             return pg_database_aclmask(table_oid, roleid, mask, how);
         case ACL_KIND_PROC:
             return pg_proc_aclmask(table_oid, roleid, mask, how);
+        case ACL_KIND_PACKAGE:
+            return pg_package_aclmask(table_oid, roleid, mask, how);
         case ACL_KIND_LANGUAGE:
             return pg_language_aclmask(table_oid, roleid, mask, how);
         case ACL_KIND_LARGEOBJECT:
@@ -4961,7 +4981,7 @@ AclMode pg_attribute_aclmask(Oid table_oid, AttrNumber attnum, Oid roleid, AclMo
     acl = DatumGetAclP(aclDatum);
 
     if (IsMonitorSpace(namespaceId)) {
-       result = aclmask_dbe_perf(acl, roleid, ownerId, mask, how);
+       result = aclmask_without_sysadmin(acl, roleid, ownerId, mask, how);
     } else {
         result = aclmask(acl, roleid, ownerId, mask, how);
     }
@@ -4974,6 +4994,72 @@ AclMode pg_attribute_aclmask(Oid table_oid, AttrNumber attnum, Oid roleid, AclMo
     return result;
 }
 
+static AclMode check_dml_privilege(Form_pg_class classForm, AclMode mask, Oid roleid, AclMode result)
+{
+    if (is_role_independent(classForm->relowner)) {
+        return result;
+    }
+    switch (classForm->relkind) {
+        case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
+        case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_COMPOSITE_TYPE:
+            break;
+        /* table */
+        default:
+            if ((mask & ACL_SELECT) && !(result & ACL_SELECT)) {
+                if (HasSpecAnyPriv(roleid, SELECT_ANY_TABLE, false)) {
+                    result |= ACL_SELECT;
+                }
+            }
+
+            if ((mask & ACL_INSERT) && !(result & ACL_INSERT)) {
+                if (HasSpecAnyPriv(roleid, INSERT_ANY_TABLE, false)) {
+                    result |= ACL_INSERT;
+                }
+            }
+            if ((mask & ACL_UPDATE) && !(result & ACL_UPDATE)) {
+                if (HasSpecAnyPriv(roleid, UPDATE_ANY_TABLE, false)) {
+                    result |= ACL_UPDATE;
+                }
+            }
+            if ((mask & ACL_DELETE) && !(result & ACL_DELETE)) {
+                if (HasSpecAnyPriv(roleid, DELETE_ANY_TABLE, false)) {
+                    result |= ACL_DELETE;
+                }
+            }
+            break;
+    }
+    return result;
+}
+
+static AclMode check_ddl_privilege(char relkind, AclMode mask, Oid roleid, AclMode result)
+{
+    mask = REMOVE_DDL_FLAG(mask);
+    switch (relkind) {
+        case RELKIND_COMPOSITE_TYPE:
+        case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
+            break;
+        /* table */
+        default:
+            if ((mask & ACL_DROP) && !(result & ACL_DROP)) {
+                if (HasSpecAnyPriv(roleid, DROP_ANY_TABLE, false)) {
+                    result |= ACL_DROP;
+                }
+            }
+            if ((mask & ACL_ALTER) && !(result & ACL_ALTER)) {
+                if (HasSpecAnyPriv(roleid, ALTER_ANY_TABLE, false)) {
+                    result |= ACL_ALTER;
+                }
+            }
+            break;
+    }
+    return result;
+}
 /*
  * Exported routine for examining a user's privileges for a table
  */
@@ -5132,7 +5218,7 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
         mask = ADD_DDL_FLAG(mask);
     }
     if (IsMonitorSpace(namespaceId)) {
-        result = aclmask_dbe_perf(acl, roleid, ownerId, mask, how);
+        result = aclmask_without_sysadmin(acl, roleid, ownerId, mask, how);
     } else {
         result = aclmask(acl, roleid, ownerId, mask, how);
     }
@@ -5140,8 +5226,16 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
     /* if we have a detoasted copy, free it */
     FREE_DETOASTED_ACL(acl, aclDatum);
 
+    if ((how == ACLMASK_ANY && result != 0) || IsSysSchema(namespaceId)) {
+        ReleaseSysCache(tuple);
+        return result;
+    }
+    if (is_ddl_privileges) {
+        result = check_ddl_privilege(classForm->relkind, mask, roleid, result);
+    } else {
+        result = check_dml_privilege(classForm, mask, roleid, result);
+    }
     ReleaseSysCache(tuple);
-
     return result;
 }
 
@@ -5321,11 +5415,14 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
     }
 
     if (IsMonitorSpace(namespaceId)) {
-        result = aclmask_dbe_perf(acl, roleid, ownerId, mask, how);
+        result = aclmask_without_sysadmin(acl, roleid, ownerId, mask, how);
     } else {
         result = aclmask(acl, roleid, ownerId, mask, how);
     }
-
+    if ((mask & ACL_EXECUTE) && !(result & ACL_EXECUTE) && !IsSysSchema(namespaceId) &&
+        HasSpecAnyPriv(roleid, EXECUTE_ANY_FUNCTION, false)) {
+        result |= ACL_EXECUTE;
+    }
     /* if we have a detoasted copy, free it */
     FREE_DETOASTED_ACL(acl, aclDatum);
     if (HeapTupleIsValid(pkgTuple)) {
@@ -5377,6 +5474,11 @@ AclMode pg_package_aclmask(Oid packageOid, Oid roleid, AclMode mask, AclMaskHow 
         acl = DatumGetAclP(aclDatum);
     }
     result = aclmask(acl, roleid, ownerId, mask, how);
+    Oid namespaceId = ((Form_gs_package) GETSTRUCT(tuple))->pkgnamespace;
+    if ((mask & ACL_EXECUTE) && !(result & ACL_EXECUTE) && !IsSysSchema(namespaceId) &&
+        HasSpecAnyPriv(roleid, EXECUTE_ANY_PACKAGE, false)) {
+        result |= ACL_EXECUTE;
+    }
     /* if we have a detoasted copy, free it */
     FREE_DETOASTED_ACL(acl, aclDatum);
     if (HeapTupleIsValid(pkgTuple)) {
@@ -5614,7 +5716,6 @@ AclMode pg_largeobject_aclmask_snapshot(Oid lobj_oid, Oid roleid, AclMode mask, 
 /*
  * Exported routine for examining a user's privileges for blockchain namespace
  */
-
 static AclMode gs_blockchain_aclmask(Oid roleid, AclMode mask)
 {
     /* Only super user or audit admin have access right to blockchain nsp */
@@ -5623,6 +5724,35 @@ static AclMode gs_blockchain_aclmask(Oid roleid, AclMode mask)
     } else {
         return ACL_NO_RIGHTS; /* not allowed to get access right by granting. */
     }
+}
+
+static AclMode check_usage_privilege(Oid nsp_oid, AclMode mask, Oid roleid, AclMode result)
+{
+    if (!(mask & ACL_USAGE) || (result & ACL_USAGE)) {
+        return result;
+    }
+    if (!IsSysSchema(nsp_oid) && HasOneOfAnyPriv(roleid)) {
+        result |= ACL_USAGE;
+    }
+    return result;
+}
+
+/*
+ * The initial user and operator admin in operation mode
+ * can bypass permission check for schema pg_catalog.
+*/
+static bool is_pg_catalog_bypass_user(Oid roleid)
+{
+    return roleid == INITIAL_USER_ID || (isOperatoradmin(roleid) && u_sess->attr.attr_security.operation_mode);
+}
+
+/*
+ * Sysadmin and operator admin in operation mode
+ * can bypass permission check for all schemas except for schema dbe_perf, snapshot and pg_catalog.
+*/
+static bool is_namespace_bypass_user(Oid roleid)
+{
+    return superuser_arg(roleid) || (isOperatoradmin(roleid) && u_sess->attr.attr_security.operation_mode);
 }
 
 /*
@@ -5644,17 +5774,19 @@ AclMode pg_namespace_aclmask(Oid nsp_oid, Oid roleid, AclMode mask, AclMaskHow h
 
     /*
      * The initial user bypass all permission checking.
-     * Sysadmin bypass all permission checking except for schema dbe_perf and schema snapshot.
+     * Sysadmin bypass all permission checking except for schema dbe_perf, snapshot and pg_catalog.
      * Monitoradmin can always bypass permission checking for schema dbe_perf and schema snapshot.
-    */
+     */
     if (IsMonitorSpace(nsp_oid)) {
         if (isMonitoradmin(roleid) || roleid == INITIAL_USER_ID) {
             return REMOVE_DDL_FLAG(mask);
         }
-    } else {
-        if (superuser_arg(roleid) || (isOperatoradmin(roleid) && u_sess->attr.attr_security.operation_mode)) {
+    } else if (IsSystemNamespace(nsp_oid)) {
+        if (is_pg_catalog_bypass_user(roleid)) {
             return REMOVE_DDL_FLAG(mask);
         }
+    } else if (is_namespace_bypass_user(roleid)) {
+        return REMOVE_DDL_FLAG(mask);
     }
 
     /*
@@ -5709,12 +5841,17 @@ AclMode pg_namespace_aclmask(Oid nsp_oid, Oid roleid, AclMode mask, AclMaskHow h
         check_nodegroup_privilege(roleid, ownerId, mask);
     }
 
-    if (IsMonitorSpace(nsp_oid)) {
-        result = aclmask_dbe_perf(acl, roleid, ownerId, mask, how);
+    if (IsMonitorSpace(nsp_oid) || IsSystemNamespace(nsp_oid)) {
+        result = aclmask_without_sysadmin(acl, roleid, ownerId, mask, how);
     } else {
         result = aclmask(acl, roleid, ownerId, mask, how);
     }
-
+    /*
+     * Check if ACL_USAGE is being checked and, if so, and not set already as
+     * part of the result, then check if the user has at least one of ANY privlege,
+     * which allow usage access to all schemas except system schema.
+     */
+    result = check_usage_privilege(nsp_oid, mask, roleid, result);
     /* if we have a detoasted copy, free it */
     FREE_DETOASTED_ACL(acl, aclDatum);
 
@@ -7048,12 +7185,14 @@ bool pg_publication_ownercheck(Oid pub_oid, Oid roleid)
     Oid ownerId;
 
     /* Superusers bypass all permission checking. */
-    if (superuser_arg(roleid))
+    if (superuser_arg(roleid)) {
         return true;
+    }
 
     tuple = SearchSysCache1(PUBLICATIONOID, ObjectIdGetDatum(pub_oid));
-    if (!HeapTupleIsValid(tuple))
+    if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("publication with OID %u does not exist", pub_oid)));
+    }
 
     ownerId = ((Form_pg_publication)GETSTRUCT(tuple))->pubowner;
 

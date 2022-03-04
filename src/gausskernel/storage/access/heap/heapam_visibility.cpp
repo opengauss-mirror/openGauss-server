@@ -1701,6 +1701,176 @@ static bool HeapTupleSatisfiesHistoricMVCC(HeapTuple htup, Snapshot snapshot, Bu
 }
 
 /*
+ * Decode MVCC check the visibility of uncommited xmin, return true if the visibility is determinate.
+ */
+static bool HeapTupleUncommitedXminCheckDecodeMVCC(HeapTupleHeader tuple, Snapshot snapshot, bool *visible,
+    TransactionIdStatus *status, Buffer buffer)
+{
+    Page page = BufferGetPage(buffer);
+    if (HeapTupleHeaderXminInvalid(tuple)) {
+        *visible = false;
+        return true;
+    }
+
+    /* IMPORTANT: Version snapshot is independent of the current transaction. */
+    if (!IsVersionMVCCSnapshot(snapshot) &&
+        TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple))) {
+
+        if ((tuple->t_infomask & HEAP_XMAX_INVALID) ||
+            HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
+            *visible = true;
+            return true;
+        }
+
+        Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
+
+        if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
+            /* deleting subtransaction must have aborted */
+            Assert(!TransactionIdDidCommit(HeapTupleHeaderGetXmax(page, tuple)));
+            SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
+            *visible = true;
+            return true;
+        }
+    } else {
+        bool xidVisible = XidVisibleInDecodeSnapshot(HeapTupleHeaderGetXmin(page, tuple), snapshot, status, buffer);
+        if (*status == XID_COMMITTED)
+            SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED, HeapTupleHeaderGetXmin(page, tuple));
+
+        if (*status == XID_ABORTED) {
+            if (!LatestFetchCSNDidAbort(HeapTupleHeaderGetXmin(page, tuple)))
+                LatestTransactionStatusError(HeapTupleHeaderGetXmin(page, tuple),
+                    snapshot,
+                    "HeapTupleSatisfiesMVCC set HEAP_XMIN_INVALID xid don't abort");
+
+            SetHintBits(tuple, buffer, HEAP_XMIN_INVALID, InvalidTransactionId);
+        }
+
+        if (!xidVisible) {
+            if (!GTM_LITE_MODE || u_sess->attr.attr_common.xc_maintenance_mode ||
+                snapshot->gtm_snapshot_type != GTM_SNAPSHOT_TYPE_LOCAL ||
+                !IsXidVisibleInGtmLiteLocalSnapshot(HeapTupleHeaderGetXmin(page, tuple), snapshot, *status,
+                HeapTupleHeaderGetXmin(page, tuple) == HeapTupleHeaderGetXmax(page, tuple), buffer, NULL)) {
+                *visible = false;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/*
+ * Decode MVCC check the visibility of commited xmin, return true if the visibility is determinate.
+ */
+static bool HeapTupleCommitedXminCheckDecodeMVCC(HeapTupleHeader tuple, Snapshot snapshot, bool *visible,
+    TransactionIdStatus *status, Buffer buffer)
+{
+    Page page = BufferGetPage(buffer);
+    /* xmin is committed, but maybe not according to our snapshot */
+    if (!HeapTupleHeaderXminFrozen(tuple) &&
+        !CommittedXidVisibleInDecodeSnapshot(HeapTupleHeaderGetXmin(page, tuple), snapshot, buffer)) {
+        /* tuple xmin has already committed, no need to use xc_maintenance_mod bypass */
+        if (!GTM_LITE_MODE || snapshot->gtm_snapshot_type != GTM_SNAPSHOT_TYPE_LOCAL ||
+            !IsXidVisibleInGtmLiteLocalSnapshot(HeapTupleHeaderGetXmin(page, tuple), snapshot, XID_COMMITTED,
+            HeapTupleHeaderGetXmin(page, tuple) == HeapTupleHeaderGetXmax(page, tuple), buffer, NULL)) {
+            *visible = false;
+            return true; /* treat as still in progress */
+        }
+    }
+    return false;
+}
+
+/*
+ * Decode MVCC check the visibility of xmin, return true if the visibility is determinate.
+ */
+static bool HeapTupleXmaxCheckDecodeMVCC(HeapTupleHeader tuple, Snapshot snapshot, bool *visible,
+    TransactionIdStatus *status, Buffer buffer)
+{
+    Page page = BufferGetPage(buffer);
+    if ((tuple->t_infomask & HEAP_XMAX_INVALID) || HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2) ||
+        (tuple->t_infomask & HEAP_XMAX_IS_MULTI)) {
+        *visible = true;
+        return true;
+    }
+
+    if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED)) {
+        bool xidVisible = XidVisibleInDecodeSnapshot(HeapTupleHeaderGetXmax(page, tuple), snapshot, status, buffer);
+        if (*status == XID_COMMITTED) {
+            /* xmax transaction committed */
+            SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, HeapTupleHeaderGetXmax(page, tuple));
+        }
+        if (*status == XID_ABORTED) {
+            if (!LatestFetchCSNDidAbort(HeapTupleHeaderGetXmax(page, tuple)))
+                LatestTransactionStatusError(HeapTupleHeaderGetXmax(page, tuple),
+                    snapshot,
+                    "HeapTupleSatisfiesMVCC set HEAP_XMAX_INVALID xid don't abort");
+
+            /* it must have aborted or crashed */
+            SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
+        }
+        if (!xidVisible) {
+            if (!GTM_LITE_MODE || u_sess->attr.attr_common.xc_maintenance_mode ||
+                snapshot->gtm_snapshot_type != GTM_SNAPSHOT_TYPE_LOCAL ||
+                !IsXidVisibleInGtmLiteLocalSnapshot(HeapTupleHeaderGetXmax(page, tuple),
+                    snapshot, *status, false, buffer, NULL)) {
+                *visible = true;
+                return true;
+            }
+        }
+
+    } else {
+        /* xmax is committed, but maybe not according to our snapshot */
+        if (!CommittedXidVisibleInDecodeSnapshot(HeapTupleHeaderGetXmax(page, tuple), snapshot, buffer)) {
+            if (!GTM_LITE_MODE || snapshot->gtm_snapshot_type != GTM_SNAPSHOT_TYPE_LOCAL ||
+                !IsXidVisibleInGtmLiteLocalSnapshot(HeapTupleHeaderGetXmax(page, tuple),
+                    snapshot, XID_COMMITTED, false, buffer, NULL)) {
+                *visible = true;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/*
+ * MVCC used in parallel decoding, which is mainly based on CSN.
+ */
+static bool HeapTupleSatisfiesDecodeMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer)
+{
+    HeapTupleHeader tuple = htup->t_data;
+    Assert(ItemPointerIsValid(&htup->t_self));
+    Assert(htup->t_tableOid != InvalidOid);
+    bool visible = false;
+    TransactionIdStatus hintstatus;
+
+    /*
+     * Just valid for read-only transaction when u_sess->attr.attr_common.XactReadOnly is true.
+     * Show any tuples including dirty ones when u_sess->attr.attr_storage.enable_show_any_tuples is true.
+     * GUC param u_sess->attr.attr_storage.enable_show_any_tuples is just for analyse or maintenance
+     */
+    if (u_sess->attr.attr_common.XactReadOnly && u_sess->attr.attr_storage.enable_show_any_tuples)
+        return true;
+
+    bool getVisibility = false;
+    if (!HeapTupleHeaderXminCommitted(tuple)) {
+        getVisibility = HeapTupleUncommitedXminCheckDecodeMVCC(tuple, snapshot, &visible, &hintstatus, buffer);
+        if (getVisibility) {
+            return visible;
+        }
+    } else {
+        getVisibility = HeapTupleCommitedXminCheckDecodeMVCC(tuple, snapshot, &visible, &hintstatus, buffer);
+        if (getVisibility) {
+            return visible;
+        }
+    }
+
+    getVisibility = HeapTupleXmaxCheckDecodeMVCC(tuple, snapshot, &visible, &hintstatus, buffer);
+    if (getVisibility) {
+        return visible;
+    }
+    return false;
+}
+
+/*
  * HeapTupleSatisfiesVisibility
  *		True iff heap tuple satisfies a time qual.
  *
@@ -1747,6 +1917,9 @@ bool HeapTupleSatisfiesVisibility(HeapTuple tup, Snapshot snapshot, Buffer buffe
             break;
         case SNAPSHOT_HISTORIC_MVCC:
             return HeapTupleSatisfiesHistoricMVCC(tup, snapshot, buffer);
+            break;
+        case SNAPSHOT_DECODE_MVCC:
+            return HeapTupleSatisfiesDecodeMVCC(tup, snapshot, buffer);
             break;
     }
 

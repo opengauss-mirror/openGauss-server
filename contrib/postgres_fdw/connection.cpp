@@ -158,8 +158,8 @@ PGconn *GetConnection(ForeignServer *server, UserMapping *user, bool will_prep_s
         RegisterXactCallback(pgfdw_xact_callback, NULL);
         RegisterSubXactCallback(pgfdw_subxact_callback, NULL);
 
-        CacheRegisterSyscacheCallback(FOREIGNSERVEROID, pgfdw_inval_callback, (Datum)0);
-        CacheRegisterSyscacheCallback(USERMAPPINGOID, pgfdw_inval_callback, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(FOREIGNSERVEROID, pgfdw_inval_callback, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(USERMAPPINGOID, pgfdw_inval_callback, (Datum)0);
 
         if (IS_THREAD_POOL_SESSION) {
             u_sess->ext_fdw_ctx[POSTGRES_TYPE_FDW].fdwExitFunc = pg_fdw_exit;

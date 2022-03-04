@@ -826,8 +826,8 @@ void do_sanity(XLogSegNo FirstToDeleteSegNo, XLogSegNo OldestToKeepSegNo,
 
         if (FirstToDeleteSegNo > 0 && OldestToKeepSegNo > 0)
         {
-            GetXLogFileName(first_to_del_str, tlinfo->tli, FirstToDeleteSegNo, xlog_seg_size);
-            GetXLogFileName(oldest_to_keep_str, tlinfo->tli, OldestToKeepSegNo, xlog_seg_size);
+            GetXLogFileName(first_to_del_str, MAXFNAMELEN, tlinfo->tli, FirstToDeleteSegNo, xlog_seg_size);
+            GetXLogFileName(oldest_to_keep_str, MAXFNAMELEN, tlinfo->tli, OldestToKeepSegNo, xlog_seg_size);
 
             elog(LOG, "On timeline %i first segment %s is greater than oldest segment to keep %s",
                 tlinfo->tli, first_to_del_str, oldest_to_keep_str);
@@ -934,8 +934,8 @@ delete_walfiles_in_tli(XLogRecPtr keep_lsn, timelineInfo *tlinfo,
     if (OldestToKeepSegNo > 0 && OldestToKeepSegNo > FirstToDeleteSegNo)
     {
         /* translate segno number into human readable format */
-        GetXLogFileName(first_to_del_str, tlinfo->tli, FirstToDeleteSegNo, xlog_seg_size);
-        GetXLogFileName(oldest_to_keep_str, tlinfo->tli, OldestToKeepSegNo, xlog_seg_size);
+        GetXLogFileName(first_to_del_str, MAXFNAMELEN, tlinfo->tli, FirstToDeleteSegNo, xlog_seg_size);
+        GetXLogFileName(oldest_to_keep_str, MAXFNAMELEN, tlinfo->tli, OldestToKeepSegNo, xlog_seg_size);
 
         elog(INFO, "On timeline %i WAL segments between %s and %s %s be removed",
              tlinfo->tli, first_to_del_str,
@@ -1108,6 +1108,11 @@ do_delete_status(InstanceConfig *instance_config, const char *status)
 
     parray_qsort(delete_list, pgBackupCompareIdDesc);
 
+    /* Lock marked for delete backups */
+    if (!dry_run) {
+        catalog_lock_backup_list(delete_list, parray_num(delete_list) - 1, 0, false);
+    }
+
     /* delete and calculate free size from delete_list */
     for (i = 0; i < parray_num(delete_list); i++)
     {
@@ -1120,8 +1125,9 @@ do_delete_status(InstanceConfig *instance_config, const char *status)
         if (backup->stream)
             size_to_delete += backup->wal_bytes;
 
-        if (!dry_run && lock_backup(backup, false))
+        if (!dry_run) {
             delete_backup_files(backup);
+        }
 
         n_deleted++;
     }

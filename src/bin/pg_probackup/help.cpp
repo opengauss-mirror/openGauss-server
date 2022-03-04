@@ -85,6 +85,7 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
+    printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s del-instance -B backup-path --instance=instance_name\n"), PROGRAM_NAME);
@@ -109,6 +110,7 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
+    printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s set-backup -B backup-path --instance=instance_name -i backup-id\n"), PROGRAM_NAME);
@@ -150,6 +152,7 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
+    printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--ttl=interval] [--expire-time=time]\n"));
     printf(_("                 [--help]\n"));
 
@@ -164,6 +167,7 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
+    printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--log-level-console=log-level-console]\n"));
     printf(_("                 [--log-level-file=log-level-file]\n"));
     printf(_("                 [--log-filename=log-filename]\n"));
@@ -231,6 +235,7 @@ static void help_add_instance(void)
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n\n"));
+    printf(_("                 [--remote-libpath=libpath]\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("  -D, --pgdata=pgdata-path         location of the database storage area\n"));
@@ -247,6 +252,7 @@ static void help_add_instance(void)
     printf(_("      --remote-path=path           path to directory with gs_probackup binary on remote host\n"));
     printf(_("                                   (default: current binary path)\n"));
     printf(_("      --remote-user=username       user name for ssh connection (default: current user)\n"));
+    printf(_("      --remote-libpath=libpath         library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n\n"));
 }
@@ -280,6 +286,7 @@ static void help_set_config(void)
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n\n"));
+    printf(_("                 [--remote-libpath=libpath]\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     name of the instance\n"));
@@ -338,6 +345,7 @@ static void help_set_config(void)
     printf(_("      --remote-path=path           path to directory with gs_probackup binary on remote host\n"));
     printf(_("                                   (default: current binary path)\n"));
     printf(_("      --remote-user=username       user name for ssh connection (default: current user)\n"));
+    printf(_("      --remote-libpath=libpath         library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n\n"));
 }
@@ -410,6 +418,7 @@ static void help_backup(void)
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
+    printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--ttl=interval] [--expire-time=time]\n\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
@@ -491,6 +500,7 @@ static void help_backup(void)
     printf(_("      --remote-path=path           path to directory with gs_probackup binary on remote host\n"));
     printf(_("                                   (default: current binary path)\n"));
     printf(_("      --remote-user=username       user name for ssh connection (default: current user)\n"));
+    printf(_("      --remote-libpath=libpath         library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 
@@ -515,6 +525,7 @@ static void help_restore(void)
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
+    printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--log-level-console=log-level-console]\n"));
     printf(_("                 [--log-level-file=log-level-file]\n"));
     printf(_("                 [--log-filename=log-filename]\n"));
@@ -559,6 +570,7 @@ static void help_restore(void)
     printf(_("      --remote-path=path           path to directory with gs_probackup binary on remote host\n"));
     printf(_("                                   (default: current binary path)\n"));
     printf(_("      --remote-user=username       user name for ssh connection (default: current user)\n"));
+    printf(_("      --remote-libpath=libpath         library path on remote host\n"));
     printf(_("      --ssh-options=ssh_options    additional ssh options (default: none)\n"));
     printf(_("                                   (example: --ssh-options='-c cipher_spec -F configfile')\n"));
 

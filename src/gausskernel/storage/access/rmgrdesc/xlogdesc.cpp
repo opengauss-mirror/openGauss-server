@@ -36,6 +36,54 @@ struct config_enum_entry wal_level_options[] = {
     { NULL, 0, false }
 };
 
+const char *xlog_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    switch (info) {
+        case XLOG_CHECKPOINT_SHUTDOWN:
+            return "shutdown_checkpoint";
+            break;
+        case XLOG_CHECKPOINT_ONLINE:
+            return "online_checkpoint";
+            break;
+        case XLOG_NOOP:
+            return "noop";
+            break;
+        case XLOG_NEXTOID:
+            return "nextoid";
+            break;
+        case XLOG_SWITCH:
+            return "xlog switch";
+            break;
+        case XLOG_BACKUP_END:
+            return "backup end";
+            break;
+        case XLOG_PARAMETER_CHANGE:
+            return "parameter chage";
+            break;
+        case XLOG_RESTORE_POINT:
+            return "restore point";
+            break;
+        case XLOG_FPW_CHANGE:
+            return "restore point";
+            break;
+        case XLOG_END_OF_RECOVERY:
+            return "end of recovery";
+            break;
+        case XLOG_FPI_FOR_HINT:
+            return "fpi for hint";
+            break;
+        case XLOG_FPI:
+            return "fpi";
+            break;
+        case XLOG_DELAY_XLOG_RECYCLE:
+            return "delay recycle";
+            break;
+        default:
+            return "unkown type";
+    }
+}
+
 void xlog_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

@@ -4,9 +4,9 @@
  *	  Lightweight lock manager
  *
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/storage/lock/lwlock.h
  *
@@ -44,6 +44,7 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
     {"CSNLOG_PART", 512, 1, 512},
     {"LOG2_LOCKTABLE_PART", 4, 4, 16}, /* lock table partition range is 2^4 to 2^16 */
     {"TWOPHASE_PART", 1, 1, 64},
+    {"FASTPATH_PART", 20, 20, 10000}
 };
 
 /*
@@ -106,8 +107,12 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of partions the ngroup info hash table */
 #define NUM_NGROUP_INFO_PARTITIONS  256
 
+#ifndef ENABLE_LITE_MODE
 /* Number of partions the io state hashtable */
 #define NUM_IO_STAT_PARTITIONS 128
+#else
+#define NUM_IO_STAT_PARTITIONS 2
+#endif
 
 /* Number of partitions the xid => procid hashtable */
 #define NUM_PROCXACT_PARTITIONS  128
@@ -127,11 +132,15 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define NUM_SESSION_ROLEID_PARTITIONS 128
 
 #ifdef WIN32
-#define NUM_INDIVIDUAL_LWLOCKS           113 /* num should be same as lwlockname.txt */
+#define NUM_INDIVIDUAL_LWLOCKS           116 /* num should be same as lwlockname.txt */
 #endif
 
 /* Number of partitions the global package runtime state hashtable */
+#ifndef ENABLE_LITE_MODE
 #define NUM_GPRC_PARTITIONS 128
+#else
+#define NUM_GPRC_PARTITIONS 2
+#endif
 
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
@@ -245,7 +254,12 @@ enum BuiltinTrancheIds
     LWTRANCHE_SEGHEAD_PARTITION,
     LWTRANCHE_TWOPHASE_STATE,
     LWTRANCHE_ROLEID_PARTITION,
+    LWTRANCHE_PGWR_SYNC_QUEUE,
+    LWTRANCHE_BARRIER_TBL,
+    LWTRANCHE_PAGE_REPAIR,
+    LWTRANCHE_FILE_REPAIR,
     LWTRANCHE_REPLICATION_ORIGIN,
+    LWTRANCHE_AUDIT_INDEX_WAIT,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

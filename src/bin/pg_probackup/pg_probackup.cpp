@@ -681,8 +681,11 @@ static void check_backid_option(char *command_name)
             elog(ERROR, "Invalid backup-id \"%s\"", backup_id_string);
     }
 
-    if (!instance_config.conn_opt.pghost && instance_config.remote.host)
-        instance_config.conn_opt.pghost = instance_config.remote.host;
+    if (!instance_config.conn_opt.pghost &&
+        instance_config.remote.host &&
+        IsSshProtocol()) {
+            instance_config.conn_opt.pghost = instance_config.remote.host;
+    }
 
         /* Setup stream options. They are used in streamutil.c. */
     if (instance_config.conn_opt.pghost != NULL)

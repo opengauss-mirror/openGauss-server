@@ -1,0 +1,524 @@
+-- FOR PL/pgSQL VARRAY scenarios --
+-- check compatibility --
+show sql_compatibility; -- expect A --
+ sql_compatibility 
+-------------------
+ A
+(1 row)
+
+-- create new schema --
+drop schema if exists plpgsql_array_opengauss;
+NOTICE:  schema "plpgsql_array_opengauss" does not exist, skipping
+create schema plpgsql_array_opengauss;
+set current_schema = plpgsql_array_opengauss;
+-- initialize tables --
+create table customers (
+    id number(10) not null,
+    c_name varchar2(50) not null,
+    c_age number(8) not null,
+    c_address varchar2(50),
+    salary float(2) not null,
+    constraint customers_pk primary key (id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "customers_pk" for table "customers"
+insert into customers (id, c_name, c_age, c_address, salary) values (1, 'Vera' ,32, 'Paris', 22999.00);
+insert into customers (id, c_name, c_age, c_address, salary) values (2, 'Zera' ,25, 'London', 5999.00);
+insert into customers (id, c_name, c_age, c_address, salary) values (3, 'Alice' ,22, 'Bangkok', 9800.98);
+insert into customers (id, c_name, c_age, c_address, salary) values (4, 'Jim' ,26, 'Dubai', 18700.00);
+insert into customers (id, c_name, c_age, c_address, salary) values (5, 'Kevin' ,28, 'Singapore', 18999.00);
+insert into customers (id, c_name, c_age, c_address, salary) values (6, 'Gauss' ,42, 'Beijing', 32999.00);
+create table tmp(a int, b varchar(100));
+-- initialize functions, types etc. --
+create type mytype as (
+    id integer,
+    biome varchar2(100)
+);
+create type mytype2 as (
+    id integer,
+    locale myType
+);
+-- it turns any input to (9, (1, 'space'))
+create or replace function myfunc(habitat in mytype2)
+return mytype2
+is
+    ret mytype2;
+begin
+    ret := (9, (1, 'space'));
+    return ret;
+end;
+/
+-- type and function shares the same name --
+-- Oh~oh, what's gonna happened?? --
+create type functype as (
+    id integer,
+    locale myType
+);
+create or replace function functype(habitat in mytype2)
+return mytype2
+is
+    ret mytype2;
+begin
+    ret := (-1, (1, 'unknown realm'));
+    return ret;
+end;
+/
+-- test function datatype priority --
+create or replace function name_list(inint in integer)
+return integer
+is
+    ret integer;
+begin
+    ret := 1;
+    return ret;
+end;
+/
+----------------------------------------------------
+------------------ START OF TESTS ------------------
+----------------------------------------------------
+-- general declare + assign + access --
+-- support varray with parentheses in SQL --
+DECLARE
+    CURSOR c_customers is
+    SELECT c_name FROM customers order by id;
+    type c_list is varray (6) of customers.c_name%type;
+    name_list c_list := c_list();
+    counter integer := 0;
+BEGIN 
+    FOR n IN c_customers LOOP
+        counter := counter + 1; -- 6 iterations --
+        name_list.extend;
+        name_list(counter) := n.c_name;
+    END LOOP;
+
+    insert into tmp values (NULL, name_list(1));
+    insert into tmp values (NULL, name_list(3));
+    name_list(2) := name_list(3);
+    insert into tmp values (NULL, name_list[2]); -- same as last one --
+END;
+/
+select * from tmp order by 1, 2;
+ a |   b   
+---+-------
+   | Alice
+   | Alice
+   | Vera
+(3 rows)
+
+truncate tmp;
+-- ERROR: mix of parens and brackets are not allowed --
+declare
+    cursor c_customers is (select c_name from customers order by id);
+    type c_list is varray(6) of customers.c_name%type;
+    name_list c_list := c_list();
+    counter integer := 0;
+begin 
+    for n in c_customers loop
+        counter := counter + 1; -- 6 iterations --
+        name_list.extend;
+        name_list(counter) := n.c_name;
+    end loop;
+
+    insert into tmp values (null, name_list(1]);
+end;
+/
+ERROR:  mismatched parentheses at or near ";"
+LINE 12:     insert into tmp values (null, name_list(1]);
+                                                        ^
+QUERY:  DECLARE  cursor c_customers is (select c_name from customers order by id);
+    type c_list is varray(6) of customers.c_name%type;
+    name_list c_list := c_list();
+    counter integer := 0;
+begin 
+    for n in c_customers loop
+        counter := counter + 1; -- 6 iterations --
+        name_list.extend;
+        name_list(counter) := n.c_name;
+    end loop;
+
+    insert into tmp values (null, name_list(1]);
+end
+-- parentheses support in SQL 2 --
+-- array of record --
+declare
+    cursor c_customers is (select * from customers order by id);
+    type c_list is varray(6) of customers;
+    customer_list c_list := c_list();
+    counter integer := 0;
+    name varchar2(50) := '';
+begin
+    for n in c_customers loop
+        counter := counter + 1;
+        customer_list.extend;
+        customer_list(counter) := (n.id, n.c_name, n.c_age, n.c_address, n.salary); -- insert record --
+        name := customer_list(counter).c_name;
+        if customer_list(counter).c_age <= 30 then
+            insert into tmp values (null, customer_list(counter).c_name);
+        else
+            insert into tmp values (null, name);
+        end if;
+        insert into tmp values (customer_list(counter).c_age, customer_list(counter).salary); -- parentheses --
+    end loop;
+end;
+/
+select * from tmp order by 1, 2;
+ a  |    b    
+----+---------
+ 22 | 9800.98
+ 25 | 5999
+ 26 | 18700
+ 28 | 18999
+ 32 | 22999
+ 42 | 32999
+    | Alice
+    | Gauss
+    | Jim
+    | Kevin
+    | Vera
+    | Zera
+(12 rows)
+
+truncate tmp;
+-- batch initialization, batch insert varray--
+declare
+    type students is varray(6) of varchar2(10);
+    type grades is varray(6) of integer;
+    marks grades := grades('98', 97, 74 + 4, (87), 92, 100); -- batch initialize --
+    names students default students('none'); -- default --
+    total integer;
+begin
+    names := students();  -- should append NULL then do the coerce --
+    names := students('Vera ', 'Zera ', 'Alice', 'Jim  ', 'Kevin', to_char('G') || 'auss'); -- batch insert --
+    total := names.count;
+    insert into tmp values (total, null);
+    for i in 1 .. total loop
+        insert into tmp values (marks(i), names(i));
+    end loop;
+end;
+/
+select * from tmp order by 1, 2;
+  a  |   b   
+-----+-------
+   6 | 
+  78 | Alice
+  87 | Jim  
+  92 | Kevin
+  97 | Zera 
+  98 | Vera 
+ 100 | Gauss
+(7 rows)
+
+truncate tmp;
+-- block above will be rewritten into this form (close to this form, but with parens and coerces)--
+declare
+    type students is varray(6) of varchar2(10);
+    type grades is varray(6) of integer;
+    marks grades := array['98', 97, 74 + 4, (87), 92, 100]; -- batch initialize --
+    names students default array['none']; -- default --
+    total integer;
+begin
+    names := array[NULL];
+    names := array['Vera ', 'Zera ', 'Alice', 'Jim  ', 'Kevin', to_char('G') || 'auss']; -- batch insert --
+    total := names.count;
+    insert into tmp values (total, null);
+    for i in 1 .. total loop
+        insert into tmp values (marks(i), names(i));
+    end loop;
+end;
+/
+select * from tmp order by 1, 2;
+  a  |   b   
+-----+-------
+   6 | 
+  78 | Alice
+  87 | Jim  
+  92 | Kevin
+  97 | Zera 
+  98 | Vera 
+ 100 | Gauss
+(7 rows)
+
+truncate tmp;
+-- test of PL/SQL data type instantiation --
+-- If we specified our type (use PL/SQL like instantiation), all varray members .. --
+--   should be able to cast to the correct data type. --
+declare
+    type students is varray(5) of varchar2(10);
+    names students;
+begin
+    names := students(1, 'Zera ', 'Alice', 'Jim  ', 'Kevin'); -- should be able read all values correctly --
+    for i in 1 .. 5 loop
+        insert into tmp values (null, names(i));
+    end loop;
+end;
+/
+select * from tmp order by 1, 2;
+ a |   b   
+---+-------
+   | 1
+   | Alice
+   | Jim  
+   | Kevin
+   | Zera 
+(5 rows)
+
+truncate tmp;
+-- However, if we use the PL/pgSQL style instantiation, it is not guaranteed --
+-- error out for this one --
+declare
+    type students is varray(5) of varchar2(10);
+    names students;
+begin
+    -- we can only make assumptions base on the first element, which, not always a good answer --
+    names := array[1, 'Zera ', 'Alice', 'Jim  ', 'Kevin'];
+    for i in 1 .. 5 loop
+        insert into tmp values (null, names(i));
+    end loop;
+end;
+/
+ERROR:  invalid input syntax for integer: "Zera "
+LINE 1: SELECT array[1, 'Zera ', 'Alice', 'Jim  ', 'Kevin']
+                        ^
+QUERY:  SELECT array[1, 'Zera ', 'Alice', 'Jim  ', 'Kevin']
+CONTEXT:  referenced column: array
+PL/pgSQL function inline_code_block line 5 at assignment
+select * from tmp order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+truncate tmp;
+-- test of uneven brackets --
+-- error out --
+declare
+    type students is varray(5) of varchar2(10);
+    names students;
+begin
+    names := students(1, 'Zera ', 'Alice', 'Jim  ', 'Kevin'); -- should be able read all values correctly --
+    for i in 1 .. 5 loop
+        insert into tmp values (null, names(i]);
+    end loop;
+end;
+/
+ERROR:  mismatched parentheses at or near ";"
+LINE 6:         insert into tmp values (null, names(i]);
+                                                       ^
+QUERY:  DECLARE  type students is varray(5) of varchar2(10);
+    names students;
+begin
+    names := students(1, 'Zera ', 'Alice', 'Jim  ', 'Kevin'); -- should be able read all values correctly --
+    for i in 1 .. 5 loop
+        insert into tmp values (null, names(i]);
+    end loop;
+end
+select * from tmp order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+truncate tmp;
+-- Using composite type defined outside of precedure block --
+declare
+    type finaltype is varray(10) of mytype2;
+    aa finaltype := finaltype(
+        mytype2(1, (1, 'ground')),
+        mytype2(1, (2, 'air'))
+    );
+begin
+    aa.extend(10);
+    aa(2) := (2, (3, 'water')); -- overwrite record (1, (2, 'air')) --
+    insert into tmp values (aa(1).id, aa(2).locale.biome);
+end;
+/
+select * from tmp order by 1, 2;
+ a |   b   
+---+-------
+ 1 | water
+(1 row)
+
+truncate tmp;
+-- Note: array can handle proper type-in-type declaration for now --
+declare
+    type finaltype is varray(10) of mytype2;
+    aa finaltype := finaltype(
+        mytype2(1, mytype(1, 'ground')),
+        mytype2(1, mytype(2, 'air'))
+    );
+begin
+    aa.extend(10);
+    aa(2) := (2, (3, 'water')); -- overwrite record (1, (2, 'air')) --
+    insert into tmp values (aa(1).id, aa(2).locale.biome);
+end;
+/
+select * from tmp order by 1, 2;
+ a |   b   
+---+-------
+ 1 | water
+(1 row)
+
+truncate tmp;
+declare
+    type finaltype is varray(10) of mytype2;
+    aa finaltype := finaltype(
+        mytype2(1, mytype(1, 'ground')),
+        mytype2(1, mytype(2, 'air'))
+    );
+begin
+    aa.extend(10);
+    aa(2) := mytype2(2, mytype(3, 'water'));
+    insert into tmp values (aa(1).id, aa(2).locale.biome);
+end;
+/
+select * from tmp order by 1, 2;
+ a |   b   
+---+-------
+ 1 | water
+(1 row)
+
+truncate tmp;
+-- working with functions --
+-- should be the same, except the result, make sure functions are correctly identified --
+declare
+    type finaltype is varray(10) of mytype2;
+    aa finaltype := finaltype(
+        myfunc((1, mytype(1, 'ground'))), -- for records, we need an extra parens to work --
+        myfunc((1, mytype(2, 'air')))
+    );
+begin
+    aa.extend(10);
+    insert into tmp values (aa(1).id, aa(2).locale.biome);
+end;
+/
+select * from tmp order by 1, 2;
+ a |   b   
+---+-------
+ 9 | space
+(1 row)
+
+truncate tmp;
+-- This is what going to happened with functions and types shares teh same name --
+-- (Don't try this at home) --
+declare
+    type finaltype is varray(10) of mytype2;
+    aa finaltype := finaltype(
+        functype(1, mytype(1, 'ground')), -- we are prioritizing types here --
+        functype(1, mytype(2, 'air'))
+    );
+begin
+    aa.extend(10);
+    insert into tmp values (aa(1).id, aa(2).locale.biome);
+end;
+/
+select * from tmp order by 1, 2;
+ a |  b  
+---+-----
+ 1 | air
+(1 row)
+
+truncate tmp;
+drop type functype; -- abandon type functype --
+declare
+    type finaltype is varray(10) of mytype2;
+    aa finaltype := finaltype(
+        functype((1, mytype(1, 'ground'))), -- here we have to use function functype --
+        functype((1, mytype(2, 'air')))
+    );
+begin
+    aa.extend(10);
+    insert into tmp values (aa(1).id, aa(2).locale.biome);
+end;
+/
+select * from tmp order by 1, 2;
+ a  |       b       
+----+---------------
+ -1 | unknown realm
+(1 row)
+
+truncate tmp;
+drop function functype; -- oops! --
+declare
+    type finaltype is varray(10) of mytype2;
+    aa finaltype := finaltype(
+        functype((1, mytype(1, 'ground'))), -- not sure --
+        functype((1, mytype(2, 'air')))
+    );
+begin
+    aa.extend(10);
+end;
+/
+ERROR:  function functype(record) does not exist
+LINE 1: SELECT ARRAY[(functype((1, ROW(1, 'ground'))))::plpgsql_arra...
+                      ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+QUERY:  SELECT ARRAY[(functype((1, ROW(1, 'ground'))))::plpgsql_array_opengauss."mytype2", 
+        (functype((1, ROW(2, 'air'))))::plpgsql_array_opengauss."mytype2"]
+CONTEXT:  referenced column: array
+PL/pgSQL function inline_code_block line 6 during statement block local variable initialization
+-- Multi-dimension arrays --
+declare
+    type arrayfirst is varray(10) of int;
+    arr arrayfirst := arrayfirst(1, 2, 3);
+    mat int[][] := ARRAY[arr, arr]; -- PLpgSQL style --
+begin
+    insert into tmp values (null, mat(1)(2));
+end;
+/
+select * from tmp order by 1, 2;
+ a | b 
+---+---
+   | 2
+(1 row)
+
+truncate tmp;
+-- assignments && statements test --
+declare
+    type arrayfirst is varray(10) of int;
+    arr arrayfirst := arrayfirst(1, 2, 3);
+    mat int[][] := ARRAY[arr, ARRAY[4, 5 ,6]]; -- PLpgSQL style --
+begin
+    insert into tmp(a) values (mat[1](2)), (mat(1)[2]), (mat(1)(2)), (mat[1][2]);
+end;
+/
+select * from tmp order by 1, 2;
+ a | b 
+---+---
+ 2 | 
+ 2 | 
+ 2 | 
+ 2 | 
+(4 rows)
+
+truncate tmp;
+-- error out! --
+declare
+    type arrayfirst is varray(10) of int;
+    arr arrayfirst := arrayfirst(1, 2, 3);
+    type arraySecond is varray(10) of arrayfirst; -- Nested types are not supported, yet --
+    mat arraySecond := arraySecond(arr, arr);
+begin
+    insert into tmp values (null, mat(1)(2));
+end;
+/
+ERROR:  array type nested by array is not supported yet.
+DETAIL:  Define array type "arraysecond" of array is not supported yet.
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 3
+select * from tmp order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+truncate tmp;
+--------------------------------------------------
+------------------ END OF TESTS ------------------
+--------------------------------------------------
+drop function if exists functype;
+NOTICE:  function functype() does not exist, skipping
+drop function if exists myfunc;
+drop table if exists tmp;
+drop table if exists customers;
+drop type if exists functype;
+NOTICE:  type "functype" does not exist, skipping
+drop type if exists mytype2;
+drop type if exists mytype;
+-- clean up --
+drop schema if exists plpgsql_array_opengauss cascade;
+NOTICE:  drop cascades to function name_list(integer)

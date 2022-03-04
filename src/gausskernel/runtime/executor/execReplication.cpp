@@ -22,6 +22,7 @@
 #include "commands/trigger.h"
 #include "commands/cluster.h"
 #include "catalog/pg_partition_fn.h"
+#include "catalog/pg_publication.h"
 #include "executor/executor.h"
 #include "executor/node/nodeModifyTable.h"
 #include "nodes/nodeFuncs.h"
@@ -73,6 +74,11 @@ static bool build_replindex_scan_key(ScanKey skey, Relation rel, Relation idxrel
         int pkattno = attoff + 1;
         int mainattno = indkey->values[attoff];
         Oid optype = get_opclass_input_type(opclass->values[attoff]);
+        if (mainattno > searchslot->tts_tupleDescriptor->natts) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_ATTRIBUTE),
+                errmsg("index key attribute number %d exceeds number of columns %d",
+                mainattno, searchslot->tts_tupleDescriptor->natts)));
+        }
 
         /*
          * Load the operator info.  We need this to get the equality operator
@@ -140,18 +146,22 @@ static void inline CheckTupleModifyRes(TM_Result res)
     }
 }
 
+static inline List* GetPartitionList(Relation rel, LOCKMODE lockmode)
+{
+    if (RelationIsSubPartitioned(rel)) {
+        return RelationGetSubPartitionList(rel, lockmode);
+    } else {
+        return relationGetPartitionList(rel, lockmode);
+    }
+}
+
 static bool PartitionFindReplTupleByIndex(EState *estate, Relation rel, Relation idxrel, LockTupleMode lockmode,
     TupleTableSlot *searchslot, TupleTableSlot *outslot, FakeRelationPartition *fakeRelInfo)
 {
     /* must be non-GPI index */
     Assert(!RelationIsGlobalIndex(idxrel));
 
-    if (RelationIsSubPartitioned(rel)) {
-        fakeRelInfo->partList = RelationGetSubPartitionList(rel, RowExclusiveLock);
-    } else {
-        fakeRelInfo->partList = relationGetPartitionList(rel, RowExclusiveLock);
-    }
-
+    fakeRelInfo->partList = GetPartitionList(rel, RowExclusiveLock);
     /* search the tuple in partition list one by one */
     ListCell *cell = NULL;
     foreach (cell, fakeRelInfo->partList) {
@@ -191,12 +201,7 @@ static bool PartitionFindReplTupleByIndex(EState *estate, Relation rel, Relation
 static bool PartitionFindReplTupleSeq(Relation rel, LockTupleMode lockmode,
     TupleTableSlot *searchslot, TupleTableSlot *outslot, FakeRelationPartition *fakeRelInfo)
 {
-    if (RelationIsSubPartitioned(rel)) {
-        fakeRelInfo->partList = RelationGetSubPartitionList(rel, RowExclusiveLock);
-    } else {
-        fakeRelInfo->partList = relationGetPartitionList(rel, RowExclusiveLock);
-    }
-
+    fakeRelInfo->partList = GetPartitionList(rel, RowExclusiveLock);
     ListCell *cell = NULL;
     foreach (cell, fakeRelInfo->partList) {
         Partition heapPart = (Partition)lfirst(cell);
@@ -302,77 +307,79 @@ static bool RelationFindReplTupleByIndex(EState *estate, Relation rel, Relation 
     /* Build scan key. */
     build_replindex_scan_key(skey, targetRel, idxrel, searchslot);
 
-retry:
-    found = false;
+    while (true) {
+        found = false;
+        scan_handler_idx_rescan(scan, skey, IndexRelationGetNumberOfKeyAttributes(idxrel), NULL, 0);
 
-    scan_handler_idx_rescan(scan, skey, IndexRelationGetNumberOfKeyAttributes(idxrel), NULL, 0);
-
-    /* Try to find the tuple */
-    if (RelationIsUstoreFormat(targetRel)) {
-        found = IndexGetnextSlot(scan, ForwardScanDirection, outslot);
-    } else {
-        if ((scantuple = scan_handler_idx_getnext(scan, ForwardScanDirection)) != NULL) {
-            found = true;
-            ExecStoreTuple(scantuple, outslot, InvalidBuffer, false);
-        }
-    }
-
-    /* Found tuple, try to lock it in the lockmode. */
-    if (found) {
-        outslot->tts_tuple = ExecMaterializeSlot(outslot);
-        xwait = TransactionIdIsValid(snap.xmin) ? snap.xmin : snap.xmax;
-        /*
-         * If the tuple is locked, wait for locking transaction to finish
-         * and retry.
-         */
-        if (TransactionIdIsValid(xwait)) {
-            XactLockTableWait(xwait);
-            goto retry;
-        }
-
-        Buffer buf;
-        TM_FailureData hufd;
-        TM_Result res;
-        Tuple locktup;
-        HeapTupleData heaplocktup;
-        UHeapTupleData UHeaplocktup;
-        struct {
-            UHeapDiskTupleData hdr;
-            char data[MaxPossibleUHeapTupleSize];
-        } tbuf;
-        ItemPointer tid = tableam_tops_get_t_self(targetRel, outslot->tts_tuple);
-
+        /* Try to find the tuple */
         if (RelationIsUstoreFormat(targetRel)) {
-            ItemPointerCopy(tid, &UHeaplocktup.ctid);
-            rc = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
-            securec_check(rc, "\0", "\0");
-            UHeaplocktup.disk_tuple = &tbuf.hdr;
-            locktup = &UHeaplocktup;
+            found = IndexGetnextSlot(scan, ForwardScanDirection, outslot);
         } else {
-            ItemPointerCopy(tid, &heaplocktup.t_self);
-            locktup = &heaplocktup;
+            if ((scantuple = scan_handler_idx_getnext(scan, ForwardScanDirection)) != NULL) {
+                found = true;
+                ExecStoreTuple(scantuple, outslot, InvalidBuffer, false);
+            }
         }
+        if (found) {
+            /* Found tuple, try to lock it in the lockmode. */
+            outslot->tts_tuple = ExecMaterializeSlot(outslot);
+            xwait = TransactionIdIsValid(snap.xmin) ? snap.xmin : snap.xmax;
+            /*
+             * If the tuple is locked, wait for locking transaction to finish
+             * and retry.
+             */
+            if (TransactionIdIsValid(xwait)) {
+                XactLockTableWait(xwait);
+                continue;
+            }
 
-        /* Get the target tuple's partition for GPI */
-        if (isGpi) {
-            GetFakeRelAndPart(estate, rel, outslot, fakeRelPart);
-            targetRel = fakeRelPart->partRel;
+            Buffer buf;
+            TM_FailureData hufd;
+            TM_Result res;
+            Tuple locktup;
+            HeapTupleData heaplocktup;
+            UHeapTupleData UHeaplocktup;
+            struct {
+                UHeapDiskTupleData hdr;
+                char data[MaxPossibleUHeapTupleSize];
+            } tbuf;
+            ItemPointer tid = tableam_tops_get_t_self(targetRel, outslot->tts_tuple);
+
+            if (RelationIsUstoreFormat(targetRel)) {
+                ItemPointerCopy(tid, &UHeaplocktup.ctid);
+                rc = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
+                securec_check(rc, "\0", "\0");
+                UHeaplocktup.disk_tuple = &tbuf.hdr;
+                locktup = &UHeaplocktup;
+            } else {
+                ItemPointerCopy(tid, &heaplocktup.t_self);
+                locktup = &heaplocktup;
+            }
+
+            /* Get the target tuple's partition for GPI */
+            if (isGpi) {
+                GetFakeRelAndPart(estate, rel, outslot, fakeRelPart);
+                targetRel = fakeRelPart->partRel;
+            }
+
+            PushActiveSnapshot(GetLatestSnapshot());
+            res = tableam_tuple_lock(targetRel,
+                locktup, &buf, GetCurrentCommandId(false), lockmode, false, &hufd,
+                false, false,             /* don't follow updates */
+                false,                    /* eval */
+                GetLatestSnapshot(), tid, /* ItemPointer */
+                false);                   /* is select for update */
+            /* the tuple slot already has the buffer pinned */
+            ReleaseBuffer(buf);
+            PopActiveSnapshot();
+
+            if (CheckTupleLockRes(res)) {
+                /* lock tuple failed, try again */
+                continue;
+            }
         }
-
-        PushActiveSnapshot(GetLatestSnapshot());
-        res = tableam_tuple_lock(targetRel,
-            locktup, &buf, GetCurrentCommandId(false), lockmode, false, &hufd,
-            false, false,             /* don't follow updates */
-            false,                    /* eval */
-            GetLatestSnapshot(), tid, /* ItemPointer */
-            false);                   /* is select for update */
-        /* the tuple slot already has the buffer pinned */
-        ReleaseBuffer(buf);
-        PopActiveSnapshot();
-
-        if (CheckTupleLockRes(res)) {
-            goto retry;
-        }
+        /* we are done */
+        break;
     }
 
     scan_handler_idx_endscan(scan);
@@ -449,6 +456,7 @@ static bool RelationFindReplTupleSeq(Relation rel, LockTupleMode lockmode, Tuple
     int rc;
     Relation targetRel = fakeRelPart->partRel == NULL ? rel : fakeRelPart->partRel;
     TupleDesc desc = RelationGetDescr(rel);
+    bool retry = false;
 
     Assert(equalTupleDescs(desc, outslot->tts_tupleDescriptor));
     eq = (TypeCacheEntry **)palloc0(sizeof(*eq) * outslot->tts_tupleDescriptor->natts);
@@ -457,73 +465,81 @@ static bool RelationFindReplTupleSeq(Relation rel, LockTupleMode lockmode, Tuple
     InitDirtySnapshot(snap);
     scan = scan_handler_tbl_beginscan(targetRel, &snap, 0, NULL, NULL);
 
-retry:
-    found = false;
+    while (true) {
+        retry = false;
+        found = false;
+        scan_handler_tbl_rescan(scan, NULL, targetRel);
 
-    scan_handler_tbl_rescan(scan, NULL, targetRel);
+        /* Try to find the tuple */
+        while ((scantuple = scan_handler_tbl_getnext(scan, ForwardScanDirection, targetRel)) != NULL) {
+            if (!tuple_equals_slot(desc, scantuple, searchslot, eq)) {
+                continue;
+            }
 
-    /* Try to find the tuple */
-    while ((scantuple = scan_handler_tbl_getnext(scan, ForwardScanDirection, targetRel)) != NULL) {
-        if (!tuple_equals_slot(desc, scantuple, searchslot, eq))
+            found = true;
+            ExecStoreTuple(scantuple, outslot, InvalidBuffer, false);
+            outslot->tts_tuple = ExecMaterializeSlot(outslot);
+
+            xwait = TransactionIdIsValid(snap.xmin) ? snap.xmin : snap.xmax;
+            /*
+             * If the tuple is locked, wait for locking transaction to finish
+             * and retry.
+             */
+            if (TransactionIdIsValid(xwait)) {
+                /* retry */
+                retry = true;
+                XactLockTableWait(xwait);
+            }
+            break;
+        }
+
+        if (retry) {
             continue;
-
-        found = true;
-        ExecStoreTuple(scantuple, outslot, InvalidBuffer, false);
-        outslot->tts_tuple = ExecMaterializeSlot(outslot);
-
-        xwait = TransactionIdIsValid(snap.xmin) ? snap.xmin : snap.xmax;
-        /*
-         * If the tuple is locked, wait for locking transaction to finish
-         * and retry.
-         */
-        if (TransactionIdIsValid(xwait)) {
-            XactLockTableWait(xwait);
-            goto retry;
         }
+        if (found) {
+            /* Found tuple, try to lock it in the lockmode. */
+            Buffer buf;
+            TM_FailureData hufd;
+            TM_Result res;
+            Tuple locktup = NULL;
+            HeapTupleData heaplocktup;
+            UHeapTupleData UHeaplocktup;
+            struct {
+                UHeapDiskTupleData hdr;
+                char data[MaxPossibleUHeapTupleSize];
+            } tbuf;
+            ItemPointer tid = tableam_tops_get_t_self(rel, outslot->tts_tuple);
 
-        /* Found our tuple and it's not locked */
+            if (RelationIsUstoreFormat(targetRel)) {
+                ItemPointerCopy(tid, &UHeaplocktup.ctid);
+                rc = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
+                securec_check(rc, "\0", "\0");
+                UHeaplocktup.disk_tuple = &tbuf.hdr;
+                locktup = &UHeaplocktup;
+            } else {
+                ItemPointerCopy(tid, &heaplocktup.t_self);
+                locktup = &heaplocktup;
+            }
+
+            PushActiveSnapshot(GetLatestSnapshot());
+            res = tableam_tuple_lock(targetRel, locktup, &buf, GetCurrentCommandId(false),
+                lockmode, false, &hufd, false,
+                false,                    /* don't follow updates */
+                false,                    /* eval */
+                GetLatestSnapshot(), tid, /* ItemPointer */
+                false);                   /* is select for update */
+
+            /* the tuple slot already has the buffer pinned */
+            ReleaseBuffer(buf);
+            PopActiveSnapshot();
+
+            if (CheckTupleLockRes(res)) {
+                /* lock tuple failed, try again */
+                continue;
+            }
+        }
+        /* we are done */
         break;
-    }
-
-    /* Found tuple, try to lock it in the lockmode. */
-    if (found) {
-        Buffer buf;
-        TM_FailureData hufd;
-        TM_Result res;
-        Tuple locktup = NULL;
-        HeapTupleData heaplocktup;
-        UHeapTupleData UHeaplocktup;
-        struct {
-            UHeapDiskTupleData hdr;
-            char data[MaxPossibleUHeapTupleSize];
-        } tbuf;
-        ItemPointer tid = tableam_tops_get_t_self(rel, outslot->tts_tuple);
-
-        if (RelationIsUstoreFormat(targetRel)) {
-            ItemPointerCopy(tid, &UHeaplocktup.ctid);
-            rc = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
-            securec_check(rc, "\0", "\0");
-            UHeaplocktup.disk_tuple = &tbuf.hdr;
-            locktup = &UHeaplocktup;
-        } else {
-            ItemPointerCopy(tid, &heaplocktup.t_self);
-            locktup = &heaplocktup;
-        }
-
-        PushActiveSnapshot(GetLatestSnapshot());
-        res = tableam_tuple_lock(targetRel, locktup, &buf, GetCurrentCommandId(false), lockmode, false, &hufd, false,
-            false,                    /* don't follow updates */
-            false,                    /* eval */
-            GetLatestSnapshot(), tid, /* ItemPointer */
-            false);                   /* is select for update */
-
-        /* the tuple slot already has the buffer pinned */
-        ReleaseBuffer(buf);
-        PopActiveSnapshot();
-
-        if (CheckTupleLockRes(res)) {
-            goto retry;
-        }
     }
 
     scan_handler_tbl_endscan(scan);
@@ -793,6 +809,7 @@ void CheckCmdReplicaIdentity(Relation rel, CmdType cmd)
             RelationGetRelationName(rel)),
             errhint("To enable deleting from the table, set REPLICA IDENTITY using ALTER TABLE.")));
     }
+    pfree(pubactions);
 }
 
 void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeRelationPartition *relAndPart)

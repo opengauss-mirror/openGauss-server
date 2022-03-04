@@ -29,54 +29,95 @@
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "db4ai/gd.h"
+#include "utils/lsyscache.h"
 
 #define DEBUG_MODEL_RETURN_TYPE INT4OID // Set manually the return type of model, until available from catalog
 
 /*
- * functions relevant to k-means and defined in kmeans.cpp
+ * functions relevant to xgboost and defined in xgboost.cpp
  */
-ModelPredictor kmeans_predict_prepare(Model const * model);
-Datum kmeans_predict(ModelPredictor model, Datum *data, bool *nulls, Oid *types, int nargs);
+ModelPredictor xgboost_predict_prepare(AlgorithmAPI *, Model const *model);
+Datum xgboost_predict(AlgorithmAPI*, ModelPredictor model, Datum* values, bool* isnull, Oid* types, int ncolumns);
+
 
 struct PredictionByData {
     PredictorInterface *api;
     ModelPredictor model_predictor;
+    AlgorithmAPI *algorithm;
 };
+typedef enum funcType {
+    INVAILD_FUNC_TYPE = 0,
+    BOOL,
+    FLOAT4,
+    FLOAT8,
+    FLOAT8ARRAY,
+    INT32,
+    INT64,
+    NUMERIC,
+    TEXT
+} funcType;
+ 
+static void check_func_oid(Oid model_retype, funcType func)
+{
+    funcType mft = INVAILD_FUNC_TYPE;
+    switch(model_retype){
+        case BOOLOID:
+            mft = BOOL;
+            break;
+        case FLOAT4OID:
+            mft = FLOAT4;
+            break;
+        case FLOAT8OID:
+            mft = FLOAT8;
+            break;
+        case FLOAT8ARRAYOID:
+            mft = FLOAT8ARRAY;
+            break;
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+            mft = INT32;
+            break;
+        case INT8OID:
+            mft = INT64;
+            break;
+        case NUMERICOID:
+            mft = NUMERIC;
+            break;
+        case VARCHAROID:
+        case BPCHAROID:
+        case CHAROID:
+        case TEXTOID:
+            mft = TEXT;
+            break;
+        default:
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Cannot trigger prediction for model with oid %u",  model_retype)));
+    }
+    if (mft != func)
+        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_DATATYPE_MISMATCH),
+                    errmsg("The function return type is mismatched with model result type: %u.", model_retype)));
+}
 
-static PredictionByData *initialize_predict_by_data(Model *model)
+static PredictionByData *initialize_predict_by_data(const Model *model)
 {
     PredictionByData *result = (PredictionByData *)palloc0(sizeof(PredictionByData));
 
     // Initialize the API handlers
-    switch (model->algorithm) {
-        case LOGISTIC_REGRESSION:
-        case SVM_CLASSIFICATION:
-        case LINEAR_REGRESSION: {
-            result->api = (PredictorInterface *)palloc0(sizeof(PredictorInterface));
-            result->api->predict = gd_predict;
-            result->api->prepare = gd_predict_prepare;
-            break;
-        }
-        case KMEANS: {
-            result->api = (PredictorInterface *)palloc0(sizeof(PredictorInterface));
-            result->api->predict = kmeans_predict;
-            result->api->prepare = kmeans_predict_prepare;
-            break;
-        }
-        case INVALID_ALGORITHM_ML:
-        default: {
-            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Model type %d is not supported for prediction", (int)model->algorithm)));
-            break;
-        }
-    }
+    result->algorithm = get_algorithm_api(model->algorithm);
+    result->api = (PredictorInterface*)palloc0(sizeof(PredictorInterface));
+    Assert(result->algorithm->predict != nullptr);
+    Assert(result->algorithm->prepare_predict != nullptr);
+    result->api->predict = result->algorithm->predict;
+    result->api->prepare = NULL;
 
     // Prepare the in memory version of the model for efficient prediction
-    result->model_predictor = result->api->prepare(model);
+    result->model_predictor = result->algorithm->prepare_predict(result->algorithm, &model->data, model->return_type);
 
     return result;
 }
 
+template <funcType ft>
 Datum db4ai_predict_by(PG_FUNCTION_ARGS)
 {
     // First argument is the model, the following ones are the inputs to the model predictor
@@ -101,16 +142,16 @@ Datum db4ai_predict_by(PG_FUNCTION_ARGS)
         text *model_name_text = PG_GETARG_TEXT_P(0);
         char *model_name = text_to_cstring(model_name_text);
 
-        Model *model = get_model(model_name, false);
+        const Model *model = get_model(model_name, false);
         prediction_by_data = initialize_predict_by_data(model);
         fcinfo->flinfo->fn_extra = prediction_by_data;
         pfree(model_name);
-
+        check_func_oid(model->return_type, ft);
         MemoryContextSwitchTo(oldContext);
     }
 
-    Datum result =
-        prediction_by_data->api->predict(prediction_by_data->model_predictor, var_args, nulls, types, var_args_size);
+    Datum result = prediction_by_data->api->predict(prediction_by_data->algorithm, prediction_by_data->model_predictor,
+                                                    var_args, nulls, types, var_args_size);
 
     PG_RETURN_DATUM(result);
 }
@@ -119,35 +160,41 @@ Datum db4ai_predict_by(PG_FUNCTION_ARGS)
 // to be compliant with openGauss type system that specifies the return type
 Datum db4ai_predict_by_bool(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by(fcinfo);
+    return db4ai_predict_by<BOOL>(fcinfo);
 }
 
 Datum db4ai_predict_by_int32(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by(fcinfo);
+    return db4ai_predict_by<INT32>(fcinfo);
 }
 
 Datum db4ai_predict_by_int64(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by(fcinfo);
+    return db4ai_predict_by<INT64>(fcinfo);
 }
 
 Datum db4ai_predict_by_float4(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by(fcinfo);
+    return db4ai_predict_by<FLOAT4>(fcinfo);
 }
 
 Datum db4ai_predict_by_float8(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by(fcinfo);
+    return db4ai_predict_by<FLOAT8>(fcinfo);
 }
+
+Datum db4ai_predict_by_float8_array(PG_FUNCTION_ARGS)
+{
+    return db4ai_predict_by<FLOAT8ARRAY>(fcinfo);
+}
+
 
 Datum db4ai_predict_by_numeric(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by(fcinfo);
+    return db4ai_predict_by<NUMERIC>(fcinfo);
 }
 
 Datum db4ai_predict_by_text(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by(fcinfo);
+    return db4ai_predict_by<TEXT>(fcinfo);
 }

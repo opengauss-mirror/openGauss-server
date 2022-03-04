@@ -37,8 +37,7 @@
  */
 #define XLR_SPECIAL_REL_UPDATE 0x01
 #define XLR_BTREE_UPGRADE_FLAG 0x02
-/* If xlog record is the compress table creation */
-#define XLR_REL_COMPRESS       0X04
+
 #define XLR_IS_TOAST           0X08
 /* If xlog record is from toast page */
 
@@ -85,7 +84,7 @@ typedef struct XLogRecordBlockHeader {
 #define BKID_HAS_TDE_PAGE (0x40)
 #define BKID_GET_BKID(id) (id & 0x3F)
 
-/*
+/* 
  * In segment-page storage, RelFileNode and block number are logic for XLog. Thus, we need record
  * physical location in xlog. This macro is used to check whether in such situation.
  */

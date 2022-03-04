@@ -154,6 +154,15 @@ select a.c1, b.c2, b.c3 from (select c1 from limit_table_03 order by c1 offset 1
  16 | 16 | 36
 (5 rows)
 
+explain (verbose, costs off) select * from limit_table_01 where rownum <= 10;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Limit
+   Output: c1, c2, c3
+   ->  Seq Scan on distribute_limit.limit_table_01
+         Output: c1, c2, c3
+(4 rows)
+
 drop table limit_table_01;
 drop table limit_table_02;
 drop table limit_table_03;

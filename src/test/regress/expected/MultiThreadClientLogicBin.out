@@ -1,0 +1,81 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_varchar(id int, name varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+DROP TABLE t_varchar;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_1')
+SELECT * FROM t_varchar ORDER BY ID
+ id |   name   
+----+----------
+  1 | worker_1
+(1 row)
+
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_2')
+SELECT * FROM t_varchar ORDER BY ID
+ id |   name   
+----+----------
+  1 | worker_1
+  2 | worker_2
+(2 rows)
+
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_3')
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_3')
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_3')
+SELECT * FROM t_varchar ORDER BY ID
+ id |   name   
+----+----------
+  1 | worker_1
+  2 | worker_2
+  3 | worker_3
+  4 | worker_3
+  5 | worker_3
+(5 rows)
+
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_4')
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_4')
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_4')
+SELECT * FROM t_varchar ORDER BY ID
+ id |   name   
+----+----------
+  1 | worker_1
+  2 | worker_2
+  3 | worker_3
+  4 | worker_3
+  5 | worker_3
+--?  6 | worker_.
+--?  . | worker_.
+--?  7 | worker_.
+--?  . | worker_.
+--?  8 | worker_.
+--?  . | worker_.
+(11 rows)
+
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_5')
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_5')
+INSERT INTO t_varchar VALUES ((SELECT COALESCE(MAX(ID),0) FROM t_varchar) + 1, 'worker_5')
+SELECT * FROM t_varchar ORDER BY ID
+ id |   name   
+----+----------
+  1 | worker_1
+  2 | worker_2
+  3 | worker_3
+  4 | worker_3
+  5 | worker_3
+--?  6 | worker_.
+--?  . | worker_.
+--?  7 | worker_.
+--?  . | worker_.
+--?  8 | worker_.
+--?  . | worker_.
+(11 rows)
+

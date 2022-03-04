@@ -30,6 +30,7 @@
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
+#include "storage/procarray.h"
 #include "storage/smgr/smgr.h"
 #include "tcop/tcopprot.h"
 #include "utils/aiomem.h"
@@ -53,9 +54,8 @@ typedef struct {
 
 static void UBTreeBuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
                             void *state);
-static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, IndexBulkDeleteCallback callback,
-                         void *callbackState, BTCycleId cycleid);
-static void UBTreeVacuumPage(BTVacState *vstate, BlockNumber blkno, BlockNumber origBlkno);
+static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, BTCycleId cycleid);
+static void UBTreeVacuumPage(BTVacState *vstate, OidRBTree* invisibleParts, BlockNumber blkno, BlockNumber origBlkno);
 
 static IndexTuple UBTreeGetIndexTuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset);
 /*
@@ -148,24 +148,14 @@ static void UBTreeBuildCallback(Relation index, HeapTuple htup, Datum *values, c
                             void *state)
 {
     BTBuildState *buildstate = (BTBuildState *)state;
-    IndexTransInfo transInfo;
-    IndexTransInfo *transInfoArg = NULL;
-
-    /*
-     * SNAPSHOT_NOW is used to scan the ustore table, and make the index
-     * unusable for old snapshots. So we can just treat every itup as Frozen.
-     */
-    transInfo.xmin = FrozenTransactionId;
-    transInfo.xmax = InvalidTransactionId;
-    transInfoArg = &transInfo;
 
     // insert the index tuple into the appropriate spool file for subsequent processing
     if (tupleIsAlive || buildstate->spool2 == NULL) {
-        _bt_spool(buildstate->spool, &htup->t_self, values, isnull, transInfoArg);
+        _bt_spool(buildstate->spool, &htup->t_self, values, isnull);
     } else {
         /* dead tuples are put into spool2 */
         buildstate->haveDead = true;
-        _bt_spool(buildstate->spool2, &htup->t_self, values, isnull, transInfoArg);
+        _bt_spool(buildstate->spool2, &htup->t_self, values, isnull);
     }
 
     buildstate->indtuples += 1;
@@ -639,8 +629,6 @@ Datum ubtbulkdelete(PG_FUNCTION_ARGS)
 {
     IndexVacuumInfo *info = (IndexVacuumInfo *)PG_GETARG_POINTER(0);
     IndexBulkDeleteResult *volatile stats = (IndexBulkDeleteResult *)PG_GETARG_POINTER(1);
-    IndexBulkDeleteCallback callback = (IndexBulkDeleteCallback)PG_GETARG_POINTER(2);
-    void *callbackState = (void *)PG_GETARG_POINTER(3);
     Relation rel = info->index;
     BTCycleId cycleid;
 
@@ -654,7 +642,7 @@ Datum ubtbulkdelete(PG_FUNCTION_ARGS)
     {
         cycleid = _bt_start_vacuum(rel);
 
-        UBTreeVacuumScan(info, stats, callback, callbackState, cycleid);
+        UBTreeVacuumScan(info, stats, cycleid);
     }
     PG_END_ENSURE_ERROR_CLEANUP(_bt_end_vacuum_callback, PointerGetDatum(rel));
     _bt_end_vacuum(rel);
@@ -688,7 +676,7 @@ Datum ubtvacuumcleanup(PG_FUNCTION_ARGS)
      */
     if (stats == NULL) {
         stats = (IndexBulkDeleteResult *)palloc0(sizeof(IndexBulkDeleteResult));
-        UBTreeVacuumScan(info, stats, NULL, NULL, 0);
+        UBTreeVacuumScan(info, stats, 0);
     }
 
     /* ubtree don't use Free Space Map */
@@ -718,21 +706,14 @@ Datum ubtvacuumcleanup(PG_FUNCTION_ARGS)
  * The caller is responsible for initially allocating/zeroing a stats struct
  * and for obtaining a vacuum cycle ID if necessary.
  */
-static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, IndexBulkDeleteCallback callback,
-                         void *callbackState, BTCycleId cycleid)
+static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
+    BTCycleId cycleid)
 {
     Relation rel = info->index;
     BTVacState vstate;
     BlockNumber numPages;
     BlockNumber blkno;
     bool needLock = false;
-    bool vacuumGPI = false;
-
-    /* Check if GPI relation has invisible partitions */
-    if (callbackState) {
-        Bitmapset* invisMap = ((Bitmapset**)callbackState)[0];
-        vacuumGPI = RelationIsGlobalIndex(rel) && invisMap != NULL;
-    }
 
     /*
      * Reset counts that will be incremented during the scan; needed in case
@@ -745,8 +726,6 @@ static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats
     /* Set up info to pass down to btvacuumpage */
     vstate.info = info;
     vstate.stats = stats;
-    vstate.callback = callback;
-    vstate.callback_state = callbackState;
     vstate.cycleid = cycleid;
     vstate.lastBlockVacuumed = BTREE_METAPAGE; /* Initialise at first block */
     vstate.lastBlockLocked = BTREE_METAPAGE;
@@ -798,7 +777,7 @@ static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats
         }
         /* Iterate over pages, then loop back to recheck length */
         for (; blkno < numPages; blkno++) {
-            UBTreeVacuumPage(&vstate, blkno, blkno);
+            UBTreeVacuumPage(&vstate, info->invisibleParts, blkno, blkno);
         }
     }
 
@@ -847,12 +826,10 @@ static void UBTreeVacuumScan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats
  * reached by the outer btvacuumscan loop (the same as blkno, unless we
  * are recursing to re-examine a previous page).
  */
-static void UBTreeVacuumPage(BTVacState *vstate, BlockNumber blkno, BlockNumber origBlkno)
+static void UBTreeVacuumPage(BTVacState *vstate, OidRBTree *invisibleParts, BlockNumber blkno, BlockNumber origBlkno)
 {
     IndexVacuumInfo *info = vstate->info;
     IndexBulkDeleteResult *stats = vstate->stats;
-    IndexBulkDeleteCallback callback = vstate->callback;
-    void *callbackState = vstate->callback_state;
     Relation rel = info->index;
     bool deleteNow = false;
     BlockNumber recurseTo;
@@ -895,7 +872,6 @@ restart:
         }
     }
 
-    bool impossible = false;
     /* Page is valid, see what to do with it */
     if (_bt_page_recyclable(page)) {
         /* Okay to recycle this page */
@@ -907,142 +883,6 @@ restart:
     } else if (P_ISHALFDEAD(opaque)) {
         /* Half-dead, try to delete */
         deleteNow = true;
-    } else if (P_ISLEAF(opaque) && impossible) {
-        OffsetNumber deletable[MaxOffsetNumber];
-        int ndeletable;
-        OffsetNumber offnum, minoff, maxoff;
-
-        /*
-         * Trade in the initial read lock for a super-exclusive write lock on
-         * this page.  We must get such a lock on every leaf page over the
-         * course of the vacuum scan, whether or not it actually contains any
-         * deletable tuples --- see nbtree/README.
-         */
-        LockBuffer(buf, BUFFER_LOCK_UNLOCK);
-        LockBufferForCleanup(buf);
-
-        /*
-         * Remember highest leaf page number we've taken cleanup lock on; see
-         * notes in btvacuumscan
-         */
-        if (blkno > vstate->lastBlockLocked) {
-            vstate->lastBlockLocked = blkno;
-        }
-
-        /*
-         * Check whether we need to recurse back to earlier pages.	What we
-         * are concerned about is a page split that happened since we started
-         * the vacuum scan.  If the split moved some tuples to a lower page
-         * then we might have missed 'em.  If so, set up for tail recursion.
-         * (Must do this before possibly clearing btpo_cycleid below!)
-         */
-        if (vstate->cycleid != 0 && opaque->btpo_cycleid == vstate->cycleid && !(opaque->btpo_flags & BTP_SPLIT_END) &&
-            !P_RIGHTMOST(opaque) && opaque->btpo_next < origBlkno) {
-            recurseTo = opaque->btpo_next;
-        }
-
-        /*
-         * Scan over all items to see which ones need deleted according to the
-         * callback function.
-         */
-        ndeletable = 0;
-        minoff = P_FIRSTDATAKEY(opaque);
-        maxoff = PageGetMaxOffsetNumber(page);
-        if (callback) {
-            AttrNumber partitionOidAttr = IndexRelationGetNumberOfAttributes(rel);
-            TupleDesc tupdesc = RelationGetDescr(rel);
-            for (offnum = minoff; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
-                IndexTuple itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
-                ItemPointer htup = &(itup->t_tid);
-
-                /*
-                 * During Hot Standby we currently assume that
-                 * XLOG_BTREE_VACUUM records do not produce conflicts. That is
-                 * only true as long as the callback function depends only
-                 * upon whether the index tuple refers to heap tuples removed
-                 * in the initial heap scan. When vacuum starts it derives a
-                 * value of OldestXmin. Backends taking later snapshots could
-                 * have a RecentGlobalXmin with a later xid than the vacuum's
-                 * OldestXmin, so it is possible that row versions deleted
-                 * after OldestXmin could be marked as killed by other
-                 * backends. The callback function *could* look at the index
-                 * tuple state in isolation and decide to delete the index
-                 * tuple, though currently it does not. If it ever did, we
-                 * would need to reconsider whether XLOG_BTREE_VACUUM records
-                 * should cause conflicts. If they did cause conflicts they
-                 * would be fairly harsh conflicts, since we haven't yet
-                 * worked out a way to pass a useful value for
-                 * latestRemovedXid on the XLOG_BTREE_VACUUM records. This
-                 * applies to *any* type of index that marks index tuples as
-                 * killed.
-                 */
-                Oid partOid = InvalidOid;
-                if (RelationIsGlobalIndex(rel)) {
-                    bool isnull = false;
-                    partOid = DatumGetUInt32(index_getattr(itup, partitionOidAttr, tupdesc, &isnull));
-                    Assert(!isnull);
-                }
-                if (callback(htup, callbackState, partOid, InvalidBktId)) {
-                    deletable[ndeletable++] = offnum;
-                }
-            }
-        }
-
-        /*
-         * Apply any needed deletes.  We issue just one _bt_delitems_vacuum()
-         * call per page, so as to minimize WAL traffic.
-         */
-        if (ndeletable > 0) {
-            /*
-             * Notice that the issued XLOG_BTREE_VACUUM WAL record includes an
-             * instruction to the replay code to get cleanup lock on all pages
-             * between the previous lastBlockVacuumed and this page.  This
-             * ensures that WAL replay locks all leaf pages at some point.
-             *
-             * Since we can visit leaf pages out-of-order when recursing,
-             * replay might end up locking such pages an extra time, but it
-             * doesn't seem worth the amount of bookkeeping it'd take to avoid
-             * that.
-             */
-            _bt_delitems_vacuum(rel, buf, deletable, ndeletable, vstate->lastBlockVacuumed);
-
-            /*
-             * Remember highest leaf page number we've issued a
-             * XLOG_BTREE_VACUUM WAL record for.
-             */
-            if (blkno > vstate->lastBlockVacuumed) {
-                vstate->lastBlockVacuumed = blkno;
-            }
-
-            stats->tuples_removed += ndeletable;
-            /* must recompute maxoff */
-            maxoff = PageGetMaxOffsetNumber(page);
-        } else {
-            /*
-             * If the page has been split during this vacuum cycle, it seems
-             * worth expending a write to clear btpo_cycleid even if we don't
-             * have any deletions to do.  (If we do, _bt_delitems_vacuum takes
-             * care of this.)  This ensures we won't process the page again.
-             * We treat this like a hint-bit update because there's no need to
-             * WAL-log it.
-             */
-            if (vstate->cycleid != 0 && opaque->btpo_cycleid == vstate->cycleid) {
-                opaque->btpo_cycleid = 0;
-                MarkBufferDirtyHint(buf, true);
-            }
-        }
-
-        /*
-         * If it's now empty, try to delete; else count the live tuples. We
-         * don't delete when recursing, though, to avoid putting entries into
-         * freePages out-of-order (doesn't seem worth any extra code to handle
-         * the case).
-         */
-        if (minoff > maxoff) {
-            deleteNow = (blkno == origBlkno);
-        } else {
-            stats->num_index_tuples += maxoff - minoff + 1;
-        }
     }
 
     /*
@@ -1058,11 +898,23 @@ restart:
 
         bool ignore;
         /* prune and freeze this index page */
-        FreezeSingleIndexPage(rel, buf, &ignore);
+        FreezeSingleIndexPage(rel, buf, &ignore, invisibleParts);
 
         if (!P_RIGHTMOST(opaque) && PageGetMaxOffsetNumber(page) == 1) {
             /* already empty (only HIKEY left), ok to delete */
             deleteNow = true;
+        }
+
+        OffsetNumber minoff = P_FIRSTDATAKEY(opaque);
+        OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
+        /*
+         * If it's now empty, try to delete; else count the live tuples. We
+         * don't delete when recursing, though, to avoid putting entries into
+         * freePages out-of-order (doesn't seem worth any extra code to handle
+         * the case).
+         */
+        if (minoff <= maxoff) {
+            stats->num_index_tuples += maxoff - minoff + 1;
         }
     }
 
@@ -1388,16 +1240,17 @@ static void IndexPageShiftBase(Page page, int64 delta, bool needWal, Buffer buf)
     WHITEBOX_TEST_STUB("IndexPageShiftBase-end", WhiteboxDefaultErrorEmit);
 }
 
-void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned)
+void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned, OidRBTree *invisibleParts)
 {
     int nfrozen = 0;
     OffsetNumber nowfrozen[MaxIndexTuplesPerPage];
-    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    TransactionId oldestXmin = InvalidTransactionId;
+    GetOldestXminForUndo(&oldestXmin);
 
     WHITEBOX_TEST_STUB("FreezeSingleIndexPage", WhiteboxDefaultErrorEmit);
 
     /* first prune the page, remove all Abort xid and Frozen xmax */
-    *hasPruned = UBTreePagePrune(rel, buf, oldestXmin);
+    *hasPruned = UBTreePagePrune(rel, buf, oldestXmin, invisibleParts);
 
     Page page = BufferGetPage(buf);
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);

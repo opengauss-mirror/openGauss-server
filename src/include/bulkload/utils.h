@@ -245,10 +245,17 @@ return -1
 #define READ_JSON_STRING(_field)                                                          \
     do {                                                                                  \
         tmpObj = cJSON_GetObjectItem(json, #_field);                                      \
-        if (tmpObj)                                                                       \
-            tmp->_field = (char*)cJSON_strdup((const unsigned char*)tmpObj->valuestring); \
-        else                                                                              \
+        if (tmpObj) {                                                                     \
+            cJSON *_tmpStringItem = cJSON_CreateString(tmpObj->valuestring);              \
+            if (_tmpStringItem != NULL) {                                                 \
+                tmp->_field = _tmpStringItem->valuestring;                                \
+                cJSON_free(_tmpStringItem); /* shallow free */                            \
+            } else {                                                                      \
+                tmp->_field = NULL;                                                       \
+            }                                                                             \
+        } else {                                                                          \
             tmp->_field = NULL;                                                           \
+        }                                                                                 \
     } while (0)
 
 #define READ_JSON_BOOL(_field)                          \

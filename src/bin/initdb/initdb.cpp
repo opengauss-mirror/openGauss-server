@@ -333,6 +333,7 @@ static int CreateRestrictedProcess(char* cmd, PROCESS_INFORMATION* processInfo);
 #endif
 
 static void InitUndoSubsystemMeta();
+static void check_input_spec_char(char* input_env_value, bool skip_dollar = false);
 
 /*
  * macros for running pipes to openGauss
@@ -397,6 +398,26 @@ static void InitUndoSubsystemMeta();
 int g_bucket_len = DEFAULT_BUCKETSLEN;
 
 #define INSERT_BUCKET_SQL_LEN 512
+
+static void check_input_spec_char(char* input_env_value, bool skip_dollar)
+{
+    if (input_env_value == NULL) {
+        return;
+    }
+
+    const char* danger_character_list[] = {"|", ";", "&", "$", "<", ">", "`", "\\", "!", NULL};
+
+    int i = 0;
+
+    for (i = 0; danger_character_list[i] != NULL; i++) {
+        if (strstr((const char*)input_env_value, danger_character_list[i]) != NULL &&
+            !(skip_dollar && danger_character_list[i][0] == '$')) {
+            write_stderr(_("Error: variable \"%s\" contains invaild symbol \"%s\".\n"),
+                input_env_value, danger_character_list[i]);
+            exit(1);
+        }
+    }
+}
 
 void check_env_value(const char* input_env_value)
 {
@@ -3642,6 +3663,7 @@ int main(int argc, char* argv[])
         "undo",
         "pg_logical"};
 
+    check_input_spec_char(argv[0]);
     progname = get_progname(argv[0]);
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_initdb"));
 
@@ -3675,6 +3697,7 @@ int main(int argc, char* argv[])
             case 'A':
                 FREE_NOT_STATIC_ZERO_STRING(authmethodlocal_tmp);
                 FREE_NOT_STATIC_ZERO_STRING(authmethodhost_tmp);
+                check_input_spec_char(optarg);
                 authmethodlocal_tmp = authmethodhost_tmp = xstrdup(optarg);
 
                 /*
@@ -3690,11 +3713,13 @@ int main(int argc, char* argv[])
             case 10:
                 if (authmethodlocal_tmp != authmethodhost_tmp)
                     FREE_NOT_STATIC_ZERO_STRING(authmethodlocal_tmp);
+                check_input_spec_char(optarg);
                 authmethodlocal_tmp = xstrdup(optarg);
                 break;
             case 11:
                 if (authmethodlocal_tmp != authmethodhost_tmp)
                     FREE_NOT_STATIC_ZERO_STRING(authmethodhost_tmp);
+                check_input_spec_char(optarg);
                 authmethodhost_tmp = xstrdup(optarg);
                 break;
 #ifndef ENABLE_MULTIPLE_NODES
@@ -3704,21 +3729,24 @@ int main(int argc, char* argv[])
 #endif
             case 'D':
                 FREE_NOT_STATIC_ZERO_STRING(pg_data);
+                check_input_spec_char(optarg);
                 pg_data = xstrdup(optarg);
                 break;
             case 'E':
                 FREE_NOT_STATIC_ZERO_STRING(encoding);
+                check_input_spec_char(optarg);
                 encoding = xstrdup(optarg);
                 break;
             case 'W':
                 pwprompt = true;
                 break;
             case 'C':
+                check_input_spec_char(optarg);
                 if (realpath(optarg, encrypt_pwd_real_path) == NULL) {
                     write_stderr(_("%s: The parameter of -C is invalid.\n"), progname);
                     break;
                 }
-                
+
                 ret = snprintf_s(cipher_key_file, MAXPGPATH, MAXPGPATH - 1,
                                  "%s/server.key.cipher", encrypt_pwd_real_path);
                 securec_check_ss_c(ret, "\0", "\0");
@@ -3748,6 +3776,7 @@ int main(int argc, char* argv[])
                 break;
             case 'U':
                 FREE_NOT_STATIC_ZERO_STRING(username);
+                check_input_spec_char(optarg, true);
                 username = xstrdup(optarg);
                 break;
             case 'd':
@@ -3756,6 +3785,7 @@ int main(int argc, char* argv[])
                 break;
             case 'g':
                 FREE_NOT_STATIC_ZERO_STRING(new_xlog_file_path);
+                check_input_spec_char(optarg);
                 new_xlog_file_path = xstrdup(optarg);
                 break;
             case 'n':
@@ -3764,34 +3794,42 @@ int main(int argc, char* argv[])
                 break;
             case 'L':
                 FREE_NOT_STATIC_ZERO_STRING(share_path);
+                check_input_spec_char(optarg);
                 share_path = xstrdup(optarg);
                 break;
             case 1:
                 FREE_NOT_STATIC_ZERO_STRING(locale);
+                check_input_spec_char(optarg);
                 locale = xstrdup(optarg);
                 break;
             case 2:
                 FREE_NOT_STATIC_ZERO_STRING(lc_collate);
+                check_input_spec_char(optarg);
                 lc_collate = xstrdup(optarg);
                 break;
             case 3:
                 FREE_NOT_STATIC_ZERO_STRING(lc_ctype);
+                check_input_spec_char(optarg);
                 lc_ctype = xstrdup(optarg);
                 break;
             case 4:
                 FREE_NOT_STATIC_ZERO_STRING(lc_monetary);
+                check_input_spec_char(optarg);
                 lc_monetary = xstrdup(optarg);
                 break;
             case 5:
                 FREE_NOT_STATIC_ZERO_STRING(lc_numeric);
+                check_input_spec_char(optarg);
                 lc_numeric = xstrdup(optarg);
                 break;
             case 6:
                 FREE_NOT_STATIC_ZERO_STRING(lc_time);
+                check_input_spec_char(optarg);
                 lc_time = xstrdup(optarg);
                 break;
             case 7:
                 FREE_NOT_STATIC_ZERO_STRING(lc_messages);
+                check_input_spec_char(optarg);
                 lc_messages = xstrdup(optarg);
                 break;
             case 8:
@@ -3800,6 +3838,7 @@ int main(int argc, char* argv[])
                 break;
             case 9:
                 FREE_NOT_STATIC_ZERO_STRING(pwfilename);
+                check_input_spec_char(optarg);
                 pwfilename = xstrdup(optarg);
                 break;
             case 's':
@@ -3807,10 +3846,12 @@ int main(int argc, char* argv[])
                 break;
             case 'T':
                 FREE_NOT_STATIC_ZERO_STRING(default_text_search_config_tmp);
+                check_input_spec_char(optarg);
                 default_text_search_config_tmp = xstrdup(optarg);
                 break;
             case 'X':
                 FREE_NOT_STATIC_ZERO_STRING(xlog_dir);
+                check_input_spec_char(optarg);
                 xlog_dir = xstrdup(optarg);
                 break;
             case 'S':
@@ -3819,16 +3860,19 @@ int main(int argc, char* argv[])
                 break;
             case 'H':
                 FREE_NOT_STATIC_ZERO_STRING(host_ip);
+                check_input_spec_char(optarg);
                 host_ip = xstrdup(optarg);
                 break;
 #ifdef PGXC
             case 12:
                 FREE_NOT_STATIC_ZERO_STRING(nodename);
+                check_input_spec_char(optarg);
                 nodename = xstrdup(optarg);
                 break;
 #endif
             case 13:
                 FREE_NOT_STATIC_ZERO_STRING(dbcompatibility);
+                check_input_spec_char(optarg);
                 dbcompatibility = xstrdup(optarg);
                 break;
            case 14:
@@ -3860,6 +3904,7 @@ int main(int argc, char* argv[])
      * already specified with -D / --pgdata
      */
     if (optind < argc && strlen(pg_data) == 0) {
+        check_input_spec_char(argv[optind]);
         pg_data = xstrdup(argv[optind]);
         optind++;
     }

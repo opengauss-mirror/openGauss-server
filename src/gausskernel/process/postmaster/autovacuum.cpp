@@ -317,6 +317,9 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
         /* Abort the current transaction in order to recover */
         AbortCurrentTransaction();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
+
         /*
          * Now return to normal top-level context and clear ErrorContext for
          * next time.
@@ -910,8 +913,9 @@ static Oid do_start_worker(void)
      */
     t_thrd.autovacuum_cxt.recentXid = ReadNewTransactionId();
     if (t_thrd.autovacuum_cxt.recentXid >
-        FirstNormalTransactionId + g_instance.attr.attr_storage.autovacuum_freeze_max_age)
-        xidForceLimit = t_thrd.autovacuum_cxt.recentXid - g_instance.attr.attr_storage.autovacuum_freeze_max_age;
+        FirstNormalTransactionId + (uint64)g_instance.attr.attr_storage.autovacuum_freeze_max_age)
+        xidForceLimit = t_thrd.autovacuum_cxt.recentXid -
+            (uint64)g_instance.attr.attr_storage.autovacuum_freeze_max_age;
     else
         xidForceLimit = FirstNormalTransactionId;
 
@@ -919,8 +923,9 @@ static Oid do_start_worker(void)
     /* Also determine the oldest datminmxid we will consider. */
     t_thrd.autovacuum_cxt.recentMulti = ReadNextMultiXactId();
     if (t_thrd.autovacuum_cxt.recentMulti >
-        FirstMultiXactId + g_instance.attr.attr_storage.autovacuum_freeze_max_age)
-        multiForceLimit = t_thrd.autovacuum_cxt.recentMulti - g_instance.attr.attr_storage.autovacuum_freeze_max_age;
+        FirstMultiXactId + (uint64)g_instance.attr.attr_storage.autovacuum_freeze_max_age)
+        multiForceLimit = t_thrd.autovacuum_cxt.recentMulti -
+            (uint64)g_instance.attr.attr_storage.autovacuum_freeze_max_age;
     else
         multiForceLimit = FirstMultiXactId;
 #endif
@@ -1247,6 +1252,9 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
 
         /* Report the error to the server log */
         EmitErrorReport();
+
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         /*
          * We can now go away.	Note that because we called InitProcess, a
@@ -2370,8 +2378,49 @@ static void do_autovacuum(void)
     }
 
     tableam_scan_end(relScan);
-    heap_close(classRel, AccessShareLock);
     DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_class to determine which toast tables to vacuum");
+
+     /* On the fourth pass: check USTORE GPI tables */
+    ScanKeyInit(&key[0], Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_GLOBAL_INDEX));
+    relScan = tableam_scan_begin(classRel, SnapshotNow, 1, &key[0]);
+    while ((tuple = (HeapTuple)tableam_scan_getnexttuple(relScan, ForwardScanDirection)) != NULL) {
+        Form_pg_class classForm = (Form_pg_class) GETSTRUCT(tuple);
+        Oid relid = HeapTupleGetOid(tuple);
+        AutoVacOpts *relopts = NULL;
+        /*
+         * We cannot safely process other backends' temp tables, so skip them.
+         */
+        if (classForm->relpersistence == RELPERSISTENCE_TEMP ||
+            classForm->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
+            continue;
+        /* only UBTree supports vacuum independently */
+        if (classForm->relam != UBTREE_AM_OID) {
+            continue;
+        }
+        /* fetch reloptions */
+        relopts = extract_autovac_opts(tuple, pg_class_desc);
+        /* only UBTree supports vacuum, and enabled will be set true */
+        if (relopts == NULL || !relopts->enabled) {
+            continue;
+        }
+        /* we skipped relation_support_autoavac() and relation_needs_vacanalyze() checks here */
+        vacObj = (vacuum_object*)palloc(sizeof(vacuum_object));
+        vacObj->tab_oid = relid;
+        vacObj->parent_oid = InvalidOid;
+        vacObj->dovacuum = true;
+        vacObj->dovacuum_toast = false;
+        vacObj->doanalyze = false;
+        vacObj->need_freeze = false;
+        vacObj->is_internal_relation = false;
+        /* VACFLG_MAIN_PARTITION makes no sense when vacuuming UBTree */
+        vacObj->flags = VACFLG_SIMPLE_HEAP; /* ignore this flag as we will not use it,
+                                             * and to be safe we can use VACFLG_SIMPLE_HEAP.
+                                             */
+        table_oids = lappend(table_oids, vacObj);
+    }
+    tableam_scan_end(relScan);
+    heap_close(classRel, AccessShareLock);
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_class to determine which UBTree tables to vacuum");
 
     /*
      * Create one buffer access strategy object per buffer pool for VACUUM to use.
@@ -2705,7 +2754,8 @@ AutoVacOpts* extract_autovac_opts(HeapTuple tup, TupleDesc pg_class_desc)
 
     Assert(((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_RELATION ||
            ((Form_pg_class) GETSTRUCT(tup))->relkind == RELKIND_MATVIEW ||
-           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_TOASTVALUE);
+           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_TOASTVALUE ||
+           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_GLOBAL_INDEX);
 
     relopts = extractRelOptions(tup, pg_class_desc, InvalidOid);
     if (relopts == NULL)
@@ -2718,6 +2768,12 @@ AutoVacOpts* extract_autovac_opts(HeapTuple tup, TupleDesc pg_class_desc)
     /* autovacuum for ustore table is disabled */
     if (RelationIsTableAccessMethodUStoreType(relopts)) {
         av->enabled = false;
+    }
+
+    /* force set av->enabled in ustore's GPI */
+    if ((((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_GLOBAL_INDEX) &&
+        RelationIsTableAccessMethodUStoreType(relopts)) {
+        av->enabled = true;
     }
 
     pfree_ext(relopts);
@@ -2842,6 +2898,17 @@ static autovac_table* table_recheck_autovac(
     if (!HeapTupleIsValid(classTup))
         return NULL;
     classForm = (Form_pg_class)GETSTRUCT(classTup);
+    /* this is UBTree, use another bypass */
+    if (classForm->relam == UBTREE_AM_OID) {
+        avopts = extract_autovac_opts(classTup, pg_class_desc);
+        tab = calculate_vacuum_cost_and_freezeages(avopts, false, false);
+        if (tab != NULL) {
+            tab->at_relid = relid;
+            tab->at_sharedrel = classForm->relisshared;
+            tab->at_dovacuum = true;
+        }
+        return tab;
+    }
 
     /*
      * Get the applicable reloptions.  If it is a TOAST table, try to get the
@@ -2938,9 +3005,9 @@ static void determine_vacuum_params(float4& vac_scale_factor, int& vac_base_thre
 
 #ifndef ENABLE_MULTIPLE_NODES
     if (t_thrd.autovacuum_cxt.recentMulti >
-        FirstMultiXactId + g_instance.attr.attr_storage.autovacuum_freeze_max_age)
+        FirstMultiXactId + (uint64)g_instance.attr.attr_storage.autovacuum_freeze_max_age)
         multiForceLimit = t_thrd.autovacuum_cxt.recentMulti -
-                            g_instance.attr.attr_storage.autovacuum_freeze_max_age;
+            (uint64)g_instance.attr.attr_storage.autovacuum_freeze_max_age;
     else
         multiForceLimit = FirstMultiXactId;
 #endif

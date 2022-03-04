@@ -302,6 +302,7 @@ private:
     void group_clauselist(List* clauses);
     void group_clauselist_groupby(List* varinfos);
     void init_candidate(es_candidate* es) const;
+    bool IsEsCandidateInEqClass(es_candidate *es, EquivalenceClass *ec);
     void load_eqsel_clause(RestrictInfo* clause);
     void load_eqjoinsel_clause(RestrictInfo* clause);
     Bitmapset* make_attnums_by_clause_map(es_candidate* es, Bitmapset* attnums, bool left) const;

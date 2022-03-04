@@ -4397,6 +4397,26 @@ bool check_insert_subquery_on_singlenode(
     return false;
 }
 
+bool check_replicated_junktlist(Query* subquery)
+{
+    ListCell *lc = NULL;
+
+    foreach (lc, subquery->targetList) {
+        TargetEntry *en = (TargetEntry *)lfirst(lc);
+
+        if (!IsA(en->expr, Var)) {
+            continue;
+        }
+
+        Var *v = (Var *)en->expr;
+        if (v->varattno < 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /*
  * check_insert_subquery_shippability:
  * Check if an INSERT SELECT query is shippable. 
@@ -4467,6 +4487,12 @@ static void check_insert_subquery_shippability(Query* query, Query* subquery, Sh
 
     /* If do not have the same distrbution for multi-node execution, return */
     if ((exec_nodes_rte->baselocatortype != exec_nodes_qry->baselocatortype)) {
+        return;
+    }
+
+    if (IsExecNodesReplicated(exec_nodes_rte) &&
+        IsExecNodesReplicated(exec_nodes_qry) &&
+        check_replicated_junktlist(subquery)) {
         return;
     }
 

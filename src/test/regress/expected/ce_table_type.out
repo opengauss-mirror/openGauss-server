@@ -5,7 +5,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY IF EXISTS MyCMK CASCADE;
-NOTICE:  global setting "mycmk" does not exist
+NOTICE:  client master key "mycmk" does not exist
 CREATE CLIENT MASTER KEY MyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 CREATE COLUMN ENCRYPTION KEY MyCEK WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 --行存
@@ -208,7 +208,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY IF EXISTS distributeby_cmk CASCADE;
-NOTICE:  global setting "distributeby_cmk" does not exist
+NOTICE:  client master key "distributeby_cmk" does not exist
 CREATE CLIENT MASTER KEY distributeby_cmk WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 CREATE COLUMN ENCRYPTION KEY distributeby_cek WITH VALUES (CLIENT_MASTER_KEY = distributeby_cmk, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 CREATE TABLE t_distributeby1(
@@ -226,15 +226,36 @@ DETAIL:  The distributed capability is not supported currently.
 CREATE TABLE t_distributeby3(
     id_number int,
     name text,
-    data text) distribute by list(name)(slice s1 values (('China'),('Germary')),slice s2 values (('Japan')), slice s3 values (('USA')), slice s4 values (default));
+    data text) distribute by list(name)(slice s1 values (('China')),slice s2 values (('Japan')), slice s3 values (('USA')), slice s4 values ('Germary'),
+        slice s5 values ('Israel'), slice s6 values ('India'), slice s7 values ('Peru'), slice s8 values ('Thailand'),
+        slice s9 values ('South Africa'), slice s10 values ('New Zealand'), slice s11 values ('Nepal'), slice s12 values (default));
 ERROR:  Un-support feature
 DETAIL:  The distributed capability is not supported currently.
+CREATE TABLE t_distributeby4(
+    id_number int,
+    name text,
+    data text encrypted with(column_encryption_key = distributeby_cek,encryption_type = DETERMINISTIC)) 
+distribute by list(name)(slice s1 values (('China')),slice s2 values (('Japan')), slice s3 values (('USA')), slice s4 values ('Germary'),
+    slice s5 values ('Israel'), slice s6 values ('India'), slice s7 values ('Peru'), slice s8 values ('Thailand'),
+    slice s9 values ('South Africa'), slice s10 values ('New Zealand'), slice s11 values ('Nepal'), slice s12 values (default));
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+create table ce_t1 (id BYTEAWITHOUTORDERWITHEQUALCOL);
+ERROR:  It's not supported to create byteawithoutorderwithequalcol column
+create table ce_t2 (id BYTEAWITHOUTORDERCOL);
+ERROR:  It's not supported to create byteawithoutordercol column
+DROP table IF EXISTS ce_t1;
+NOTICE:  table "ce_t1" does not exist, skipping
+DROP table IF EXISTS ce_t2;
+NOTICE:  table "ce_t2" does not exist, skipping
 DROP table IF EXISTS t_distributeby1;
 NOTICE:  table "t_distributeby1" does not exist, skipping
 DROP table IF EXISTS t_distributeby2;
 NOTICE:  table "t_distributeby2" does not exist, skipping
 DROP table IF EXISTS t_distributeby3;
 NOTICE:  table "t_distributeby3" does not exist, skipping
+DROP table IF EXISTS t_distributeby4;
+NOTICE:  table "t_distributeby4" does not exist, skipping
 DROP COLUMN ENCRYPTION KEY IF EXISTS distributeby_cek;
 DROP CLIENT MASTER KEY IF EXISTS distributeby_cmk;
 \! gs_ktool -d all

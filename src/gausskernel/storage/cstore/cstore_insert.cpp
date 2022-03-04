@@ -1052,6 +1052,7 @@ void CStoreInsert::FlushIndexDataIfNeed()
  */
 void CStoreInsert::CUListFlushAll(int attno)
 {
+#ifndef ENABLE_LITE_MODE
     /* flush cu */
     for (int col = 0; col < attno; ++col) {
         int count = m_aio_dispath_idx[col];
@@ -1071,6 +1072,7 @@ void CStoreInsert::CUListFlushAll(int attno)
         }
         m_aio_dispath_idx[col] = count;
     }
+#endif
 }
 
 /*
@@ -1081,6 +1083,7 @@ void CStoreInsert::CUListFlushAll(int attno)
  */
 void CStoreInsert::CUWrite(int attno, int col)
 {
+#ifndef ENABLE_LITE_MODE
     CU* cu = m_cuPPtr[col];
     CUDesc* cuDesc = m_cuDescPPtr[col];
     CUStorage* cuStorage = m_cuStorage[col];
@@ -1188,6 +1191,7 @@ void CStoreInsert::CUWrite(int attno, int col)
                     col, cuDesc->cu_id, cuDesc->cu_pointer, cuDesc->cu_size)));
 
     return;
+#endif
 }
 
 /*
@@ -1266,6 +1270,7 @@ void CUListWriteAbort(int code, Datum arg)
  */
 void CStoreInsert::CUListWriteCompeleteIO(int col, int count)
 {
+#ifndef ENABLE_LITE_MODE
     int idx = 0;
     AioDispatchCUDesc_t** dList = m_aio_dispath_cudesc[col];
     CUStorage* cuStorage = m_cuStorage[col];
@@ -1310,6 +1315,7 @@ void CStoreInsert::CUListWriteCompeleteIO(int col, int count)
     }
 
     FileAsyncCUClose(m_vfdList[col], count);
+#endif
 }
 
 /* Write CU data and CUDesc */

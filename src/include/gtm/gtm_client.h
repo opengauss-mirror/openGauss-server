@@ -155,6 +155,13 @@ typedef union GTM_ResultData {
     int32 grd_delete_resource_pool_result; /*MSG_WLM_RESOURCEPOOL_DELETE*/
     int32 grd_init_resource_pool_result;   /*MSG_WLM_RESOURCEPOOL_INIT*/
 
+    int32 grd_set_disaster_cluster_result;
+    int32 grd_del_disaster_cluster_result;
+    struct {
+        int32 length;
+        char* result;
+    } grd_get_disaster_cluster_result;
+
     struct {
         int32 length;
         char* result;
@@ -221,6 +228,10 @@ int set_gtm_vaccum_flag(GTM_Conn* conn, bool is_vaccum, GTM_TransactionKey txnKe
 GTM_TransactionKey begin_transaction(GTM_Conn* conn, GTM_IsolationLevel isolevel, GTM_Timestamp* timestamp);
 GlobalTransactionId begin_get_gxid(GTM_Conn* conn, GTM_TransactionKey txn, bool is_sub_xact, GTMClientErrCode* err);
 
+bool begin_set_disaster_cluster(GTM_Conn* conn, char* disasterCluster, GTMClientErrCode* err);
+bool begin_get_disaster_cluster(GTM_Conn* conn, char** disasterCluster, GTMClientErrCode* err);
+bool begin_del_disaster_cluster(GTM_Conn* conn, GTMClientErrCode* err);
+
 GlobalTransactionId begin_transaction_gxid(GTM_Conn* conn, GTM_IsolationLevel isolevel, GTM_Timestamp* timestamp);
 
 int bkup_gtm_control_file_gxid(GTM_Conn* conn, GlobalTransactionId gxid);
@@ -246,12 +257,17 @@ int bkup_prepare_transaction(GTM_Conn* conn, GlobalTransactionId gxid);
 int get_gid_data(GTM_Conn* conn, GTM_IsolationLevel isolevel, const char* gid, GlobalTransactionId* gxid,
     GlobalTransactionId* prepared_gxid, char** nodestring);
 
+bool set_consistency_point_csn(GTM_Conn* conn, CommitSeqNo consistencyPointCSN, GTMClientErrCode* err);
+bool set_consistency_point(GTM_Conn* conn, CommitSeqNo consistencyPointCSN, const char* cnName, GTMClientErrCode* err);
+
 /*
  * Snapshot Management API
  */
 GTM_SnapshotData *get_snapshot(GTM_Conn *conn, GTM_TransactionKey txnKey, GlobalTransactionId gxid, bool canbe_grouped,
                                bool is_vacuum);
 GTM_SnapshotData *get_snapshot_gtm_lite(GTM_Conn *conn);
+GTM_SnapshotData *get_snapshot_gtm_dr(GTM_Conn *conn);
+GTM_SnapshotData *get_snapshot_gtm_disaster(GTM_Conn *conn, const char* cnName);
 GTMLite_StatusData *get_status_gtm_lite(GTM_Conn *conn);
 
 
@@ -333,5 +349,4 @@ int InitResourcePool(GTM_Conn* conn, int rp_count, int buf_len, char* buf);
 /* Set parameter API */
 void set_gtm_client_rw_timeout(int timeout);
 extern void process_for_gtm_connection_failed(GTM_Conn* conn);
-extern THR_LOCAL bool need_reset_xmin;
 #endif

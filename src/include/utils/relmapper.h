@@ -106,5 +106,7 @@ extern void RelationMapInitializePhase3(void);
 
 extern void relmap_redo(XLogReaderState* record);
 extern void relmap_desc(StringInfo buf, XLogReaderState* record);
+extern const char* relmap_type_name(uint8 subtype);
 
+extern void load_relmap_file(bool shared, RelMapFile *map);
 #endif /* RELMAPPER_H */

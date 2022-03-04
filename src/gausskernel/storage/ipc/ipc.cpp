@@ -85,6 +85,7 @@ static const pg_on_exit_callback on_sess_exit_list[] = {
     ShutdownPostgres,
     PGXCNodeCleanAndRelease,
     PlDebugerCleanUp,
+    cleanGPCPlanProcExit,
 #ifdef ENABLE_MOT
     /*
      * 1. Must come after ShutdownPostgres(), in case there is abort/rollback callback.
@@ -120,8 +121,6 @@ void WaitGraceThreadsExit(void)
     for (loop = 0; loop < WAITTIME; loop++) {
         if (0 != alive_threads_waitted) {
             pg_usleep(100);
-        } else {
-            break;
         }
     }
 }
@@ -392,8 +391,6 @@ void proc_exit_prepare(int code)
 {
     sigset_t old_sigset;
 
-    closeAllVfds();
-
     PreventInterrupt();
 
     /*
@@ -432,6 +429,9 @@ void proc_exit_prepare(int code)
             (*func)(code, t_thrd.storage_cxt.on_proc_exit_list[t_thrd.storage_cxt.on_proc_exit_index].arg);
         }
     }
+
+    /* release all refcount and lock */
+    CloseLocalSysDBCache();
 
     t_thrd.storage_cxt.on_proc_exit_index = 0;
 
@@ -482,7 +482,9 @@ void sess_exit_prepare(int code)
 {
     sigset_t old_sigset;
 
-    closeAllVfds();
+    if (!EnableLocalSysCache()) {
+        closeAllVfds();
+    }
 
     PreventInterrupt();
     HOLD_INTERRUPTS();
@@ -497,9 +499,14 @@ void sess_exit_prepare(int code)
         }
     }
 
-    for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++)
+    for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++) {
+        if (EnableLocalSysCache() && on_sess_exit_list[u_sess->on_sess_exit_index] == AtProcExit_Files) {
+            // we close this only on proc exit
+            continue;
+        }
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
-
+    }
+    
     t_thrd.storage_cxt.on_proc_exit_index = 0;
     RESUME_INTERRUPTS();
     gs_signal_recover_mask(old_sigset);
@@ -548,6 +555,16 @@ void on_proc_exit(pg_on_exit_callback function, Datum arg)
 {
     if (t_thrd.storage_cxt.on_proc_exit_index >= MAX_ON_EXITS)
         ereport(FATAL, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg_internal("out of on_proc_exit slots")));
+    
+    /* reregister when cache miss on thread pool mode */
+    if ((function == AtProcExit_Files || function == smgrshutdown) && EnableLocalSysCache()) {
+        for (int i = 0; i < t_thrd.storage_cxt.on_proc_exit_index; i++) {
+            if (t_thrd.storage_cxt.on_proc_exit_list[i].function == function) {
+                Assert(t_thrd.storage_cxt.on_proc_exit_list[i].arg == arg);
+                return;
+            }
+        }
+    }
 
     t_thrd.storage_cxt.on_proc_exit_list[t_thrd.storage_cxt.on_proc_exit_index].function = function;
     t_thrd.storage_cxt.on_proc_exit_list[t_thrd.storage_cxt.on_proc_exit_index].arg = arg;

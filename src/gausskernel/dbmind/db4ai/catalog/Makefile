@@ -17,6 +17,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-OBJS = model_warehouse.o
+OBJS = aifuncs.o model_warehouse.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -47,6 +47,8 @@ typedef enum {
 	PMSIGNAL_START_UNDO_WORKER,        /* start a new undo worker */
     PMSIGNAL_START_RB_WORKER,          /* start a rbworker */
     PMSIGNAL_START_TXNSNAPWORKER,      /* start a snapcaputure worker */
+    PMSIGNAL_START_LOGICAL_READ_WORKER,/* start logical read worker */
+    PMSIGNAL_START_PARALLEL_DECODE_WORKER,/* start parallel decoding worker */
     PMSIGNAL_START_APPLY_WORKER,       /* start a apply worker */
     NUM_PMSIGNALS                      /* Must be last value of enum! */
 } PMSignalReason;

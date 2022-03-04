@@ -1063,6 +1063,8 @@ COPY multivariate_7_1000_10_real_centroids (id, "position", closest_centroid, l1
 \.
 ;
 
+CREATE TABLE multivariate_7_1000_10_unnested AS SELECT id, position[1] AS x_1, position[2] AS x_2, position[3] AS x_3, position[4] AS x_4, position[5] AS x_5, position[6] AS x_6, position[7] AS x_7, closest_centroid, l1_distance, l2_distance, l2_squared_distance, linf_distance FROM multivariate_7_1000_10;
+
 -- Running the tests
 
 -- Random++
@@ -1093,6 +1095,30 @@ SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr(
 SELECT id, PREDICT BY my_kmeans_pp_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
 SELECT id, PREDICT BY my_kmeans_pp_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
 
+CREATE MODEL my_kmeans_pp_l2_sqr_no_num_features USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+SELECT SUM(l2_squared_distance) FROM multivariate_7_1000_10 AS l2_squared_approx;
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+SELECT id, PREDICT BY my_kmeans_pp_l2_sqr_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+SELECT id, PREDICT BY my_kmeans_pp_l2_sqr_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+
+CREATE MODEL my_kmeans_pp_l2_sqr_unnested USING kmeans FROM (SELECT ARRAY[x_1, x_2, x_3, x_4, x_5, x_6, x_7] AS position FROM multivariate_7_1000_10_unnested) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+SELECT SUM(l2_squared_distance) FROM multivariate_7_1000_10_unnested AS l2_squared_approx;
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_unnested(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_unnested(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_unnested(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+SELECT id, PREDICT BY my_kmeans_pp_l2_sqr_unnested(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+SELECT id, PREDICT BY my_kmeans_pp_l2_sqr_unnested(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+
+CREATE MODEL my_kmeans_pp_l2_sqr_unnested_no_num_features USING kmeans FROM (SELECT ARRAY[x_1, x_2, x_3, x_4, x_5, x_6, x_7] AS position FROM multivariate_7_1000_10_unnested) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+SELECT SUM(l2_squared_distance) FROM multivariate_7_1000_10_unnested AS l2_squared_approx;
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_unnested_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_unnested_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr_unnested_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+SELECT id, PREDICT BY my_kmeans_pp_l2_sqr_unnested_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+SELECT id, PREDICT BY my_kmeans_pp_l2_sqr_unnested_no_num_features(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+
 CREATE MODEL my_kmeans_pp_linf USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'Linf', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
 SELECT SUM(linf_distance) FROM multivariate_7_1000_10 AS linf_approx;
 SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
@@ -1104,6 +1130,9 @@ SELECT id, PREDICT BY my_kmeans_pp_linf(features position) AS centroid_id FROM m
 DROP MODEL my_kmeans_pp_l1;
 DROP MODEL my_kmeans_pp_l2;
 DROP MODEL my_kmeans_pp_l2_sqr;
+DROP MODEL my_kmeans_pp_l2_sqr_no_num_features;
+DROP MODEL my_kmeans_pp_l2_sqr_unnested;
+DROP MODEL my_kmeans_pp_l2_sqr_unnested_no_num_features;
 DROP MODEL my_kmeans_pp_linf;
 
 SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
@@ -1216,5 +1245,6 @@ CREATE MODEL my_kmeans_pp_more_attr USING kmeans FROM (SELECT ARRAY[135.52912207
 -- Cleanup
 DROP TABLE IF EXISTS multivariate_7_1000_10;
 DROP TABLE IF EXISTS multivariate_7_1000_10_real_centroids;
+DROP TABLE IF EXISTS multivariate_7_1000_10_unnested;
 
 SELECT 'DB4AI KMEANS TEST COMPLETED';

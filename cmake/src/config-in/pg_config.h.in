@@ -913,6 +913,10 @@
  *  * (--enable-privategauss) */
 #cmakedefine ENABLE_PRIVATEGAUSS
 
+/* Define to 1 if you want to generate gauss product as lite mode.
+ *  * (--enable-lite-mode) */
+#cmakedefine ENABLE_LITE_MODE
+
 /* Define to 1 if you want to use mot
  * --enable-mot */
 #cmakedefine ENABLE_MOT
@@ -931,3 +935,7 @@
 
 /* Define to on if you want to collect USTORE statistics */
 #cmakedefine DEBUG_UHEAP
+
+/* Define to 1 if you want to build opengauss rpm package on openeuler os.
+ * (--with-openeuler-os) */
+#cmakedefine WITH_OPENEULER_OS

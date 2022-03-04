@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -693,6 +694,10 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
                             return node;
                         }
                     }
+                    if (pstate->p_bind_describe_hook != NULL) {
+                        node = (*pstate->p_bind_describe_hook)(pstate, cref);
+                        return node;
+                    }
                 }
             }
             break;
@@ -977,7 +982,7 @@ static bool isCol2Function(List* fields)
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
 #endif
     for (int i = 0; i < catlist->n_members; i++) {
-        HeapTuple proctup = &catlist->members[i]->tuple;
+        HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
         /* get function all args */
         Oid *p_argtypes = NULL;
@@ -1412,15 +1417,18 @@ static bool NeedExtractOutParam(FuncCall* fn, Node* result)
      * When proc_outparam_override is on, extract all but select func
      */
     FuncExpr* funcexpr = (FuncExpr*)result;
+    if (is_function_with_plpgsql_language_and_outparam(funcexpr->funcid) && !fn->call_func) {
+        return true;
+    }
     char prokind = get_func_prokind(funcexpr->funcid);
     if (!PROC_IS_PRO(prokind) && !fn->call_func) {
         return false;
     }
-
-    if (enable_out_param_override()) {
-        return true;
-    }
+#ifndef ENABLE_MULTIPLE_NODES
+    return enable_out_param_override();
+#else
     return false;
+#endif
 }
 
 static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
@@ -2267,8 +2275,8 @@ static Node* transformCurrentOfExpr(ParseState* pstate, CurrentOfExpr* cexpr)
 }
 
 // Locate in the system catalog the information for a model name
-static char* select_prediction_function(Model* model){
-    
+static char* select_prediction_function(const Model* model){
+
     char* result;
     switch(model->return_type){
         case BOOLOID:
@@ -2279,6 +2287,9 @@ static char* select_prediction_function(Model* model){
             break;
         case FLOAT8OID:
             result = "db4ai_predict_by_float8";
+            break;
+        case FLOAT8ARRAYOID:
+            result = "db4ai_predict_by_float8_array";
             break;
         case INT1OID:
         case INT2OID:
@@ -2300,7 +2311,7 @@ static char* select_prediction_function(Model* model){
 
         default:
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Cannot trigger prediction for model with oid %d",  model->return_type)));
+                errmsg("Cannot trigger prediction for model with oid %u",  model->return_type)));
             result = NULL;
             break;
     }
@@ -2321,7 +2332,7 @@ static Node* transformPredictByFunction(ParseState* pstate, PredictByFunction* p
             errmsg("Model name for prediction cannot be null")));
     }
 
-    Model* model = get_model(p->model_name, true);
+    const Model* model = get_model(p->model_name, true);
     if (model == NULL) {
         ereport(ERROR, (errmsg(
             "No model found with name %s", p->model_name)));

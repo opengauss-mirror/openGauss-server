@@ -78,7 +78,7 @@ test: gpi_clean_wait
 # gpi vacuum
 test: gpi_vacuum_lazy
 test: gpi_hw_partition_vacuum_full
-test: gpi_hw_partition_vacuum_full_01
+#test: gpi_hw_partition_vacuum_full_01
 
 # gpi alter
 test: gpi_alter_partition
@@ -114,7 +114,7 @@ test: hw_cstore_vacuum
 test: hw_cstore_insert hw_cstore_delete hw_cstore_unsupport
 
 # test on extended statistics
-test: hw_es_multi_column_stats_prepare
+test: hw_es_multi_column_stats_prepare hw_es_multi_column_stats_eqclass
 test: hw_es_multi_column_stats_1 hw_es_multi_column_stats_1_1 hw_es_multi_column_stats_1_2 hw_es_multi_column_stats_1_3 hw_es_multi_column_stats_1_4 hw_es_multi_column_stats_1_5 hw_es_multi_column_stats_1_6 hw_es_multi_column_stats_2_1 hw_es_multi_column_stats_2_2 hw_es_multi_column_stats_2_3 hw_es_multi_column_stats_3 hw_es_multi_column_stats_3_1 hw_es_multi_column_stats_3_2
 test: hw_es_multi_column_stats_end
 
@@ -125,10 +125,10 @@ test: unsupported_features statistic statistic_2
 
 test: hw_setop_writefile
 
-test: vec_nestloop_pre vec_mergejoin_prepare vec_result vec_limit vec_mergejoin_1 vec_mergejoin_2 vec_stream
+test: vec_nestloop_pre vec_mergejoin_prepare vec_result vec_limit vec_mergejoin_1 vec_mergejoin_2 vec_stream force_vector_engine force_vector_engine2
 test: vec_mergejoin_inner vec_mergejoin_left vec_mergejoin_semi vec_mergejoin_anti llvm_vecexpr1 llvm_vecexpr2 llvm_vecexpr3 llvm_target_expr llvm_target_expr2 llvm_target_expr3 llvm_vecexpr_td
 #test: vec_nestloop1
-test: vec_mergejoin_aggregation llvm_vecagg llvm_vecagg2 llvm_vecagg3 llvm_vechashjoin
+test: vec_mergejoin_aggregation llvm_vecagg llvm_vecagg2 llvm_vecagg3 llvm_vechashjoin vector_subpartition
 #test: vec_nestloop_end
 
 # ----------$
@@ -241,7 +241,7 @@ test: hw_partition_hash_dml
 test: hw_partition_hash_dql
 test: hw_partition_list_dml
 test: hw_partition_list_dql
-#test: hw_cipher_sm4
+test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: hw_pwd_encryption_sm3
 test: cstore_unique_index

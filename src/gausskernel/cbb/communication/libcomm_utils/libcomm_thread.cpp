@@ -1317,10 +1317,12 @@ static void CommReceiverFlowerAcceptNewConn(const struct sock_id* tFdId, int ltk
         return;
     }
 #endif
+
     /* Server side gss kerberos authentication for tcp connection.
      * if GSS authentication SUCC, no IP authentication is required.
      */
     if (g_instance.comm_cxt.localinfo_cxt.gs_krb_keyfile != NULL) {
+#ifdef ENABLE_GSS
         if (GssServerAuth(ctk, g_instance.comm_cxt.localinfo_cxt.gs_krb_keyfile) < 0) {
             mc_tcp_close(ctk);
             errno = ECOMMTCPGSSAUTHFAIL;
@@ -1334,6 +1336,12 @@ static void CommReceiverFlowerAcceptNewConn(const struct sock_id* tFdId, int ltk
         COMM_DEBUG_LOG("(r|flow ctrl)\tControl channel GSS authentication SUCC, listen socket[%d]:%s.",
             ltk,
             mc_strerror(errno));
+#else
+        mc_tcp_close(ctk);
+        LIBCOMM_ELOG(WARNING,
+            "(r|flow ctrl)\tControl channel GSS authentication is disable.");
+        return;
+#endif
     } else {
         /* send signal to postmaster thread to reload hba */
         if (gs_reload_hba(ltk, ctrlClient)) {
@@ -1750,6 +1758,7 @@ static int CommReceiverAcceptNewConnect(const struct sock_id *fdId, int selfid)
     LIBCOMM_ELOG(
         LOG, "(r|recv loop)\tDetect incoming connection, socket[%d] from [%s].", clientSocket, ipstr);
 
+#ifdef ENABLE_GSS
     /*
      * server side gss kerberos authentication for data connection.
      * authentication for tcp mode after accept.
@@ -1770,6 +1779,8 @@ static int CommReceiverAcceptNewConnect(const struct sock_id *fdId, int selfid)
             "(r|recv loop)\tData channel GSS authentication SUCC, listen socket[%d].",
             fdId->fd);
     }
+#endif
+
 #ifdef USE_SSL
     if (g_instance.attr.attr_network.comm_enable_SSL) {
         LIBCOMM_ELOG(LOG, "CommReceiverAcceptNewConnect call comm_ssl_open_server, fd is %d, id is %d, sock is %d", fdId->fd, fdId->id, clientSocket);

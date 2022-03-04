@@ -237,7 +237,7 @@ Oid *namespaceid, bool isFirstNode)
      * preexisting relation in that namespace with the same name, and updates
      * stmt->relation->relpersistence if the select namespace is temporary.
      */
-    *namespaceid = RangeVarGetAndCheckCreationNamespace(stmt->relation, NoLock, &existing_relid);
+    *namespaceid = RangeVarGetAndCheckCreationNamespace(stmt->relation, NoLock, &existing_relid, RELKIND_RELATION);
 
     /*
      * Check whether relation is in ledger schema. If it is, we add hash column.
@@ -906,7 +906,11 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
             column->typname->names = NIL;
             column->typname->typeOid = NUMERICOID;
             large = true;
+#ifdef ENABLE_MULTIPLE_NODES
         } else if ((is_enc_type(typname) && IS_MAIN_COORDINATOR) ||
+#else
+        } else if (is_enc_type(typname) ||
+#endif
             (!u_sess->attr.attr_common.enable_beta_features && strcmp(typname, "int16") == 0)) {
             ereport(ERROR,
                 (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
@@ -1277,6 +1281,96 @@ static DistributeBy* GetHideTagDistribution(TupleDesc tupleDesc)
 }
 
 /*
+ * Support Create table like on table with subpartitions
+ * In transform phase, we need fill PartitionState
+ * 1. Recursively fill partitionList in PartitionState also including subpartitionList
+ * 2. Recursively fill PartitionState also including SubPartitionState
+ */
+static PartitionState *transformTblSubpartition(Relation relation, HeapTuple partitionTuple,
+                                    List* partitionList, List* subPartitionList)
+{
+    ListCell *lc1 = NULL;
+    ListCell *lc2 = NULL;
+    ListCell *lc3 = NULL;
+
+    List *partKeyColumns = NIL;
+    List *partitionDefinitions = NIL;
+    PartitionState *partState = NULL;
+    PartitionState *subPartState = NULL;
+    Form_pg_partition tupleForm = NULL;
+    Form_pg_partition partitionForm = NULL;
+    Form_pg_partition subPartitionForm = NULL;
+
+    tupleForm = (Form_pg_partition)GETSTRUCT(partitionTuple);
+
+    /* prepare partition definitions */
+    transformTableLikePartitionProperty(
+        relation, partitionTuple, &partKeyColumns, partitionList, &partitionDefinitions);
+
+    partState = makeNode(PartitionState);
+    partState->partitionKey = partKeyColumns;
+    partState->partitionList = partitionDefinitions;
+    partState->partitionStrategy = tupleForm->partstrategy;
+
+    partState->rowMovement = relation->rd_rel->relrowmovement ? ROWMOVEMENT_ENABLE : ROWMOVEMENT_DISABLE;
+
+    /* prepare subpartition definitions */
+    forboth(lc1, partitionList, lc2, subPartitionList) {
+        List *subPartKeyColumns = NIL;
+        List *subPartitionDefinitions = NIL;
+        RangePartitionDefState *partitionDef = NULL;
+
+        HeapTuple partTuple = (HeapTuple)lfirst(lc1);
+        List *subPartitions = (List *)lfirst(lc2);
+
+        HeapTuple subPartTuple = (HeapTuple)linitial(subPartitions);
+        subPartitionForm = (Form_pg_partition)GETSTRUCT(subPartTuple);
+        partitionForm = (Form_pg_partition)GETSTRUCT(partTuple);
+
+        if (subPartitionForm->partstrategy != PART_STRATEGY_RANGE) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("Create Table like with subpartition only support range strategy.")));
+        }
+
+        Oid partOid = HeapTupleGetOid(partTuple);
+        Partition part = partitionOpen(relation, partOid, AccessShareLock);
+        Relation partRel = partitionGetRelation(relation, part);
+
+        transformTableLikePartitionProperty(
+            partRel, partTuple, &subPartKeyColumns, subPartitions, &subPartitionDefinitions);
+
+        if (subPartState == NULL) {
+            subPartState = makeNode(PartitionState);
+            subPartState->partitionKey = subPartKeyColumns;
+            subPartState->partitionList = NULL;
+            subPartState->partitionStrategy = subPartitionForm->partstrategy;
+        }
+
+        /* Here do this for reserve origin subpartitions order */
+        foreach(lc3, partitionDefinitions) {
+            RangePartitionDefState *rightDef = (RangePartitionDefState*)lfirst(lc3);
+
+            if (pg_strcasecmp(NameStr(partitionForm->relname), rightDef->partitionName) == 0) {
+                partitionDef = rightDef;
+                break;
+            }
+        }
+
+        Assert(partitionDef != NULL);
+        partitionDef->subPartitionDefState = subPartitionDefinitions;
+
+        releaseDummyRelation(&partRel);
+        partitionClose(relation, part, NoLock);
+    }
+
+    partState->subPartitionState = subPartState;
+
+    return partState;
+}
+
+/*
  * transformTableLikeClause
  *
  * Change the LIKE <srctable> portion of a CREATE TABLE statement into
@@ -1338,15 +1432,6 @@ static void transformTableLikeClause(
                     RelationGetRelationName(relation))));
 
     cancel_parser_errposition_callback(&pcbstate);
-
-    if (RelationIsSubPartitioned(relation)) {
-        ereport(
-            ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-             (errmsg("Subpartition table does not support create table like."),
-              errdetail("N/A."),
-              errcause("The feature is not currently supported."), erraction("Use other actions instead."))));
-    }
 
     // If specify 'INCLUDING ALL' for non-partitioned table, just remove the option 'INCLUDING PARTITION'.
     // Right shift 10 bits can handle both 'INCLUDING ALL' and 'INCLUDING ALL EXCLUDING option(s)'.
@@ -1760,23 +1845,29 @@ static void transformTableLikeClause(
         HeapTuple partitionTableTuple = NULL;
         Form_pg_partition partitionForm = NULL;
         List* partitionList = NIL;
+        List* subPartitionList = NIL;
 
         // read out partitioned table tuple, and partition tuple list
         partitionTableTuple =
             searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, ObjectIdGetDatum(relation->rd_id));
         partitionList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, ObjectIdGetDatum(relation->rd_id));
 
+        if (RelationIsSubPartitioned(relation)) {
+            subPartitionList = searchPgSubPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION, partitionList);
+        }
+
         if (partitionTableTuple != NULL) {
             partitionForm = (Form_pg_partition)GETSTRUCT(partitionTableTuple);
-	    if (partitionForm->partstrategy == PART_STRATEGY_LIST ||
-		partitionForm->partstrategy == PART_STRATEGY_HASH) {
-		freePartList(partitionList);
-		heap_freetuple_ext(partitionTableTuple);
+
+            if (partitionForm->partstrategy == PART_STRATEGY_LIST ||
+                partitionForm->partstrategy == PART_STRATEGY_HASH) {
+                freePartList(partitionList);
+                heap_freetuple_ext(partitionTableTuple);
                 heap_close(relation, NoLock);
-		ereport(ERROR,
-			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			errmsg("Un-support feature"),
-			errdetail("The Like feature is not supported currently for List and Hash.")));
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature"),
+                        errdetail("The Like feature is not supported currently for List and Hash.")));
             }
             bool value_partition_rel = (partitionForm->partstrategy == PART_STRATEGY_VALUE);
 
@@ -1784,7 +1875,7 @@ static void transformTableLikeClause(
              * We only have to create PartitionState for a range partition table
              * with known partitions or a value partition table(HDFS).
              */
-            if ((NIL != partitionList) || value_partition_rel) {
+            if ((NIL != partitionList && subPartitionList == NIL) || value_partition_rel) {
                 {
                     List* partKeyColumns = NIL;
                     List* partitionDefinitions = NIL;
@@ -1815,6 +1906,17 @@ static void transformTableLikeClause(
 
                     freePartList(partitionList);
                 }
+            } else if (subPartitionList != NULL) {
+                n = transformTblSubpartition(relation,
+                            partitionTableTuple,
+                            partitionList,
+                            subPartitionList);
+
+                /* store the produced partition state in CreateStmtContext */
+                cxt->csc_partTableState = n;
+
+                freePartList(partitionList);
+                freePartList(subPartitionList);
             }
 
             heap_freetuple_ext(partitionTableTuple);
@@ -3078,7 +3180,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
                 AssertEreport(attnum <= heap_rel->rd_att->natts, MOD_OPT, "");
                 attform = heap_rel->rd_att->attrs[attnum - 1];
             } else
-                attform = SystemAttributeDefinition(attnum, heap_rel->rd_rel->relhasoids,  RELATION_HAS_BUCKET(heap_rel));
+                attform = SystemAttributeDefinition(attnum, heap_rel->rd_rel->relhasoids,  RELATION_HAS_BUCKET(heap_rel), RELATION_HAS_UIDS(heap_rel));
             attname = pstrdup(NameStr(attform->attname));
 
             if (i < indnkeyatts) {
@@ -3593,21 +3695,12 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
         if (!isColStore && (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_GIN_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_GIST_INDEX_TYPE)) &&
-            (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_HASH_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_USTORE_INDEX_TYPE))) {
             /* row store only support btree/ubtree/gin/gist index */
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("access method \"%s\" does not support row store", stmt->accessMethod)));
         }
-
-        if (0 == pg_strcasecmp(stmt->accessMethod, DEFAULT_HASH_INDEX_TYPE) && 
-            t_thrd.proc->workingVersionNum < SUPPORT_HASH_XLOG_VERSION_NUM) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("access method \"%s\" does not support row store", stmt->accessMethod)));
-        }
-
         if (isColStore && (!isPsortMothed && !isCBtreeMethod && !isCGinBtreeMethod)) {
             /* column store support psort/cbtree/gin index */
             ereport(ERROR,
@@ -4025,6 +4118,7 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
     AlterTableCmd* newcmd = NULL;
     Node* rangePartDef = NULL;
     AddPartitionState* addDefState = NULL;
+    AddSubPartitionState* addSubdefState = NULL;
     SplitPartitionState* splitDefState = NULL;
     ListCell* cell = NULL;
 
@@ -4196,7 +4290,28 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                 newcmds = lappend(newcmds, cmd);
                 break;
 
+            case AT_AddSubPartition:
+                /* transform the boundary of subpartition,
+                 * this step transform it from A_Const into Const */
+                addSubdefState = (AddSubPartitionState*)cmd->def;
+                if (!PointerIsValid(addSubdefState)) {
+                    ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmodule(MOD_OPT),
+                        errmsg("Missing definition of adding subpartition"),
+                        errdetail("The AddSubPartitionState in ADD SUBPARTITION command is not found"),
+                        errcause("Try ADD SUBPARTITION without subpartition defination"),
+                        erraction("Please check DDL syntax for \"ADD SUBPARTITION\"")));
+                }
+                /* A_Const -->Const */
+                foreach (cell, addSubdefState->subPartitionList) {
+                    rangePartDef = (Node*)lfirst(cell);
+                    transformPartitionValue(pstate, rangePartDef, true);
+                }
+
+                newcmds = lappend(newcmds, cmd);
+                break;
+
             case AT_DropPartition:
+            case AT_DropSubPartition:
             case AT_TruncatePartition:
             case AT_ExchangePartition:
             case AT_TruncateSubPartition:
@@ -4228,6 +4343,7 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                     ereport(ERROR,
                         (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not split LIST/HASH partition table")));
                 }
+
                 /* transform the boundary of range partition: from A_Const into Const */
                 splitDefState = (SplitPartitionState*)cmd->def;
                 if (!PointerIsValid(splitDefState->split_point)) {

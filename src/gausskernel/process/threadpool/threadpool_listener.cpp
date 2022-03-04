@@ -49,8 +49,11 @@
 #include <sys/socket.h>
 
 #include "communication/commproxy_interface.h"
+#include "executor/executor.h"
+#include "utils/knl_catcache.h"
 
 #define INVALID_FD (-1)
+
 
 static void TpoolListenerLoop(ThreadPoolListener* listener);
 
@@ -61,7 +64,7 @@ static void ListenerSIGUSR1Handler(SIGNAL_ARGS)
 
 static void ListenerSIGKILLHandler(SIGNAL_ARGS)
 {
-    proc_exit(0);
+    t_thrd.threadpool_cxt.listener->m_getKilled = true;
 }
 
 void TpoolListenerMain(ThreadPoolListener* listener)
@@ -109,9 +112,31 @@ ThreadPoolListener::ThreadPoolListener(ThreadPoolGroup* group)
     m_epollFd = INVALID_FD;
     m_epollEvents = NULL;
     m_reaperAllSession = false;
+    m_getKilled = false;
     m_freeWorkerList = New(CurrentMemoryContext) DllistWithLock();
     m_readySessionList = New(CurrentMemoryContext) DllistWithLock();
     m_idleSessionList = New(CurrentMemoryContext) DllistWithLock();
+
+    if (EnableLocalSysCache()) {
+        /* see HASH_INDEX, Since the hash table must contain a power-of-2 number of elements */
+#ifdef ENABLE_LITE_MODE
+        m_session_nbucket = 128;
+#else
+        m_session_nbucket = MAX_THREAD_POOL_SIZE;
+#endif
+        m_session_bucket = (Dllist*)palloc0(m_session_nbucket * sizeof(Dllist));
+        m_session_rw_locks = (pthread_rwlock_t *)palloc0(m_session_nbucket * sizeof(pthread_rwlock_t));
+        for (int i = 0; i < m_session_nbucket; i++) {
+            PthreadRwLockInit(&m_session_rw_locks[i], NULL);
+        }
+        m_match_search = 0;
+        
+    } else {
+        m_session_nbucket = 0;
+        m_session_bucket = NULL;
+        m_session_rw_locks = NULL;
+        m_match_search = 0;
+    }
 }
 
 ThreadPoolListener::~ThreadPoolListener()
@@ -126,6 +151,13 @@ ThreadPoolListener::~ThreadPoolListener()
     m_freeWorkerList = NULL;
     m_readySessionList = NULL;
     m_idleSessionList = NULL;
+
+    if (EnableLocalSysCache()) {
+        pfree_ext(m_session_bucket);
+        pfree_ext(m_session_rw_locks);
+    }
+    m_session_nbucket = 0;
+    m_session_bucket = NULL;
 }
 
 int ThreadPoolListener::StartUp()
@@ -211,14 +243,27 @@ void ThreadPoolListener::AddEpoll(knl_session_context* session)
 
 bool ThreadPoolListener::TryFeedWorker(ThreadPoolWorker* worker)
 {
-    Dlelem* sc = m_readySessionList->RemoveHead();
+    Dlelem* sc = GetReadySession(worker);
     if (sc != NULL) {
         worker->SetSession((knl_session_context*)sc->dle_val);
         pg_atomic_fetch_sub_u32((volatile uint32*)&m_group->m_waitServeSessionCount, 1);
         pg_atomic_fetch_add_u32((volatile uint32*)&m_group->m_processTaskCount, 1);
         return true;
     } else {
-        m_freeWorkerList->AddTail(&worker->m_elem);
+        if (EnableLocalSysCache()) {
+#ifdef ENABLE_LITE_MODE
+            LocalSysDBCache *lsc = worker->GetThreadContextPtr()->lsc_cxt.lsc;
+            if (lsc == NULL || lsc->my_database_id == InvalidOid) {
+                m_freeWorkerList->AddTail(&worker->m_elem);
+            } else {
+                m_freeWorkerList->AddHead(&worker->m_elem);
+            }
+#else
+            m_freeWorkerList->AddHead(&worker->m_elem);
+#endif
+        } else {
+            m_freeWorkerList->AddTail(&worker->m_elem);
+        }
         pg_atomic_fetch_add_u32((volatile uint32*)&m_group->m_idleWorkerNum, 1);
         return false;
     }
@@ -301,7 +346,11 @@ void ThreadPoolListener::WaitTask()
     int nevents = 0;
 
     while (true) {
-        if (m_reaperAllSession) {
+        if (unlikely(m_getKilled)) {
+            m_getKilled = false;
+            proc_exit(0);
+        }
+        if (unlikely(m_reaperAllSession)) {
             ReaperAllSession();
         }
 
@@ -378,7 +427,7 @@ void ThreadPoolListener::DispatchSession(knl_session_context* session)
         return;
     }
     while (true) {
-        Dlelem* sc = m_freeWorkerList->RemoveHead();
+        Dlelem* sc = GetFreeWorker(session);
         if (sc != NULL) {
             ereport(DEBUG2,
                     (errmodule(MOD_THREAD_POOL),
@@ -396,11 +445,10 @@ void ThreadPoolListener::DispatchSession(knl_session_context* session)
             
             /* Add new session to the head so the connection request can be quickly processed. */
             if (session->status == KNL_SESS_UNINIT) {
-                m_readySessionList->AddHead(&session->elem);
+                AddIdleSessionToHead(session);
             } else {
-                m_readySessionList->AddTail(&session->elem);
+                AddIdleSessionToTail(session);
             }
-
             pg_atomic_fetch_add_u32((volatile uint32*)&m_group->m_waitServeSessionCount, 1);
             break;
         }
@@ -452,3 +500,150 @@ bool ThreadPoolListener::GetSessIshang(instr_time* current_time, uint64* session
     return ishang;
 }
 
+Dlelem *ThreadPoolListener::GetFreeWorker(knl_session_context* session)
+{
+    /* only lite mode need find right threadworker, 
+     * otherwise since there are so many requests, we dont have any freeworkers. so optimization is not necessary */
+#ifdef ENABLE_LITE_MODE
+    if (!EnableLocalSysCache()) {
+        return m_freeWorkerList->RemoveHead();
+    }
+
+    /* sess is not init, we dont know how to hit the cache */
+    if (session->status != KNL_SESS_ATTACH && session->status != KNL_SESS_DETACH) {
+        return m_freeWorkerList->RemoveTail();
+    }
+
+    if (unlikely(session->proc_cxt.MyDatabaseId == InvalidOid)) {
+        return m_freeWorkerList->RemoveTail();
+    }
+
+    /* for lite_mode, threadworkers are a small amount, so it is quickly to traverse the list */
+    m_freeWorkerList->GetLock();
+    for (Dlelem *elt = m_freeWorkerList->GetHead(); elt != NULL; elt = DLGetSucc(elt)) {
+        ThreadPoolWorker *worker = (ThreadPoolWorker *)DLE_VAL(elt);
+        LocalSysDBCache *lsc = worker->GetThreadContextPtr()->lsc_cxt.lsc;
+        /* uninited lsc are addtotail of the list, so when see one uninited, the follow all are uninited. just break */
+        if (unlikely(lsc == NULL || lsc->my_database_id == InvalidOid)) {
+            break;
+        }
+        /* cache hit */
+        if (likely(lsc->my_database_id == session->proc_cxt.MyDatabaseId)) {
+            m_freeWorkerList->Remove(elt);
+            m_freeWorkerList->ReleaseLock();
+            return elt;
+        }
+    }
+    m_freeWorkerList->ReleaseLock();
+    /* dont find, use tail instead head, because head of the list has syscache of other db */
+    return m_freeWorkerList->RemoveTail();
+#else
+    return m_freeWorkerList->RemoveHead();
+#endif
+}
+
+static Dlelem *GetHeadUnInitSession(DllistWithLock* m_readySessionList)
+{
+    /* uninit session needs be replied first */
+    m_readySessionList->GetLock();
+    Dlelem *head = m_readySessionList->GetHead();
+    if (likely(head != NULL)) {
+        if (((knl_session_context *)DLE_VAL(head))->status != KNL_SESS_UNINIT) {
+            /* go cache hit branch, set it null */
+            head = NULL;
+        } else {
+            head = m_readySessionList->RemoveHeadNoLock();
+        }
+    }
+    m_readySessionList->ReleaseLock();
+    Assert(head == NULL || ((knl_session_context *)DLE_VAL(head))->status == KNL_SESS_UNINIT);
+    return head;
+} 
+
+Dlelem *ThreadPoolListener::GetSessFromReadySessionList(ThreadPoolWorker *worker)
+{
+    Assert(EnableLocalSysCache());
+    Dlelem *elt = GetHeadUnInitSession(m_readySessionList);
+    if (elt != NULL) {
+        return elt;
+    }
+    do {
+        m_match_search++;
+        if (unlikely(m_match_search > MATCH_SEARCH_THRESHOLD)) {
+            m_match_search = 0;
+            break;
+        }
+        LocalSysDBCache *lsc = worker->GetThreadContextPtr()->lsc_cxt.lsc;
+        // worker not init, any session is matched
+        if (unlikely(lsc == NULL || lsc->my_database_id == InvalidOid)) {
+            break;
+        }
+        // now we try to reuse workers syscache
+        Index hash_index = HASH_INDEX(lsc->my_database_id, (uint32)m_session_nbucket);
+        ResourceOwner owner = LOCAL_SYSDB_RESOWNER;
+        PthreadRWlockRdlock(owner, &m_session_rw_locks[hash_index]);
+        elt = DLGetHead(&m_session_bucket[hash_index]);
+        if (elt == NULL || ((knl_session_context *)DLE_VAL(elt))->proc_cxt.MyDatabaseId != lsc->my_database_id) {
+            PthreadRWlockUnlock(owner, &m_session_rw_locks[hash_index]);
+            break;
+        }
+        if (!m_readySessionList->RemoveConfirm(&((knl_session_context *)DLE_VAL(elt))->elem)) {
+            // someone remove it already
+            PthreadRWlockUnlock(owner, &m_session_rw_locks[hash_index]);
+            break;
+        }
+        PthreadRWlockUnlock(owner, &m_session_rw_locks[hash_index]);
+
+        return &((knl_session_context *)DLE_VAL(elt))->elem;
+    } while (0);
+
+    elt = m_readySessionList->RemoveHead();
+    return elt;
+}
+
+Dlelem *ThreadPoolListener::GetReadySession(ThreadPoolWorker *worker)
+{
+    if (!EnableLocalSysCache()) {
+        return m_readySessionList->RemoveHead();
+    }
+    Dlelem *elt = GetSessFromReadySessionList(worker);
+    if (elt == NULL) {
+        return NULL;
+    }
+    knl_session_context *session = (knl_session_context *)DLE_VAL(elt);
+    Oid cur_dbid = session->proc_cxt.MyDatabaseId;
+    Index hash_index = HASH_INDEX(cur_dbid, (uint32)m_session_nbucket);
+    ResourceOwner owner = LOCAL_SYSDB_RESOWNER;
+    PthreadRWlockWrlock(owner, &m_session_rw_locks[hash_index]);
+    DLRemove(&session->elem2);
+    PthreadRWlockUnlock(owner, &m_session_rw_locks[hash_index]);
+    return elt;
+}
+
+void ThreadPoolListener::AddIdleSessionToTail(knl_session_context* session)
+{
+    if (!EnableLocalSysCache()) {
+        m_readySessionList->AddTail(&session->elem);
+        return;
+    }
+    Index hash_index = HASH_INDEX(session->proc_cxt.MyDatabaseId, (uint32)m_session_nbucket);
+    ResourceOwner owner = LOCAL_SYSDB_RESOWNER;
+    PthreadRWlockWrlock(owner, &m_session_rw_locks[hash_index]);
+    DLAddTail(&m_session_bucket[hash_index], &session->elem2);
+    PthreadRWlockUnlock(owner, &m_session_rw_locks[hash_index]);
+    m_readySessionList->AddTail(&session->elem);
+}
+
+void ThreadPoolListener::AddIdleSessionToHead(knl_session_context* session)
+{
+    if (!EnableLocalSysCache()) {
+        m_readySessionList->AddHead(&session->elem);
+        return;
+    }
+    Index hash_index = HASH_INDEX(session->proc_cxt.MyDatabaseId, (uint32)m_session_nbucket);
+    ResourceOwner owner = LOCAL_SYSDB_RESOWNER;
+    PthreadRWlockWrlock(owner, &m_session_rw_locks[hash_index]);
+    DLAddHead(&m_session_bucket[hash_index], &session->elem2);
+    PthreadRWlockUnlock(owner, &m_session_rw_locks[hash_index]);
+    m_readySessionList->AddHead(&session->elem);
+}

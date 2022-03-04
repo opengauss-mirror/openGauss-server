@@ -558,6 +558,59 @@ END;
 $$ LANGUAGE plpgsql;
 select test_func_VARRAY();
 
+--NULLTEST FOR AFORMAT
+set behavior_compat_options='aformat_null_test';
+
+explain (verbose, costs off)
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+
+explain (verbose, costs off)
+with r(a,b) as
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+
+with r(a,b) as
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+
+explain (verbose, costs off)
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+
+declare
+type ta as record (a int, b int);
+va ta;
+begin
+va.b = 2;
+if va is not null then
+raise info '1111';
+else
+raise info '2222';
+end if;
+end;
+/
+
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+
+reset behavior_compat_options;
+
 drop function avg_transfn1();
 drop function test_func_VARRAY();
 drop type avg_state cascade;

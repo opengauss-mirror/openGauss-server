@@ -63,7 +63,8 @@ extern bool have_createdb_privilege(void);
 
 extern void dbase_redo(XLogReaderState* rptr);
 extern void dbase_desc(StringInfo buf, XLogReaderState* record);
-extern void xlog_db_drop(Oid dbId, Oid tbSpcId);
+extern const char* dbase_type_name(uint8 subtype);
+extern void xlog_db_drop(XLogRecPtr lsn, Oid dbId, Oid tbSpcId);
 extern void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId);
 
 extern void check_encoding_locale_matches(int encoding, const char* collate, const char* ctype);

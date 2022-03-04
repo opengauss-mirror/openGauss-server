@@ -51,6 +51,21 @@ template void GlobalPlanCache::RemovePlanSource<ACTION_RELOAD>(CachedPlanSource*
 
 template void GlobalPlanCache::RemovePlanSource<ACTION_CN_RETRY>(CachedPlanSource* plansource, const char* stmt_name);
 
+static bool has_diff_schema(const List *list1, const List *list2)
+{
+    const ListCell *cell = NULL;
+
+    if (list2 == NIL) {
+        return list1 != NULL;
+    }
+    foreach (cell, list1) {
+        if (!list_member_oid(list2, lfirst_oid(cell))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool
 CompareSearchPath(struct OverrideSearchPath* path1, struct OverrideSearchPath* path2)
 {
@@ -70,10 +85,10 @@ CompareSearchPath(struct OverrideSearchPath* path1, struct OverrideSearchPath* p
     if (path1->addCatalog != path2->addCatalog) {
         return false;
     }
-    if (list_difference_oid(path1->schemas, path2->schemas) != NULL) {
+    if (has_diff_schema(path1->schemas, path2->schemas)) {
         return false;
     }
-    if (list_difference_oid(path2->schemas, path1->schemas) != NULL) {
+    if (has_diff_schema(path2->schemas, path1->schemas)) {
         return false;
     }
     return true;
@@ -380,6 +395,7 @@ CachedPlanSource* GlobalPlanCache::Fetch(const char *query_string, uint32 query_
         CachedPlanSource* psrc = entry->val.plansource;
         psrc->gpc.status.AddRefcount();
         if (!psrc->gpc.status.IsValid()) {
+            MemoryContextSwitchTo(oldcontext);
             LWLockRelease(GetMainLWLockByIndex(lock_id));
             MoveIntoInvalidPlanList(psrc);
             psrc->gpc.status.SubRefCount();

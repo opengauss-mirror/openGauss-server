@@ -1,0 +1,364 @@
+-- create users
+create user scheduler_user1 password 'scheduler_user1.';
+create user scheduler_user2 password 'scheduler_user2.';
+--grant
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user1', 'create job');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user1', 'create external job');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user1', 'run external job');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user1', 'execute any program');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+select attribute_name, attribute_value from gs_job_attribute;
+   attribute_name    | attribute_value 
+---------------------+-----------------
+ create job          | granted
+ create external job | granted
+ run external job    | granted
+ execute any program | granted
+(4 rows)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'create job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'create external job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'run external job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'execute any program');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select attribute_name, attribute_value from gs_job_attribute;
+ attribute_name | attribute_value 
+----------------+-----------------
+(0 rows)
+
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user1', 'xxx');
+ERROR:  Invalid privilege xxx
+DETAIL:  privilege contains invalid character
+CONTEXT:  referenced column: grant_user_authorization
+-- no privilege
+SET ROLE scheduler_user1 PASSWORD "scheduler_user1.";
+select DBE_SCHEDULER.create_credential('cre_1', 'scheduler_user1', ''); -- failed
+ERROR:  Fail to create credential.
+DETAIL:  Insufficient privilege to create credential.
+CONTEXT:  referenced column: create_credential
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 0, false, 'test'); -- failed
+ERROR:  User needs 'create job' privilege to perform this operation.
+DETAIL:  Not enough privileges.
+CONTEXT:  referenced column: create_program
+select DBE_SCHEDULER.create_schedule('schedule1', NULL, 'sysdate', NULL, 'test'); -- failed
+ERROR:  User needs 'create job' privilege to perform this operation.
+DETAIL:  Not enough privileges.
+CONTEXT:  referenced column: create_schedule
+select DBE_SCHEDULER.create_job(job_name=>'job1', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(1);', enabled=>true, auto_drop=>false); -- failed
+ERROR:  User needs 'create job' privilege to perform this operation.
+DETAIL:  Not enough privileges.
+CONTEXT:  referenced column: create_job
+RESET ROLE;
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user1', 'create job');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+-- create job privilege
+SET ROLE scheduler_user1 PASSWORD "scheduler_user1.";
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 0, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_schedule('schedule1', NULL, 'sysdate', NULL, 'test');
+ create_schedule 
+-----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job1', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(1);', enabled=>true, auto_drop=>false);
+ create_job 
+------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job2', program_name=>'program1');
+ create_job 
+------------
+ 
+(1 row)
+
+RESET ROLE;
+select count(*) from adm_scheduler_jobs;
+ count 
+-------
+     2
+(1 row)
+
+SET ROLE scheduler_user1 PASSWORD "scheduler_user1.";
+-- create external job privilege
+select DBE_SCHEDULER.create_program('program1', 'EXTERNAL_SCRIPT', '/usr/bin/pwd'); -- failed
+ERROR:  User needs 'create external job' privilege to perform this operation.
+DETAIL:  Not enough privileges.
+CONTEXT:  referenced column: create_program
+select DBE_SCHEDULER.create_job(job_name=>'job1', job_type=>'EXTERNAL_SCRIPT', job_action=>'/usr/bin/pwd', enabled=>true, auto_drop=>false); -- failed
+ERROR:  User needs 'create external job' privilege to perform this operation.
+DETAIL:  Not enough privileges.
+CONTEXT:  referenced column: create_job
+RESET ROLE;
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user1', 'create external job');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+SET ROLE scheduler_user1 PASSWORD "scheduler_user1.";
+select DBE_SCHEDULER.create_program('program2', 'EXTERNAL_SCRIPT', '/usr/bin/pwd');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job3', job_type=>'EXTERNAL_SCRIPT', job_action=>'/usr/bin/pwd', enabled=>true, auto_drop=>false);
+ create_job 
+------------
+ 
+(1 row)
+
+-- cross user
+RESET ROLE;
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user2', 'create job');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+SET ROLE scheduler_user2 PASSWORD "scheduler_user2.";
+select DBE_SCHEDULER.create_job(job_name=>'job4', program_name=>'program1');  -- failed
+ERROR:  User needs 'execute any program' privilege to perform this operation.
+DETAIL:  Not enough privileges.
+CONTEXT:  referenced column: create_job
+RESET ROLE;
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user2', 'execute any program');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+SET ROLE scheduler_user2 PASSWORD "scheduler_user2.";
+select DBE_SCHEDULER.create_job(job_name=>'job4', program_name=>'program1');
+ create_job 
+------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job5', program_name=>'program2');  -- failed
+ERROR:  User needs 'create external job' privilege to perform this operation.
+DETAIL:  Not enough privileges.
+CONTEXT:  referenced column: create_job
+RESET ROLE;
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user2', 'create external job');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+SET ROLE scheduler_user2 PASSWORD "scheduler_user2.";
+select DBE_SCHEDULER.create_job(job_name=>'job5', program_name=>'program2');
+ create_job 
+------------
+ 
+(1 row)
+
+RESET ROLE;
+select count(*) from adm_scheduler_jobs;
+ count 
+-------
+     5
+(1 row)
+
+SET ROLE scheduler_user2 PASSWORD "scheduler_user2.";
+select DBE_SCHEDULER.run_job(job_name=>'job4', use_current_session=>false);
+ run_job 
+---------
+ 
+(1 row)
+
+select DBE_SCHEDULER.run_job(job_name=>'job5', use_current_session=>true);  -- failed
+ERROR:  No database wise credential found.
+DETAIL:  Need to create default credential for database with name 'db_credential'
+CONTEXT:  PL/pgSQL function dbe_scheduler.run_job(text,boolean) line 9 at assignment
+referenced column: run_job
+RESET ROLE;
+select DBE_SCHEDULER.enable('job4');
+ enable 
+--------
+ 
+(1 row)
+
+select enable from pg_job where job_name = 'job4';
+ enable 
+--------
+ t
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user2', 'execute any program');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select enable from pg_job where job_name = 'job4';
+ enable 
+--------
+ f
+(1 row)
+
+RESET ROLE;
+select DBE_SCHEDULER.drop_job('job1', true);
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job2', true);
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job3', true);
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job4', true);
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job5', true);
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_program('program1', true);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_program('program2', true);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_schedule('schedule1', true);
+ drop_schedule 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'create job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'create external job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'run external job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'execute any program');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user2', 'create job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user2', 'create external job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user2', 'run external job');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.revoke_user_authorization('scheduler_user1', 'execute any program');
+ revoke_user_authorization 
+---------------------------
+ 
+(1 row)
+
+-- check object cleanups --
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user1', 'create job');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.grant_user_authorization('scheduler_user2', 'execute any program');
+ grant_user_authorization 
+--------------------------
+ 
+(1 row)
+
+drop user scheduler_user1;
+drop user scheduler_user2;
+select attribute_name, attribute_value from gs_job_attribute; -- empty
+ attribute_name | attribute_value 
+----------------+-----------------
+(0 rows)
+

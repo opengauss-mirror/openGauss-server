@@ -1,6 +1,10 @@
 #This is the main CMAKE for build bin.
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_archive_SRC)
 
+if("${ENABLE_LITE_MODE}" STREQUAL "ON")
+    list(REMOVE_ITEM TGT_archive_SRC ${CMAKE_CURRENT_SOURCE_DIR}/nas_am.cpp)
+endif()
+
 set(TGT_archive_INC 
     ${PROJECT_SRC_DIR}/gausskernel/cbb/communication
     ${PROJECT_SRC_DIR}/include/iprange

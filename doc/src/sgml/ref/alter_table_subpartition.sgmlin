@@ -1,0 +1,43 @@
+<refentry id="SQL-ALTER_TABLE_SUBPARTITION">
+<refmeta>
+<refentrytitle>ALTER TABLE SUBPARTITION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER TABLE SUBPARTITION</refname>
+<refpurpose>change the definition of a subpartition</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    action [, ... ];
+
+where action can be:
+    add_clause    |
+    drop_clause   |
+    split_clause  |
+    truncate_clause
+where add_clause can be:
+ADD { partition_less_than_item | partition_list_item } [ ( subpartition_definition_list ) ]
+MODIFY PARTITION partition_name ADD subpartition_definition
+where partition_less_than_item can be:
+PARTITION partition_name VALUES LESS THAN ( partition_value | MAXVALUE ) [ TABLESPACE tablespacename ]
+where partition_list_item can be:
+PARTITION partition_name VALUES ( partition_value [, ...] | DEFAULT ) [ TABLESPACE tablespacename ]
+where subpartition_definition_list can be:
+SUBPARTITION subpartition_name [ VALUES LESS THAN ( partition_value | MAXVALUE ) | VALUES ( partition_value [, ...] | DEFAULT )]  [ TABLESPACE tablespace ]
+where drop_clause can be:
+DROP PARTITION  { partition_name | FOR (  partition_value )  } [ UPDATE GLOBAL INDEX ]
+DROP SUBPARTITION  { subpartition_name | FOR (  partition_value, subpartition_value )  } [ UPDATE GLOBAL INDEX ]
+where split_clause can be:
+SPLIT SUBPARTITION { subpartition_name } { split_point_clause } [ UPDATE GLOBAL INDEX ]
+where split_point_clause can be:
+AT ( subpartition_value ) INTO ( SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] , SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] ) |
+VALUES ( subpartition_value ) INTO ( SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] , SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] )
+where truncate_clause can be:
+TRUNCATE SUBPARTITION { subpartition_name } [ UPDATE GLOBAL INDEX ]
+NOTICE: 'ALTER TABLE SUBPARTITION' is only avaliable in CENTRALIZED mode!
+</synopsis>
+</refsynopsisdiv>
+</refentry>

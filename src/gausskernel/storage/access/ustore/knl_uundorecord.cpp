@@ -425,19 +425,11 @@ bool UndoRecord::ReadUndoRecord(_in_ Page page, _in_ int startingByte, __inout i
     return true;
 }
 
-static bool LoadUndoRecord(UndoRecord *urec)
+static UndoRecordState LoadUndoRecord(UndoRecord *urec)
 {
-    if (!IS_VALID_UNDO_REC_PTR(urec->Urp())) {
-#ifdef DEBUG_UHEAP
-        UHEAPSTAT_COUNT_UNDO_CHAIN_VISITED_MISS();
-#endif
-        return false;
-    }
-    if (!undo::CheckUndoRecordValid(urec->Urp(), true)) {
-#ifdef DEBUG_UHEAP
-        UHEAPSTAT_COUNT_UNDO_CHAIN_VISITED_MISS();
-#endif
-        return false;
+    UndoRecordState state = undo::CheckUndoRecordValid(urec->Urp(), true);
+    if (state != UNDO_RECORD_NORMAL) {
+        return state;
     }
 
     int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
@@ -448,35 +440,34 @@ static bool LoadUndoRecord(UndoRecord *urec)
     }
     PG_CATCH();
     {
-        if ((!t_thrd.undo_cxt.fetchRecord) && (!undo::CheckUndoRecordValid(urec->Urp(), true))) {
+        state = undo::CheckUndoRecordValid(urec->Urp(), true);
+        if ((!t_thrd.undo_cxt.fetchRecord) && (state == UNDO_RECORD_DISCARD ||
+            state == UNDO_RECORD_FORCE_DISCARD)) {
             t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
             if (BufferIsValid(urec->Buff())) {
                 ReleaseBuffer(urec->Buff());
                 urec->SetBuff(InvalidBuffer);
             }
-            ereport(LOG, (errmsg(UNDOFORMAT("fetch record fail, curr undo: %lu"), urec->Urp())));
-            return false;
+            return state;
         } else {
             PG_RE_THROW();
         }
     }
     PG_END_TRY();
     t_thrd.undo_cxt.fetchRecord = false;
-    return true;
+    return UNDO_RECORD_NORMAL;
 }
 
-int FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRecordCallback callback, 
-    _in_ BlockNumber blkno, _in_ OffsetNumber offset, _in_ TransactionId xid)
+UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRecordCallback callback,
+    _in_ BlockNumber blkno, _in_ OffsetNumber offset, _in_ TransactionId xid, bool isNeedBypass)
 {
-#ifdef DEBUG_UHEAP
     int64 undo_chain_len = 0; /* len of undo chain for one tuple */
-#endif
 
     Assert(urec);
 
     if (RecoveryInProgress()) {
         uint64 blockcnt = 0;
-        while (undo::CheckUndoRecordRecoveryStatus(urec->Urp()) == UNDO_NOT_RECOVERY) {
+        while (undo::CheckUndoRecordValid(urec->Urp(), false) == UNDO_RECORD_NOT_INSERT) {
             ereport(LOG,
                 (errmsg(UNDOFORMAT("urp: %ld is not replayed yet. ROS waiting for UndoRecord replay."),
                 urec->Urp())));
@@ -486,19 +477,25 @@ int FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRecordCallback cal
                 CHECK_FOR_INTERRUPTS();
             }
         }
-        if (undo::CheckUndoRecordRecoveryStatus(urec->Urp()) == UNDO_DISCARD) {
-            return UNDO_RET_FAIL;
+        if (undo::CheckUndoRecordValid(urec->Urp(), false) == UNDO_RECORD_DISCARD) {
+            return UNDO_TRAVERSAL_END;
         }
     }
 
     do {
-        if (!LoadUndoRecord(urec)) {
-            return UNDO_RET_FAIL;
+        UndoRecordState state = LoadUndoRecord(urec);
+        if (state == UNDO_RECORD_INVALID || state == UNDO_RECORD_DISCARD) {
+            return UNDO_TRAVERSAL_END;
+        } else if (state == UNDO_RECORD_FORCE_DISCARD) {
+            return UNDO_TRAVERSAL_ABORT;
         }
 
-#ifdef DEBUG_UHEAP
+        if (isNeedBypass && TransactionIdPrecedes(urec->Xid(), g_instance.undo_cxt.oldestFrozenXid)) {
+            ereport(DEBUG1, (errmsg(UNDOFORMAT("Check visibility by oldestFrozenXid"))));
+            return UNDO_TRAVERSAL_STOP;
+        }
+
         ++undo_chain_len;
-#endif
 
         if (blkno == InvalidBlockNumber) {
             break;
@@ -516,7 +513,11 @@ int FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRecordCallback cal
 #ifdef DEBUG_UHEAP
     UHEAPSTAT_COUNT_UNDO_CHAIN_VISTIED(undo_chain_len)
 #endif
-    return UNDO_RET_SUCC;
+    g_instance.undo_cxt.undoChainTotalSize += undo_chain_len;
+    g_instance.undo_cxt.undo_chain_visited_count += 1;
+    g_instance.undo_cxt.maxChainSize =
+        g_instance.undo_cxt.maxChainSize > undo_chain_len ? g_instance.undo_cxt.maxChainSize : undo_chain_len;
+    return UNDO_TRAVERSAL_COMPLETE;
 }
 
 bool InplaceSatisfyUndoRecord(_in_ UndoRecord *urec, _in_ BlockNumber blkno, _in_ OffsetNumber offset,

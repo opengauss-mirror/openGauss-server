@@ -165,7 +165,6 @@ public:
     bool empty() const;
     
     const std::string& get_err_str() { return m_err_str; }
-    void print_ranges();
     std::string ip_to_str(const IPV6 *ip) const;
     bool str_to_ip(const char* ip_str, IPV6 *ip);
 private:
@@ -184,7 +183,6 @@ private:
     bool mask_range(Range *range, unsigned short cidr);
     void handle_remove_intersection(Ranges_t *new_ranges, const Range *remove_range, Range *exist_range);
     bool handle_add_intersection(Range *new_range, const Range *exist_range);
-    void print_range(const Range *range);
     void copy_without_spaces(char buf[], size_t buf_len, const char *original, size_t original_len) const;
     void net_ipv6_to_host_order(IPV6 *ip, const struct sockaddr_in6 *sa) const;
     void net_ipv4_to_host_order(IPV6 *ip, const struct in_addr *addr) const;

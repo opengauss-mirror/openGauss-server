@@ -166,7 +166,9 @@ static int BBOX_SetMappingVDSOFlag(
     int* piGetChar, struct BBOX_READ_FILE_IO* pstReadIO, struct BBOX_VM_MAPS* pstSegmentMapping)
 {
     int iIsMappingVdsoFlag = BBOX_FALSE;
+    int iIsMappingVvarFlag = BBOX_TRUE;
     const char* pszVdso = VDSO_NAME_STRING;
+    const char* pszVvar = VVAR_NAME_STRING;
 
     if (NULL == piGetChar || NULL == pstReadIO || NULL == pstSegmentMapping) {
 
@@ -178,6 +180,10 @@ static int BBOX_SetMappingVDSOFlag(
     }
 
     while (*pszVdso && *piGetChar == *pszVdso) {
+        if (iIsMappingVvarFlag == BBOX_TRUE) {
+            iIsMappingVvarFlag = (*piGetChar == *pszVvar) ? BBOX_TRUE : BBOX_FALSE;
+            pszVvar++;
+        }
         *piGetChar = BBOX_GetCharFromFile(pstReadIO);
         if (RET_ERR == *piGetChar) {
             bbox_print(PRINT_ERR, "BBOX_GetCharFromFile is failed, *piGetChar= %d.\n", *piGetChar);
@@ -196,6 +202,27 @@ static int BBOX_SetMappingVDSOFlag(
             " Get VDSO StartAddr = %zu, EndAddr = %zu.\n",
             pstSegmentMapping->uiStartAddress,
             pstSegmentMapping->uiEndAddress);
+    }
+
+    if (iIsMappingVvarFlag == BBOX_TRUE) {
+        while (*pszVdso && *piGetChar == *pszVvar) {
+            *piGetChar = BBOX_GetCharFromFile(pstReadIO);
+            if (RET_ERR == *piGetChar) {
+                bbox_print(PRINT_ERR, "BBOX_GetCharFromFile is failed, *piGetChar= %d.\n", *piGetChar);
+
+                return RET_ERR;
+            }
+
+            pszVvar++;
+        }
+
+        if (*pszVvar == '\0' && (*piGetChar == '\n' || *piGetChar == ' ' || *piGetChar == '\0')) {
+            pstSegmentMapping->iFlags |= PF_VVAR; /* set VVAR flag */
+
+            bbox_print(PRINT_DBG,
+                " Get VVAR StartAddr = %zu, EndAddr = %zu.\n",
+                pstSegmentMapping->uiStartAddress, pstSegmentMapping->uiEndAddress);
+        }
     }
 
     return RET_OK;
@@ -688,8 +715,9 @@ static int BBOX_VmMappingSizeDump(struct BBOX_VM_MAPS* pstVmMappingSegment, int 
         }
 
         /* mark a segment not write into core file
-           if it cannot be read, discribes equipment segment or segment size is 0 */
+           if it cannot be read, discribes equipment segment or segment size is 0 or vvar segement */
         if (((pstVmMapping->iFlags & PF_R) == 0) || pstVmMapping->uiStartAddress == pstVmMapping->uiEndAddress ||
+            (pstVmMapping->iFlags & PF_VVAR) ||
             (pstVmMapping->iFlags & PF_DEVICE)) {
             pstVmMapping->uiWriteSize = 0;
             (*piValidSegmentNum)--;

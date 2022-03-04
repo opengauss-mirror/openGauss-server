@@ -19,6 +19,44 @@
 #include "access/spgist_private.h"
 #include "utils/rel_gs.h"
 
+const char* spg_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    switch (info) {
+        case XLOG_SPGIST_CREATE_INDEX:
+            return "spgist_create_index";
+            break;
+        case XLOG_SPGIST_ADD_LEAF:
+            return "spgist_add_leaf";
+            break;
+        case XLOG_SPGIST_MOVE_LEAFS:
+            return "spgist_move_leafs";
+            break;
+        case XLOG_SPGIST_ADD_NODE:
+            return "spgist_add_node";
+            break;
+        case XLOG_SPGIST_SPLIT_TUPLE:
+            return "spgist_split";
+            break;
+        case XLOG_SPGIST_PICKSPLIT:
+            return "spgist_picksplit";
+            break;
+        case XLOG_SPGIST_VACUUM_LEAF:
+            return "spgist_vacuum_leaf";
+            break;
+        case XLOG_SPGIST_VACUUM_ROOT:
+            return "spgist_vacuum_root";
+            break;
+        case XLOG_SPGIST_VACUUM_REDIRECT:
+            return "spgist_vacuum_redirect";
+            break;
+        default:
+            break;
+    }
+    return "unknow_type";
+}
+
+
 void spg_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

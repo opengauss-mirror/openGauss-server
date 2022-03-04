@@ -46,6 +46,7 @@ const char* g_metric_name = "Metric";
 const char* g_per_second_str = "Per Second";
 const char* g_per_trx_str = "Per Transaction";
 const char* g_per_exec_str = "Per Exec";
+const char* g_value_str = "Value";
 
 const char* g_per_sec_io_rw = "Read + Write Per Sec";
 const char* g_per_sec_io_r = "Read Per Sec";
@@ -78,6 +79,9 @@ typedef struct _report_params {
     int64 snap_diff_rollback_trx_count; /* diff commit trx */
     List* Contents;                     /* structured data pool */
 } report_params;
+
+static bool is_cluster_report(report_params* params);
+
 /*
  * Declare function
  */
@@ -86,7 +90,7 @@ namespace GenReport {
 void add_data(dashboard* spec, List** Contents);
 
 /* Generate a report in Html format */
-char* GenerateHtmlReport(List* Contents);
+char* GenerateHtmlReport(report_params* params);
 
 /* Generate index for h1 title */
 void GenerateListByHtml(uint32 detailrow, List* Contents, StringInfoData& listHtml);
@@ -127,6 +131,7 @@ void GetTimeModelData(report_params* params);
 void get_summary_database_stat(report_params* params);
 void get_summary_load_profile(report_params* params);
 }  // namespace GenReport
+
 static dashboard* CreateDash(void)
 {
     dashboard* dash = NULL;
@@ -141,10 +146,10 @@ static dashboard* CreateDash(void)
 /*
  * generate the type of html report
  */
-char* GenReport::GenerateHtmlReport(List* Contents)
+char* GenReport::GenerateHtmlReport(report_params* params)
 {
     StringInfoData result;
-    initStringInfo(&result);
+
     /*
      * declare css for html
      */
@@ -171,10 +176,9 @@ char* GenReport::GenerateHtmlReport(List* Contents)
         "background:#F4F6F6; vertical-align:top;word-break: break-word; max-width: 300px;}\n"
         "td.wdrc {font:8pt Arial,Helvetica,Geneva,sans-serif;color:black;"
         "background:White; vertical-align:top;word-break: break-word; max-width: 300px;}\n"
-        "td.wdrtext {font:8pt Arial,Helvetica,Geneva,sans-serif;color:black;background:White;vertical-align:top;}"
-        "</style>";
+        "</style>\n";
 
-    const char* js = "<script type=\"text/javascript\">function msg(titlename, inputname, objname) {\n"
+    const char* js = "<script type=\"text/javascript\">\nfunction msg(titlename, inputname, objname) {\n"
                      "if (document.getElementById(inputname).value == \"1\") {\n"
                      "    document.getElementById(objname).style.display=\"block\";\n"
                      "    document.getElementById(titlename).innerHTML = \"-\" + titlename;\n"
@@ -185,10 +189,21 @@ char* GenReport::GenerateHtmlReport(List* Contents)
                      "    document.getElementById(inputname).value = \"1\";\n"
                      "}}</script>\n"
                      "</head><body class=\"wdr\"\n>";
-    appendStringInfo(&result, "%s%s<h1 class=\"wdr\">Workload Diagnosis Report</h1>", css, js);
+
+    initStringInfo(&result);
+    appendStringInfoString(&result, "<style type=\"text/css\">\n#SQL_Text2>table{width:100%}\n");
+    appendStringInfo(&result, "#SQL_Text2>table tr td:nth-child(-n+%s)", is_cluster_report(params) ? "3" : "2");
+    appendStringInfoString(&result, " {width:8%;word-break:break-all;}\n</style>\n");
+
+    const char* specialStyle = result.data;
+
+    initStringInfo(&result);
+    appendStringInfo(&result, "%s%s%s<h1 class=\"wdr\">Workload Diagnosis Report</h1>", css, specialStyle, js);
+    pfree_ext(specialStyle);
+
     for (uint32 i = 0; i < NUM_REPROT_PART; i++)
-        GenReport::GenerateSummaryHtml(g_reportpart[i], Contents, result);
-    GenReport::GenerateDetailHtml(Contents, result);
+        GenReport::GenerateSummaryHtml(g_reportpart[i], params->Contents, result);
+    GenReport::GenerateDetailHtml(params->Contents, result);
     appendStringInfoString(&result, "\n</body></html>");
     return result.data;
 }
@@ -316,7 +331,7 @@ static void GetOsInfo(List** osInfoList, report_params* params, List** typeList)
 
     List* cpusList = NIL;
     appendStringInfo(&query,
-        "select 'CPUS', x.snap_value  from (select * from pg_node_env) t,"
+        "select 'CPUs', x.snap_value  from (select * from pg_node_env) t,"
         " (select * from snapshot.snap_global_os_runtime) x where x.snap_node_name = t.node_name and"
         " x.snapshot_id = %ld and (x.snap_name = 'NUM_CPUS');",
         params->end_snap_id);
@@ -326,7 +341,7 @@ static void GetOsInfo(List** osInfoList, report_params* params, List** typeList)
     List* cpuCoresList = NIL;
     resetStringInfo(&query);
     appendStringInfo(&query,
-        "select 'CPU Cores', x.snap_value  from (select * from pg_node_env) t,"
+        "select 'Cores', x.snap_value  from (select * from pg_node_env) t,"
         " (select * from snapshot.snap_global_os_runtime) x where x.snap_node_name = t.node_name and"
         " x.snapshot_id = %ld and x.snap_name = 'NUM_CPU_CORES';",
         params->end_snap_id);
@@ -336,7 +351,7 @@ static void GetOsInfo(List** osInfoList, report_params* params, List** typeList)
     List* cpuSocketsList = NIL;
     resetStringInfo(&query);
     appendStringInfo(&query,
-        "select 'CPU Sockets', x.snap_value  from (select * from pg_node_env) t,"
+        "select 'Sockets', x.snap_value  from (select * from pg_node_env) t,"
         " (select * from snapshot.snap_global_os_runtime) x where x.snap_node_name = t.node_name and"
         " x.snapshot_id = %ld and  x.snap_name = 'NUM_CPU_SOCKETS';",
         params->end_snap_id);
@@ -539,12 +554,33 @@ void GenReport::DescToHtml(List* descList, StringInfoData& descHtml)
     appendStringInfo(&descHtml, "</ul>\n");
 }
 /*
+ * Turn the space in the table title into an underscore,
+ * and use the converted String for ID generation in HTML elements.
+ * This method calls pstrdup method so you need to use pfree to free memory.
+ * Input parameters:
+ *        table -- the structed data
+ */
+static char* SpaceToUnderline(char* tableTitle)
+{
+    if (!tableTitle) {
+        return tableTitle;
+    }
+    char* resultStr = pstrdup(tableTitle);
+    for (unsigned i = 0; i < strlen(resultStr); i++) {
+        if (resultStr[i] == ' ') {
+            resultStr[i] = '_';
+        }
+    }
+    return resultStr;
+}
+/*
  * Convert one dashboard data to html format
  * Input parameters:
  *        row -- represents a dashboard
  */
 void GenReport::dashboad_to_html(List* rowList, StringInfoData& dashboadHtml)
 {
+    char* prevTableTitle = NULL;
     foreach_cell(cell, rowList)
     {
         if (lfirst(cell) == NULL) {
@@ -552,28 +588,41 @@ void GenReport::dashboad_to_html(List* rowList, StringInfoData& dashboadHtml)
         }
         dashboard* dash = (dashboard*)lfirst(cell);
         char* tableTitle = (char*)dash->tableTitle;
-        appendStringInfo(&dashboadHtml, "<a class=\"wdr\"></a><h3 class=\"wdr\" id=\"%s\" ", tableTitle);
-        appendStringInfo(&dashboadHtml,
-            "onclick=\"return msg('%s', '%s1', '%s2')\">-%s</h3>\n",
-            tableTitle,
-            tableTitle,
-            tableTitle,
-            tableTitle);
+        char* htmlId = SpaceToUnderline(tableTitle);
+        if (prevTableTitle == NULL || strcmp(tableTitle, prevTableTitle) != 0) {
+            appendStringInfo(&dashboadHtml, "<a class=\"wdr\"></a><h3 class=\"wdr\" id=\"%s\" ", htmlId);
+            appendStringInfo(&dashboadHtml,
+                "onclick=\"return msg('%s', '%s1', '%s2')\">-%s</h3>\n",
+                htmlId,
+                htmlId,
+                htmlId,
+                tableTitle);
 
-        /* Convert the description corresponding to the table to HTML format */
-        appendStringInfo(&dashboadHtml,
-            "<form>\n<input  id = '%s1'"
-            " type=\"hidden\" value=\"0\"/>\n</form>\n<div id = '%s2'>\n",
-            tableTitle,
-            tableTitle);
+            /* Convert the description corresponding to the table to HTML format */
+            appendStringInfo(&dashboadHtml,
+                "<form>\n<input  id = '%s1'"
+                " type=\"hidden\" value=\"0\"/>\n</form>\n<div id = '%s2'>\n",
+                htmlId,
+                htmlId);
+        } else {
+            appendStringInfo(&dashboadHtml, "<br>");
+        }
+        pfree_ext(htmlId);
         GenReport::DescToHtml(dash->desc, dashboadHtml);
 
         /* Convert the table data to HTML format (include the colname corresponding to the data) */
         if (dash->table == NULL) {
             ereport(WARNING, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("there is no available data in table")));
-            continue;
+        } else {
+            GenReport::TableToHtml(dash, dashboadHtml);
         }
-        GenReport::TableToHtml(dash, dashboadHtml);
+        prevTableTitle = tableTitle;
+        if (lnext(cell) != NULL) {
+            dashboard* dashNext = (dashboard*)lfirst(lnext(cell));
+            if (strcmp(tableTitle, dashNext->tableTitle) == 0) {
+                continue;
+            }
+        }
         appendStringInfoString(&dashboadHtml,
             "</div>\n<p />\n<hr align=\"left\" width=\"20%\" /><p />\n"
             "<a class=\"wdr\" href=\"#");
@@ -647,7 +696,7 @@ void GenReport::table_to_Html(List* tableList, List* typeList, ColName COL_HAVE,
                 appendStringInfoString(&tableHtml, "</a></td>");
             } else if (j == 0 && COL_HAVE == HAVE_SQLTEXT) {
                 appendStringInfo(
-                    &tableHtml, "<td class=\"wdrtext\" ><a class=\"wdr\" name=\"%s\">%s", cellData, cellData);
+                    &tableHtml, "%s><a class=\"wdr\" name=\"%s\">%s", tableRowClz, cellData, cellData);
                 appendStringInfoString(&tableHtml, "</a></td>");
             } else {
                 if (*(Oid*)lfirst(typeCell) == NAME_TYPE || *(Oid*)lfirst(typeCell) == TEXT_TYPE) {
@@ -1096,7 +1145,7 @@ static void SQLNodeTotalElapsedTime(report_params* params)
 
     /* SQL ordered by Total Elapsed Time */
     appendStringInfo(&query,
-        "select /*+ hashjoin(c1 c2)*/t2.snap_unique_sql_id as \"Unique SQL Id\", t2.snap_user_name as \"User Name\","
+        "select t2.snap_unique_sql_id as \"Unique SQL Id\", t2.snap_user_name as \"User Name\","
         " (t2.snap_total_elapse_time - coalesce(t1.snap_total_elapse_time, 0)) as \"Total Elapse Time(us)\", "
         " (t2.snap_n_calls - coalesce(t1.snap_n_calls, 0)) as \"Calls\", "
         " round(\"Total Elapse Time(us)\"/greatest(\"Calls\", 1), 0) as \"Avg Elapse Time(us)\", "
@@ -1123,9 +1172,9 @@ static void SQLNodeTotalElapsedTime(report_params* params)
         " (t2.snap_hash_spill_count - coalesce(t1.snap_hash_spill_count, 0)) as \"Hash Spill Count\", "
         " (t2.snap_hash_spill_size - coalesce(t1.snap_hash_spill_size, 0)) as \"Hash Spill Size(KB)\", "
         " LEFT(t2.snap_query, 25) as \"SQL Text\" "
-        "  from (select * from snapshot.snap_summary_statement as c1 where snapshot_id = %ld and snap_node_name = '%s') t1"
+        "  from (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join "
-        " (select * from snapshot.snap_summary_statement as c2 where snapshot_id = %ld and snap_node_name = '%s') t2"
+        " (select * from snapshot.snap_summary_statement where snapshot_id = %ld and snap_node_name = '%s') t2"
         " on t1.snap_unique_sql_id = t2.snap_unique_sql_id and t1.snap_user_id = t2.snap_user_id order by \"Total "
         "Elapse Time(us)\" desc limit 200;",
         params->begin_snap_id,
@@ -2116,7 +2165,7 @@ static void GlobalTableIndex(report_params* params)
         "WHERE i.snapshot_id = %ld) AS snap_1"
         " ON (snap_2.snap_relid = snap_1.snap_relid AND snap_2.snap_indexrelid = snap_1.snap_indexrelid AND "
         " snap_2.db_name = snap_1.db_name AND snap_2.snap_schemaname = snap_1.snap_schemaname) "
-        " order by snap_2.db_name, snap_2.snap_schemaname limit 200;",
+        " order by \"Index Tuple Read\" limit 200;",
         params->end_snap_id,
         params->end_snap_id,
         params->begin_snap_id,
@@ -2179,50 +2228,6 @@ static void GetObjectStatData(report_params* params)
     }
 }
 
-/*
- * BackgroundWriter Stat will be reset when the stat_reset is updated
- */
-static void BackgroundWriterStat(report_params* params)
-{
-    dashboard* dash = CreateDash();
-    char* desc = NULL;
-    StringInfoData query;
-    initStringInfo(&query);
-    appendStringInfo(&query,
-        "select (snap_2.snap_checkpoints_timed - coalesce(snap_1.snap_checkpoints_timed, 0)) "
-        "AS \"Checkpoints Timed\","
-        " (snap_2.snap_checkpoints_req - coalesce(snap_1.snap_checkpoints_req, 0)) AS \"Checkpoints Require\","
-        " (snap_2.snap_checkpoint_write_time - coalesce(snap_1.snap_checkpoint_write_time, 0))"
-        " AS \"Checkpoint Write Time(ms)\","
-        " (snap_2.snap_checkpoint_sync_time - coalesce(snap_1.snap_checkpoint_sync_time, 0))"
-        " AS \"Checkpoint Sync Time(ms)\","
-        " (snap_2.snap_buffers_checkpoint - coalesce(snap_1.snap_buffers_checkpoint, 0)) AS \"Buffers Checkpoint\","
-        " (snap_2.snap_buffers_clean - coalesce(snap_1.snap_buffers_clean, 0)) AS \"Buffers Clean\","
-        " (snap_2.snap_maxwritten_clean - coalesce(snap_1.snap_maxwritten_clean, 0)) AS \"Maxwritten Clean\","
-        " (snap_2.snap_buffers_backend - coalesce(snap_1.snap_buffers_backend, 0)) AS \"Buffers Backend\","
-        " (snap_2.snap_buffers_backend_fsync - coalesce(snap_1.snap_buffers_backend_fsync, 0))"
-        " AS \"Buffers Backend Fsync\","
-        " (snap_2.snap_buffers_alloc - coalesce(snap_1.snap_buffers_alloc, 0)) AS \"Buffers Alloc\","
-        " to_char(snap_2.snap_stats_reset, 'YYYY-MM-DD HH24:MI:SS') AS \"Stats Reset\" from"
-        " (select * from snapshot.snap_global_bgwriter_stat where snapshot_id = %ld and snap_node_name = '%s') snap_2 "
-        " LEFT JOIN (select * from snapshot.snap_global_bgwriter_stat where "
-        " snapshot_id = %ld and snap_node_name = '%s') snap_1 on snap_2.snapshot_id = snap_1.snapshot_id and"
-        " snap_2.snap_node_name = snap_1.snap_node_name and snap_2.snap_stats_reset = snap_1.snap_stats_reset"
-        " limit 200;",
-        params->end_snap_id,
-        params->report_node,
-        params->begin_snap_id,
-        params->report_node);
-
-    GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
-    dash->dashTitle = "Utility status";
-    dash->tableTitle = "Background writer stat";
-    desc = "The information of background writer statistics";
-    dash->desc = lappend(dash->desc, desc);
-    GenReport::add_data(dash, &params->Contents);
-
-    pfree_ext(query.data);
-}
 
 static void ReplicationStat(report_params* params)
 {
@@ -2262,9 +2267,6 @@ static void GetUtilityStatus(report_params* params)
     char* desc = NULL;
     StringInfoData query;
     initStringInfo(&query);
-
-    /* background writer stat */
-    BackgroundWriterStat(params);
 
     /* replication slot */
     appendStringInfo(&query,
@@ -2362,7 +2364,9 @@ static void GetClusterSqlDetailData(report_params* params)
     initStringInfo(&query);
 
     appendStringInfo(&query,
-        "select (t2.snap_unique_sql_id) as \"Unique SQL Id\", (t2.snap_query) as \"SQL Text\" "
+        "select (t2.snap_unique_sql_id) as \"Unique SQL Id\", "
+        "(t2.snap_node_name) as \"Node Name\", (t2.snap_user_name) as \"User Name\", "
+        "(t2.snap_query) as \"SQL Text\" "
         "from snapshot.snap_summary_statement t2 where snapshot_id = %ld ",
         params->end_snap_id);
     char* uniqueIDStr = GetUniqueIDStr(params->Contents);
@@ -2388,7 +2392,9 @@ static void GetNodeSqlDetailData(report_params* params)
     initStringInfo(&query);
 
     appendStringInfo(&query,
-        "select (t2.snap_unique_sql_id) as \"Unique SQL Id\", (t2.snap_query) as \"SQL Text\" "
+        "select (t2.snap_unique_sql_id) as \"Unique SQL Id\", "
+        "(t2.snap_user_name) as \"User Name\", "
+        "(t2.snap_query) as \"SQL Text\" "
         " from snapshot.snap_summary_statement t2 where snapshot_id = %ld "
         "and snap_node_name = '%s' ",
         params->end_snap_id,
@@ -2436,8 +2442,7 @@ void GenReport::GetTimeModelData(report_params* params)
 
     /* Time Model order by value */
     appendStringInfo(&query,
-        "select t2.snap_node_name as \"Node Name\","
-        " t2.snap_stat_name as \"Stat Name\", (t2.snap_value - coalesce(t1.snap_value, 0)) as \"Value(us)\" "
+        "select t2.snap_stat_name as \"Stat Name\", (t2.snap_value - coalesce(t1.snap_value, 0)) as \"Value(us)\" "
         " from (select * from snapshot.snap_global_instance_time where snapshot_id = %ld and snap_node_name = '%s') t1"
         " right join (select * from snapshot.snap_global_instance_time where snapshot_id = %ld and"
         " snap_node_name = '%s') t2 on t1.snap_stat_name = t2.snap_stat_name order by \"Value(us)\" desc limit 200;",
@@ -2447,7 +2452,7 @@ void GenReport::GetTimeModelData(report_params* params)
         params->report_node);
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
     dash->dashTitle = "Time Model";
-    dash->tableTitle = "Time model(node)";
+    dash->tableTitle = "Time model";
     desc = "time model order by value in node";
     dash->desc = lappend(dash->desc, desc);
     GenReport::add_data(dash, &params->Contents);
@@ -2979,13 +2984,15 @@ void GenReport::get_summary_database_stat(report_params* params)
         " (snap_2.snap_blk_write_time - coalesce(snap_1.snap_blk_write_time, 0)) as \"Blk Write Time\", "
         " to_char(snap_2.snap_stats_reset, 'YYYY-MM-DD HH24:MI:SS') AS \"Stats Reset\" ");
     appendStringInfo(&query,
-        "from (select * from snapshot.snap_summary_stat_database where snapshot_id = %ld) snap_2 ",
+        "from (select * from snapshot.snap_summary_stat_database where snapshot_id = %ld "
+        "and snap_datname != 'template0' and snap_datname != 'template1') snap_2 ",
         params->end_snap_id);
     appendStringInfo(&query,
         "left join (select * from snapshot.snap_summary_stat_database "
         "where snapshot_id = %ld) snap_1 ",
         params->begin_snap_id);
-    appendStringInfo(&query, "on snap_1.snap_datname = snap_2.snap_datname order by snap_2.snap_datname;");
+    appendStringInfo(&query, "on snap_1.snap_datname = snap_2.snap_datname order by "
+        "\"Xact Commit\" desc;");
 
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
     pfree(query.data);
@@ -3033,7 +3040,7 @@ static void get_summary_load_profile_db_cpu_time(report_params* params, dashboar
     initStringInfo(&query);
 
     // diff (snap_2 db cpu and snap_1 db cpu)
-    appendStringInfo(&query, "select 'CPU Time(microseconds)' as \"%s\", ", g_metric_name);
+    appendStringInfo(&query, "select 'CPU Time(us)' as \"%s\", ", g_metric_name);
     appendStringInfo(&query,
         "((snap_2.cpu_time - snap_1.cpu_time) / (%ld))::int8 as \"%s\", ",
         get_report_snap_gap(params),
@@ -3073,7 +3080,7 @@ static void get_summary_load_profile_db_time(report_params* params, dashboard* d
     initStringInfo(&query);
 
     // diff (snap_2 db time and snap_1 db time)
-    appendStringInfo(&query, "select 'DB Time(microseconds)' as \"%s\", ", g_metric_name);
+    appendStringInfo(&query, "select 'DB Time(us)' as \"%s\", ", g_metric_name);
     appendStringInfo(&query,
         "((snap_2.db_time - snap_1.db_time) / (%ld))::int8 as \"%s\", ",
         get_report_snap_gap(params),
@@ -3244,7 +3251,7 @@ static void get_summary_load_profile_logins(report_params* params, dashboard* da
 
     initStringInfo(&query);
     appendStringInfo(&query,
-        "select 'Logons' as \"%s\", "
+        "select 'Logins' as \"%s\", "
         "    round((snap_2.login_counter - snap_1.login_counter) / %ld)"
         "        as \"%s\", "
         "    round((snap_2.login_counter - snap_1.login_counter) / %ld)"
@@ -3348,19 +3355,12 @@ static void get_summary_load_profile_sql_resp_time(report_params* params, dashbo
     initStringInfo(&query);
     appendStringInfo(&query,
         "select "
-        "unnest(array['SQL response time P95', 'SQL response time P80']) as \"%s\", "
-        "round(unnest(array[snap_P95, snap_P80]) / %ld) as \"%s\", "
-        "round(unnest(array[snap_P95, snap_P80]) / %ld) as \"%s\", "
-        "round(unnest(array[snap_P95, snap_P80]) / %lu) as \"%s\" "
+        "unnest(array['SQL response time P95(us)', 'SQL response time P80(us)']) as \"%s\", "
+        "round(unnest(array[snap_P95, snap_P80])) as \"%s\" "
         "from "
         "snapshot.snap_statement_responsetime_percentile where snapshot_id = %ld",
         g_metric_name,
-        get_report_snap_gap(params),
-        g_per_second_str,
-        get_report_snap_diff_trx_count(params),
-        g_per_trx_str,
-        get_report_snap_diff_sql_count(params),
-        g_per_exec_str,
+        g_value_str,
         params->end_snap_id);
 
     GenReport::get_query_data(query.data, !list_length(dash->table), &query_result, &dash->type);
@@ -3416,7 +3416,11 @@ static void get_summary_load_profile_part(report_params* params, dashboard* dash
     if (update_report_snap_gap_param(params, "snap_summary_workload_transaction")) {
         get_summary_load_profile_trx(params, dash);
     }
+}
 
+/* Used to store tables with only one column of values */
+static void get_summary_load_profile_part_single_value(report_params* params, dashboard* dash)
+{
     /* SQL response time P90/P85 */
     if (update_report_snap_gap_param(params, "snap_statement_responsetime_percentile")) {
         get_summary_load_profile_sql_resp_time(params, dash);
@@ -3460,6 +3464,14 @@ void GenReport::get_summary_load_profile(report_params* params)
     params->snap_diff_trx_count = snap_diff_trx_count;
     params->snap_diff_sql_count = snap_diff_sql_count;
     get_summary_load_profile_part(params, dash);
+    GenReport::add_data(dash, &params->Contents);
+
+    dash = CreateDash();
+    desc = "SQL response time P80/P95";
+    dash->dashTitle = "Summary";
+    dash->tableTitle = "Load Profile";
+    dash->desc = lappend(dash->desc, (void*)desc);
+    get_summary_load_profile_part_single_value(params, dash);
     GenReport::add_data(dash, &params->Contents);
 }
 
@@ -3636,9 +3648,9 @@ static void get_summary_top10event_waitevent(report_params* params)
 
         appendStringInfo(&query,
             "select snap_event as \"Event\", snap_wait as \"Waits\", "
-            "       snap_total_wait_time as \"Total Wait Times(us)\", "
-            "       round(snap_total_wait_time/snap_wait) as \"Wait Avg(us)\", "
-            "       snap_type as \"Wait Class\" "
+            "       snap_total_wait_time as \"Total Wait Time(us)\", "
+            "       round(snap_total_wait_time/snap_wait) as \"Avg Wait Time(us)\", "
+            "       snap_type as \"Type\" "
             "from ("
             "  select snap_2.snap_event as snap_event, snap_2.snap_type snap_type, "
             "         snap_2.snap_wait - snap_1.snap_wait as snap_wait, "
@@ -3696,12 +3708,12 @@ static void get_summary_wait_classes(report_params* params)
 
     appendStringInfo(&query,
         "select "
-        "    snap_2.type as \"Wait Class\", "
+        "    snap_2.type as \"Type\", "
         "    (snap_2.wait - snap_1.wait) as \"Waits\", "
         "    (snap_2.total_wait_time - snap_1.total_wait_time) "
         "        as \"Total Wait Time(us)\", "
         "    round((snap_2.total_wait_time - snap_1.total_wait_time) / "
-        "        greatest((snap_2.wait - snap_1.wait), 1)) as \"Wait Avg(us)\" "
+        "        greatest((snap_2.wait - snap_1.wait), 1)) as \"Avg Wait Time(us)\" "
         "from "
         "    (select "
         "        snap_type as type, "
@@ -3732,7 +3744,7 @@ static void AppendQueryOne(StringInfoData& query)
 {
     appendStringInfo(&query,
         "select "
-        "    snap_2.cpus as \"Cpus\", "
+        "    snap_2.cpus as \"CPUs\", "
         "    snap_2.cores as \"Cores\", "
         "    snap_2.sockets as \"Sockets\", "
         "    snap_1.load as \"Load Average Begin\", "
@@ -4406,7 +4418,7 @@ Datum generate_wdr_report(PG_FUNCTION_ARGS)
 
     GenReport::get_report_data(&params);
     MemoryContext spi_context = MemoryContextSwitchTo(old_context);
-    char* result_str = GenReport::GenerateHtmlReport(params.Contents);
+    char* result_str = GenReport::GenerateHtmlReport(&params);
     (void)MemoryContextSwitchTo(spi_context);
     SPI_STACK_LOG("finish", NULL, NULL);
     (void)SPI_finish();

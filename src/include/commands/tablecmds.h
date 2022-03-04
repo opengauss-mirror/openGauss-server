@@ -128,6 +128,7 @@ extern bool checkRelationLocalIndexesUsable(Relation relation);
 extern List* GetPartitionkeyPos(List* partitionkeys, List* schema);
 
 extern void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *partitionList, bool isPartition = true);
+extern void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partitionList);
 extern void clearAttrInitDefVal(Oid relid);
 
 extern void AlterDfsCreateTables(Oid relOid, Datum toast_options, CreateStmt* mainTblStmt);
@@ -146,7 +147,8 @@ extern Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval
 extern void ATExecEnableDisableRls(Relation rel, RelationRlsStatus changeType, LOCKMODE lockmode);
 extern bool isQueryUsingTempRelation(Query *query);
 extern void addToastTableForNewPartition(Relation relation, Oid newPartId, bool isForSubpartition = false);
-extern void fastDropPartition(Relation rel, Oid partOid, const char* stmt, Oid intervalPartOid = InvalidOid);
+extern void fastDropPartition(Relation rel, Oid partOid, const char *stmt, Oid intervalPartOid = InvalidOid,
+    bool sendInvalid = true);
 extern void ExecutePurge(PurgeStmt* stmt);
 extern void ExecuteTimeCapsule(TimeCapsuleStmt* stmt);
 extern void truncate_check_rel(Relation rel);

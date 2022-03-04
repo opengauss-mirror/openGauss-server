@@ -798,7 +798,7 @@ static void InitSecurityConfigureNamesInt()
             &u_sess->attr.attr_security.Audit_DDL,
             12295,
             0,
-            2097151,
+            67108863,
             NULL,
             NULL,
             NULL},
@@ -886,6 +886,36 @@ static void InitSecurityConfigureNamesInt()
             10000,
             2048,
             134217728, /* 134217728 is the max iteration count supported. */
+            NULL,
+            NULL,
+            NULL},
+
+        {{"audit_xid_info",
+            PGC_SIGHUP,
+            NODE_ALL,
+            AUDIT_OPTIONS,
+            gettext_noop("whether record xid info in audit log."),
+            NULL,
+            0},
+            &u_sess->attr.attr_security.audit_xid_info,
+            0,
+            0,
+            1,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"audit_thread_num",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            AUDIT_OPTIONS,
+            gettext_noop("Sets the number of audit threads."),
+            NULL,
+            0},
+            &g_instance.attr.attr_security.audit_thread_num,
+            1,
+            1,
+            48,
             NULL,
             NULL,
             NULL},
@@ -1262,18 +1292,17 @@ static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
     int i = 0;
     char* ptok = NULL;
     const char* ssl_ciphers_list[] = {
-        "DHE-RSA-AES256-GCM-SHA384",
-        "DHE-RSA-AES128-GCM-SHA256",
-        "DHE-RSA-AES256-CCM",
-        "DHE-RSA-AES128-CCM",
-        "ECDHE-RSA-AES256-GCM-SHA384",
         "ECDHE-RSA-AES128-GCM-SHA256",
-        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES256-GCM-SHA384",
         "ECDHE-ECDSA-AES128-GCM-SHA256",
-        NULL
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "DHE-RSA-AES128-GCM-SHA256",
+        "DHE-RSA-AES256-GCM-SHA384"
     };
+    int maxCnt = lengthof(ssl_ciphers_list);
+
     if (*newval == NULL || **newval == '\0' || **newval == ';') {
-        ereport(ERROR, (errmsg("sslciphers can not be null")));
+        return false;
     } else if (strcasecmp(*newval, "ALL") == 0) {
         return true;
     } else {
@@ -1286,25 +1315,19 @@ static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
                 break;
             }
             if (cipherStr == strchr(cipherStr, ';')) {
-                ereport(ERROR, (errmsg("unrecognized ssl ciphers name: \"%s\"", *newval)));
+                return false;
             }
             cipherStr = strchr(cipherStr, ';');
         }
+
+        if (counter > maxCnt) {
+            return false;
+        }
         ciphers_list = static_cast<char**>(palloc(counter * sizeof(char*)));
-
-        Assert(ciphers_list != NULL);
-        if (ciphers_list == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("malloc failed")));
-        }
-
         cipherStr_tmp = pstrdup(*newval);
-        if (cipherStr_tmp == NULL) {
-            pfree_ext(ciphers_list);
-            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("malloc failed")));
-        }
         token = strtok_r(cipherStr_tmp, ";", &ptok);
         while (token != NULL) {
-            for (int j = 0; ssl_ciphers_list[j] != NULL; j++) {
+            for (int j = 0; j < maxCnt; j++) {
                 if (strlen(ssl_ciphers_list[j]) == strlen(token) &&
                     strncmp(ssl_ciphers_list[j], token, strlen(token)) == 0) {
                     ciphers_list[i] = const_cast<char*>(ssl_ciphers_list[j]);
@@ -1312,16 +1335,11 @@ static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
                     break;
                 }
             }
+
             if (!find_ciphers_in_list) {
-                const int maxCipherStrLen = 64;
-                char errormessage[maxCipherStrLen] = {0};
-                errno_t errorno = EOK;
-                errorno = strncpy_s(errormessage, sizeof(errormessage), token, sizeof(errormessage) - 1);
-                securec_check(errorno, cipherStr_tmp, ciphers_list, "\0");
-                errormessage[maxCipherStrLen - 1] = '\0';
                 pfree_ext(cipherStr_tmp);
                 pfree_ext(ciphers_list);
-                ereport(ERROR, (errmsg("unrecognized ssl ciphers name: \"%s\"", errormessage)));
+                return false;
             }
             token = strtok_r(NULL, ";", &ptok);
             i++;
@@ -1332,3 +1350,4 @@ static bool check_ssl_ciphers(char** newval, void** extra, GucSource)
     pfree_ext(ciphers_list);
     return true;
 }
+

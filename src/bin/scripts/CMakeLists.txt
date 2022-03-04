@@ -95,8 +95,10 @@ set(TGT_scripts_INC
 set(scripts_DEF_OPTIONS ${MACRO_OPTIONS})
 set(scripts_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(scripts_LINK_OPTIONS ${BIN_LINK_OPTIONS})
-set(scripts_LINK_LIBS libelog.a libpgport.a -lpq -lcrypt -ldl -lm -lssl -lcrypto  -lsecurec -pthread -lrt -lz -lminiunz -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss)
-
+set(scripts_LINK_LIBS libelog.a libpgport.a -lpq -lcrypt -ldl -lm -lssl -lcrypto  -l${SECURE_C_CHECK} -pthread -lrt -lz -lminiunz)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    list(APPEND scripts_LINK_LIBS -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss)
+endif()
 add_bintarget(createdb TGT_createdb_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(createdb elog_static pgport_static pq)
 target_link_directories(createdb PUBLIC

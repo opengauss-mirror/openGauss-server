@@ -19,18 +19,18 @@ set -e
 kernel=""
 if [ -f "/etc/euleros-release" ]
 then
-	kernel=$(cat /etc/euleros-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+    kernel=$(cat /etc/euleros-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 elif [ -f "/etc/openEuler-release" ]
 then
-	kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+    kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 elif [ -f "/etc/centos-release" ]
 then
-	kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+    kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 elif [ -f "/etc/kylin-release" ]
 then
-	kernel=$(cat /etc/kylin-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+    kernel=$(cat /etc/kylin-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 else
-	kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
+    kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
 fi
 
 ## to solve kernel="name=openeuler"
@@ -51,7 +51,7 @@ plat_form_str=""
 ##################################################################################
 if [ "$kernel"x = "red"x ]
 then
-	plat_form_str=redhat6.4_"$cpu_bit"
+    plat_form_str=redhat6.4_"$cpu_bit"
 fi
 
 ##################################################################################
@@ -60,7 +60,7 @@ fi
 ##################################################################################
 if [ "$kernel"x = "fedora"x ]
 then
-	plat_form_str=redhat6.4_"$cpu_bit"
+    plat_form_str=redhat6.4_"$cpu_bit"
 fi
 
 ##################################################################################
@@ -69,13 +69,8 @@ fi
 ##################################################################################
 if [ "$kernel"x = "suse"x ]
 then
-	version=$(lsb_release -r | awk -F ' ' '{print $2}')
-	if [ "$version"x = "12"x ]
-	then
-		plat_form_str=suse12_"$cpu_bit"
-	else
-		plat_form_str=suse11_sp1_"$cpu_bit"
-	fi
+    version=$(lsb_release -r | awk -F ' ' '{print $2}')
+    plat_form_str=suse${version%%\.*}_sp${version##*\.}_"$cpu_bit"
 fi
 
 ##################################################################################
@@ -84,8 +79,11 @@ fi
 ##################################################################################
 if [ "$kernel"x = "euleros"x ]
 then
-	version=$(cat /etc/euleros-release | awk -F '(' '{print $2}'| awk -F ')' '{print $1}' | tr A-Z a-z)
-	plat_form_str=euleros2.0_"$version"_"$cpu_bit"
+    major_version=$(cat /etc/euleros-release | awk  '{print $3}')
+    minor_version=$(cat /etc/euleros-release | awk -F '(' '{print $2}'| awk -F ')' '{print $1}' | tr A-Z a-z)
+    minor_version=${minor_version%x86_64}
+    minor_version=${minor_version%aarch64}
+    plat_form_str=euleros${major_version}_"$minor_version"_"$cpu_bit"
 fi
 
 ##################################################################################
@@ -94,11 +92,11 @@ fi
 ##################################################################################
 if [ "$kernel"x = "deepin"x ]
 then
-	if [ X"$cpu_bit" = X"unknown" ]
-	then
-		cpu_bit=$(uname -m)
-	fi
-	plat_form_str=deepin15.2_"$cpu_bit"
+    if [ X"$cpu_bit" = X"unknown" ]
+    then
+        cpu_bit=$(uname -m)
+    fi
+    plat_form_str=deepin15.2_"$cpu_bit"
 fi
 ##################################################################################
 # centos7.6_x86_64 platform
@@ -107,12 +105,12 @@ fi
 ##################################################################################
 if [ "$kernel"x = "centos"x ]
 then
-	if [ X"$cpu_bit" = X"aarch64" ]
-	then
-		plat_form_str=centos_7.5_aarch64
+    if [ X"$cpu_bit" = X"aarch64" ]
+    then
+        plat_form_str=centos_7.5_aarch64
     else
         plat_form_str=centos7.6_"$cpu_bit"
-	fi
+    fi
 fi
 
 
@@ -139,14 +137,23 @@ if [ "$kernel"x = "kylin"x ];then
 fi
 
 ##################################################################################
+# ubuntu platform
+# the result form like this: ubuntu_x86_64
+##################################################################################
+if [ "$kernel"x = "ubuntu"x ]
+then
+    plat_form_str=ubuntu18.04_"$cpu_bit"
+fi
+
+##################################################################################
 #
 # other platform 
 #
 ##################################################################################
 if [ -z "$plat_form_str" ]
 then
-	echo "Failed"
+    echo "Failed"
 else
-	echo $plat_form_str
+    echo $plat_form_str
 fi
 

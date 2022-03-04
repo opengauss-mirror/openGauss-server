@@ -51,7 +51,7 @@ extern bool HaveActiveCoordinatorPreparedStatement(const char* stmt_name);
 
 #ifdef PGXC
 extern DatanodeStatement* FetchDatanodeStatement(const char* stmt_name, bool throwError);
-extern bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid);
+extern bool ActivateDatanodeStatementOnNode(const char* stmt_name, int nodeIdx);
 extern void DeActiveAllDataNodeStatements(void);
 extern bool HaveActiveDatanodeStatements(void);
 extern void DropDatanodeStatement(const char* stmt_name);

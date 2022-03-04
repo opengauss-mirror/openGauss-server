@@ -77,4 +77,5 @@ extern List* check_random_expr(Node* node);
 extern List* check_subplan_expr(Node* node, bool recurseSubPlan = false);
 extern bool check_varno(Node* qual, int varno, int varlevelsup);
 extern List* check_vartype(Node* node);
+extern Node *LocateOpExprLeafVar(Node *node);
 #endif /* VAR_H */

@@ -51,7 +51,12 @@
 #include "gssignal/gs_signal.h"
 #include "utils/pg_locale.h"
 #include "gs_policy/policy_common.h"
+#ifdef ENABLE_GSS
+#include "gssapi/gssapi_krb5.h"
+#endif /* ENABLE_GSS */
+#ifdef KRB5
 #include "krb5.h"
+#endif
 #ifndef WIN32_ONLY_COMPILER
 #include "dynloader.h"
 #else
@@ -473,8 +478,10 @@ void gs_thread_exit(int code)
     /* free the locale cache */
     freeLocaleCache(true);
 
+#ifdef ENABLE_LLVM_COMPILE
     /* release llvm context memory */
     CodeGenThreadTearDown();
+#endif
 
     CancelAutoAnalyze();
 
@@ -482,6 +489,12 @@ void gs_thread_exit(int code)
 
     if (t_thrd.bn != NULL) {
         t_thrd.bn->dead_end = true;
+    } else if (!t_thrd.is_inited) {
+        /* if thread has error befor get backend, get backend from childSlot. */
+        Backend* bn = GetBackend(t_thrd.child_slot);
+        if (bn != NULL) {
+            bn->dead_end = true;
+        }
     }
 
     /* release the signal slot in signal_base */

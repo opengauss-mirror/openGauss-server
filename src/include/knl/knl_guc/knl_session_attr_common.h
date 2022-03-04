@@ -91,9 +91,6 @@ typedef struct knl_session_attr_common {
     int Log_RotationSize;
     int max_function_args;
     int max_user_defined_exception;
-    int pset_lob_length;
-    char* pset_num_format;
-    int pset_num_width;
     int tcp_keepalives_idle;
     int tcp_keepalives_interval;
     int tcp_keepalives_count;
@@ -222,9 +219,9 @@ typedef struct knl_session_attr_common {
     char* node_name;
 #ifndef ENABLE_MULTIPLE_NODES
     bool plsql_show_all_error;
+#endif
     uint32 extension_session_vars_array_size;
     void** extension_session_vars_array;
-#endif
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

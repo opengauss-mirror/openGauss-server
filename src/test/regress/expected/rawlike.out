@@ -1,0 +1,32 @@
+create database utf8test template template0 encoding 'utf8';
+\c utf8test
+create table rawlike_t1(c1 raw);
+insert into rawlike_t1 values(hextoraw('D'));
+select * from rawlike_t1 where c1 like hextoraw('D');
+ c1 
+----
+ 0D
+(1 row)
+
+insert into rawlike_t1 values(hextoraw('D9'));
+select * from rawlike_t1 where c1 like hextoraw('D9');
+ c1 
+----
+ D9
+(1 row)
+
+insert into rawlike_t1 values(hextoraw('D9a'));
+select * from rawlike_t1 where c1 like hextoraw('D9a');
+  c1  
+------
+ 0D9A
+(1 row)
+
+select * from rawlike_t1 where c1 like hextoraw('D9f');
+ c1 
+----
+(0 rows)
+
+drop table rawlike_t1;
+\c postgres
+drop database utf8test;

@@ -5,8 +5,8 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * src/include/executor/spi.h
  *
  * -------------------------------------------------------------------------
@@ -134,7 +134,7 @@ extern void SPI_cursor_move(Portal portal, bool forward, long count);
 extern void SPI_scroll_cursor_fetch(Portal, FetchDirection direction, long count);
 extern void SPI_scroll_cursor_move(Portal, FetchDirection direction, long count);
 extern void SPI_cursor_close(Portal portal);
-extern void SPI_start_transaction(void);
+extern void SPI_start_transaction(List* transactionHead);
 extern void SPI_stp_transaction_check(bool read_only, bool savepoint = false);
 extern void SPI_commit();
 extern void SPI_rollback();

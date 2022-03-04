@@ -19,6 +19,52 @@
 #include "lib/stringinfo.h"
 #include "access/ustore/undo/knl_uundoxlog.h"
 
+const char* undo::undo_xlog_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+
+    switch (info) {
+        case XLOG_UNDO_UNLINK:
+        {
+            return "undo_unlink";
+            break;
+        }
+        case XLOG_UNDO_EXTEND:
+        {
+            return "undo_extend";
+            break;
+        }
+        case XLOG_UNDO_CLEAN:
+        {
+            return "undo_clean";
+            break;
+        }
+        case XLOG_SLOT_CLEAN:
+        {
+            return "undo_slot_clean";
+            break;
+        }
+        case XLOG_UNDO_DISCARD:
+        {
+            return "undo_slot_discard";
+            break;
+        }
+        case XLOG_SLOT_EXTEND:
+        {
+            return "undo_slot_extend";
+            break;
+        }
+        case XLOG_SLOT_UNLINK:
+        {
+            return "undo_slot_unlink";
+            break;
+        }
+        default:
+            break;
+    }
+    return "unknown_type";
+}
+
 void undo::UndoXlogDesc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
@@ -87,6 +133,17 @@ void undo::UndoXlogDesc(StringInfo buf, XLogReaderState *record)
         }
     }
 }
+
+const char* undo::undo_xlog_roll_back_finish_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_ROLLBACK_FINISH) {
+        return "undo_rollback_finish";
+    } else {
+        return "unknown_type";
+    }
+}
+
 
 void undo::UndoXlogRollbackFinishDesc(StringInfo buf, XLogReaderState *record)
 {

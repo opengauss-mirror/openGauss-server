@@ -11,12 +11,14 @@
 <refsynopsisdiv>
 <synopsis>
 VACUUM [ ( { FULL | FREEZE | VERBOSE | {ANALYZE | ANALYSE }} [,...] ) ]
-    [ table_name [ (column_name [, ...] ) ] ] [ PARTITION ( partition_name ) ];
-VACUUM [ FULL [ COMPACT ] ] [ FREEZE ] [ VERBOSE ] [ table_name ] [ PARTITION ( partition_name ) ];
+    [ table_name [ (column_name [, ...] ) ] ] [ PARTITION ( partition_name ) | SUBPARTITION ( subpartition_name ) ];
+VACUUM [ FULL [COMPACT] ] [ FREEZE ] [ VERBOSE ] [ table_name ] 
+    [ PARTITION ( partition_name )  | SUBPARTITION ( subpartition_name ) ];
 VACUUM [ FULL ] [ FREEZE ] [ VERBOSE ] { ANALYZE | ANALYSE } [ VERBOSE ] 
-    [ table_name [ (column_name [, ...] ) ] ] [ PARTITION ( partition_name ) ];
+    [ table_name [ (column_name [, ...] ) ] ] [ PARTITION ( partition_name ) | SUBPARTITION ( subpartition_name ) ];
 VACUUM DELTAMERGE [ table_name ];
 VACUUM HDFSDIRECTORY [ table_name ];
+NOTICE: 'SUBPARTITION ( subpartition_name )' is only avaliable in CENTRALIZED mode!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

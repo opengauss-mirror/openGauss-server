@@ -25,11 +25,14 @@
 #include "access/gtm.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
+#include "access/slru.h"
 #include "miscadmin.h"
 #include "pgxc/pgxc.h"
 #include "storage/procarray.h"
 #include "utils/guc.h"
 #include "utils/snapmgr.h"
+#include "replication/walreceiver.h"
+#include "storage/procarray.h"
 
 #ifdef PGXC
 #include "utils/builtins.h"
@@ -102,12 +105,16 @@ RETRY:
         } else {
             xid = recentGlobalXmin;
         }
+    } else if (snapshot != NULL && snapshot->satisfies == SNAPSHOT_DECODE_MVCC) {
+        xid = GetReplicationSlotCatalogXmin();
+    } else if (snapshot != NULL && IsMVCCSnapshot(snapshot)) {
+        xid = snapshot->xmin;
     } else {
         xid = u_sess->utils_cxt.RecentXmin;
     }
 
     Assert(TransactionIdIsValid(xid));
-    if ((snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) && TransactionIdPrecedes(transactionId, xid)) {
+    if ((!IS_DISASTER_RECOVER_MODE) && (snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) && TransactionIdPrecedes(transactionId, xid)) {
         if (isCommit) {
             result = COMMITSEQNO_FROZEN;
         } else {
@@ -131,7 +138,15 @@ RETRY:
         }
         PG_CATCH();
         {
-            if (GTM_LITE_MODE && retry_times == 0) {
+            if ((IS_CN_DISASTER_RECOVER_MODE || IS_DISASTER_RECOVER_MODE) &&
+                t_thrd.xact_cxt.slru_errcause == SLRU_OPEN_FAILED)
+            {
+                t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+                FlushErrorState();
+                ereport(LOG, (errmsg("TransactionIdGetCommitSeqNo: "
+                     "Treat CSN as frozen when csnlog file cannot be found for the given xid: %lu", transactionId)));
+                result = COMMITSEQNO_FROZEN;
+            } else if (GTM_LITE_MODE && retry_times == 0) {
                 t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
                 FlushErrorState();
                 ereport(LOG, (errmsg("recentGlobalXmin has been updated, csn log may be truncated, try clog, xid"
@@ -184,16 +199,6 @@ static CommitSeqNo TransactionIdGetCommitSeqNoForGSClean(TransactionId transacti
     if (!TransactionIdIsValid(xid)) {
         /* Fetch the newest global xmin from gtm and use it. */
         TransactionId gtm_gloabl_xmin = InvalidTransactionId;
-        if (GTM_MODE) {
-            gtm_gloabl_xmin = GetGTMGlobalXmin();
-            ereport(LOG, (errmsg("For gs_clean, fetch the recent global xmin %lu if"
-                                 "it is not fetched before.",
-                                 gtm_gloabl_xmin)));
-            TransactionId local_xmin = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
-            if (TransactionIdPrecedes(local_xmin, gtm_gloabl_xmin)) {
-                gtm_gloabl_xmin = local_xmin;
-            }
-        }
 
         if (TransactionIdIsValid(gtm_gloabl_xmin)) {
             (void)pg_atomic_compare_exchange_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin, &xid,
@@ -206,8 +211,6 @@ static CommitSeqNo TransactionIdGetCommitSeqNoForGSClean(TransactionId transacti
              */
             xid = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
             ereport(DEBUG1, (errmsg("For gs_clean, fetch the recent global xmin %lu from recent local xmin.", xid)));
-            if (GTM_MODE)
-                miss_global_xmin = true;
         }
     }
 
@@ -411,7 +414,7 @@ bool UHeapTransactionIdDidCommit(TransactionId transactionId)
         return true;
     }
     if (TransactionIdIsNormal(transactionId) &&
-        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo))) {
+        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo))) {
         return true;
     }
     return TransactionIdDidCommit(transactionId);
@@ -478,7 +481,7 @@ bool UHeapTransactionIdDidAbort(TransactionId transactionId)
     if (transactionId == FrozenTransactionId) {
         return false;
     }
-    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
     if (TransactionIdIsNormal(transactionId) && TransactionIdPrecedes(transactionId, oldestXidInUndo)) {
         /* The transaction must be committed or rollback finish, not abort. */
         ereport(PANIC, (errmsg("The transaction cannot rollback, transactionId = %lu, oldestXidInUndo = %lu.",
@@ -665,24 +668,6 @@ XLogRecPtr TransactionIdGetCommitLSN(TransactionId xid)
     (void)CLogGetStatus(xid, &result);
 
     return result;
-}
-
-/*
- * TransactionIdLogicallyPrecedes --- is id1 logically < id2?
- */
-bool TransactionIdLogicallyPrecedes(TransactionId id1, TransactionId id2)
-{
-    /*
-     * If either ID is a permanent XID then we can just do unsigned
-     * comparison.	If both are normal, do a modulo-2^31 comparison.
-     */
-    int32 diff;
-
-    if (!TransactionIdIsNormal(id1) || !TransactionIdIsNormal(id2))
-        return (id1 < id2);
-
-    diff = (int32)(id1 - id2);
-    return (diff < 0);
 }
 
 /*

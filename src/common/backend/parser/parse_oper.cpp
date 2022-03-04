@@ -963,8 +963,8 @@ static Oid find_oper_cache_entry(OprCacheKey* key)
             hash_create("Operator lookup cache", 256, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
         /* Arrange to flush cache on pg_operator and pg_cast changes */
-        CacheRegisterSyscacheCallback(OPERNAMENSP, InvalidateOprCacheCallBack, (Datum)0);
-        CacheRegisterSyscacheCallback(CASTSOURCETARGET, InvalidateOprCacheCallBack, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(OPERNAMENSP, InvalidateOprCacheCallBack, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(CASTSOURCETARGET, InvalidateOprCacheCallBack, (Datum)0);
     }
 
     /* Look for an existing entry */

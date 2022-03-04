@@ -327,7 +327,7 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     StringArgs &new_args)
 {
     bool has_user_set_cek = false;
-
+    
     EncryptionGlobalHookExecutor *encryption_global_hook_executor =
         dynamic_cast<EncryptionGlobalHookExecutor *>(m_global_hook_executor);
     if (!encryption_global_hook_executor) {

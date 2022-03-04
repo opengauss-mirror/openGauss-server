@@ -20,6 +20,8 @@ CREATE [ LARGE ] SEQUENCE <replaceable class="parameter">name</replaceable> [ IN
     [ MINVALUE <replaceable class="parameter">minvalue</replaceable> | NO MINVALUE | NOMINVALUE] [ MAXVALUE <replaceable class="parameter">maxvalue</replaceable> | NO MAXVALUE | NOMAXVALUE]
     [ START [ WITH ] <replaceable class="parameter">start</replaceable> ] [ CACHE <replaceable class="parameter">cache</replaceable> ] [ [ NO ] CYCLE | NOCYCLE]
     [ OWNED BY { <replaceable class="parameter">table_name</replaceable>.<replaceable class="parameter">column_name</replaceable> | NONE } ];
+
+NOTICE: '[ LARGE ]' is only avaliable in CENTRALIZED mode!
 </synopsis>
  </refsynopsisdiv>
 

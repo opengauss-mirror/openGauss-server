@@ -15,7 +15,7 @@ set(TGT_controldata_INC
 set(controldata_DEF_OPTIONS ${MACRO_OPTIONS})
 set(controldata_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(controldata_LINK_OPTIONS ${BIN_LINK_OPTIONS})
-set(controldata_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -lsecurec -lrt -lz -lminiunz)
+set(controldata_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz)
 add_bintarget(pg_controldata TGT_controldata_SRC TGT_controldata_INC "${controldata_DEF_OPTIONS}" "${controldata_COMPILE_OPTIONS}" "${controldata_LINK_OPTIONS}" "${controldata_LINK_LIBS}")
 add_dependencies(pg_controldata elog_static pgport_static)
 target_link_directories(pg_controldata PUBLIC

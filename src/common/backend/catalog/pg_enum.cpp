@@ -220,7 +220,7 @@ restart:
         existing = (HeapTuple*)palloc(nelems * sizeof(HeapTuple));
         for (i = 0; i < nelems; i++) {
             /* Sort the existing enum lable */
-            existing[i] = &(list->members[i]->tuple);
+            existing[i] = t_thrd.lsc_cxt.FetchTupleFromCatCList(list, i);
         }
         qsort(existing, nelems, sizeof(HeapTuple), sort_order_cmp);
     }
@@ -294,7 +294,7 @@ restart:
                 RenumberEnumType(pg_enum, existing, nelems);
                 /* Clean up and start over */
                 pfree_ext(existing);
-                ReleaseCatCacheList(list);
+                ReleaseSysCacheList(list);
                 goto restart;
             }
 
@@ -396,7 +396,7 @@ restart:
 
     /* Done with info about existing members */
     pfree_ext(existing);
-    ReleaseCatCacheList(list);
+    ReleaseSysCacheList(list);
 
     /* Create the new pg_enum entry */
     errno_t rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
@@ -454,7 +454,7 @@ void RenameEnumLabel(Oid enumTypeOid, const char* oldVal, const char* newVal)
      * prefer a friendlier error message.)
      */
     for (i = 0; i < nelems; i++) {
-        enum_tup = &(list->members[i]->tuple);
+        enum_tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(list, i);
         en = (Form_pg_enum)GETSTRUCT(enum_tup);
 
         if (strcmp(NameStr(en->enumlabel), oldVal) == 0)
@@ -464,7 +464,7 @@ void RenameEnumLabel(Oid enumTypeOid, const char* oldVal, const char* newVal)
     }
 
     if (!old_tup) {
-        ReleaseCatCacheList(list);
+        ReleaseSysCacheList(list);
         heap_close(pg_enum, RowExclusiveLock);
 
         ereport(
@@ -472,7 +472,7 @@ void RenameEnumLabel(Oid enumTypeOid, const char* oldVal, const char* newVal)
     }
 
     if (found_new) {
-        ReleaseCatCacheList(list);
+        ReleaseSysCacheList(list);
         heap_close(pg_enum, RowExclusiveLock);
 
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("enum label \"%s\" already exists", newVal)));
@@ -482,7 +482,7 @@ void RenameEnumLabel(Oid enumTypeOid, const char* oldVal, const char* newVal)
     enum_tup = heap_copytuple(old_tup);
     en = (Form_pg_enum)GETSTRUCT(enum_tup);
 
-    ReleaseCatCacheList(list);
+    ReleaseSysCacheList(list);
 
     /* Update the pg_enum entry */
     (void)namestrcpy(&en->enumlabel, newVal);

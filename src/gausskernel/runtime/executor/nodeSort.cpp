@@ -54,7 +54,6 @@ TupleTableSlot* ExecSort(SortState* node)
      * get state info from node
      */
     SO1_printf("ExecSort: %s\n", "entering routine");
-    WaitState old_status = pgstat_report_waitstatus(STATE_EXEC_SORT);
 
     EState* estate = node->ss.ps.state;
     ScanDirection dir = estate->es_direction;
@@ -120,6 +119,7 @@ TupleTableSlot* ExecSort(SortState* node)
         }
 
         node->tuplesortstate = (void*)tuple_sortstate;
+        WaitState old_status = pgstat_report_waitstatus(STATE_EXEC_SORT_FETCH_TUPLE);
 
         /*
          * Scan the subplan and feed all the tuples to tuplesort.
@@ -135,6 +135,9 @@ TupleTableSlot* ExecSort(SortState* node)
 #endif /* PGXC */
                 tuplesort_puttupleslot(tuple_sortstate, slot);
         }
+        
+        pgstat_report_waitstatus(STATE_EXEC_SORT);
+
         sort_count(tuple_sortstate);
 
         /*
@@ -160,6 +163,7 @@ TupleTableSlot* ExecSort(SortState* node)
          * Complete the sort.
          */
         tuplesort_performsort(tuple_sortstate);
+        (void)pgstat_report_waitstatus(old_status);
 
         /*
          * restore to user specified direction
@@ -192,7 +196,6 @@ TupleTableSlot* ExecSort(SortState* node)
                 &(plan_state->instrument->sorthashinfo.spaceUsed));
         }
         SO1_printf("ExecSort: %s\n", "sorting done");
-        (void)pgstat_report_waitstatus(old_status);
     }
 
     SO1_printf("ExecSort: %s\n", "retrieving tuple from tuplesort");

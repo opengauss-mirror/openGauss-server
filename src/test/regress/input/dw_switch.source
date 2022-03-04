@@ -1,0 +1,10 @@
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_double_write=off"
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_double_write=on"
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null

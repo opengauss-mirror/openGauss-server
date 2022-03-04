@@ -84,5 +84,6 @@ extern bool CheckPermissionForBasetable(const RangeTblEntry *rte);
 extern void CheckRefreshMatview(Relation matviewRel, bool isIncremental);
 extern void acquire_mativew_tables_lock(Query *query, bool incremental);
 extern bool CheckMatviewQuals(Query *query);
+extern Oid FindRoleid(Oid relid);
 
 #endif   /* GS_MATVIEW_H */

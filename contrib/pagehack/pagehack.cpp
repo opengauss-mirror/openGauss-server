@@ -86,17 +86,16 @@
 #include "utils/timestamp.h"
 #include "cstore.h"
 #include "common/build_query/build_query.h"
+#include <libgen.h>
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/utils/constant_def.h"
 #endif
-
-#include "openGaussCompression.h"
-
 
 /* Max number of pg_class oid, currently about 4000 */
 #define MAX_PG_CLASS_ID 10000
 /* Number of pg_class types */
 #define CLASS_TYPE_NUM 512
+#define TEN 10
 
 typedef unsigned char* binary;
 static const char* indents[] = {  // 10 tab is enough to used.
@@ -113,6 +112,14 @@ static const char* indents[] = {  // 10 tab is enough to used.
     "\t\t\t\t\t\t\t\t\t\t"};
 static const int nIndents = sizeof(indents) / sizeof(indents[0]);
 static int indentLevel = 0;
+static uint64 g_tdCount = 0;
+static uint64 g_rpCount = 0;
+static uint64 g_tdMax = 0;
+static uint64 g_rpMax = 0;
+static uint64 g_pageCount = 0;
+static uint64 g_freeSpace = 0;
+static uint64 g_freeMax = 0;
+
 static HeapTupleData dummyTuple;
 
 // add those special tables to parse, so we can read the tuple data
@@ -132,7 +139,6 @@ static const char* PgHeapRelName[] = {"pg_class",
     "pg_am",
     "pg_statistic",
     "pg_toast"};
-typedef enum SegmentType { SEG_HEAP, SEG_FSM, SEG_UHEAP, SEG_INDEX_BTREE, SEG_UNDO, SEG_UNKNOWN } SegmentType;
 
 static void ParsePgClassTupleData(binary tupdata, int len, binary nullBitmap, int natrrs);
 static void ParsePgIndexTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
@@ -150,8 +156,6 @@ static void ParseToastTupleData(binary tupdata, int len, binary nullBitmap, int 
 static void ParseTDSlot(const char *page);
 
 static void ParseToastIndexTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
-static int parse_uncompressed_page_file(const char *filename, SegmentType type, const uint32 start_point,
-    const uint32 number_read);
 
 static ParseHeapTupleData PgHeapRelTupleParser[] = {
     ParsePgClassTupleData,       // pg_class
@@ -806,11 +810,6 @@ typedef struct TwoPhaseRecordOnDisk {
     uint16 info;         /* flag bits for use by rmgr */
 } TwoPhaseRecordOnDisk;
 
-typedef struct TwoPhaseLockRecord {
-    LOCKTAG locktag;
-    LOCKMODE lockmode;
-} TwoPhaseLockRecord;
-
 typedef struct TwoPhaseFileHeader {
     uint32 magic;            /* format identifier */
     uint32 total_len;        /* actual file length */
@@ -899,6 +898,8 @@ static const char* HACKINGTYPE[] = {"heap",
     "undo_fix",
     "segment"
 };
+
+typedef enum SegmentType { SEG_HEAP, SEG_FSM, SEG_UHEAP, SEG_INDEX_BTREE, SEG_UNDO, SEG_UNKNOWN } SegmentType;
 
 const char* PageTypeNames[] = {"DATA", "FSM", "VM"};
 
@@ -1284,7 +1285,7 @@ static void ParseTsCudescXXTupleData(binary tupdata, int len, binary nullBitmap,
     unsigned char ch = 0;
     unsigned char bitmask = 0;
     bool isnulls[nattrs] = {0};
-    
+
     if (NULL != nullBitmap) {
         datlen = (nattrs + 7) / 8;
         j = 0;
@@ -1317,7 +1318,7 @@ static void ParseTsCudescXXTupleData(binary tupdata, int len, binary nullBitmap,
         fprintf(stdout, "\n%s" "CUId: %u", indents[indentLevel], *(uint32*)nextAttr);
         nextAttr += sizeof(uint32);
     }
-    
+
     if (!isnulls[3]) {
         // rough check MIN/MAX
         nextAttr = (char*)att_align_pointer((long int)nextAttr, 'i', -1, nextAttr);
@@ -2394,7 +2395,7 @@ static void ParsePgAttributeTupleData(binary tupdata, int len, binary nullBitmap
         indents[indentLevel],
         (pgAttributeTupData->attcollation));
     fprintf(stdout,
-        "\n%s" "attkvtype: %d", 
+        "\n%s" "attkvtype: %d",
         indents[indentLevel],
         (pgAttributeTupData->attkvtype));
 
@@ -2426,6 +2427,40 @@ static void parse_uheap_item(const Item item, unsigned len, int blkno, int linen
     fprintf(stdout, "%s", buffer);
     fprintf(stdout, "\t\t\tNumber of columns: %d\n", UHeapTupleHeaderGetNatts(utuple));
     fprintf(stdout, "\t\t\tFlag: %d\n", utuple->flag);
+
+    if (utuple->flag & UHEAP_HAS_NULL) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_HASNULL ");
+    }
+    if (utuple->flag & UHEAP_DELETED) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_DELETED ");
+    }
+    if (utuple->flag & UHEAP_INPLACE_UPDATED) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_INPLACE_UPDATED ");
+    }
+    if (utuple->flag & UHEAP_UPDATED) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_UPDATED ");
+    }
+    if (utuple->flag & UHEAP_XID_KEYSHR_LOCK) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_XID_KEYSHR_LOCK ");
+    }
+    if (utuple->flag & UHEAP_XID_NOKEY_EXCL_LOCK) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_XID_NOKEY_EXCL_LOCK ");
+    }
+    if (utuple->flag & UHEAP_XID_EXCL_LOCK) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_XID_EXCL_LOCK ");
+    }
+    if (utuple->flag & UHEAP_MULTI_LOCKERS) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_MULTI_LOCKERS ");
+    }
+    if (utuple->flag & UHEAP_INVALID_XACT_SLOT) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "UHEAP_INVALID_XACT_SLOT ");
+    }
+    if (utuple->flag & SINGLE_LOCKER_XID_IS_LOCK) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "SINGLE_LOCKER_XID_IS_LOCK ");
+    }
+    if (utuple->flag & SINGLE_LOCKER_XID_IS_SUBXACT) {
+        fprintf(stdout, "\t\t\tFlag: %s\n", "SINGLE_LOCKER_XID_IS_SUBXACT ");
+    }
 
     fprintf(stdout, "%sdata:", indents[indentLevel]);
     content = ((unsigned char *)(utuple) + utuple->t_hoff);
@@ -2509,11 +2544,10 @@ static void parse_heap_item(const Item item, unsigned len, int blkno, int lineno
         tup->t_infomask &= ~HEAP_HASEXTERNAL;
         tup->t_infomask &= ~HEAP_XMAX_COMMITTED;
         tup->t_infomask &= ~HEAP_COMBOCID;
-        tup->t_infomask &= ~HEAP_MOVED_IN;
         tup->t_infomask |= HEAP_XMIN_INVALID;
         fprintf(stdout,
             "force writer tup->t_infomask to HEAP_XMIN_INVALID and clean HEAP_XMIN_COMMITTED | HEAP_COMPRESSED | "
-            "HEAP_HASEXTERNAL | HEAP_XMAX_COMMITTED | HEAP_COMBOCID | HEAP_MOVED_IN");
+            "HEAP_HASEXTERNAL | HEAP_XMAX_COMMITTED | HEAP_COMBOCID");
     }
     if (tup->t_infomask & HEAP_XMAX_COMMITTED)
         fprintf(stdout, "HEAP_XMAX_COMMITTED ");
@@ -2523,10 +2557,11 @@ static void parse_heap_item(const Item item, unsigned len, int blkno, int lineno
         fprintf(stdout, "HEAP_XMAX_IS_MULTI ");
     if (tup->t_infomask & HEAP_UPDATED)
         fprintf(stdout, "HEAP_UPDATED ");
-    if (tup->t_infomask & HEAP_MOVED_OFF)
-        fprintf(stdout, "HEAP_MOVED_OFF ");
-    if (tup->t_infomask & HEAP_MOVED_IN)
-        fprintf(stdout, "HEAP_MOVED_IN ");
+    if ((tup->t_infomask & HEAP_HAS_8BYTE_UID)) {
+        fprintf(stdout, "HEAP_HAS_8BYTE_UID ");
+    } else {
+        fprintf(stdout, "HEAP_HAS_NO_UID ");
+    }
     fprintf(stdout, "\n");
 
     fprintf(stdout, "%st_infomask2: ", indents[indentLevel]);
@@ -2644,6 +2679,7 @@ static void parse_one_item(const Item item, unsigned len, int blkno, int lineno,
 static void ParseHeapPageHeader(const PageHeader page, int blkno, int blknum)
 {
     bool checksum_matched = false;
+    uint64 freeSpace = 0;
     if (CheckPageZeroCases(page)) {
         uint16 checksum = pg_checksum_page((char*)page, (BlockNumber)blkno + (SegNo * ((BlockNumber)RELSEG_SIZE)));
         checksum_matched = (checksum == page->pd_checksum);
@@ -2673,25 +2709,32 @@ static void ParseHeapPageHeader(const PageHeader page, int blkno, int blknum)
         "\tPage size & version: %u, %u\n",
         (uint16)PageGetPageSize(page),
         (uint16)PageGetPageLayoutVersion(page));
-    if (true) {
-        fprintf(stdout,
-            "\tpd_xid_base: %lu, pd_multi_base: %lu\n",
-            ((HeapPageHeader)(page))->pd_xid_base,
-            ((HeapPageHeader)(page))->pd_multi_base);
-        fprintf(stdout,
-            "\tpd_prune_xid: %lu\n",
-            ((HeapPageHeader)(page))->pd_prune_xid + ((HeapPageHeader)(page))->pd_xid_base);
-    } else
-        fprintf(stdout, "\tpd_prune_xid: %u\n", page->pd_prune_xid);
+    fprintf(stdout,
+        "\tpd_xid_base: %lu, pd_multi_base: %lu\n",
+        ((HeapPageHeader)(page))->pd_xid_base,
+        ((HeapPageHeader)(page))->pd_multi_base);
+    fprintf(stdout,
+        "\tpd_prune_xid: %lu\n",
+        ((HeapPageHeader)(page))->pd_prune_xid + ((HeapPageHeader)(page))->pd_xid_base);
+    if (page->pd_upper < page->pd_lower) {
+        fprintf(stdout, "WARNING: INVALID PAGE!");
+    } else {
+        freeSpace = page->pd_upper - page->pd_lower;
+        g_freeMax = freeSpace > g_freeMax ? freeSpace : g_freeMax;
+        g_freeSpace += freeSpace;
+    }
+    g_pageCount++;
     return;
 }
-
 
 static void ParseUHeapPageHeader(const PageHeader page, int blkno, int blknum)
 {
     bool checksum_matched = false;
+    uint64 tdCount = 0;
+    uint64 freeSpace = 0;
+    UHeapPageHeader upage = (UHeapPageHeader)page;
     if (CheckPageZeroCases(page)) {
-        uint16 checksum = pg_checksum_page((char*)page, (BlockNumber)blkno);
+        uint16 checksum = pg_checksum_page((char*)page, (BlockNumber)blkno + (SegNo * ((BlockNumber)RELSEG_SIZE)));
         checksum_matched = (checksum == page->pd_checksum);
     }
     fprintf(stdout, "page information of block %d/%d\n", blkno, blknum);
@@ -2699,9 +2742,9 @@ static void ParseUHeapPageHeader(const PageHeader page, int blkno, int blknum)
     fprintf(stdout, "\tpd_checksum: 0x%X, verify %s\n", page->pd_checksum, checksum_matched ? "success" : "fail");
 
     fprintf(stdout, "\tpd_flags: ");
-    if (PageHasFreeLinePointers(page))
+    if (UPageHasFreeLinePointers(page))
         fprintf(stdout, "PD_HAS_FREE_LINES ");
-    if (PageIsFull(page))
+    if (UPageIsFull(page))
         fprintf(stdout, "PD_PAGE_FULL ");
     if (PageIsAllVisible(page))
         fprintf(stdout, "PD_ALL_VISIBLE ");
@@ -2712,22 +2755,27 @@ static void ParseUHeapPageHeader(const PageHeader page, int blkno, int blknum)
     if (PageIsEncrypt(page))
         fprintf(stdout, "PD_ENCRYPT_PAGE ");
     fprintf(stdout, "\n");
-    fprintf(stdout, "\tpd_lower: %u, %s\n", page->pd_lower, PageIsEmpty(page) ? "empty" : "non-empty");
+    fprintf(stdout, "\tpd_lower: %u, %s\n", page->pd_lower, UPageIsEmpty(upage) ? "empty" : "non-empty");
     fprintf(stdout, "\tpd_upper: %u, %s\n", page->pd_upper, PageIsNew(page) ? "new" : "old");
     fprintf(stdout, "\tpd_special: %u, size %u\n", page->pd_special, PageGetSpecialSize(page));
-    fprintf(stdout,
-        "\tPage size & version: %u, %u\n",
-        (uint16)PageGetPageSize(page),
-        (uint16)PageGetPageLayoutVersion(page));
-
-    fprintf(stdout, "\tpotential_freespace: %u\n", ((UHeapPageHeaderData *)(page))->potential_freespace);
-    fprintf(stdout, "\ttd_count: %u\n", ((UHeapPageHeaderData *)(page))->td_count);
-    fprintf(stdout, "\tpd_prune_xid: %lu\n", ((UHeapPageHeaderData *)(page))->pd_prune_xid);
-    fprintf(stdout,
-            "\tpd_xid_base: %lu, pd_multi_base: %lu\n",
-            ((UHeapPageHeaderData *)(page))->pd_xid_base,
-            ((UHeapPageHeaderData *)(page))->pd_multi_base);
-
+    fprintf(stdout, "\tPage size & version: %u, %u\n",
+        (uint16)PageGetPageSize(page), (uint16)PageGetPageLayoutVersion(page));
+    fprintf(stdout, "\tpotential_freespace: %u\n", upage->potential_freespace);
+    fprintf(stdout, "\ttd_count: %u\n", upage->td_count);
+    fprintf(stdout, "\tpd_prune_xid: %lu\n", upage->pd_prune_xid);
+    fprintf(stdout, "\tpd_xid_base: %lu, pd_multi_base: %lu\n",
+        upage->pd_xid_base, upage->pd_multi_base);
+    if (upage->pd_upper < upage->pd_lower) {
+        fprintf(stdout, "WARNING: INVALID PAGE!");
+    } else {
+        freeSpace = upage->pd_upper - upage->pd_lower;
+        g_freeMax = freeSpace > g_freeMax ? freeSpace : g_freeMax;
+        g_freeSpace += freeSpace;
+    }
+    g_pageCount++;
+    tdCount = upage->td_count;
+    g_tdCount += tdCount;
+    g_tdMax = tdCount > g_tdMax ? tdCount : g_tdMax;
 
     return;
 }
@@ -2777,14 +2825,10 @@ static void parse_special_data(const char* buffer, SegmentType type)
         if (!P_ISDELETED(opaque))
             fprintf(stdout, "\tbtree tree level: %u\n", opaque->btpo.level);
         else {
-            if (PageIs4BXidVersion(page))
-                fprintf(stdout, "\tnext txid_old (deleted): %u\n", opaque->btpo.xact_old);
-            else {
-                if (uopaque)
-                    fprintf(stdout, "\tnext txid (deleted): %lu\n", ((UBTPageOpaque)uopaque)->xact);
-                else
-                    fprintf(stdout, "\tnext txid (deleted): %lu\n", ((BTPageOpaque)opaque)->xact);
-            }
+            if (uopaque)
+                fprintf(stdout, "\tnext txid (deleted): %lu\n", ((UBTPageOpaque)uopaque)->xact);
+            else
+                fprintf(stdout, "\tnext txid (deleted): %lu\n", ((BTPageOpaque)opaque)->xact);
         }
         fprintf(stdout, "\tbtree flag: ");
         if (P_ISLEAF(opaque))
@@ -2897,12 +2941,14 @@ static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType 
     nunused = nnormal = ndead = 0;
     if (type == SEG_UHEAP) {
         UHeapPageHeaderData *upghdr = (UHeapPageHeaderData *)buffer;
-        if (upghdr->pd_lower <= SizeOfUHeapPageHeaderData)
+        if (upghdr->pd_lower <= SizeOfUHeapPageHeaderData) {
             nline = 0;
-        else
-            nline =
-                (upghdr->pd_lower - (SizeOfUHeapPageHeaderData + SizeOfUHeapTDData(upghdr))) / sizeof(RowPtr);
-
+        } else {
+            nline = (upghdr->pd_lower - (SizeOfUHeapPageHeaderData +
+                SizeOfUHeapTDData(upghdr))) / sizeof(RowPtr);
+            g_rpCount += (uint64)nline;
+            g_rpMax = (uint64)nline > g_rpMax ? (uint64)nline : g_rpMax;
+        }
         fprintf(stdout, "\n\tUHeap tuple information on this page\n");
         for (i = FirstOffsetNumber; i <= nline; i++) {
             rowptr = UPageGetRowPtr(buffer, i);
@@ -2936,6 +2982,8 @@ static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType 
         parse_special_data(buffer, type);
     } else if (type == SEG_HEAP || type == SEG_INDEX_BTREE) {
         nline = PageGetMaxOffsetNumber((Page)page);
+        g_rpCount += (uint64)nline;
+        g_rpMax = (uint64)nline > g_rpMax ? (uint64)nline : g_rpMax;
         fprintf(stdout, "\n\tHeap tuple information on this page\n");
         for (i = FirstOffsetNumber; i <= nline; i++) {
             lp = PageGetItemId(page, i);
@@ -3097,78 +3145,7 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
     return true;
 }
 
-static BlockNumber CalculateMaxBlockNumber(BlockNumber blknum, BlockNumber start, BlockNumber number)
-{
-    /* parse */
-    if (start >= blknum) {
-        fprintf(stderr, "start point exceeds the total block number of relation.\n");
-        return InvalidBlockNumber;
-    } else if ((start + number) > blknum) {
-        fprintf(stderr, "don't have %d blocks from block %d in the relation, only %d blocks\n", number, start,
-                (blknum - start));
-        number = blknum;
-    } else if (number == 0) {
-        number = blknum;
-    } else {
-        number += start;
-    }
-    return number;
-}
-
 static int parse_page_file(const char* filename, SegmentType type, const uint32 start_point, const uint32 number_read)
-{
-    if (type != SEG_HEAP && type != SEG_INDEX_BTREE) {
-        return parse_uncompressed_page_file(filename, type, start_point, number_read);
-    }
-
-    auto openGaussCompression = new OpenGaussCompression();
-    openGaussCompression->SetFilePath(filename, SegNo);
-    bool success = openGaussCompression->TryOpen();
-    if (!success) {
-        delete openGaussCompression;
-        return parse_uncompressed_page_file(filename, type, start_point, number_read);
-    }
-
-    BlockNumber start = start_point;
-    BlockNumber blknum = openGaussCompression->GetMaxBlockNumber();
-    BlockNumber number = CalculateMaxBlockNumber(blknum, start, number_read);
-    if (number == InvalidBlockNumber) {
-        delete openGaussCompression;
-        return false;
-    }
-    char compressed[BLCKSZ];
-    size_t compressedLen;
-    while (start < number) {
-        if (!openGaussCompression->ReadChunkOfBlock(compressed, &compressedLen, start)) {
-            fprintf(stderr, "read block %d failed, filename: %s: %s\n", start, openGaussCompression->GetPcdFilePath(),
-                    strerror(errno));
-            delete openGaussCompression;
-            return false;
-        }
-        if (!parse_a_page(openGaussCompression->GetDecompressedPage(), start, blknum, type)) {
-            fprintf(stderr, "Error during parsing block %d/%d\n", start, blknum);
-            delete openGaussCompression;
-            return false;
-        }
-        if ((write_back && num_item) || dirty_page) {
-            if (dirty_page) {
-                openGaussCompression->MarkUncompressedDirty();
-            }
-            if (!openGaussCompression->WriteBackUncompressedData()) {
-                fprintf(stderr, "write back failed, filename: %s: %s\n", openGaussCompression->GetPcdFilePath(),
-                        strerror(errno));
-                delete openGaussCompression;
-                return false;
-            }
-        }
-        start++;
-    }
-    delete openGaussCompression;
-    return true;
-}
-
-static int parse_uncompressed_page_file(const char *filename, SegmentType type, const uint32 start_point,
-                                        const uint32 number_read)
 {
     char buffer[BLCKSZ];
     FILE* fd = NULL;
@@ -3196,9 +3173,21 @@ static int parse_uncompressed_page_file(const char *filename, SegmentType type, 
     blknum = size / BLCKSZ;
 
     /* parse */
-    number = CalculateMaxBlockNumber(blknum, start, number);
-    if (number == InvalidBlockNumber) {
+    if (start >= blknum) {
+        fprintf(stderr, "start point exceeds the total block number of relation.\n");
+        fclose(fd);
         return false;
+    } else if ((start + number) > blknum) {
+        fprintf(stderr,
+            "don't have %u blocks from block %u in the relation, only %u blocks\n",
+            number,
+            start,
+            (blknum - start));
+        number = blknum;
+    } else if (number == 0) {
+        number = blknum;
+    } else {
+        number += start;
     }
 
     Assert((start * BLCKSZ) < size);
@@ -3214,7 +3203,7 @@ static int parse_uncompressed_page_file(const char *filename, SegmentType type, 
         }
 
         if (!parse_a_page(buffer, start, blknum, type)) {
-            fprintf(stderr, "Error during parsing block %d/%d\n", start, blknum);
+            fprintf(stderr, "Error during parsing block %u/%u\n", start, blknum);
             fclose(fd);
             return false;
         }
@@ -3235,6 +3224,16 @@ static int parse_uncompressed_page_file(const char *filename, SegmentType type, 
         start++;
     }
 
+    float8 rpAvg = g_pageCount == 0 ? 0 : (float8)g_rpCount / g_pageCount;
+    float8 tdAvg = g_pageCount == 0 ? 0 : (float8)g_tdCount / g_pageCount;
+    float8 freeAvg = g_pageCount == 0 ? 0 : (float8)g_freeSpace / g_pageCount;
+    fprintf(stdout, "Relation information : pageCount %lu.\n", g_pageCount);
+    fprintf(stdout, "RP information : rpCount %lu, rpMax %lu, rpAvg %f.\n",
+        g_rpCount, g_rpMax, rpAvg);
+    fprintf(stdout, "TD information : tdCount %lu, tdMax %lu, tdAvg %f.\n",
+        g_tdCount, g_tdMax, tdAvg);
+    fprintf(stdout, "Freespace information : freeTotal %lu, freeMax %lu, freeAvg %f.\n",
+        g_freeSpace, g_freeMax, freeAvg);
     fclose(fd);
 
     return true;
@@ -3343,7 +3342,7 @@ static void parse_relation_options_struct(char* vardata, int relkind)
         --indentLevel;
     }
     /*  else can index relation options but won't solve it now*/
-    
+
 }
 
 static void parse_oid_array(Oid* ids, int nids)
@@ -3751,6 +3750,7 @@ static int parse_cu_file(char* filename, uint64 offset)
 /* parse a replslot file */
 static int parse_slot_file(char* filename)
 {
+    const uint32 upperLen = 32;
     FILE* fd = NULL;
     ReplicationSlotOnDisk cp;
     size_t readBytes = 0;
@@ -3822,8 +3822,11 @@ static int parse_slot_file(char* filename)
 
     fprintf(stdout, "xmin:           %lu\n", cp.slotdata.xmin);
     fprintf(
-        stdout, "restart_lsn:    %X/%X\n", (uint32)(cp.slotdata.restart_lsn >> 32), (uint32)(cp.slotdata.restart_lsn));
-
+        stdout, "restart_lsn:    %X/%X\n", (uint32)(cp.slotdata.restart_lsn >> upperLen),
+        (uint32)(cp.slotdata.restart_lsn));
+    fprintf(
+        stdout, "confirmed_flush:    %X/%X\n", (uint32)(cp.slotdata.confirmed_flush >> upperLen),
+        (uint32)(cp.slotdata.confirmed_flush));
     fclose(fd);
 
     return true;
@@ -4126,7 +4129,7 @@ static int parse_csnlog_file(char* filename)
     return true;
 }
 
-static bool parse_dw_file_head(char* file_head, dw_file_head_t* saved_file_head)
+static bool parse_dw_file_head(char* file_head, dw_file_head_t* saved_file_head, int size = 0)
 {
     uint32 i;
     uint16 id;
@@ -4256,7 +4259,8 @@ static uint16 parse_batch_data_pages(dw_batch_t* curr_head, uint16 page_num)
     return page_num;
 }
 
-static uint16 calc_reading_pages(dw_batch_t** curr_head, char* start_buf, uint16 read_pages, uint16 file_page_id)
+static uint16 calc_reading_pages(dw_batch_t** curr_head, char* start_buf, uint16 read_pages, uint16 file_page_id,
+    uint16 dw_batch_page_num)
 {
     uint16 buf_page_id;
     errno_t rc;
@@ -4278,11 +4282,11 @@ static uint16 calc_reading_pages(dw_batch_t** curr_head, char* start_buf, uint16
     }
 
     Assert((char*)(*curr_head) + (read_pages + readingPages) * BLCKSZ <= start_buf + DW_BUF_MAX * BLCKSZ);
-    Assert(file_page_id + read_pages + readingPages <= DW_FILE_PAGE);
+    Assert(file_page_id + read_pages + readingPages <= dw_batch_page_num);
     return (uint16)readingPages;
 }
 
-static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint16 page_num)
+static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint16 page_num, uint16 dw_batch_page_num)
 {
     uint16 file_page_id, read_pages;
     uint16 reading_pages;
@@ -4296,7 +4300,7 @@ static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint1
     start_buf = buf;
     curr_head = (dw_batch_t*)start_buf;
     read_pages = 0;
-    reading_pages = Min(DW_BATCH_MAX_FOR_NOHBK, (DW_FILE_PAGE - file_page_id));
+    reading_pages = Min(DW_BATCH_MAX_FOR_NOHBK, (dw_batch_page_num - file_page_id));
     flush_pages = 0;
 
     for (;;) {
@@ -4328,43 +4332,92 @@ static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint1
             break;
         }
 
-        reading_pages = calc_reading_pages(&curr_head, start_buf, read_pages, file_page_id);
+        reading_pages = calc_reading_pages(&curr_head, start_buf, read_pages, file_page_id, dw_batch_page_num);
     }
 }
 
 static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_num)
 {
-    char* buf;
+    errno_t rc;
     FILE* fd;
     size_t result;
+    uint32 dw_batch_page_num;
     dw_file_head_t file_head;
+    char meta_path[PATH_MAX];
+    char cur_dir[PATH_MAX];
+    dw_batch_meta_file* batch_meta_file;
+    char* meta_buf = NULL;
+    char* dw_buf = NULL;
+
+    rc = strcpy_s(cur_dir, PATH_MAX, file_name);
+    securec_check(rc, "", "");
+    (void)dirname(cur_dir);
+    rc = strcpy_s(meta_path, PATH_MAX, cur_dir);
+    securec_check(rc, "", "");
+    rc = strcat_s(meta_path, PATH_MAX, "\\");
+    securec_check(rc, "", "");
+    rc = strcat_s(meta_path, PATH_MAX, DW_META_FILE);
+    securec_check(rc, "", "");
+
+    fd = fopen(meta_path, "rb+");
+
+    if (fd == NULL) {
+        fprintf(stderr, "%s: %s\n", meta_path, strerror(errno));
+        return false;
+    }
+
+    meta_buf = (char*)malloc(DW_META_FILE_BLOCK_NUM * BLCKSZ);
+    if (meta_buf == NULL) {
+        fclose(fd);
+        fprintf(stderr, "out of memory\n");
+        return false;
+    }
+
+    result = fread(meta_buf, sizeof(dw_batch_meta_file), 1, fd);
+    if (result != 1) {
+        free(meta_buf);
+        fclose(fd);
+        fprintf(stderr, "read %s: %s\n", meta_path, strerror(errno));
+        return false;
+    }
+
+    batch_meta_file = (dw_batch_meta_file *) meta_buf;
+    dw_batch_page_num = (uint32) (DW_FILE_SIZE_UNIT * batch_meta_file->dw_file_size / BLCKSZ);
+
+    free(meta_buf);
+    fclose(fd);
 
     fd = fopen(file_name, "rb+");
     if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", file_name, strerror(errno));
         return false;
     }
-    buf = (char*)malloc(BLCKSZ * DW_BUF_MAX_FOR_NOHBK);
-    if (buf == NULL) {
+
+    dw_buf = (char*)malloc(BLCKSZ * DW_BUF_MAX_FOR_NOHBK);
+    if (dw_buf == NULL) {
         fclose(fd);
         fprintf(stderr, "out of memory\n");
         return false;
     }
 
-    result = fread(buf, BLCKSZ, 1, fd);
+    result = fread(dw_buf, BLCKSZ, 1, fd);
     if (result != 1) {
-        free(buf);
+        free(dw_buf);
         fclose(fd);
         fprintf(stderr, "read %s: %s\n", file_name, strerror(errno));
         return false;
     }
-    if (!parse_dw_file_head(buf, &file_head)) {
-        free(buf);
+    if (!parse_dw_file_head(dw_buf, &file_head, BLCKSZ)) {
+        free(dw_buf);
         fclose(fd);
         return false;
     }
     if (start_page != 0) {
-        Assert(start_page < DW_FILE_PAGE);
+        if (start_page >= dw_batch_page_num) {
+            fprintf(stdout, "start_page %u exceeds the double write file upper limit offset %u\n",
+                start_page, dw_batch_page_num - 1);
+            return false;
+        }
         file_head.start = (uint16)start_page;
 
         if (page_num != 0) {
@@ -4374,11 +4427,12 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
         }
     }
     if (page_num == 0) {
-        page_num = DW_FILE_PAGE - start_page;
+        page_num = dw_batch_page_num - start_page;
     }
-    parse_dw_batch(buf, fd, &file_head, (uint16)page_num);
 
-    free(buf);
+    parse_dw_batch(dw_buf, fd, &file_head, (uint16)page_num, (uint16)dw_batch_page_num);
+
+    free(dw_buf);
     fclose(fd);
     return true;
 }
@@ -4566,7 +4620,7 @@ static bool parse_dw_single_flush_file(const char* file_name)
 
     fseek(fd, (1 + DW_FIRST_DATA_PAGE_NUM) * BLCKSZ, SEEK_SET);
     result = fread(second_file_head, 1, BLCKSZ, fd);
-    
+
     fseek(fd, (1 + DW_FIRST_DATA_PAGE_NUM + 1) * BLCKSZ, SEEK_SET);
     result = fread(item_buf, 1, blk_num * BLCKSZ, fd);
     if (blk_num * BLCKSZ != result) {
@@ -4684,7 +4738,7 @@ void CheckCRC(pg_crc32 comCrcVal, pg_crc32 pageCrcVal, const uint64 readSize, ch
     FIN_CRC32C(comCrcVal);
 
     if (!EQ_CRC32C(pageCrcVal, comCrcVal)) {
-        fprintf(stderr, 
+        fprintf(stderr,
                 "Undo meta CRC calculated(%u) is different from CRC recorded(%u) in page.\n", comCrcVal, pageCrcVal);
         return;
     }
@@ -4734,8 +4788,8 @@ static int ParseUndoZoneMeta(const char *filename, int zid)
         /* Get page CRC from uspMetaBuffer. */
         pageCrcVal = *(pg_crc32 *) (uspMetaBuffer + readSize);
 
-        /* 
-         * Calculate the CRC value based on all undospace meta information stored on the page. 
+        /*
+         * Calculate the CRC value based on all undospace meta information stored on the page.
          * Then compare with pageCrcVal.
          */
         CheckCRC(comCrcVal, pageCrcVal, readSize, uspMetaBuffer);
@@ -4778,7 +4832,7 @@ static int ParseUndoSpaceMeta(const char *filename, int zid, UndoSpaceType type)
         fprintf(stderr, "Open file(%s), return code desc(%s).\n", UNDO_META_FILE, strerror(errno));
         return false;
     }
-    
+
     if (type == UNDO_LOG_SPACE) {
         UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
         lseek(fd, totalPageCnt * UNDO_META_PAGE_SIZE, SEEK_SET);
@@ -4812,8 +4866,8 @@ static int ParseUndoSpaceMeta(const char *filename, int zid, UndoSpaceType type)
         /* Get page CRC from uspMetaBuffer. */
         pageCrcVal = *(pg_crc32 *) (uspMetaBuffer + readSize);
 
-        /* 
-         * Calculate the CRC value based on all undospace meta information stored on the page. 
+        /*
+         * Calculate the CRC value based on all undospace meta information stored on the page.
          * Then compare with pageCrcVal.
          */
         CheckCRC(comCrcVal, pageCrcVal, readSize, uspMetaBuffer);
@@ -4822,8 +4876,8 @@ static int ParseUndoSpaceMeta(const char *filename, int zid, UndoSpaceType type)
             zoneId = (loop - 1) * UNDOSPACE_COUNT_PER_PAGE + offset;
             uspSpaceInfo = (UndoSpaceMetaInfo *) (uspMetaBuffer + offset * sizeof(UndoSpaceMetaInfo));
             if ((zid == INVALID_ZONE_ID) || (zid != INVALID_ZONE_ID && zid == zoneId)) {
-                fprintf(stdout, "zid=%d, head=%lu, tail=%lu, lsn=%lu.\n", zoneId, 
-                    UNDO_PTR_GET_OFFSET(uspSpaceInfo->head), UNDO_PTR_GET_OFFSET(uspSpaceInfo->tail), 
+                fprintf(stdout, "zid=%d, head=%lu, tail=%lu, lsn=%lu.\n", zoneId,
+                    UNDO_PTR_GET_OFFSET(uspSpaceInfo->head), UNDO_PTR_GET_OFFSET(uspSpaceInfo->tail),
                     uspSpaceInfo->lsn);
 
                 if (zid != INVALID_ZONE_ID) {
@@ -4883,8 +4937,10 @@ typedef struct UndoHeader {
     UndoRecordHeader        whdr_;
     UndoRecordBlock         wblk_;
     UndoRecordTransaction   wtxn_;
+    UndoRecordPayload wpay_;
     UndoRecordOldTd         wtd_;
-    UndoRecordPayload       wpay_;
+    UndoRecordPartition wpart_;
+    UndoRecordTablespace wtspc_;
 } UndoHeader;
 
 char g_dir[100] = {0};
@@ -4962,19 +5018,19 @@ bool ReadUndoRecord(UndoHeader *urec, char *buffer, int startingByte, int *alrea
         }
     }
     if ((urec->whdr_.uinfo & UNDO_UREC_INFO_HAS_PARTOID) != 0) {
-        if (!ReadUndoBytes((char *)&urec->wtd_, SIZE_OF_UNDO_RECORD_PARTITION,
+        if (!ReadUndoBytes((char *)&urec->wpart_, SIZE_OF_UNDO_RECORD_PARTITION,
             &readptr, endptr, &myBytesRead, alreadyRead)) {
             return false;
         }
     }
     if ((urec->whdr_.uinfo & UNDO_UREC_INFO_HAS_TABLESPACEOID) != 0) {
-        if (!ReadUndoBytes((char *)&urec->wtd_, SIZE_OF_UNDO_RECORD_TABLESPACE,
+        if (!ReadUndoBytes((char *)&urec->wtspc_, SIZE_OF_UNDO_RECORD_TABLESPACE,
             &readptr, endptr, &myBytesRead, alreadyRead)) {
             return false;
         }
     }
     if ((urec->whdr_.uinfo & UNDO_UREC_INFO_PAYLOAD) != 0) {
-        if (!ReadUndoBytes((char *)&urec->wtd_, SIZE_OF_UNDO_RECORD_PAYLOAD,
+        if (!ReadUndoBytes((char *)&urec->wpay_, SIZE_OF_UNDO_RECORD_PAYLOAD,
             &readptr, endptr, &myBytesRead, alreadyRead)) {
             return false;
         }
@@ -4988,7 +5044,7 @@ static bool ParseUndoRecord(UndoRecPtr urp)
     char buffer[BLCKSZ] = {'\0'};
     BlockNumber blockno = UNDO_PTR_GET_BLOCK_NUM(urp);
     int zoneId = UNDO_PTR_GET_ZONE_ID(urp);
-    int startingByte = UNDO_PTR_GET_BLOCK_NUM(urp);
+    int startingByte = UNDO_PTR_GET_PAGE_OFFSET(urp);
     int fd = -1;
     int alreadyRead = 0;
     off_t seekpos;
@@ -5003,6 +5059,7 @@ static bool ParseUndoRecord(UndoRecPtr urp)
     do {
         fd = OpenUndoBlock(zoneId, blockno);
         if (fd < 0) {
+            free(urec);
             return false;
         }
         seekpos = (off_t)BLCKSZ * (blockno % ((BlockNumber)UNDOSEG_SIZE));
@@ -5013,6 +5070,7 @@ static bool ParseUndoRecord(UndoRecPtr urp)
         ret = read(fd, (char *)buffer, BLCKSZ);
         if (ret != BLCKSZ) {
             close(fd);
+            free(urec);
             fprintf(stderr, "Read undo meta page failed, expect size(8192), real size(%u).\n", ret);
             return false;
         }
@@ -5266,6 +5324,28 @@ static void fill_filenode_map(char** class_map)
     return;
 }
 
+static long int strtolSafe(const char* nptr, long int default_value)
+{
+    char* tmp = NULL;
+    long int res = strtol(nptr, &tmp, TEN);
+    if (errno == ERANGE || tmp == nptr || (errno != 0 && res == 0)) {
+        fprintf(stdout, "WARNING: failed to convert parameter %s to int!\n", nptr);
+        res = default_value;
+    }
+    return res;
+}
+
+static long long int strtollSafe(const char* nptr, long long int default_value)
+{
+    char* tmp = NULL;
+    long long int res = strtoll(nptr, &tmp, TEN);
+    if (errno == ERANGE || tmp == nptr || (errno != 0 && res == 0)) {
+        fprintf(stdout, "WARNING: failed to convert parameter %s to int!\n", nptr);
+        res = default_value;
+    }
+    return res;
+}
+
 int main(int argc, char** argv)
 {
     int c;
@@ -5318,7 +5398,7 @@ int main(int argc, char** argv)
             }
 
             case 'o':
-                cu_offset = (uint64)atoll(optarg);
+                cu_offset = (uint64)strtollSafe(optarg, 0);
                 break;
 
             case 'r':  // relation name given
@@ -5371,19 +5451,19 @@ int main(int argc, char** argv)
                 break;
 
             case 's':
-                start_point = (unsigned)atoi(optarg);
+                start_point = (unsigned int)strtolSafe(optarg, 0);
                 break;
 
             case 'n':
-                num_block = (unsigned)atoi(optarg);
+                num_block = (unsigned int)strtolSafe(optarg, 0);
                 break;
 
             case 'I':
-                start_item = (unsigned)atoi(optarg);
+                start_item = (unsigned int)strtolSafe(optarg, 1);
                 break;
 
             case 'N':
-                num_item = (unsigned)atoi(optarg);
+                num_item = (unsigned int)strtolSafe(optarg, 0);
                 break;
 
             case 'w':
@@ -5395,11 +5475,11 @@ int main(int argc, char** argv)
                 break;
 
             case 'z':
-                zid = (int)atoi(optarg);
+                zid = (int)strtolSafe(optarg, INVALID_ZONE_ID);
                 break;
 
             case 'S':
-                SegNo = (unsigned)atoi(optarg);
+                SegNo = (unsigned int)strtolSafe(optarg, 0);
                 break;
 
             default:

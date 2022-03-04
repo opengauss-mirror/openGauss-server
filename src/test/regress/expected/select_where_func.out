@@ -1,0 +1,310 @@
+-- check compatibility --
+show sql_compatibility; -- expect A --
+ sql_compatibility 
+-------------------
+ A
+(1 row)
+
+drop schema if exists sch2;
+NOTICE:  schema "sch2" does not exist, skipping
+create schema sch2;
+set current_schema = sch2;
+create table tbl_1 (a int, b int);
+insert into tbl_1 values (1,1);
+insert into tbl_1 values (2,2);
+insert into tbl_1 values (3,3);
+insert into tbl_1 values (4,4);
+insert into tbl_1 values (5,5);
+create or replace function func_1() returns integer AS $Summary$
+declare
+begin
+return 1;
+end;
+$Summary$ language plpgsql;
+create or replace function func_1(a int) returns integer AS $Summary$
+declare
+begin
+return a;
+end;
+$Summary$ language plpgsql;
+drop schema if exists sch1;
+NOTICE:  schema "sch1" does not exist, skipping
+create schema sch1;
+create or replace function sch1.func_1() returns integer AS $Summary$
+declare
+begin
+return 4;
+end;
+$Summary$ language plpgsql;
+-- package
+create or replace package aa
+is
+function func_2() return integer;
+end aa;
+/
+create or replace package body aa
+is
+function func_2 return integer 
+is
+begin
+    return 3;
+end;
+end aa;
+/
+select aa.func_2();
+ func_2 
+--------
+      3
+(1 row)
+
+create or replace package sch1.aa
+is
+function func_2() return integer;
+end aa;
+/
+create or replace package body sch1.aa
+is
+function func_2 return integer 
+is
+begin
+    return 5;
+end;
+end aa;
+/
+select sch1.aa.func_2();
+ func_2 
+--------
+      5
+(1 row)
+
+select * from tbl_1 where a = func_1();
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+select * from tbl_1 where a = func_1(2);
+ a | b 
+---+---
+ 2 | 2
+(1 row)
+
+select * from tbl_1 where a = func_1;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+-- pkg.fun
+select * from tbl_1 where a = aa.func_2();
+ a | b 
+---+---
+ 3 | 3
+(1 row)
+
+select * from tbl_1 where a = aa.func_2;
+ a | b 
+---+---
+ 3 | 3
+(1 row)
+
+-- schma.fun
+select * from tbl_1 where a = sch1.func_1();
+ a | b 
+---+---
+ 4 | 4
+(1 row)
+
+select * from tbl_1 where a = sch1.func_1;
+ a | b 
+---+---
+ 4 | 4
+(1 row)
+
+-- pkg.schma.fun
+select * from tbl_1 where a = sch1.aa.func_2();
+ a | b 
+---+---
+ 5 | 5
+(1 row)
+
+select * from tbl_1 where a = sch1.aa.func_2;
+ a | b 
+---+---
+ 5 | 5
+(1 row)
+
+create or replace package a2
+as
+v integer := 1;
+function func_11() return integer;
+end a2;
+/
+create or replace package body a2
+is
+function func_11 return integer 
+is
+  b integer;
+begin
+    return 1;
+end;
+end a2;
+/
+create or replace package a3
+is
+function func_111() return integer;
+end a3;
+/
+create or replace package body a3
+is
+function func_111 return integer 
+is
+	cur sys_refcursor;
+    temp integer;
+begin
+    open cur for
+	select a from tbl_1 t where (t.a = a2.v or t.b = 3);
+    fetch cur into temp;
+	RAISE INFO '%' , temp;
+    fetch cur into temp;
+	RAISE INFO '%' , temp;
+    return 3;
+end;
+end a3;
+/
+select a3.func_111();
+INFO:  1
+CONTEXT:  referenced column: func_111
+INFO:  3
+CONTEXT:  referenced column: func_111
+ func_111 
+----------
+        3
+(1 row)
+
+create table t1(c1 int);
+insert into t1 values(1),(2),(3),(4),(5),(6);
+create or replace package call_test as
+function func1() return int;
+function func2(c1 out int) return int;
+function func3(c1 int default 3) return int;
+procedure proc1();
+procedure proc2(c1 out int);
+procedure proc3(c1 int default 3, c2 out int);
+end call_test;
+/
+create or replace package body call_test as
+function func1() return int as
+begin
+  return 1;
+end;
+function func2(c1 out int) return int as
+begin
+  return 2;
+end;
+function func3(c1 int default 3) return int as
+begin
+  return 3;
+end;
+procedure proc1() as
+begin
+  raise info 'proc1';
+end;
+procedure proc2(c1 out int) as
+begin
+  c1 := 5;
+end;
+procedure proc3(c1 int default 3, c2 out int) as
+begin
+  c2 := 6;
+end;
+end call_test;
+/
+begin
+call_test.proc1;
+end;
+/
+INFO:  proc1
+CONTEXT:  SQL statement "CALL call_test.proc1()"
+PL/pgSQL function inline_code_block line 3 at PERFORM
+select * from t1 where c1 = call_test.func1;
+ c1 
+----
+  1
+(1 row)
+
+select * from t1 where c1 = call_test.func2;
+ERROR:  missing FROM-clause entry for table "call_test"
+LINE 1: select * from t1 where c1 = call_test.func2;
+                                    ^
+select * from t1 where c1 = call_test.func3;
+ERROR:  missing FROM-clause entry for table "call_test"
+LINE 1: select * from t1 where c1 = call_test.func3;
+                                    ^
+select * from t1 where c1 = call_test.proc1;
+ERROR:  operator does not exist: integer = void
+LINE 1: select * from t1 where c1 = call_test.proc1;
+                                  ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+select * from t1 where c1 = call_test.proc2;
+ERROR:  missing FROM-clause entry for table "call_test"
+LINE 1: select * from t1 where c1 = call_test.proc2;
+                                    ^
+select * from t1 where c1 = call_test.proc3;
+ERROR:  missing FROM-clause entry for table "call_test"
+LINE 1: select * from t1 where c1 = call_test.proc3;
+                                    ^
+declare
+var int;
+begin
+call_test.func2;
+end;
+/
+ERROR:  function call_test.func2 has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+declare
+var int;
+begin
+select c1 into var from t1 where c1 = call_test.func1;
+raise info 'var is %',var;
+select c1 into var from t1 where c1 = call_test.func2;
+raise info 'var is %',var;
+select c1 into var from t1 where c1 = call_test.func3;
+raise info 'var is %',var;
+select c1 into var from t1 where c1 = call_test.proc2;
+raise info 'var is %',var;
+select c1 into var from t1 where c1 = call_test.proc3;
+raise info 'var is %',var;
+--call call_test.proc1;
+end;
+/
+INFO:  var is 1
+ERROR:  missing FROM-clause entry for table "call_test"
+LINE 1: select c1          from t1 where c1 = call_test.func2
+                                              ^
+QUERY:  select c1          from t1 where c1 = call_test.func2
+CONTEXT:  PL/pgSQL function inline_code_block line 6 at SQL statement
+drop package call_test;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to function sch2.func1()
+drop cascades to function sch2.func2()
+drop cascades to function sch2.func3(integer)
+drop cascades to function sch2.proc1()
+drop cascades to function sch2.proc2()
+drop cascades to function sch2.proc3(integer)
+drop package sch1.aa;
+NOTICE:  drop cascades to function sch1.func_2()
+drop package aa;
+NOTICE:  drop cascades to function sch2.func_2()
+drop package a2;
+NOTICE:  drop cascades to function sch2.func_11()
+drop package a3;
+NOTICE:  drop cascades to function sch2.func_111()
+drop table tbl_1;
+drop function func_1;
+drop schema if exists sch1 cascade;
+NOTICE:  drop cascades to function sch1.func_1()
+drop schema if exists sch2 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function func_1(integer)
+drop cascades to table t1

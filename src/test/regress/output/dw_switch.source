@@ -1,0 +1,24 @@
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_double_write=off"
+The gs_guc run with the following arguments: [@abs_srcdir@/tmp_check/install//home/liyifeng/gaussMaster/gauss_app1/bin/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c enable_double_write=off set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: enable_double_write=off: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_double_write=on"
+The gs_guc run with the following arguments: [@abs_srcdir@/tmp_check/install//home/liyifeng/gaussMaster/gauss_app1/bin/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c enable_double_write=on set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: enable_double_write=on: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null

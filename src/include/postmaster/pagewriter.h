@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * pagewriter.h
  *        Data struct to store pagewriter thread variables.
- * 
- * 
+ *
+ *
  * IDENTIFICATION
  *        src/include/postmaster/pagewriter.h
  *
@@ -113,6 +113,22 @@ typedef struct RecoveryQueueState {
     LWLock *recovery_queue_lock;
 } RecoveryQueueState;
 
+typedef struct {
+    SyncRequestType type;   /* request type */
+    FileTag ftag;           /* file identifier */
+} CheckpointerRequest;
+
+typedef struct IncreCkptSyncShmemStruct {
+    ThreadId pagewritermain_pid; /* PID (0 if not started) */
+    slock_t sync_lock;          /* protects all the fsync_* fields */
+    int64 fsync_start;
+    int64 fsync_done;
+    LWLock *sync_queue_lwlock;         /* */
+    int num_requests;                /* current # of requests */
+    int max_requests;                /* allocated array size */
+    CheckpointerRequest requests[1]; /* VARIABLE LENGTH ARRAY */
+} IncreCkptSyncShmemStruct;
+
 /*
  * The slot location is pre-occupied. When the slot buffer is set, the state will set
  * to valid. when remove dirty page form queue, don't change the state, only when move
@@ -151,4 +167,12 @@ extern bool seg_candidate_buf_pop(int *buf_id, int thread_id);
 extern void candidate_buf_init(void);
 
 extern uint32 get_curr_candidate_nums(bool segment);
+extern void PgwrAbsorbFsyncRequests(void);
+extern Size PageWriterShmemSize(void);
+extern void PageWriterSyncShmemInit(void);
+extern void RequestPgwrSync(void);
+extern void PageWriterSync(void);
+extern bool PgwrForwardSyncRequest(const FileTag *ftag, SyncRequestType type);
+extern void PageWriterSyncWithAbsorption(void);
+
 #endif /* _PAGEWRITER_H */

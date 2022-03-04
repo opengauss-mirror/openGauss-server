@@ -40,6 +40,7 @@
 #include "catalog/pg_hashbucket_fn.h"
 #include "catalog/pg_tablespace.h"
 #include "commands/tablespace.h"
+#include "commands/verify.h"
 #include "pgxc/pgxc.h"
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
@@ -318,30 +319,17 @@ void log_smgrcreate(RelFileNode* rnode, ForkNumber forkNum)
     if (IsSegmentFileNode(*rnode)) {
         return;
     }
-
-    xl_smgr_create_compress xlrec;
-    uint size;
-    uint8 info = XLOG_SMGR_CREATE | XLR_SPECIAL_REL_UPDATE;
-    /*
-    * compressOptions Copy
-    */
-    if (rnode->opt != 0) {
-        xlrec.pageCompressOpts = rnode->opt;
-        size = sizeof(xl_smgr_create_compress);
-        info |= XLR_REL_COMPRESS;
-    } else {
-        size = sizeof(xl_smgr_create);
-    }
-
+    
     /*
      * Make an XLOG entry reporting the file creation.
      */
-    xlrec.xlrec.forkNum = forkNum;
-    RelFileNodeRelCopy(xlrec.xlrec.rnode, *rnode);
+    xl_smgr_create xlrec;
+    xlrec.forkNum = forkNum;
+    RelFileNodeRelCopy(xlrec.rnode, *rnode);
 
     XLogBeginInsert();
-    XLogRegisterData((char*)&xlrec, size);
-    XLogInsert(RM_SMGR_ID, info, false, rnode->bucketNode);
+    XLogRegisterData((char*)&xlrec, sizeof(xlrec));
+    XLogInsert(RM_SMGR_ID, XLOG_SMGR_CREATE | XLR_SPECIAL_REL_UPDATE, rnode->bucketNode);
 }
 
 static void CStoreRelDropStorage(Relation rel, RelFileNode* rnode, Oid ownerid)
@@ -703,26 +691,15 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
          * Make an XLOG entry reporting the file truncation.
          */
         XLogRecPtr lsn;
-        xl_smgr_truncate_compress xlrec;
-        uint size;
-        uint8 info = XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE;
+        xl_smgr_truncate xlrec;
 
-        xlrec.xlrec.blkno = nblocks;
-
-        if (rel->rd_node.opt != 0) {
-            xlrec.pageCompressOpts = rel->rd_node.opt;
-            size = sizeof(xl_smgr_truncate_compress);
-            info |= XLR_REL_COMPRESS;
-        } else {
-            size = sizeof(xl_smgr_truncate);
-        }
-
-        RelFileNodeRelCopy(xlrec.xlrec.rnode, rel->rd_node);
+        xlrec.blkno = nblocks;
+        RelFileNodeRelCopy(xlrec.rnode, rel->rd_node);
 
         XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, size);
+        XLogRegisterData((char*)&xlrec, sizeof(xlrec));
 
-        lsn = XLogInsert(RM_SMGR_ID, info, false, rel->rd_node.bucketNode);
+        lsn = XLogInsert(RM_SMGR_ID, XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE, rel->rd_node.bucketNode);
 
         /*
          * Flush, because otherwise the truncation of the main relation might
@@ -742,6 +719,7 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
 
     /* Do the real work */
     smgrtruncate(rel->rd_smgr, MAIN_FORKNUM, nblocks);
+    BatchClearBadBlock(rel->rd_node, MAIN_FORKNUM, nblocks);
 }
 
 void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
@@ -799,7 +777,7 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
         XLogBeginInsert();
         XLogRegisterData((char*)&xlrec, sizeof(xlrec));
 
-        lsn = XLogInsert(RM_SMGR_ID, XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE, false, part->pd_node.bucketNode);
+        lsn = XLogInsert(RM_SMGR_ID, XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE, part->pd_node.bucketNode);
 
         /*
          * Flush, because otherwise the truncation of the main relation might
@@ -817,6 +795,7 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
 
     /* Do the real work */
     smgrtruncate(rel->rd_smgr, MAIN_FORKNUM, nblocks);
+    BatchClearBadBlock(rel->rd_node, MAIN_FORKNUM, nblocks);
 
     /* release fake relation */
     releaseDummyRelation(&rel);
@@ -967,6 +946,7 @@ void push_del_rel_to_hashtbl(bool isCommit)
                             entry->rnode.bucketNode = pending->relnode.bucketNode;
                             entry->maxSegNo = -1;
                         }
+                        BatchClearBadBlock(pending->relnode, pending->forknum, 0);
                     }
                 }
             }
@@ -1233,7 +1213,7 @@ void smgr_redo(XLogReaderState* record)
 {
     XLogRecPtr lsn = record->EndRecPtr;
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-    bool compress = XLogRecGetInfo(record) & XLR_REL_COMPRESS;
+
     /* Backup blocks are not used in smgr records */
     Assert(!XLogRecHasAnyBlockRefs(record));
 
@@ -1242,14 +1222,14 @@ void smgr_redo(XLogReaderState* record)
 
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-        rnode.opt = compress ? ((xl_smgr_create_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
-        smgr_redo_create(rnode, xlrec->forkNum, (char *)xlrec);
-        /* Redo column file, attid is hidden in forkNum */
+        smgr_redo_create(rnode, xlrec->forkNum, (char *)xlrec);    
+            /* Redo column file, attid is hidden in forkNum */
+
     } else if (info == XLOG_SMGR_TRUNCATE) {
         xl_smgr_truncate* xlrec = (xl_smgr_truncate*)XLogRecGetData(record);
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-        rnode.opt = compress ? ((xl_smgr_truncate_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
+
         /*
          * Forcibly create relation if it doesn't exist (which suggests that
          * it was dropped somewhere later in the WAL sequence).  As in
@@ -1290,7 +1270,7 @@ void smgrApplyXLogTruncateRelation(XLogReaderState* record)
 
     smgrclosenode(rbnode);
 
-    XLogTruncateRelation(record, rbnode.node, MAIN_FORKNUM, xlrec->blkno);
+    XLogTruncateRelation(rbnode.node, MAIN_FORKNUM, xlrec->blkno);
 }
 
 /*
@@ -2192,13 +2172,6 @@ void ColMainFileNodesAppend(RelFileNode* bcmFileNode, BackendId backend)
     u_sess->catalog_cxt.ColMainFileNodes[u_sess->catalog_cxt.ColMainFileNodesCurNum].node = *bcmFileNode;
     u_sess->catalog_cxt.ColMainFileNodes[u_sess->catalog_cxt.ColMainFileNodesCurNum].backend = backend;
     ++u_sess->catalog_cxt.ColMainFileNodesCurNum;
-
-    ereport(DEBUG1,
-        (errmsg("Row[MAIN] relation dropped: %u/%u/%u backend(%d)",
-            bcmFileNode->spcNode,
-            bcmFileNode->dbNode,
-            bcmFileNode->relNode,
-            backend)));
 }
 
 /* search some one in Column Heap Main file list.

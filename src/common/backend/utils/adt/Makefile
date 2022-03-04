@@ -34,12 +34,12 @@ OBJS = acl.o arrayfuncs.o array_selfuncs.o array_typanalyze.o \
 	tid.o timestamp.o varbit.o varchar.o varlena.o version.o xid.o \
 	network.o mac.o inet_cidr_ntop.o inet_net_pton.o \
 	ri_triggers.o pg_lzcompress.o pg_lsn.o pg_locale.o formatting.o \
-	ascii.o quote.o pgstatfuncs.o encode.o dbsize.o genfile.o trigfuncs.o \
+	ascii.o quote.o pgxlogstatfuncs.o pgundostatfuncs.o pgstatfuncs.o encode.o dbsize.o genfile.o trigfuncs.o \
 	tsginidx.o tsgistidx.o tsquery.o tsquery_cleanup.o tsquery_gist.o \
 	tsquery_op.o tsquery_rewrite.o tsquery_util.o tsrank.o \
 	tsvector.o tsvector_op.o tsvector_parser.o \
 	txid.o uuid.o windowfuncs.o xml.o extended_statistics.o clientlogic_bytea.o clientlogicsettings.o \
-	median_aggs.o expr_distinct.o nlssort.o first_last_agg.o
+	median_aggs.o expr_distinct.o nlssort.o memory_func.o first_last_agg.o
 
 like.o: like.cpp like_match.cpp
 

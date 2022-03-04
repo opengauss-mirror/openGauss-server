@@ -70,7 +70,6 @@ extern void expand_indexqual_conditions(
 extern void check_partial_indexes(PlannerInfo* root, RelOptInfo* rel);
 extern Expr* adjust_rowcompare_for_index(
     RowCompareExpr* clause, IndexOptInfo* index, int indexcol, List** indexcolnos, bool* var_on_left_p);
-extern int compute_parallel_worker(const RelOptInfo *rel, double heap_pages, int rel_maxworker);
 /*
  * Check index path whether use global partition index to scan
  */

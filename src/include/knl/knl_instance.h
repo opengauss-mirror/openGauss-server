@@ -40,6 +40,7 @@
 #include "nodes/pg_list.h"
 #include "storage/lock/s_lock.h"
 #include "access/double_write_basic.h"
+#include "utils/knl_globalsysdbcache.h"
 #include "utils/palloc.h"
 #include "replication/replicainternal.h"
 #include "storage/latch.h"
@@ -74,6 +75,19 @@ const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
 const int HOTKEY_ABANDON_LENGTH = 100;
 const int MAX_GLOBAL_CACHEMEM_NUM = 128;
+const int MAX_GLOBAL_PRC_NUM = 32;
+const int MAX_AUDIT_NUM = 48;
+
+const uint32 PARALLEL_DECODE_WORKER_INVALID = 0;
+const uint32 PARALLEL_DECODE_WORKER_START = 1;
+const uint32 PARALLEL_DECODE_WORKER_READY = 2;
+const uint32 PARALLEL_DECODE_WORKER_EXIT = 3;
+/* Maximum number of max parallel decode threads */
+#define MAX_PARALLEL_DECODE_NUM 20
+
+/* Maximum number of max replication slots */
+#define MAX_REPLICATION_SLOT_NUM 100
+
 #ifndef ENABLE_MULTIPLE_NODES
 const int DB_CMPT_MAX = 4;
 #endif
@@ -116,6 +130,7 @@ typedef struct knl_g_cache_context
 {
     MemoryContext global_cache_mem;
     MemoryContext global_plancache_mem[MAX_GLOBAL_CACHEMEM_NUM];
+    MemoryContext global_prc_mem[MAX_GLOBAL_PRC_NUM];
 } knl_g_cache_context;
 
 typedef struct knl_g_cost_context {
@@ -138,6 +153,7 @@ typedef struct knl_g_pid_context {
     ThreadId BgWriterPID;
     ThreadId SpBgWriterPID;
     ThreadId* PageWriterPID;
+    ThreadId PageRepairPID;
     ThreadId CheckpointerPID;
     ThreadId WalWriterPID;
     ThreadId WalWriterAuxiliaryPID;
@@ -150,7 +166,7 @@ typedef struct knl_g_pid_context {
     ThreadId PgArchPID;
     ThreadId PgStatPID;
     ThreadId PercentilePID;
-    ThreadId PgAuditPID;
+    ThreadId *PgAuditPID;
     ThreadId SysLoggerPID;
     ThreadId CatchupPID;
     ThreadId WLMCollectPID;
@@ -181,6 +197,9 @@ typedef struct knl_g_pid_context {
     ThreadId TsCompactionPID;
     ThreadId TsCompactionAuxiliaryPID;
     ThreadId sharedStorageXlogCopyThreadPID;
+    ThreadId LogicalReadWorkerPID;
+    ThreadId LogicalDecoderWorkerPID;
+    ThreadId BarrierPreParsePID;
     ThreadId ApplyLauncerPID;
 } knl_g_pid_context;
 
@@ -430,11 +449,35 @@ typedef struct ckpt_view_struct {
 } ckpt_view_struct;
 
 const int TWO_UINT64_SLOT = 2;
-/*checkpoint*/
+
+typedef struct knl_g_audit_context {
+    MemoryContext global_audit_context;
+    /* audit pipes */
+    int *sys_audit_pipes;
+
+    /* audit logs */
+    char index_file_path[MAXPGPATH];
+    LWLock *index_file_lock;
+    struct AuditIndexTable* audit_indextbl;
+    struct AuditIndexTableOld* audit_indextbl_old;
+    uint64 pgaudit_totalspace;
+
+    /* audit thread */
+    volatile uint32 current_audit_index;
+    volatile int thread_num;
+    volatile uint32 audit_coru_fnum[MAX_AUDIT_NUM];
+} knl_g_audit_context;
+
+/* incremental checkpoint */
 typedef struct knl_g_ckpt_context {
     uint64 dirty_page_queue_reclsn;
     uint64 dirty_page_queue_tail;
 
+    /* dirty pages applied to flush */
+    volatile uint32 prepared;
+    pg_atomic_uint32 CkptBufferIdsTail;
+    pg_atomic_uint32 CkptBufferIdsCompletedPages;
+    volatile uint32 CkptBufferIdsFlushPages;
     CkptSortItem* CkptBufferIds;
 
     /* dirty_page_queue store dirty buffer, buf_id + 1, 0 is invalid */
@@ -479,6 +522,8 @@ typedef struct knl_g_ckpt_context {
     struct CheckpointCallbackItem* ckptCallback;
 #endif
 
+    struct IncreCkptSyncShmemStruct* incre_ckpt_sync_shmem;
+
     uint64 pad[TWO_UINT64_SLOT];
 } knl_g_ckpt_context;
 
@@ -490,19 +535,48 @@ typedef struct recovery_dw_buf {
     bool *single_flush_state;
 } recovery_dw_buf;
 
-typedef struct knl_g_dw_context {
+typedef struct dw_batch_file_context{
+    int id;
+
     volatile int fd;
-    volatile uint32 closed;
     uint16 flush_page;          /* total number of flushed pages before truncate or reset */
 
-    MemoryContext mem_cxt;
     char* unaligned_buf;
     char* buf;
 
-    struct LWLock* flush_lock;  /* single flush: first version pos lock, batch flush: pos lock */
+    struct LWLock* flush_lock;
     dw_file_head_t* file_head;
     volatile uint32 write_pos;  /* the copied pages in buffer, updated when mark page */
+    uint64 file_size;
+
+    dw_stat_info_batch batch_stat_info;
+
+    char file_name[PATH_MAX];
+}dw_batch_file_context;
+
+typedef struct knl_g_dw_context {
+    volatile int fd;
+    volatile uint32 closed;
+
+    volatile bool old_batch_version;
+    volatile int recovery_dw_file_num;
+    volatile int recovery_dw_file_size;
+
+    dw_batch_meta_file batch_meta_file;
+    dw_batch_file_context *batch_file_cxts;
+
+    MemoryContext mem_cxt;
+
     volatile uint32 dw_version;
+
+    uint16 flush_page;
+
+    char* unaligned_buf;
+    char* buf;
+
+    struct LWLock* flush_lock;
+    dw_file_head_t* file_head;
+    volatile uint32 write_pos;
 
     /* second version flush, only single flush */
     struct LWLock* second_flush_lock;  /* single flush: second version pos lock */
@@ -519,7 +593,6 @@ typedef struct knl_g_dw_context {
     recovery_dw_buf recovery_buf;     /* recovery the c20 version dw file */
 
     /* dw view information */
-    dw_stat_info_batch batch_stat_info;
     dw_stat_info_single single_stat_info;
 } knl_g_dw_context;
 
@@ -530,6 +603,17 @@ typedef struct knl_g_bgwriter_context {
     LWLock *rel_one_fork_hashtbl_lock;
     Latch *invalid_buf_proc_latch;
 }knl_g_bgwriter_context;
+
+typedef struct knl_g_repair_context {
+    ThreadId startup_tid;
+    Latch *repair_proc_latch;
+    HTAB *page_repair_hashtbl;          /* standby store page repair info */
+    LWLock *page_repair_hashtbl_lock;
+    HTAB *file_repair_hashtbl;          /* standby store file repair info */
+    LWLock *file_repair_hashtbl_lock;
+    HTAB *global_repair_bad_block_stat; /* local_bad_block_info use this */
+    bool support_repair;
+} knl_g_repair_context;
 
 typedef struct {
     ThreadId threadId;
@@ -561,6 +645,39 @@ typedef enum{
     EXTREME_REDO,
 }RedoType;
 
+extern struct ReorderBufferChange* change;
+
+enum knl_parallel_decode_state {
+    DECODE_INIT = 0,
+    DECODE_STARTING_BEGIN,
+    DECODE_STARTING_END,
+    DECODE_IN_PROGRESS,
+    DECODE_DONE,
+};
+
+typedef struct {
+    ThreadId threadId;
+    uint32 threadState;
+} ParallelDecodeWorkerStatus;
+
+typedef struct {
+    ThreadId threadId;
+    uint32 threadState;
+} ParallelReaderWorkerStatusTye;
+
+typedef struct knl_g_parallel_decode_context {
+    MemoryContext parallelDecodeCtx;
+    int state;
+    slock_t rwlock;
+    slock_t destroy_lock; /* redo worker destroy lock */
+    char* dbUser;
+    char* dbName;
+    int totalNum;
+    volatile ParallelDecodeWorkerStatus ParallelDecodeWorkerStatusList[MAX_PARALLEL_DECODE_NUM];
+    volatile ParallelReaderWorkerStatusTye ParallelReaderWorkerStatus;
+    gs_thread_t tid[MAX_PARALLEL_DECODE_NUM];
+    Oid relationOid;
+} knl_g_parallel_decode_context;
 
 typedef struct knl_g_parallel_redo_context {
     RedoType redoType;
@@ -574,12 +691,15 @@ typedef struct knl_g_parallel_redo_context {
     int pre_enable_switch;
     slock_t destroy_lock; /* redo worker destroy lock */
     pg_atomic_uint64 max_page_flush_lsn[NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS];
+    pg_atomic_uint64 last_replayed_conflict_csn;
     pg_atomic_uint32 permitFinishRedo;
     pg_atomic_uint32 hotStdby;
     volatile XLogRecPtr newestCheckpointLoc;
     volatile CheckPoint newestCheckpoint;
     char* unali_buf; /* unaligned_buf */
     char* ali_buf;
+    XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
+    RedoCpuBindControl redoCpuBindcontrl;
 } knl_g_parallel_redo_context;
 
 typedef struct knl_g_heartbeat_context {
@@ -595,6 +715,13 @@ typedef struct knl_g_barrier_creator_context {
     bool stop;
     bool is_barrier_creator;
 } knl_g_barrier_creator_context;
+
+typedef struct knl_g_csn_barrier_context {
+    struct HTAB* barrier_hash_table;
+    LWLock* barrier_hashtbl_lock;
+    char stopBarrierId[MAX_BARRIER_ID_LENGTH];
+    MemoryContext barrier_context;
+} knl_g_csn_barrier_context;
 
 typedef struct knl_g_comm_context {
     /* function point, for wake up consumer in executor */
@@ -643,6 +770,7 @@ typedef struct knl_g_comm_context {
     knl_g_counters_context counters_cxt;
     knl_g_tests_context tests_cxt;
     knl_g_pollers_context pollers_cxt;
+    knl_g_parallel_decode_context pdecode_cxt[MAX_REPLICATION_SLOT_NUM];
     knl_g_reqcheck_context reqcheck_cxt;
     knl_g_mctcp_context mctcp_cxt;
     knl_g_commutil_context commutil_cxt;
@@ -653,6 +781,9 @@ typedef struct knl_g_comm_context {
 
     HTAB* usedDnSpace;
     uint32 current_gsrewind_count;
+    bool request_disaster_cluster;
+    bool isNeedChangeRole;
+    long lastArchiveRcvTime;
 
 #ifdef USE_SSL
     libcomm_sslinfo* libcomm_data_port_list;
@@ -665,6 +796,12 @@ typedef struct knl_g_comm_logic_context {
     MemoryContext comm_logic_mem_cxt;
     FdCollection *comm_fd_collection;
 } knl_g_comm_logic_context;
+
+/* g_instance struct for "Pooler" */
+typedef struct knl_g_pooler_context {
+    /* Record global connection status for function 'comm_check_connection_status' */
+    struct GlobalConnStatus* globalConnStatus;
+} knl_g_pooler_context;
 
 typedef struct knl_g_libpq_context {
     /* Workaround for Solaris 2.6 brokenness */
@@ -717,13 +854,24 @@ typedef struct knl_g_xlog_context {
 } knl_g_xlog_context;
 
 typedef struct knl_g_undo_context {
-    void                    *uZones[UNDO_ZONE_COUNT];
+    void                    **uZones;
     uint32                   undoTotalSize;
     uint32                   undoMetaSize;
-    uint32                   uZoneCount;
+    volatile uint32          uZoneCount;
     Bitmapset               *uZoneBitmap[UNDO_PERSISTENCE_LEVELS];
     MemoryContext            undoContext;
+    int64                    undoChainTotalSize;
+    int64                    maxChainSize;
+    uint32                   undo_chain_visited_count;
+    uint32                   undoCountThreshold;
+    TransactionId            oldestFrozenXid;
+    /* Oldest transaction id which is having undo. */
+    pg_atomic_uint64         oldestXidInUndo;
 } knl_g_undo_context;
+
+typedef struct knl_g_flashback_context {
+    TransactionId oldestXminInFlashback;
+} knl_g_flashback_context;
 
 struct NumaMemAllocInfo {
     void* numaAddr; /* Start address returned from numa_alloc_xxx */
@@ -761,9 +909,11 @@ typedef struct WalInsertStatusEntry WALInsertStatusEntry;
 typedef struct WALFlushWaitLockPadded WALFlushWaitLockPadded;
 typedef struct WALBufferInitWaitLockPadded WALBufferInitWaitLockPadded;
 typedef struct WALInitSegLockPadded WALInitSegLockPadded;
+typedef struct XlogFlushStats XlogFlushStatistics;
 typedef struct knl_g_conn_context {
     volatile int CurConnCount;
-    volatile int CurCMAConnCount;
+    volatile int CurCMAConnCount;  /* Connection count of cm_agent after initialize, using for connection limit */
+    volatile uint32 CurCMAProcCount;  /* Proc count of cm_agent connections, indicate proc unsing condition */
     slock_t ConnCountLock;
 } knl_g_conn_context;
 
@@ -790,6 +940,9 @@ typedef struct knl_g_wal_context {
     volatile int lastLRCFlushed;
     int num_locks_in_group;
     DemoteMode upgradeSwitchMode;
+    uint64 totalXlogIterBytes;
+    uint64 totalXlogIterTimes;
+    XlogFlushStatistics* xlogFlushStats;
 } knl_g_wal_context;
 
 typedef struct GlobalSeqInfoHashBucket {
@@ -809,6 +962,7 @@ typedef struct knl_g_archive_context {
     struct ArchiveBarrierLsnInfo *barrier_lsn_info;
     slock_t barrier_lock;
     int max_node_cnt;
+    int chosen_walsender_index;
     bool in_switchover;
     bool in_service_truncate;
 } knl_g_archive_context;
@@ -904,6 +1058,11 @@ typedef struct knl_g_archive_thread_info {
 
 typedef struct knl_g_roach_context {
     bool isRoachRestore;
+    char* targetTimeInPITR;
+    char* globalBarrierRecordForPITR;
+    bool isXLogForceRecycled;
+    bool isGtmFreeCsn;
+    char* targetRestoreTimeFromMedia;
 } knl_g_roach_context;
 
 /* Added for streaming disaster recovery */
@@ -912,8 +1071,22 @@ typedef struct knl_g_streaming_dr_context {
     bool isInSwitchover;
     bool isInteractionCompleted;
     XLogRecPtr switchoverBarrierLsn;
-    TimestampTz lastRequestTimestamp;
+    int64 rpoSleepTime;
+    int64 rpoBalanceSleepTime;
+    char currentBarrierId[MAX_BARRIER_ID_LENGTH];
+    char targetBarrierId[MAX_BARRIER_ID_LENGTH];
+    slock_t mutex; /* locks shared variables shown above */
 } knl_g_streaming_dr_context;
+
+typedef struct knl_g_startup_context {
+    uint32 remoteReadPageNum;
+    HTAB *badPageHashTbl;
+    char page[BLCKSZ];
+    XLogReaderState *current_record;
+    volatile uint32 BadFileNum;
+    ThreadId startup_tid;
+    XLogRecPtr suspend_lsn;
+}knl_g_startup_context;
 
 typedef struct knl_instance_context {
     knl_virtual_role role;
@@ -971,7 +1144,6 @@ typedef struct knl_instance_context {
     /* load ir file count for each session */
     long codegen_IRload_process_count;
     uint64 global_session_seq;
-    char stopBarrierId[MAX_BARRIER_ID_LENGTH];
 
     struct HTAB* vec_func_hash;
 
@@ -992,12 +1164,14 @@ typedef struct knl_instance_context {
     knl_g_cost_context cost_cxt;
     knl_g_comm_context comm_cxt;
     knl_g_comm_logic_context comm_logic_cxt;
+    knl_g_pooler_context pooler_cxt;
     knl_g_conn_context conn_cxt;
     knl_g_libpq_context libpq_cxt;
     struct knl_g_wlm_context* wlm_cxt;
     knl_g_ckpt_context ckpt_cxt;
     knl_g_ckpt_context* ckpt_cxt_ctl;
     knl_g_bgwriter_context bgwriter_cxt;
+    knl_g_repair_context repair_cxt;
     struct knl_g_dw_context dw_batch_cxt;
     struct knl_g_dw_context dw_single_cxt;
     knl_g_shmem_context shmem_cxt;
@@ -1009,6 +1183,7 @@ typedef struct knl_instance_context {
     knl_g_numa_context numa_cxt;
 
     knl_g_undo_context undo_cxt;
+    knl_g_flashback_context flashback_cxt;
 
 #ifdef ENABLE_MOT
     knl_g_mot_context mot_cxt;
@@ -1019,10 +1194,11 @@ typedef struct knl_instance_context {
     knl_g_streaming_context streaming_cxt;
     knl_g_csnminsync_context csnminsync_cxt;
     knl_g_barrier_creator_context barrier_creator_cxt;
+    knl_g_csn_barrier_context csn_barrier_cxt;
+    GlobalSysDBCache global_sysdbcache;
     knl_g_archive_context archive_obs_cxt;
     knl_g_archive_thread_info archive_thread_info;
     struct HTAB* ngroup_hash_table;
-    struct HTAB* mmapCache;
     knl_g_hypo_context hypo_cxt;
 
     knl_g_segment_context segment_cxt;
@@ -1032,12 +1208,14 @@ typedef struct knl_instance_context {
     knl_g_roach_context roach_cxt;
     knl_g_streaming_dr_context streaming_dr_cxt;
     struct PLGlobalPackageRuntimeCache* global_session_pkg;
-    pg_atomic_uint32 extensionNum;
+    knl_g_startup_context startup_cxt;
 
 #ifndef ENABLE_MULTIPLE_NODES
     void *raw_parser_hook[DB_CMPT_MAX];
     void *plsql_parser_hook[DB_CMPT_MAX];
 #endif
+    pg_atomic_uint32 extensionNum;
+    knl_g_audit_context audit_cxt;
 } knl_instance_context;
 
 extern long random();
@@ -1053,10 +1231,8 @@ extern void add_numa_alloc_info(void* numaAddr, size_t length);
 
 #define GTM_FREE_MODE (g_instance.attr.attr_storage.enable_gtm_free || \
                         g_instance.attr.attr_storage.gtm_option == GTMOPTION_GTMFREE)
-#define GTM_MODE (!g_instance.attr.attr_storage.enable_gtm_free && \
-                    (g_instance.attr.attr_storage.gtm_option == GTMOPTION_GTM))
-#define GTM_LITE_MODE (!g_instance.attr.attr_storage.enable_gtm_free && \
-                        g_instance.attr.attr_storage.gtm_option == GTMOPTION_GTMLITE)
+#define GTM_MODE (false)
+#define GTM_LITE_MODE (!(GTM_FREE_MODE))
 
 #define REDO_FINISH_STATUS_LOCAL		0x00000001
 #define REDO_FINISH_STATUS_CM	    	0x00000002
@@ -1066,6 +1242,9 @@ extern void add_numa_alloc_info(void* numaAddr, size_t length);
 
 #define GLOBAL_PLANCACHE_MEMCONTEXT \
     (g_instance.cache_cxt.global_plancache_mem[u_sess->session_id % MAX_GLOBAL_CACHEMEM_NUM])
+
+#define GLOBAL_PRC_MEMCONTEXT \
+    (g_instance.cache_cxt.global_prc_mem[u_sess->session_id % MAX_GLOBAL_PRC_NUM])
 
 #define DISABLE_MULTI_NODES_GPI (u_sess->attr.attr_storage.default_index_kind == DEFAULT_INDEX_KIND_NONE)
 #define DEFAULT_CREATE_LOCAL_INDEX (u_sess->attr.attr_storage.default_index_kind == DEFAULT_INDEX_KIND_LOCAL)

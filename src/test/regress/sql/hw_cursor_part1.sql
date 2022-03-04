@@ -793,6 +793,41 @@ close c;
 end;
 /
 
+create table t1_refcursor(a int);
+insert into t1_refcursor values (1);
+insert into t1_refcursor values (2);
+create or replace procedure p3_refcursor (c1 out sys_refcursor) as
+va t1_refcursor;
+i int;
+begin
+open c1 for select * from t1_refcursor;
+i = 1/0;
+exception 
+when others then
+    raise info '%', 'exception';
+end;
+/
+select * from  p3_refcursor();
+
+create or replace procedure p3 (c4 in int,c2 out int,c3 out int,c1 out sys_refcursor,cc2 out sys_refcursor) as
+va t1_refcursor;
+i int;
+begin
+begin
+open cc2 for select * from t1_refcursor;
+i = 1/0;
+exception 
+when others then
+    raise info '%', 'exception2';
+end;
+open c1 for select * from t1_refcursor;
+c3:=1;
+c2:=2;
+end;
+/
+
+select * from  p3(1);
+
 START TRANSACTION;
 CURSOR sc  FOR select * from generate_series(3, 13) i where i <> all (values (1),(2),(4));
 MOVE FORWARD 10 IN sc;

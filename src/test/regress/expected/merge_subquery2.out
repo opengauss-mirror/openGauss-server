@@ -1,0 +1,196 @@
+create schema merge_subquery2;
+set current_schema=merge_subquery2;
+create table merge_subquery_utest1(id int, val int) with(storage_type=ustore);
+create table merge_subquery_utest2(id int, val int) with(storage_type=ustore);
+insert into merge_subquery_utest1 values(generate_series(1, 10), generate_series(1, 5));
+insert into merge_subquery_utest2 values(generate_series(1, 5), generate_series(21, 25));
+insert into merge_subquery_utest2 values(generate_series(11, 15), generate_series(11, 15));
+explain merge into merge_subquery_utest1 mg1
+using merge_subquery_utest2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select mg2.val+mg1.val)
+when not matched then
+  insert values(mg2.id, mg2.val);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Merge on merge_subquery_utest1 mg1  (cost=58.35..355.67 rows=23091 width=28)
+   ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=28)
+         Hash Cond: (mg2.id = mg1.id)
+         ->  Seq Scan on merge_subquery_utest2 mg2  (cost=0.00..31.49 rows=2149 width=14)
+         ->  Hash  (cost=31.49..31.49 rows=2149 width=14)
+               ->  Seq Scan on merge_subquery_utest1 mg1  (cost=0.00..31.49 rows=2149 width=14)
+   SubPlan 1
+     ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(8 rows)
+
+START TRANSACTION;
+merge into merge_subquery_utest1 mg1
+using merge_subquery_utest2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select mg2.val+mg1.val)
+when not matched then
+  insert values(mg2.id, mg2.val);
+select * from merge_subquery_utest1;
+ id | val 
+----+-----
+  1 |  22
+  2 |  24
+  3 |  26
+  4 |  28
+  5 |  30
+  6 |   1
+  7 |   2
+  8 |   3
+  9 |   4
+ 10 |   5
+ 11 |  11
+ 12 |  12
+ 13 |  13
+ 14 |  14
+ 15 |  15
+(15 rows)
+
+ROLLBACK;
+explain merge into merge_subquery_utest1 mg1
+using merge_subquery_utest2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select sum(val) from merge_subquery_utest2 mg3)
+when not matched then
+  insert values(mg2.id, mg2.val);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Merge on merge_subquery_utest1 mg1  (cost=95.23..392.55 rows=23091 width=28)
+   InitPlan 1 (returns $0)
+     ->  Aggregate  (cost=36.86..36.87 rows=1 width=12)
+           ->  Seq Scan on merge_subquery_utest2 mg3  (cost=0.00..31.49 rows=2149 width=4)
+   ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=28)
+         Hash Cond: (mg2.id = mg1.id)
+         ->  Seq Scan on merge_subquery_utest2 mg2  (cost=0.00..31.49 rows=2149 width=14)
+         ->  Hash  (cost=31.49..31.49 rows=2149 width=14)
+               ->  Seq Scan on merge_subquery_utest1 mg1  (cost=0.00..31.49 rows=2149 width=14)
+(9 rows)
+
+START TRANSACTION;
+merge into merge_subquery_utest1 mg1
+using merge_subquery_utest2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select sum(val) from merge_subquery_utest2 mg3)
+when not matched then
+  insert values(mg2.id, mg2.val);
+select * from merge_subquery_utest1;
+ id | val 
+----+-----
+  1 | 180
+  2 | 180
+  3 | 180
+  4 | 180
+  5 | 180
+  6 |   1
+  7 |   2
+  8 |   3
+  9 |   4
+ 10 |   5
+ 11 |  11
+ 12 |  12
+ 13 |  13
+ 14 |  14
+ 15 |  15
+(15 rows)
+
+ROLLBACK;
+explain merge into merge_subquery_utest1 mg1
+using merge_subquery_utest2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select mg3.val from (select * from merge_subquery_utest1) as mg3 where mg3.id in (select id from merge_subquery_utest2) limit 1)
+when not matched then
+  insert values(mg2.id, mg2.val);  
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Merge on merge_subquery_utest1 mg1  (cost=93.55..390.87 rows=23091 width=28)
+   InitPlan 1 (returns $0)
+     ->  Limit  (cost=0.00..35.20 rows=1 width=4)
+           ->  Nested Loop Semi Join  (cost=0.00..37804.61 rows=1074 width=4)
+                 Join Filter: (merge_subquery_utest1.id = merge_subquery_utest2.id)
+                 ->  Seq Scan on merge_subquery_utest1  (cost=0.00..31.49 rows=2149 width=8)
+                 ->  Materialize  (cost=0.00..42.23 rows=2149 width=4)
+                       ->  Seq Scan on merge_subquery_utest2  (cost=0.00..31.49 rows=2149 width=4)
+   ->  Hash Left Join  (cost=58.35..355.67 rows=23091 width=28)
+         Hash Cond: (mg2.id = mg1.id)
+         ->  Seq Scan on merge_subquery_utest2 mg2  (cost=0.00..31.49 rows=2149 width=14)
+         ->  Hash  (cost=31.49..31.49 rows=2149 width=14)
+               ->  Seq Scan on merge_subquery_utest1 mg1  (cost=0.00..31.49 rows=2149 width=14)
+(13 rows)
+
+START TRANSACTION;
+merge into merge_subquery_utest1 mg1
+using merge_subquery_utest2 mg2 on mg1.id=mg2.id
+when matched then
+  update set mg1.val=(select mg3.val from (select * from merge_subquery_utest1) as mg3 where mg3.id in (select id from merge_subquery_utest2) limit 1)
+when not matched then
+  insert values(mg2.id, mg2.val);
+select * from merge_subquery_utest1;
+ id | val 
+----+-----
+  1 |   1
+  2 |   1
+  3 |   1
+  4 |   1
+  5 |   1
+  6 |   1
+  7 |   2
+  8 |   3
+  9 |   4
+ 10 |   5
+ 11 |  11
+ 12 |  12
+ 13 |  13
+ 14 |  14
+ 15 |  15
+(15 rows)
+
+ROLLBACK;
+-- subpartition
+create table partition_table(id int, val1 int, val2 int, val3 int)
+partition by range (id) subpartition by list (val1)
+(
+  partition p_1 values less than(5)
+  (
+    subpartition p_11 values ('1','2'),
+	subpartition p_12 values ('3','4'),
+	subpartition p_13 values ('5')
+  ),
+  partition p_2 values less than(10)
+  (
+    subpartition p_21 values ('1','2'),
+	subpartition p_22 values ('3','4'),
+	subpartition p_23 values ('5')
+  ),
+  partition p_3 values less than(20)
+  (
+    subpartition p_31 values ('1','2'),
+	subpartition p_32 values ('3','4'),
+	subpartition p_33 values ('5')
+  )
+);
+insert into partition_table values(generate_series(1, 10), generate_series(1,5), generate_series(1,2), generate_series(1,10));
+explain
+merge into partition_table t1
+using merge_subquery_utest2 t2 on t1.id=t2.id
+when matched then
+  update set t1.val2 = (select t2.val + t1.val2) and
+         t1.val3 = (select t3.id from merge_subquery_utest1 t3 where id=3)
+when not matched then
+  insert values(t2.id, t2.val, (select t4.val from merge_subquery_utest1 t4 where id=7), t2.val*2);
+ERROR:  Subpartition is not supported for MERGE INTO
+START TRANSACTION;
+merge into partition_table t1
+using merge_subquery_utest2 t2 on t1.id=t2.id
+when matched then
+  update set t1.val2 = (select t2.val + t1.val2) and
+         t1.val3 = (select t3.id from merge_subquery_utest1 t3 where id=3)
+when not matched then
+  insert values(t2.id, t2.val, (select t4.val from merge_subquery_utest1 t4 where id=7), t2.val*2);
+ERROR:  Subpartition is not supported for MERGE INTO
+select * from partition_table;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK;

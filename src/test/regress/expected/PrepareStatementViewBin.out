@@ -1,0 +1,47 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_table_4_view(key int PRIMARY KEY ,col_varchar varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),col_int int  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),col_float float ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_table_4_view_pkey" for table "t_table_4_view"
+*******inserting data to the t_table_4_view
+INSERT INTO t_table_4_view (key, col_varchar, col_int, col_float) VALUES (?,?,?,?);
+1,data_4_view,1,1.1
+INSERT INTO t_table_4_view (key, col_varchar, col_int, col_float) VALUES (?,?,?,?);
+2,data_4_view2,2,2.2
+*************verify data before creating the view
+select * from t_table_4_view order by key;
+
+ key | col_varchar  | col_int | col_float 
+-----+--------------+---------+-----------
+   1 | data_4_view  |       1 | 1.1
+   2 | data_4_view2 |       2 | 2.2
+(2 rows)
+
+CREATE View v_view_from_table_4_view as select * from t_table_4_view;
+*************verifying that new view was successfully created
+select * from v_view_from_table_4_view order by key;
+
+ key | col_varchar  | col_int | col_float 
+-----+--------------+---------+-----------
+   1 | data_4_view  |       1 | 1.1
+   2 | data_4_view2 |       2 | 2.2
+(2 rows)
+
+**************verifying view creation
+select *, col_int from v_view_from_table_4_view where  col_float = ? or key = ?
+2.2,1
+ key | col_varchar  | col_int | col_float | col_int 
+-----+--------------+---------+-----------+---------
+   2 | data_4_view2 |       2 | 2.2       |       2
+   1 | data_4_view  |       1 | 1.1       |       1
+(2 rows)
+
+drop view v_view_from_table_4_view;
+drop table t_table_4_view;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;

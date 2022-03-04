@@ -41,10 +41,10 @@
 #include "tcop/dest.h"
 #include "securec_check.h"
 
-void XLogRecSetBarrierState(XLogBlockBarrierParse *blockbarrierstate, XLogRecPtr startptr, XLogRecPtr endptr)
+void XLogRecSetBarrierState(XLogBlockBarrierParse *blockbarrierstate, char *mainData, Size len)
 {
-    blockbarrierstate->startptr = startptr;
-    blockbarrierstate->endptr = endptr;
+    blockbarrierstate->maindata = mainData;
+    blockbarrierstate->maindatalen = len;
 }
 
 XLogRecParseState *barrier_redo_parse_to_block(XLogReaderState *record, uint32 *blocknum)
@@ -63,8 +63,8 @@ XLogRecParseState *barrier_redo_parse_to_block(XLogReaderState *record, uint32 *
     filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
     XLogRecSetBlockCommonState(record, BLOCK_DATA_BARRIER_TYPE, filenode, recordstatehead);
 
-    XLogRecSetBarrierState(&(recordstatehead->blockparse.extra_rec.blockbarrier), record->ReadRecPtr,
-                           record->EndRecPtr);
+    XLogRecSetBarrierState(&(recordstatehead->blockparse.extra_rec.blockbarrier), XLogRecGetData(record),
+                           XLogRecGetDataLen(record));
     recordstatehead->isFullSync = record->isFullSync;
     return recordstatehead;
 }

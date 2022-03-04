@@ -100,12 +100,15 @@ typedef enum knl_thread_role {
     DATARECWRITER,
     CBMWRITER,
     PAGEWRITER_THREAD,
+    PAGEREPAIR_THREAD,
     HEARTBEAT,
     COMM_SENDERFLOWER,
     COMM_RECEIVERFLOWER,
     COMM_RECEIVER,
     COMM_AUXILIARY,
     COMM_POOLER_CLEAN,
+    LOGICAL_READ_RECORD,
+    PARALLEL_DECODE,
 
     UNDO_RECYCLER,
     UNDO_LAUNCHER,
@@ -118,6 +121,7 @@ typedef enum knl_thread_role {
     SHARE_STORAGE_XLOG_COPYER,
     APPLY_LAUNCHER,
     APPLY_WORKER,
+    BARRIER_PREPARSE,
     TS_COMPACTION,
     TS_COMPACTION_CONSUMER,
     TS_COMPACTION_AUXILIAY,
@@ -136,6 +140,7 @@ typedef enum knl_thread_role {
     REDISTRIBUTION_WORKER,
     WAL_NORMAL_SENDER,
     WAL_HADR_SENDER, /* A cross cluster wal sender to hadr cluster main standby */
+    WAL_HADR_CN_SENDER, /* A cross cluster wal sender to hadr cluster coordinator standby */
     WAL_SHARE_STORE_SENDER, /* A cross cluster wal sender to share storage cluster standby */
     WAL_STANDBY_SENDER, /* Am I cascading WAL to another standby ? */
     WAL_DB_SENDER,

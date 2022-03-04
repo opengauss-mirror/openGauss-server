@@ -54,7 +54,11 @@
 #include <sys/poll.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
+#ifndef WITH_OPENEULER_OS
 #include <sys/sysctl.h>
+#else
+#include <linux/sysctl.h>
+#endif
 #include <sys/uio.h>
 #include <sys/wait.h>
 

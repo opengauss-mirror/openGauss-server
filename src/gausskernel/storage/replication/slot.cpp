@@ -249,6 +249,49 @@ void redo_slot_reset_for_backup(const ReplicationSlotPersistentData *xlrec)
 }
 
 /*
+ * Drop the old hadr replication slot when hadr main standby is changed.
+ */
+static void DropOldHadrReplicationSlot(const char *name)
+{
+    if (strstr(name, "_hadr") == NULL) {
+        return;
+    }
+
+    ReplicationSlot *slot;
+    char dropSlotName[NAMEDATALEN] = {0};
+    errno_t rc;
+
+    LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        if (slot->in_use && !slot->active &&
+            strcmp(name, NameStr(slot->data.name)) != 0 &&
+            strstr(NameStr(slot->data.name), "_hadr") != NULL) {
+            rc = strcpy_s(dropSlotName, NAMEDATALEN, NameStr(slot->data.name));
+            securec_check_ss(rc, "\0", "\0");
+            break;
+        }
+    }
+    LWLockRelease(ReplicationSlotControlLock);
+
+    if (strlen(dropSlotName) > 0) {
+        ReplicationSlotDrop(dropSlotName);
+    }
+}
+
+static bool HasArchiveSlot()
+{
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        if (s->in_use && s->data.database == InvalidOid  && GET_SLOT_PERSISTENCY(s->data) != RS_BACKUP &&
+            s->extra_content != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
  * Create a new replication slot and mark it as used by this backend.
  *
  * name: Name of the slot
@@ -266,6 +309,9 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
 
     (void)ReplicationSlotValidateName(name, ERROR);
 
+    /* Drop old hadr replication slot for streaming disaster cluster. */
+    DropOldHadrReplicationSlot(name);
+
     /*
      * If some other backend ran this code currently with us, we'd likely
      * both allocate the same slot, and that would be bad.  We'd also be
@@ -281,9 +327,11 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
      * nobody else can change the in_use flags while we're looking at them.
      */
     LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+    if (extra_content != NULL && strlen(extra_content) != 0 && HasArchiveSlot()) {
+        ereport(ERROR, (errmsg("currently multi-archive replication slot isn't supported")));
+    }
     for (i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
         ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
-
         if (s->in_use && strcmp(name, NameStr(s->data.name)) == 0) {
             LWLockRelease(ReplicationSlotControlLock);
             LWLockRelease(ReplicationSlotAllocationLock);
@@ -835,6 +883,36 @@ void ReplicationSlotsComputeRequiredXmin(bool already_locked)
     ProcArraySetReplicationSlotXmin(agg_xmin, agg_catalog_xmin, already_locked);
 }
 
+static void CalculateMinAndMaxRequiredPtr(ReplicationSlot *s, XLogRecPtr* standby_slots_list, int i,
+        XLogRecPtr restart_lsn, XLogRecPtr* min_tools_required, XLogRecPtr* min_required,
+        XLogRecPtr* min_archive_restart_lsn, XLogRecPtr* max_required)
+{
+    if (s->data.database == InvalidOid && GET_SLOT_PERSISTENCY(s->data) != RS_BACKUP && s->extra_content == NULL) {
+        standby_slots_list[i] = restart_lsn;
+    } else {
+        XLogRecPtr min_tools_lsn = restart_lsn;
+        if (s->extra_content == NULL && (!XLByteEQ(min_tools_lsn, InvalidXLogRecPtr)) &&
+            (XLByteEQ(*min_tools_required, InvalidXLogRecPtr) || XLByteLT(min_tools_lsn, *min_tools_required))) {
+            *min_tools_required = min_tools_lsn;
+        }
+    }
+    if (s->extra_content != NULL) {
+        if ((!XLByteEQ(restart_lsn, InvalidXLogRecPtr)) &&
+            (XLByteEQ(*min_archive_restart_lsn, InvalidXLogRecPtr)
+            || XLByteLT(restart_lsn, *min_archive_restart_lsn))) {
+            *min_archive_restart_lsn = restart_lsn;
+        }
+    }
+    if ((!XLByteEQ(restart_lsn, InvalidXLogRecPtr)) &&
+        (XLByteEQ(*min_required, InvalidXLogRecPtr) || XLByteLT(restart_lsn, *min_required))) {
+        *min_required = restart_lsn;
+    }
+
+    if (XLByteLT(*max_required, restart_lsn)) {
+        *max_required = restart_lsn;
+    }
+}
+
 /*
  * Compute the oldest restart LSN across all slots and inform xlog module.
  */
@@ -845,6 +923,7 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
     XLogRecPtr min_tools_required = InvalidXLogRecPtr;
     XLogRecPtr max_required = InvalidXLogRecPtr;
     XLogRecPtr standby_slots_list[g_instance.attr.attr_storage.max_replication_slots];
+    XLogRecPtr min_archive_restart_lsn = InvalidXLogRecPtr;
     bool in_use = false;
     errno_t rc = EOK;
 
@@ -866,6 +945,7 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
         SpinLockAcquire(&s->mutex);
         XLogRecPtr restart_lsn;
         bool isNoNeedCheck = (t_thrd.xlog_cxt.server_mode != PRIMARY_MODE &&
+            !(t_thrd.xlog_cxt.server_mode == STANDBY_MODE && t_thrd.xlog_cxt.is_hadr_main_standby) &&
             t_thrd.xlog_cxt.server_mode != PENDING_MODE && s->data.database == InvalidOid &&
             GET_SLOT_PERSISTENCY(s->data) != RS_BACKUP);
         if (isNoNeedCheck) {
@@ -880,23 +960,8 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
         restart_lsn = vslot->data.restart_lsn;
 
         SpinLockRelease(&s->mutex);
-        if (s->data.database == InvalidOid && GET_SLOT_PERSISTENCY(s->data) != RS_BACKUP) {
-            standby_slots_list[i] = restart_lsn;
-        } else {
-            XLogRecPtr min_tools_lsn = restart_lsn;
-            if ((!XLByteEQ(min_tools_lsn, InvalidXLogRecPtr)) &&
-                (XLByteEQ(min_tools_required, InvalidXLogRecPtr) || XLByteLT(min_tools_lsn, min_tools_required))) {
-                min_tools_required = min_tools_lsn;
-            }
-        }
-        if ((!XLByteEQ(restart_lsn, InvalidXLogRecPtr)) &&
-            (XLByteEQ(min_required, InvalidXLogRecPtr) || XLByteLT(restart_lsn, min_required))) {
-            min_required = restart_lsn;
-        }
-
-        if (XLByteLT(max_required, restart_lsn)) {
-            max_required = restart_lsn;
-        }
+        CalculateMinAndMaxRequiredPtr(s, standby_slots_list, i, restart_lsn, &min_tools_required, &min_required,
+            &min_archive_restart_lsn, &max_required);
         continue;
     lock_release:
         SpinLockRelease(&s->mutex);
@@ -909,9 +974,14 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
     if (repl_slt_state != NULL) {
         repl_slt_state->min_required = min_required;
         repl_slt_state->max_required = max_required;
-        if (*standby_slots_list == InvalidXLogRecPtr) {
+        if (*standby_slots_list == InvalidXLogRecPtr || t_thrd.syncrep_cxt.SyncRepConfig == NULL) {
             repl_slt_state->quorum_min_required = InvalidXLogRecPtr;
-        } else if (t_thrd.syncrep_cxt.SyncRepConfig != NULL) {
+            repl_slt_state->min_tools_required = min_tools_required;
+            repl_slt_state->min_archive_slot_required = min_archive_restart_lsn;
+            repl_slt_state->exist_in_use = in_use;
+            return;
+        }
+        if (t_thrd.syncrep_cxt.SyncRepConfig != NULL) {
             for (i = t_thrd.syncrep_cxt.SyncRepConfig->num_sync - 1; i >= 0; i--) {
                 if (standby_slots_list[i] != InvalidXLogRecPtr) {
                     repl_slt_state->quorum_min_required = standby_slots_list[i];
@@ -920,6 +990,7 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
             }
         }
         repl_slt_state->min_tools_required = min_tools_required;
+        repl_slt_state->min_archive_slot_required = min_archive_restart_lsn;
         repl_slt_state->exist_in_use = in_use;
     }
 }
@@ -1609,10 +1680,9 @@ loop:
         slot->candidate_restart_lsn = InvalidXLogRecPtr;
         slot->candidate_restart_valid = InvalidXLogRecPtr;
         slot->in_use = true;
-        slot->active = (extra_content != NULL ? true : false);
+        slot->active = false;
         slot->extra_content = extra_content;
         slot->archive_config = archive_cfg;
-        slot->active = (archive_cfg != NULL);
         restored = true;
         if (extra_content != NULL) {
             MarkArchiveSlotOperate();
@@ -2012,9 +2082,14 @@ ArchiveSlotConfig* getArchiveReplicationSlot()
             if (slot->archive_config->conn_config != NULL) {
                 t_thrd.arch.archive_config->archive_config.conn_config =
                     (ArchiveConnConfig *)palloc0(sizeof(ArchiveConnConfig));
-                int rc = memcpy_s(t_thrd.arch.archive_config->archive_config.conn_config, sizeof(ArchiveConnConfig),
-                        slot->archive_config->conn_config, sizeof(ArchiveConnConfig));
-                securec_check(rc, "\0", "\0");
+                t_thrd.arch.archive_config->archive_config.conn_config->obs_address =
+                    pstrdup(slot->archive_config->conn_config->obs_address);
+                t_thrd.arch.archive_config->archive_config.conn_config->obs_bucket =
+                    pstrdup(slot->archive_config->conn_config->obs_bucket);
+                t_thrd.arch.archive_config->archive_config.conn_config->obs_ak =
+                    pstrdup(slot->archive_config->conn_config->obs_ak);
+                t_thrd.arch.archive_config->archive_config.conn_config->obs_sk =
+                    pstrdup(slot->archive_config->conn_config->obs_sk);
             }
             t_thrd.arch.archive_config->archive_config.archive_prefix =
                 pstrdup_ext(slot->archive_config->archive_prefix);
@@ -2065,7 +2140,8 @@ List *GetAllArchiveSlotsName()
     for (int slotno = 0; slotno < g_instance.attr.attr_storage.max_replication_slots; slotno++) {
         ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[slotno];
         SpinLockAcquire(&slot->mutex);
-        if (slot->in_use == true && slot->archive_config != NULL && slot->archive_config->is_recovery == false) {
+        if (slot->in_use == true && slot->archive_config != NULL && slot->archive_config->is_recovery == false &&
+            GET_SLOT_PERSISTENCY(slot->data) != RS_BACKUP) {
             result = lappend(result, (void *)pstrdup(slot->data.name.data));
         }
         SpinLockRelease(&slot->mutex);
@@ -2090,17 +2166,24 @@ List *GetAllRecoverySlotsName()
 void AdvanceArchiveSlot(XLogRecPtr restart_pos) 
 {
     volatile int *slot_idx = &t_thrd.arch.slot_idx;
+    char* extra_content = NULL;
     if (likely(*slot_idx != -1) && *slot_idx < g_instance.attr.attr_storage.max_replication_slots) {
         ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[*slot_idx];
         SpinLockAcquire(&slot->mutex);
         if (slot->in_use == true && slot->archive_config != NULL) {
             slot->data.restart_lsn = restart_pos;
+            extra_content = slot->extra_content;
         } else {
             ereport(WARNING,
                 (errcode_for_file_access(), errmsg("slot idx not valid, obs slot %X/%X not advance ",
                     (uint32)(restart_pos >> 32), (uint32)(restart_pos))));
         }
         SpinLockRelease(&slot->mutex);
+        if (extra_content == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("archive thread could not get slot extra content when advance slot.")));
+        }
+        log_slot_advance(&slot->data, extra_content);
     }
 }
 
@@ -2279,6 +2362,7 @@ void MarkArchiveSlotOperate()
     SpinLockRelease(&g_instance.archive_obs_cxt.mutex);
 }
 
+#ifndef ENABLE_LITE_MODE
 void get_hadr_cn_info(char* keyCn, bool* isExitKey, char* deleteCn, bool* isExitDelete, 
     ArchiveSlotConfig *archive_conf)
 {
@@ -2305,3 +2389,4 @@ void get_hadr_cn_info(char* keyCn, bool* isExitKey, char* deleteCn, bool* isExit
         ereport(LOG, ((errmsg("The file named %s cannot be found.", HADR_DELETE_CN_FILE))));
     }
 }
+#endif

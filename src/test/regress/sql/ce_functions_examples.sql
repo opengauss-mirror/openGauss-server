@@ -60,25 +60,6 @@ CREATE FUNCTION f_plaintext_return_table3(int, int) RETURNS TABLE(name text, val
     SELECT * FROM t_plaintext WHERE val=$1 or val2=$2;
 $$ LANGUAGE SQL;
 
-
-    returns table (
-        film_title varchar,
-        film_release_year int
-    ) 
-    language plpgsql
-as $$
-begin
-    return query 
-        select
-            title,
-            release_year::integer
-        from
-            film
-        where
-            title ilike p_pattern;
-end;$$
-
-
 CREATE OR REPLACE FUNCTION get_all_plaintext_setof() RETURNS SETOF t_plaintext AS
 $BODY$
 DECLARE
@@ -179,13 +160,12 @@ CREATE OR REPLACE FUNCTION foo()
  end;
  $BODY$
    LANGUAGE 'plpgsql' VOLATILE;
-select proname, prorettype::regtype from pg_proc where Oid in (select func_id  from gs_encrypted_proc);
+select proname, prorettype::regtype from pg_proc where Oid in (select func_id  from gs_encrypted_proc) order by proname;
 CALL f_processed_in_plpgsql();
 CALL f_processed_return_table();
 CALL f_processed_return_table();
 DROP TABLE t_plaintext CASCADE;
 DROP TABLE t_processed CASCADE;
-\d
 DROP FUNCTION f_hardcoded;
 DROP FUNCTION f_hardcoded_variable;
 DROP FUNCTION f_plaintext_in;
@@ -203,7 +183,6 @@ DROP FUNCTION reffunc_plaintext;
 DROP FUNCTION reffunc_processed;
 DROP FUNCTION f_plaintext_out;
 DROP FUNCTION f_processed_out;
-\df
 DROP COLUMN ENCRYPTION KEY func_cek;
 DROP CLIENT MASTER KEY func_cmk CASCADE;
 \! gs_ktool -d all

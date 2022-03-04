@@ -58,7 +58,7 @@ static int Itemoffcompare(const void *itemidp1, const void *itemidp2)
 bool UHeapPagePruneOptPage(Relation relation, Buffer buffer, TransactionId xid, bool acquireContionalLock)
 {
     Page page;
-    TransactionId oldestXmin;
+    TransactionId oldestXmin = InvalidTransactionId;
     TransactionId ignore = InvalidTransactionId;
     Size minfree;
     bool pruned = false;
@@ -77,25 +77,7 @@ bool UHeapPagePruneOptPage(Relation relation, Buffer buffer, TransactionId xid, 
         return false;
     }
 
-    /*
-     * Use the appropriate xmin horizon for this relation. If it's a proper
-     * catalog relation or a user defined, additional, catalog relation, we
-     * need to use the horizon that includes slots, otherwise the data-only
-     * horizon can be used. Note that the toast relation of user defined
-     * relations are *not* considered catalog relations.
-     *
-     * It is OK to apply the old snapshot limit before acquiring the cleanup
-     * lock because the worst that can happen is that we are not quite as
-     * aggressive about the cleanup (by however many transaction IDs are
-     * consumed between this point and acquiring the lock).  This allows us to
-     * save significant overhead in the case where the page is found not to be
-     * prunable.
-     */
-    if (IsCatalogRelation(relation) || RelationIsAccessibleInLogicalDecoding(relation))
-        oldestXmin = u_sess->utils_cxt.RecentGlobalXmin;
-    else
-        oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
-
+    GetOldestXminForUndo(&oldestXmin);
     Assert(TransactionIdIsValid(oldestXmin));
 
     if ((t_thrd.xact_cxt.useLocalSnapshot && IsPostmasterEnvironment) ||
@@ -240,6 +222,7 @@ int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldestXmin, bool 
          * first print relation oid
          */
 
+        WaitState oldStatus = pgstat_report_waitstatus(STATE_PRUNE_TABLE);
         UHeapPagePruneExecute(relbuf->buffer, InvalidOffsetNumber, &prstate);
 
         /* prune the dead line pointers */
@@ -307,6 +290,7 @@ int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldestXmin, bool 
         if (pruned) {
             *pruned = hasPruned;
         }
+        pgstat_report_waitstatus(oldStatus);
     } else {
 #ifdef DEBUG_UHEAP
         UHEAPSTAT_COUNT_PRUNEPAGE(PRUNE_PAGE_NO_SPACE);
@@ -391,25 +375,7 @@ bool UHeapPagePruneOpt(Relation relation, Buffer buffer, OffsetNumber offnum, Si
     if (RecoveryInProgress())
         return false;
 
-    /*
-     * Use the appropriate xmin horizon for this relation. If it's a proper
-     * catalog relation or a user defined, additional, catalog relation, we
-     * need to use the horizon that includes slots, otherwise the data-only
-     * horizon can be used. Note that the toast relation of user defined
-     * relations are *not* considered catalog relations.
-     *
-     * It is OK to apply the old snapshot limit before acquiring the cleanup
-     * lock because the worst that can happen is that we are not quite as
-     * aggressive about the cleanup (by however many transaction IDs are
-     * consumed between this point and acquiring the lock).  This allows us to
-     * save significant overhead in the case where the page is found not to be
-     * prunable.
-     */
-    if (IsCatalogRelation(relation) || RelationIsAccessibleInLogicalDecoding(relation))
-        oldestXmin = u_sess->utils_cxt.RecentGlobalXmin;
-    else
-        oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
-
+    GetOldestXminForUndo(&oldestXmin);
     Assert(TransactionIdIsValid(oldestXmin));
 
     if (OffsetNumberIsValid(offnum)) {
@@ -572,6 +538,7 @@ int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, O
          * Apply the planned item changes, then repair page fragmentation, and
          * update the page's hint bit about whether it has free line pointers.
          */
+        WaitState oldStatus = pgstat_report_waitstatus(STATE_PRUNE_TABLE);
         UHeapPagePruneExecute(relbuf->buffer, targetOffnum, &prstate);
 
         /* prune the dead line pointers */
@@ -639,6 +606,7 @@ int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, O
         if (pruned) {
             *pruned = hasPruned;
         }
+        pgstat_report_waitstatus(oldStatus);
     } else {
 #ifdef DEBUG_UHEAP
         UHEAPSTAT_COUNT_PRUNEPAGE(PRUNE_PAGE_NO_SPACE);
@@ -783,7 +751,7 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
     RowPtr *lp;
     Page dp = (Page)BufferGetPage(relbuf->buffer);
     int ndeleted = 0;
-    TransactionId xid;
+    TransactionId xid = InvalidTransactionId;
     bool tupdead = false;
     bool recentDead = false;
 
@@ -853,7 +821,7 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
         if (TransactionIdIsValid(xid) && TransactionIdIsInProgress(xid)) {
             ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
                 errmsg("Tuple will be pruned but xid is inprogress, xid=%lu, oldestxmin=%lu, oldestXidInUndo=%lu.",
-                xid, oldestXmin, g_instance.proc_base->oldestXidInUndo)));
+                xid, oldestXmin, g_instance.undo_cxt.oldestXidInUndo)));
         }
         /* short aligned */
         *spaceFreed += SHORTALIGN(tup.disk_tuple_size);

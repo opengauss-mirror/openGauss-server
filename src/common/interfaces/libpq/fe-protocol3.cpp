@@ -380,6 +380,18 @@ void pqParseInput3(PGconn* conn)
             /* trust the specified message length as what to skip */
             conn->inStart += 5 + msgLength;
         }
+#ifdef HAVE_CE
+        /* post processing we are now executing after the message has been handled */
+        switch (id) {
+            case 'Z': /* backend is ready for new query */
+                if (conn->client_logic->enable_client_encryption) {
+                    Processor::run_post_query(conn);
+                }
+                break;
+            default:
+                break;
+        }
+#endif // HAVE_CE
     }
 }
 
@@ -756,8 +768,74 @@ set_error_result:
     return 0;
 }
 
+#ifdef HAVE_CE
 #define ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA "2200Z"
-#define ERRCODE_CL_FUNCTION_UPDATE "42716"
+#define ERRCODE_UNDEFINED_FUNCTION "42883"
+
+typedef struct CLRefreshParams {
+    CLRefreshParams()
+        : check_cl_refresh(true), found_internal_cl_type(false), check_function_hint(false) {};
+    bool check_cl_refresh;
+    bool found_internal_cl_type;
+    bool check_function_hint;
+} CLRefreshParams;
+
+/*
+ * based on the error response, checking whether the CL cache in the libpq needs to be refreshed
+ * @param[OUT] - client_logic - session wide state machine
+ * @param[IN] - id - response token from server
+ * @param[IN] - data - string response from server
+ * @param[INOUT] - cl_refresh_params - internal state of the loop this function is in.
+ */
+bool cl_refresh(PGClientLogic *client_logic, const char id, const char *data, CLRefreshParams *cl_refresh_params)
+{
+    if (!client_logic || !data || !cl_refresh_params) {
+        return false;
+    }
+
+    switch (id) {
+        /*
+         * Severity: the field contents are ERROR, FATAL, or PANIC (in an error message),
+         * or WARNING, NOTICE, DEBUG, INFO, or LOG (in a notice message)
+         */
+        case 'S':
+            if (strcmp(data, "ERROR") != 0) {
+                cl_refresh_params->check_cl_refresh = false;
+            }
+            break;
+        case 'M': /* Message: the primary human-readable error message */
+            if (strstr(data, "byteawithoutorder") != 0) {
+                /* it's only used for the internal state of the while clause */
+                cl_refresh_params->found_internal_cl_type = true;
+            }
+            break;
+        case 'C': /* Code: the SQLSTATE code for the error */
+            if (strcmp(data, ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA) == 0) {
+                client_logic->isInvalidOperationOnColumn = true; // failed to WRITE
+            } else if (strcmp(data, ERRCODE_UNDEFINED_FUNCTION) == 0) {
+                if (cl_refresh_params->found_internal_cl_type) {
+                    client_logic->isInvalidOperationOnColumn = true; // failed to WRITE
+                } else {
+                    cl_refresh_params->check_function_hint = true;
+                }
+            }
+            break;
+        case 'H': /* Hint: an optional suggestion what to do about the problem. */
+            if (cl_refresh_params->check_function_hint) {
+                const char* hint = "No function matches the given name and argument types. "
+                    "You might need to add explicit type casts.";
+                if (strcmp(data, hint) == 0) {
+                    client_logic->isInvalidOperationOnColumn = true; // failed to WRITE
+                }
+            }
+            break;
+        default:
+            break;
+    }
+    return true;
+}
+#endif // HAVE_CE
+
 /*
  * Attempt to read an Error or Notice response message.
  * This is possible in several places, so we break it out as a subroutine.
@@ -774,6 +852,9 @@ int pqGetErrorNotice3(PGconn* conn, bool isError)
     const char* querytext = NULL;
     int querypos = 0;
     int errcodes = 0;
+#ifdef HAVE_CE
+    CLRefreshParams cl_refresh_params;
+#endif
     /* dbms_output */
     
     /*
@@ -805,13 +886,9 @@ int pqGetErrorNotice3(PGconn* conn, bool isError)
         if (pqGets(&workBuf, conn))
             goto fail;
 #ifdef HAVE_CE
-        if (strcmp(workBuf.data, ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA)==0) {
-            conn->client_logic->isInvalidOperationOnColumn = true; // failed to WRITE
-        } else if (strcmp(workBuf.data, ERRCODE_CL_FUNCTION_UPDATE)==0) {
-            conn->client_logic->should_refresh_function = true; // failed to WRITE
-            goto fail;
+        if (cl_refresh_params.check_cl_refresh) {
+            (void)cl_refresh(conn->client_logic, id, workBuf.data, &cl_refresh_params);
         }
-
         pqSaveMessageField(res, id, workBuf.data, conn);
 #else
         pqSaveMessageField(res, id, workBuf.data);

@@ -207,9 +207,9 @@ NON_EXEC_STATIC void PercentileMain()
     pgstat_report_activity(STATE_IDLE, NULL);
 
     while (!t_thrd.percentile_cxt.need_exit) {
-        if (u_sess->sig_cxt.got_PoolReload) {
+        if (IsGotPoolReload()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         }
         if (t_thrd.percentile_cxt.got_SIGHUP) {
             t_thrd.percentile_cxt.got_SIGHUP = false;
@@ -341,9 +341,9 @@ void PercentileSpace::SubPercentileMain(void)
             pgstat_report_activity(STATE_RUNNING, NULL);
             t_thrd.percentile_cxt.need_reset_timer = false;
         }
-        if (u_sess->sig_cxt.got_PoolReload) {
+        if (IsGotPoolReload()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         }
         if (t_thrd.percentile_cxt.got_SIGHUP) {
             t_thrd.percentile_cxt.got_SIGHUP = false;

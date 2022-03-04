@@ -397,7 +397,6 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 42705    E    ERRCODE_UNDEFINED_KEY                                          undefined_key
 42711    E    ERRCODE_DUPLICATE_KEY                                          duplicate_key
 42713    E    ERRCODE_UNDEFINED_CL_COLUMN                                    undefined_cl_column
-42716    E    ERRCODE_CL_FUNCTION_UPDATE                                     internal - cl function being updatd
 
 Section: Class 44 - WITH CHECK OPTION Violation
 

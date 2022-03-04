@@ -30,6 +30,7 @@ extern void RecordDeletedTuple(Oid relid, int2 bucketid, const ItemPointer tuple
 /* May move all resizing declaration to appropriate postion sometime. */
 extern bool RelationInClusterResizing(const Relation rel);
 extern bool RelationInClusterResizingReadOnly(const Relation rel);
+extern bool RelationInClusterResizingEndCatchup(const Relation rel);
 extern bool CheckRangeVarInRedistribution(const RangeVar* range_var);
 extern bool RelationIsDeleteDeltaTable(char* delete_delta_name);
 extern Relation GetAndOpenDeleteDeltaRel(const Relation rel, LOCKMODE lockmode, bool isMultiCatchup);
@@ -39,6 +40,7 @@ extern List* eval_ctid_funcs(Relation rel, List* original_quals, RangeScanInRedi
 extern char* nodeTagToString(NodeTag type);
 extern bool ClusterResizingInProgress();
 extern void RelationGetNewTableName(Relation rel, char* newtable_name);
+extern bool RelationInClusterResizingWriteErrorMode(const Relation rel);
 
 extern TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 bucketid, HeapTupleHeader oldtuple,
     TupleTableSlot* planSlot, EPQState* epqstate, ModifyTableState* node, bool canSetTag);

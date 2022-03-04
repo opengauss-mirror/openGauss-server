@@ -36,6 +36,7 @@
 #include "catalog/pg_streaming_fn.h"
 #include "catalog/toasting.h"
 #include "catalog/cstore_ctlg.h"
+#include "catalog/gs_db_privilege.h"
 #include "catalog/gs_global_config.h"
 #include "catalog/gs_matview_dependency.h"
 #include "catalog/gs_matview.h"
@@ -186,7 +187,6 @@ static void attatch_global_info(char** query_string_with_info, VacuumStmt* stmt,
     AnalyzeMode e_analyze_mode, Oid rel_id, char* foreign_tbl_schedul_message = NULL);
 static char* get_hybrid_message(ForeignTableDesc* table_desc, VacuumStmt* stmt, char* foreign_tbl_schedul_message);
 static bool need_full_dn_execution(const char* group_name);
-int SetGTMVacuumFlag(GTM_TransactionKey txn_key, bool is_vacuum);
 
 extern void check_log_ft_definition(CreateForeignTableStmt* stmt);
 extern void ts_check_feature_disable();
@@ -245,6 +245,12 @@ bool IsSchemaInDistribution(const Oid namespaceOid)
     return result;
 }
 
+static bool foundPgstatPartititonOperations(AlterTableType subtype)
+{
+    return subtype == AT_TruncatePartition || subtype == AT_ExchangePartition || subtype == AT_DropPartition ||
+        subtype == AT_DropSubPartition;
+}
+
 /* ----------------------------------------------------------------
  * report_utility_time
  *
@@ -281,10 +287,7 @@ static void report_utility_time(void* parse_tree)
         AlterTableCmd* cmd = NULL;
         foreach (lc, ats->cmds) {
             cmd = (AlterTableCmd*)lfirst(lc);
-            if (cmd->subtype == AT_TruncatePartition || cmd->subtype == AT_ExchangePartition ||
-                cmd->subtype == AT_DropPartition) {
-                found = true;
-            }
+            found = foundPgstatPartititonOperations(cmd->subtype);
         }
 
         if (found == false) {
@@ -449,6 +452,7 @@ static void check_xact_readonly(Node* parse_tree)
         case T_DropRoleStmt:
         case T_GrantStmt:
         case T_GrantRoleStmt:
+        case T_GrantDbStmt:
         case T_AlterDefaultPrivilegesStmt:
         case T_TruncateStmt:
         case T_DropOwnedStmt:
@@ -471,6 +475,8 @@ static void check_xact_readonly(Node* parse_tree)
         case T_CreateResourcePoolStmt:
         case T_AlterResourcePoolStmt:
         case T_DropResourcePoolStmt:
+        case T_AlterGlobalConfigStmt:
+        case T_DropGlobalConfigStmt:
         case T_CreatePolicyLabelStmt:
         case T_AlterPolicyLabelStmt:
         case T_DropPolicyLabelStmt:
@@ -2479,7 +2485,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             Oid node_oid = get_pgxc_nodeoid(g_instance.attr.attr_common.PGXCNodeName);
             bool nodeis_active = true;
             nodeis_active = is_pgxc_nodeactive(node_oid);
-            if (OidIsValid(node_oid) && nodeis_active == false && !IS_CNDISASTER_RECOVER_MODE)
+            if (OidIsValid(node_oid) && nodeis_active == false && !IS_CN_OBS_DISASTER_RECOVER_MODE)
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Current Node is not active")));
         }
     }
@@ -2518,20 +2524,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     if ((IS_SINGLE_NODE || IS_PGXC_COORDINATOR) && u_sess->debug_query_id == 0) {
                         u_sess->debug_query_id = generate_unique_id64(&gt_queryId);
                         pgstat_report_queryid(u_sess->debug_query_id);
-                    }
-
-                    /* check the commit cmd */
-                    if (GTM_MODE && (IS_PGXC_DATANODE || IsConnFromCoord())) {
-                        TransactionId CurrentTopXid = GetTopTransactionIdIfAny();
-                        if (TransactionIdIsValid(CurrentTopXid) &&
-                            TransactionIdIsValid(t_thrd.xact_cxt.reserved_nextxid_check) &&
-                            t_thrd.xact_cxt.reserved_nextxid_check != CurrentTopXid) {
-                            ereport(PANIC,
-                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    (errmsg("commit xid %lu is not equal to the excute one %lu.",
-                                        CurrentTopXid,
-                                        t_thrd.xact_cxt.reserved_nextxid_check))));
-                        }
                     }
                     /* only check write nodes csn valid */
                     if (TransactionIdIsValid(GetTopTransactionIdIfAny())) {
@@ -2649,22 +2641,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     break;
 
                 case TRANS_STMT_ROLLBACK:
-                    /* check the abort cmd */
-                    if (GTM_MODE && (IS_PGXC_DATANODE || IsConnFromCoord())) {
-                        TransactionId CurrentTopXid = GetTopTransactionIdIfAny();
-
-                        if (TransactionIdIsValid(CurrentTopXid) &&
-                            TransactionIdIsValid(t_thrd.xact_cxt.reserved_nextxid_check) &&
-                            t_thrd.xact_cxt.reserved_nextxid_check != CurrentTopXid) {
-                            /* level ERROR will cause ERRDATA stack overflow */
-                            ereport(PANIC,
-                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    (errmsg("abort xid %lu is not equal to the former one %lu.",
-                                        CurrentTopXid,
-                                        t_thrd.xact_cxt.reserved_nextxid_check))));
-                        }
-                    }
-
                     UserAbortTransactionBlock();
                     FreeSavepointList();
                     break;
@@ -4333,6 +4309,30 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #endif
             break;
 
+        case T_GrantDbStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            if (IS_PGXC_COORDINATOR) {
+                char* first_exec_node = find_first_exec_cn();
+                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
+
+                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
+                    ExecuteGrantDbStmt((GrantDbStmt*)parse_tree);
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
+                } else {
+                    ExecuteGrantDbStmt((GrantDbStmt*)parse_tree);
+                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
+                }
+            } else {
+                ExecuteGrantDbStmt((GrantDbStmt*)parse_tree);
+            }
+#else
+        ExecuteGrantDbStmt((GrantDbStmt*)parse_tree);
+#endif
+            break;
+
         case T_AlterDefaultPrivilegesStmt:
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR) {
@@ -4650,7 +4650,18 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
         case T_CreateFunctionStmt: /* CREATE FUNCTION */
         {
-            CreateFunction((CreateFunctionStmt*)parse_tree, query_string, InvalidOid);
+            PG_TRY();
+            {
+                CreateFunction((CreateFunctionStmt*)parse_tree, query_string, InvalidOid);
+            }
+            PG_CATCH();
+            {
+                if (u_sess->plsql_cxt.debug_query_string) {
+                    pfree_ext(u_sess->plsql_cxt.debug_query_string);
+                }
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
 #ifdef PGXC
             Oid group_oid;
             bool multi_group = false;
@@ -4688,7 +4699,18 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
                     errmsg("not support create package in distributed database")));
 #endif
-            CreatePackageCommand((CreatePackageStmt*)parse_tree, query_string);
+            PG_TRY();
+            {
+                CreatePackageCommand((CreatePackageStmt*)parse_tree, query_string);
+            }
+            PG_CATCH();
+            {
+                if (u_sess->plsql_cxt.debug_query_string) {
+                    pfree_ext(u_sess->plsql_cxt.debug_query_string);
+                }
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
         } break;
         case T_CreatePackageBodyStmt: /* CREATE PACKAGE SPECIFICATION*/
         {
@@ -4696,7 +4718,18 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             ereport(ERROR, (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
                     errmsg("not support create package in distributed database")));
 #endif
-            CreatePackageBodyCommand((CreatePackageBodyStmt*)parse_tree, query_string);
+            PG_TRY();
+            {
+                CreatePackageBodyCommand((CreatePackageBodyStmt*)parse_tree, query_string);
+            }
+            PG_CATCH();
+            {
+                if (u_sess->plsql_cxt.debug_query_string) {
+                    pfree_ext(u_sess->plsql_cxt.debug_query_string);
+                }
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
         } break;
 
 
@@ -4772,14 +4805,13 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             }
 
 #ifdef ENABLE_MULTIPLE_NODES
-            if (stmt->concurrent) {
+            if (stmt->concurrent && t_thrd.proc->workingVersionNum < CREATE_INDEX_CONCURRENTLY_DIST_VERSION_NUM) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("PGXC does not support concurrent INDEX yet"),
                         errdetail("The feature is not currently supported")));
             }
 #endif
-
             /* INDEX on a temporary table cannot use 2PC at commit */
             rel_id = RangeVarGetRelidExtended(stmt->relation, AccessShareLock, true, false, false, true, NULL, NULL);
 
@@ -4858,15 +4890,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 g_instance.attr.attr_common.allowSystemTableMods = true;
             }
 #endif
-#ifdef ENABLE_MULTIPLE_NODES
-            DefineIndex(rel_id,
-                stmt,
-                InvalidOid,                                /* no predefined OID */
-                false,                                     /* is_alter_table */
-                true,                                      /* check_rights */
-                !u_sess->upg_cxt.new_catalog_need_storage, /* skip_build */
-                false);                                    /* quiet */
-#else
+
             Oid indexRelOid = DefineIndex(rel_id,
                 stmt,
                 InvalidOid,                                /* no predefined OID */
@@ -4874,6 +4898,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 true,                                      /* check_rights */
                 !u_sess->upg_cxt.new_catalog_need_storage, /* skip_build */
                 false);                                    /* quiet */
+
+#ifndef ENABLE_MULTIPLE_NODES
             if (RelationIsCUFormatByOid(rel_id) && (stmt->primary || stmt->unique)) {
                 DefineDeltaUniqueIndex(rel_id, stmt, indexRelOid);
             }
@@ -4889,6 +4915,15 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 } else {
                     ExecUtilityStmtOnNodes(query_string, exec_nodes, sent_to_remote, stmt->concurrent, exec_type, is_temp);
                 }
+#ifdef ENABLE_MULTIPLE_NODES
+                /* Force non-concurrent build on temporary relations, even if CONCURRENTLY was requested */
+                char relPersistence = get_rel_persistence(rel_id);
+                if (stmt->concurrent &&
+                    !(relPersistence == RELPERSISTENCE_TEMP || relPersistence == RELPERSISTENCE_GLOBAL_TEMP)) {
+                    /* for index if caller didn't specify, use oid get indexname. */
+                    mark_indisvalid_all_cns(stmt->relation->schemaname, get_rel_name(indexRelOid));
+                }
+#endif
             }
             FreeExecNodes(&exec_nodes);
 #endif
@@ -4916,9 +4951,15 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateSeqStmt:
+        {
 #ifdef PGXC
+            CreateSeqStmt* stmt = (CreateSeqStmt*)parse_tree;
+            /*
+             * We must not scribble on the passed-in CreateSeqStmt, so copy it.  (This is
+             * overkill, but easy.)
+             */
+            stmt = (CreateSeqStmt*)copyObject(stmt);
             if (IS_PGXC_COORDINATOR) {
-                CreateSeqStmt* stmt = (CreateSeqStmt*)parse_tree;
                 ExecNodes* exec_nodes = NULL;
 
                 char* query_stringWithUUID = gen_hybirdmsg_for_CreateSeqStmt(stmt, query_string);
@@ -4942,7 +4983,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     }
                 }
 
-                DefineSequenceWrapper((CreateSeqStmt*)parse_tree);
+                DefineSequenceWrapper(stmt);
 
                 if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
                     /* In case this query is related to a SERIAL execution, just bypass */
@@ -4972,7 +5013,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 if (IS_MAIN_COORDINATOR && exec_nodes != NULL &&
                     exec_nodes->nodeList->length < u_sess->pgxc_cxt.NumDataNodes) {
                     /* NodeGroup: Create sequence in other datanodes without owned by */
-                    char* msg = deparse_create_sequence((Node*)parse_tree, true);
+                    char* msg = deparse_create_sequence((Node*)stmt, true);
                     exec_remote_query_4_seq(exec_nodes, msg, stmt->uuid);
                     pfree_ext(msg);
                 }
@@ -4980,15 +5021,15 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 pfree_ext(query_stringWithUUID);
                 FreeExecNodes(&exec_nodes);
             } else {
-                DefineSequenceWrapper((CreateSeqStmt*)parse_tree);
+                DefineSequenceWrapper(stmt);
             }
 #else
-        DefineSequenceWrapper((CreateSeqStmt*)parse_tree);
+        DefineSequenceWrapper(stmt);
 #endif
 
-            ClearCreateSeqStmtUUID((CreateSeqStmt*)parse_tree);
+            ClearCreateSeqStmtUUID(stmt);
             break;
-
+        }
         case T_AlterSeqStmt:
 #ifdef PGXC
             if (IS_MAIN_COORDINATOR || IS_SINGLE_NODE) {
@@ -5916,7 +5957,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         case T_CheckPointStmt:
             if (!(superuser() || isOperatoradmin(GetUserId())))
                 ereport(
-                    ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to do CHECKPOINT")));
+                    ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("must be system admin or operator admin to do CHECKPOINT")));
             /*
              * You might think we should have a PreventCommandDuringRecovery()
              * here, but we interpret a CHECKPOINT command during recovery as
@@ -6484,6 +6526,52 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             }
             break;
 
+        case T_AlterGlobalConfigStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            if (IS_PGXC_COORDINATOR) {
+                char* first_exec_node = find_first_exec_cn();
+                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
+                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
+                    AlterGlobalConfig((AlterGlobalConfigStmt*)parse_tree);
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
+                } else {
+                    AlterGlobalConfig((AlterGlobalConfigStmt*)parse_tree);
+                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
+                }
+            } else {
+                AlterGlobalConfig((AlterGlobalConfigStmt*)parse_tree);
+            }
+#else
+            AlterGlobalConfig((AlterGlobalConfigStmt*)parse_tree);
+#endif
+            break;
+
+        case T_DropGlobalConfigStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            if (IS_PGXC_COORDINATOR) {
+                char* first_exec_node = find_first_exec_cn();
+                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
+                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
+                    DropGlobalConfig((DropGlobalConfigStmt*)parse_tree);
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
+                } else {
+                    DropGlobalConfig((DropGlobalConfigStmt*)parse_tree);
+                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
+                }
+            } else {
+                DropGlobalConfig((DropGlobalConfigStmt*)parse_tree);
+            }
+#else
+            DropGlobalConfig((DropGlobalConfigStmt*)parse_tree);
+#endif
+            break;
+
         case T_CreateWorkloadGroupStmt:
 #ifndef ENABLE_MULTIPLE_NODES
             DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -6896,7 +6984,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         }
 
         case T_CreatePublicationStmt:
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("openGauss does not support PUBLICATION yet"),
@@ -6905,7 +6993,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             CreatePublication((CreatePublicationStmt *) parse_tree);
             break;
         case T_AlterPublicationStmt:
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("openGauss does not support PUBLICATION yet"),
@@ -6914,7 +7002,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             AlterPublication((AlterPublicationStmt *) parse_tree);
             break;
         case T_CreateSubscriptionStmt:
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("openGauss does not support SUBSCRIPTION yet"),
@@ -6923,7 +7011,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             CreateSubscription((CreateSubscriptionStmt *) parse_tree, is_top_level);
             break;
         case T_AlterSubscriptionStmt:
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("openGauss does not support SUBSCRIPTION yet"),
@@ -6932,7 +7020,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             AlterSubscription((AlterSubscriptionStmt *) parse_tree);
             break;
         case T_DropSubscriptionStmt:
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("openGauss does not support SUBSCRIPTION yet"),
@@ -7662,6 +7750,9 @@ static const char* AlterObjectTypeCommandTag(ObjectType obj_type)
         case OBJECT_FUNCTION:
             tag = "ALTER FUNCTION";
             break;
+        case OBJECT_PACKAGE:
+            tag = "ALTER PACKAGE";
+            break;
         case OBJECT_INDEX:
             tag = "ALTER INDEX";
             break;
@@ -8212,6 +8303,12 @@ const char* CreateCommandTag(Node* parse_tree)
             tag = (stmt->is_grant) ? "GRANT ROLE" : "REVOKE ROLE";
         } break;
 
+        case T_GrantDbStmt: {
+            GrantDbStmt* stmt = (GrantDbStmt*)parse_tree;
+
+            tag = (stmt->is_grant) ? "GRANT" : "REVOKE";
+        } break;
+
         case T_AlterDefaultPrivilegesStmt:
             tag = "ALTER DEFAULT PRIVILEGES";
             break;
@@ -8571,6 +8668,14 @@ const char* CreateCommandTag(Node* parse_tree)
             tag = "DROP RESOURCE POOL";
             break;
 
+        case T_AlterGlobalConfigStmt:
+            tag = "ALTER GLOBAL CONFIGURATION";
+            break;
+
+        case T_DropGlobalConfigStmt:
+            tag = "Drop GLOBAL CONFIGURATION";
+            break;
+
         case T_CreateWorkloadGroupStmt:
             tag = "CREATE WORKLOAD GROUP";
             break;
@@ -8837,6 +8942,9 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
         case AT_AddPartition:
             tag = "ADD PARTITION";
             break;
+        case AT_AddSubPartition:
+            tag = "MODIFY PARTITION ADD SUBPARTITION";
+            break;
         case AT_ColumnDefault:
             tag = "COLUMN DEFAULT";
             break;
@@ -8866,6 +8974,9 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
             break;
         case AT_DropPartition:
             tag = "DROP PARTITION";
+            break;
+        case AT_DropSubPartition:
+            tag = "DROP SUBPARTITION";
             break;
         case AT_AddIndex:
             tag = "ADD INDEX";
@@ -9235,6 +9346,10 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             lev = LOGSTMT_DDL;
             break;
 
+        case T_GrantDbStmt:
+            lev = LOGSTMT_DDL;
+            break;
+
         case T_AlterDefaultPrivilegesStmt:
             lev = LOGSTMT_DDL;
             break;
@@ -9536,6 +9651,8 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
         case T_CreateResourcePoolStmt:
         case T_AlterResourcePoolStmt:
         case T_DropResourcePoolStmt:
+        case T_AlterGlobalConfigStmt:
+        case T_DropGlobalConfigStmt:
         case T_CreateWorkloadGroupStmt:
         case T_AlterWorkloadGroupStmt:
         case T_DropWorkloadGroupStmt:
@@ -10753,10 +10870,6 @@ static void cn_do_vacuum_mpp_table(VacuumStmt* stmt, const char* query_string, b
 
     // Step 0: Notify gtm if it is a vacuum
     is_vacuum = (stmt->options & VACOPT_VACUUM) && (!(stmt->options & VACOPT_FULL));
-    if (is_vacuum && GTM_MODE) {
-        if (SetGTMVacuumFlag(GetCurrentTransactionKeyIfAny(), is_vacuum))
-            ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("GTM error, could not set vacuum flag")));
-    }
 
     // Step 1: Execute query_string on all datanode
     if (stmt->relation == NULL || (!ISMATMAP(stmt->relation->relname) && !ISMLOG(stmt->relation->relname))) {
@@ -11929,7 +12042,7 @@ void DoVacuumMppTable(VacuumStmt* stmt, const char* query_string, bool is_top_le
         bool isSegmentTable = targRel->storage_type == SEGMENT_PAGE;
         heap_close(targRel, AccessShareLock);
         if (isSegmentTable) {
-            ereport(LOG, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
+            ereport(INFO, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
                 "to recycle segment space.", stmt->relation->relname)));
             return;
         }

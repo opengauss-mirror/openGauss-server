@@ -1,0 +1,93 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_processed (name text, val INT ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), val2 INT)
+INSERT INTO t_processed VALUES('name', 1, 2)
+select * from t_processed
+ name | val | val2 
+------+-----+------
+ name |   1 |    2
+(1 row)
+
+CREATE TABLE t_processed_b (name text, val bytea ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), val2 INT)
+INSERT INTO t_processed_b VALUES('name', 'test', 2)
+CREATE OR REPLACE FUNCTION f_processed_out_1param(out1 OUT int) AS 'SELECT val from t_processed LIMIT 1' LANGUAGE SQL
+CREATE OR REPLACE FUNCTION f_processed_out(out1 OUT int, out2 OUT int) AS 'SELECT val, val2 from t_processed LIMIT 1' LANGUAGE SQL
+CREATE OR REPLACE FUNCTION f_processed_out_b(out1 OUT bytea, out2 OUT int) AS 'SELECT val, val2 from t_processed_b LIMIT 1' LANGUAGE SQL
+CREATE OR REPLACE FUNCTION f_processed_out_plpgsql(out out1 int, out out2 int)
+as $$
+begin
+  select val, val2 INTO out1, out2 from t_processed;
+end;$$
+LANGUAGE plpgsql
+CREATE OR REPLACE FUNCTION f_processed_out_plpgsql2(out out1 t_processed.val%TYPE, out out2 t_processed.val%TYPE)
+as $$
+begin
+  select val, val2 INTO out1, out2 from t_processed;
+end;$$
+LANGUAGE plpgsql
+NOTICE:  type reference t_processed.val%TYPE converted to integer
+NOTICE:  type reference t_processed.val%TYPE converted to integer
+CREATE OR REPLACE FUNCTION f_processed_aliases_plpgsql(out out1 int, out out2 int) as
+$BODY$
+DECLARE
+ val1 ALIAS FOR out1;
+begin
+  select val, val2 INTO val1, out2 from t_processed;
+end;
+$BODY$
+LANGUAGE plpgsql
+select f_processed_out_1param()
+ f_processed_out_1param 
+------------------------
+                      1
+(1 row)
+
+select f_processed_out()
+ f_processed_out 
+-----------------
+ (1,2)
+(1 row)
+
+select f_processed_out_b()
+ f_processed_out_b 
+-------------------
+ ("\\x74657374",2)
+(1 row)
+
+select f_processed_out_plpgsql()
+ f_processed_out_plpgsql 
+-------------------------
+ (1,2)
+(1 row)
+
+select f_processed_out_plpgsql2()
+ f_processed_out_plpgsql2 
+--------------------------
+ (1,2)
+(1 row)
+
+select f_processed_aliases_plpgsql()
+ f_processed_aliases_plpgsql 
+-----------------------------
+ (1,2)
+(1 row)
+
+drop function f_processed_out_1param
+drop function f_processed_out
+drop function f_processed_out_b
+drop function f_processed_out_plpgsql
+drop function f_processed_out_plpgsql2
+drop function f_processed_aliases_plpgsql
+drop table t_processed
+drop table t_processed_b
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1

@@ -115,7 +115,7 @@ typedef struct ReplicationStateOnDisk {
 
 static void replorigin_check_prerequisites(bool check_slots, bool recoveryOK)
 {
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
     ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("openGauss does not support replication origin yet"),
@@ -672,7 +672,21 @@ void StartupReplicationOrigin(void)
 
         /* copy data to shared memory */
         u_sess->reporigin_cxt.repStatesShm->states[last_state].roident = disk_state.roident;
-        u_sess->reporigin_cxt.repStatesShm->states[last_state].remote_lsn = disk_state.remote_lsn;
+        if (u_sess->reporigin_cxt.repStatesShm->states[last_state].remote_lsn > disk_state.remote_lsn) {
+            /*
+             * This may happen in standby when doing switchover. before calling startup, standby has
+             * already redo a xact_commit, which set a lastest remote_lsn to shared memory(check
+             * xact_redo_commit_internal -> replorigin_advance). In this case, we can just ignore the
+             * value in disk.
+             */
+            XLogRecPtr currentLsn = u_sess->reporigin_cxt.repStatesShm->states[last_state].remote_lsn;
+            ereport(LOG, (errmsg("try to recover a older replication state from disk, ignore it. "
+                "current remote_lsn: %X/%X, remote_lsn in disk: %X/%X",
+                (uint32)(currentLsn >> BITS_PER_INT), (uint32)currentLsn,
+                (uint32)(disk_state.remote_lsn >> BITS_PER_INT), (uint32)disk_state.remote_lsn)));
+        } else {
+            u_sess->reporigin_cxt.repStatesShm->states[last_state].remote_lsn = disk_state.remote_lsn;
+        }
         last_state++;
 
         elog(LOG, "recovered replication state of node %u to %X/%X", disk_state.roident,
@@ -728,6 +742,17 @@ void replorigin_redo(XLogReaderState *record)
     }
 }
 
+const char* replorigin_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_REPLORIGIN_SET) {
+        return "set_replication_origin";
+    } else if (info == XLOG_REPLORIGIN_DROP) {
+        return "drop_replication_origin";
+    } else {
+        return "unkown_type";
+    }
+}
 
 /*
  * Tell the replication origin progress machinery that a commit from 'node'
@@ -1242,7 +1267,9 @@ Datum pg_replication_origin_advance(PG_FUNCTION_ARGS)
     /* lock to prevent the replication origin from vanishing */
     LockRelationOid(ReplicationOriginRelationId, RowExclusiveLock);
 
-    node = replorigin_by_name(text_to_cstring(name), false);
+    char *originName = text_to_cstring(name);
+    node = replorigin_by_name(originName, false);
+    pfree(originName);
 
     /*
      * Can't sensibly pass a local commit to be flushed at checkpoint - this
@@ -1279,6 +1306,7 @@ Datum pg_replication_origin_progress(PG_FUNCTION_ARGS)
     roident = replorigin_by_name(name, false);
     Assert(OidIsValid(roident));
 
+    pfree(name);
     remote_lsn = replorigin_get_progress(roident, flush);
     if (remote_lsn == InvalidXLogRecPtr)
         PG_RETURN_NULL();

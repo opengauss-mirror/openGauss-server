@@ -27,7 +27,7 @@ include $(top_builddir)/src/Makefile.global
 
 override CPPFLAGS := -I$(srcdir) $(CPPFLAGS)
 
-OBJS = dcf_replication.o dcf_callbackfuncs.o
+OBJS = dcf_replication.o dcf_callbackfuncs.o dcf_flowcontrol.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

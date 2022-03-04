@@ -57,6 +57,7 @@
 #include "catalog/pg_authid.h"
 #include "catalog/pg_database.h"
 #include "catalog/gs_job_argument.h"
+#include "catalog/gs_job_attribute.h"
 #include "fmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
@@ -135,6 +136,21 @@ Datum dbe_insert_pg_job_proc(Datum job_id, Datum job_action, const Datum job_nam
     return job_id;
 }
 
+int4 get_job_id_from_pg_job(Datum job_name)
+{
+    Relation pg_job_rel = heap_open(PgJobRelationId, AccessShareLock);
+    HeapTuple tuple = search_from_pg_job(pg_job_rel, job_name);
+    int4 job_id = 0;
+    if (tuple != NULL) {
+        bool isnull = false;
+        job_id = heap_getattr(tuple, Anum_pg_job_job_id, pg_job_rel->rd_att, &isnull);
+        heap_freetuple_ext(tuple);
+    }
+    
+    heap_close(pg_job_rel, AccessShareLock);
+    return job_id;
+}
+
 /*
  * @brief search_from_pg_job_proc_no_exception
  *
@@ -142,14 +158,23 @@ Datum dbe_insert_pg_job_proc(Datum job_id, Datum job_action, const Datum job_nam
  * @param job_name
  * @return HeapTuple
  */
-static HeapTuple search_from_pg_job_proc_no_exception(Relation rel, Datum job_name)
+HeapTuple search_from_pg_job_proc_no_exception(Relation rel, Datum job_name)
 {
-    ScanKeyInfo scan_key_info;
-    scan_key_info.attribute_value = job_name;
-    scan_key_info.attribute_number = Anum_pg_job_proc_job_name;
-    scan_key_info.procedure = F_TEXTEQ;
-    List *tuples = search_by_sysscan_1(rel, &scan_key_info);
+    int4 job_id = get_job_id_from_pg_job(job_name);
+    ScanKeyInfo scan_key_info1;
+    scan_key_info1.attribute_value = job_name;
+    scan_key_info1.attribute_number = Anum_pg_job_proc_job_name;
+    scan_key_info1.procedure = F_TEXTEQ;
+    ScanKeyInfo scan_key_info2;
+    scan_key_info2.attribute_value = job_id;
+    scan_key_info2.attribute_number = Anum_pg_job_proc_job_id;
+    scan_key_info2.procedure = F_INT4EQ;
+    List *tuples = search_by_sysscan_2(rel, &scan_key_info1, &scan_key_info2);
+    if (tuples == NIL) {
+        return NULL;
+    }
     if (list_length(tuples) != 1) {
+        list_free_deep(tuples);
         return NULL;
     }
     HeapTuple tuple = (HeapTuple)linitial(tuples);
@@ -187,6 +212,7 @@ void lookup_pg_job_proc(Datum name, Datum *job_id, Datum *job_action)
     bool isnull = false;
     Relation rel = heap_open(PgJobProcRelationId, AccessShareLock);
     HeapTuple tuple = search_from_pg_job_proc(rel, name);
+
     /* integer job id */
     if (job_id != NULL) {
         *job_id = heap_getattr(tuple, Anum_pg_job_proc_job_id, rel->rd_att, &isnull);
@@ -204,6 +230,7 @@ void lookup_pg_job_proc(Datum name, Datum *job_id, Datum *job_action)
             *job_action = PointerGetDatum(PG_DETOAST_DATUM_COPY(job_action_src));
         }
     }
+    heap_freetuple_ext(tuple);
 
     heap_close(rel, AccessShareLock);
 }

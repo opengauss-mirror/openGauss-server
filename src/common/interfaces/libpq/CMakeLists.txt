@@ -1,9 +1,10 @@
 #This is the main CMAKE for build all components.
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
 set(CMAKE_MODULE_PATH 
     ${${CMAKE_CURRENT_SOURCE_DIR}}/jdbc
 )
 add_subdirectory(jdbc)
-
+endif()
 #execute_process(
 #    COMMAND flex -CF -b -p -o scan.cpp scan.l
 #    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/frontend_parser
@@ -97,8 +98,10 @@ set(TGT_pq_INC
     ${LIBEDIT_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
     ${PROJECT_SRC_DIR}/include/libpq
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")    
     ${JAVA_HOME}/include 
     ${JAVA_HOME}/include/linux
+endif()
 )
 
 set(pq_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND -DFRONTEND_PARSER -DUNSAFE_STAT_OK -DSO_MAJOR_VERSION=5)
@@ -108,7 +111,11 @@ add_static_libtarget(pq TGT_pq_SRC TGT_pq_INC "${pq_DEF_OPTIONS}" "${pq_COMPILE_
 # so pq
 set(pq_LINK_OPTIONS ${LIB_LINK_OPTIONS})
 add_shared_libtarget(pq TGT_pq_SRC TGT_pq_INC "${pq_DEF_OPTIONS}" "${pq_COMPILE_OPTIONS}" "${pq_LINK_OPTIONS}")
-target_link_libraries(pq PRIVATE com_err_gauss crypto gssapi_krb5_gauss gssrpc_gauss k5crypto_gauss krb5_gauss krb5support_gauss securec ssl)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    target_link_libraries(pq PRIVATE com_err_gauss crypto gssapi_krb5_gauss gssrpc_gauss k5crypto_gauss krb5_gauss krb5support_gauss securec ssl)
+else()
+    target_link_libraries(pq PRIVATE crypto securec ssl)
+endif()
 target_link_directories(pq PUBLIC 
     ${LIBOPENSSL_LIB_PATH} ${KERBEROS_LIB_PATH} ${SECURE_LIB_PATH} 
     ${PROJECT_SRC_DIR}/common/port ${PROJECT_SRC_DIR}/gstrace/common
@@ -122,6 +129,7 @@ install(TARGETS pq LIBRARY DESTINATION lib)
 install(TARGETS pq_static ARCHIVE DESTINATION lib)
 
 # libpq_ce.so
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
 execute_process(COMMAND rm -rf ${CMAKE_CURRENT_SOURCE_DIR}/libpq_ce)
 execute_process(COMMAND mkdir -p ${CMAKE_CURRENT_SOURCE_DIR}/libpq_ce)
 execute_process(
@@ -193,7 +201,12 @@ add_static_objtarget(libpq_ce TGT_libpq_ce_SRC TGT_pq_ce_INC "${libpq_ce_DEF_OPT
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks TGT_cmk_entity_manager_hooks_SRC)
 if(NOT "${ENABLE_UT}" STREQUAL "ON")
     if(NOT "${ENABLE_MULTIPLE_NODES}_${ENABLE_PRIVATEGAUSS}" STREQUAL "OFF_OFF")
-        list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_local_kms.cpp)
+        if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+            list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_local_kms.cpp)
+        else()
+            list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.cpp)
+            list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.cpp)
+        endif()
     else()
         list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.cpp)
         list(REMOVE_ITEM TGT_cmk_entity_manager_hooks_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.cpp)
@@ -267,9 +280,15 @@ set(pq_ce_LINK_OPTIONS ${LIB_LINK_OPTIONS})
 add_shared_libtarget(pq_ce TGT_pq_ce_SRC TGT_pq_ce_INC "${pq_ce_DEF_OPTIONS}" "${pq_ce_COMPILE_OPTIONS}" "${pq_ce_LINK_OPTIONS}")
 set(pq_ce_LINK_LIBS libpq_ce cmk_entity_manager_hooks encryption_hooks client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher frontend_parser)
 if(NOT "${ENABLE_MULTIPLE_NODES}_${ENABLE_PRIVATEGAUSS}" STREQUAL "OFF_OFF")
-    set(pq_ce_LINK_LIBS ${pq_ce_LINK_LIBS} -lgs_ktool -lkmc)
+    if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+        set(pq_ce_LINK_LIBS ${pq_ce_LINK_LIBS} -lgs_ktool -lkmc)
+    endif()
 endif()
-target_link_libraries(pq_ce PRIVATE ${pq_ce_LINK_LIBS} -lcurl -lcjson -lssl -lcrypto -lsecurec -lpthread -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    target_link_libraries(pq_ce PRIVATE ${pq_ce_LINK_LIBS} -lcurl -lcjson -lssl -lcrypto -l${SECURE_C_CHECK} -lpthread -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss)
+else()
+    target_link_libraries(pq_ce PRIVATE ${pq_ce_LINK_LIBS} -lcurl -lcjson -lssl -lcrypto -l${SECURE_C_CHECK} -lpthread)
+endif()
 add_dependencies(pq_ce libpq_ce cmk_entity_manager_hooks encryption_hooks client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher frontend_parser)
 target_link_directories(pq_ce PUBLIC 
     ${SECURE_LIB_PATH}
@@ -281,7 +300,9 @@ target_link_directories(pq_ce PUBLIC
     ${CMAKE_BINARY_DIR}/lib
 )
 if(NOT "${ENABLE_MULTIPLE_NODES}_${ENABLE_PRIVATEGAUSS}" STREQUAL "OFF_OFF")
-    add_dependencies(pq_ce gs_ktool)
+    if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+        add_dependencies(pq_ce gs_ktool)
+    endif()
 endif()
 SET_TARGET_PROPERTIES(pq_ce PROPERTIES VERSION 5.5)
 add_custom_command(TARGET pq_ce POST_BUILD
@@ -289,6 +310,21 @@ add_custom_command(TARGET pq_ce POST_BUILD
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS pq_ce LIBRARY DESTINATION lib)
+else()
+SET(TGT_pq_ce_INC
+    ${PROJECT_SRC_DIR}/include/libpq
+    ${LIBOPENSSL_INCLUDE_PATH}
+    ${ZLIB_INCLUDE_PATH}
+    ${LIBCURL_INCLUDE_PATH}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set(pq_ce_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${LIB_SECURE_OPTIONS} ${CHECK_OPTIONS} -fstack-protector-all)
+AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR}/client_logic_common TGT_client_logic_common_SRC)
+set(TGT_client_logic_common_cstrings_map_SRC ${CMAKE_CURRENT_SOURCE_DIR}/client_logic_common/cstrings_map.cpp)
+set(client_logic_common_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND -DFRONTEND_PARSER -DHAVE_CE)
+add_static_objtarget(libpq_cstrings_map TGT_client_logic_common_cstrings_map_SRC TGT_pq_ce_INC "${client_logic_common_DEF_OPTIONS}" "${pq_ce_COMPILE_OPTIONS}" "")
+endif() #end of not build pq_ce
 
 # gauss pq ogject
 list(APPEND TGT_libpq_SRC
@@ -324,6 +360,8 @@ endif()
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/pg_service.conf.sample
     DESTINATION share/postgresql/
 )
-install_symlink(libpq_ce.so.5.5 libpq_ce.so.5 ${prefix_home}/lib)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    install_symlink(libpq_ce.so.5.5 libpq_ce.so.5 ${prefix_home}/lib)
+endif()
 install_symlink(libpq.so.5.5 libpq.so.5 ${prefix_home}/lib)
 

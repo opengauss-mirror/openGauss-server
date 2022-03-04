@@ -813,3 +813,6 @@ test: gs_basebackup
 
 # gs_ledger
 test: ledger_table_case
+
+# wlm_memory_trace
+test: wlm_memory_trace

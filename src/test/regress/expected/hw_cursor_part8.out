@@ -395,7 +395,7 @@ END;
 /
 create table t1(a int);
 --test with query
-create or replace procedure test_cursor() as
+create or replace procedure test_cursor_8() as
 declare
 	cursor cursor1 is 
 	with recursive StepCTE(a)
@@ -427,7 +427,7 @@ ERROR:  cannot open FETCH query as cursor
 CONTEXT:  PL/pgSQL function pro_cursor_c0019() line 5 at OPEN
 create table test_cursor_table(c1 int,c2 varchar);
 insert into test_cursor_table values(1,'Jack'),(2,'Rose');
-create or replace procedure test_cursor() as
+create or replace procedure test_cursor_8() as
 declare
 		type ref_cur is ref cursor;
 		cur1 ref_cur;
@@ -445,15 +445,15 @@ begin
 		CLOSE cur1;
 end
 /
-call test_cursor();
+call test_cursor_8();
 NOTICE:  1---Jack
 NOTICE:  2---Rose
- test_cursor 
--------------
+ test_cursor_8 
+---------------
  
 (1 row)
 
-create or replace procedure test_cursor() as
+create or replace procedure test_cursor_8() as
 declare
 type ref_cur is ref cursor;
 		cur1 ref_cur;
@@ -474,10 +474,10 @@ begin
 		CLOSE cur1;
 end
 /
-call test_cursor();
+call test_cursor_8();
 NOTICE:  1---Jack
- test_cursor 
--------------
+ test_cursor_8 
+---------------
  
 (1 row)
 
@@ -532,7 +532,7 @@ drop cascades to function test_crs_rpt_emptysor(integer)
 drop cascades to table t1
 drop cascades to function pro_cursor_c0019()
 drop cascades to table test_cursor_table
-drop cascades to function test_cursor()
+drop cascades to function test_cursor_8()
 drop cascades to type pro_type_04
 drop cascades to function pro_base13_03(character varying,character varying,character varying)
 drop cascades to function pro_base13_04(character varying,character varying,character varying)

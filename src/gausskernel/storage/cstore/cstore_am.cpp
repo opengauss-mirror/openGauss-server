@@ -463,6 +463,7 @@ void CStore::Destroy()
  */
 void CStore::CUPrefetch(CUDesc* cudesc, int col, AioDispatchCUDesc_t** dList, int& count, File* vfdList)
 {
+#ifndef ENABLE_LITE_MODE
     CU* cu_ptr = NULL;
     bool found = false;
     int slotId = CACHE_BLOCK_INVALID_IDX;
@@ -589,6 +590,7 @@ void CStore::CUPrefetch(CUDesc* cudesc, int col, AioDispatchCUDesc_t** dList, in
         pgstat_count_cu_hdd_asyn(m_relation, tmp_count);
     }
     return;
+#endif
 }
 
 /*
@@ -635,6 +637,7 @@ void CStore::CUListPrefetch()
         }
     }
     if (t_thrd.cstore_cxt.InProgressAioCUDispatchCount > 0) {
+#ifndef ENABLE_LITE_MODE
         int tmp_count = t_thrd.cstore_cxt.InProgressAioCUDispatchCount;
 
         HOLD_INTERRUPTS();
@@ -646,6 +649,7 @@ void CStore::CUListPrefetch()
         // stat cu hdd asyn read
         pgstatCountCUHDDAsynRead4SessionLevel(tmp_count);
         pgstat_count_cu_hdd_asyn(m_relation, tmp_count);
+#endif
     }
 
     pfree(dList);

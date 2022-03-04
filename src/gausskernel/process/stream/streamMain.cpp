@@ -106,7 +106,9 @@ int StreamMain()
     
     MemoryContext oldMemory = MemoryContextSwitchTo(
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+#ifdef ENABLE_LLVM_COMPILE
     CodeGenThreadInitialize();
+#endif
     (void)MemoryContextSwitchTo(oldMemory);
     
     /* We can now handle ereport(ERROR) */
@@ -121,10 +123,13 @@ int StreamMain()
             pgstat_report_activity(STATE_IDLE, NULL);
             pgstat_report_waitstatus(STATE_WAIT_COMM);
             t_thrd.threadpool_cxt.stream->WaitMission();
+            Assert(CheckMyDatabaseMatch());
             pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
         }
 
         pgstat_report_queryid(u_sess->debug_query_id);
+        pgstat_report_unique_sql_id(false);
+        pgstat_report_global_session_id(u_sess->globalSessionId);
         pgstat_report_smpid(u_sess->stream_cxt.smp_id);
         timeInfoRecordStart();
 
@@ -258,6 +263,7 @@ void ExtractProduerInfo()
     u_sess->exec_cxt.need_track_resource = u_sess->stream_cxt.producer_obj->getExplainTrack();
     u_sess->stream_cxt.producer_obj->getUniqueSQLKey(&u_sess->unique_sql_cxt.unique_sql_id,
         &u_sess->unique_sql_cxt.unique_sql_user_id, &u_sess->unique_sql_cxt.unique_sql_cn_id);
+    u_sess->stream_cxt.producer_obj->getGlobalSessionId(&u_sess->globalSessionId);
 
     WLMGeneralParam *g_wlm_params =  &u_sess->wlm_cxt->wlm_params;
     errno_t ret = sprintf_s(u_sess->wlm_cxt->control_group, 
@@ -360,6 +366,9 @@ static void HandleStreamSigjmp()
 
     AbortCurrentTransaction();
 
+    /* release resource held by lsc */
+    AtEOXact_SysDBCache(false);
+
     LWLockReleaseAll();
 
     if (u_sess->stream_cxt.producer_obj != NULL) {
@@ -394,14 +403,13 @@ static void execute_stream_plan(StreamProducer* producer)
     PlannedStmt* planstmt = producer->getPlan();
     CommandDest dest = producer->getDest();
     bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
-    bool was_logged = false;
     bool isTopLevel = false;
     const char* commandTag = NULL;
     char completionTag[COMPLETION_TAG_BUFSIZE];
     Portal portal = NULL;
     DestReceiver* receiver = NULL;
     int16 format;
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
 
     t_thrd.postgres_cxt.debug_query_string = planstmt->query_string;
     pgstat_report_activity(STATE_RUNNING, t_thrd.postgres_cxt.debug_query_string);
@@ -491,9 +499,9 @@ static void execute_stream_plan(StreamProducer* producer)
     /*
      * Emit duration logging if appropriate.
      */
-    switch (check_log_duration(msec_str, was_logged)) {
+    switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms", msec_str), errhidestmt(true)));
+            Assert(false);
             break;
         case 2:
             ereport(LOG,
@@ -742,28 +750,29 @@ void StreamExit()
 
     AtProcExit_Buffers(0, 0);
     ShutdownPostgres(0, 0);
-    AtProcExit_Files(0, 0);
+    if(!EnableLocalSysCache()) {
+        AtProcExit_Files(0, 0);
+    }
     StreamQuitAndClean(0, 0);
 
     RestoreStream();
 
-    /* release memory context and reset flags. */
-    MemoryContextReset(u_sess->syscache_cxt.SysCacheMemCxt);
-
-    errno_t rc = EOK;
-    rc = memset_s(u_sess->syscache_cxt.SysCache, sizeof(CatCache*) * SysCacheSize,
-                  0, sizeof(CatCache*) * SysCacheSize);
-    securec_check(rc, "\0", "\0");
-    rc = memset_s(u_sess->syscache_cxt.SysCacheRelationOid, sizeof(Oid) * SysCacheSize,
-                  0, sizeof(Oid) * SysCacheSize);
-    securec_check(rc, "\0", "\0");
+    if (!EnableLocalSysCache()) {
+        /* release memory context and reset flags. */
+        MemoryContextReset(u_sess->syscache_cxt.SysCacheMemCxt);
+        errno_t rc = EOK;
+        rc = memset_s(u_sess->syscache_cxt.SysCache, sizeof(CatCache*) * SysCacheSize,
+                    0, sizeof(CatCache*) * SysCacheSize);
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(u_sess->syscache_cxt.SysCacheRelationOid, sizeof(Oid) * SysCacheSize,
+                    0, sizeof(Oid) * SysCacheSize);
+        securec_check(rc, "\0", "\0");
+    }
 
     /* release statement_cxt */
     if (t_thrd.proc_cxt.MyBackendId != InvalidBackendId) {
         release_statement_context(t_thrd.shemem_ptr_cxt.MyBEEntry, __FUNCTION__, __LINE__);
     }
-    /* When the stream session ends, the user count decreases by one. */
-    DecreaseUserCount(u_sess->proc_cxt.MyRoleId);
 
     free_session_context(u_sess);
 }

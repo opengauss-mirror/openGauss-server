@@ -103,7 +103,13 @@ static inline uint32 UNDO_FILE_BLOCK(uint32 dbId)
 /* allocate UndoFileState memory. */
 static UndoFileState *AllocUndoFileState(void)
 {
-    return (UndoFileState *)MemoryContextAlloc(u_sess->storage_cxt.UndoFileCxt, sizeof(UndoFileState));
+    MemoryContext current;
+    if (EnableLocalSysCache()) {
+        current = t_thrd.lsc_cxt.lsc->lsc_mydb_memcxt;
+    } else {
+        current = u_sess->storage_cxt.UndoFileCxt;
+    }
+    return (UndoFileState *)MemoryContextAlloc(current, sizeof(UndoFileState));
 }
 
 static inline void SetUndoFileState(UndoFileState *state, int segno, File file)
@@ -114,6 +120,9 @@ static inline void SetUndoFileState(UndoFileState *state, int segno, File file)
 
 void InitUndoFile(void)
 {
+    if (EnableLocalSysCache()) {
+        return;
+    }
     Assert(u_sess->storage_cxt.UndoFileCxt == NULL);
     u_sess->storage_cxt.UndoFileCxt = AllocSetContextCreate(u_sess->top_mem_cxt, "UndoFileSmgr", ALLOCSET_DEFAULT_SIZES);
 }
@@ -288,7 +297,7 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
         }
     }
 
-    if (fstat(u_sess->storage_cxt.VfdCache[fd].fd, &statBuffer) < 0) {
+    if (fstat(GetVfdCache()[fd].fd, &statBuffer) < 0) {
         CloseUndoFile(reln, forknum, InvalidBlockNumber);
         ereport(ERROR, (errmsg(UNDOFORMAT("could not stat file \"%s\": %m."), path)));
     }
@@ -555,13 +564,14 @@ void UnlinkUndoFile(const RelFileNodeBackend& rnode, ForkNumber forkNum, bool is
         if (!RelFileNodeBackendIsTemp(rnode)) {
             RegisterForgetUndoRequests(rnode, segno);
         }
-
+        pgstat_report_waitevent(WAIT_EVENT_UNDO_FILE_UNLINK);
         if (unlink(path) < 0 && errno != ENOENT) {
             /* try again */
             if ((unlink(path) < 0) && (errno != ENOENT) && !isRedo) {
                 ereport(WARNING, (errmsg(UNDOFORMAT("could not remove file \"%s\": %m."), path)));
             }
         }
+        pgstat_report_waitevent(WAIT_EVENT_END);
     } else {
         /* truncate(2) would be easier here, but Windows hasn't got it */
         int fd;

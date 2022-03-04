@@ -1127,8 +1127,8 @@ int pqRowProcessor(PGconn* conn, const char** errmsgp)
                     bool isValueDecrypted = false;
                     dec_dat_res = DEC_DATA_ERR;
                     if (RecordProcessor::DeProcessRecord(conn, columns[i].value, length,
-                        res->attDescs[i].rec->get_original_ids(), res->attDescs[i].format, &deProcessed, length,
-                        &isValueDecrypted)) {
+                        res->attDescs[i].rec->get_original_ids(), res->attDescs[i].rec->get_num_processed_args(),
+                        res->attDescs[i].format, &deProcessed, length, &isValueDecrypted)) {
                         clen = (int)length;
                         if (isValueDecrypted) {
                             dec_dat_res = DEC_DATA_SUCCEED;
@@ -1136,7 +1136,6 @@ int pqRowProcessor(PGconn* conn, const char** errmsgp)
                         }
                     } else {
                         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("failed to deprocess data in record"));
-                        conn->client_logic->isInvalidOperationOnColumn = true; // FAILED TO READ
                         goto fail;
                     }
                 }
@@ -2130,16 +2129,11 @@ PGresult* PQgetResult(PGconn* conn)
     }
 
 #ifdef HAVE_CE
-    if (conn->client_logic->enable_client_encryption) {
-        Assert(conn->client_logic && (conn->client_logic->enable_client_encryption));
-        /*
-         * when res is NULL then it means ReadyForQuery was received
-         */
-        if (res)
+    /*
+    * when res is NULL then it means ReadyForQuery was received
+    */
+    if (conn->client_logic->enable_client_encryption && res) {
             conn->client_logic->m_lastResultStatus = res->resultStatus;
-        else if (conn->asyncStatus != PGASYNC_BUSY) {
-            Processor::run_post_query(conn);
-        }
     }
 #endif
 
@@ -2400,8 +2394,7 @@ PGresult* checkRefreshCacheOnError(PGconn* conn)
 {
     PGresult* res = NULL;
     if (conn->client_logic->enable_client_encryption) {
-        if ((conn->client_logic->isInvalidOperationOnColumn || conn->client_logic->should_refresh_function) &&
-            !conn->client_logic->isDuringRefreshCacheOnError) {
+        if (conn->client_logic->isInvalidOperationOnColumn && !conn->client_logic->isDuringRefreshCacheOnError) {
             /* copy query because it will be overwritten */
             char* query_to_resend = NULL;
             size_t last_query_size = 0;
@@ -2413,17 +2406,6 @@ PGresult* checkRefreshCacheOnError(PGconn* conn)
                 check_strncpy_s(strncpy_s(query_to_resend, last_query_size + 1, conn->last_query, last_query_size));
                 query_to_resend[last_query_size] = '\0';
             }
-            if (conn->client_logic->should_refresh_function) {
-                conn->client_logic->should_refresh_function = false;
-                if (query_to_resend != NULL) {
-                    conn->client_logic->disable_once = true;
-                    res = PQexec(conn, query_to_resend);
-                    conn->client_logic->disable_once = false;
-                    libpq_free(query_to_resend);
-                }
-                conn->client_logic->isDuringRefreshCacheOnError = false; /* reset variable */
-                return res;
-            }
             /*
              * if an "invalid operation on a column" was detected it probably means that a DML operation was made on 
              * "encrypted" special column. however, the client that performed the DML operation was under the 
@@ -2433,14 +2415,14 @@ PGresult* checkRefreshCacheOnError(PGconn* conn)
             conn->client_logic->cacheRefreshType = CacheRefreshType::CACHE_ALL;
             conn->client_logic->m_cached_column_manager->load_cache(conn);
             if (query_to_resend != NULL) {
-                PQclear(PQexec(conn, query_to_resend));
+                res = PQexec(conn, query_to_resend);
                 free(query_to_resend);
             }
             conn->client_logic->isInvalidOperationOnColumn = false; // reset variable
             conn->client_logic->isDuringRefreshCacheOnError = false; // reset variable
         }
     }
-    return NULL;
+    return res;
 }
 #endif
 

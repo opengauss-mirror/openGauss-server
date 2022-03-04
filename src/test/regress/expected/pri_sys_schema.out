@@ -1,0 +1,156 @@
+CREATE USER test_any_role PASSWORD 'Gauss@1234';
+GRANT insert any table to test_any_role;
+GRANT update any table to test_any_role;
+GRANT delete any table to test_any_role;
+CREATE USER test_user PASSWORD 'Gauss@1234';
+--db4ai
+reset role;
+SET ROLE test_user PASSWORD 'Gauss@1234';
+insert into db4ai.snapshot(id) values(1);
+ERROR:  permission denied for relation snapshot
+DETAIL:  N/A
+update db4ai.snapshot set id = 2 where id = 1;
+ERROR:  permission denied for relation snapshot
+DETAIL:  N/A
+delete from db4ai.snapshot;
+ERROR:  permission denied for relation snapshot
+DETAIL:  N/A
+select * from db4ai.snapshot;
+ id | parent_id | matrix_id | root_id | schema | name | owner | commands | comment | published | archived | created | row_count 
+----+-----------+-----------+---------+--------+------+-------+----------+---------+-----------+----------+---------+-----------
+(0 rows)
+
+reset role;
+SET ROLE test_any_role PASSWORD 'Gauss@1234';
+insert into db4ai.snapshot(id) values(1);
+ERROR:  permission denied for relation snapshot
+DETAIL:  N/A
+update db4ai.snapshot set id = 2 where id = 1;
+ERROR:  permission denied for relation snapshot
+DETAIL:  N/A
+delete from db4ai.snapshot;
+ERROR:  permission denied for relation snapshot
+DETAIL:  N/A
+select * from db4ai.snapshot;
+ id | parent_id | matrix_id | root_id | schema | name | owner | commands | comment | published | archived | created | row_count 
+----+-----------+-----------+---------+--------+------+-------+----------+---------+-----------+----------+---------+-----------
+(0 rows)
+
+--information_schema
+reset role;
+SET ROLE test_user PASSWORD 'Gauss@1234';
+insert into information_schema.sql_features(feature_id) values(1);
+ERROR:  permission denied for relation sql_features
+DETAIL:  N/A
+update information_schema.sql_features set feature_name = 'Embedded Ada1' where feature_id = 'B011';
+ERROR:  permission denied for relation sql_features
+DETAIL:  N/A
+delete from information_schema.sql_features;
+ERROR:  permission denied for relation sql_features
+DETAIL:  N/A
+select * from information_schema.sql_features where feature_id = 'B011';
+ feature_id | feature_name | sub_feature_id | sub_feature_name | is_supported | is_verified_by | comments 
+------------+--------------+----------------+------------------+--------------+----------------+----------
+ B011       | Embedded Ada |                |                  | NO           |                | 
+(1 row)
+
+reset role;
+SET ROLE test_any_role PASSWORD 'Gauss@1234';
+insert into information_schema.sql_features(feature_id) values(1);
+ERROR:  permission denied for relation sql_features
+DETAIL:  N/A
+update information_schema.sql_features set feature_name = 'Embedded Ada1' where feature_id = 'B011';
+ERROR:  permission denied for relation sql_features
+DETAIL:  N/A
+delete from information_schema.sql_features;
+ERROR:  permission denied for relation sql_features
+DETAIL:  N/A
+select * from information_schema.sql_features where feature_id = 'B011';
+ feature_id | feature_name | sub_feature_id | sub_feature_name | is_supported | is_verified_by | comments 
+------------+--------------+----------------+------------------+--------------+----------------+----------
+ B011       | Embedded Ada |                |                  | NO           |                | 
+(1 row)
+
+--dbe_perf
+reset role;
+SET ROLE test_user PASSWORD 'Gauss@1234';
+select count(*) from dbe_perf.user_transaction;
+ERROR:  permission denied for schema dbe_perf
+LINE 1: select count(*) from dbe_perf.user_transaction;
+                             ^
+DETAIL:  N/A
+delete from dbe_perf.user_transaction;
+ERROR:  permission denied for schema dbe_perf
+LINE 1: delete from dbe_perf.user_transaction;
+                    ^
+DETAIL:  N/A
+reset role;
+GRANT select any table to test_any_role;
+GRANT delete any table to test_any_role;
+SET ROLE test_any_role PASSWORD 'Gauss@1234';
+select count(*) from dbe_perf.user_transaction;
+ERROR:  permission denied for schema dbe_perf
+LINE 1: select count(*) from dbe_perf.user_transaction;
+                             ^
+DETAIL:  N/A
+delete from dbe_perf.user_transaction;
+ERROR:  permission denied for schema dbe_perf
+LINE 1: delete from dbe_perf.user_transaction;
+                    ^
+DETAIL:  N/A
+--cstore
+reset role;
+SET ROLE test_user PASSWORD 'Gauss@1234';
+select count(*) from sys.sys_dummy;
+ERROR:  permission denied for schema sys
+LINE 1: select count(*) from sys.sys_dummy;
+                             ^
+DETAIL:  N/A
+delete from sys.sys_dummy;
+ERROR:  permission denied for schema sys
+LINE 1: delete from sys.sys_dummy;
+                    ^
+DETAIL:  N/A
+reset role;
+SET ROLE test_any_role PASSWORD 'Gauss@1234';
+select count(*) from sys.sys_dummy;
+ERROR:  permission denied for schema sys
+LINE 1: select count(*) from sys.sys_dummy;
+                             ^
+DETAIL:  N/A
+delete from sys.sys_dummy;
+ERROR:  permission denied for schema sys
+LINE 1: delete from sys.sys_dummy;
+                    ^
+DETAIL:  N/A
+--pg_catalog
+reset role;
+SET ROLE test_user PASSWORD 'Gauss@1234';
+select count(*) from pg_catalog.pg_authid;
+ERROR:  permission denied for relation pg_authid
+DETAIL:  N/A
+reset role;
+GRANT select any table to test_any_role;
+SET ROLE test_any_role PASSWORD 'Gauss@1234';
+select count(*) from pg_catalog.pg_authid;
+ERROR:  permission denied for relation pg_authid
+DETAIL:  N/A
+--sys
+reset role;
+SET ROLE test_user PASSWORD 'Gauss@1234';
+select count(*) from sys.my_jobs;
+ERROR:  permission denied for schema sys
+LINE 1: select count(*) from sys.my_jobs;
+                             ^
+DETAIL:  N/A
+reset role;
+GRANT select any table to test_any_role;
+SET ROLE test_any_role PASSWORD 'Gauss@1234';
+select count(*) from sys.my_jobs;
+ERROR:  permission denied for schema sys
+LINE 1: select count(*) from sys.my_jobs;
+                             ^
+DETAIL:  N/A
+reset role;
+drop user test_any_role cascade;
+drop user test_user cascade;

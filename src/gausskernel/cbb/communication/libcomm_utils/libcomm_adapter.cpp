@@ -904,6 +904,7 @@ static int libcomm_build_tcp_connection(libcommaddrinfo* libcomm_addrinfo, int n
         return -1;
     }
 
+#ifdef ENABLE_GSS
     /* Client side gss kerberos authentication for data connection. */
     if (g_instance.comm_cxt.localinfo_cxt.gs_krb_keyfile != NULL && GssClientAuth(sock, libcomm_addrinfo->host) < 0) {
         LIBCOMM_ELOG(WARNING,
@@ -918,6 +919,8 @@ static int libcomm_build_tcp_connection(libcommaddrinfo* libcomm_addrinfo, int n
         mc_tcp_close(sock);
         return -1;
     }
+#endif
+
     g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]->socket = sock;
 #ifdef USE_SSL
     if (g_instance.attr.attr_network.comm_enable_SSL) {
@@ -1125,6 +1128,7 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
         return -1;
     }
 
+#ifdef ENABLE_GSS
     /* Client side gss kerberos authentication for tcp connection. */
     if (g_instance.comm_cxt.localinfo_cxt.gs_krb_keyfile != NULL && GssClientAuth(tcp_sock, remote_host) < 0) {
         mc_tcp_close(tcp_sock);
@@ -1143,6 +1147,7 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
             remote_tcp_port,
             mc_strerror(errno));
     }
+#endif
     
     g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]->socket = tcp_sock;
 #ifdef USE_SSL

@@ -274,6 +274,9 @@ NON_EXEC_STATIC void JobScheduleMain()
         /* Abort the current transaction in order to recover */
         AbortCurrentTransaction();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
+
         elog(LOG, "Job scheduler encounter abnormal, detail error msg: %s.", edata->message);
 
         /*
@@ -690,17 +693,7 @@ static bool SkipSchedulerJob(Datum *values, bool *nulls, Timestamp curtime)
         return true; /* skip here to avoid further overhead */
     }
 
-    /* immediate job (expired after one successful run) */
-    if (nulls[Anum_pg_job_interval - 1]) {
-        return false;
-    } else {
-        char* interval_str = TextDatumGetCString(values[Anum_pg_job_interval - 1]);
-        if (pg_strcasecmp(interval_str, "null") == 0) {
-            pfree_ext(interval_str);
-            return false;
-        }
-    }
-    return true;
+    return false;
 }
 
 /*

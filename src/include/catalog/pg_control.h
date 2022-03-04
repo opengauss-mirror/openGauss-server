@@ -79,23 +79,6 @@ typedef struct CheckPointUndo
     /* you can add more attributes here */
 } CheckPointUndo;
 
-typedef struct CheckPointOld {
-    XLogRecPtrOld      redo;            /* next RecPtr available when we began to
-                                         * create CheckPoint (i.e. REDO start point) */
-    TimeLineID         ThisTimeLineID;  /* current TLI */
-    bool               fullPageWrites;  /* current full_page_writes */
-    uint32             nextXidEpoch;    /* higher-order bits of nextXid */
-    ShortTransactionId nextXid;         /* next free XID */
-    Oid                nextOid;         /* next free OID */
-    ShortTransactionId nextMulti;       /* next free MultiXactId */
-    ShortTransactionId nextMultiOffset; /* next free MultiXact offset */
-    ShortTransactionId oldestXid;       /* cluster-wide minimum datfrozenxid */
-    Oid                oldestXidDB;     /* database with minimum datfrozenxid */
-    pg_time_t          time;            /* time stamp of checkpoint */
-    ShortTransactionId oldestActiveXid;
-} CheckPointOld;
-
-
 /* XLOG info values for XLOG rmgr */
 
 #define XLOG_CHECKPOINT_SHUTDOWN        0x00
@@ -254,40 +237,6 @@ typedef struct ControlFileData {
     /* CRC of all above ... MUST BE LAST! */
     pg_crc32c     crc;
 } ControlFileData;
-
-/*This struct is used to verify the checksum of old version control file*/
-typedef struct ControlFileDataOld {
-    uint64           system_identifier;
-    uint32           pg_control_version;
-    uint32           catalog_version_no;
-    uint32           timeline;
-    DBState          state;
-    pg_time_t        time;
-    XLogRecPtrOld    checkPoint;
-    XLogRecPtrOld    prevCheckPoint;
-    CheckPointOld    checkPointCopy;
-    XLogRecPtrOld    minRecoveryPoint;
-    XLogRecPtrOld    backupStartPoint;
-    XLogRecPtrOld    backupEndPoint;
-    bool             backupEndRequired;
-    int              wal_level;
-    int              MaxConnections;
-    int              max_prepared_xacts;
-    int              max_locks_per_xact;
-    uint32           maxAlign;
-    double           floatFormat;
-    uint32           blcksz;
-    uint32           relseg_size;
-    uint32           xlog_blcksz;
-    uint32           xlog_seg_size;
-    uint32           nameDataLen;
-    uint32           indexMaxKeys;
-    uint32           toast_max_chunk_size;
-    bool             enableIntTimes;
-    bool             float4ByVal;
-    bool             float8ByVal;
-    pg_crc32         crc;
-}ControlFileDataOld;
 
 typedef struct LsnXlogFlushData {
     XLogRecPtr    localLsnFlushPoint;        /* latest flush buffer's lsn postion on primary*/

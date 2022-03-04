@@ -1284,7 +1284,7 @@ static bool recheck_calendar_period(Calendar calendar, TimestampTz start_date, T
     start_date = truncate_calendar_date(CStringGetTextDatum(field_str), start_date);
     next_date = truncate_calendar_date(CStringGetTextDatum(field_str), next_date);
 
-    int64 elapsed = (int)timestamp_diff_internal(cstring_to_text(field_str), start_date, next_date, true);
+    int64 elapsed = timestamp_diff_internal(cstring_to_text(field_str), start_date, next_date, true);
     if (elapsed % (calendar->interval * multiplier) == 0) {
         return true;
     }

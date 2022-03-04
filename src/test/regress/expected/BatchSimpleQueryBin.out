@@ -1,0 +1,23 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_varchar(id INT, name varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),address varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+INSERT INTO t_varchar (id, name, address) VALUES (1, 'MyName-1', 'MyAddress-1');INSERT INTO t_varchar (id, name, address) VALUES (2, 'MyName-2', 'MyAddress-2');
+multiple statements is not allowed under client logic routine, please split it up into simpleQuery per statement.
+INSERT INTO t_varchar (id, name, address) VALUES (1, 'MyName-1', 'MyAddress-1');
+INSERT INTO t_varchar (id, name, address) VALUES (2, 'MyName-2', 'MyAddress-2');
+SELECT * from t_varchar ORDER BY id;
+ id |   name   |   address   
+----+----------+-------------
+  1 | MyName-1 | MyAddress-1
+  2 | MyName-2 | MyAddress-2
+(2 rows)
+
+DROP table t_varchar;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;

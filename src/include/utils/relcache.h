@@ -113,8 +113,7 @@ extern void RelationCacheInitializePhase3(void);
  */
 extern Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, TupleDesc tupDesc, Oid relid,
     Oid relfilenode, Oid reltablespace, bool shared_relation, bool mapped_relation, char relpersistence, char relkind,
-    int8 row_compress, Datum reloptions, TableAmType tam_type, int8 relindexsplit = 0, StorageType storage_type = HEAP_DISK,
-    Oid accessMethodObjectId = 0);
+    int8 row_compress, TableAmType tam_type, int8 relindexsplit = 0, StorageType storage_type = HEAP_DISK);
 
 /*
  * Routine to manage assignment of new relfilenode to a relation
@@ -124,7 +123,11 @@ extern void DeltaTableSetNewRelfilenode(Oid relid, TransactionId freezeXid, bool
 extern void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid,  MultiXactId minmulti,
     bool isDfsTruncate = false);
 extern RelFileNodeBackend CreateNewRelfilenode(Relation relation, TransactionId freezeXid);
+extern RelFileNodeBackend CreateNewRelfilenodePart(Relation parent, Partition part);
+
 extern void UpdatePgclass(Relation relation, TransactionId freezeXid, const RelFileNodeBackend *rnode);
+extern void UpdatePartition(Relation parent, Partition part, TransactionId freezeXid, const RelFileNodeBackend *newrnode);
+
 /*
  * Routines for flushing/rebuilding relcache entries in various scenarios
  */
@@ -142,6 +145,7 @@ extern Oid  RelationGetBucketOid(Relation relation);
 extern void AtEOXact_RelationCache(bool isCommit);
 extern void AtEOSubXact_RelationCache(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid);
 
+extern void InvalidateRelationNodeList();
 /*
  * Routines to help manage rebuilding of relcache init files
  */

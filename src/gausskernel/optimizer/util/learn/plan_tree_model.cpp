@@ -32,7 +32,7 @@
 static char* FormConfigureJson(const Form_gs_opt_model modelinfo, const char* labels);
 static char* FormSetupJson(const char* modelName);
 static void ConfigureModel(Form_gs_opt_model modelinfo, const char* labels, char** filename);
-static char* TrainModel(const Form_gs_opt_model modelinfo, char* filename);
+static char* train_model(const Form_gs_opt_model modelinfo, char* filename);
 static void Unlinkfile(char* filename);
 
 /**
@@ -54,7 +54,7 @@ char* TreeModelTrain(Form_gs_opt_model modelinfo, char* labels)
     SaveDataToFile(filename);
 
     /* 3. send saved file to server to trigger training */
-    buf = TrainModel(modelinfo, filename);
+    buf = train_model(modelinfo, filename);
     return buf;
 }
 
@@ -219,7 +219,7 @@ static void ConfigureModel(Form_gs_opt_model modelinfo, const char* labels, char
     }
 }
 
-static char* TrainModel(const Form_gs_opt_model modelinfo, char* filename)
+static char* train_model(const Form_gs_opt_model modelinfo, char* filename)
 {
     char* buf = NULL;
     char portStr[PORT_LEN] = {'\0'};

@@ -39,7 +39,6 @@
 #include "libpq/pqformat.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
-#include "utils/guc_sql.h"
 
 #define SAMESIGN(a, b) (((a) < 0) == ((b) < 0))
 
@@ -70,23 +69,10 @@ Datum int2in(PG_FUNCTION_ARGS)
  */
 Datum int2out(PG_FUNCTION_ARGS)
 {
-    char* result = NULL;
     int16 arg1 = PG_GETARG_INT16(0);
+    char* result = (char*)palloc(7); /* sign, 5 digits, '\0' */
 
-    if (u_sess->attr.attr_sql.for_print_tuple) {
-        double var = (double)arg1;
-        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
-            result = apply_num_format(var);
-        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
-            result = apply_num_width(var);
-        }
-    }
-
-    if (result == NULL) {
-        result = (char*)palloc(7); /* sign, 5 digits, '\0' */
-        pg_itoa(arg1, result);
-    }
-
+    pg_itoa(arg1, result);
     PG_RETURN_CSTRING(result);
 }
 
@@ -318,23 +304,10 @@ Datum int4in(PG_FUNCTION_ARGS)
  */
 Datum int4out(PG_FUNCTION_ARGS)
 {
-    char* result = NULL;
     int32 arg1 = PG_GETARG_INT32(0);
+    char* result = (char*)palloc(12); /* sign, 10 digits, '\0' */
 
-    if (u_sess->attr.attr_sql.for_print_tuple) {
-        double var = (double)arg1;
-        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
-            result = apply_num_format(var);
-        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
-            result = apply_num_width(var);
-        }
-    }
-
-    if (result == NULL) {
-        result = (char*)palloc(12);  /* sign, 10 digits, '\0' */
-        pg_ltoa(arg1, result);
-    }
-    
+    pg_ltoa(arg1, result);
     PG_RETURN_CSTRING(result);
 }
 
@@ -1252,23 +1225,10 @@ Datum int1in(PG_FUNCTION_ARGS)
 // int1out - converts uint8 to "num"
 Datum int1out(PG_FUNCTION_ARGS)
 {
-    char* result = NULL;
     uint8 arg1 = PG_GETARG_UINT8(0);
+    char* result = (char*)palloc(5); /* sign, 3 digits, '\0' */
 
-    if (u_sess->attr.attr_sql.for_print_tuple) {
-        double var = (double)arg1;
-        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
-            result = apply_num_format(var);
-        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
-            result = apply_num_width(var);
-        }
-    }
-
-    if (result == NULL) {
-        result = (char*)palloc(5); /* sign, 3 digits, '\0' */
-        pg_ctoa(arg1, result);
-    }
-    
+    pg_ctoa(arg1, result);
     PG_RETURN_CSTRING(result);
 }
 

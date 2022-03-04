@@ -193,7 +193,7 @@ UHeapTuple UHeapToastInsertOrUpdate(Relation relation, UHeapTuple newtup, UHeapT
              * we have to delete it later.
              */
             if (att->attlen == -1 && !toastOldIsNull[i] && VARATT_IS_EXTERNAL_ONDISK(oldValue)) {
-                if (toastIsNull[i] || !VARATT_IS_EXTERNAL_ONDISK(newValue) ||
+                if (toastIsNull[i] || !VARATT_IS_EXTERNAL_ONDISK(newValue) || RelationIsLogicallyLogged(relation) ||
                     memcmp((char *)oldValue, (char *)newValue, VARSIZE_EXTERNAL(oldValue)) != 0) {
                     /*
                      * The old external stored value isn't needed any more
@@ -228,6 +228,10 @@ UHeapTuple UHeapToastInsertOrUpdate(Relation relation, UHeapTuple newtup, UHeapT
          * Now look at varlena attributes
          */
         if (att->attlen == -1) {
+            if (VARATT_IS_HUGE_TOAST_POINTER(newValue)) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support clob/blob type more than 1GB of Ustore")));
+            }
             /*
              * If the table's attribute says PLAIN always, force it so.
              */
@@ -806,7 +810,7 @@ static Datum UHeapToastSaveDatum(Relation rel, Datum value, struct varlena *olde
         securec_check(rc, "", "");
         toasttup = UHeapFormTuple(toastTupDesc, tValues, tIsnull);
 
-        (void)UHeapInsert(toastrel, toasttup, mycid, NULL);
+        (void)UHeapInsert(toastrel, toasttup, mycid, NULL, true);
 
         /*
          * Create the index entry.	We cheat a little here by not using
@@ -1065,7 +1069,7 @@ struct varlena *UHeapInternalToastFetchDatum(struct varatt_external toastPointer
 }
 
 struct varlena *UHeapInternalToastFetchDatumSlice(struct varatt_external toastPointer, Relation toastrel,
-    Relation toastidx, int32 sliceoffset, int32 length)
+    Relation toastidx, int64 sliceoffset, int32 length)
 {
     int32 attrsize;
     int32 residx;

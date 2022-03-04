@@ -1,0 +1,214 @@
+DROP SCHEMA test_deferrable CASCADE;
+ERROR:  schema "test_deferrable" does not exist
+CREATE SCHEMA test_deferrable;
+SET CURRENT_SCHEMA TO test_deferrable;
+-- partition table for deferrable
+drop table t_kenyon;
+ERROR:  table "t_kenyon" does not exist
+create table t_kenyon(id int primary key deferrable)
+partition by range(id)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (6000)
+)ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_kenyon_pkey" for table "t_kenyon"
+insert into t_kenyon values(1);
+begin;
+set constraints all deferred;
+insert into t_kenyon values(1);
+end;
+ERROR:  duplicate key value violates unique constraint "t_kenyon_pkey"
+DETAIL:  Key (id)=(1) already exists.
+begin;
+set constraints all IMMEDIATE;
+insert into t_kenyon values(1);
+ERROR:  duplicate key value violates unique constraint "t_kenyon_pkey"
+DETAIL:  Key (id)=(1) already exists.
+end;
+drop table t_kenyon;
+create table t_kenyon(id int primary key not deferrable )
+partition by range(id)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (6000)
+)ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_kenyon_pkey" for table "t_kenyon"
+insert into t_kenyon values(1);
+begin;
+set constraints all deferred;
+insert into t_kenyon values(1);
+ERROR:  duplicate key value violates unique constraint "t_kenyon_pkey"
+DETAIL:  Key (id)=(1) already exists.
+end;
+begin;
+set constraints all IMMEDIATE;
+insert into t_kenyon values(1);
+ERROR:  duplicate key value violates unique constraint "t_kenyon_pkey"
+DETAIL:  Key (id)=(1) already exists.
+end;
+drop table t_kenyon;
+create table t_kenyon(id int primary key initially immediate )
+partition by range(id)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (6000)
+)ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_kenyon_pkey" for table "t_kenyon"
+insert into t_kenyon values(1);
+begin;
+set constraints all deferred;
+insert into t_kenyon values(1);
+ERROR:  duplicate key value violates unique constraint "t_kenyon_pkey"
+DETAIL:  Key (id)=(1) already exists.
+end;
+begin;
+set constraints all IMMEDIATE;
+insert into t_kenyon values(1);
+ERROR:  duplicate key value violates unique constraint "t_kenyon_pkey"
+DETAIL:  Key (id)=(1) already exists.
+end;
+drop table t_kenyon;
+create table t_kenyon(id int primary key  initially deferred)
+partition by range(id)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (6000)
+)ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_kenyon_pkey" for table "t_kenyon"
+insert into t_kenyon values(1);
+begin;
+set constraints all deferred;
+insert into t_kenyon values(1);
+end;
+ERROR:  duplicate key value violates unique constraint "t_kenyon_pkey"
+DETAIL:  Key (id)=(1) already exists.
+begin;
+set constraints all IMMEDIATE;
+insert into t_kenyon values(1);
+ERROR:  duplicate key value violates unique constraint "t_kenyon_pkey"
+DETAIL:  Key (id)=(1) already exists.
+end;
+-- foreign key for deferrable
+drop table warehouse_t23;
+ERROR:  table "warehouse_t23" does not exist
+drop table city_t23;
+ERROR:  table "city_t23" does not exist
+CREATE TABLE city_t23
+(
+	W_CITY VARCHAR(60) PRIMARY KEY,
+	W_ADDRESS TEXT
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "city_t23_pkey" for table "city_t23"
+CREATE TABLE warehouse_t23
+(
+	W_INT int,
+	W_CITY VARCHAR(60) ,
+	FOREIGN KEY(W_CITY) REFERENCES city_t23(W_CITY) deferrable
+);
+begin;
+set constraints all deferred;
+insert into warehouse_t23 values(1,'sss');
+end;
+ERROR:  insert or update on table "warehouse_t23" violates foreign key constraint "warehouse_t23_w_city_fkey"
+DETAIL:  Key (w_city)=(sss) is not present in table "city_t23".
+begin;
+set constraints all IMMEDIATE;
+insert into warehouse_t23 values(1,'sss');
+ERROR:  insert or update on table "warehouse_t23" violates foreign key constraint "warehouse_t23_w_city_fkey"
+DETAIL:  Key (w_city)=(sss) is not present in table "city_t23".
+end;
+drop table warehouse_t23;
+drop table city_t23;
+CREATE TABLE city_t23
+(
+	W_CITY VARCHAR(60) PRIMARY KEY,
+	W_ADDRESS TEXT
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "city_t23_pkey" for table "city_t23"
+CREATE TABLE warehouse_t23
+(
+	W_INT int,
+	W_CITY VARCHAR(60) ,
+	FOREIGN KEY(W_CITY) REFERENCES city_t23(W_CITY) not deferrable
+);
+begin;
+set constraints all deferred;
+insert into warehouse_t23 values(1,'sss');
+ERROR:  insert or update on table "warehouse_t23" violates foreign key constraint "warehouse_t23_w_city_fkey"
+DETAIL:  Key (w_city)=(sss) is not present in table "city_t23".
+end;
+begin;
+set constraints all IMMEDIATE;
+insert into warehouse_t23 values(1,'sss');
+ERROR:  insert or update on table "warehouse_t23" violates foreign key constraint "warehouse_t23_w_city_fkey"
+DETAIL:  Key (w_city)=(sss) is not present in table "city_t23".
+end;
+drop table warehouse_t23;
+drop table city_t23;
+CREATE TABLE city_t23
+(
+	W_CITY VARCHAR(60) PRIMARY KEY,
+	W_ADDRESS TEXT
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "city_t23_pkey" for table "city_t23"
+CREATE TABLE warehouse_t23
+(
+	W_INT int,
+	W_CITY VARCHAR(60) ,
+	FOREIGN KEY(W_CITY) REFERENCES city_t23(W_CITY) initially immediate
+);
+begin;
+set constraints all deferred;
+insert into warehouse_t23 values(1,'sss');
+ERROR:  insert or update on table "warehouse_t23" violates foreign key constraint "warehouse_t23_w_city_fkey"
+DETAIL:  Key (w_city)=(sss) is not present in table "city_t23".
+end;
+begin;
+set constraints all IMMEDIATE;
+insert into warehouse_t23 values(1,'sss');
+ERROR:  insert or update on table "warehouse_t23" violates foreign key constraint "warehouse_t23_w_city_fkey"
+DETAIL:  Key (w_city)=(sss) is not present in table "city_t23".
+end;
+drop table warehouse_t23;
+drop table city_t23;
+CREATE TABLE city_t23
+(
+	W_CITY VARCHAR(60) PRIMARY KEY,
+	W_ADDRESS TEXT
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "city_t23_pkey" for table "city_t23"
+CREATE TABLE warehouse_t23
+(
+	W_INT int,
+	W_CITY VARCHAR(60) ,
+	FOREIGN KEY(W_CITY) REFERENCES city_t23(W_CITY) initially deferred
+);
+begin;
+set constraints all deferred;
+insert into warehouse_t23 values(1,'sss');
+end;
+ERROR:  insert or update on table "warehouse_t23" violates foreign key constraint "warehouse_t23_w_city_fkey"
+DETAIL:  Key (w_city)=(sss) is not present in table "city_t23".
+begin;
+set constraints all IMMEDIATE;
+insert into warehouse_t23 values(1,'sss');
+ERROR:  insert or update on table "warehouse_t23" violates foreign key constraint "warehouse_t23_w_city_fkey"
+DETAIL:  Key (w_city)=(sss) is not present in table "city_t23".
+end;
+DROP SCHEMA test_deferrable CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table t_kenyon
+drop cascades to table city_t23
+drop cascades to table warehouse_t23

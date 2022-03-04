@@ -113,6 +113,21 @@ typedef struct RewriteVarMapping {
     bool need_fix; /* the var is needed to fix when create plan */
 } RewriteVarMapping;
 
+typedef struct VectorPlanContext {
+    bool containRowTable;
+    bool forceVectorEngine;
+    bool currentExprIsFilter;
+    Cost rowCost;
+    Cost vecCost;
+} VectorPlanContext;
+
+typedef struct VectorExprContext {
+    double rows;
+    double lefttreeRows;
+    VectorPlanContext* planContext;
+    List* varList;
+} VectorExprContext;
+
 extern MemoryContext SwitchToPlannerTempMemCxt(PlannerInfo *root);
 extern MemoryContext ResetPlannerTempMemCxt(PlannerInfo *root, MemoryContext cxt);
 extern void fix_vars_plannode(PlannerInfo* root, Plan* plan);
@@ -127,8 +142,9 @@ extern List* get_distributekey_from_tlist(
     PlannerInfo* root, List* tlist, List* groupcls, double rows, double* result_multiple, void* skew_info = NULL);
 extern Plan* try_vectorize_plan(Plan* top_plan, Query* parse, bool from_subplan, PlannerInfo* subroot = NULL);
 extern bool is_vector_scan(Plan* plan);
+extern bool CheckColumnsSuportedByBatchMode(List* targetList, List *qual);
 
-extern bool vector_engine_unsupport_expression_walker(Node* node);
+extern bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* planContext = NULL);
 
 extern void adjust_all_pathkeys_by_agg_tlist(PlannerInfo* root, List* tlist, WindowLists* wflists);
 extern void get_multiple_from_exprlist(PlannerInfo* root, List* exprList, double rows, bool* useskewmultiple,
@@ -189,6 +205,6 @@ extern List* get_plan_list(Plan* plan);
 extern RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rtekind);
 extern Plan* get_foreign_scan(Plan* plan);
 extern uint64 adjust_plsize(Oid relid, uint64 plan_width, uint64 pl_size, uint64* width);
-extern int plan_create_index_workers(Oid tableOid);
+extern bool check_stream_for_loop_fetch(Portal portal);
 
 #endif /* PLANNER_H */

@@ -38,9 +38,12 @@
 #include "catalog/gs_package_fn.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_fn.h"
 #include "catalog/pg_synonym.h"
 #include "commands/defrem.h"
 #include "commands/sqladvisor.h"
+#include "gs_thread.h"
+#include "parser/parse_type.h"
 #include "pgxc/pgxc.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -54,36 +57,32 @@
 #include "utils/pl_global_package_runtime_cache.h"
 #include "utils/pl_package.h"
 
-static PLpgSQL_datum* copypPackageVarDatum(PLpgSQL_datum* datum);
-static PackageRuntimeState* buildPkgRunStatesbyPackage(PLpgSQL_package* pkg);
-static PackageRuntimeState* buildPkgRunStatebyPkgRunState(PackageRuntimeState* parentPkgState);
-static void copyCurrentSessionPkgs(SessionPackageRuntime* sessionPkgs, DList* pkgList);
-static bool pkgExistInSession(PackageRuntimeState* pkgState);
-static void copyParentSessionPkgs(SessionPackageRuntime* sessionPkgs, List* pkgList);
-static void restorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntimeState* pkgState, bool isInit = false);
-static void restoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs);
+#include "tcop/pquery.h"
+#include "executor/executor.h"
+#include "executor/tstoreReceiver.h"
+
+static PLpgSQL_datum* CopyPackageVarDatum(PLpgSQL_datum* datum);
+static PackageRuntimeState* BuildPkgRunStatesbyPackage(PLpgSQL_package* pkg);
+static PackageRuntimeState* BuildPkgRunStatebyPkgRunState(PackageRuntimeState* parentPkgState);
+static void CopyCurrentSessionPkgs(SessionPackageRuntime* sessionPkgs, DList* pkgList);
+static bool PkgExistInSession(PackageRuntimeState* pkgState);
+static void CopyParentSessionPkgs(SessionPackageRuntime* sessionPkgs, List* pkgList);
+static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntimeState* pkgState, bool isInit = false);
+static void RestoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs);
+static void ReleaseUnusedPortalContext(List* portalContexts, bool releaseAll = false);
+#define MAXSTRLEN ((1 << 11) - 1)
 
 static Acl* PackageAclDefault(Oid ownerId)
 {
-    AclMode world_default;
     AclMode owner_default;
     int nacl = 0;
     Acl* acl = NULL;
     AclItem* aip = NULL;
-    world_default = ACL_NO_RIGHTS;
     owner_default = ACL_ALL_RIGHTS_PACKAGE;
-    if (world_default != ACL_NO_RIGHTS)
-        nacl++;
     if (owner_default != ACL_NO_RIGHTS)
         nacl++;
     acl = allocacl(nacl);
     aip = ACL_DAT(acl);
-    if (world_default != ACL_NO_RIGHTS) {
-        aip->ai_grantee = ACL_ID_PUBLIC;
-        aip->ai_grantor = ownerId;
-        ACLITEM_SET_PRIVS_GOPTIONS(*aip, world_default, ACL_NO_RIGHTS);
-        aip++;
-    }
 
     if (owner_default != ACL_NO_RIGHTS) {
         aip->ai_grantee = ownerId;
@@ -93,7 +92,6 @@ static Acl* PackageAclDefault(Oid ownerId)
 
     return acl;
 }
-
 
 /* ----------------
  * PackageSpecCreate
@@ -332,7 +330,7 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     pkgacl = get_user_default_acl(ACL_OBJECT_PACKAGE, ownerId, pkgNamespace);
     if (pkgacl != NULL)
         values[Anum_gs_package_pkgacl - 1] = PointerGetDatum(pkgacl);
-    else if (PLSQL_SECURITY_DEFINER) {
+    else if (PLSQL_SECURITY_DEFINER && u_sess->attr.attr_common.upgrade_mode == 0) {
         values[Anum_gs_package_pkgacl - 1] = PointerGetDatum(PackageAclDefault(ownerId));
     } else {
         nulls[Anum_gs_package_pkgacl - 1] = true;
@@ -347,7 +345,7 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     if (OidIsValid(oldPkgOid)) {
         if (replace != true) {
             ereport(ERROR,
-                (errcode(ERRCODE_DUPLICATE_OBJECT),
+                (errcode(ERRCODE_DUPLICATE_PACKAGE),
                     errmsg("package \"%s\" already exists.", pkgName)));
         } else {
             oldpkgtup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(oldPkgOid));
@@ -358,6 +356,10 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
                         errdetail("cache lookup failed"),
                         errcause("System error"),
                         erraction("Drop and rebuild package.")));
+            }
+            if (!pg_package_ownercheck(HeapTupleGetOid(oldpkgtup), ownerId)) {
+                ReleaseSysCache(oldpkgtup);
+                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PACKAGE, pkgName);
             }
             tup = heap_modify_tuple(oldpkgtup, tupDesc, values, nulls, replaces);
             simple_heap_update(pkgDesc, &tup->t_self, tup); 
@@ -384,7 +386,7 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
         DeleteTypesDenpendOnPackage(PackageRelationId, pkgOid);
         /* the 'shared dependencies' also change when update. */
         deleteSharedDependencyRecordsFor(PackageRelationId, pkgOid, 0); 
-        dropFunctionByPackageOid(pkgOid);
+        DeleteFunctionByPackageOid(pkgOid);
     }  
     heap_freetuple_ext(tup);
 
@@ -459,7 +461,6 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
 Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, const char* pkgBodySrc, const char* pkgInitSrc, bool replace)
 {
     Relation pkgDesc;
-    Oid pkgOid = InvalidOid;
     bool nulls[Natts_gs_package];
     Datum values[Natts_gs_package];
     bool replaces[Natts_gs_package];
@@ -477,7 +478,6 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     Assert(PointerIsValid(pkgBodySrc));
     HeapTuple tup = NULL;
     HeapTuple oldpkgtup = NULL;
-    Oid packageOid = InvalidOid;
     Oid oldPkgOid = InvalidOid;
     /* sanity checks */
     if (pkgName == NULL) {
@@ -493,8 +493,8 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
                 erraction("Please rename package name")));
 
     }
-    packageOid = PackageNameGetOid(pkgName, pkgNamespace);
-    if (packageOid == InvalidOid) {
+    oldPkgOid = PackageNameGetOid(pkgName, pkgNamespace);
+    if (!OidIsValid(oldPkgOid)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("package spec not found")));
     }
     /* initialize nulls and values */
@@ -516,7 +516,6 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     pkgDesc = heap_open(PackageRelationId, RowExclusiveLock);
     tupDesc = RelationGetDescr(pkgDesc);
 
-    oldPkgOid = PackageNameGetOid(pkgName, pkgNamespace);
     if (OidIsValid(oldPkgOid)) {
         oldpkgtup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(oldPkgOid));
         if (!HeapTupleIsValid(oldpkgtup)) {
@@ -531,13 +530,14 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
         SysCacheGetAttr(PACKAGEOID, oldpkgtup, Anum_gs_package_pkgbodydeclsrc, &isNull);
         if (!isNull && !replace) {
             ereport(ERROR, (errcode(ERRCODE_DUPLICATE_PACKAGE), errmsg("package body already exists")));
-        } 
+        } else if (!isNull) {
+            DeleteFunctionByPackageOid(oldPkgOid);
+            DeleteTypesDenpendOnPackage(PackageRelationId, oldPkgOid, false);
+        }
         tup = heap_modify_tuple(oldpkgtup, tupDesc, values, nulls, replaces);
         simple_heap_update(pkgDesc, &tup->t_self, tup); 
         ReleaseSysCache(oldpkgtup);
         isReplaced = true; 
-    } else {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("package spec not found")));
     }
     if (u_sess->attr.attr_common.IsInplaceUpgrade &&
         u_sess->upg_cxt.Inplace_upgrade_next_gs_package_oid != InvalidOid) {
@@ -545,39 +545,34 @@ Oid PackageBodyCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
         u_sess->upg_cxt.Inplace_upgrade_next_gs_package_oid = InvalidOid;
     }
     if (HeapTupleIsValid(tup)) {
-        pkgOid = HeapTupleGetOid(tup);
+        oldPkgOid = HeapTupleGetOid(tup);
     }
-    Assert(OidIsValid(pkgOid));
 
     CatalogUpdateIndexes(pkgDesc, tup);
 
-    if (isReplaced) {
-        DeleteTypesDenpendOnPackage(PackageRelationId, pkgOid, false);
-    }
-
     heap_freetuple_ext(tup);
 
-    heap_close(pkgDesc, NoLock);
+    heap_close(pkgDesc, RowExclusiveLock);
 
     /* Post creation hook for new schema */
-    InvokeObjectAccessHook(OAT_POST_CREATE, PackageRelationId, pkgOid, 0, NULL);
+    InvokeObjectAccessHook(OAT_POST_CREATE, PackageRelationId, oldPkgOid, 0, NULL);
 
     /* Advance command counter so new tuple can be seen by validator */
     CommandCounterIncrement();
 
         /* Recode the procedure create time. */
-    if (OidIsValid(pkgOid)) {
-            if (!isReplaced) {
-                PgObjectOption objectOpt = {true, true, false, false};
-                CreatePgObject(pkgOid, OBJECT_TYPE_PKGSPEC, ownerId, objectOpt);
-            } else {
-                UpdatePgObjectMtime(pkgOid, OBJECT_TYPE_PROC);
-            }
+    if (OidIsValid(oldPkgOid)) {
+        if (!isReplaced) {
+            PgObjectOption objectOpt = {true, true, false, false};
+            CreatePgObject(oldPkgOid, OBJECT_TYPE_PKGSPEC, ownerId, objectOpt);
+        } else {
+            UpdatePgObjectMtime(oldPkgOid, OBJECT_TYPE_PROC);
+        }
     }
 
-    plpgsql_package_validator(pkgOid, false, true);
+    plpgsql_package_validator(oldPkgOid, false, true);
 
-    return pkgOid;
+    return oldPkgOid;
 }
 
 bool IsFunctionInPackage(List* wholename) 
@@ -620,15 +615,495 @@ bool IsFunctionInPackage(List* wholename)
     return false;
 }
 
+/* free the reference value of var */
 static void free_var_value(PLpgSQL_var* var)
 {
     if (var->freeval) {
+        /* means the value is by reference, and need free */
         pfree(DatumGetPointer(var->value));
         var->freeval = false;
     }
 }
 
-void BuildSessionPackageRuntime(uint64 sessionId, uint64 parentSessionId)
+/* find auto session stored portals, and build new on depend on it */
+Portal BuildHoldPortalFromAutoSession(PLpgSQL_execstate* estate, int curVarDno, int outParamIndex)
+{
+    AutoSessionPortalData* holdPortal = NULL;
+    ListCell* cell = NULL;
+    PLpgSQL_var *curVar = NULL;
+    foreach(cell, u_sess->plsql_cxt.storedPortals) {
+        AutoSessionPortalData* portalData = (AutoSessionPortalData*)lfirst(cell);
+        if (portalData != NULL && portalData->outParamIndex == outParamIndex) {
+            holdPortal = portalData;
+        }
+    }
+
+    if (holdPortal == NULL) {
+        /* reset the cursor attribute */
+        curVar = (PLpgSQL_var*)(estate->datums[curVarDno]);
+        free_var_value(curVar);
+        curVar->value = (Datum)0;
+        curVar->isnull = true;
+        curVar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_ISOPEN]);
+        curVar->value = BoolGetDatum(false);
+        curVar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_FOUND]);
+        curVar->value = BoolGetDatum(false);
+        curVar->isnull = true;
+        curVar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_NOTFOUND]);
+        curVar->value = BoolGetDatum(false);
+        curVar->isnull = true;
+        curVar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_ROWCOUNT]);
+        curVar->value = Int32GetDatum(0);
+        curVar->isnull = true;
+        return NULL;
+    }
+    /* Reset SPI result (note we deliberately don't touch lastoid) */
+    SPI_processed = 0;
+    SPI_tuptable = NULL;
+    u_sess->SPI_cxt._current->processed = 0;
+    u_sess->SPI_cxt._current->tuptable = NULL;
+
+    SPI_STACK_LOG("begin", NULL, NULL);
+    if (_SPI_begin_call(true) < 0) {
+        ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
+            errmsg("SPI stack is corrupted when perform cursor operation, current level: %d, connected level: %d",
+            u_sess->SPI_cxt._curid, u_sess->SPI_cxt._connected)));
+    }
+
+    Portal portal = CreateNewPortal(true);
+    portal->holdContext = holdPortal->holdContext;
+    portal->holdStore = holdPortal->holdStore;
+    portal->tupDesc = holdPortal->tupDesc;
+    portal->strategy = holdPortal->strategy;
+    portal->cursorOptions = holdPortal->cursorOptions;
+    portal->commandTag = holdPortal->commandTag;
+    portal->atEnd = holdPortal->atEnd;
+    portal->atStart = holdPortal->atStart;
+    portal->portalPos = holdPortal->portalPos;
+
+    portal->autoHeld = true;
+    portal->resowner = NULL;
+    portal->createSubid = InvalidSubTransactionId;
+    portal->activeSubid = InvalidSubTransactionId;
+    portal->status = PORTAL_READY;
+
+    portal->portalPinned = true;
+
+    /* Pop the SPI stack */
+    SPI_STACK_LOG("end", NULL, NULL);
+    _SPI_end_call(true);
+
+    /* restore cursor var values */
+    curVar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_ISOPEN]);
+    curVar->value = BoolGetDatum(holdPortal->is_open);
+    curVar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_FOUND]);
+    curVar->value = BoolGetDatum(holdPortal->found);
+    curVar->isnull = holdPortal->null_fetch;
+    curVar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_NOTFOUND]);
+    curVar->value = BoolGetDatum(holdPortal->not_found);
+    curVar->isnull = holdPortal->null_fetch;
+    curVar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_ROWCOUNT]);
+    curVar->value = Int32GetDatum(holdPortal->row_count);
+    curVar->isnull = holdPortal->null_open;
+
+    return portal;
+}
+
+static void ReleaseUnusedPortalContext(List* portalContexts, bool releaseAll)
+{
+    ListCell* cell = NULL;
+    AutoSessionPortalContextData* portalContext = NULL;
+    foreach(cell, portalContexts) {
+        portalContext = (AutoSessionPortalContextData*)lfirst(cell);
+        if (releaseAll || portalContext->status == CONTEXT_NEW) {
+            /*
+             * if context not new, its session id and parent is from auto session.
+             * we should set them to parent session to delete it.
+             */
+            if (portalContext->status != CONTEXT_NEW) {
+                portalContext->portalHoldContext->session_id = u_sess->session_id;
+                portalContext->portalHoldContext->thread_id = gs_thread_self();
+                MemoryContextSetParent(portalContext->portalHoldContext, u_sess->top_portal_cxt);
+            }
+            MemoryContextDelete(portalContext->portalHoldContext);
+        }
+    }
+}
+
+/* restore cursors from auto transaction procedure out param */
+void restoreAutonmSessionCursors(PLpgSQL_execstate* estate, PLpgSQL_row* row)
+{
+    if (!u_sess->plsql_cxt.call_after_auto) {
+            return;
+    }
+    PLpgSQL_var* curvar = NULL;
+    for (int i = 0; i < row->nfields; i++) {
+        if (estate->datums[row->varnos[i]]->dtype != PLPGSQL_DTYPE_VAR) {
+            continue;
+        }
+        curvar = (PLpgSQL_var*)(estate->datums[row->varnos[i]]);
+        if (curvar->datatype->typoid == REFCURSOROID) {
+            Portal portal = BuildHoldPortalFromAutoSession(estate, row->varnos[i], i);
+            if (portal == NULL) {
+                continue;
+            }
+            if (curvar->pkg != NULL) {
+                MemoryContext temp = MemoryContextSwitchTo(curvar->pkg->pkg_cxt);
+                assign_text_var(curvar, portal->name);
+                temp = MemoryContextSwitchTo(temp);
+            } else {
+                assign_text_var(curvar, portal->name);
+            }
+            curvar->cursor_closed = false;
+        }
+    }
+
+    list_free_deep(u_sess->plsql_cxt.storedPortals);
+    u_sess->plsql_cxt.storedPortals = NIL;
+    ReleaseUnusedPortalContext(u_sess->plsql_cxt.portalContext);
+    list_free_deep(u_sess->plsql_cxt.portalContext);
+    u_sess->plsql_cxt.portalContext = NIL;
+    u_sess->plsql_cxt.call_after_auto = false;
+}
+
+static bool PortalConextInList(Portal portal, List* PortalContextList)
+{
+    ListCell* cell = NULL;
+    AutoSessionPortalContextData* portalContext = NULL;
+    foreach(cell, PortalContextList) {
+        portalContext = (AutoSessionPortalContextData*)lfirst(cell);
+        if (portalContext != NULL && portalContext->portalHoldContext == portal->holdContext) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ResetAutoPortalConext(Portal portal)
+{
+    if (portal->holdStore == NULL) {
+        return;
+    }
+    /*
+     * we do not call tuplestore_end, because context is another session,
+     * this may cause memory leak, but it seems not serious, because autonomous
+     * session will destroy soon.
+     */
+    portal->holdStore = NULL;
+    List* PortalContextList = u_sess->plsql_cxt.auto_parent_session_pkgs->portalContext;
+    ListCell* cell = NULL;
+    AutoSessionPortalContextData* portalContext = NULL;
+    /* mark context is new, and can be re-used */
+    foreach(cell, PortalContextList) {
+        portalContext = (AutoSessionPortalContextData*)lfirst(cell);
+        if (portalContext != NULL && portalContext->portalHoldContext == portal->holdContext) {
+            portalContext->status = CONTEXT_NEW;
+            if (u_sess->plsql_cxt.parent_context != NULL) {
+                portalContext->portalHoldContext->session_id = u_sess->plsql_cxt.parent_session_id;
+                portalContext->portalHoldContext->thread_id = u_sess->plsql_cxt.parent_thread_id;
+                MemoryContextSetParent(portalContext->portalHoldContext, u_sess->plsql_cxt.parent_context);
+            }
+        }
+    }
+}
+
+MemoryContext GetAvailableHoldContext(List* PortalContextList)
+{
+    ListCell* cell = NULL;
+    AutoSessionPortalContextData* portalContext = NULL;
+    MemoryContext result = NULL;
+    foreach(cell, PortalContextList) {
+        portalContext = (AutoSessionPortalContextData*)lfirst(cell);
+        if (portalContext != NULL && portalContext->status == CONTEXT_NEW) {
+            result = portalContext->portalHoldContext;
+            portalContext->status = CONTEXT_USED;
+            break;
+        }
+    }
+
+    if (result == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_GPRC), errcode(ERRCODE_INVALID_STATUS),
+                errmsg("no available portal hold context"),
+                errdetail("no available portal hold context when hold autonomous transction procedure cursor"),
+                errcause("System error"),
+                erraction("Modify autonomous transction procedure")));
+    }
+
+
+    u_sess->plsql_cxt.parent_session_id = result->session_id;
+    u_sess->plsql_cxt.parent_thread_id = result->thread_id;
+    u_sess->plsql_cxt.parent_context = result->parent;
+    result->session_id = u_sess->session_id;
+    result->thread_id = gs_thread_self();
+    MemoryContextSetParent(result, u_sess->top_portal_cxt);
+
+    return result;
+}
+
+static List* BuildPortalContextListForAutoSession(PLpgSQL_function* func)
+{
+    List* result = NIL;
+    if (func == NULL) {
+        return result;
+    }
+
+    if (func->out_param_varno == -1) {
+        return result;
+    }
+
+    AutoSessionPortalContextData* portalContext = NULL;
+    PLpgSQL_datum* outDatum = func->datums[func->out_param_varno];
+    if (outDatum->dtype == PLPGSQL_DTYPE_VAR) {
+        PLpgSQL_var* outVar = (PLpgSQL_var*)outDatum;
+        if (outVar == NULL || outVar->datatype == NULL || outVar->datatype->typoid != REFCURSOROID) {
+            return result;
+        }
+        portalContext = (AutoSessionPortalContextData*)palloc0(sizeof(AutoSessionPortalContextData));
+        portalContext->status = CONTEXT_NEW;
+        portalContext->portalHoldContext = AllocSetContextCreate(u_sess->top_portal_cxt,
+            "PortalHoldContext",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+        result = lappend(result, portalContext);
+        return result;
+    }
+
+    PLpgSQL_row* outRow = (PLpgSQL_row*)outDatum;
+    if (outRow->refname != NULL) {
+        /* means out param is just one normal row variable */
+        return result;
+    }
+    for (int i = 0; i < outRow->nfields; i++) {
+        if (func->datums[outRow->varnos[i]]->dtype == PLPGSQL_DTYPE_VAR) {
+            PLpgSQL_var* var = (PLpgSQL_var*)(func->datums[outRow->varnos[i]]);
+            if (var != NULL && var->datatype != NULL && var->datatype->typoid == REFCURSOROID) {
+                portalContext = (AutoSessionPortalContextData*)palloc0(sizeof(AutoSessionPortalContextData));
+                portalContext->status = CONTEXT_NEW;
+                portalContext->portalHoldContext = AllocSetContextCreate(u_sess->top_portal_cxt,
+                    "PortalHoldContext",
+                    ALLOCSET_DEFAULT_MINSIZE,
+                    ALLOCSET_DEFAULT_INITSIZE,
+                    ALLOCSET_DEFAULT_MAXSIZE);
+                result = lappend(result, portalContext);
+            }
+        }
+    }
+    return result;
+}
+
+static void HoldOutParamPortal(Portal portal)
+{
+    if (portal->portalPinned && !portal->autoHeld) {
+        /*
+         * Doing transaction control, especially abort, inside a cursor
+         * loop that is not read-only, for example using UPDATE
+         * ... RETURNING, has weird semantics issues.  Also, this
+         * implementation wouldn't work, because such portals cannot be
+         * held.  (The core grammar enforces that only SELECT statements
+         * can drive a cursor, but for example PL/pgSQL does not restrict
+         * it.)
+         */
+        if (portal->strategy != PORTAL_ONE_SELECT) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_TERMINATION),
+                errmsg("cannot perform transaction commands inside a cursor loop that is not read-only")));
+        }
+
+        /* skip portal got error */
+        if (portal->status == PORTAL_FAILED)
+            return;
+
+        /* Verify it's in a suitable state to be held */
+        if (portal->status != PORTAL_READY)
+            ereport(ERROR, (errmsg("pinned portal(%s) is not ready to be auto-held, with status[%d]",
+                portal->name, portal->status)));
+
+        HoldPortal(portal);
+        portal->autoHeld = true;
+    }
+}
+
+static AutoSessionPortalData* BuildPortalDataForParentSession(PLpgSQL_execstate* estate,
+    int curVarDno, int outParamIndex)
+{
+    PLpgSQL_var* curvar = (PLpgSQL_var*)(estate->datums[curVarDno]);
+    if (curvar->isnull) {
+        return NULL;
+    }
+    char* curname = TextDatumGetCString(curvar->value);
+    Portal portal = SPI_cursor_find(curname);
+    pfree_ext(curname);
+    if (portal == NULL) {
+        return NULL;
+    }
+
+    /* portal not held, hold it */
+    if (portal->portalPinned && !portal->autoHeld) {
+        /* Push the SPI stack */
+        SPI_STACK_LOG("begin", NULL, NULL);
+        if (_SPI_begin_call(true) < 0) {
+            ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
+                errmsg("SPI stack is corrupted when perform cursor operation, current level: %d, connected level: %d",
+                u_sess->SPI_cxt._curid, u_sess->SPI_cxt._connected)));
+        }
+        HoldOutParamPortal(portal);
+        /* Pop the SPI stack */
+        SPI_STACK_LOG("end", NULL, NULL);
+        _SPI_end_call(true);
+    }
+
+    if (!portal->autoHeld) {
+        return NULL;
+    }
+
+    if (!PortalConextInList(portal, u_sess->plsql_cxt.auto_parent_session_pkgs->portalContext)) {
+        ereport(ERROR,
+            (errmodule(MOD_GPRC),
+             errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("nested call of ref cursor out param for autonomous transaction procedure is not supported yet."),
+             errdetail("N/A"),
+             errcause("feature not supported"),
+             erraction("Modify autonomous transction procedure")));
+    }
+
+    MemoryContext oldCtx = MemoryContextSwitchTo(portal->holdContext);
+    AutoSessionPortalData* portalData = (AutoSessionPortalData*)palloc0(sizeof(AutoSessionPortalData));
+    portalData->outParamIndex = outParamIndex;
+    portalData->strategy = portal->strategy;
+    portalData->cursorOptions = portal->cursorOptions;
+    portalData->commandTag = pstrdup(portal->commandTag);
+    portalData->atEnd = portal->atEnd;
+    portalData->atStart = portal->atStart;
+    portalData->portalPos = portal->portalPos;
+    portalData->holdStore = portal->holdStore;
+    portalData->holdContext = portal->holdContext;
+    portalData->tupDesc = CreateTupleDescCopy(portal->tupDesc);
+    /* cursor attribute data */
+    curvar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_ISOPEN]);
+    portalData->is_open = DatumGetBool(curvar->value);
+    portalData->null_open = curvar->isnull;
+    curvar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_FOUND]);
+    portalData->found = DatumGetBool(curvar->value);
+    portalData->null_fetch = curvar->isnull;
+    curvar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_NOTFOUND]);
+    portalData->not_found = DatumGetBool(curvar->value);
+    curvar = (PLpgSQL_var*)(estate->datums[curVarDno + CURSOR_ROWCOUNT]);
+    portalData->row_count = DatumGetInt32(curvar->value);
+    MemoryContextSwitchTo(oldCtx);
+    if (u_sess->plsql_cxt.parent_context != NULL) {
+        portalData->holdContext->session_id = u_sess->plsql_cxt.parent_session_id;
+        portalData->holdContext->thread_id = u_sess->plsql_cxt.parent_thread_id;
+        MemoryContextSetParent(portalData->holdContext, u_sess->plsql_cxt.parent_context);
+    }
+
+    return portalData;
+}
+
+static List* BuildPortalDataListForParentSession(PLpgSQL_execstate* estate)
+{
+    List* result = NIL;
+    if (estate == NULL) {
+        return result;
+    }
+    SessionPackageRuntime* sessionPkgs = NULL;
+    if (u_sess->plsql_cxt.auto_parent_session_pkgs == NULL) {
+        return result;
+    } else {
+        sessionPkgs = u_sess->plsql_cxt.auto_parent_session_pkgs;
+    }
+
+    /* means no out param */
+    if (estate->func->out_param_varno == -1) {
+        return result;
+    }
+
+    PLpgSQL_datum* outDatum = estate->datums[estate->func->out_param_varno];
+    AutoSessionPortalData* portalData = NULL;
+    if (outDatum->dtype == PLPGSQL_DTYPE_VAR) {
+        PLpgSQL_var* outVar = (PLpgSQL_var*)outDatum;
+        if (outVar == NULL || outVar->datatype == NULL || outVar->datatype->typoid != REFCURSOROID) {
+            return result;
+        }
+        portalData = BuildPortalDataForParentSession(estate, estate->func->out_param_varno, 0);
+        if (portalData != NULL) {
+            result = lappend(result, portalData);
+        }
+        return result;
+    }
+
+    PLpgSQL_row* outRow = (PLpgSQL_row*)outDatum;
+    if (outRow->refname != NULL) {
+        /* means out param is just one normal row variable */
+        return result;
+    }
+    for (int i = 0; i < outRow->nfields; i++) {
+        if (estate->datums[outRow->varnos[i]]->dtype != PLPGSQL_DTYPE_VAR) {
+            continue;
+        }
+        PLpgSQL_var* var = (PLpgSQL_var*)(estate->datums[outRow->varnos[i]]);
+        if (var != NULL && var->datatype != NULL && var->datatype->typoid == REFCURSOROID) {
+            portalData = BuildPortalDataForParentSession(estate, outRow->varnos[i], i);
+            if (portalData != NULL) {
+                result = lappend(result, portalData);
+            }
+        }
+    }
+
+    u_sess->plsql_cxt.parent_session_id = 0;
+    u_sess->plsql_cxt.parent_thread_id = 0;
+    u_sess->plsql_cxt.parent_context = NULL;
+    return result;
+}
+
+static List* BuildFuncInfoList(PLpgSQL_execstate* estate)
+{
+    List* result = NIL;
+    if (estate == NULL) {
+        return result;
+    }
+
+    AutoSessionFuncValInfo *autoSessionFuncInfo = (AutoSessionFuncValInfo *)palloc0(sizeof(AutoSessionFuncValInfo));
+    if (COMPAT_CURSOR) {
+        PLpgSQL_var* var = (PLpgSQL_var*)(estate->datums[estate->found_varno]);
+        autoSessionFuncInfo->found = var->value;
+        var = (PLpgSQL_var*)(estate->datums[estate->sql_cursor_found_varno]);
+        if (var->isnull) {
+            autoSessionFuncInfo->sql_cursor_found = PLPGSQL_NULL;
+        } else {
+            autoSessionFuncInfo->sql_cursor_found = var->value;
+        }
+        var = (PLpgSQL_var*)(estate->datums[estate->sql_notfound_varno]);
+        if (var->isnull) {
+            autoSessionFuncInfo->sql_notfound = PLPGSQL_NULL;
+        } else {
+            autoSessionFuncInfo->sql_notfound = var->value;
+        }
+
+        var = (PLpgSQL_var*)(estate->datums[estate->sql_isopen_varno]);
+        autoSessionFuncInfo->sql_isopen = var->value;
+        var = (PLpgSQL_var*)(estate->datums[estate->sql_rowcount_varno]);
+        autoSessionFuncInfo->sql_rowcount = var->value;
+    }
+    PLpgSQL_var* var = (PLpgSQL_var*)(estate->datums[estate->sqlcode_varno]);
+    if (var->isnull) {
+        autoSessionFuncInfo->sqlcode_isnull = true;
+        autoSessionFuncInfo->sqlcode = 0;
+    } else {
+        autoSessionFuncInfo->sqlcode_isnull = false;
+        char* sqlcode = TextDatumGetCString(var->value);
+        autoSessionFuncInfo->sqlcode = MAKE_SQLSTATE((unsigned char)sqlcode[0], (unsigned char)sqlcode[1],
+                                                     (unsigned char)sqlcode[2], (unsigned char)sqlcode[3],
+                                                     (unsigned char)sqlcode[4]);
+    }
+    result = lappend(result, autoSessionFuncInfo);
+
+    return result;
+}
+
+
+void BuildSessionPackageRuntimeForAutoSession(uint64 sessionId, uint64 parentSessionId,
+    PLpgSQL_execstate* estate, PLpgSQL_function* func)
 {
     SessionPackageRuntime* parentSessionPkgs = NULL;
 
@@ -637,7 +1112,7 @@ void BuildSessionPackageRuntime(uint64 sessionId, uint64 parentSessionId)
         if (!u_sess->plsql_cxt.not_found_parent_session_pkgs) {
             if (u_sess->plsql_cxt.auto_parent_session_pkgs == NULL) {
                 MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
-                parentSessionPkgs = g_instance.global_session_pkg->fetch(parentSessionId);
+                parentSessionPkgs = g_instance.global_session_pkg->Fetch(parentSessionId);
                 MemoryContextSwitchTo(oldcontext);
                 u_sess->plsql_cxt.auto_parent_session_pkgs = parentSessionPkgs;
             } else {
@@ -654,34 +1129,74 @@ void BuildSessionPackageRuntime(uint64 sessionId, uint64 parentSessionId)
     SessionPackageRuntime* resultSessionPkgs = (SessionPackageRuntime*)palloc0(sizeof(SessionPackageRuntime));
     resultSessionPkgs->context = pkgRuntimeCtx;
     if (u_sess->plsql_cxt.plpgsqlpkg_dlist_objects != NULL) {
-        copyCurrentSessionPkgs(resultSessionPkgs, u_sess->plsql_cxt.plpgsqlpkg_dlist_objects);
+        CopyCurrentSessionPkgs(resultSessionPkgs, u_sess->plsql_cxt.plpgsqlpkg_dlist_objects);
     }
 
     if (parentSessionPkgs) {
         List* parentPkgList = parentSessionPkgs->runtimes;
-        copyParentSessionPkgs(resultSessionPkgs, parentPkgList);
+        CopyParentSessionPkgs(resultSessionPkgs, parentPkgList);
     } else if (parentSessionId != 0) {
         u_sess->plsql_cxt.not_found_parent_session_pkgs = true;
     }
 
-    g_instance.global_session_pkg->add(sessionId, resultSessionPkgs);
+    /* build portal context for auto session */
+    resultSessionPkgs->portalContext = BuildPortalContextListForAutoSession(func);
+
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        resultSessionPkgs->funcValInfo = BuildFuncInfoList(estate);
+    }
+
+    g_instance.global_session_pkg->Add(sessionId, resultSessionPkgs);
 
     MemoryContextSwitchTo(oldCtx);
     MemoryContextDelete(resultSessionPkgs->context);
 }
 
-static void copyCurrentSessionPkgs(SessionPackageRuntime* sessionPkgs, DList* pkgList)
+void BuildSessionPackageRuntimeForParentSession(uint64 sessionId, PLpgSQL_execstate* estate)
+{
+    MemoryContext pkgRuntimeCtx = AllocSetContextCreate(CurrentMemoryContext,
+                                                        "SessionPackageRuntime",
+                                                        ALLOCSET_SMALL_MINSIZE,
+                                                        ALLOCSET_SMALL_INITSIZE,
+                                                        ALLOCSET_DEFAULT_MAXSIZE);
+    MemoryContext oldCtx = MemoryContextSwitchTo(pkgRuntimeCtx);
+    SessionPackageRuntime* resultSessionPkgs = (SessionPackageRuntime*)palloc0(sizeof(SessionPackageRuntime));
+    resultSessionPkgs->context = pkgRuntimeCtx;
+    if (u_sess->plsql_cxt.plpgsqlpkg_dlist_objects != NULL) {
+        CopyCurrentSessionPkgs(resultSessionPkgs, u_sess->plsql_cxt.plpgsqlpkg_dlist_objects);
+    }
+
+    /* build portal data for out param ref cursor of automous transaction */
+    resultSessionPkgs->portalData = BuildPortalDataListForParentSession(estate);
+
+    /* copy the portal context return to parent session */
+    if (u_sess->plsql_cxt.auto_parent_session_pkgs != NULL) {
+        resultSessionPkgs->portalContext =
+            CopyPortalContexts(u_sess->plsql_cxt.auto_parent_session_pkgs->portalContext);
+    }
+
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        resultSessionPkgs->funcValInfo = BuildFuncInfoList(estate);
+    }
+
+    g_instance.global_session_pkg->Add(sessionId, resultSessionPkgs);
+
+    MemoryContextSwitchTo(oldCtx);
+    MemoryContextDelete(resultSessionPkgs->context);
+}
+
+static void CopyCurrentSessionPkgs(SessionPackageRuntime* sessionPkgs, DList* pkgList)
 {
     PLpgSQL_package* pkg = NULL;
     DListCell* cell = NULL;
     dlist_foreach_cell(cell, pkgList) {
         pkg = ((plpgsql_pkg_HashEnt*)lfirst(cell))->package;
-        PackageRuntimeState* pkgState = buildPkgRunStatesbyPackage(pkg);
+        PackageRuntimeState* pkgState = BuildPkgRunStatesbyPackage(pkg);
         sessionPkgs->runtimes = lappend(sessionPkgs->runtimes, pkgState);
     }
 }
 
-static bool pkgExistInSession(PackageRuntimeState* pkgState)
+static bool PkgExistInSession(PackageRuntimeState* pkgState)
 {
     if (pkgState == NULL) {
         return false;
@@ -689,74 +1204,68 @@ static bool pkgExistInSession(PackageRuntimeState* pkgState)
     PLpgSQL_pkg_hashkey hashkey;
     hashkey.pkgOid = pkgState->packageId;
     PLpgSQL_package* getpkg = plpgsql_pkg_HashTableLookup(&hashkey);
-    if (getpkg) {
-        return true;
-    } else {
-        return false;
-    }
+    return getpkg ? true : false;
 }
 
-static void copyParentSessionPkgs(SessionPackageRuntime* sessionPkgs, List* pkgList)
+static void CopyParentSessionPkgs(SessionPackageRuntime* sessionPkgs, List* pkgList)
 {
     ListCell* cell = NULL;
     foreach(cell, pkgList) {
         /* if package exist in current session, we already copy it */
-        if (pkgExistInSession((PackageRuntimeState*)lfirst(cell))) {
+        if (PkgExistInSession((PackageRuntimeState*)lfirst(cell))) {
             continue;
         }
         PackageRuntimeState* parentPkgState = (PackageRuntimeState*)lfirst(cell);
-        PackageRuntimeState* pkgState = buildPkgRunStatebyPkgRunState(parentPkgState);
+        PackageRuntimeState* pkgState = BuildPkgRunStatebyPkgRunState(parentPkgState);
         sessionPkgs->runtimes = lappend(sessionPkgs->runtimes, pkgState);
     }
 }
 
-static PackageRuntimeState* buildPkgRunStatesbyPackage(PLpgSQL_package* pkg)
+static PackageRuntimeState* BuildPkgRunStatesbyPackage(PLpgSQL_package* pkg)
 {
     PackageRuntimeState* pkgState = (PackageRuntimeState*)palloc0(sizeof(PackageRuntimeState));
     pkgState->packageId = pkg->pkg_oid;
     pkgState->size = pkg->ndatums;
     pkgState->datums = (PLpgSQL_datum**)palloc0(sizeof(PLpgSQL_datum*) * pkg->ndatums);
     for (int i = 0; i < pkg->ndatums; i++) {
-        pkgState->datums[i] = copypPackageVarDatum(pkg->datums[i]);
+        pkgState->datums[i] = CopyPackageVarDatum(pkg->datums[i]);
     }
 
     return pkgState;
 }
 
-static PackageRuntimeState* buildPkgRunStatebyPkgRunState(PackageRuntimeState* parentPkgState)
+static PackageRuntimeState* BuildPkgRunStatebyPkgRunState(PackageRuntimeState* parentPkgState)
 {
     PackageRuntimeState* pkgState = (PackageRuntimeState*)palloc0(sizeof(PackageRuntimeState));
     pkgState->packageId = parentPkgState->packageId;
     pkgState->size = parentPkgState->size;
     pkgState->datums = (PLpgSQL_datum**)palloc0(sizeof(PLpgSQL_datum*) * parentPkgState->size);
     for (int i = 0; i < parentPkgState->size; i++) {
-        pkgState->datums[i] = copypPackageVarDatum(parentPkgState->datums[i]);
+        pkgState->datums[i] = CopyPackageVarDatum(parentPkgState->datums[i]);
     }
 
     return pkgState;
 }
 
-static PLpgSQL_datum* copypPackageVarDatum(PLpgSQL_datum* datum)
+static PLpgSQL_datum* CopyPackageVarDatum(PLpgSQL_datum* datum)
 {
     PLpgSQL_datum* result = NULL;
 
     if (datum == NULL)
         return NULL;
     /* only VAR store value */
-    switch (datum->dtype) {
-        case PLPGSQL_DTYPE_VAR: {
-            PLpgSQL_var* newm =  copyPlpgsqlVar((PLpgSQL_var*)datum);
-            result = (PLpgSQL_datum*)newm;
-            break;
-        }
-        default:
-            break;
+    if (datum->dtype == PLPGSQL_DTYPE_VAR) {
+        PLpgSQL_var* var = (PLpgSQL_var*)datum;
+        if (unlikely(var->nest_table != NULL))
+            return NULL;
+        PLpgSQL_var* newm =  copyPlpgsqlVar(var);
+        result = (PLpgSQL_datum*)newm;
     }
     return result;
 }
 
 /* restore package values by Autonm SessionPkgs */
-static void restoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs)
+static void RestoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs)
 {
     if (sessionPkgs == NULL || sessionPkgs->runtimes == NULL) {
         return;
@@ -776,12 +1285,12 @@ static void restoreAutonmSessionPkgs(SessionPackageRuntime* sessionPkgs)
         if (pkg == NULL) {
             pkg = PackageInstantiation(pkgOid);
         }
-        restorePkgValuesByPkgState(pkg, pkgState);
+        RestorePkgValuesByPkgState(pkg, pkgState);
     }
 }
 
 /* restore package values by pkgState */
-static void restorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntimeState* pkgState, bool isInit)
+static void RestorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntimeState* pkgState, bool isInit)
 {
     if (targetPkg == NULL || pkgState == NULL) {
         return;
@@ -796,13 +1305,19 @@ static void restorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntim
         targetPkg = PackageInstantiation(targetPkg->pkg_oid);
     }
 
-    for (int i = 0; i < targetPkg->ndatums && i < pkgState->size; i++) {
-        /* null mean datum not a var */
-        if (pkgState->datums[i] == NULL) {
+    int startNum = 0;
+    int endNum = targetPkg->ndatums < pkgState->size ? targetPkg->ndatums : pkgState->size;
+    /* when compiling body, need not restore public var */
+    if (isInit && targetPkg->is_bodycompiled) {
+        startNum = targetPkg->public_ndatums;
+    }
+
+    for (int i = startNum; i < endNum; i++) {
+        fromVar = (PLpgSQL_var*)pkgState->datums[i];
+        /* null mean datum not a var, no need to restore */
+        if (fromVar == NULL) {
             continue;
         }
-
-        fromVar = (PLpgSQL_var*)pkgState->datums[i];
         /* const value cannot be changed, cursor not supported by automo func yet */
         if (fromVar->isconst || fromVar->is_cursor_var || fromVar->datatype->typoid == REFCURSOROID) {
             continue;
@@ -835,22 +1350,146 @@ static void restorePkgValuesByPkgState(PLpgSQL_package* targetPkg, PackageRuntim
     }
 }
 
-/* init Autonomous session package values by parent session */
+static SessionPackageRuntime* GetSessPkgRuntime(uint64 sessionId)
+{
+    SessionPackageRuntime* sessionPkgs = NULL;
+    if (u_sess->plsql_cxt.auto_parent_session_pkgs == NULL) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+        sessionPkgs = g_instance.global_session_pkg->Fetch(sessionId);
+        MemoryContextSwitchTo(oldcontext);
+        u_sess->plsql_cxt.auto_parent_session_pkgs = sessionPkgs;
+    } else {
+        sessionPkgs = u_sess->plsql_cxt.auto_parent_session_pkgs;
+    }
+    return sessionPkgs;
+}
+
+
+/* update packages already in auto session by parent session */
+void initAutoSessionPkgsValue(uint64 sessionId)
+{
+    if (u_sess->is_autonomous_session != true || u_sess->SPI_cxt._connected != 0) {
+        return;
+    }
+
+    ListCell* cell = NULL;
+    PackageRuntimeState* pkgState = NULL;
+    Oid pkgOid = InvalidOid;
+    PLpgSQL_pkg_hashkey hashkey;
+    PLpgSQL_package* pkg = NULL;
+
+    SessionPackageRuntime* sessionPkgs = GetSessPkgRuntime(sessionId);
+
+    if (sessionPkgs == NULL) {
+        u_sess->plsql_cxt.not_found_parent_session_pkgs = true;
+        return;
+    }
+    if (sessionPkgs->runtimes == NULL) {
+        return;
+    }
+
+    foreach(cell, sessionPkgs->runtimes) {
+        pkgState = (PackageRuntimeState*)lfirst(cell);
+        pkgOid = pkgState->packageId;
+        hashkey.pkgOid = pkgOid;
+        pkg = plpgsql_pkg_HashTableLookup(&hashkey);
+        if (pkg == NULL) {
+            continue;
+        }
+        RestorePkgValuesByPkgState(pkg, pkgState);
+    }
+}
+
+void setCursorAtrValue(PLpgSQL_execstate* estate, AutoSessionFuncValInfo* FuncValInfo)
+{
+    PLpgSQL_var* var = NULL;
+    
+    var = (PLpgSQL_var*)(estate->datums[estate->found_varno]);
+    var->value = BoolGetDatum(FuncValInfo->found);
+    var->isnull = false;
+    
+    /* Set the magic implicit cursor attribute variable FOUND to false */
+    var = (PLpgSQL_var*)(estate->datums[estate->sql_cursor_found_varno]);
+    /* if state is -1, found is set NULL */
+    if (FuncValInfo->sql_cursor_found == PLPGSQL_NULL) {
+        var->value = (Datum)0;
+        var->isnull = true;
+    } else {
+        var->value = (FuncValInfo->sql_cursor_found == 1) ? (Datum)1 : (Datum)0;
+        var->isnull = false;
+    }
+    
+    /* Set the magic implicit cursor attribute variable NOTFOUND to true */
+    var = (PLpgSQL_var*)(estate->datums[estate->sql_notfound_varno]);
+    /* if state is -1, notfound is set NULL */
+    if (FuncValInfo->sql_notfound == PLPGSQL_NULL) {
+        var->value = (Datum)0;
+        var->isnull = true;
+    } else {
+        var->value = (FuncValInfo->sql_notfound == 1) ? (Datum)1 : (Datum)0;
+        var->isnull = false;
+    }
+    
+    /* Set the magic implicit cursor attribute variable ISOPEN to false */
+    var = (PLpgSQL_var*)(estate->datums[estate->sql_isopen_varno]);
+    var->value = BoolGetDatum(FuncValInfo->sql_isopen);
+    var->isnull = false;
+    
+    /* Set the magic implicit cursor attribute variable ROWCOUNT to 0 */
+    var = (PLpgSQL_var*)(estate->datums[estate->sql_rowcount_varno]);
+    /* reset == true and rowcount == -1, rowcount is set NULL */
+    if (FuncValInfo->sql_rowcount == -1) {
+        var->value = (Datum)0;
+        var->isnull = true;
+    } else {
+        var->value = FuncValInfo->sql_rowcount;
+        var->isnull = false;
+    }
+}
+
+void SetFuncInfoValue(List* SessionFuncInfo, PLpgSQL_execstate* estate)
+{
+    ListCell* cell = NULL;
+    AutoSessionFuncValInfo* FuncValInfo = NULL;
+
+    foreach(cell, SessionFuncInfo) {
+        FuncValInfo = (AutoSessionFuncValInfo*)lfirst(cell);
+        if (COMPAT_CURSOR) {
+            setCursorAtrValue(estate, FuncValInfo);
+        }
+        if (!FuncValInfo->sqlcode_isnull) {
+            PLpgSQL_var* var = (PLpgSQL_var*)(estate->datums[estate->sqlcode_varno]);
+            assign_text_var(var, plpgsql_get_sqlstate(FuncValInfo->sqlcode));
+            var = (PLpgSQL_var*)(estate->datums[estate->sqlstate_varno]);
+            assign_text_var(var, plpgsql_get_sqlstate(FuncValInfo->sqlcode));
+        }
+    }
+}
+
+/* update function info already in auto session by parent session */
+void initAutoSessionFuncInfoValue(uint64 sessionId, PLpgSQL_execstate* estate)
+{
+    SessionPackageRuntime* sessionPkgs = GetSessPkgRuntime(sessionId);
+
+    if (sessionPkgs == NULL) {
+        u_sess->plsql_cxt.not_found_parent_session_pkgs = true;
+        return;
+    }
+    if (sessionPkgs->funcValInfo == NULL) {
+        return;
+    }
+    SetFuncInfoValue(sessionPkgs->funcValInfo, estate);
+}
+
+
+/* update packages when initializing package in auto session by parent session */
 void initAutonomousPkgValue(PLpgSQL_package* targetPkg, uint64 sessionId)
 {
     if (u_sess->plsql_cxt.not_found_parent_session_pkgs) {
         return;
     }
 
-    SessionPackageRuntime* sessionPkgs = NULL;
-    if (u_sess->plsql_cxt.auto_parent_session_pkgs == NULL) {
-        MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
-        sessionPkgs = g_instance.global_session_pkg->fetch(sessionId);
-        MemoryContextSwitchTo(oldcontext);
-        u_sess->plsql_cxt.auto_parent_session_pkgs = sessionPkgs;
-    } else {
-        sessionPkgs = u_sess->plsql_cxt.auto_parent_session_pkgs;
-    }
+    SessionPackageRuntime* sessionPkgs = GetSessPkgRuntime(sessionId);
 
     if (sessionPkgs == NULL) {
         u_sess->plsql_cxt.not_found_parent_session_pkgs = true;
@@ -863,15 +1502,63 @@ void initAutonomousPkgValue(PLpgSQL_package* targetPkg, uint64 sessionId)
     foreach(cell, sessionPkgs->runtimes) {
         pkgState = (PackageRuntimeState*)lfirst(cell);
         if (targetPkg->pkg_oid == pkgState->packageId) {
-            restorePkgValuesByPkgState(targetPkg, pkgState, true);
+            RestorePkgValuesByPkgState(targetPkg, pkgState, true);
             break;
-        } else {
-            continue;
         }
     }
 }
 
-void processAutonmSessionPkgs(PLpgSQL_function* func)
+List *processAutonmSessionPkgs(PLpgSQL_function* func, PLpgSQL_execstate* estate, bool isAutonm)
+{
+    List *autonmsList = NULL;
+    /* ignore inline_code_block function */
+    if (!OidIsValid(func->fn_oid)) {
+        return NULL;
+    }
+
+    uint64 currentSessionId = IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
+
+    if (IsAutonomousTransaction(func->action->isAutonomous)) {
+        /*
+         * call after plpgsql_exec_autonm_function(), need restore
+         * autonm session pkgs to current session, and remove
+         * sessionpkgs from g_instance.global_session_pkg
+         */
+        uint64 automnSessionId = u_sess->SPI_cxt.autonomous_session->current_attach_sessionid;
+        SessionPackageRuntime* sessionpkgs = g_instance.global_session_pkg->Fetch(automnSessionId);
+        RestoreAutonmSessionPkgs(sessionpkgs);
+        if (sessionpkgs != NULL) {
+            MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+            u_sess->plsql_cxt.storedPortals = CopyPortalDatas(sessionpkgs);
+            u_sess->plsql_cxt.portalContext = CopyPortalContexts(sessionpkgs->portalContext);
+            autonmsList = CopyFuncInfoDatas(sessionpkgs);
+            u_sess->plsql_cxt.call_after_auto = true;
+            MemoryContextSwitchTo(oldcontext);
+            MemoryContextDelete(sessionpkgs->context);
+            g_instance.global_session_pkg->Remove(automnSessionId);
+        }
+        g_instance.global_session_pkg->Remove(currentSessionId);
+    } else {
+        /*
+         * call after plpgsql_exec_function(), If it is first level
+         * autonomous func, need add its all session package values
+         * to global, the parent session will fetch the sessionPkgs,
+         * and restore package values by it.
+         */
+        if (u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0) {
+            BuildSessionPackageRuntimeForParentSession(currentSessionId, estate);
+            /* autonomous session will be reused by next autonomous procedure, need clean it */
+            if (u_sess->plsql_cxt.auto_parent_session_pkgs != NULL) {
+                MemoryContextDelete(u_sess->plsql_cxt.auto_parent_session_pkgs->context);
+                u_sess->plsql_cxt.auto_parent_session_pkgs = NULL;
+            }
+            u_sess->plsql_cxt.not_found_parent_session_pkgs = false;
+        }
+    }
+    return autonmsList;
+}
+
+void processAutonmSessionPkgsInException(PLpgSQL_function* func)
 {
     /* ignore inline_code_block function */
     if (!OidIsValid(func->fn_oid)) {
@@ -884,16 +1571,23 @@ void processAutonmSessionPkgs(PLpgSQL_function* func)
         /*
          * call after plpgsql_exec_autonm_function(), need restore
          * autonm session pkgs to current session, and remove
-         * sessionpkgs from g_instance.global_session_pkg.
+         * sessionpkgs from g_instance.global_session_pkg
          */
-        uint64 automnSessionId = u_sess->SPI_cxt.autonomous_session->current_attach_sessionid;
-        SessionPackageRuntime* sessionpkgs = g_instance.global_session_pkg->fetch(automnSessionId);
-        restoreAutonmSessionPkgs(sessionpkgs);
-        if (sessionpkgs != NULL) {
-            MemoryContextDelete(sessionpkgs->context);
-            g_instance.global_session_pkg->remove(automnSessionId);
+        if (u_sess->SPI_cxt.autonomous_session == NULL) {
+            /* exception before create autonomous_session */
+            return;
         }
-        g_instance.global_session_pkg->remove(currentSessionId);
+        uint64 automnSessionId = u_sess->SPI_cxt.autonomous_session->current_attach_sessionid;
+        SessionPackageRuntime* sessionpkgs = g_instance.global_session_pkg->Fetch(automnSessionId);
+        RestoreAutonmSessionPkgs(sessionpkgs);
+        if (sessionpkgs != NULL) {
+            MemoryContext oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+            ReleaseUnusedPortalContext(sessionpkgs->portalContext, true);
+            MemoryContextSwitchTo(oldcontext);
+            MemoryContextDelete(sessionpkgs->context);
+            g_instance.global_session_pkg->Remove(automnSessionId);
+        }
+        g_instance.global_session_pkg->Remove(currentSessionId);
     } else {
         /*
          * call after plpgsql_exec_function(), If it is first level
@@ -902,7 +1596,256 @@ void processAutonmSessionPkgs(PLpgSQL_function* func)
          * and restore package values by it.
          */
         if (u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0) {
-            BuildSessionPackageRuntime(currentSessionId, 0);
+            BuildSessionPackageRuntimeForParentSession(currentSessionId, NULL);
+            /* autonomous session will be reused by next autonomous procedure, need clean it */
+            if (u_sess->plsql_cxt.auto_parent_session_pkgs != NULL) {
+                MemoryContextDelete(u_sess->plsql_cxt.auto_parent_session_pkgs->context);
+                u_sess->plsql_cxt.auto_parent_session_pkgs = NULL;
+            }
+            u_sess->plsql_cxt.not_found_parent_session_pkgs = false;
         }
     }
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+Oid GetOldTupleOid(const char* procedureName, oidvector* parameterTypes, Oid procNamespace,
+                          Oid propackageid, Datum* values, Datum parameterModes)
+{
+    bool enableOutparamOverride = enable_out_param_override();
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        HeapTuple oldtup = SearchSysCache3(PROCNAMEARGSNSP,
+            PointerGetDatum(procedureName),
+            values[Anum_pg_proc_proargtypes - 1],
+            ObjectIdGetDatum(procNamespace));
+        if (!HeapTupleIsValid(oldtup)) {
+            return InvalidOid;
+        }
+        Oid oldTupleOid = HeapTupleGetOid(oldtup);
+        ReleaseSysCache(oldtup);
+        return oldTupleOid;
+    }
+    if (enableOutparamOverride) {
+        HeapTuple oldtup = NULL;
+        oldtup = SearchSysCacheForProcAllArgs(PointerGetDatum(procedureName),
+            values[Anum_pg_proc_allargtypes - 1],
+            ObjectIdGetDatum(procNamespace),
+            ObjectIdGetDatum(propackageid),
+            parameterModes);
+        if (!HeapTupleIsValid(oldtup)) {
+            return InvalidOid;
+        }
+        Oid oldTupleOid = HeapTupleGetOid(oldtup);
+        ReleaseSysCache(oldtup);
+        return oldTupleOid;
+    } else {
+        CatCList* catlist = NULL;
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(procedureName));
+        for (int i = 0; i < catlist->n_members; i++) {
+            HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
+            Oid packageid = InvalidOid;
+            if (HeapTupleIsValid(proctup)) {
+                Form_pg_proc pform = (Form_pg_proc)GETSTRUCT(proctup);
+                Oid oldTupleOid = HeapTupleGetOid(proctup);
+                /* compare function's namespace */
+                if (pform->pronamespace != procNamespace) {
+                    continue;
+                }
+                bool isNull = false;
+                Datum packageIdDatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+                if (!isNull) {
+                    packageid = ObjectIdGetDatum(packageIdDatum);
+                }
+                if (packageid != propackageid) {
+                    continue;
+                }
+                oidvector* procParaType = ProcedureGetArgTypes(proctup);
+                bool result = DatumGetBool(
+                    DirectFunctionCall2(oidvectoreq, PointerGetDatum(procParaType),
+                                        PointerGetDatum(parameterTypes)));
+                if (result) {
+                    ReleaseSysCacheList(catlist);
+                    return oldTupleOid;
+                }
+            }
+        }
+        if (catlist != NULL) {
+            ReleaseSysCacheList(catlist);
+        }
+    }
+    return InvalidOid;
+}
+
+/*
+ * judage the two arglis is same or not
+ */
+bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2)
+{
+    List* argList1 = stmt1->parameters;
+    List* argList2 = stmt2->parameters;
+    ListCell* cell =  NULL;
+    int length1 = list_length(argList1);
+    int length2 = list_length(argList2);
+    bool enable_outparam_override = enable_out_param_override();
+    bool isSameName = true;
+    FunctionParameter** arr1 = (FunctionParameter**)palloc0(length1 * sizeof(FunctionParameter*));
+    FunctionParameter** arr2 = (FunctionParameter**)palloc0(length2 * sizeof(FunctionParameter*));
+    FunctionParameter* fp1 = NULL;
+    FunctionParameter* fp2 = NULL;
+    int inArgNum1 = 0;
+    int inArgNum2 = 0;
+    int inLoc1 = 0;
+    int inLoc2 = 0;
+    int length = 0;
+    foreach(cell, argList1) {
+        arr1[length] = (FunctionParameter*)lfirst(cell);
+        if (arr1[length]->mode != FUNC_PARAM_OUT) {
+            inArgNum1++;
+        }
+        length = length + 1;
+    }
+    length = 0;
+    foreach(cell, argList2) {
+        arr2[length] = (FunctionParameter*)lfirst(cell);
+        if (arr2[length]->mode != FUNC_PARAM_OUT) {
+            inArgNum2++;
+        }
+        length = length + 1;
+    }
+    if (!enable_outparam_override) {
+        if (inArgNum1 != inArgNum2) {
+            return false;
+        } else if (inArgNum1 == inArgNum2 && length1 != length2) {
+            char message[MAXSTRLEN];
+            errno_t rc = sprintf_s(message, MAXSTRLEN, "can not override out param:%s", stmt1->funcname);
+            securec_check_ss_c(rc, "", "");
+            InsertErrorMessage(message, stmt1->startLineNumber);
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                    errmodule(MOD_PLSQL),
+                    errmsg("can not override out param:%s",
+                    NameListToString(stmt1->funcname))));
+        }
+    } else {
+        if (length1 != length2) {
+            return false;
+        }
+    }
+    for (int i = 0, j = 0; i < length1 || j < length2; i++, j++) {
+        if (!enable_outparam_override) {
+            fp1 = arr1[inLoc1];
+            fp2 = arr2[inLoc2];
+        } else {
+            fp1 = arr1[i];
+            fp2 = arr2[j];
+        }
+        TypeName* t1 = fp1->argType;
+        TypeName* t2 = fp2->argType;
+        if (!enable_outparam_override) {
+            if (fp1->mode == FUNC_PARAM_OUT && fp2->mode == FUNC_PARAM_OUT) {
+                continue;
+            } else if (fp1->mode != FUNC_PARAM_OUT && fp2->mode == FUNC_PARAM_OUT) {
+                inLoc1++;
+                continue;
+            } else if (fp1->mode == FUNC_PARAM_OUT && fp2->mode != FUNC_PARAM_OUT) {
+                inLoc2++;
+                continue;
+            } else {
+                inLoc1++;
+                inLoc2++;
+            }
+        }
+        Oid toid1;
+        Oid toid2;
+        Type typtup1;
+        Type typtup2;
+        errno_t rc;
+        typtup1 = LookupTypeName(NULL, t1, NULL);
+        typtup2 = LookupTypeName(NULL, t2, NULL);
+        bool isTableOf1 = false;
+        bool isTableOf2 = false;
+        Oid baseOid1 = InvalidOid;
+        Oid baseOid2 = InvalidOid;
+        if (HeapTupleIsValid(typtup1)) {
+            toid1 = typeTypeId(typtup1);
+            if (((Form_pg_type)GETSTRUCT(typtup1))->typtype == TYPTYPE_TABLEOF) {
+                baseOid1 = ((Form_pg_type)GETSTRUCT(typtup1))->typelem;
+                isTableOf1 = true;
+            }
+            ReleaseSysCache(typtup1);
+        } else {
+            toid1 = findPackageParameter(strVal(linitial(t1->names)));
+            if (!OidIsValid(toid1)) {
+                char message[MAXSTRLEN];
+                rc = sprintf_s(message, MAXSTRLEN, "type is not exists  %s.", fp1->name);
+                securec_check_ss_c(rc, "", "");
+                InsertErrorMessage(message, stmt1->startLineNumber);
+                ereport(ERROR,
+                    (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("type is not exists  %s.", fp1->name),
+                        errdetail("CommandType: %s", fp1->name), errcause("System error."),
+                        erraction("Contact Huawei Engineer.")));
+            }
+        }
+        if (HeapTupleIsValid(typtup2)) {
+            toid2 = typeTypeId(typtup2);
+            if (((Form_pg_type)GETSTRUCT(typtup2))->typtype == TYPTYPE_TABLEOF) {
+                baseOid2 = ((Form_pg_type)GETSTRUCT(typtup2))->typelem;
+                isTableOf2 = true;
+            }
+            ReleaseSysCache(typtup2);
+        } else {
+            toid2 = findPackageParameter(strVal(linitial(t2->names)));
+            if (!OidIsValid(toid2)) {
+                char message[MAXSTRLEN];
+                rc = sprintf_s(message, MAXSTRLEN, "type is not exists  %s.", fp2->name);
+                securec_check_ss_c(rc, "", "");
+                InsertErrorMessage(message, stmt1->startLineNumber);
+                ereport(ERROR,
+                    (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("type is not exists  %s.", fp2->name),
+                        errdetail("CommandType: %s", fp2->name), errcause("System error."),
+                        erraction("Contact Huawei Engineer.")));
+            }
+        }
+        /* If table of type shold check its base type */
+        if (isTableOf1 == isTableOf2 && isTableOf1 == true) {
+            if (baseOid1 != baseOid2 || fp1->mode != fp2->mode) {
+                pfree(arr1);
+                pfree(arr2);
+                return false;
+            }
+        } else if (toid1 != toid2 || fp1->mode != fp2->mode) {
+            pfree(arr1);
+            pfree(arr2);
+            return false;
+        }
+        if (fp1->name == NULL || fp2->name == NULL) {
+            char message[MAXSTRLEN];
+            rc = sprintf_s(message, MAXSTRLEN, "type is not exists.");
+            securec_check_ss_c(rc, "", "");
+            InsertErrorMessage(message, stmt1->startLineNumber);
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("type is not exists."),
+                    errdetail("CommandType."), errcause("System error."),
+                    erraction("Contact Huawei Engineer.")));
+        }
+        if (strcmp(fp1->name, fp2->name) != 0) {
+            isSameName = false;
+        }
+    }
+    pfree(arr1);
+    pfree(arr2);
+    /* function delcare in package specification and define in package body must be same */
+    if (!isSameName && (stmt1->isFunctionDeclare^stmt2->isFunctionDeclare)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmodule(MOD_PLSQL),
+                errmsg("function declared in package specification and "
+                "package body must be the same, function: %s",
+                NameListToString(stmt1->funcname))));
+    }
+    return true;
+}
+
+#endif

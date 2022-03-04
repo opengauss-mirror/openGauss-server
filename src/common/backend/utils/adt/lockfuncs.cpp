@@ -54,7 +54,8 @@ const char* const LockTagTypeNames[] = {"relation",
     "userlock",
     "advisory",
     "filenode",
-    "subtransactionid"};
+    "subtransactionid",
+    "tuple_uid"};
 
 /* This must match enum PredicateLockTargetType (predicate_internals.h) */
 static const char* const PredicateLockTagTypeNames[] = {"relation", "page", "tuple"};
@@ -351,6 +352,20 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
                 nulls[9] = true;
                 nulls[10] = true;
                 break;
+            case LOCKTAG_UID:
+                values[1] = ObjectIdGetDatum(instance->locktag.locktag_field1);
+                values[2] = ObjectIdGetDatum(instance->locktag.locktag_field2);
+                nulls[3] = true;
+                nulls[4] = true;
+                nulls[5] = true;
+                nulls[6] = true;
+                values[7] = TransactionIdGetDatum((uint64)instance->locktag.locktag_field3 << 32 |
+                                                  ((uint64)instance->locktag.locktag_field4));
+
+                nulls[8] = true;
+                nulls[9] = true;
+                nulls[10] = true;
+                break;
             case LOCKTAG_TRANSACTION:
                 values[7] = TransactionIdGetDatum((TransactionId)instance->locktag.locktag_field1 |
                                                   ((TransactionId)instance->locktag.locktag_field2 << 32));
@@ -639,9 +654,9 @@ static bool pgxc_advisory_lock(int64 key64, int32 key1, int32 key2, bool iskeybi
      * can not process SIGUSR1 of "pgxc_pool_reload" command immediately.
      */
 #ifdef ENABLE_MULTIPLE_NODES
-        if (u_sess->sig_cxt.got_PoolReload) {
+        if (IsGotPoolReload()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         }
 #endif
     PgxcNodeGetOids(&coOids, &dnOids, &numcoords, &numdnodes, false);
@@ -1458,6 +1473,23 @@ Datum pgxc_lock_for_sp_database(PG_FUNCTION_ARGS)
         NameGetDatum(databaseName));
 
     PG_RETURN_BOOL(true);
+}
+
+bool pg_try_advisory_lock_for_redis(Relation rel)
+{
+    LOCKMODE lockmode = u_sess->attr.attr_sql.enable_cluster_resize ? ExclusiveLock : ShareLock;
+    LockLevel locklevel = u_sess->attr.attr_sql.enable_cluster_resize ? SESSION_LOCK : TRANSACTION_LOCK;
+    TryType locktry = u_sess->attr.attr_sql.enable_cluster_resize ? WAIT : DONT_WAIT;
+    bool result = pgxc_advisory_lock(0, 65534, RelationGetRelCnOid(rel), false, lockmode, locklevel, locktry, NULL);
+    if (u_sess->attr.attr_sql.enable_cluster_resize && result) {
+        return true;
+    } else if (result) {
+        LOCKTAG tag;
+        SET_LOCKTAG_INT32_DB(tag, u_sess->proc_cxt.MyDatabaseId, 65534, RelationGetRelCnOid(rel));
+        (void)LockRelease(&tag, ShareLock, false);
+        return true;
+    }
+    return false;
 }
 
 /*

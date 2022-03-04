@@ -75,7 +75,6 @@ select * from copy_transform_explicit_cast order by c_bigint;
 copy copy_transform_explicit_cast from '@abs_srcdir@/data/copy_transform_explicit_cast.data' TRANSFORM (c_bigint bigint AS c_bigint::text::date) delimiter ',';
 
 drop table copy_transform_explicit_cast;
-----DTS2021042807RJQKP1F00
 CREATE TABLE float_type_t2
 (
 FT_COL INTEGER,

@@ -1468,3 +1468,15 @@ List* check_vartype(Node* node)
     return rs;
 }
 
+Node* LocateOpExprLeafVar(Node* node)
+{
+    if (node == NULL) {
+        return NULL;
+    }
+
+    if (IsA(node, Var)) {
+        return node;
+    }
+
+    return expression_tree_mutator(node, (Node* (*)(Node*, void*)) LocateOpExprLeafVar, NULL);
+}

@@ -47,7 +47,10 @@ OBJS=	pg_backup_archiver.o pg_backup_db.o pg_backup_custom.o \
 	pg_backup_null.o pg_backup_tar.o \
 	pg_backup_directory.o dumpmem.o dumputils.o compress_io.o $(WIN32RES)
 	
-LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -lcjson -lcurl -lz
+LIBS += -lcjson -lcurl -lz
+ifeq ($(enable_lite_mode), no)
+    LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+endif
 COMMON_OBJS = $(top_builddir)/src/lib/elog/elog.a
 
 EXTRA_OBJS =  $(top_builddir)/src/gausskernel/cbb/utils/aes/aes.o
@@ -59,7 +62,9 @@ kwlookup.cpp: % : $(top_srcdir)/src/common/backend/parser/%
 all: submake-aes gs_dump gs_restore gs_dumpall
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
+  ifneq ($(enable_lite_mode), yes)
+    libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -l$(SECURE_C_CHECK) -L$(LIBKMC_LIB_PATH) -lkmc
+  endif
 endif
 
 gs_dump: pg_dump.o common.o pg_dump_sort.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq_ce submake-libpgport

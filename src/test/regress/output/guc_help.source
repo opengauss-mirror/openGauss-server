@@ -1,0 +1,64 @@
+\! @abs_bindir@/gs_guc -?
+gs_guc is an inferface to modify config files or encrypt plain text to cipher text.
+
+Checking GUC parameters:
+    gs_guc check [-Z NODE-TYPE] -D DATADIR {-c "parameter", -c "parameter", ...}
+    gs_guc check [-Z NODE-TYPE] -D DATADIR {-c parameter, -c parameter, ...}
+
+Configuring GUC parameters:
+  Usage:
+        gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--lcname=LCNAME] [--ignore-node=NODES] {-c "parameter = value" -c "parameter = value" ...}
+        gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--lcname=LCNAME] [--ignore-node=NODES] {-c " parameter = value " -c " parameter = value " ...}
+        gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--lcname=LCNAME] [--ignore-node=NODES] {-c "parameter = 'value'" -c "parameter = 'value'" ...}
+        gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--lcname=LCNAME] [--ignore-node=NODES] {-c " parameter = 'value' " -c " parameter = 'value' " ...}
+        gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--lcname=LCNAME] [--ignore-node=NODES] {-c "parameter" -c "parameter" ...}
+    e.g. gs_guc set -Z datanode -D /datanode/data -c "program = '\"Hello\", World\!'".
+    e.g. gs_guc reload -Z datanode -D /datanode/data -c "program = '\"Hello\", World\!'".
+
+  If parameter value set or reload to DEFAULT OR COMMENT configuration parameter, use the form: -c "parameter"
+
+  You can choose Usage as you like, and perhaps the first one will be more suitable for you!
+
+Configuring Authentication Policy:
+    gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--ignore-node=NODES] -h "HOSTTYPE DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options" 
+    gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--ignore-node=NODES] -h "HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK AUTHMEHOD authentication-options" 
+    gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--ignore-node=NODES] -h "HOSTTYPE DATABASE USERNAME HOSTNAME AUTHMEHOD authentication-options" 
+  If authentication policy need to set/reload DEFAULT OR COMMENT then provide without authentication menthod, use the form: 
+    gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--ignore-node=NODES] -h "HOSTTYPE DATABASE USERNAME IPADDR IPMASK" 
+    gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--ignore-node=NODES] -h "HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK " 
+    gs_guc {set | reload} [-Z NODE-TYPE] -D DATADIR [--ignore-node=NODES] -h "HOSTTYPE DATABASE USERNAME HOSTNAME" 
+
+Encrypt plain text to cipher text:
+    gs_guc encrypt [-M keymode] -K password [-U username] {-D DATADIR | -R RANDFILEDIR -C CIPHERFILEDIR}
+
+Generate plain cipher key to cipher text:
+    gs_guc generate [-o prefix] -S cipherkey -D DATADIR
+
+Common options:
+  -D, --pgdata=DATADIR    location of the database storage area
+  -c    parameter=value   the parameter to set
+  -c    parameter         the parameter value to DEFAULT (i.e comments in configuration file)
+  --lcname=LCNAME         logical cluter name. It only can be used with datanode
+  --ignore-node=NODES     Nodes which need to ignore. It only can be used with set/reload operation,and CN/DN nodetype
+  -h    host-auth-policy  to set authentication policy in HBA conf file
+  -?, --help              show this help, then exit
+  -V, --version           output version information, then exit
+
+Options for set with -c parameter: 
+  -Z NODE-TYPE   can only be "datanode", default is "datanode". NODE-TYPE is used to identify configuration file (with -c parameter) in data directory
+  "datanode"                     -- postgresql.conf
+
+Options for set and reload with -h host-auth-policy: 
+  -Z NODE-TYPE   can only be "datanode", default is "datanode"
+
+Options for encrypt: 
+  -M, --keymode=MODE     the cipher files will be applies in server, client or source,default value is server mode
+  -K PASSWORD            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters
+  -U, --keyuser=USER     if appointed, the cipher files will name with the user name
+  -R RANDFILEDIR         set the dir that put the rand file
+  -C CIPHERFILEDIR       set the dir that put the cipher file
+
+
+Options for generate: 
+  -o PREFIX               the cipher files prefix. default value is obsserver
+  -S CIPHERKEY            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters

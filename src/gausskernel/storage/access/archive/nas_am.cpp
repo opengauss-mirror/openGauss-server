@@ -47,6 +47,7 @@
 #include "replication/walreceiver.h"
 
 #define MAX_PATH_LEN 1024
+static int headerLen = 22;
 
 size_t NasRead(const char* fileName, const int offset, char *buffer, const int length, ArchiveConfig *nas_config)
 {
@@ -73,8 +74,23 @@ size_t NasRead(const char* fileName, const int offset, char *buffer, const int l
                 errmsg("Cannot get archive config from replication slots")));
     }
 
-    ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_nas->archive_prefix, fileName);
-    securec_check_ss(ret, "\0", "\0");
+    if (strncmp(fileName, "global_barrier_records", headerLen) != 0) {
+        ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_nas->archive_prefix, fileName);
+        securec_check_ss(ret, "\0", "\0");
+    } else {
+        char pathPrefix[MAXPGPATH] = {0};
+        ret = strcpy_s(pathPrefix, MAXPGPATH, archive_nas->archive_prefix);
+        securec_check_ss(ret, "\0", "\0");
+        if (!IS_PGXC_COORDINATOR) {
+            char *p = strrchr(pathPrefix, '/');
+            if (p == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Obs path prefix is invalid")));
+            }
+            *p = '\0';
+        }
+        ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pathPrefix, fileName);
+        securec_check_ss(ret, "\0", "\0");
+    }
 
     if (stat(file_path, &statbuf)) {
         if (errno != ENOENT) {
@@ -107,6 +123,7 @@ int NasWrite(const char* fileName, const char *buffer, const int bufferLength, A
     int ret = 0;
     ArchiveConfig *archive_nas = NULL;
     char file_path[MAXPGPATH] = {0};
+    char file_path_bak[MAXPGPATH] = {0};
     char *origin_file_path = NULL;
     char *base_path = NULL;
     FILE *fp = NULL;
@@ -127,8 +144,23 @@ int NasWrite(const char* fileName, const char *buffer, const int bufferLength, A
                 errmsg("Cannot get archive config from replication slots")));
     }
 
-    ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_nas->archive_prefix, fileName);
-    securec_check_ss(ret, "\0", "\0");
+    if (strncmp(fileName, "global_barrier_records", headerLen) != 0) {
+        ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_nas->archive_prefix, fileName);
+        securec_check_ss(ret, "\0", "\0");
+    } else {
+        char pathPrefix[MAXPGPATH] = {0};
+        ret = strcpy_s(pathPrefix, MAXPGPATH, archive_nas->archive_prefix);
+        securec_check_ss(ret, "\0", "\0");
+        if (!IS_PGXC_COORDINATOR) {
+            char *p = strrchr(pathPrefix, '/');
+            if (p == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Obs path prefix is invalid")));
+            }
+            *p = '\0';
+        }
+        ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pathPrefix, fileName);
+        securec_check_ss(ret, "\0", "\0");
+    }
 
     canonicalize_path(file_path);
 
@@ -142,7 +174,9 @@ int NasWrite(const char* fileName, const char *buffer, const int bufferLength, A
         }
     }
 
-    fp = fopen(file_path, "wb");
+    ret = snprintf_s(file_path_bak, MAXPGPATH, MAXPGPATH - 1, "%s.bak", file_path);
+    securec_check_ss(ret, "\0", "\0");
+    fp = fopen(file_path_bak, "wb");
     if (fp == NULL) {
         pfree_ext(origin_file_path);
         ereport(LOG, (errmsg("could not create file \"%s\": %m", fileName)));
@@ -150,8 +184,21 @@ int NasWrite(const char* fileName, const char *buffer, const int bufferLength, A
     }
 
     if (fwrite(buffer, bufferLength, 1, fp) != 1) {
+        ereport(LOG, (errmsg("could not write file \"%s\": %m", fileName)));
         pfree_ext(origin_file_path);
         fclose(fp);
+        return -1;
+    }
+    if (fflush(fp) != 0) {
+        ereport(LOG, (errmsg("could not fflush file \"%s\": %m", fileName)));
+        (void)fclose(fp);
+        pfree_ext(origin_file_path);
+        return -1;
+    }
+    if (rename(file_path_bak, file_path) < 0) {
+        ereport(LOG, (errmsg("could not rename file \"%s\": %m", fileName)));
+        (void)fclose(fp);
+        pfree_ext(origin_file_path);
         return -1;
     }
 
@@ -177,11 +224,26 @@ int NasDelete(const char* fileName, ArchiveConfig *nas_config)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Cannot get obs bucket config from replication slots")));
     }
-
-    ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_nas->archive_prefix, fileName);
-    securec_check_ss(ret, "\0", "\0");
+    if (strncmp(fileName, "global_barrier_records", headerLen) != 0) {
+        ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_nas->archive_prefix, fileName);
+        securec_check_ss(ret, "\0", "\0");
+    } else {
+        char pathPrefix[MAXPGPATH] = {0};
+        ret = strcpy_s(pathPrefix, MAXPGPATH, archive_nas->archive_prefix);
+        securec_check_ss(ret, "\0", "\0");
+        if (!IS_PGXC_COORDINATOR) {
+            char *p = strrchr(pathPrefix, '/');
+            if (p == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Obs path prefix is invalid")));
+            }
+            *p = '\0';
+        }
+        ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pathPrefix, fileName);
+        securec_check_ss(ret, "\0", "\0");
+    }
 
     if (lstat(file_path, &statbuf) < 0) {
+        ereport(LOG, (errmsg("could not stat file \"%s\": %m", fileName)));
         return -1;
     }
     if (S_ISDIR(statbuf.st_mode)) {
@@ -321,6 +383,41 @@ List* NasList(const char* prefix, ArchiveConfig *nas_config)
 
     fileNameList = SortFileList(fileNameListTmp);
 
-    list_free_ext(fileNameListTmp);
+    list_free_deep(fileNameListTmp);
+    fileNameListTmp = NIL;
     return fileNameList;
+}
+
+bool checkNASFileExist(const char* file_path, ArchiveConfig *nas_config)
+{
+    struct stat buf;
+    char realPath[MAXPGPATH] = {0};
+    int ret = 0;
+
+    if (strncmp(file_path, "global_barrier_records", headerLen) != 0) {
+        ret = snprintf_s(realPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", nas_config->archive_prefix, file_path);
+        securec_check_ss_c(ret, "\0", "\0");
+    } else {
+        char pathPrefix[MAXPGPATH] = {0};
+        ret = strcpy_s(pathPrefix, MAXPGPATH, nas_config->archive_prefix);
+        securec_check_ss_c(ret, "\0", "\0");
+        if (!IS_PGXC_COORDINATOR) {
+            char *p = strrchr(pathPrefix, '/');
+            if (p == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Obs path prefix is invalid")));
+            }
+            *p = '\0';
+        }
+        ret = snprintf_s(realPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pathPrefix, file_path);
+        securec_check_ss_c(ret, "\0", "\0");
+    }
+    if (stat(realPath, &buf) == -1 && errno == ENOENT) {
+        return false;
+    }
+
+    if (!S_ISREG(buf.st_mode)) {
+        return false;
+    }
+
+    return true;
 }

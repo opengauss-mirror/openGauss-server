@@ -22,6 +22,7 @@
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
+#include "catalog/gs_db_privilege.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_collation.h"
@@ -1092,6 +1093,8 @@ static void storeObjectDescription(
                 appendStringInfo(descs, _("privileges for %s"), objdesc);
             else if (deptype == SHARED_DEPENDENCY_RLSPOLICY)
                 appendStringInfo(descs, _("target of %s"), objdesc);
+            else if (deptype == SHARED_DEPENDENCY_DBPRIV)
+                appendStringInfo(descs, _("privileges for %s"), objdesc);
             else
                 ereport(ERROR,
                     (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -1236,6 +1239,14 @@ void shdepDropOwned(List* roleids, DropBehavior behavior)
                     break;
                 case SHARED_DEPENDENCY_OWNER:
                     /* If a local object, save it for deletion below */
+                    if (sdepForm->dbid == u_sess->proc_cxt.MyDatabaseId) {
+                        obj.classId = sdepForm->classid;
+                        obj.objectId = sdepForm->objid;
+                        obj.objectSubId = sdepForm->objsubid;
+                        add_exact_object_address(&obj, deleteobjs);
+                    }
+                    break;
+                case SHARED_DEPENDENCY_DBPRIV:
                     if (sdepForm->dbid == u_sess->proc_cxt.MyDatabaseId) {
                         obj.classId = sdepForm->classid;
                         obj.objectId = sdepForm->objid;

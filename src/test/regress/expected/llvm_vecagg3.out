@@ -274,6 +274,27 @@ select sum(col_num3), avg(col_num3-(-0.25)) from llvm_vecagg_table_03 group by c
 
 reset analysis_options;
 ----
+--- test5 : test distinct in aggregate functions
+----
+select col_int, max(distinct col_num1 order by col_num1), min(col_num2 order by col_num2) from llvm_vecagg_table_03 group by col_int order by 1, 2, 3;
+ col_int |        max         |         min         
+---------+--------------------+---------------------
+     -74 |            3.60000 |                  -1
+     -56 |        56987.25600 |  222337203685475805
+       1 | 360287970189.63967 |   12233720368547758
+       2 | 232879701892.63967 | -923720368547758098
+       6 |            0.00000 |                   0
+       8 |             .10000 |                   1
+      25 |            0.00000 |                  -2
+      36 |        98125.87589 |         12233720368
+      52 |                    |                    
+      67 |       -15478.25600 |  223372036854775806
+     458 |            7.25412 |                    
+    6985 |   4587962145.36000 |  922337203685473807
+         |            0.00000 |                   0
+(13 rows)
+
+----
 --- clean table and resource
 ----
 drop schema llvm_vecagg_engine3 cascade;

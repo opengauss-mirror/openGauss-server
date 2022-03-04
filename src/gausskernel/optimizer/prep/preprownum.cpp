@@ -16,11 +16,11 @@
  * preprownum.cpp
  *     Planner preprocessing for ROWNUM
  *     The main function is to rewrite ROWNUM to LIMIT in parse tree if possible.
- *     For example, 
+ *     For example,
  *         {select * from table_name where rownum < 5;}
  *     can be rewrited to
  *         {select * from table_name limit 4;}
- * 
+ *
  * IDENTIFICATION
  *     src/gausskernel/optimizer/prep/preprownum.cpp
  *
@@ -29,17 +29,19 @@
 
 #include "optimizer/prep.h"
 #include "nodes/makefuncs.h"
+#include "utils/int8.h"
 
 #ifndef ENABLE_MULTIPLE_NODES
 static Node* preprocess_rownum_opexpr(PlannerInfo* root, Query* parse, OpExpr* expr, bool isOrExpr);
-static Node* process_rownum_boolexpr(PlannerInfo *root, Query* parse, BoolExpr* quals);
+static Node* process_rownum_boolexpr(PlannerInfo* root, Query* parse, BoolExpr* quals);
 static Node* process_rownum_lt(Query *parse, OpExpr* qual, bool isOrExpr);
 static Node* process_rownum_le(Query* parse, OpExpr* qual, bool isOrExpr);
 static Node* process_rownum_eq(Query* parse, OpExpr* qual, bool isOrExpr);
 static Node* process_rownum_gt(Query* parse, OpExpr* qual, bool isOrExpr);
 static Node* process_rownum_ge(Query* parse, OpExpr* qual, bool isOrExpr);
 static Node* process_rownum_ne(Query* parse, OpExpr* qual, bool isOrExpr);
-static int64 extract_rownum_limit(OpExpr *expr);
+static bool try_extract_rownum_limit(OpExpr* expr, int64* retValue);
+static bool try_extract_numeric_rownum(Oid type, Datum value, int64* retValue);
 
 /*
  * preprocess_rownum
@@ -62,7 +64,7 @@ void preprocess_rownum(PlannerInfo *root, Query *parse)
             return;
         }
     }
-    
+
     quals = (Node*)canonicalize_qual((Expr*)quals, false);
     switch (nodeTag(quals)) {
         case T_OpExpr: {
@@ -154,8 +156,9 @@ static bool is_optimizable_rownum_opexpr(PlannerInfo* root, OpExpr* expr)
 
     /* now, only constant integer types are supported to rewrite */
     Oid consttype = ((Const*)rightArg)->consttype;
-    if (consttype == INT8OID || consttype == INT4OID || 
-        consttype == INT2OID || consttype == INT1OID) {
+    if (consttype == INT8OID || consttype == INT4OID ||
+        consttype == INT2OID || consttype == INT1OID ||
+        consttype == NUMERICOID) {
         return true;
     }
 
@@ -173,12 +176,14 @@ static Node* preprocess_rownum_opexpr(PlannerInfo* root, Query* parse, OpExpr* e
         case INT8LTOID:
         case INT84LTOID:
         case INT82LTOID:
+        case NUMERICLTOID:
             /* operator '<' */
             return process_rownum_lt(parse, expr, isOrExpr);
 
         case INT8LEOID:
         case INT84LEOID:
         case INT82LEOID:
+        case NUMERICLEOID:
             /* operator '<=' */
             return process_rownum_le(parse, expr, isOrExpr);
 
@@ -191,12 +196,14 @@ static Node* preprocess_rownum_opexpr(PlannerInfo* root, Query* parse, OpExpr* e
         case INT8GTOID:
         case INT84GTOID:
         case INT82GTOID:
+        case NUMERICGTOID:
             /* operator '>' */
             return process_rownum_gt(parse, expr, isOrExpr);
 
         case INT8GEOID:
         case INT84GEOID:
         case INT82GEOID:
+        case NUMERICGEOID:
             /* operator '>=' */
             return process_rownum_ge(parse, expr, isOrExpr);
 
@@ -211,43 +218,99 @@ static Node* preprocess_rownum_opexpr(PlannerInfo* root, Query* parse, OpExpr* e
     }
 }
 
-/* extract const value from OpExpr like {rownum op Const} */
-static int64 extract_rownum_limit(OpExpr *expr)
+/*
+ * adapt process rownum to limit with different ops when rownum is numeric
+ * Note: if someone change the behavior of process_rownum_ops, please adapt
+ * this function, too!
+ */
+static bool try_extract_numeric_rownum(Oid type, Datum value, int64* retValue)
 {
+    Numeric ceilValue = DatumGetNumeric(DirectFunctionCall1(numeric_ceil, value));
+    Numeric floorValue = DatumGetNumeric(DirectFunctionCall1(numeric_floor, value));
+    NumericVar x;
+
+    /*
+     * '<' takes ceilValue and '>' takes floorValue because we need to keep
+     * consistent to the process_rownum_ops functions.
+     */
+    switch (type) {
+        case NUMERICLTOID:
+        case NUMERICGEOID:
+            {
+                uint16 numFlags = NUMERIC_NB_FLAGBITS(ceilValue);
+                if (NUMERIC_FLAG_IS_NANORBI(numFlags) && !NUMERIC_FLAG_IS_BI(numFlags)) {
+                    return false;
+                }
+                init_var_from_num(ceilValue, &x);
+                break;
+            }
+        case NUMERICLEOID:
+        case NUMERICGTOID:
+            {
+                uint16 numFlags = NUMERIC_NB_FLAGBITS(floorValue);
+                if (NUMERIC_FLAG_IS_NANORBI(numFlags) && !NUMERIC_FLAG_IS_BI(numFlags)) {
+                    return false;
+                }
+                init_var_from_num(floorValue, &x);
+                break;
+            }
+        default:
+            ereport(ERROR, ((errmodule(MOD_OPT),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("unsupported data type %u for ROWNUM limit", NUMERICOID))));
+    }
+
+    return numericvar_to_int64(&x, retValue);
+}
+
+/* extract const value from OpExpr like {rownum op Const} */
+static bool try_extract_rownum_limit(OpExpr *expr, int64* retValue)
+{
+    bool canExtract = true;
+
     Const* con = (Const *)llast(expr->args);
     Oid type = con->consttype;
     Datum value = con->constvalue;
 
-    if (type == INT8OID) {
-        return DatumGetInt64(value);
+    if (type == NUMERICOID) {
+        /*
+         * convert numeric to int64
+         * if value is larger than the range of int64, rownum will not be converted to limit.
+         */
+        canExtract = try_extract_numeric_rownum(expr->opno, value, retValue);
+    } else if (type == INT8OID) {
+        *retValue = DatumGetInt64(value);
     } else if (type == INT4OID) {
-        return (int64)DatumGetInt32(value);
+        *retValue = (int64)DatumGetInt32(value);
     } else if (type == INT2OID) {
-        return (int64)DatumGetInt16(value);
+        *retValue = (int64)DatumGetInt16(value);
     } else if (type == INT1OID) {
-        return (int64)DatumGetInt8(value);
+        *retValue = (int64)DatumGetInt8(value);
     } else {
         ereport(ERROR,
             ((errmodule(MOD_OPT),
               errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
               errmsg("unsupported data type %u for ROWNUM limit", type))));
-        return -1;
     }
+
+    return canExtract;
 }
 
 /* process operator '<' in rownum expr like {rownum < 5}
  * if the OpExpr is rewritten, the original OpExpr can be
  * substituted by a bool constant expr. */
-static Node* process_rownum_lt(Query *parse, OpExpr *rnxpr, bool isOrExpr)
+static Node* process_rownum_lt(Query *parse, OpExpr *qual, bool isOrExpr)
 {
-    int64 limitValue = extract_rownum_limit(rnxpr);
+    int64 limitValue = -1;
+    if (!try_extract_rownum_limit(qual, &limitValue))
+        return (Node*)qual;
 
     /* ROWNUM OpExpr in OrExpr */
     if (isOrExpr) {
         if (limitValue <= 1) {
             return makeBoolConst(false, false);
         }
-        return (Node*)rnxpr;
+        return (Node*)qual;
     }
 
     /* ROWNUM OpExpr in AndExpr */
@@ -265,13 +328,14 @@ static Node* process_rownum_lt(Query *parse, OpExpr *rnxpr, bool isOrExpr)
  * substituted by a bool constant expr. */
 static Node* process_rownum_le(Query* parse, OpExpr* qual, bool isOrExpr)
 {
-    int64 limitValue = extract_rownum_limit(qual);
+    int64 limitValue = -1;
+    if (!try_extract_rownum_limit(qual, &limitValue))
+        return (Node*)qual;
 
     /* ROWNUM OpExpr in OrExpr */
     if (isOrExpr) {
-        if (limitValue < 1) {
+        if (limitValue < 1)
             return makeBoolConst(false, false);
-        }
         return (Node*)qual;
     }
 
@@ -288,13 +352,14 @@ static Node* process_rownum_le(Query* parse, OpExpr* qual, bool isOrExpr)
 /* process operator '=' in rownum expr like {rownum = 5} */
 static Node* process_rownum_eq(Query* parse, OpExpr* qual, bool isOrExpr)
 {
-    int64 limitValue = extract_rownum_limit(qual);
+    int64 limitValue = -1;
+    if (!try_extract_rownum_limit(qual, &limitValue))
+        return (Node*)qual;
 
     /* ROWNUM OpExpr in OrExpr */
     if (isOrExpr) {
-        if (limitValue < 1) {
+        if (limitValue < 1)
             return makeBoolConst(false, false);
-        }
         return (Node*)qual;
     }
 
@@ -311,18 +376,18 @@ static Node* process_rownum_eq(Query* parse, OpExpr* qual, bool isOrExpr)
 /* process operator '>' in rownum expr like {rcoerceownum > 5} */
 static Node* process_rownum_gt(Query* parse, OpExpr* qual, bool isOrExpr)
 {
-    int64 limitValue = extract_rownum_limit(qual);
+    int64 limitValue = -1;
+    if (!try_extract_rownum_limit(qual, &limitValue))
+        return (Node*)qual;
 
-    if (limitValue < 1) {
+    if (limitValue < 1)
         return makeBoolConst(true, false);
-    }
 
     /* ROWNUM OpExpr in OrExpr */
-    if (isOrExpr) {
+    if (isOrExpr)
         return (Node*)qual;
-    }
 
-    /* ROWNUM OpExpr in AndExpr, 
+    /* ROWNUM OpExpr in AndExpr,
      * here limitValue >= 1, so ROWNUM > limitValue is always false. */
     rewrite_rownum_to_limit(parse, 0);
     return makeBoolConst(false, false);
@@ -333,16 +398,16 @@ static Node* process_rownum_gt(Query* parse, OpExpr* qual, bool isOrExpr)
  * substituted by a bool constant expr. */
 static Node* process_rownum_ge(Query* parse, OpExpr* qual, bool isOrExpr)
 {
-    int64 limitValue = extract_rownum_limit(qual);
+    int64 limitValue = -1;
+    if (!try_extract_rownum_limit(qual, &limitValue))
+        return (Node*)qual;
 
-    if (limitValue <= 1) {
+    if (limitValue <= 1)
         return makeBoolConst(true, false);
-    }
 
     /* ROWNUM OpExpr in OrExpr */
-    if (isOrExpr) {
+    if (isOrExpr)
         return (Node*)qual;
-    }
 
     /* ROWNUM OpExpr in AndExpr */
     rewrite_rownum_to_limit(parse, 0);
@@ -354,16 +419,16 @@ static Node* process_rownum_ge(Query* parse, OpExpr* qual, bool isOrExpr)
  */
 static Node* process_rownum_ne(Query* parse, OpExpr* qual, bool isOrExpr)
 {
-    int64 limitValue = extract_rownum_limit(qual);
+    int64 limitValue = -1;
+    if (!try_extract_rownum_limit(qual, &limitValue))
+        return (Node*)qual;
 
-    if (limitValue < 1) {
+    if (limitValue < 1)
         return makeBoolConst(true, false);
-    }
 
     /* ROWNUM OpExpr in OrExpr */
-    if (isOrExpr) {
+    if (isOrExpr)
         return (Node*)qual;
-    }
 
     /* ROWNUM OpExpr in AndExpr */
     if (limitValue == 1) {

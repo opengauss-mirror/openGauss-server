@@ -1,0 +1,158 @@
+-- Setting parameters
+SET statement_timeout = 0;
+SET xmloption = content;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET search_path = public;
+SET default_tablespace = '';
+SET default_with_oids = false;
+-- Creating data tables
+CREATE TABLE multivariate_2_1000_1_test (
+    id integer NOT NULL,
+    "position" double precision[] NOT NULL
+)
+WITH (orientation=row, compression=no);
+CREATE TABLE multivariate_7_1000_1_test (
+    id integer NOT NULL,
+    "position" float[] NOT NULL
+)
+WITH (orientation=row, compression=no);
+-- Filling out data tables
+COPY multivariate_2_1000_1_test (id, "position") FROM stdin;
+;
+--
+-- Data for Name: multivariate_7_1000_1_test; Type: TABLE DATA; Schema: public; Owner: -
+--
+COPY multivariate_7_1000_1_test (id, "position") FROM stdin;
+;
+-- Running the tests
+-- Testing PCA training
+CREATE MODEL pca_fit_2_2_1000 USING pca FEATURES position FROM multivariate_2_1000_1_test WITH number_components = 2, tolerance = 0.0001, batch_size = 1000, max_iterations = 10, seed = 96176977;
+CREATE MODEL pca_fit_7_7_1000 USING pca FEATURES position FROM multivariate_7_1000_1_test WITH number_components = 7, tolerance = 0.0001, batch_size = 1000, max_iterations = 10, seed = 96176977;
+SELECT modelname, processedtuples, discardedtuples, iterations, modeltype, length(modeldata) as model_data_len, trainingscoresvalue, weight FROM gs_model_warehouse WHERE modelname = 'pca_fit_2_2_1000';
+    modelname     | processedtuples | discardedtuples | iterations | modeltype | model_data_len | trainingscoresvalue | weight 
+------------------+-----------------+-----------------+------------+-----------+----------------+---------------------+--------
+ pca_fit_2_2_1000 |            1000 |               0 |         10 | pca       |            404 | {.382552}           | 
+(1 row)
+
+SELECT modelname, processedtuples, discardedtuples, iterations, modeltype, length(modeldata) as model_data_len, trainingscoresvalue, weight FROM gs_model_warehouse WHERE modelname = 'pca_fit_7_7_1000';
+    modelname     | processedtuples | discardedtuples | iterations | modeltype | model_data_len | trainingscoresvalue | weight 
+------------------+-----------------+-----------------+------------+-----------+----------------+---------------------+--------
+ pca_fit_7_7_1000 |            1000 |               0 |         10 | pca       |           1284 | {.0080319}          | 
+(1 row)
+
+EXPLAIN CREATE MODEL pca_fit_2_2_1000_explain USING pca FEATURES position FROM multivariate_2_1000_1_test WITH number_components = 2, tolerance = 0.0001, batch_size = 1000, max_iterations = 10, seed = 96176977;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Train Model - pca  (cost=0.00..0.00 rows=0 width=0)
+   ->  Materialize  (cost=0.00..28.57 rows=1238 width=32)
+         ->  Seq Scan on multivariate_2_1000_1_test  (cost=0.00..22.38 rows=1238 width=32)
+(3 rows)
+
+SELECT modelname, processedtuples, discardedtuples, iterations, modeltype, length(modeldata) as model_data_len, trainingscoresvalue, weight FROM gs_model_warehouse WHERE modelname = 'pca_fit_2_2_1000_explain';
+ modelname | processedtuples | discardedtuples | iterations | modeltype | model_data_len | trainingscoresvalue | weight 
+-----------+-----------------+-----------------+------------+-----------+----------------+---------------------+--------
+(0 rows)
+
+CREATE MODEL pca_fit_7_8_1000_more_components USING pca FEATURES position FROM multivariate_7_1000_1_test WITH number_components = 8, tolerance = 0.0001, batch_size = 1000, max_iterations = 10, seed = 96176977;
+CREATE MODEL pca_fit_7_4_1000_less_components USING pca FEATURES position FROM multivariate_7_1000_1_test WITH number_components = 4, tolerance = 0.0001, batch_size = 1000, max_iterations = 10, seed = 96176977;
+SELECT modelname, processedtuples, discardedtuples, iterations, modeltype, length(modeldata) as model_data_len, trainingscoresvalue, weight FROM gs_model_warehouse WHERE modelname = 'pca_fit_7_8_1000_more_components';
+            modelname             | processedtuples | discardedtuples | iterations | modeltype | model_data_len | trainingscoresvalue | weight 
+----------------------------------+-----------------+-----------------+------------+-----------+----------------+---------------------+--------
+ pca_fit_7_8_1000_more_components |            1000 |               0 |         10 | pca       |           1284 | {.0080319}          | 
+(1 row)
+
+SELECT modelname, processedtuples, discardedtuples, iterations, modeltype, length(modeldata) as model_data_len, trainingscoresvalue, weight FROM gs_model_warehouse WHERE modelname = 'pca_fit_7_4_1000_less_components';
+            modelname             | processedtuples | discardedtuples | iterations | modeltype | model_data_len | trainingscoresvalue | weight 
+----------------------------------+-----------------+-----------------+------------+-----------+----------------+---------------------+--------
+ pca_fit_7_4_1000_less_components |            1000 |               0 |         10 | pca       |            948 | {.00828935}         | 
+(1 row)
+
+-- Wrong input format
+CREATE MODEL pca_fit_2_2_1000_wrong_optimizer USING pca FEATURES position FROM multivariate_2_1000_1_test WITH number_components = 2, tolerance = 0.0001, batch_size = 1000, max_iterations = 10, seed = 96176977, optimizer = 'gd';
+ERROR:  Invalid hyperparameter optimizer
+CREATE MODEL pca_fit_2_2_1000_wrong_optimizer USING pca FEATURES position FROM multivariate_2_1000_1_test WITH number_components = 2, tolerance = 0.0001, batch_size = 1000, max_iterations = 10, seed = 96176977, optimizer = 'ngd';
+ERROR:  Invalid hyperparameter optimizer
+CREATE MODEL pca_fit_2_2_1000_wrong_num_components USING pca FEATURES position FROM multivariate_2_1000_1_test WITH number_components = -2, tolerance = 0.0001, batch_size = 1000, max_iterations = 10, seed = 96176977;
+ERROR:  Hyperparameter number_components must be in the range [1,2147483647]
+-- Prediction
+SELECT id, PREDICT BY pca_fit_2_2_1000(FEATURES position) as projection_2d FROM multivariate_2_1000_1_test WHERE id <= 10;
+ id |             projection_2d             
+----+---------------------------------------
+  8 | {-1.15986975744937,-.348766278080407}
+  2 | {3.35878001447117,-.425176037961929}
+  5 | {1.55032570006237,-1.00334268076016}
+  1 | {2.12593545225663,1.49172053673385}
+  4 | {-1.16092554286634,.663026300191944}
+  3 | {-3.49555162634873,-1.85104699528611}
+ 10 | {1.55371491574894,.058343268701519}
+  6 | {-1.42699402009033,-.231581533993596}
+  9 | {-.198532034911188,-1.00617452721559}
+  7 | {2.16850938142969,.0412310289866401}
+(10 rows)
+
+SELECT id, PREDICT BY pca_fit_7_7_1000(FEATURES position) as projection_7d FROM multivariate_7_1000_1_test WHERE id <= 10;
+ id |                                                          projection_7d                                                           
+----+----------------------------------------------------------------------------------------------------------------------------------
+  1 | {.678714994382065,.976432283385473,.0266050404237083,.0866369780025167,-.759932630535208,-.464128782050144,1.09853425713183}
+  2 | {.0760125437005675,.490027694537528,1.26651369875808,.135297175928951,-.56960244483657,.82425549663981,-.18787121259391}
+  3 | {.742392865048418,.231803951757561,-.185105563745649,-.390443998155235,.767333271159934,.391164113010215,-.661034215244053}
+  4 | {.784869330775296,.225892747592101,1.93505364376692,1.43588784529663,.906132133208712,-.365825897640064,1.30457165822626}
+  5 | {-1.46244046462834,.0480416790101441,-.970249679579649,1.12422894394046,-1.82872692581671,.246067014195788,.261596848049019}
+  6 | {-.878135462594663,-.335694232789492,-1.39444134364323,-.992156242174232,.0796398554027303,-2.5604949481646,-.851795895966088}
+  7 | {-.603614919834191,-.49653429677693,-.561079352045715,.566968287015253,1.17228061530521,-.075097558455854,.226797169704934}
+  8 | {-1.07660437757058,.563607554596825,.806692544447932,-1.62441014357104,.329949498873683,-.376632582157374,.202218970179358}
+  9 | {-.0232818353312938,-1.01237573968119,-1.03692265037781,-.607688676612508,-1.00157739929268,-1.95832289799181,-1.07448696975176}
+ 10 | {-1.69609469059258,.400439995333213,-.122637001186274,-1.51137175629667,-.650670099719702,-.0835378769839427,-.556543011509711}
+(10 rows)
+
+SELECT id, PREDICT BY pca_fit_7_8_1000_more_components(FEATURES position) as projection_7d FROM multivariate_7_1000_1_test WHERE id <= 10;
+ id |                                                          projection_7d                                                           
+----+----------------------------------------------------------------------------------------------------------------------------------
+  1 | {.678714994382065,.976432283385473,.0266050404237083,.0866369780025167,-.759932630535208,-.464128782050144,1.09853425713183}
+  2 | {.0760125437005675,.490027694537528,1.26651369875808,.135297175928951,-.56960244483657,.82425549663981,-.18787121259391}
+  3 | {.742392865048418,.231803951757561,-.185105563745649,-.390443998155235,.767333271159934,.391164113010215,-.661034215244053}
+  4 | {.784869330775296,.225892747592101,1.93505364376692,1.43588784529663,.906132133208712,-.365825897640064,1.30457165822626}
+  5 | {-1.46244046462834,.0480416790101441,-.970249679579649,1.12422894394046,-1.82872692581671,.246067014195788,.261596848049019}
+  6 | {-.878135462594663,-.335694232789492,-1.39444134364323,-.992156242174232,.0796398554027303,-2.5604949481646,-.851795895966088}
+  7 | {-.603614919834191,-.49653429677693,-.561079352045715,.566968287015253,1.17228061530521,-.075097558455854,.226797169704934}
+  8 | {-1.07660437757058,.563607554596825,.806692544447932,-1.62441014357104,.329949498873683,-.376632582157374,.202218970179358}
+  9 | {-.0232818353312938,-1.01237573968119,-1.03692265037781,-.607688676612508,-1.00157739929268,-1.95832289799181,-1.07448696975176}
+ 10 | {-1.69609469059258,.400439995333213,-.122637001186274,-1.51137175629667,-.650670099719702,-.0835378769839427,-.556543011509711}
+(10 rows)
+
+SELECT id, PREDICT BY pca_fit_7_4_1000_less_components(FEATURES position) as projection_4d FROM multivariate_7_1000_1_test WHERE id <= 10;
+ id |                                projection_4d                                
+----+-----------------------------------------------------------------------------
+  1 | {-.678714994382065,-.976432283385472,-.0266050404237085,-.0866369780025167}
+  2 | {-.0760125437005672,-.490027694537527,-1.26651369875808,-.135297175928951}
+  3 | {-.742392865048418,-.231803951757562,.185105563745649,.390443998155235}
+  4 | {-.784869330775296,-.225892747592101,-1.93505364376692,-1.43588784529663}
+  5 | {1.46244046462834,-.0480416790101434,.970249679579648,-1.12422894394046}
+  6 | {.878135462594663,.335694232789491,1.39444134364323,.992156242174233}
+  7 | {.603614919834191,.49653429677693,.561079352045715,-.566968287015253}
+  8 | {1.07660437757058,-.563607554596825,-.806692544447932,1.62441014357104}
+  9 | {.0232818353312931,1.01237573968119,1.03692265037781,.607688676612509}
+ 10 | {1.69609469059258,-.400439995333213,.122637001186273,1.51137175629667}
+(10 rows)
+
+-- Undoable projection
+SELECT id, PREDICT BY pca_fit_7_7_1000(FEATURES position) as projection_7d FROM multivariate_2_1000_1_test WHERE id <= 10;
+ERROR:  Input array must be 1-dimensional of 7 elements, must not contain nulls, and must be of type float8 or float.
+CONTEXT:  referenced column: projection_7d
+SELECT id, PREDICT BY pca_fit_2_2_1000(FEATURES position) as projection_2d FROM multivariate_7_1000_1_test WHERE id <= 10;
+ERROR:  Input array must be 1-dimensional of 2 elements, must not contain nulls, and must be of type float8 or float.
+CONTEXT:  referenced column: projection_2d
+-- Cleanup
+DROP MODEL pca_fit_2_2_1000;
+DROP MODEL pca_fit_7_7_1000;
+DROP MODEL pca_fit_7_8_1000_more_components;
+DROP MODEL pca_fit_7_4_1000_less_components;
+DROP TABLE IF EXISTS multivariate_2_1000_1_test CASCADE;
+DROP TABLE IF EXISTS multivariate_7_1000_1_test CASCADE;
+SELECT 'DB4AI PCA TEST COMPLETED';
+         ?column?         
+--------------------------
+ DB4AI PCA TEST COMPLETED
+(1 row)
+

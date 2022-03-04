@@ -335,7 +335,7 @@ static void print_unaligned_text(const printTableContent* cont, FILE* fout)
     if (cont->opt->stop_table) {
         printTableFooter* footers = footers_with_default(cont);
 
-        if (!opt_tuples_only && footers != NULL && !cancel_pressed) {
+        if (!opt_tuples_only && footers != NULL && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             for (f = footers; f != NULL; f = f->next) {
@@ -408,7 +408,7 @@ static void print_unaligned_vertical(const printTableContent* cont, FILE* fout)
 
     if (cont->opt->stop_table) {
         /* print footers */
-        if (!opt_tuples_only && cont->footers != NULL && !cancel_pressed) {
+        if (!opt_tuples_only && cont->footers != NULL && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             print_separator(cont->opt->recordSep, fout);
@@ -968,7 +968,7 @@ static void print_aligned_text(const printTableContent* cont, FILE* fout)
             _print_horizontal_line(col_count, width_wrap, opt_border, PRINT_RULE_BOTTOM, format, fout);
 
         /* print footers */
-        if ((footers != NULL) && !opt_tuples_only && !cancel_pressed) {
+        if ((footers != NULL) && !opt_tuples_only && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             for (f = footers; f != NULL; f = f->next)
@@ -1229,7 +1229,7 @@ static void print_aligned_vertical(const printTableContent* cont, FILE* fout)
             print_aligned_vertical_line(cont, 0, hwidth, dwidth, PRINT_RULE_BOTTOM, fout);
 
         /* print footers */
-        if (!opt_tuples_only && cont->footers != NULL && !cancel_pressed) {
+        if (!opt_tuples_only && cont->footers != NULL && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             if (opt_border < 2)
@@ -1362,7 +1362,7 @@ static void print_html_text(const printTableContent* cont, FILE* fout)
         fputs("</table>\n", fout);
 
         /* print footers */
-        if (!opt_tuples_only && footers != NULL && !cancel_pressed) {
+        if (!opt_tuples_only && footers != NULL && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             fputs("<p>", fout);
@@ -1434,7 +1434,7 @@ static void print_html_vertical(const printTableContent* cont, FILE* fout)
         fputs("</table>\n", fout);
 
         /* print footers */
-        if (!opt_tuples_only && cont->footers != NULL && !cancel_pressed) {
+        if (!opt_tuples_only && cont->footers != NULL && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             fputs("<p>", fout);
@@ -1565,7 +1565,7 @@ static void print_latex_text(const printTableContent* cont, FILE* fout)
         fputs("\\end{tabular}\n\n\\noindent ", fout);
 
         /* print footers */
-        if ((footers != NULL) && !opt_tuples_only && !cancel_pressed) {
+        if ((footers != NULL) && !opt_tuples_only && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             for (f = footers; f != NULL; f = f->next) {
@@ -1643,7 +1643,7 @@ static void print_latex_vertical(const printTableContent* cont, FILE* fout)
         fputs("\\end{tabular}\n\n\\noindent ", fout);
 
         /* print footers */
-        if ((cont->footers != NULL) && !opt_tuples_only && !cancel_pressed) {
+        if ((cont->footers != NULL) && !opt_tuples_only && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             for (f = cont->footers; f != NULL; f = f->next) {
@@ -1742,7 +1742,7 @@ static void print_troff_ms_text(const printTableContent* cont, FILE* fout)
         fputs(".TE\n.DS L\n", fout);
 
         /* print footers */
-        if ((footers != NULL) && !opt_tuples_only && !cancel_pressed) {
+        if ((footers != NULL) && !opt_tuples_only && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             for (f = footers; f != NULL; f = f->next) {
@@ -1837,7 +1837,7 @@ static void print_troff_ms_vertical(const printTableContent* cont, FILE* fout)
         fputs(".TE\n.DS L\n", fout);
 
         /* print footers */
-        if ((cont->footers != NULL) && !opt_tuples_only && !cancel_pressed) {
+        if ((cont->footers != NULL) && !opt_tuples_only && !cancel_pressed && cont->opt->feedback) {
             printTableFooter* f = NULL;
 
             for (f = cont->footers; f != NULL; f = f->next) {

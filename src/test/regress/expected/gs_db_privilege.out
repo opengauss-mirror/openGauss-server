@@ -1,0 +1,409 @@
+-- prepare
+CREATE ROLE db_priv_user PASSWORD '1234567i*';
+CREATE ROLE db_priv_user1 PASSWORD '1234567i*';
+CREATE ROLE db_priv_user2 PASSWORD '1234567i*';
+CREATE ROLE db_priv_user3 PASSWORD '1234567i*';
+CREATE ROLE db_priv_user4 PASSWORD '1234567i*';
+CREATE ROLE db_priv_user5 PASSWORD '1234567i*';
+-- system relation privilege check
+SET ROLE db_priv_user PASSWORD '1234567i*';
+SELECT * FROM gs_db_privilege ORDER BY oid;
+ roleid | privilege_type | admin_option 
+--------+----------------+--------------
+(0 rows)
+
+SELECT * FROM gs_db_privileges ORDER BY rolename;
+ rolename | privilege_type | admin_option 
+----------+----------------+--------------
+(0 rows)
+
+SELECT has_any_privilege('db_priv_user','UPDATE ANY TABLE');
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+-- pg_shdepend
+RESET ROLE;
+CREATE DATABASE db_priv_base;
+\c db_priv_base
+CREATE ROLE db_priv_user0 PASSWORD '1234567i*';
+CREATE ROLE db_priv_user00 PASSWORD '1234567i*';
+select d.datname,a.rolname,p.privilege_type from pg_shdepend s join pg_authid a on s.refobjid=a.oid
+  join pg_database d on s.dbid=d.oid join gs_db_privilege p on s.objid=p.oid; --noting
+ datname | rolname | privilege_type 
+---------+---------+----------------
+(0 rows)
+
+GRANT SELECT ANY TABLE,DROP ANY TABLE TO db_priv_user, db_priv_user0, db_priv_user00;
+select d.datname,a.rolname,p.privilege_type from pg_shdepend s join pg_authid a on s.refobjid=a.oid
+  join pg_database d on s.dbid=d.oid join gs_db_privilege p on s.objid=p.oid order by a.rolname,p.privilege_type; --6 lines
+   datname    |    rolname     |  privilege_type  
+--------------+----------------+------------------
+ db_priv_base | db_priv_user   | drop any table
+ db_priv_base | db_priv_user   | select any table
+ db_priv_base | db_priv_user0  | drop any table
+ db_priv_base | db_priv_user0  | select any table
+ db_priv_base | db_priv_user00 | drop any table
+ db_priv_base | db_priv_user00 | select any table
+(6 rows)
+
+DROP USER db_priv_user00;
+ERROR:  role "db_priv_user00" cannot be dropped because some objects depend on it
+DETAIL:  privileges for "drop any table"
+privileges for "select any table"
+DROP USER db_priv_user00 CASCADE;
+DROP USER db_priv_user0;
+ERROR:  role "db_priv_user0" cannot be dropped because some objects depend on it
+DETAIL:  privileges for "drop any table"
+privileges for "select any table"
+REVOKE SELECT ANY TABLE FROM db_priv_user0;
+DROP USER db_priv_user0;
+ERROR:  role "db_priv_user0" cannot be dropped because some objects depend on it
+DETAIL:  privileges for "drop any table"
+REVOKE DROP ANY TABLE FROM db_priv_user0;
+DROP USER db_priv_user0;
+\c postgres
+GRANT SELECT ANY TABLE TO db_priv_user;
+select d.datname,a.rolname,p.privilege_type from pg_shdepend s join pg_authid a on s.refobjid=a.oid
+  join pg_database d on s.dbid=d.oid join gs_db_privilege p on s.objid=p.oid; --1 line
+ datname  |   rolname    |  privilege_type  
+----------+--------------+------------------
+ postgres | db_priv_user | select any table
+(1 row)
+
+DROP USER db_priv_user CASCADE;
+ERROR:  role "db_priv_user" cannot be dropped because some objects depend on it
+DETAIL:  2 objects in database db_priv_base
+\c db_priv_base
+DROP USER db_priv_user CASCADE;
+ERROR:  role "db_priv_user" cannot be dropped because some objects depend on it
+DETAIL:  1 object in database postgres
+REVOKE SELECT ANY TABLE,DROP ANY TABLE FROM db_priv_user;
+DROP USER db_priv_user CASCADE;
+ERROR:  role "db_priv_user" cannot be dropped because some objects depend on it
+DETAIL:  1 object in database postgres
+\c postgres
+DROP USER db_priv_user;
+ERROR:  role "db_priv_user" cannot be dropped because some objects depend on it
+DETAIL:  privileges for "select any table"
+DROP USER db_priv_user CASCADE;
+\c regression
+DROP DATABASE db_priv_base;
+--syntax and gs_db_privilege
+RESET ROLE;
+GRANT SELECT ANY TABLES TO db_priv_user3; --failed
+ERROR:  syntax error at or near "TABLES"
+LINE 1: GRANT SELECT ANY TABLES TO db_priv_user3;
+                         ^
+REVOKE SELECT ANY TABLES FROM db_priv_user3; --failed
+ERROR:  syntax error at or near "TABLES"
+LINE 1: REVOKE SELECT ANY TABLES FROM db_priv_user3;
+                          ^
+GRANT DELETE ANY TABLE TO PUBLIC; --failed
+ERROR:  Invalid grant or revoke operation.
+DETAIL:  Forbid to grant ANY privileges to PUBLIC or revoke ANY privileges from PUBLIC.
+REVOKE DELETE ANY TABLE FROM PUBLIC; --failed
+ERROR:  Invalid grant or revoke operation.
+DETAIL:  Forbid to grant ANY privileges to PUBLIC or revoke ANY privileges from PUBLIC.
+GRANT SELECT ANY TABLE TO db_priv_user; --failed
+ERROR:  role "db_priv_user" does not exist
+REVOKE SELECT ANY TABLE FROM db_priv_user; --failed
+ERROR:  role "db_priv_user" does not exist
+GRANT SELECT ANY TABLE,DROP ANY TABLE TO db_priv_user1,db_priv_user2;
+GRANT update any table TO db_priv_user3, db_priv_user4 WITH ADMIN OPTION;
+SELECT * FROM gs_db_privileges ORDER BY rolename;
+   rolename    |  privilege_type  | admin_option 
+---------------+------------------+--------------
+ db_priv_user1 | select any table | no
+ db_priv_user1 | drop any table   | no
+ db_priv_user2 | select any table | no
+ db_priv_user2 | drop any table   | no
+ db_priv_user3 | update any table | yes
+ db_priv_user4 | update any table | yes
+(6 rows)
+
+GRANT SELECT ANY TABLE TO db_priv_user1; --no change
+GRANT SELECT ANY TABLE TO db_priv_user2 WITH ADMIN OPTION; --change to yes
+REVOKE ADMIN OPTION FOR DROP ANY TABLE FROM db_priv_user1,db_priv_user2; --no change
+REVOKE ADMIN OPTION FOR update ANY TABLE FROM db_priv_user3; --change to no
+REVOKE update ANY TABLE FROM db_priv_user4; --delete
+SELECT * FROM gs_db_privileges ORDER BY rolename;
+   rolename    |  privilege_type  | admin_option 
+---------------+------------------+--------------
+ db_priv_user1 | select any table | no
+ db_priv_user1 | drop any table   | no
+ db_priv_user2 | select any table | yes
+ db_priv_user2 | drop any table   | no
+ db_priv_user3 | update any table | no
+(5 rows)
+
+REVOKE SELECT ANY TABLE,DROP ANY TABLE,update any table FROM db_priv_user1,db_priv_user2,db_priv_user3,db_priv_user4;
+SELECT * FROM gs_db_privileges ORDER BY rolename;
+ rolename | privilege_type | admin_option 
+----------+----------------+--------------
+(0 rows)
+
+--privileges for grant
+RESET ROLE;
+GRANT SELECT ANY TABLE TO db_priv_user1 WITH ADMIN OPTION;
+GRANT INSERT ANY TABLE TO db_priv_user1 WITH ADMIN OPTION;
+GRANT UPDATE ANY TABLE TO db_priv_user1;
+GRANT DELETE ANY TABLE TO db_priv_user1;
+SET ROLE db_priv_user1 PASSWORD '1234567i*';
+GRANT SELECT ANY TABLE,UPDATE ANY TABLE,INSERT ANY TABLE TO db_priv_user2; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant update any table.
+GRANT INSERT ANY TABLE,DELETE ANY TABLE TO db_priv_user2; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant delete any table.
+GRANT SELECT ANY TABLE TO db_priv_user2 WITH ADMIN OPTION;
+GRANT INSERT ANY TABLE TO db_priv_user2;
+GRANT UPDATE ANY TABLE TO db_priv_user2; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant update any table.
+GRANT DELETE ANY TABLE TO db_priv_user2; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant delete any table.
+SET ROLE db_priv_user2 PASSWORD '1234567i*';
+GRANT SELECT ANY TABLE TO db_priv_user3;
+GRANT INSERT ANY TABLE TO db_priv_user3; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant insert any table.
+GRANT UPDATE ANY TABLE TO db_priv_user3; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant update any table.
+GRANT DELETE ANY TABLE TO db_priv_user3; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant delete any table.
+SET ROLE db_priv_user3 PASSWORD '1234567i*';
+GRANT SELECT ANY TABLE TO db_priv_user4; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant select any table.
+GRANT INSERT ANY TABLE TO db_priv_user4; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant insert any table.
+GRANT UPDATE ANY TABLE TO db_priv_user4; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant update any table.
+GRANT DELETE ANY TABLE TO db_priv_user4; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant delete any table.
+RESET ROLE;
+SELECT * FROM gs_db_privileges ORDER BY rolename;
+   rolename    |  privilege_type  | admin_option 
+---------------+------------------+--------------
+ db_priv_user1 | select any table | yes
+ db_priv_user1 | insert any table | yes
+ db_priv_user1 | update any table | no
+ db_priv_user1 | delete any table | no
+ db_priv_user2 | select any table | yes
+ db_priv_user2 | insert any table | no
+ db_priv_user3 | select any table | no
+(7 rows)
+
+GRANT db_priv_user2 TO db_priv_user3;
+SET ROLE db_priv_user3 PASSWORD '1234567i*';
+GRANT SELECT ANY TABLE TO db_priv_user4;
+GRANT INSERT ANY TABLE TO db_priv_user4; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant insert any table.
+GRANT UPDATE ANY TABLE TO db_priv_user4; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant update any table.
+GRANT DELETE ANY TABLE TO db_priv_user4; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant delete any table.
+RESET ROLE;
+GRANT db_priv_user3 TO db_priv_user4;
+SET ROLE db_priv_user4 PASSWORD '1234567i*';
+GRANT SELECT ANY TABLE TO db_priv_user5;
+GRANT INSERT ANY TABLE TO db_priv_user5; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant insert any table.
+GRANT UPDATE ANY TABLE TO db_priv_user5; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant update any table.
+GRANT DELETE ANY TABLE TO db_priv_user5; --failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant delete any table.
+REVOKE ADMIN OPTION FOR SELECT ANY TABLE FROM db_priv_user2;
+GRANT SELECT ANY TABLE TO db_priv_user5;--failed
+ERROR:  Permission denied.
+DETAIL:  Permission denied to grant select any table.
+RESET ROLE;
+GRANT db_priv_user1 TO db_priv_user5;
+SET ROLE db_priv_user5 PASSWORD '1234567i*';
+REVOKE SELECT ANY TABLE FROM db_priv_user1,db_priv_user2,db_priv_user3,db_priv_user4,db_priv_user5;
+REVOKE INSERT ANY TABLE FROM db_priv_user1,db_priv_user2,db_priv_user3,db_priv_user4,db_priv_user5;
+REVOKE UPDATE ANY TABLE FROM db_priv_user1,db_priv_user2,db_priv_user3,db_priv_user4,db_priv_user5;
+ERROR:  Permission denied.
+DETAIL:  Permission denied to revoke update any table.
+--function has_any_privilege
+RESET ROLE;
+GRANT UPDATE ANY TABLE TO db_priv_user1 WITH ADMIN OPTION;
+SELECT * FROM gs_db_privileges ORDER BY rolename;
+   rolename    |  privilege_type  | admin_option 
+---------------+------------------+--------------
+ db_priv_user1 | delete any table | no
+ db_priv_user1 | update any table | yes
+(2 rows)
+
+SELECT has_any_privilege('db_priv_user','SELECT ANY TABLE'); --error
+ERROR:  role "db_priv_user" does not exist
+CONTEXT:  referenced column: has_any_privilege
+SELECT has_any_privilege('db_priv_user1','SELECT ANY   TABLE'); --error
+ERROR:  Unrecognized privilege type.
+DETAIL:  Unrecognized privilege type: "SELECT ANY   TABLE".
+CONTEXT:  referenced column: has_any_privilege
+SELECT has_any_privilege('db_priv_user1','SELECT ANY TABLES'); --error
+ERROR:  Unrecognized privilege type.
+DETAIL:  Unrecognized privilege type: "SELECT ANY TABLES".
+CONTEXT:  referenced column: has_any_privilege
+SELECT has_any_privilege('db_priv_user1','UPDATE ANY TABLE WITH ADMIN OPtION'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','update ANY TABLE WITH ADMIN OPtION'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','UPDATE ANY TABLE WITH admin OPtION'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','update ANY TABLE'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','UPDATE ANY TABLE WITH ADMIN OPTION'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','DELETE ANY TABLE'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','DELETE ANY TABLE WITH ADMIN OPTION'); --f
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','CREATE ANY TABLE'); --f
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','CREATE ANY TABLE WITH ADMIN OPTION'); --f
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','SELECT ANY TABLE, DELETE ANY TABLE WITH ADMIN OPTION'); --f
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','SELECT ANY TABLE, UPDATE ANY TABLE'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user1','CREATE ANY TABLE WITH ADMIN OPTION, DELETE ANY TABLE'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','update ANY TABLE'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','UPDATE ANY TABLE WITH ADMIN OPTION'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','DELETE ANY TABLE'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','DELETE ANY TABLE WITH ADMIN OPTION'); --f
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','CREATE ANY TABLE'); --f
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','CREATE ANY TABLE WITH ADMIN OPTION'); --f
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','SELECT ANY TABLE, DELETE ANY TABLE WITH ADMIN OPTION'); --f
+ has_any_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','SELECT ANY TABLE, UPDATE ANY TABLE'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_any_privilege('db_priv_user5','CREATE ANY TABLE WITH ADMIN OPTION, DELETE ANY TABLE'); --t
+ has_any_privilege 
+-------------------
+ t
+(1 row)
+
+--audit
+RESET ROLE;
+SELECT type,result,object_name,detail_info from pg_query_audit('2021-11-30','2099-12-28')
+  WHERE type='grant_role' AND object_name='db_priv_user0';
+    type    | result |  object_name  |                                      detail_info                                      
+------------+--------+---------------+---------------------------------------------------------------------------------------
+ grant_role | ok     | db_priv_user0 | GRANT SELECT ANY TABLE,DROP ANY TABLE TO db_priv_user, db_priv_user0, db_priv_user00;
+(1 row)
+
+SELECT type,result,object_name,detail_info from pg_query_audit('2021-11-30','2099-12-28')
+  WHERE type='revoke_role' AND object_name='db_priv_user0';
+    type     | result |  object_name  |                 detail_info                 
+-------------+--------+---------------+---------------------------------------------
+ revoke_role | ok     | db_priv_user0 | REVOKE SELECT ANY TABLE FROM db_priv_user0;
+ revoke_role | ok     | db_priv_user0 | REVOKE DROP ANY TABLE FROM db_priv_user0;
+(2 rows)
+
+--clean
+RESET ROLE;
+DROP USER db_priv_user1 CASCADE;
+DROP USER db_priv_user2,db_priv_user3,db_priv_user4,db_priv_user5;

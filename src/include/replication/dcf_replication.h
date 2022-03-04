@@ -27,17 +27,14 @@
 #ifndef _DCF_REPLICATION_H
 #define _DCF_REPLICATION_H
 
-#define DCF_MAX_STREAM_INFO_LEN 1024
-
 #ifndef ENABLE_MULTIPLE_NODES
 #include "dcf_interface.h"
 #include "cjson/cJSON.h"
+#include "replication/dcf_flowcontrol.h"
 
-#define DCF_MAX_IP_LEN 64
 #define DCF_QUERY_IDLE 30000 /* 30ms RTT */
 
 #define DCF_CHECK_CONF_IDLE 3600000; /* 1 hour */
-#define DCF_STANDBY_NAME_SIZE 1024
 
 #define DCF_FOLLOWER_STR "FOLLOWER"
 #define DCF_UNIT_S 1000 /* 1000ms */
@@ -69,36 +66,6 @@ typedef enum {
     DCF_RUN_MODE_DISABLE = 2
 } DcfRunModePerm;
 
-/*
- * Reply dcf message from standby (message type 'r').
- */
-typedef struct DCFStandbyReplyMessage {
-    char id[DCF_STANDBY_NAME_SIZE];
-    /*
-     * The xlog locations that have been received, written, flushed, and applied by
-     * standby-side. These may be invalid if the standby-side is unable to or
-     * chooses not to report these.
-     */
-    XLogRecPtr receive;
-    XLogRecPtr write;
-    XLogRecPtr flush;
-    XLogRecPtr apply;
-    XLogRecPtr applyRead;
-
-    /* local role  on walreceiver, they will be sent to walsender */
-    ServerMode peer_role;
-    DbState peer_state;
-
-    /* Sender's system clock at the time of transmission */
-    TimestampTz sendTime;
-
-    /*
-     * If replyRequested is set, the server should reply immediately to this
-     * message, to avoid a timeout disconnect.
-     */
-    bool replyRequested;
-} DCFStandbyReplyMessage;
-
 extern Size DcfContextShmemSize(void);
 extern void DcfContextShmemInit(void);
 extern bool InitPaxosModule();
@@ -120,25 +87,11 @@ extern void StopPaxosModule(void);
 extern void DcfLogTruncate(void);
 extern bool QueryLeaderNodeInfo(uint32* leaderID, char* leaderIP = NULL, uint32 ipLen = 0, uint32 *leaderPort = NULL);
 extern void CheckConfigFile(bool after_build = false);
-extern bool ResetDCFNodeInfoWithNodeID(uint32 nodeID);
-extern void ResetDCFNodesInfo(void);
-extern bool SetNodeInfoByNodeID(uint32 nodeID, DCFStandbyReplyMessage reply, int *nodeIndex);
 extern bool DCFSendMsg(uint32 streamID, uint32 destNodeID, const char* msg, uint32 msgSize);
 extern bool DCFSendXLogLocation(void);
-extern int DCFLogCtrlCalculateCurrentRTO(const DCFStandbyReplyMessage *reply, DCFLogCtrlData* logCtrl);
-extern void DCFLogCtrlCalculateSleepTime(DCFLogCtrlData *logCtrl);
-extern void DCFLogCtrlCountSleepLimit(DCFLogCtrlData *logCtrl);
-extern void SleepNodeReplication(int nodeIndex);
-extern bool IsForceUpdate(TimestampTz preSendTime, TimestampTz curSendTime);
 extern void SetDcfNeedSyncConfig(void);
 extern bool DcfArchiveRoachForPitrMaster(XLogRecPtr targetLsn);
 extern void DcfSendArchiveXlogResponse(ArchiveTaskStatus *archive_task_status);
-extern bool GetNodeInfos(cJSON **nodeInfos);
-bool GetDCFNodeInfo(const cJSON *nodeJsons, int nodeID, char *role, int roleLen, char *ip, int ipLen, int *port);
+extern bool IsDCFReadyOrDisabled(void);
 #endif
-
 #endif 
-
-
-
-

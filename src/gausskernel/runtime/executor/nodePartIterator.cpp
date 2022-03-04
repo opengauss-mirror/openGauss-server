@@ -83,15 +83,37 @@ static int GetScanPartitionNum(PartIteratorState* node)
     return partitionScan;
 }
 
+void SetPartitionIteratorParamter(PartIteratorState* node, List* subPartLengthList)
+{
+    if (subPartLengthList != NIL) {
+        if (node->currentItr == -1) {
+            node->currentItr++;
+        }
+
+        int subPartLength = (int)list_nth_int(subPartLengthList, node->currentItr);
+        if (node->subPartCurrentItr + 1 >= subPartLength) {
+            node->currentItr++;
+            node->subPartCurrentItr = -1;
+        }
+        node->subPartCurrentItr++;
+        unsigned int subitr_idx = node->subPartCurrentItr;
+        PartIterator* pi_node = (PartIterator*)node->ps.plan;
+        int subPartParamno = pi_node->param->subPartParamno;
+        ParamExecData* subPartParam = &(node->ps.state->es_param_exec_vals[subPartParamno]);
+        subPartParam->isnull = false;
+        subPartParam->value = (Datum)subitr_idx;
+        node->ps.lefttree->chgParam = bms_add_member(node->ps.lefttree->chgParam, subPartParamno);
+    } else {
+        node->currentItr++;
+    }
+}
+
 static void InitScanPartition(PartIteratorState* node, int partitionScan)
 {
     int paramno = 0;
-    int subPartParamno = 0;
     unsigned int itr_idx = 0;
-    unsigned int subitr_idx = 0;
     PartIterator* pi_node = (PartIterator*)node->ps.plan;
     ParamExecData* param = NULL;
-    ParamExecData* subPartParam = NULL;
     PlanState* noden = (PlanState*)node->ps.lefttree;
     List *subPartLengthList = NIL;
     if (IsA(noden, VecToRowState)) {
@@ -104,25 +126,7 @@ static void InitScanPartition(PartIteratorState* node, int partitionScan)
     Assert(ForwardScanDirection == pi_node->direction || BackwardScanDirection == pi_node->direction);
 
     /* set iterator parameter */
-    if (subPartLengthList != NIL) {
-        if (node->currentItr == -1) {
-            node->currentItr++;
-        }
-        int subPartLength = (int)list_nth_int(subPartLengthList, node->currentItr);
-        if (node->subPartCurrentItr + 1 >= subPartLength) {
-            node->currentItr++;
-            node->subPartCurrentItr = -1;
-        }
-        node->subPartCurrentItr++;
-        subitr_idx = node->subPartCurrentItr;
-        subPartParamno = pi_node->param->subPartParamno;
-        subPartParam = &(node->ps.state->es_param_exec_vals[subPartParamno]);
-        subPartParam->isnull = false;
-        subPartParam->value = (Datum)subitr_idx;
-        node->ps.lefttree->chgParam = bms_add_member(node->ps.lefttree->chgParam, subPartParamno);
-    } else {
-        node->currentItr++;
-    }
+    SetPartitionIteratorParamter(node, subPartLengthList);
 
     itr_idx = node->currentItr;
     if (BackwardScanDirection == pi_node->direction)

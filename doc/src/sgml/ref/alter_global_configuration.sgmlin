@@ -1,0 +1,16 @@
+<refentry id="SQL-ALTER_GLOBAL_CONFIGURATION">
+<refmeta>
+<refentrytitle>ALTER GLOBAL CONFIGURATION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER GLOBAL CONFIGURATION</refname>
+<refpurpose>add or fix records of gs_global_config</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER GLOBAL CONFIGURATION with(paraname=value, paraname=value...);
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -1,0 +1,45 @@
+-- create table
+CREATE TABLE kmeans_2d(
+id SERIAL,
+position DOUBLE PRECISION[]
+);
+-- insert data
+INSERT INTO kmeans_2d( position)
+SELECT
+ARRAY[
+x + random() * 15.0,
+y + random() * 15.0
+]::DOUBLE PRECISION[] AS position
+FROM (
+SELECT
+random() * 100.0 AS x,
+random() * 100.0 AS y
+FROM generate_series(1,10)
+) AS centroids, generate_series(1,2) i;
+
+-- clear audit log
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');
+-- enable creating/dropping model audit
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=4206599" > /dev/null 2>&1
+\! sleep 1s
+-- create model
+CREATE MODEL test_explain_model_function USING kmeans
+FEATURES position
+FROM kmeans_2d
+WITH  max_iterations=default;
+
+select substring(gs_explain_model('test_explain_model_function'),0, 196);
+-- cleanup models in random order
+DROP MODEL test_explain_model_function;
+
+-- query audit logs
+select type, result, object_name, detail_info from pg_query_audit('1012-11-10', '3012-11-11') where type in ('ddl_model');
+
+-- clear audit log
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+
+-- cleanup tables
+DROP TABLE IF EXISTS kmeans_2d;
+-- output finish
+SELECT 'DB4AI EXPLAIN MODEL FUNCTION TEST COMPLETED';

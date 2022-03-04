@@ -605,21 +605,6 @@ std::unordered_set<std::string> IPRange::get_ranges_set()
     return rslt;
 }
 
-void IPRange::print_range(const Range *range)
-{
-    cout << "range from: " << ip_to_str(&range->from) << " to " << ip_to_str(&range->to) << endl;
-}
-
-void IPRange::print_ranges()
-{
-    cout << endl << "print ranges" << endl;
-    cout << "-------------" << endl;
-    std::unordered_set<std::string> ranges = get_ranges_set();
-    for (const std::string range : ranges) {
-        cout << "range: " << range << endl;
-    }
-}
-
 void IPRange::copy_without_spaces(char buf[], size_t buf_len, const char *original, size_t original_len) const
 {
     if (original_len == 0 || original_len > buf_len) {

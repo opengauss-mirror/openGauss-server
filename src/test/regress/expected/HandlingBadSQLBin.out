@@ -1,0 +1,153 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS metadata_client_logic_test_tbl(key int,id int PRIMARY KEY ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),char_col varchar(30)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),float_col float ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC))
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "metadata_client_logic_test_tbl_pkey" for table "metadata_client_logic_test_tbl"
+*******inserting data to the metadata_client_logic_test_tbl;
+insert into metadata_client_logic_test_tbl (key, id, char_col, float_col ) values (?,?,?,?);
+1,2,test_data_4_meta_data,1.1
+*************verifying data
+select * from metadata_client_logic_test_tbl;
+
+ key | id |       char_col        | float_col 
+-----+----+-----------------------+-----------
+   1 |  2 | test_data_4_meta_data | 1.1
+(1 row)
+
+create table metadata_simple_test_tbl (key int , id int primary key, char_col varchar(30), float_col float);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "metadata_simple_test_tbl_pkey" for table "metadata_simple_test_tbl"
+*******inserting data to the metadata_simple_test_tbl
+insert into metadata_simple_test_tbl (key, id, char_col, float_col ) values (?,?,?,?);
+1,2,test_data_4_meta_data,1.1
+*************verifying data
+select * from metadata_simple_test_tbl;
+
+ key | id |       char_col        |      float_col      
+-----+----+-----------------------+---------------------
+   1 |  2 | test_data_4_meta_data | 1.10000000000000009
+(1 row)
+
+Testing table with client logic ...
+select 1* from metadata_client_logic_test_tbl;
+ERROR:  syntax error at or near "from"
+LINE 1: select 1* from metadata_client_logic_test_tbl;
+                  ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+from * select metadata_client_logic_test_tbl;
+ERROR:  syntax error at or near "from"
+LINE 1: from * select metadata_client_logic_test_tbl;
+        ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select col from metadata_client_logic_test_tbl;
+ERROR:  column "col" does not exist
+LINE 1: select col from metadata_client_logic_test_tbl;
+               ^
+CONTEXT:  referenced column: col
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * frm metadata_client_logic_test_tbl;
+ERROR:  syntax error at or near "frm"
+LINE 1: select * frm metadata_client_logic_test_tbl;
+                 ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * from "mEtadata_client_logic_test_tbl";
+ERROR:  relation "mEtadata_client_logic_test_tbl" does not exist on datanode1
+LINE 1: select * from "mEtadata_client_logic_test_tbl";
+                      ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * from metadata_client_logic_test_tbl select * from metadata_client_logic_test_tbl;;
+ERROR:  syntax error at or near "select"
+LINE 1: select * from metadata_client_logic_test_tbl select * from m...
+                                                     ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+
+drop table metadata_client_logic_test_tbl;
+DROP CLIENT MASTER KEY cmk1 CASCADE;
+NOTICE:  drop cascades to column encryption key: cek1
+Testing table with no client logic ...
+select 1* from metadata_simple_test_tbl;
+ERROR:  syntax error at or near "from"
+LINE 1: select 1* from metadata_simple_test_tbl;
+                  ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+from * select metadata_simple_test_tbl;
+ERROR:  syntax error at or near "from"
+LINE 1: from * select metadata_simple_test_tbl;
+        ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select col from metadata_simple_test_tbl;
+ERROR:  column "col" does not exist
+LINE 1: select col from metadata_simple_test_tbl;
+               ^
+CONTEXT:  referenced column: col
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * frm metadata_simple_test_tbl;
+ERROR:  syntax error at or near "frm"
+LINE 1: select * frm metadata_simple_test_tbl;
+                 ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * from "mEtadata_simple_test_tbl";
+ERROR:  relation "mEtadata_simple_test_tbl" does not exist on datanode1
+LINE 1: select * from "mEtadata_simple_test_tbl";
+                      ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * from metadata_simple_test_tbl select * from metadata_simple_test_tbl;
+ERROR:  syntax error at or near "select"
+LINE 1: select * from metadata_simple_test_tbl select * from metadat...
+                                               ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+Testing table with no client logic and with no client logic in connection string ...
+select 1* from metadata_simple_test_tbl;
+ERROR:  syntax error at or near "from"
+LINE 1: select 1* from metadata_simple_test_tbl;
+                  ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+from * select metadata_simple_test_tbl;
+ERROR:  syntax error at or near "from"
+LINE 1: from * select metadata_simple_test_tbl;
+        ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select col from metadata_simple_test_tbl;
+ERROR:  column "col" does not exist
+LINE 1: select col from metadata_simple_test_tbl;
+               ^
+CONTEXT:  referenced column: col
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * frm metadata_simple_test_tbl;
+ERROR:  syntax error at or near "frm"
+LINE 1: select * frm metadata_simple_test_tbl;
+                 ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * from "mEtadata_simple_test_tbl";
+ERROR:  relation "mEtadata_simple_test_tbl" does not exist on datanode1
+LINE 1: select * from "mEtadata_simple_test_tbl";
+                      ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+select * from metadata_simple_test_tbl select * from metadata_simple_test_tbl;
+ERROR:  syntax error at or near "select"
+LINE 1: select * from metadata_simple_test_tbl select * from metadat...
+                                               ^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+drop table metadata_simple_test_tbl;

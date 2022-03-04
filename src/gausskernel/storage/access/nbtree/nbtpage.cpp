@@ -315,6 +315,57 @@ Buffer _bt_getroot(Relation rel, int access)
 }
 
 /*
+ * _bt_getrootheight() -- Get the height of the btree search tree.
+ *
+ * We return the level (counting from zero) of the current fast root.
+ * This represents the number of tree levels we'd have to descend through
+ * to start any btree index search.
+ *
+ * This is used by the planner for cost-estimation purposes.  Since it's
+ * only an estimate, slightly-stale data is fine, hence we don't worry
+ * about updating previously cached data.
+ */
+int _bt_getrootheight(Relation rel)
+{
+    BTMetaPageData *metad;
+
+    if (rel->rd_amcache == NULL) {
+        Buffer metabuf;
+
+        metabuf = _bt_getbuf(rel, BTREE_METAPAGE, BT_READ);
+        Page metapg = BufferGetPage(metabuf);
+        metad = BTPageGetMeta(metapg);
+
+        /*
+         * If there's no root page yet, _bt_getroot() doesn't expect a cache
+         * to be made, so just stop here and report the index height is zero.
+         * (XXX perhaps _bt_getroot() should be changed to allow this case.)
+         */
+        if (metad->btm_root == P_NONE) {
+            _bt_relbuf(rel, metabuf);
+            return 0;
+        }
+
+        /*
+         * Cache the metapage data for next time
+         */
+        rel->rd_amcache = MemoryContextAlloc(rel->rd_indexcxt, sizeof(BTMetaPageData));
+        errno_t rc = memcpy_s(rel->rd_amcache, sizeof(BTMetaPageData), metad, sizeof(BTMetaPageData));
+        securec_check(rc, "", "");
+
+        _bt_relbuf(rel, metabuf);
+    }
+
+    /* Get cached page */
+    metad = (BTMetaPageData *) rel->rd_amcache;
+    /* We shouldn't have cached it if any of these fail */
+    Assert(metad->btm_magic == BTREE_MAGIC);
+    Assert(metad->btm_fastroot != P_NONE);
+
+    return metad->btm_fastlevel;
+}
+
+/*
  *	_bt_gettrueroot() -- Get the true root page of the btree.
  *
  *		This is the same as the BT_READ case of _bt_getroot(), except
@@ -440,8 +491,7 @@ void _bt_checkpage(Relation rel, Buffer buf)
     /*
      * Additionally check that the special area looks sane.
      */
-    Size _bt_specialsize = PageIs4BXidVersion(page) ? MAXALIGN(sizeof(BTPageOpaqueDataInternal))
-                                                    : MAXALIGN(sizeof(BTPageOpaqueData));
+    Size _bt_specialsize = MAXALIGN(sizeof(BTPageOpaqueData));
     if (RelationIsUstoreIndex(rel)) {
         _bt_specialsize = MAXALIGN(sizeof(UBTPageOpaqueData));
     }
@@ -477,7 +527,7 @@ static void _bt_log_reuse_page(const Relation rel, BlockNumber blkno, Transactio
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec_reuse, SizeOfBtreeReusePage);
 
-    (void)XLogInsert(RM_BTREE_ID, XLOG_BTREE_REUSE_PAGE, false, rel->rd_node.bucketNode);
+    (void)XLogInsert(RM_BTREE_ID, XLOG_BTREE_REUSE_PAGE, rel->rd_node.bucketNode);
 }
 
 /*
@@ -549,10 +599,7 @@ loop:
                      */
                     if (XLogStandbyInfoActive() && RelationNeedsWAL(rel)) {
                         BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
-                        if (PageIs4BXidVersion(page))
-                            _bt_log_reuse_page(rel, blkno, opaque->btpo.xact_old);
-                        else
-                            _bt_log_reuse_page(rel, blkno, ((BTPageOpaque)opaque)->xact);
+                        _bt_log_reuse_page(rel, blkno, ((BTPageOpaque)opaque)->xact);
                     }
 
                     /* Okay to use page.  Re-initialize and return it */
@@ -679,13 +726,9 @@ bool _bt_page_recyclable(Page page)
      * interested in it.
      */
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
-    if (PageIs4BXidVersion(page)) {
-        if (P_ISDELETED(opaque) && TransactionIdPrecedes(opaque->btpo.xact_old, u_sess->utils_cxt.RecentGlobalXmin))
-            return true;
-    } else {
-        if (P_ISDELETED(opaque) &&
-            TransactionIdPrecedes(((BTPageOpaque)opaque)->xact, u_sess->utils_cxt.RecentGlobalXmin))
-            return true;
+    if (P_ISDELETED(opaque) &&
+        TransactionIdPrecedes(((BTPageOpaque)opaque)->xact, u_sess->utils_cxt.RecentGlobalXmin)) {
+        return true;
     }
     return false;
 }
@@ -833,7 +876,7 @@ void _bt_delitems_delete(const Relation rel, Buffer buf, OffsetNumber *itemnos, 
          */
         XLogRegisterData((char *)itemnos, nitems * sizeof(OffsetNumber));
         int bucket_id = RelationIsValid(heapRel) ? heapRel->rd_node.bucketNode : InvalidBktId;
-        recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_DELETE, false, bucket_id);
+        recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_DELETE, bucket_id);
 
         PageSetLSN(page, recptr);
     }
@@ -1439,10 +1482,6 @@ int _bt_pagedel_old(Relation rel, Buffer buf, BTStack stack)
      * of that scan.
      */
     page = BufferGetPage(buf);
-    if (PageIs4BXidVersion(page)) {
-        _bt_page_localupgrade(page);
-    }
-    Assert(PageIs8BXidVersion(page));
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     opaque->btpo_flags &= ~BTP_HALF_DEAD;
     opaque->btpo_flags |= BTP_DELETED;
@@ -2375,33 +2414,4 @@ static bool _bt_unlink_halfdead_page(Relation rel, Buffer leafbuf, bool *rightsi
     }
 
     return true;
-}
-
-/* Upgrade the BTpage
- * 	Upgrade the Btree page from PG_PAGE_4B_LAYOUT_VERSION(4) to
- *    PG_PAGE_LAYOUT_VERSION(5) and only be called when the page is delete.
- */
-void _bt_page_localupgrade(Page page)
-{
-    PageHeader phdr = (PageHeader)page;
-    errno_t rc;
-
-    if (PageIs8BXidVersion(page))
-        return;
-
-    Assert(PageIs4BXidVersion(page));
-
-    rc = memmove_s((char *)page + phdr->pd_special - sizeof(TransactionId), MAXALIGN(sizeof(BTPageOpaqueDataInternal)),
-                   (char *)page + phdr->pd_special, MAXALIGN(sizeof(BTPageOpaqueDataInternal)));
-    securec_check(rc, "", "");
-
-    /* Update PageHeaderInfo */
-    PageSetPageSizeAndVersion(page, BLCKSZ, PG_COMM_PAGE_LAYOUT_VERSION);
-    phdr->pd_special = BLCKSZ - MAXALIGN(sizeof(BTPageOpaqueData));
-
-    rc = memset_s(page + phdr->pd_special + MAXALIGN(sizeof(BTPageOpaqueDataInternal)), sizeof(TransactionId), 0,
-                  sizeof(TransactionId));
-    securec_check(rc, "", "");
-    BTPageGetSpecial(page)->xact = 0;
-    ereport(DEBUG1, (errmsg("The Btree page has been upgraded to version %d. ", phdr->pd_pagesize_version)));
 }

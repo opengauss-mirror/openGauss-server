@@ -35,8 +35,10 @@
 #include "mot_error.h"
 #include "utilities.h"
 
+#ifdef ENABLE_LLVM_COMPILE
 // for checking if LLVM_ENABLE_DUMP is defined and for using LLVM_VERSION_STRING
 #include "llvm/Config/llvm-config.h"
+#endif
 
 namespace JitExec {
 DECLARE_LOGGER(JitLlvmQueryCodegen, JitExec)

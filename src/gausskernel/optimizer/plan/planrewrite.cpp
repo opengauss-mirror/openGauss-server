@@ -1103,6 +1103,8 @@ static char* get_attr_name(int attrnum)
             return (char*)"xc_node_id";
         case BucketIdAttributeNumber:
             return (char*)"tablebucketid";
+        case UidAttributeNumber:
+            return (char*)"gs_tuple_uid";
 #endif
         default:
             ereport(ERROR,

@@ -20,9 +20,11 @@
 #include "lib/stringinfo.h"
 
 #define CREATE_BARRIER_PREPARE 'P'
+#define CREATE_SWITCHOVER_BARRIER_PREPARE 'O'
 #define CREATE_BARRIER_EXECUTE 'X'
 #define CREATE_SWITCHOVER_BARRIER_EXECUTE 'S'
 #define CREATE_BARRIER_END 'E'
+#define CREATE_BARRIER_COMMIT 'C'
 #define CREATE_BARRIER_QUERY_ARCHIVE 'W'
 #define BARRIER_QUERY_ARCHIVE 'Q'
 
@@ -42,43 +44,54 @@
 #define HADR_IN_FAILOVER "hadr_promote"
 #define HADR_BARRIER_ID_HEAD "hadr"
 #define CSN_BARRIER_ID_HEAD "csn"
+#define ROACH_BARRIER_ID_HEAD "gs_roach"
 #define HADR_KEY_CN_FILE "hadr_key_cn"
 #define HADR_DELETE_CN_FILE "hadr_delete_cn"
 #define HADR_SWITCHOVER_BARRIER_ID "hadr_switchover_000000000_0000000000000"
+#define HADR_SWITCHOVER_BARRIER_TAIL "dr_switchover"
 #define BARRIER_LSN_FILE_LENGTH 17
 #define BARRIER_CSN_FILE_LENGTH 39
 #define MAX_BARRIER_ID_LENGTH 40
-#define BARRIER_ID_WITHOUT_TIMESTAMP_LEN 25
+#define BARRIER_ID_WITHOUT_TIMESTAMP_LEN 26
 #define BARRIER_ID_TIMESTAMP_LEN 13
 #define MAX_DEFAULT_LENGTH 255
 #define WAIT_ARCHIVE_TIMEOUT 6000
 #define MAX_BARRIER_SQL_LENGTH 60
 #define BARRIER_LSN_LENGTH 30
 #define MAX_BARRIER_PREFIX_LEHGTH 25
+
 #define XLOG_BARRIER_CREATE 0x00
+#define XLOG_BARRIER_COMMIT 0x10
+#define XLOG_BARRIER_SWITCHOVER 0x20
+
 #define IS_CSN_BARRIER(id) (strncmp(id, CSN_BARRIER_ID_HEAD, strlen(CSN_BARRIER_ID_HEAD)) == 0)
+#define IS_HADR_BARRIER(id) (strncmp(id, HADR_BARRIER_ID_HEAD, strlen(HADR_BARRIER_ID_HEAD)) == 0)
+#define IS_ROACH_BARRIER(id) (strncmp(id, ROACH_BARRIER_ID_HEAD, strlen(ROACH_BARRIER_ID_HEAD)) == 0)
 
 #define BARRIER_EQ(barrier1, barrier2) (strcmp((char *)barrier1, (char *)barrier2) == 0)
 #define BARRIER_GT(barrier1, barrier2) (strcmp((char *)barrier1, (char *)barrier2) > 0)
 #define BARRIER_LT(barrier1, barrier2) (strcmp((char *)barrier1, (char *)barrier2) < 0)
+#define BARRIER_LE(barrier1, barrier2) (strcmp((char *)barrier1, (char *)barrier2) <= 0)
+#define BARRIER_GE(barrier1, barrier2) (strcmp((char *)barrier1, (char *)barrier2) >= 0)
 
-extern void ProcessCreateBarrierPrepare(const char* id);
+extern void ProcessCreateBarrierPrepare(const char* id, bool isSwitchoverBarrier = false);
 extern void ProcessCreateBarrierEnd(const char* id);
 extern void ProcessCreateBarrierExecute(const char* id, bool isSwitchoverBarrier = false);
+extern void ProcessCreateBarrierCommit(const char* id);
 
-extern void RequestBarrier(const char* id, char* completionTag, bool isSwitchoverBarrier = false);
+extern void CleanupBarrierLock();
+extern void RequestBarrier(char* id, char* completionTag, bool isSwitchoverBarrier = false);
 extern void barrier_redo(XLogReaderState* record);
 extern void barrier_desc(StringInfo buf, XLogReaderState* record);
+extern const char* barrier_type_name(uint8 subtype);
 extern void DisasterRecoveryRequestBarrier(const char* id, bool isSwitchoverBarrier = false);
 extern void ProcessBarrierQueryArchive(char* id);
-extern void ConnectETCD();
+extern bool is_barrier_pausable(const char* id);
 
-extern void SendETCDLocalNewestBarrierInXlog();
-
-extern void UpdateRedoBarrierTargetFromETCD();
 #ifndef ENABLE_MULTIPLE_NODES
 extern void CreateHadrSwitchoverBarrier();
 #endif
+extern void UpdateXLogMaxCSN(CommitSeqNo xlogCSN);
 
 
 #endif

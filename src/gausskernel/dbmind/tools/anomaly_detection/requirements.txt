@@ -1,9 +1,0 @@
-numpy
-sqlparse
-python-dateutil
-pandas
-flask
-flask_restful
-configparse
-prettytable
-pmdarima

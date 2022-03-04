@@ -64,7 +64,11 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 #define DISABLE_MEMORY_PROTECT() (t_thrd.utils_cxt.memNeedProtect = false)
 
 /* Definition for the unchanged interfaces */
+#ifndef MEMORY_CONTEXT_CHECKING
+#define MemoryContextAlloc(context, size) MemoryAllocFromContext(context, size, __FILE__, __LINE__)
+#else
 #define MemoryContextAlloc(context, size) MemoryContextAllocDebug(context, size, __FILE__, __LINE__)
+#endif
 #define MemoryContextAllocZero(context, size) MemoryContextAllocZeroDebug(context, size, __FILE__, __LINE__)
 #define MemoryContextAllocZeroAligned(context, size) \
     MemoryContextAllocZeroAlignedDebug(context, size, __FILE__, __LINE__)
@@ -80,6 +84,7 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext TopMemoryContext;
 /*
  * Fundamental memory-allocation operations (more are in utils/memutils.h)
  */
+extern void* MemoryAllocFromContext(MemoryContext context, Size size, const char* file, int line);
 extern void* MemoryContextAllocDebug(MemoryContext context, Size size, const char* file, int line);
 extern void* MemoryContextAllocHugeDebug(MemoryContext context, Size size, const char* file, int line);
 extern void* repallocHugeDebug(void* pointer, Size size, const char* file, int line);

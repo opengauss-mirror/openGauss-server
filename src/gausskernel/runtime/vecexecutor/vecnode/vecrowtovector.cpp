@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/tableam.h"
+#include "access/tuptoaster.h"
 #include "executor/executor.h"
 #include "vecexecutor/vecnoderowtovector.h"
 #include "utils/memutils.h"
@@ -35,8 +36,10 @@
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
 #include "storage/item/itemptr.h"
+#include "vecexecutor/vecexecutor.h"
+#include "vecexecutor/vectorbatch.h"
 
-static void CheckTypeSupportRowToVec(List* targetlist);
+#define MAX_LOOPS_FOR_RESET 50
 
 /*
  * @Description: Pack one tuple into vectorbatch.
@@ -65,8 +68,6 @@ bool VectorizeOneTuple(_in_ VectorBatch* pBatch, _in_ TupleTableSlot* slot, _in_
     for (i = 0; i < slot->tts_nvalid; i++) {
         int type_len;
         Form_pg_attribute attr = slot->tts_tupleDescriptor->attrs[i];
-
-        pBatch->m_arr[i].m_desc.typeId = attr->atttypid;
 
         if (slot->tts_isnull[i] == false) {
             type_len = attr->attlen;
@@ -127,13 +128,138 @@ bool VectorizeOneTuple(_in_ VectorBatch* pBatch, _in_ TupleTableSlot* slot, _in_
     return may_more;
 }
 
+inline struct varlena* DetoastDatumBatch(struct varlena* datum, ScalarVector* arr)
+{
+    if (VARATT_IS_EXTENDED(datum)) {
+        return heap_tuple_untoast_attr(datum, arr);
+    } else {
+        return datum;
+    }
+}
+
+template<bool hasNull>
+static void FillVector(ScalarVector* pVector, int rows)
+{
+    for (int i = 0; i < rows; i++) {
+        if (hasNull && unlikely(IS_NULL(pVector->m_flag[i]))) {
+            continue;
+        }
+
+        pVector->AddVar(pVector->m_vals[i], i);
+    }
+}
+
+template<bool hasNull>
+static void FillTidVector(ScalarVector* pVector, int rows)
+{
+    for (int i = 0; i < rows; i++) {
+        if (hasNull && unlikely(IS_NULL(pVector->m_flag[i]))) {
+            continue;
+        }
+
+        ItemPointer srcTid = (ItemPointer)DatumGetPointer(pVector->m_vals[i]);
+        ItemPointer destTid = (ItemPointer)(&pVector->m_vals[i]);
+        *destTid = *srcTid;
+    }
+}
+
+template<bool hasNull>
+static void TransformScalarVector(Form_pg_attribute attr, ScalarVector* pVector, int rows)
+{
+    int  i = 0;
+    int typeLen = attr->attlen;
+    Datum v, v0;
+    switch (typeLen) {
+        case sizeof(char):
+        case sizeof(int16):
+        case sizeof(int32):
+        case sizeof(Datum):
+            /* nothing to do */
+            break;
+        /* See ScalarVector::DatumToScalar to get the define */
+        case 12:  /* TIMETZOID, TINTERVALOID */
+        case 16:  /* INTERVALOID, UUIDOID */
+        case 64:  /* NAMEOID */
+        case -2:
+            FillVector<hasNull>(pVector, rows);
+            break;
+        case -1:
+            for (i = 0; i < rows; i++) {
+                if (hasNull && unlikely(IS_NULL(pVector->m_flag[i]))) {
+                    continue;
+                }
+
+                v0 = pVector->m_vals[i];
+                v = PointerGetDatum(DetoastDatumBatch((struct varlena *)DatumGetPointer(v0), pVector));
+                /* if numeric cloumn, try to convert numeric to big integer */
+                if (attr->atttypid == NUMERICOID) {
+                    v = try_convert_numeric_normal_to_fast(v, pVector);
+                }
+
+                if (v == v0) {
+                    pVector->AddVar(v0, i);
+                } else {
+                    pVector->m_vals[i] = v;
+                }
+            }
+            break;
+        case 6:
+            if (attr->atttypid == TIDOID && !attr->attbyval) {
+                FillTidVector<hasNull>(pVector, rows);
+            } else {
+                FillVector<hasNull>(pVector, rows);
+            }
+            break;
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_INDETERMINATE_DATATYPE), errmsg("unsupported datatype branch")));
+    }
+}
+
+template <bool lateRead>
+void VectorizeTupleBatchMode(VectorBatch *pBatch, TupleTableSlot **slots,
+    ExprContext *econtext, ScanBatchState *scanstate, int rows)
+{
+    int i, j, colidx = 0;
+    MemoryContext transformContext = econtext->ecxt_per_tuple_memory;
+
+    /* Extract all the values of the old tuple */
+    MemoryContext oldContext = MemoryContextSwitchTo(transformContext);
+
+    /* for not late read, deform all the column into batch */
+    if (!lateRead) {
+        for (j = 0; j < rows; j++) {
+            tableam_tslot_formbatch(slots[j], pBatch, j, scanstate->maxcolId);
+        }
+
+        for (i = 0; i < scanstate->maxcolId; i++) {
+            scanstate->nullflag[i] =  pBatch->m_arr[i].m_const;
+            pBatch->m_arr[i].m_const = false;
+        }
+    }
+
+    for (i = 0; i < scanstate->colNum; i++) {
+        if ((lateRead && scanstate->lateRead[i]) || (!lateRead && !scanstate->lateRead[i])) {
+            colidx = scanstate->colId[i];
+            Form_pg_attribute attr = slots[0]->tts_tupleDescriptor->attrs[colidx];
+            if (scanstate->nullflag[colidx]) {
+                TransformScalarVector<true>(attr, &pBatch->m_arr[colidx], rows);
+            } else {
+                TransformScalarVector<false>(attr, &pBatch->m_arr[colidx], rows);
+            }
+        }
+    }
+
+    MemoryContextSwitchTo(oldContext);
+}
+
 /*
  * @Description: Vectorized Operator--Convert row data to vector batch.
  *
  * @IN state: Row To Vector State.
  * @return: Return the batch of row table data, return NULL otherwise.
  */
-VectorBatch* ExecRowToVec(RowToVecState* state)
+static VectorBatch* ExecRowToVecTupleMode(RowToVecState* state)
 {
     int i;
     PlanState* outer_plan = NULL;
@@ -185,9 +311,187 @@ done:
     return batch;
 }
 
+static VectorBatch *ApplyProjectionAndFilterBatch(VectorBatch *pScanBatch,
+    SeqScanState *node, TupleTableSlot **outerslot)
+{
+    ExprContext *econtext = NULL;
+    ProjectionInfo *proj = node->ps.ps_ProjInfo;
+    VectorBatch *pOutBatch = NULL;
+    bool fSimpleMap = false;
+    uint64 inputRows = pScanBatch->m_rows;
+    List* qual = node->ps.qual;
+
+    econtext = node->ps.ps_ExprContext;
+    pOutBatch = node->scanBatchState->pCurrentBatch;
+    fSimpleMap = node->ps.ps_ProjInfo->pi_directMap;
+    if (pScanBatch->m_rows != 0) {
+        initEcontextBatch(pScanBatch, NULL, NULL, NULL);
+        /* Evaluate the qualification clause if any. */
+        if (qual != NULL) {
+            ScalarVector *pVector = NULL;
+            pVector = ExecVecQual(qual, econtext, false);
+            /* If no matched rows, fetch again. */
+            if (pVector == NULL) {
+                pOutBatch->m_rows = 0;
+                /* collect information of removed rows */
+                InstrCountFiltered1(node, inputRows - pOutBatch->m_rows);
+                return pOutBatch;
+            }
+
+            /* Call optimized PackT function when batch mode is turned on. */
+            if (econtext->ecxt_scanbatch->m_sel) {
+                pScanBatch->Pack(econtext->ecxt_scanbatch->m_sel);
+            }
+        }
+
+        /*
+         * Late read these columns
+         * reset m_rows to the value before VecQual
+         */
+        VectorizeTupleBatchMode<true>(pScanBatch, outerslot, econtext, node->scanBatchState, pScanBatch->m_rows);
+
+        /* Project the final result */
+        if (!fSimpleMap) {
+            pOutBatch = ExecVecProject(proj, true, NULL);
+        } else {
+            /*
+             * Copy the result to output batch. Note the output batch has different column set than
+             * the scan batch, so we have to remap them. Projection will handle all logics here, so
+             * for non simpleMap case, we don't need to do anything.
+             */
+            pOutBatch->m_rows += pScanBatch->m_rows;
+            for (int i = 0; i < pOutBatch->m_cols; i++) {
+                AttrNumber att = proj->pi_varNumbers[i];
+                Assert(att > 0 && att <= pScanBatch->m_cols);
+
+                errno_t rc = memcpy_s(&pOutBatch->m_arr[i], sizeof(ScalarVector), &pScanBatch->m_arr[att - 1],
+                    sizeof(ScalarVector));
+                securec_check(rc, "\0", "\0");
+            }
+        }
+    }
+
+    if (!proj->pi_exprContext->have_vec_set_fun) {
+        pOutBatch->m_rows = Min(pOutBatch->m_rows, pScanBatch->m_rows);
+        pOutBatch->FixRowCount();
+    }
+
+    /* collect information of removed rows */
+    InstrCountFiltered1(node, inputRows - pOutBatch->m_rows);
+
+    /* Check fullness of return batch and refill it does not contain enough? */
+    return pOutBatch;
+}
+
+static VectorBatch *ExecRowToVecBatchMode(RowToVecState *state)
+{
+    VectorBatch *pFinalBatch = state->m_pCurrentBatch;
+    SeqScanState *seqScanState = (SeqScanState *)outerPlanState(state);
+    ScanBatchState *scanBatchState = seqScanState->scanBatchState;
+    ExprContext *econtext = state->ps.ps_ExprContext;
+    VectorBatch *pBatch = scanBatchState->pScanBatch;
+    seqScanState->ps.ps_ProjInfo->pi_exprContext->ecxt_scanbatch = pBatch;
+    VectorBatch *pOutBatch = scanBatchState->pCurrentBatch;
+    const int BatchModeMaxTuples = 900;
+    const int MaxLoopsForReset = 50;
+
+    pFinalBatch->Reset();
+    ResetExprContext(seqScanState->ps.ps_ExprContext);
+    ResetExprContext(econtext);
+
+    /* last time return with rows, but last partition is read out */
+    if (scanBatchState->scanfinished || state->m_fNoMoreRows) {
+        scanBatchState->scanfinished = false;
+        /* scan next partition for partition iterator */
+        return pFinalBatch;
+    }
+
+    pBatch->Reset();
+    pOutBatch->Reset();
+    scanBatchState->scanTupleSlotMaxNum = BatchMaxSize;
+
+    int loops = 0;
+    while (true) {
+        loops++;
+
+        /* Reset MemoryContext to avoid using too much memory if scan times more than MAX_LOOPS_FOR_RESET */
+        if (loops == MaxLoopsForReset) {
+            if (pFinalBatch->m_rows != 0) {
+                return pFinalBatch;
+            }
+            loops  = 0;
+            ResetExprContext(seqScanState->ps.ps_ExprContext);
+            ResetExprContext(econtext);
+        }
+        ScanBatchResult *scanSlotBatch = (ScanBatchResult *)ExecProcNode((PlanState*)seqScanState);
+
+        /* scanSlotBatch is NULL means early free */
+        if (scanSlotBatch == NULL || scanBatchState->scanfinished) {
+            /* scan next partition for partition iterator */
+            scanBatchState->scanfinished = false;
+            state->m_fNoMoreRows = true;
+            return pFinalBatch;
+        }
+
+        /* Vectorize tuples for filter columns. */
+        VectorizeTupleBatchMode<false>(pBatch, scanSlotBatch->scanTupleSlotInBatch,
+            econtext, scanBatchState, scanSlotBatch->rows);
+
+        pBatch->FixRowCount(scanSlotBatch->rows);
+
+        /* apply filter conditions and vectorize tuples for late read columns. */
+        pOutBatch = ApplyProjectionAndFilterBatch(pBatch, seqScanState, scanSlotBatch->scanTupleSlotInBatch);
+
+        /* prepare pBatch for next time read */
+        for (int i = 0 ; i < pBatch->m_cols; i++) {
+            scanBatchState->nullflag[i] = false;
+        }
+        pBatch->FixRowCount(0);
+
+        if (BatchIsNull(pOutBatch)) {
+            if (!scanBatchState->scanfinished) {
+                continue;
+            }
+            scanBatchState->scanfinished = false;
+            state->m_fNoMoreRows = true;
+            return pFinalBatch;
+        }
+
+        for (int i = 0; i < pOutBatch->m_cols; i++) {
+            pFinalBatch->m_arr[i].copyDeep(&(pOutBatch->m_arr[i]), 0, pOutBatch->m_rows);
+        }
+
+        pFinalBatch->m_rows += pOutBatch->m_rows;
+        scanBatchState->scanTupleSlotMaxNum = BatchMaxSize - pFinalBatch->m_rows;
+
+        /*
+         * use BatchModeMaxTuples to avoid that pFinalBatch->m_rows be BatchMaxSize - 1 may
+         * cause scanBatchState->scanTupleSlotMaxNum = 1, and each SeqNextBatchMode only read
+         * one tuple.
+         */
+        if (scanBatchState->scanfinished || pFinalBatch->m_rows >= BatchModeMaxTuples) {
+            /* scaned tuples of this time may not equals to null, next time must be null */
+            return pFinalBatch;
+        }
+    }
+
+    return pFinalBatch;
+}
+
+
+VectorBatch *ExecRowToVec(RowToVecState *state)
+{
+    if (state->m_batchMode) {
+        return ExecRowToVecBatchMode(state);
+    } else {
+        return ExecRowToVecTupleMode(state);
+    }
+}
+
 RowToVecState* ExecInitRowToVec(RowToVec* node, EState* estate, int eflags)
 {
     RowToVecState* state = NULL;
+    ScanState* scanstate = NULL;
 
     /*
      * create state structure
@@ -197,7 +501,9 @@ RowToVecState* ExecInitRowToVec(RowToVec* node, EState* estate, int eflags)
     state->ps.state = estate;
     state->ps.vectorized = true;
 
-    CheckTypeSupportRowToVec(node->plan.targetlist);
+    if (!CheckTypeSupportRowToVec(node->plan.targetlist, ERROR)) {
+        return NULL;
+    }
 
     /*
      * tuple table initialization
@@ -215,6 +521,9 @@ RowToVecState* ExecInitRowToVec(RowToVec* node, EState* estate, int eflags)
      * We shield the child node from the need to support REWIND, BACKWARD, or
      * MARK/RESTORE.
      */
+    if (IsA(((Plan *)node)->lefttree, SeqScan)) {
+        ((SeqScan*)((Plan *)node)->lefttree)->scanBatchMode = true;
+    }
     outerPlanState(state) = ExecInitNode(outerPlan(node), estate, eflags);
 
     /*
@@ -223,6 +532,13 @@ RowToVecState* ExecInitRowToVec(RowToVec* node, EState* estate, int eflags)
      * create expression context for node
      */
     ExecAssignExprContext(estate, &state->ps);
+
+    scanstate = (ScanState *)outerPlanState(state);
+    if (IsA(scanstate, SeqScanState) && ((SeqScan *)scanstate->ps.plan)->scanBatchMode) {
+        state->m_batchMode = true;
+    } else {
+        state->m_batchMode = false;
+    }
 
     /*
      * initialize tuple type.  no need to initialize projection info because
@@ -268,25 +584,3 @@ void ExecReScanRowToVec(RowToVecState* node)
     ExecReScan(node->ps.lefttree);
 }
 
-/*
- * Check if there is any data type unsupported by cstore. If so, stop rowtovec
- */
-static void CheckTypeSupportRowToVec(List* targetlist)
-{
-    ListCell* cell = NULL;
-    TargetEntry* entry = NULL;
-    Var* var = NULL;
-    foreach(cell, targetlist) {
-        entry = (TargetEntry*)lfirst(cell);
-        if (IsA(entry->expr, Var)) {
-            var = (Var*)entry->expr;
-            if (var->varattno > 0 && var->varoattno > 0
-                && var->vartype != TIDOID // cstore support for hidden column CTID
-                && !IsTypeSupportedByCStore(var->vartype, var->vartypmod)) {
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("type \"%s\" is not supported in column store",
-                        format_type_with_typemod(var->vartype, var->vartypmod))));
-            }
-        }
-    }
-}

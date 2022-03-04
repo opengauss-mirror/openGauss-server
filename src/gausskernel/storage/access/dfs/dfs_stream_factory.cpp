@@ -46,6 +46,7 @@ DFS_UNIQUE_PTR<dfs::GSInputStream> InputStreamFactory(dfs::DFSConnector *conn, c
 
     int32_t connect_type = conn->getType();
     if (OBS_CONNECTOR == connect_type) {
+#ifndef ENABLE_LITE_MODE
         /*
          * when we read file through foreign table,
          * readerState->currentFileID value is -1.
@@ -65,6 +66,9 @@ DFS_UNIQUE_PTR<dfs::GSInputStream> InputStreamFactory(dfs::DFSConnector *conn, c
         } else {
             return dfs::readObsFile(reader_handler, path, readerState);
         }
+#else
+        FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
     } else {
         ereport(ERROR, (errcode(ERRCODE_FDW_UNABLE_TO_ESTABLISH_CONNECTION), errmodule(MOD_ORC),
                         errmsg("unsupport connector type %d", connect_type)));

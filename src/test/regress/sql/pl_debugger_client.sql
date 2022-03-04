@@ -361,6 +361,12 @@ select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 
 select funcname, lineno, query from dbe_pldebugger.continue();
 
+-- test_empty
+select pg_sleep(1);
+
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+
+
 -- test set_var
 select pg_sleep(1);
 

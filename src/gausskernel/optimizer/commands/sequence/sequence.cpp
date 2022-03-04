@@ -373,7 +373,7 @@ void gen_uuid_for_CreateSchemaStmt(List* stmts, List* uuids)
 
 void InitGlobalSeq()
 {
-    for (int i = 0; i < GS_NUM_OF_BUCKETS; i++) {
+    for (int i = 0; i < NUM_GS_PARTITIONS; i++) {
         g_instance.global_seq[i].shb_list = NULL;
         g_instance.global_seq[i].lock_id = FirstGlobalSeqLock + i;
     }
@@ -645,7 +645,7 @@ static int128 GetNextvalLocal(SeqTable elm, Relation seqrel)
         XLogRegisterData((char*)&xlrec, sizeof(xl_seq_rec));
         XLogRegisterData((char*)seqtuple.t_data, seqtuple.t_len);
 
-        recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, false, seqrel->rd_node.bucketNode);
+        recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, seqrel->rd_node.bucketNode);
 
         PageSetLSN(page, recptr);
     }
@@ -1571,7 +1571,7 @@ static void do_setval(Oid relid, int128 next, bool iscalled)
             XLogRegisterData((char*)&xlrec, sizeof(xl_seq_rec));
             XLogRegisterData((char*)seqtuple.t_data, seqtuple.t_len);
 
-            recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, false, seqrel->rd_node.bucketNode);
+            recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, seqrel->rd_node.bucketNode);
 
             PageSetLSN(page, recptr);
         }
@@ -2567,6 +2567,34 @@ static void CheckUpdateSequenceMsgStatus(PGXCNodeHandle* exec_handle, const char
 }
 #endif // ENABLE_MULTIPLE_NODES
 
+static void SaveNextValForSequence(char* dbname, char* schemaname, char *seqname, int64* res)
+{
+    bool issame = false;
+    if (u_sess->xact_cxt.sendSeqName != NULL) {
+        ListCell *db_name_cell = NULL;
+        ListCell *schema_name_cell = NULL;
+        ListCell *seq_name_cell = NULL;
+        ListCell *res_cell = NULL;
+        forfour(db_name_cell, u_sess->xact_cxt.sendSeqDbName, schema_name_cell, u_sess->xact_cxt.sendSeqSchmaName,
+                seq_name_cell, u_sess->xact_cxt.sendSeqName, res_cell, u_sess->xact_cxt.send_result) {
+            if (strcmp(seqname, (char*)lfirst(seq_name_cell)) == 0 && strcmp(dbname, (char*)lfirst(db_name_cell)) == 0
+                && strcmp(schemaname, (char*)lfirst(schema_name_cell)) == 0) {
+                int64* nu = (int64*)lfirst(res_cell);
+                pfree_ext(nu);
+                lfirst(res_cell) = (void*)res;
+                issame = true;
+                break;
+            }
+        }
+    }
+    if (!issame) {
+        u_sess->xact_cxt.sendSeqDbName = lappend(u_sess->xact_cxt.sendSeqDbName, pstrdup(dbname));
+        u_sess->xact_cxt.sendSeqSchmaName = lappend(u_sess->xact_cxt.sendSeqSchmaName, pstrdup(schemaname));
+        u_sess->xact_cxt.sendSeqName = lappend(u_sess->xact_cxt.sendSeqName, pstrdup(seqname));
+        u_sess->xact_cxt.send_result = lappend(u_sess->xact_cxt.send_result, res);
+    }
+}
+
 static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTupleData seqtuple, Relation seqrel,
             int64 result)
 {
@@ -2598,7 +2626,7 @@ static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTuple
             XLogRegisterBuffer(0, buf, REGBUF_WILL_INIT);
             XLogRegisterData((char*)&xlrec, sizeof(xl_seq_rec));
             XLogRegisterData((char*)seqtuple.t_data, seqtuple.t_len);
-            recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, false, seqrel->rd_node.bucketNode);
+            recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, seqrel->rd_node.bucketNode);
             PageSetLSN(page, recptr);
         }
         /*
@@ -2631,10 +2659,7 @@ static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTuple
             curr = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
             int64* res = (int64*)palloc(sizeof(int64));
             *res = result;
-            u_sess->xact_cxt.sendSeqDbName = lappend(u_sess->xact_cxt.sendSeqDbName, pstrdup(dbname));
-            u_sess->xact_cxt.sendSeqSchmaName = lappend(u_sess->xact_cxt.sendSeqSchmaName, pstrdup(schemaname));
-            u_sess->xact_cxt.sendSeqName = lappend(u_sess->xact_cxt.sendSeqName, pstrdup(seqname));
-            u_sess->xact_cxt.send_result = lappend(u_sess->xact_cxt.send_result, res);
+            SaveNextValForSequence(dbname, schemaname, seqname, res);
             MemoryContextSwitchTo(curr);
         } else {
             /* nexval execute direct on cn will not notify dn */

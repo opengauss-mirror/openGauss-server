@@ -19,7 +19,6 @@
 #include "catalog/catalog.h"
 #include "catalog/pg_tablespace.h"
 #include "common/fe_memutils.h"
-#include "compressed_rewind.h"
 #include "storage/cu.h"
 #include "storage/smgr/fd.h"
 
@@ -85,6 +84,23 @@ const char *excludeFiles[] = {
     "pg_dw",
     "pg_dw_single",
     "pg_dw.build",
+    "pg_dw_meta",
+    "pg_dw_0",
+    "pg_dw_1",
+    "pg_dw_2",
+    "pg_dw_3",
+    "pg_dw_4",
+    "pg_dw_5",
+    "pg_dw_6",
+    "pg_dw_7",
+    "pg_dw_8",
+    "pg_dw_9",
+    "pg_dw_10",
+    "pg_dw_11",
+    "pg_dw_12",
+    "pg_dw_13",
+    "pg_dw_14",
+    "pg_dw_15",
     "cacert.pem",
     "server.crt",
     "server.key",
@@ -131,8 +147,7 @@ void filemapInit(void)
     filemaptarget = filemap_create();
 }
 
-void processTargetFileMap(const char* path, file_type_t type, size_t oldsize, const char* link_target,
-    const RewindCompressInfo* info)
+void processTargetFileMap(const char* path, file_type_t type, size_t oldsize, const char* link_target)
 {
     file_entry_t* entry = NULL;
     filemap_t* map = filemaptarget;
@@ -147,8 +162,6 @@ void processTargetFileMap(const char* path, file_type_t type, size_t oldsize, co
     entry->next = NULL;
     entry->pagemap.bitmap = NULL;
     entry->pagemap.bitmapsize = 0;
-
-    COPY_REWIND_COMPRESS_INFO(entry, info, info == NULL ? 0 : info->oldBlockNumber, 0)
 
     if (map->last != NULL) {
         map->last->next = entry;
@@ -218,7 +231,7 @@ BuildErrorCode targetFilemapProcess(void)
     filemap_t* map = filemaptarget;
     for (i = 0; i < map->narray; i++) {
         entry = map->array[i];
-        process_target_file(entry->path, entry->type, entry->oldsize, entry->link_target, &entry->rewindCompressInfo);
+        process_target_file(entry->path, entry->type, entry->oldsize, entry->link_target);
     }
     return BUILD_SUCCESS;
 }
@@ -301,7 +314,7 @@ static inline bool is_skip_tblspc(const char* path, file_type_t type)
     if (strstr(path, TABLESPACE_VERSION_DIRECTORY) != NULL && strstr(path, pgxcnodename) == NULL) {
         return true;
     }
-    
+
     /*
      * Skip invalid tblspc oid
      */
@@ -329,8 +342,7 @@ static bool process_source_file_sanity_check(const char* path, file_type_t type)
  * action needs to be taken for the file, depending on whether the file
  * exists in the target and whether the size matches.
  */
-void process_source_file(const char* path, file_type_t type, size_t newsize, const char* link_target,
-    RewindCompressInfo* info)
+void process_source_file(const char* path, file_type_t type, size_t newsize, const char* link_target)
 {
     bool exists = false;
     char localpath[MAXPGPATH];
@@ -338,7 +350,6 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
     filemap_t* map = filemap;
     file_action_t action = FILE_ACTION_NONE;
     size_t oldsize = 0;
-    BlockNumber oldBlockNumber = 0;
     file_entry_t* entry = NULL;
     int ss_c = 0;
     bool isreldatafile = false;
@@ -489,21 +500,7 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
                  * replayed.
                  */
                 /* mod blocksize 8k to avoid half page write */
-                RewindCompressInfo oldRewindCompressInfo;
-                bool sourceCompressed = info != NULL;
-                bool targetCompressed = ProcessLocalPca(path, &oldRewindCompressInfo);
-                if (sourceCompressed && !targetCompressed) {
-                    info->compressed = false;
-                    action = FILE_ACTION_REMOVE;
-                    break;
-                } else if (!sourceCompressed && targetCompressed) {
-                    info = &oldRewindCompressInfo;
-                    action = FILE_ACTION_REMOVE;
-                    break;
-                } else if (sourceCompressed && targetCompressed) {
-                    oldBlockNumber = oldRewindCompressInfo.oldBlockNumber;
-                    oldsize = oldBlockNumber * BLCKSZ;
-                }
+                oldsize = statbuf.oldsize;
                 if (oldsize % BLOCKSIZE != 0) {
                     oldsize = oldsize - (oldsize % BLOCKSIZE);
                     pg_log(PG_PROGRESS, "target file size mod BLOCKSIZE not equal 0 %s %ld \n", path, statbuf.oldsize);
@@ -534,8 +531,6 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
     entry->pagemap.bitmapsize = 0;
     entry->isrelfile = isreldatafile;
 
-    COPY_REWIND_COMPRESS_INFO(entry, info, oldBlockNumber, info == NULL ? 0 : info->newBlockNumber)
-
     if (map->last != NULL) {
         map->last->next = entry;
         map->last = entry;
@@ -551,8 +546,7 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
  * marks target data directory's files that didn't exist in the source for
  * deletion.
  */
-void process_target_file(const char* path, file_type_t type, size_t oldsize, const char* link_target,
-    const RewindCompressInfo* info)
+void process_target_file(const char* path, file_type_t type, size_t oldsize, const char* link_target)
 {
     bool exists = false;
     file_entry_t key;
@@ -581,7 +575,7 @@ void process_target_file(const char* path, file_type_t type, size_t oldsize, con
      */
     for (int excludeIdx = 0; excludeFiles[excludeIdx] != NULL; excludeIdx++) {
         if (strstr(path, excludeFiles[excludeIdx]) != NULL) {
-            pg_log(PG_DEBUG, "entry \"%s\" excluded from target file list\n", path);
+            pg_log(PG_DEBUG, "entry \"%s\" excluded from target file list", path);
             return;
         }
     }
@@ -632,8 +626,6 @@ void process_target_file(const char* path, file_type_t type, size_t oldsize, con
         entry->pagemap.bitmap = NULL;
         entry->pagemap.bitmapsize = 0;
         entry->isrelfile = isRelDataFile(path);
-
-        COPY_REWIND_COMPRESS_INFO(entry, info, info == NULL ? 0 : info->oldBlockNumber, 0)
 
         if (map->last == NULL)
             map->first = entry;
@@ -1225,14 +1217,14 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
                             path, pathlen, pathlen - 1, "base/%u/%u_%s", rnode.dbNode, rnode.relNode, forkNames_t[forknum]);
                     } else {
                         ss_c = snprintf_s(
-                            path, pathlen, pathlen - 1, "base/%u/%u_b%d_%s", rnode.dbNode, rnode.relNode, 
+                            path, pathlen, pathlen - 1, "base/%u/%u_b%d_%s", rnode.dbNode, rnode.relNode,
                             rnode.bucketNode, forkNames_t[forknum]);
                     }
                 } else {
                     if (!IsBucketFileNode(rnode)) {
                         ss_c = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u", rnode.dbNode, rnode.relNode);
                     } else {
-                        ss_c = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_b%d", 
+                        ss_c = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_b%d",
                             rnode.dbNode, rnode.relNode, rnode.bucketNode);
                     }
                 }
@@ -1411,7 +1403,7 @@ bool check_base_path(const char *fname, unsigned int *segNo, RelFileNode *rnode)
     rnode->dbNode = InvalidOid;
     rnode->relNode = InvalidOid;
     rnode->bucketNode = InvalidBktId;
-    
+
     /* Column Store Table File Format Checking */
     nmatch = sscanf_s(fname, "base/%u/%u_C%d.%u",
                     &rnode->dbNode, &rnode->relNode, &columnid, segNo);
@@ -1487,7 +1479,7 @@ bool check_abs_tblspac_path(const char *fname, unsigned int *segNo, RelFileNode 
     rnode->dbNode = InvalidOid;
     rnode->relNode = InvalidOid;
     rnode->bucketNode = InvalidBktId;
-    
+
     nmatch = sscanf_s(fname, "PG_9.2_201611171_%[^/]/%u/%u_C%d.%u",
                       buf, sizeof(buf), &rnode->dbNode, &rnode->relNode, &columnid, segNo);
     if (nmatch == MATCH_FIVE) {

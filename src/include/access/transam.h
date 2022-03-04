@@ -160,6 +160,11 @@ typedef struct VariableCacheData {
     pg_atomic_uint64 nextCommitSeqNo;
     TransactionId latestCompletedXid; /* newest XID that has committed or
                                        * aborted */
+
+    CommitSeqNo xlogMaxCSN; /* latest CSN read in the xlog */
+    CommitSeqNo* max_csn_array; /* Record the xlogMaxCSN of all nodes. */
+    bool* main_standby_array;   /* Record whether node is main standby or not */
+
     /*
      * These fields only set in startup to normal
      */
@@ -233,7 +238,6 @@ extern TransactionId TransactionIdLatest(TransactionId mainxid, int nxids, const
 extern XLogRecPtr TransactionIdGetCommitLSN(TransactionId xid);
 extern bool LatestFetchTransactionIdDidAbort(TransactionId transactionId);
 extern bool LatestFetchCSNDidAbort(TransactionId transactionId);
-extern bool TransactionIdLogicallyPrecedes(TransactionId id1, TransactionId id2);
 
 /* in transam/varsup.c */
 #ifdef PGXC /* PGXC_DATANODE */

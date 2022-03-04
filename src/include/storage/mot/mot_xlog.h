@@ -30,5 +30,6 @@
 
 extern void MOTRedo(XLogReaderState* record);
 extern void MOTDesc(StringInfo buf, XLogReaderState* record);
+extern const char* MOT_type_name(uint8 subtype);
 
 #endif /* MOT_XLOG_H */

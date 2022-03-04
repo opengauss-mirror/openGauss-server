@@ -321,6 +321,68 @@ SELECT q1 FROM int8_tbl EXCEPT ALL SELECT DISTINCT q2 FROM int8_tbl;
  4567890123456789
 (3 rows)
 
+-- Test that single node stream plan handles INTERSECT and EXCEPT correctly
+set query_dop = 10;
+SELECT q2 FROM int8_tbl INTERSECT SELECT q1 FROM int8_tbl ORDER BY 1;
+        q2        
+------------------
+              123
+ 4567890123456789
+                 
+(3 rows)
+
+SELECT q2 FROM int8_tbl INTERSECT ALL SELECT q1 FROM int8_tbl ORDER BY 1;
+        q2        
+------------------
+              123
+ 4567890123456789
+ 4567890123456789
+                 
+(4 rows)
+
+SELECT q2 FROM int8_tbl EXCEPT SELECT q1 FROM int8_tbl ORDER BY 1;
+        q2         
+-------------------
+ -4567890123456789
+               456
+(2 rows)
+
+SELECT q2 FROM int8_tbl EXCEPT ALL SELECT q1 FROM int8_tbl ORDER BY 1;
+        q2         
+-------------------
+ -4567890123456789
+               456
+(2 rows)
+
+SELECT q2 FROM int8_tbl EXCEPT ALL SELECT DISTINCT q1 FROM int8_tbl ORDER BY 1;
+        q2         
+-------------------
+ -4567890123456789
+               456
+  4567890123456789
+(3 rows)
+
+SELECT q1 FROM int8_tbl EXCEPT SELECT q2 FROM int8_tbl;
+ q1 
+----
+(0 rows)
+
+SELECT q1 FROM int8_tbl EXCEPT ALL SELECT q2 FROM int8_tbl;
+        q1        
+------------------
+              123
+ 4567890123456789
+(2 rows)
+
+SELECT q1 FROM int8_tbl EXCEPT ALL SELECT DISTINCT q2 FROM int8_tbl;
+        q1        
+------------------
+              123
+ 4567890123456789
+ 4567890123456789
+(3 rows)
+
+set query_dop = 1;
 --
 -- Mixed types
 --
@@ -514,6 +576,42 @@ explain (costs off)
                Index Cond: (ab = 'ab'::text)
 (7 rows)
 
+-- Test that single node stream plan handles UNION correctly
+set query_dop = 10;
+explain (costs off)
+ SELECT * FROM
+ (SELECT a || b AS ab FROM t1
+  UNION ALL
+  SELECT * FROM t2) t
+ WHERE ab = 'ab';
+                    QUERY PLAN                     
+---------------------------------------------------
+ Result
+   ->  Append
+         ->  Index Scan using t1_ab_idx on t1
+               Index Cond: ((a || b) = 'ab'::text)
+         ->  Index Only Scan using t2_pkey on t2
+               Index Cond: (ab = 'ab'::text)
+(6 rows)
+
+explain (costs off)
+ SELECT * FROM
+ (SELECT a || b AS ab FROM t1
+  UNION
+  SELECT * FROM t2) t
+ WHERE ab = 'ab';
+                    QUERY PLAN                     
+---------------------------------------------------
+ HashAggregate
+   Group By Key: ((t1.a || t1.b))
+   ->  Append
+         ->  Index Scan using t1_ab_idx on t1
+               Index Cond: ((a || b) = 'ab'::text)
+         ->  Index Only Scan using t2_pkey on t2
+               Index Cond: (ab = 'ab'::text)
+(7 rows)
+
+set query_dop = 1;
 --
 -- Test that ORDER BY for UNION ALL can be pushed down to inheritance
 -- children.
@@ -645,6 +743,106 @@ WHERE x > 3;
  2 | 4
 (1 row)
 
+-- Test that single node stream plan handles UNION sub-selects correctly
+set query_dop = 10;
+explain (costs off)
+ SELECT * FROM
+  (SELECT 1 AS t, * FROM tenk1 a
+   UNION ALL
+   SELECT 2 AS t, * FROM tenk1 b) c
+ WHERE t = 2;
+ERROR:  relation "tenk1" does not exist on datanode1
+LINE 3:   (SELECT 1 AS t, * FROM tenk1 a
+                                 ^
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, 2 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4;
+                 QUERY PLAN                 
+--------------------------------------------
+ Unique
+   ->  Sort
+         Sort Key: (1), (2)
+         ->  Append
+               ->  Result
+               ->  Result
+                     One-Time Filter: false
+(7 rows)
+
+SELECT * FROM
+  (SELECT 1 AS t, 2 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4;
+ t | x 
+---+---
+ 1 | 2
+(1 row)
+
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, generate_series(1,10) AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Sort
+   Sort Key: ss.x
+   ->  Subquery Scan on ss
+         Filter: (ss.x < 4)
+         ->  HashAggregate
+               Group By Key: (1), (generate_series(1, 10))
+               ->  Append
+                     ->  Result
+                     ->  Result
+(9 rows)
+
+SELECT * FROM
+  (SELECT 1 AS t, generate_series(1,10) AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+ t | x 
+---+---
+ 1 | 1
+ 1 | 2
+ 1 | 3
+(3 rows)
+
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, (random()*3)::int AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x > 3;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Subquery Scan on ss
+   Filter: (ss.x > 3)
+   ->  Unique
+         ->  Sort
+               Sort Key: (1), (((random() * 3::double precision))::integer)
+               ->  Append
+                     ->  Result
+                     ->  Result
+(8 rows)
+
+SELECT * FROM
+  (SELECT 1 AS t, (random()*3)::int AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x > 3;
+ t | x 
+---+---
+ 2 | 4
+(1 row)
+
+set query_dop = 1;
 -- Test proper handling of parameterized appendrel paths when the
 -- potential join qual is expensive
 create function expensivefunc(int) returns int

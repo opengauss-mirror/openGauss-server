@@ -17,6 +17,8 @@
  <refsynopsisdiv>
 <synopsis>
 DROP [ LARGE ] SEQUENCE [ IF EXISTS ] { [schema.] sequence_name } [, ...] [ CASCADE | RESTRICT ];
+
+NOTICE: '[ LARGE ]' is only avaliable in CENTRALIZED mode!
 </synopsis>
  </refsynopsisdiv>
 

@@ -12,6 +12,7 @@ SELECT * from test.t_varchar;
 ALTER SCHEMA test RENAME TO test1;
 SELECT c.relname, g.column_name from gs_encrypted_columns g join pg_class c on (g.rel_id=c.oid);
 SELECT * FROM test1.t_varchar;
+SELECT * FROM test1.t_varchar WHERE name = 'MyName';
 DROP TABLE test1.t_varchar;
 DROP SCHEMA test1;
 DROP COLUMN ENCRYPTION KEY MyCEK;

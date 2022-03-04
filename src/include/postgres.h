@@ -7,10 +7,10 @@
  * Client-side code should include postgres_fe.h instead.
  *
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1995, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/postgres.h
  *
@@ -117,6 +117,10 @@
 #define BITS_PER_INT (BITS_PER_BYTE * sizeof(int))
 
 #define STREAM_RESERVE_PROC_TIMES (16)
+
+/* for CLOB/BLOB more than 1GB, the first chunk threadhold. */
+#define MAX_TOAST_CHUNK_SIZE 1073741771
+
 /* this struct is used to store connection info got from pool */
 typedef struct {
     /* hostname of the connection */
@@ -155,6 +159,21 @@ typedef struct varatt_external {
     Oid va_toastrelid; /* RelID of TOAST table containing it */
 } varatt_external;
 
+typedef struct varatt_lob_external {
+    int64 va_rawsize;  /* Original data size (includes header) */
+    Oid va_valueid;    /* Unique ID of value within TOAST table */
+    Oid va_toastrelid; /* RelID of TOAST table containing it */
+} varatt_lob_external;
+
+typedef struct varatt_lob_pointer {
+    Oid relid;
+    int2 columid;
+    int2 bucketid;
+    uint16 bi_hi;
+    uint16 bi_lo;
+    uint16 ip_posid;
+} varatt_lob_pointer;
+
 /*
  * Out-of-line Datum thats stored in memory in contrast to varatt_external
  * pointers which points to data in an external toast relation.
@@ -171,13 +190,19 @@ typedef struct varatt_indirect {
  * comes from the requirement for on-disk compatibility with the older
  * definitions of varattrib_1b_e where v_tag was named va_len_1be...
  */
-typedef enum vartag_external { VARTAG_INDIRECT = 1, VARTAG_BUCKET = 8, VARTAG_ONDISK = 18 } vartag_external;
+typedef enum vartag_external { VARTAG_INDIRECT = 1, VARTAG_BUCKET = 8, VARTAG_ONDISK = 18, VARTAG_LOB = 28 } vartag_external;
 
-#define VARTAG_SIZE(tag) \
+#define VARTAG_SIZE(tag) ((tag & 0x80) == 0x00 ? \
    ((tag) == VARTAG_INDIRECT ? sizeof(varatt_indirect) :       \
-    (tag) == VARTAG_ONDISK ? sizeof(varatt_external) : \
-    (tag) == VARTAG_BUCKET ? sizeof(varatt_external) + sizeof(int2) : \
-    TrapMacro(true, "unknown vartag"))
+    ((tag) == VARTAG_ONDISK ? sizeof(varatt_external) : \
+    ((tag) == VARTAG_BUCKET ? sizeof(varatt_external) + sizeof(int2) : \
+    ((tag) == VARTAG_LOB ? sizeof(varatt_lob_pointer) : \
+    TrapMacro(true, "unknown vartag"))))) : \
+    ((tag & 0x7f) == VARTAG_INDIRECT ? sizeof(varatt_indirect) :       \
+    ((tag & 0x7f) == VARTAG_ONDISK ? sizeof(varatt_lob_external) : \
+    ((tag & 0x7f) == VARTAG_BUCKET ? sizeof(varatt_lob_external) + sizeof(int2) : \
+    ((tag & 0x7f) == VARTAG_LOB ? sizeof(varatt_lob_pointer) : \
+    TrapMacro(true, "unknown vartag"))))))
 
 /*
  * These structs describe the header of a varlena object that may have been
@@ -296,6 +321,8 @@ typedef enum {
 #define VARATT_IS_4B_C(PTR) ((((varattrib_1b*)(PTR))->va_header & 0xC0) == 0x40)
 #define VARATT_IS_1B(PTR) ((((varattrib_1b*)(PTR))->va_header & 0x80) == 0x80)
 #define VARATT_IS_1B_E(PTR) ((((varattrib_1b*)(PTR))->va_header) == 0x80)
+#define VARATT_IS_HUGE_TOAST_POINTER(PTR) ((((varattrib_1b*)(PTR))->va_header) == 0x80 && \
+    ((((varattrib_1b_e*)(PTR))->va_tag) & 0x01) == 0x01)
 #define VARATT_NOT_PAD_BYTE(PTR) (*((uint8*)(PTR)) != 0)
 
 /* VARSIZE_4B() should only be used on known-aligned data */
@@ -307,6 +334,8 @@ typedef enum {
 #define SET_VARSIZE_4B_C(PTR, len) (((varattrib_4b*)(PTR))->va_4byte.va_header = ((len)&0x3FFFFFFF) | 0x40000000)
 #define SET_VARSIZE_1B(PTR, len) (((varattrib_1b*)(PTR))->va_header = (len) | 0x80)
 #define SET_VARTAG_1B_E(PTR, tag) (((varattrib_1b_e*)(PTR))->va_header = 0x80, ((varattrib_1b_e*)(PTR))->va_tag = (tag))
+#define SET_HUGE_TOAST_POINTER_TAG(PTR, tag) (((varattrib_1b_e*)(PTR))->va_header = 0x80, \
+    ((varattrib_1b_e*)(PTR))->va_tag = (tag) | 0x01)
 #else /* !WORDS_BIGENDIAN */
 
 #define VARATT_IS_4B(PTR) ((((varattrib_1b*)(PTR))->va_header & 0x01) == 0x00)
@@ -314,6 +343,8 @@ typedef enum {
 #define VARATT_IS_4B_C(PTR) ((((varattrib_1b*)(PTR))->va_header & 0x03) == 0x02)
 #define VARATT_IS_1B(PTR) ((((varattrib_1b*)(PTR))->va_header & 0x01) == 0x01)
 #define VARATT_IS_1B_E(PTR) ((((varattrib_1b*)(PTR))->va_header) == 0x01)
+#define VARATT_IS_HUGE_TOAST_POINTER(PTR) ((((varattrib_1b*)(PTR))->va_header) == 0x01 && \
+    ((((varattrib_1b_e*)(PTR))->va_tag) >> 7) == 0x01)
 #define VARATT_NOT_PAD_BYTE(PTR) (*((uint8*)(PTR)) != 0)
 
 /* VARSIZE_4B() should only be used on known-aligned data */
@@ -324,6 +355,8 @@ typedef enum {
 #define SET_VARSIZE_4B_C(PTR, len) (((varattrib_4b*)(PTR))->va_4byte.va_header = (((uint32)(len)) << 2) | 0x02)
 #define SET_VARSIZE_1B(PTR, len) (((varattrib_1b*)(PTR))->va_header = (((uint8)(len)) << 1) | 0x01)
 #define SET_VARTAG_1B_E(PTR, tag) (((varattrib_1b_e*)(PTR))->va_header = 0x01, ((varattrib_1b_e*)(PTR))->va_tag = (tag))
+#define SET_HUGE_TOAST_POINTER_TAG(PTR, tag) (((varattrib_1b_e*)(PTR))->va_header = 0x01, \
+    ((varattrib_1b_e*)(PTR))->va_tag = (tag) | 0x80)
 #endif /* WORDS_BIGENDIAN */
 
 #define VARHDRSZ_SHORT offsetof(varattrib_1b, va_data)
@@ -375,6 +408,7 @@ typedef enum {
 #define VARATT_IS_EXTERNAL_INDIRECT(PTR) (VARATT_IS_EXTERNAL(PTR) && VARTAG_EXTERNAL(PTR) == VARTAG_INDIRECT)
 #define VARATT_IS_EXTERNAL_BUCKET(PTR) \
     (VARATT_IS_EXTERNAL(PTR) && VARTAG_EXTERNAL(PTR) == VARTAG_BUCKET)
+#define VARATT_IS_EXTERNAL_LOB(PTR) (VARATT_IS_EXTERNAL(PTR) && VARTAG_EXTERNAL(PTR) == VARTAG_LOB)
 #define VARATT_IS_EXTERNAL_ONDISK_B(PTR) \
     (VARATT_IS_EXTERNAL_ONDISK(PTR) || VARATT_IS_EXTERNAL_BUCKET(PTR))
 
@@ -389,9 +423,9 @@ typedef enum {
 #define VARSIZE_ANY(PTR) \
     (VARATT_IS_1B_E(PTR) ? VARSIZE_EXTERNAL(PTR) : (VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) : VARSIZE_4B(PTR)))
 
-#define VARSIZE_ANY_EXHDR(PTR)                                       \
-    (VARATT_IS_1B_E(PTR) ? VARSIZE_EXTERNAL(PTR) - VARHDRSZ_EXTERNAL \
-                         : (VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) - VARHDRSZ_SHORT : VARSIZE_4B(PTR) - VARHDRSZ))
+#define VARSIZE_ANY_EXHDR(PTR)                                             \
+        (VARATT_IS_1B_E(PTR) ? VARSIZE_EXTERNAL(PTR) - VARHDRSZ_EXTERNAL : \
+                               (VARATT_IS_1B(PTR) ? VARSIZE_1B(PTR) - VARHDRSZ_SHORT : VARSIZE_4B(PTR) - VARHDRSZ))
 
 /* caution: this will not work on an external or compressed-in-line Datum */
 /* caution: this will return a possibly unaligned pointer */
@@ -933,17 +967,18 @@ extern void cJSON_internal_free(void* pointer);
 extern void InitThreadLocalWhenSessionExit();
 extern void RemoveTempNamespace();
 #ifndef ENABLE_MULTIPLE_NODES
-#define CacheIsProcNameArgNsp(cache) ((cache)->id == PROCNAMEARGSNSP || (cache)->id == PROCALLARGS)
+#define CacheIsProcNameArgNsp(cc_id) ((cc_id) == PROCNAMEARGSNSP || (cc_id) == PROCALLARGS)
 #else 
-#define CacheIsProcNameArgNsp(cache) ((cache)->id == PROCNAMEARGSNSP)
+#define CacheIsProcNameArgNsp(cc_id) ((cc_id) == PROCNAMEARGSNSP)
 #endif 
-#define CacheIsProcOid(cache) ((cache)->id == PROCOID)
+#define CacheIsProcOid(cc_id) ((cc_id) == PROCOID)
 #define IsBootingPgProc(rel) IsProcRelation(rel)
 #define BootUsingBuiltinFunc true
 
 extern int errdetail_abort(void);
 
 void log_disconnections(int code, Datum arg);
+void cleanGPCPlanProcExit(int code, Datum arg);
 
 void ResetInterruptCxt();
 

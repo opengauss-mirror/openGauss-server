@@ -107,6 +107,11 @@ public:
     {
         m_currentSession = session;
     }
+    const inline knl_thrd_context *GetThreadContextPtr()
+    {
+        return m_thrd;
+    }
+
 
     inline ThreadStatus GetthreadStatus()
     {
@@ -144,6 +149,7 @@ private:
     ThreadPoolGroup* m_group;
     pthread_mutex_t* m_mutex;
     pthread_cond_t* m_cond;
+    knl_thrd_context *m_thrd;
 };
 
 #endif /* THREAD_POOL_WORKER_H */

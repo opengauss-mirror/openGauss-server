@@ -56,4 +56,5 @@ bool update_label_value(const gs_stl::gs_string object_name,
 
 void reset_policy_labels();
 void clear_thread_local_label();
+void verify_drop_column(AlterTableStmt *stmt);
 #endif /* GS_POLICY_GS_POLICY_LABELS_H_ */

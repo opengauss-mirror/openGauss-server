@@ -1,6 +1,23 @@
 -- test simple lock for update
 create table test_lock_for_update (c1 int) with (storage_type=USTORE);
 insert into test_lock_for_update values (1);
+-- test for update/no key update/share/key share
+select c1 from test_lock_for_update where c1 = 1 for update;
+ c1 
+----
+  1
+(1 row)
+
+select c1 from test_lock_for_update where c1 = 1 for no key update;
+ERROR:  For Key Share and For No Key Update is not support for ustore.
+select c1 from test_lock_for_update where c1 = 1 for share;
+ c1 
+----
+  1
+(1 row)
+
+select c1 from test_lock_for_update where c1 = 1 for key share;
+ERROR:  For Key Share and For No Key Update is not support for ustore.
 \parallel on 2
 begin
     delete from test_lock_for_update;

@@ -79,9 +79,6 @@ bool FuncHardcodedValues::process(const List *options, StatementData *statement_
     /* process hardcoded values in each query */
     size_t body_location_offset = 0;
     for (size_t i = 0; i < bodies_size; ++i) {
-        if (bodies[i] == NULL) {
-            return false;
-        }
         if (!parse_body(language, bodies[i], delimiter_location, delimiter_size, &body_location_offset,
             statement_data)) {
             return false;

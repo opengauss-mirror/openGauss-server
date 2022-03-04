@@ -37,10 +37,12 @@
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
 #include "access/xlogutils.h"
+#include "access/xlogproc.h"
 #include "catalog/storage_xlog.h"
 #include "gssignal/gs_signal.h"
 #include "libpq/pqsignal.h"
 #include "postmaster/postmaster.h"
+#include "postmaster/pagerepair.h"
 #include "storage/ipc.h"
 #include "access/nbtree.h"
 #include "utils/guc.h"
@@ -52,8 +54,8 @@
 #include "commands/dbcommands.h"
 #include "access/parallel_recovery/page_redo.h"
 #include "access/parallel_recovery/dispatcher.h"
-#include "pgstat.h"
 #include "access/multi_redo_api.h"
+#include "pgstat.h"
 
 namespace parallel_recovery {
 
@@ -65,7 +67,9 @@ THR_LOCAL PageRedoWorker *g_redoWorker = NULL;
 
 static RedoItem g_redoEndMark = {};
 static RedoItem g_terminateMark = {};
-static RedoItem g_cleanupMark = { false, false, false, false, 0 };
+static RedoItem g_cleanupMark = { false, false, false, false, 0};
+static RedoItem g_closefdMark = { false, false, false, false, 0};
+static RedoItem g_cleanInvalidPageMark = { false, false, false, false, 0};
 
 static const int PAGE_REDO_WORKER_ARG = 3;
 static const int REDO_SLEEP_50US = 50;
@@ -185,6 +189,10 @@ static PageRedoWorker *CreateWorker(uint32 id)
     worker->statWaitReplay = 0;
     worker->oldCtx = NULL;
     worker->bufferPinWaitBufId = -1;
+    worker->remoteReadPageNum = 0;
+    
+    worker->badPageHashTbl = BadBlockHashTblCreate();
+
     pg_atomic_write_u32(&(worker->readyStatus), PAGE_REDO_WORKER_INVALID);
 #if (!defined __x86_64__) && (!defined __aarch64__)
     SpinLockInit(&worker->ptrLck);
@@ -257,6 +265,10 @@ void HandlePageRedoInterrupts()
         t_thrd.page_redo_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
     }
+    if (t_thrd.page_redo_cxt.check_repair) {
+        SeqCheckRemoteReadAndRepairPage();
+        t_thrd.page_redo_cxt.check_repair = false;
+    }
 
     if (t_thrd.page_redo_cxt.shutdown_requested) {
         ereport(LOG,
@@ -269,6 +281,16 @@ void HandlePageRedoInterrupts()
 
         proc_exit(1);
     }
+}
+
+/* HandleRedoPageRepair
+ *           if the page crc verify failed, call the function record the bad block.
+ */
+void HandleRedoPageRepair(RepairBlockKey key, XLogPhyBlock pblk)
+{
+    XLogReaderState *record = g_redoWorker->current_item;
+    RecordBadBlockAndPushToRemote(record, key, CRC_CHECK_FAIL, InvalidXLogRecPtr, pblk);
+    return;
 }
 
 /* Run from the worker thread. */
@@ -292,7 +314,8 @@ void PageRedoWorkerMain()
 
     SetupSignalHandlers();
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
-    
+    (void)RegisterRedoPageRepairCallBack(HandleRedoPageRepair);
+
     InitGlobals();
     ResourceManagerStartup();
 
@@ -315,6 +338,10 @@ static void PageRedoShutdownHandler(SIGNAL_ARGS)
     t_thrd.page_redo_cxt.shutdown_requested = true;
 }
 
+static void PageRedoSigUser1Handler(SIGNAL_ARGS)
+{
+    t_thrd.page_redo_cxt.check_repair = true;
+}
 static void PageRedoQuickDie(SIGNAL_ARGS)
 {
     int status = 2;
@@ -337,7 +364,7 @@ static void SetupSignalHandlers()
     (void)gspqsignal(SIGQUIT, PageRedoQuickDie);
     (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
-    (void)gspqsignal(SIGUSR1, SIG_IGN);
+    (void)gspqsignal(SIGUSR1, PageRedoSigUser1Handler);
     (void)gspqsignal(SIGUSR2, PageRedoUser2Handler);
     (void)gspqsignal(SIGCHLD, SIG_IGN);
     (void)gspqsignal(SIGTTIN, SIG_IGN);
@@ -374,16 +401,11 @@ static void InitGlobals()
 
 void ApplyProcHead(RedoItem *head)
 {
-    uint32 isSkipItem;
     while (head != NULL) {
         RedoItem *cur = head;
+        g_redoWorker->current_item = &cur->record;
         head = head->nextByWorker[g_redoWorker->id + 1];
-        isSkipItem = pg_atomic_read_u32(&g_redoWorker->skipItemFlg);
-        if (isSkipItem == PAGE_REDO_WORKER_APPLY_ITEM) {
-            ApplyAndFreeRedoItem(cur);
-        } else {
-            OnlyFreeRedoItem(cur);
-        }
+        ApplyAndFreeRedoItem(cur);
     }
 }
 
@@ -395,16 +417,22 @@ static int ApplyRedoLoop()
     instr_time endTime;
 
     INSTR_TIME_SET_CURRENT(startTime);
-
+    GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
     while ((head = (RedoItem *)SPSCBlockingQueueTop(g_redoWorker->queue)) != &g_redoEndMark) {
+        CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
         if (head == &g_cleanupMark) {
             g_redoWorker->btreeIncompleteActions = btree_get_incomplete_actions();
             g_redoWorker->xlogInvalidPages = XLogGetInvalidPages();
+        } else if (head == &g_closefdMark) {
+            smgrcloseall();
+        } else if (head == &g_cleanInvalidPageMark) {
+            forget_range_invalid_pages((void*)head);
         } else {
             ApplyProcHead(head);
         }
         SPSCBlockingQueuePop(g_redoWorker->queue);
         RedoInterruptCallBack();
+        GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_1]);
     }
     SPSCBlockingQueuePop(g_redoWorker->queue);
 
@@ -431,8 +459,9 @@ static int ApplyRedoLoop()
 /* Run from the worker thread. */
 static void ApplyAndFreeRedoItem(RedoItem *item)
 {
+    GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
     UpdateRecordGlobals(item, g_redoWorker->standbyState);
-
+    CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
     /*
      * We need to save the LSN here because the following apply will
      * free the item.
@@ -441,47 +470,49 @@ static void ApplyAndFreeRedoItem(RedoItem *item)
     XLogRecPtr readLSN = item->record.ReadRecPtr;
 
     if (item->replay_undo) {
+        GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
         g_redoWorker->replay_undo = (g_redoWorker->role == UndoLogZidWorker);
         ApplyRecordWithoutSyncUndoLog(item);
-        pg_atomic_write_u64(&g_redoWorker->lastReplayedEndRecPtr, endLSN);
+        SetCompletedReadEndPtr(g_redoWorker, readLSN, endLSN);
+        CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_4]);
     } else if (IsLSNMarker(item)) {
         FreeRedoItem(item);
         SetCompletedReadEndPtr(g_redoWorker, readLSN, endLSN);
-    } else if (item->sharewithtrxn)
+    } else if (item->sharewithtrxn) {
+        GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_5]);
         ApplyMultiPageShareWithTrxnRecord(item);
-    else if (item->blockbytrxn)
+        CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_5]);
+    } else if (item->blockbytrxn) {
+        GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
         ApplyMultiPageSyncWithTrxnRecord(item);
-    else if (item->shareCount == 1) {
+        CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_6]);
+    } else if (item->shareCount == 1) {
+        GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_7]);
         ApplySinglePageRecord(item);
         SetCompletedReadEndPtr(g_redoWorker, readLSN, endLSN);
+        CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_7]);
     } else {
         if (item->designatedWorker == ALL_WORKER) {
+            GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
             ApplyMultiPageAllWorkerRecord(item);
+            CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_8]);
         } else {
+            GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_9]);
             ApplyMultiPageRecord(item);
             SetCompletedReadEndPtr(g_redoWorker, readLSN, endLSN);
+            CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_9]);
         }
-    }
-}
-
-/* Run from the worker thread. */
-void OnlyFreeRedoItem(RedoItem *item)
-{
-    if (pg_atomic_read_u32(&item->freed) == 0) {
-        FreeRedoItem(item);
     }
 }
 
 /* Run from the worker thread */
 static void ApplyRecordWithoutSyncUndoLog(RedoItem *item)
 {
-    bool bOld = item->oldVersion;
-
     /* No need to sync with undo log */
     if (g_redoWorker->replay_undo) {
         Assert(g_redoWorker->role == UndoLogZidWorker);
         MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
-        ApplyRedoRecord(&item->record, bOld);
+        ApplyRedoRecord(&item->record);
         (void)MemoryContextSwitchTo(oldCtx);
         uint32 shrCount = pg_atomic_read_u32(&item->shareCount);
         uint32 trueRefCount = pg_atomic_add_fetch_u32(&item->trueRefCount, 1);
@@ -520,18 +551,19 @@ static void ApplyRecordWithoutSyncUndoLog(RedoItem *item)
 static void ApplySinglePageRecord(RedoItem *item, bool replayUndo)
 {
     XLogReaderState *record = &item->record;
-    bool bOld = item->oldVersion;
-
+    long readbufcountbefore = u_sess->instr_cxt.pg_buffer_usage->local_blks_read;
     MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
-    ApplyRedoRecord(record, bOld);
+    ApplyRedoRecord(record);
     (void)MemoryContextSwitchTo(oldCtx);
+    record->readblocks = u_sess->instr_cxt.pg_buffer_usage->local_blks_read - readbufcountbefore;
 
     if (replayUndo) {
         uint32 shrCount = pg_atomic_read_u32(&item->shareCount);
         uint32 trueRefCount = pg_atomic_add_fetch_u32(&item->trueRefCount, 1);
         uint32 undoZidWorkersNum = get_recovery_undozidworkers_num();
-        if (trueRefCount == (shrCount + undoZidWorkersNum))
+        if (trueRefCount == (shrCount + undoZidWorkersNum)) {
             FreeRedoItem(item);
+        }
     } else {
         FreeRedoItem(item);
     }
@@ -591,7 +623,7 @@ static void WaitAndApplyMultiPageRecord(RedoItem *item)
 
     MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
     /* Apply the record and wake up other workers. */
-    ApplyRedoRecord(&item->record, item->oldVersion);
+    ApplyRedoRecord(&item->record);
     (void)MemoryContextSwitchTo(oldCtx);
 
     pg_memory_barrier();
@@ -674,7 +706,6 @@ static void ApplyMultiPageAllWorkerRecord(RedoItem *item)
 {
     g_redoWorker->statMulpageCnt++;
     XLogReaderState *record = &item->record;
-    bool bOld = item->oldVersion;
     XLogRecPtr endLSN = item->record.EndRecPtr;
     XLogRecPtr readLSN = item->record.ReadRecPtr;
     (void)pg_atomic_add_fetch_u32(&item->refCount, 1);
@@ -682,14 +713,10 @@ static void ApplyMultiPageAllWorkerRecord(RedoItem *item)
 
     if (IsCheckPoint(record)) {
         CheckPoint checkPoint;
-        if (bOld) {
-            checkPoint = update_checkpoint(record);
-        } else {
-            rc = memcpy_s(&checkPoint, sizeof(checkPoint), XLogRecGetData(record), sizeof(checkPoint));
-            securec_check(rc, "\0", "\0");
-        }
+        rc = memcpy_s(&checkPoint, sizeof(checkPoint), XLogRecGetData(record), sizeof(checkPoint));
+        securec_check(rc, "\0", "\0");
 
-        if (HasTimelineUpdate(record, bOld)) {
+        if (HasTimelineUpdate(record)) {
             UpdateTimeline(&checkPoint);
         }
 
@@ -881,6 +908,21 @@ bool SendPageRedoClearMark(PageRedoWorker *worker)
     return SPSCBlockingQueuePut(worker->queue, &g_cleanupMark);
 }
 
+bool SendPageRedoClosefdMark(PageRedoWorker *worker)
+{
+    return SPSCBlockingQueuePut(worker->queue, &g_closefdMark);
+}
+
+
+bool SendPageRedoCleanInvalidPageMark(PageRedoWorker *worker, RepairFileKey key)
+{
+    errno_t rc = memcpy_s((char*)&g_cleanInvalidPageMark, sizeof(RepairFileKey), (char*)&key, sizeof(RepairFileKey));
+    securec_check(rc, "", "");
+
+    return SPSCBlockingQueuePut(worker->queue, &g_cleanInvalidPageMark);
+}
+
+
 bool SendPageRedoWorkerTerminateMark(PageRedoWorker *worker)
 {
     return SPSCBlockingQueuePut(worker->queue, &g_terminateMark);
@@ -917,6 +959,7 @@ void UpdatePageRedoWorkerStandbyState(PageRedoWorker *worker, HotStandbyState ne
 /* Run from the txn worker thread. */
 XLogRecPtr GetCompletedRecPtr(PageRedoWorker *worker)
 {
+    pg_read_barrier();
     return pg_atomic_read_u64(&worker->lastReplayedEndRecPtr);
 }
 
@@ -1048,6 +1091,280 @@ void WaitAllPageWorkersQueueEmpty()
                 HandlePageRedoInterrupts();
             }
         }
+    }
+}
+
+void RepairPageAndRecoveryXLog(BadBlockRecEnt *page_info, const char *page)
+{
+    RedoBufferInfo buffer;
+    RedoBufferTag blockinfo;
+    errno_t rc;
+    RedoItem *item = NULL;
+
+    blockinfo.rnode = page_info->key.relfilenode;
+    blockinfo.forknum = page_info->key.forknum;
+    blockinfo.blkno = page_info->key.blocknum;
+    blockinfo.pblk = page_info->pblk;
+
+    /* read page to buffer pool by RBM_ZERO_AND_LOCK mode and get buffer lock */
+    (void)XLogReadBufferForRedoBlockExtend(&blockinfo, RBM_ZERO_AND_LOCK, false, &buffer,
+        page_info->rec_max_lsn, InvalidXLogRecPtr, false, WITH_NORMAL_CACHE, false);
+
+    rc = memcpy_s(buffer.pageinfo.page, BLCKSZ, page, BLCKSZ);
+    securec_check(rc, "", "");
+    MarkBufferDirty(buffer.buf);
+    UnlockReleaseBuffer(buffer.buf);
+
+    /* recovery the page xlog */
+    item = page_info->head;
+    while (item != NULL) {
+        RedoItem *next = item->remoteNext;
+        ApplySinglePageRecord(item);
+        item = next;
+    }
+}
+
+HTAB* BadBlockHashTblCreate()
+{
+    HASHCTL ctl;
+    errno_t rc;
+
+    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "", "");
+
+    ctl.keysize = sizeof(RepairBlockKey);
+    ctl.entrysize = sizeof(BadBlockRecEnt);
+    ctl.hash = tag_hash;
+
+    return hash_create("recovery thread bad block hashtbl", MAX_REMOTE_READ_INFO_NUM, &ctl, HASH_ELEM | HASH_FUNCTION);
+}
+
+/* RecordBadBlockAndPushToRemote
+ *               If the bad page has been stored, record the xlog. If the bad page
+ * has not been stored, need push to page repair thread hash table and record to
+ * recovery thread hash table.
+ */
+void RecordBadBlockAndPushToRemote(XLogReaderState *record, RepairBlockKey key,
+    PageErrorType error_type, XLogRecPtr old_lsn, XLogPhyBlock pblk)
+{
+    bool found = false;
+    BadBlockRecEnt *remoteReadInfo = NULL;
+    RedoItem *newItem = NULL;
+    bool thread_found = false;
+    HTAB *bad_hash = NULL;
+    gs_thread_t tid = gs_thread_get_cur_thread();
+
+    if (AmPageRedoWorker()) {
+        bad_hash = g_redoWorker->badPageHashTbl;
+    } else {
+        Assert(AmStartupProcess());
+        bad_hash = g_instance.startup_cxt.badPageHashTbl;
+    }
+
+    found = PushBadPageToRemoteHashTbl(key, error_type, old_lsn, pblk, tid.thid);
+
+    if (found) {
+         /* store the record for recovery */
+        remoteReadInfo = (BadBlockRecEnt*)hash_search(bad_hash, &(key), HASH_FIND, &thread_found);
+        newItem = (RedoItem *)palloc_extended(MAXALIGN(sizeof(RedoItem)) +
+                sizeof(RedoItem *) * (GetPageWorkerCount() + 1), MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+
+        InitReaderStateByOld(&newItem->record, record, true);
+        CopyDataFromOldReader(&newItem->record, record);
+        newItem->need_free = true;
+
+        Assert(thread_found);
+        if (!thread_found) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("recovery thread bad block hash table corrupted")));
+        }
+        newItem->remoteNext = NULL;
+        remoteReadInfo->tail->remoteNext = newItem;
+        remoteReadInfo->tail = newItem;
+        remoteReadInfo->rec_max_lsn = newItem->record.EndRecPtr;
+    } else {
+        remoteReadInfo = (BadBlockRecEnt*)hash_search(bad_hash, &(key), HASH_ENTER, &thread_found);
+        Assert(!thread_found);
+        newItem = (RedoItem *)palloc_extended(MAXALIGN(sizeof(RedoItem)) +
+                sizeof(RedoItem *) * (GetPageWorkerCount() + 1), MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+
+        InitReaderStateByOld(&newItem->record, record, true);
+        CopyDataFromOldReader(&newItem->record, record);
+        newItem->need_free = true;
+
+        remoteReadInfo->key.relfilenode = key.relfilenode;
+        remoteReadInfo->key.forknum = key.forknum;
+        remoteReadInfo->key.blocknum = key.blocknum;
+        remoteReadInfo->pblk = pblk;
+        remoteReadInfo->rec_min_lsn = newItem->record.EndRecPtr;
+        remoteReadInfo->rec_max_lsn = newItem->record.EndRecPtr;
+        newItem->remoteNext = NULL;
+        remoteReadInfo->head = newItem;
+        remoteReadInfo->tail = newItem;
+
+        if (AmPageRedoWorker()) {
+            g_redoWorker->remoteReadPageNum++;
+            if (g_redoWorker->remoteReadPageNum >= MAX_REMOTE_READ_INFO_NUM) {
+                ereport(WARNING, (errmsg("recovery thread found %d error block.", g_redoWorker->remoteReadPageNum)));
+            }
+        } else {
+            Assert(AmStartupProcess());
+            g_instance.startup_cxt.remoteReadPageNum++;
+            if (g_instance.startup_cxt.remoteReadPageNum >= MAX_REMOTE_READ_INFO_NUM) {
+                ereport(WARNING, (errmsg("startup thread found %d error block.",
+                    g_instance.startup_cxt.remoteReadPageNum)));
+            }
+        }
+
+        return;
+    }
+
+    return;
+}
+
+/* ClearPageRepairHashTbl
+ *         drop table, or truncate table, need clear the page repair hashTbl, if the
+ * repair page Filenode match, need remove.
+ */
+void ClearRecoveryThreadHashTbl(const RelFileNode &node, ForkNumber forknum, BlockNumber minblkno,
+    bool segment_shrink)
+{
+    HTAB *bad_hash = NULL;
+    bool found = false;
+    BadBlockRecEnt *entry = NULL;
+    HASH_SEQ_STATUS status;
+
+    if (AmPageRedoWorker()) {
+        bad_hash = g_redoWorker->badPageHashTbl;
+    } else {
+        Assert(AmStartupProcess());
+        bad_hash = g_instance.startup_cxt.badPageHashTbl;
+    }
+
+    hash_seq_init(&status, bad_hash);
+    while ((entry = (BadBlockRecEnt *)hash_seq_search(&status)) != NULL) {
+        if (BlockNodeMatch(entry->key, entry->pblk, node, forknum, minblkno, segment_shrink)) {
+            if (hash_search(bad_hash, &(entry->key), HASH_REMOVE, &found) == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("recovery thread bad page hash table corrupted")));
+            }
+            g_redoWorker->remoteReadPageNum--;
+        }
+    }
+
+    return;
+}
+
+/* BatchClearPageRepairHashTbl
+ *           drop database, or drop segmentspace, need clear the page repair hashTbl,
+ * if the repair page key dbNode match and spcNode match, need remove.
+ */
+void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode)
+{
+    HTAB *bad_hash = NULL;
+    bool found = false;
+    BadBlockRecEnt *entry = NULL;
+    HASH_SEQ_STATUS status;
+
+    if (AmPageRedoWorker()) {
+        bad_hash = g_redoWorker->badPageHashTbl;
+    } else {
+        Assert(AmStartupProcess());
+        bad_hash = g_instance.startup_cxt.badPageHashTbl;
+    }
+
+    hash_seq_init(&status, bad_hash);
+    while ((entry = (BadBlockRecEnt *)hash_seq_search(&status)) != NULL) {
+        if (dbNodeandSpcNodeMatch(&(entry->key.relfilenode), spcNode, dbNode)) {
+            if (hash_search(bad_hash, &(entry->key), HASH_REMOVE, &found) == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("page repair hash table corrupted")));
+            }
+            g_redoWorker->remoteReadPageNum--;
+        }
+    }
+
+    return;
+}
+
+
+/* ClearSpecificsPageEntryAndMem
+ *           If the page has been repair, need remove entry of bad page hashtable,
+ * and release the xlog record mem.
+ */
+void ClearSpecificsPageEntryAndMem(BadBlockRecEnt *entry)
+{
+    HTAB *bad_hash = NULL;
+    bool found = false;
+
+    if (AmPageRedoWorker()) {
+        bad_hash = g_redoWorker->badPageHashTbl;
+    } else {
+        Assert(AmStartupProcess());
+        bad_hash = g_instance.startup_cxt.badPageHashTbl;
+    }
+
+    if ((BadBlockRecEnt*)hash_search(bad_hash, &(entry->key), HASH_REMOVE, &found) == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("recovery thread bad block hash table corrupted")));
+    }
+}
+
+/* CheckRemoteReadAndRepairPage
+ *           check the page state of page repair hashtbl, if can repair,
+ * repair the page and recovery xlog, clean the page info.
+ */
+void CheckRemoteReadAndRepairPage(BadBlockRecEnt *entry)
+{
+    RepairBlockKey key;
+    XLogRecPtr rec_min_lsn = InvalidXLogRecPtr;
+    XLogRecPtr rec_max_lsn = InvalidXLogRecPtr;
+    bool check = false;
+    char *page = NULL;
+
+    key = entry->key;
+    rec_min_lsn = entry->rec_min_lsn;
+    rec_max_lsn = entry->rec_max_lsn;
+
+    if (AmPageRedoWorker()) {
+        page = g_redoWorker->page;
+    } else {
+        Assert(AmStartupProcess());
+        page = g_instance.startup_cxt.page;
+    }
+
+    check = CheckRepairPage(key, rec_min_lsn, rec_max_lsn, page);
+    if (check) {
+        /* copy page to buffer pool, and recovery the stored xlog */
+        RepairPageAndRecoveryXLog(entry, page);
+        /* clear this thread invalid page hash table */
+        forget_specified_invalid_pages(key);
+        /* clear thread bad block hash entry */
+        ClearSpecificsPageEntryAndMem(entry);
+        /* clear page repair thread hash table */
+        ClearSpecificsPageRepairHashTbl(key);
+        g_redoWorker->remoteReadPageNum--;
+    }
+
+    return;
+}
+
+
+void SeqCheckRemoteReadAndRepairPage()
+{
+    BadBlockRecEnt *entry = NULL;
+    HASH_SEQ_STATUS status;
+    HTAB *bad_hash = NULL;
+
+    if (AmPageRedoWorker()) {
+        bad_hash = g_redoWorker->badPageHashTbl;
+    } else {
+        Assert(AmStartupProcess());
+        bad_hash = g_instance.startup_cxt.badPageHashTbl;
+    }
+
+    hash_seq_init(&status, bad_hash);
+    while ((entry = (BadBlockRecEnt *)hash_seq_search(&status)) != NULL) {
+        CheckRemoteReadAndRepairPage(entry);
     }
 }
 

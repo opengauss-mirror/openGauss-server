@@ -57,7 +57,7 @@
                                 status == STATE_WAIT_XACTSYNC)
 
 ThreadPoolGroup::ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum, int maxStreamNum,
-                                 int groupId, int numaId, int cpuNum, int* cpuArr)
+                                 int groupId, int numaId, int cpuNum, int* cpuArr, bool enableBindCpuNuma)
     : m_listener(NULL),
       m_maxWorkerNum(maxWorkerNum),
       m_maxStreamNum(maxStreamNum),
@@ -78,11 +78,13 @@ ThreadPoolGroup::ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum, int maxS
       m_groupCpuNum(cpuNum),
       m_groupCpuArr(cpuArr),
       m_enableNumaDistribute(false),
+      m_enableBindCpuNuma(enableBindCpuNuma),
       m_workers(NULL),
       m_context(NULL)
 {
     pthread_mutex_init(&m_mutex, NULL);
     CPU_ZERO(&m_nodeCpuSet);
+    CPU_ZERO(&m_CpuNumaSet);
 
     m_streams = NULL;
     m_freeStreamList = NULL;
@@ -113,6 +115,12 @@ void ThreadPoolGroup::Init(bool enableNumaDistribute)
 
     m_listener = New(CurrentMemoryContext) ThreadPoolListener(this);
     m_listener->StartUp();
+
+    if (m_enableBindCpuNuma) {
+        for (int i = 0; i < m_groupCpuNum; i++) {
+            CPU_SET(m_groupCpuArr[i], &m_CpuNumaSet);
+        }
+    }
 
     InitWorkerSentry();
 
@@ -158,6 +166,8 @@ void ThreadPoolGroup::AddWorker(int i)
         if (m_groupCpuArr) {
             if (m_enableNumaDistribute) {
                 AttachThreadToNodeLevel(m_workers[i].worker->GetThreadId());
+            } else if (m_enableBindCpuNuma) {
+                AttachThreadToCpuNuma(m_workers[i].worker->GetThreadId());
             } else {
                 AttachThreadToCPU(m_workers[i].worker->GetThreadId(), m_groupCpuArr[i % m_groupCpuNum]);
             }
@@ -400,6 +410,14 @@ void ThreadPoolGroup::AttachThreadToNodeLevel(ThreadId thread) const
     int ret = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &m_nodeCpuSet);
     if (ret != 0)
         ereport(WARNING, (errmsg("Fail to attach thread %lu to numa node %d", thread, m_numaId)));
+}
+
+void ThreadPoolGroup::AttachThreadToCpuNuma(ThreadId thread)
+{
+    int ret = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &m_CpuNumaSet);
+    if (ret != 0) {
+        ereport(WARNING, (errmsg("Fail to attach thread %lu to CPU NUMA", thread)));
+    }
 }
 
 void ThreadPoolGroup::InitStreamSentry()

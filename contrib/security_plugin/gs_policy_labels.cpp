@@ -36,6 +36,8 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
+#include "gs_mask_policy.h"
+#include "gs_policy_plugin.h"
 
 static THR_LOCAL loaded_labels *all_labels = NULL;
 
@@ -192,13 +194,13 @@ bool check_label_has_object(const PolicyLabelItem *object,
         return false;
     }
     Assert(CheckLabelBoundPolicy != NULL);
-    loaded_labels *all_labels = get_policy_labels();
-    if (all_labels == NULL) {
+    loaded_labels *cur_all_labels = get_policy_labels();
+    if (cur_all_labels == NULL) {
         return false;
     }
 
-    loaded_labels::const_iterator it = all_labels->begin();
-    loaded_labels::const_iterator eit = all_labels->end();
+    loaded_labels::const_iterator it = cur_all_labels->begin();
+    loaded_labels::const_iterator eit = cur_all_labels->end();
     for (; it != eit; ++it) {
         /* for each item of loaded existing labels, and match labels */
         if (labels != NULL && labels->find(*(it->first)) == labels->end()) {
@@ -237,5 +239,42 @@ void clear_thread_local_label()
     if (all_labels != NULL) {
         delete all_labels;
         all_labels = NULL;
+    }
+}
+
+void verify_drop_column(AlterTableStmt *stmt)
+{
+    ListCell *lcmd = NULL;
+    foreach (lcmd, stmt->cmds) {
+        AlterTableCmd *cmd = (AlterTableCmd *)lfirst(lcmd);
+        switch (cmd->subtype) {
+            case AT_DropColumn: {
+                /* check by column */
+                PolicyLabelItem find_obj(stmt->relation->schemaname, stmt->relation->relname, cmd->name, O_COLUMN);
+                if (check_label_has_object(&find_obj, is_masking_has_object)) {
+                    char buff[512] = {0};
+                    int rc = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
+                        "Column: %s is part of some resource label, can not be renamed.", find_obj.m_column);
+                    securec_check_ss(rc, "\0", "\0");
+                    gs_audit_issue_syslog_message("PGAUDIT", buff, AUDIT_POLICY_EVENT, AUDIT_FAILED);
+                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\"", buff)));
+                }
+                break;
+            }
+            case AT_AlterColumnType: {
+                PolicyLabelItem find_obj(stmt->relation->schemaname, stmt->relation->relname, cmd->name, O_COLUMN);
+                if (check_label_has_object(&find_obj, is_masking_has_object, true)) {
+                    char buff[512] = {0};
+                    int ret = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
+                        "Column: %s is part of some masking policy, can not be changed.", find_obj.m_column);
+                    securec_check_ss(ret, "\0", "\0");
+                    gs_audit_issue_syslog_message("PGAUDIT", buff, AUDIT_POLICY_EVENT, AUDIT_FAILED);
+                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\"", buff)));
+                }
+                break;
+            }
+            default:
+                break;
+        }
     }
 }

@@ -8,8 +8,8 @@
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
- * Written by Peter Eisentraut <peter_e@gmx.net>.
  * Portions Copyright (c) 2021, openGauss Contributors
+ * Written by Peter Eisentraut <peter_e@gmx.net>.
  *
  * IDENTIFICATION
  * src/backend/utils/misc/guc/guc_sql.cpp
@@ -165,7 +165,6 @@ static void assign_convert_string_to_digit(bool newval, void* extra);
 static void AssignUStoreAttr(const char* newval, void* extra);
 static bool check_snapshot_delimiter(char** newval, void** extra, GucSource source);
 static bool check_snapshot_separator(char** newval, void** extra, GucSource source);
-static bool check_numformat_arg(char** numformat, void** extra, GucSource source);
 
 
 static void InitSqlConfigureNamesBool();
@@ -174,15 +173,7 @@ static void InitSqlConfigureNamesInt64();
 static void InitSqlConfigureNamesReal();
 static void InitSqlConfigureNamesString();
 static void InitSqlConfigureNamesEnum();
-
-double str_to_num(char *format_str);
-double my_pow(double base, int exp);
-void extract_deci_part_width(double num, int width, int int_places, StringInfo result, bool is_negative);
-void extract_part(double num, StringInfo result, bool is_negative, bool extract_deci, int int_places, int deci_places);
-void extract_int_part(double num, int places, StringInfo space_part, StringInfo int_part);
-void extract_deci_part(double num, int deci_places, StringInfo deci_part);
-void out_of_range(StringInfo result, int len, bool amend_length);
-
+#define FORBID_GUC_NUM 3
 /*
  * Although only "on", "off", and "safe_encoding" are documented, we
  * accept all the likely variants of "on" and "off".
@@ -296,9 +287,17 @@ static const struct config_enum_entry sql_beta_options[] = {
     {"canonical_pathkey", CANONICAL_PATHKEY, false},
     {"index_cost_with_leaf_pages_only", INDEX_COST_WITH_LEAF_PAGES_ONLY, false},
     {"partition_opfusion", PARTITION_OPFUSION , false},
-    {"spi_debug", SPI_DEBUG, false},
-    {"resowner_debug", RESOWNER_DEBUG, false},
     {"a_style_coerce", A_STYLE_COERCE, false},
+    {"plpgsql_stream_fetchall", PLPGSQL_STREAM_FETCHALL, false},
+    {"predpush_same_level", PREDPUSH_SAME_LEVEL, false},
+    {"partition_fdw_on", PARTITION_FDW_ON, false},
+    {NULL, 0, false}
+};
+
+static const struct config_enum_entry vector_engine_strategy[] = {
+    {"off", OFF_VECTOR_ENGINE, false},
+    {"force", FORCE_VECTOR_ENGINE, false},
+    {"optimal", OPT_VECTOR_ENGINE, false},
     {NULL, 0, false}
 };
 
@@ -323,7 +322,14 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"hide_tailing_zero", OPT_HIDE_TAILING_ZERO},
     {"plsql_security_definer", OPT_SECURITY_DEFINER},
     {"skip_insert_gs_source", OPT_SKIP_GS_SOURCE},
-    {"proc_outparam_override", OPT_PROC_OUTPARAM_OVERRIDE}
+    {"proc_outparam_override", OPT_PROC_OUTPARAM_OVERRIDE},
+    {"allow_procedure_compile_check", OPT_ALLOW_PROCEDURE_COMPILE_CHECK},
+    {"proc_implicit_for_loop_variable", OPT_IMPLICIT_FOR_LOOP_VARIABLE},
+    {"aformat_null_test", OPT_AFORMAT_NULL_TEST},
+    {"aformat_regexp_match", OPT_AFORMAT_REGEX_MATCH},
+    {"rownum_type_compat", OPT_ROWNUM_TYPE_COMPAT},
+    {"compat_cursor", OPT_COMPAT_CURSOR},
+    {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT}
 };
 
 /*
@@ -865,7 +871,7 @@ static void InitSqlConfigureNamesBool()
             gettext_noop("Logs the duration of each completed SQL statement."),
             NULL},
             &u_sess->attr.attr_sql.log_duration,
-            true,
+            false,
             NULL,
             NULL,
             NULL},
@@ -1545,6 +1551,19 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"uppercase_attribute_name",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            COMPAT_OPTIONS,
+            gettext_noop("Set to ON will force attname displayed in upper case when all characters in lower case "
+                        "(comapatible with ORA), otherwise do nothing."),
+            NULL,
+            GUC_REPORT},
+            &u_sess->attr.attr_sql.uppercase_attribute_name,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #endif
         /* End-of-list marker */
         {{NULL,
@@ -2213,6 +2232,7 @@ static void InitSqlConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#ifndef ENABLE_MULTIPLE_NODES
         {{"pldebugger_timeout",
             PGC_USERSET,
             NODE_ALL,
@@ -2227,6 +2247,7 @@ static void InitSqlConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -2665,17 +2686,6 @@ static void InitSqlConfigureNamesString()
             check_snapshot_delimiter,
             NULL,
             NULL},
-        {{"pset_num_format",
-            PGC_USERSET,
-            NODE_ALL,
-            CUSTOM_OPTIONS,
-            gettext_noop("GUC parameter of pset_num_format."),
-            NULL},
-            &u_sess->attr.attr_common.pset_num_format,
-            "\0",
-            check_numformat_arg,
-            NULL,
-            NULL},
         {{NULL,
             (GucContext)0,
             (GucNodeType)0,
@@ -2834,6 +2844,18 @@ static void InitSqlConfigureNamesEnum()
             &u_sess->attr.attr_sql.sql_beta_feature,
             NO_BETA_FEATURE,
             sql_beta_options,
+            NULL,
+            NULL,
+            NULL},
+        {{"try_vector_engine_strategy",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING,
+            gettext_noop("Sets the strategy of using vector engine for row table."),
+            NULL},
+            &u_sess->attr.attr_sql.vectorEngineStrategy,
+            OFF_VECTOR_ENGINE,
+            vector_engine_strategy,
             NULL,
             NULL,
             NULL},
@@ -3091,7 +3113,22 @@ static void assign_inlist2joininfo(const char* newval, void* extra)
         }
     }
 }
-
+#ifdef ENABLE_MULTIPLE_NODES
+static bool ForbidDistributeParameter(const char* elem)
+{
+    const char *forbidList[] = {
+        "proc_outparam_override",
+        "skip_insert_gs_source",
+        "rownum_type_compat"
+    };
+    for (int i = 0; i < FORBID_GUC_NUM; i++) {
+        if (strcmp(forbidList[i], elem) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
 /*
  * check_behavior_compat_options: GUC check_hook for behavior compat options
  */
@@ -3119,12 +3156,20 @@ static bool check_behavior_compat_options(char** newval, void** extra, GucSource
         bool nfound = true;
 
         for (start = 0; start < OPT_MAX; start++) {
+#ifdef ENABLE_MULTIPLE_NODES
+            if (ForbidDistributeParameter(item)) {
+                GUC_check_errdetail("behavior compat option %s can not use"
+                                    " in distributed database system", item);
+                pfree(rawstring);
+                list_free(elemlist);
+                return false;
+            }
+#endif
             if (strcmp(item, behavior_compat_options[start].name) == 0) {
                 nfound = false;
                 break;
             }
         }
-
         if (nfound) {
             GUC_check_errdetail("invalid behavior compat option \"%s\"", item);
             pfree(rawstring);
@@ -3315,275 +3360,4 @@ static bool check_snapshot_separator(char** newval, void** extra, GucSource sour
 {
     return (strlen(*newval) == 1 && (!u_sess->attr.attr_sql.db4ai_snapshot_version_delimiter
                                      || **newval != *u_sess->attr.attr_sql.db4ai_snapshot_version_delimiter));
-}
-
-/*
- * @@GaussDB@@
- * Brief			: Check numformat (strlen(numformat) is known to greater than 0).
- * Description		: If numformat is not right, then return false.
- */
-static bool check_numformat_arg(char** numformat, void** extra, GucSource source)
-{
-    if (NULL == numformat) {
-        return false;
-    }
-
-    if (strlen(*numformat) > 128) {
-        GUC_check_errdetail("The numformat is too long!");
-        return false;
-    }
-
-    bool point_appeared = false;
-    char *numformat_copy = *numformat;
-    while (*numformat_copy != '\0') {
-        if (*numformat_copy != '9' && *numformat_copy != '.') {
-            return false;
-        }
-        if (*numformat_copy == '.') {
-            if (unlikely(point_appeared)) {
-                return false;
-            }
-            point_appeared = true;
-        }
-		numformat_copy++;
-    }
-    return true;
-}
-
-char* apply_num_width(double num)
-{
-    StringInfoData result;
-    initStringInfo(&result);
-    bool is_negative = false;
-    int width = u_sess->attr.attr_common.pset_num_width;
-    const int decimal = 10;
-    if (num < 0) {
-        num = -num;
-        is_negative = true;
-        width--;
-    }
-
-    int int_places = 0;
-    double num_copy = num;
-    while ((int)num_copy > 0) {
-        int_places++;
-        num_copy = num_copy / decimal;
-    }
-
-    if (int_places > width) {
-        out_of_range(&result, width, is_negative);
-    } else if (int_places == width || int_places == width - 1) {
-        int value = (int)(num * decimal) % decimal;
-        if (value >= 5) {
-            num += 1;
-        }
-        if ((int)num == (int)my_pow(decimal, width) && int_places == width) {
-            out_of_range(&result, width, is_negative);
-        } else {
-            if (unlikely(is_negative)) {
-                appendStringInfo(&result, "%s", "-");
-            }
-            appendStringInfo(&result, "%d", (int)num);
-        }
-    } else {
-        extract_deci_part_width(num, width, int_places, &result, is_negative);
-    }
-
-    return result.data;
-}
-
-void extract_deci_part_width(double num, int width, int int_places, StringInfo result, bool is_negative)
-{
-    int deci_places = width - 1 - int_places;
-    const int decimal = 10;
-    int value = (int)(num * my_pow(decimal, deci_places + 1)) % decimal;
-    if (value >= 5) {
-        num += my_pow(decimal, -deci_places);
-        int_places = 0;
-        double num_copy = num;
-        while ((int)num_copy > 0) {
-            int_places++;
-            num_copy = num_copy / decimal;
-        }
-        deci_places = width - 1 - int_places;
-    }
-
-    StringInfoData int_part, deci_part;
-    initStringInfo(&int_part);
-    initStringInfo(&deci_part);
-
-    if (unlikely(is_negative)) {
-        appendStringInfo(&int_part, "%s", "-");
-    }
-
-    for (int i = int_places - 1; i >= 0; i--) {
-        int value = (int)(num / my_pow(decimal, i)) % decimal;
-        appendStringInfo(&int_part, "%d", value);
-    }
-
-    int last_not_zero = 0;
-    for (int i = 1; i <= deci_places; i++) {
-        int value = (int)(num * my_pow(decimal, i)) % decimal;
-        if (value != 0) {
-            last_not_zero = i;
-        }
-    }
-
-    if (last_not_zero == 0) {
-        for (int i = 0; i < deci_places + 1; i++) {
-            appendStringInfo(result, "%s", " ");
-        }
-        if (int_part.len == 0) {
-            appendStringInfo(&int_part, "%s", "0");
-        }
-        appendStringInfo(result, "%s", int_part.data);
-    } else {
-        for (int i = 0; i < deci_places - last_not_zero; i++) {
-            appendStringInfo(result, "%s", " ");
-        }
-        appendStringInfo(result, "%s", int_part.data);
-        appendStringInfo(result, "%s", ".");
-        extract_deci_part(num, last_not_zero, &deci_part);
-        appendStringInfo(result, "%s", deci_part.data);
-    }
-
-    pfree(int_part.data);
-    pfree(deci_part.data);
-}
-
-char* apply_num_format(double num)
-{
-    char *format_str = u_sess->attr.attr_common.pset_num_format;
-    double format_num = str_to_num(format_str);
-    const int decimal = 10;
-    
-    StringInfoData result;
-    initStringInfo(&result);
-    bool is_negative = false;
-
-    if (num < 0) {
-        num = -num;
-        is_negative = true;
-    }
-
-    char *decimal_str = strrchr(format_str, '.');
-    if (decimal_str == NULL) {
-        int remainder = (int)(num * decimal) % decimal;
-        if (remainder >= 5) {
-            num += 1;
-        }
-        if ((int)num > (int)format_num) {
-            out_of_range(&result, strlen(format_str) + 1, false);
-        } else {
-            extract_part(num, &result, is_negative, false, strlen(format_str), 0);
-        }
-    } else {
-        int deci_places = strlen(decimal_str) - 1;
-        int remainder = (int)(num * my_pow(decimal, deci_places + 1)) % decimal;
-        if (remainder >= 5) {
-            num += my_pow(decimal, -deci_places);
-        }
-        num = (double)(int)(num * my_pow(decimal, deci_places)) / my_pow(decimal, deci_places);
-        if (num > format_num) {
-            out_of_range(&result, strlen(format_str) + 1, false);
-        } else {
-            extract_part(num, &result, is_negative, true, strlen(format_str) - strlen(decimal_str), deci_places);
-        }
-    }
-
-    return result.data;
-}
-
-double str_to_num(char *format_str)
-{
-    double num;
-    const int decimal = 10;
-
-    char *decimal_str = strrchr(format_str, '.');
-    if (decimal_str == NULL) {
-        num = my_pow(decimal, strlen(format_str)) - 1;
-    } else {
-        num = my_pow(decimal, strlen(format_str) - strlen(decimal_str)) - 1 + (1 - my_pow(decimal, 1 - strlen(decimal_str)));
-    }
-
-    return num;
-}
-
-double my_pow(double base, int exp)
-{
-    double result = 1;
-    bool is_negative = false;
-    if (exp < 0) {
-        exp = -exp;
-        is_negative = true;
-    }
-    while (exp) {
-        if (exp & 1) {
-            result *= base;
-        }
-        exp >>= 1;
-        base *= base;
-    }
-    return is_negative ? (1 / result) : result;
-}
-
-void extract_part(double num, StringInfo result, bool is_negative, bool extract_deci, int int_places, int deci_places)
-{
-    StringInfoData space_part, int_part, deci_part;
-    initStringInfo(&space_part);
-    initStringInfo(&int_part);
-    initStringInfo(&deci_part);
-
-    extract_int_part(num, int_places, &space_part, &int_part);
-
-    appendStringInfo(result, "%s", space_part.data);
-    if (unlikely(is_negative)) {
-        appendStringInfo(result, "%s", "-");
-    }
-    appendStringInfo(result, "%s", int_part.data);
-
-    if (extract_deci) {
-        extract_deci_part(num, deci_places, &deci_part);
-        appendStringInfo(result, "%s", ".");
-        appendStringInfo(result, "%s", deci_part.data);
-    }
-
-    pfree(space_part.data);
-    pfree(int_part.data);
-    pfree(deci_part.data);
-}
-
-void extract_int_part(double num, int places, StringInfo space_part, StringInfo int_part)
-{
-    bool can_append_space = true;
-     const int decimal = 10;
-    for (int i = places - 1; i >= 0; i--) {
-        int value = (int)(num / my_pow(decimal, i)) % decimal;
-        if (value == 0 && unlikely(can_append_space)) {
-            appendStringInfo(space_part, "%s", " ");
-        } else {
-            appendStringInfo(int_part, "%d", value);
-            can_append_space = false;
-        }
-    }
-}
-
-void extract_deci_part(double num, int deci_places, StringInfo deci_part)
-{
-    const int decimal = 10;
-
-    for (int i = 1; i <= deci_places; i++) {
-        int value = (int)(num * my_pow(decimal, i)) % decimal;
-        appendStringInfo(deci_part, "%d", value);
-    }
-}
-
-void out_of_range(StringInfo result, int len, bool amend_length)
-{
-    if (unlikely(amend_length)) {
-        len++;
-    }
-    for (int i = 0; i < len; i++) {
-        appendStringInfo(result, "%s", "#");
-    }
 }

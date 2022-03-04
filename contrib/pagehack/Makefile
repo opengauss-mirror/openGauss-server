@@ -1,6 +1,6 @@
 # contrib/pagehack/Makefile
 MODULE_big	= pagehack
-OBJS		= openGaussCompression.o pagehack.o
+OBJS		= pagehack.o
 
 # executable program, even there is no database server/client
 PROGRAM = pagehack
@@ -14,7 +14,7 @@ subdir = contrib/pagehack
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 enable_shared = false
-override CFLAGS += -lzstd
+
 ifeq ($(enable_debug), yes)
 	PG_CPPFLAGS += -DDEBUG
 endif

@@ -29,6 +29,7 @@
 #include "pgxc/pgxc.h"
 #include "access/xlog_internal.h"
 #include "access/multi_redo_api.h"
+#include "libpq/libpq-fe.h"
 #include "postmaster/startup.h"
 #include "postmaster/postmaster.h"
 #include "replication/dataqueue.h"
@@ -39,6 +40,7 @@
 #include "replication/walsender_private.h"
 #include "storage/pmsignal.h"
 #include "storage/shmem.h"
+#include "utils/builtins.h"
 #include "utils/guc.h"
 #include "utils/timestamp.h"
 #include "gssignal/gs_signal.h"
@@ -57,7 +59,7 @@
  * entryway ReplConnArray2 = (channel4, channel5, channel6)
  */
 extern bool dummyStandbyMode;
-
+static const int MAX_CONNECT_ERROR_COUNT = 3000;
 
 static void SetWalRcvConninfo(ReplConnTarget conn_target);
 static void SetFailoverFailedState(void);
@@ -70,6 +72,8 @@ extern void SetDataRcvDummyStandbySyncPercent(int percent);
  */
 #define WALRCV_STARTUP_TIMEOUT 3
 #define FAILOVER_HOST_FOR_DUMMY "failover_host_for_dummy"
+static int  NORMAL_IP_LEN = 16; /* ipv4 len */
+static const char* HADRUSERINFO_CONIG_NAME = "hadr_user_info";
 
 bool walRcvCtlBlockIsEmpty(void)
 {
@@ -86,14 +90,8 @@ bool walRcvCtlBlockIsEmpty(void)
     bool retState = false;
 
     SpinLockAcquire(&walrcb->mutex);
-    if (IsExtremeRedo()) {
-        if (walrcb->walFreeOffset == walrcb->walReadOffset) {
-            retState = true;
-        }
-    } else {
-        if (walrcb->walFreeOffset == walrcb->walWriteOffset) {
-            retState = true;
-        }
+    if (walrcb->walFreeOffset == walrcb->walWriteOffset) {
+        retState = true;
     }
 
     SpinLockRelease(&walrcb->mutex);
@@ -149,6 +147,17 @@ static void SetFailoverFailedState(void)
     return;
 }
 
+static int GetConnectErrorCont(int index)
+{
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    int ret = 0;
+    SpinLockAcquire(&hashmdata->mutex);
+    ret = hashmdata->disconnect_count[index];
+    SpinLockRelease(&hashmdata->mutex);
+    return ret;
+}
+
+
 /*
  * Find next connect channel , and try to connect. According to the ReplFlag,
  * ReplIndex , connect error in the walrcv, find next channel, save it in
@@ -160,6 +169,7 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
     volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     ReplConnInfo *conninfo = NULL;
     int checknum = MAX_REPLNODE_NUM;
+    int useIndex = 0;
 
     if (IS_DN_DUMMY_STANDYS_MODE()) {
         if (conn_target == REPCONNTARGET_PRIMARY) {
@@ -186,19 +196,43 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
         g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
     SpinLockRelease(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
 
+    SpinLockAcquire(&hashmdata->mutex);
+    int prev_index = hashmdata->prev_repl;
+    SpinLockRelease(&hashmdata->mutex);
+
+    if (prev_index > 0 && (GetConnectErrorCont(prev_index) < MAX_CONNECT_ERROR_COUNT) &&
+        IS_CN_DISASTER_RECOVER_MODE) {
+        t_thrd.walreceiverfuncs_cxt.WalReplIndex = prev_index;
+        ereport(LOG, (errmsg(" SetWalRcvConninfo reuse connection %d.", prev_index)));
+        pg_usleep(200000L);
+    }
+
     /*
      * Skip other connections if you specify a connection host.
      */
     while (checknum--) {
+        char* ipNoZone = NULL;
+        char ipNoZoneData[IP_LEN] = {0};
         conninfo = GetRepConnArray(&t_thrd.walreceiverfuncs_cxt.WalReplIndex);
+        if (conninfo == NULL) {
+            t_thrd.walreceiverfuncs_cxt.WalReplIndex++;
+            break;
+        }
+        
+        /* remove any '%zone' part from an IPv6 address string */
+        ipNoZone = remove_ipv6_zone(conninfo->remotehost, ipNoZoneData, IP_LEN);
         if (connNode.conn_mode == SPECIFY_CONNECTION &&
             (conninfo != NULL &&
-            strcmp(connNode.disable_conn_node_host, (char *)conninfo->remotehost) == 0) &&
+            strcmp(connNode.disable_conn_node_host, (char *)ipNoZone) == 0) &&
             connNode.disable_conn_node_port == conninfo->remoteport) {
+            useIndex = t_thrd.walreceiverfuncs_cxt.WalReplIndex;
+            t_thrd.walreceiverfuncs_cxt.WalReplIndex++;
             break;
         }
 
         if (connNode.conn_mode != SPECIFY_CONNECTION) {
+            useIndex = t_thrd.walreceiverfuncs_cxt.WalReplIndex;
+            t_thrd.walreceiverfuncs_cxt.WalReplIndex++;
             break;
         }
 
@@ -212,20 +246,24 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
         rcs = snprintf_s((char *)walrcv->conninfo, MAXCONNINFO, MAXCONNINFO - 1,
                          "host=%s port=%d localhost=%s localport=%d", conninfo->remotehost, conninfo->remoteport,
                          conninfo->localhost, conninfo->localport);
+#ifdef ENABLE_LITE_MODE
+        if (*conninfo->sslmode != '\0') {
+            rcs = snprintf_s((char *)walrcv->conninfo, MAXCONNINFO, MAXCONNINFO - 1,
+                             "%s sslmode=%s", (char *)walrcv->conninfo, conninfo->sslmode);
+        }
+#endif
         securec_check_ss(rcs, "\0", "\0");
         walrcv->conninfo[MAXCONNINFO - 1] = '\0';
         walrcv->conn_errno = NONE_ERROR;
         walrcv->conn_target = conn_target;
         SpinLockRelease(&walrcv->mutex);
-        ereport(LOG, (errmsg("wal receiver try to connect to %s.", walrcv->conninfo)));
+        ereport(LOG, (errmsg("wal receiver try to connect to %s index %d .", walrcv->conninfo, useIndex)));
         SpinLockAcquire(&hashmdata->mutex);
-        if (!IS_SHARED_STORAGE_STANBY_CLUSTER_MODE)
-            hashmdata->current_repl = t_thrd.walreceiverfuncs_cxt.WalReplIndex;
+        if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE)
+            hashmdata->current_repl = useIndex;
         else
-            hashmdata->current_repl = MAX_REPLNODE_NUM + t_thrd.walreceiverfuncs_cxt.WalReplIndex;
-        hashmdata->disconnect_count[hashmdata->current_repl] = 0;
+            hashmdata->current_repl = MAX_REPLNODE_NUM + useIndex;
         SpinLockRelease(&hashmdata->mutex);
-        t_thrd.walreceiverfuncs_cxt.WalReplIndex++;
     }
 }
 
@@ -334,6 +372,34 @@ StringInfo get_rcv_slot_name(void)
     return slotname;
 }
 
+/* trim char  ':' and '%' */
+static char* trim_ipv6_char(char* str, char* dest)
+{
+    char* s = dest;
+    char* cp_location = str;
+    int len = 0;
+
+    /* if ipv4,do nothing */
+    if (strchr(str, ':') == NULL) {
+        return str;
+    }
+
+    for (; *cp_location != '\0' && len < NORMAL_IP_LEN; cp_location++) {
+
+        /* skip the char  ':' and '%' */
+        if (*cp_location == ':' || *cp_location == '%') {
+            continue;
+        }
+
+        *s = *cp_location;
+        s++;
+        len++;
+    }
+    *s = '\0';
+
+    return dest;
+}
+
 /*
  * Set current walrcv's slotname.
  *  depend on have setting the hashmdata->current_repl
@@ -350,7 +416,7 @@ static void set_rcv_slot_name(const char *slotname)
     SpinLockAcquire(&hashmdata->mutex);
     replIdx = hashmdata->current_repl;
     SpinLockRelease(&hashmdata->mutex);
-    if (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE && replIdx >= MAX_REPLNODE_NUM) {
+    if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE && replIdx >= MAX_REPLNODE_NUM) {
         replIdx = replIdx - MAX_REPLNODE_NUM;
     }
     conninfo = GetRepConnArray(&replIdx);
@@ -371,8 +437,14 @@ static void set_rcv_slot_name(const char *slotname)
             rc = snprintf_s((char *)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s",
                             g_instance.attr.attr_common.PGXCNodeName);
         } else if (conninfo != NULL) {
+            char slotData[NAMEDATALEN] = {'\0'};
+            char *slotTmp = NULL;
+
+            /* trim char  ':' and '%' */
+            slotTmp = trim_ipv6_char(conninfo->localhost, slotData);
+
             rc = snprintf_s((char *)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s_%s_%d",
-                            g_instance.attr.attr_common.PGXCNodeName, conninfo->localhost, conninfo->localport);
+                            g_instance.attr.attr_common.PGXCNodeName, slotTmp, conninfo->localport);
         }
         securec_check_ss(rc, "\0", "\0");
     } else
@@ -494,6 +566,15 @@ void ShutdownWalRcv(void)
  */
 void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname)
 {
+    if (IS_SHARED_STORAGE_MODE) {
+        ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.shareStorageXLogCtl;
+        ReadShareStorageCtlInfo(ctlInfo);
+        if ((uint64)g_instance.attr.attr_storage.xlog_file_size != ctlInfo->xlogFileSize) {
+            ereport(FATAL, (errmsg("maybe primary cluster changed xlog_file_size to %lu, current is %lu,"
+                "we need exit for change.", ctlInfo->xlogFileSize, g_instance.attr.attr_storage.xlog_file_size)));
+        }
+    }
+
     if (HasBuildReason()) {
         ereport(LOG, (errmsg("Stop to start walreceiver due to have build reason")));
         pg_usleep(500000L);
@@ -769,7 +850,7 @@ ReplConnInfo *GetRepConnArray(int *cur_idx)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid replication node index:%d", *cur_idx)));
     }
-    if (!IS_SHARED_STORAGE_STANBY_CLUSTER_MODE)
+    if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE)
         replConnInfoArray = &t_thrd.postmaster_cxt.ReplConnArray[0];
     else
         replConnInfoArray = &t_thrd.postmaster_cxt.CrossClusterReplConnArray[0];
@@ -782,23 +863,23 @@ ReplConnInfo *GetRepConnArray(int *cur_idx)
         replConnInfo = replConnInfoArray[*cur_idx];
         if (replConnInfo != NULL) {
             if (t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
-                if (t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby) {
+                if (t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby || IS_PGXC_COORDINATOR) {
                     if (replConnInfo->isCrossRegion) {
-                        break;
+                        return replConnInfo;
                     }
                 } else {
-                    if (replConnInfo->isCascade) {
-                        break;
+                    if (replConnInfo->isCascade || (!replConnInfo->isCascade && !replConnInfo->isCrossRegion)) {
+                        return replConnInfo;
                     }
                 }
             } else {
-                break;
+                return replConnInfo;
             }
         }
         (*cur_idx)++;
     }
 
-    return replConnInfo;
+    return NULL;
 }
 
 void get_failover_host_conninfo_for_dummy(int *repl)
@@ -845,10 +926,19 @@ static int get_repl_idx(const char *host, int port)
 {
     int i = 0;
     int replIdx = -1;
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
 
     for (i = 0; i < MAX_REPLNODE_NUM; ++i) {
-        if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL &&
-            strcmp(t_thrd.postmaster_cxt.ReplConnArray[i]->remotehost, host) == 0 &&
+        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        if (replconninfo == NULL) {
+            continue;
+        }
+
+        /* remove any '%zone' part from an IPv6 address string */
+        ipNoZone = remove_ipv6_zone(replconninfo->remotehost, ipNoZoneData, IP_LEN);
+
+        if (strcmp(ipNoZone, host) == 0 &&
             t_thrd.postmaster_cxt.ReplConnArray[i]->remoteport == port) {
             replIdx = i;
             break;
@@ -1045,7 +1135,7 @@ static void wal_get_ha_rebuild_reason_with_dummy(char *buildReason, ServerMode l
     volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     int nRet = 0;
     load_server_mode();
-    if (local_role == NORMAL_MODE || local_role == PRIMARY_MODE || IS_DISASTER_RECOVER_MODE) {
+    if (local_role == NORMAL_MODE || local_role == PRIMARY_MODE || IS_OBS_DISASTER_RECOVER_MODE) {
         nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
         securec_check_ss(nRet, "\0", "\0");
         return;
@@ -1100,7 +1190,7 @@ static void wal_get_ha_rebuild_reason_with_multi(char *buildReason, ServerMode l
     }
     if ((replConnInfo != NULL &&
         (walrcv->conn_target == REPCONNTARGET_PRIMARY || am_cascade_standby() || IS_SHARED_STORAGE_MODE)) ||
-        IS_DISASTER_RECOVER_MODE) {
+        IS_OBS_DISASTER_RECOVER_MODE) {
         if (hashmdata->repl_reason[hashmdata->current_repl] == NONE_REBUILD && isRunning) {
             rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
             securec_check_ss(rcs, "\0", "\0");
@@ -1141,12 +1231,15 @@ static int cmp_min_lsn(const void *a, const void *b)
 
 void GetMinLsnRecordsFromHadrCascadeStandby(void)
 {
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     XLogRecPtr standbyReceiveList[g_instance.attr.attr_storage.max_wal_senders];
     XLogRecPtr standbyFlushList[g_instance.attr.attr_storage.max_wal_senders];
     XLogRecPtr standbyApplyList[g_instance.attr.attr_storage.max_wal_senders];
+    uint32 standbyFlagsList[g_instance.attr.attr_storage.max_wal_senders];
+    uint32 standbyFlags = 0;
     int i;
-    XLogRecPtr applyLoc;
-    XLogRecPtr ReplayReadPtr;
+    XLogRecPtr applyLoc = InvalidXLogRecPtr;
+    XLogRecPtr ReplayReadPtr = InvalidXLogRecPtr;
     bool needReport = false;
     errno_t rc = EOK;
 
@@ -1155,6 +1248,8 @@ void GetMinLsnRecordsFromHadrCascadeStandby(void)
     rc = memset_s(standbyFlushList, sizeof(standbyFlushList), 0, sizeof(standbyFlushList));
     securec_check(rc, "\0", "\0");
     rc = memset_s(standbyApplyList, sizeof(standbyApplyList), 0, sizeof(standbyApplyList));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(standbyFlagsList, sizeof(standbyFlagsList), 0, sizeof(standbyFlagsList));
     securec_check(rc, "\0", "\0");
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
@@ -1165,6 +1260,7 @@ void GetMinLsnRecordsFromHadrCascadeStandby(void)
             standbyApplyList[i] = walsnd->apply;
             standbyReceiveList[i] = walsnd->receive;
             standbyFlushList[i] = walsnd->flush;
+            standbyFlagsList[i] = walsnd->replyFlags;
         }
         SpinLockRelease(&walsnd->mutex);
     }
@@ -1209,78 +1305,96 @@ void GetMinLsnRecordsFromHadrCascadeStandby(void)
             ereport(DEBUG1, (errmsg(
                 "In disaster cluster, all cascade standbys are abnormal, using local apply location.")));
         }
+        /* all cascade standby is not pause by targetBarrier, we set flag 0 */
+        standbyFlags |= standbyFlagsList[i] & IS_PAUSE_BY_TARGET_BARRIER;
     }
+    SpinLockAcquire(&walrcv->mutex);
+    t_thrd.walreceiver_cxt.reply_message->replyFlags |= standbyFlags;
+    SpinLockRelease(&walrcv->mutex);
+    if (t_thrd.walreceiver_cxt.reply_message->apply > t_thrd.walreceiver_cxt.reply_message->flush) {
+        ereport(LOG, (errmsg(
+            "In disaster cluster, the reply message of quorum flush location is less than replay location,"
+            "flush is %X/%X, replay is %X/%X.", (uint32)(t_thrd.walreceiver_cxt.reply_message->flush >> 32),
+            (uint32)t_thrd.walreceiver_cxt.reply_message->flush,
+            (uint32)(t_thrd.walreceiver_cxt.reply_message->apply >> 32),
+            (uint32)t_thrd.walreceiver_cxt.reply_message->apply)));
+    }
+}
+
+static void GetHadrUserInfo(char *hadr_user_info)
+{
+    char conninfo[MAXPGPATH] = {0};
+    char query[MAXPGPATH] = {0};
+    char conn_error_msg[MAXPGPATH] = {0};
+    PGconn* pgconn = NULL;
+    PGresult* res = NULL;
+    char* value = NULL;
+    errno_t rc;
+
+    rc = snprintf_s(query,
+        sizeof(query),
+        sizeof(query) - 1,
+        "SELECT VALUE FROM GS_GLOBAL_CONFIG WHERE NAME = '%s';",
+        HADRUSERINFO_CONIG_NAME);
+    securec_check_ss_c(rc, "\0", "\0");
+    rc = snprintf_s(conninfo,
+        sizeof(conninfo),
+        sizeof(conninfo) - 1,
+        "dbname=postgres port=%d host=%s "
+        "connect_timeout=60 application_name='local_hadr_walrcv' "
+        "options='-c xc_maintenance_mode=on'",
+        g_instance.attr.attr_network.PostPortNumber,
+        g_instance.attr.attr_network.tcp_link_addr);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    pgconn = PQconnectdb(conninfo);
+    if (PQstatus(pgconn) != CONNECTION_OK) {
+        rc = snprintf_s(conn_error_msg, MAXPGPATH, MAXPGPATH - 1,
+                        "%s", PQerrorMessage(pgconn));
+        securec_check_ss(rc, "\0", "\0");
+
+        PQfinish(pgconn);
+        ereport(ERROR, (errmsg("hadr walreceiver connect to local database fail: %s", conn_error_msg)));
+        return;
+    }
+
+    res = PQexec(pgconn, query);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
+        rc = snprintf_s(conn_error_msg, MAXPGPATH, MAXPGPATH - 1,
+                        "%s", PQresultErrorMessage(res));
+        securec_check_ss(rc, "\0", "\0");
+
+        PQclear(res);
+        PQfinish(pgconn);
+        ereport(ERROR, (errmsg("hadr walreceiver could not obtain hadr_user_info: %s", conn_error_msg)));
+        return;
+    }
+
+    value = PQgetvalue(res, 0, 0);
+    rc = strcpy_s(hadr_user_info, MAXPGPATH, value);
+    securec_check_ss(rc, "\0", "\0");
+
+    PQclear(res);
+    PQfinish(pgconn);
 }
 
 void GetPasswordForHadrStreamingReplication(char user[], char password[])
 {
-    char superUserKeyCipherFile[MAXPGPATH] = {0};
-    char superUserKeyRandFile[MAXPGPATH] = {0};
-    char fileIndex[MAXPGPATH] = {0};
-    char* username = NULL;
-    struct stat cipherFileStat;
-    struct stat randFileStat;
-    int num = 0;
-    int rcs = 0;
+    char hadr_user_info[MAXPGPATH] = {0};
+    char plain_hadr_user_info[MAXPGPATH] = {0};
+    errno_t rc = EOK;
 
-    if (u_sess->attr.attr_storage.hadr_super_user_record_path == NULL ||
-        u_sess->attr.attr_storage.hadr_super_user_record_path[0] == '\0') {
-        ereport(ERROR, (errmsg(
-                "In disaster cluster, main standby could not get user record path, so there is not invalid user.")));
-        return;
+    GetHadrUserInfo(hadr_user_info);
+    if (!decryptECString(hadr_user_info, plain_hadr_user_info, MAXPGPATH, HADR_MODE)) {
+        rc = memset_s(plain_hadr_user_info, sizeof(plain_hadr_user_info), 0, sizeof(plain_hadr_user_info));
+        securec_check(rc, "\0", "\0");
+        ereport(ERROR, (errmsg("In disaster cluster, decrypt hadr_user_info fail.")));
     }
-    username = strrchr(u_sess->attr.attr_storage.hadr_super_user_record_path, '/');
-    username = username + 1;
-    rcs = strcat_s(user, MAXPGPATH - 1, username);
-    securec_check_ss(rcs, "\0", "\0");
-    while (true) {
-        rcs = snprintf_s(superUserKeyCipherFile, MAXPGPATH, MAXPGPATH - 1, "%s/cipher/key_%d/server.key.cipher",
-            u_sess->attr.attr_storage.hadr_super_user_record_path, num);
-        securec_check_ss(rcs, "\0", "\0");
-        canonicalize_path(superUserKeyCipherFile);
-
-        rcs = snprintf_s(superUserKeyRandFile, MAXPGPATH, MAXPGPATH - 1, "%s/rand/key_%d/server.key.rand",
-            u_sess->attr.attr_storage.hadr_super_user_record_path, num);
-        securec_check_ss(rcs, "\0", "\0");
-        canonicalize_path(superUserKeyRandFile);
-        if (lstat(superUserKeyCipherFile, &cipherFileStat) != 0) {
-            if (errno == ENOENT) {
-                if (lstat(superUserKeyRandFile, &randFileStat) != 0) {
-                    if (errno == ENOENT) {
-                        break;
-                    } else {
-                        ereport(ERROR, (errmsg(
-                            "In disaster cluster, main standby could not get password without stat rand file.")));
-                        return;
-                    }
-                } else {
-                    ereport(ERROR, (errmsg(
-                        "In disaster cluster, main standby could not get password without cipher file.")));
-                    return;
-                }
-            } else {
-                ereport(ERROR, (errmsg(
-                    "In disaster cluster, main standby could not get password without stat cipher file.")));
-                return;
-            }
-        }
-        if (lstat(superUserKeyRandFile, &randFileStat) != 0) {
-            ereport(ERROR, (errmsg("In disaster cluster, main standby could not lstat rand file.")));
-            return;
-        }
-        rcs = snprintf_s(fileIndex, MAXPGPATH, MAXPGPATH - 1, "key_%d", num);
-        securec_check_ss(rcs, "\0", "\0");
-        GS_UCHAR* plaintext = NULL;
-        plaintext = (GS_UCHAR*)palloc(RANDOM_LEN + 1);
-        if (plaintext == NULL) {
-            ereport(ERROR, (errmsg("In disaster cluster, main standby memory is temporarily unavailable.")));
-        }
-        decode_cipher_files(HADR_MODE, u_sess->attr.attr_storage.hadr_super_user_record_path, fileIndex, plaintext);
-
-        rcs = strcat_s(password, MAXPGPATH - 1, (char*)plaintext);
-        securec_check_ss(rcs, "\0", "\0");
-        pfree(plaintext);
-        plaintext = NULL;
-        num++;
+    if (sscanf_s(plain_hadr_user_info, "%[^|]|%s", user, MAXPGPATH, password, MAXPGPATH) != 2) {
+        rc = memset_s(plain_hadr_user_info, sizeof(plain_hadr_user_info), 0, sizeof(plain_hadr_user_info));
+        securec_check(rc, "\0", "\0");
+        ereport(ERROR, (errmsg("In disaster cluster, parse plain hadr_user_info fail.")));
     }
+    rc = memset_s(plain_hadr_user_info, sizeof(plain_hadr_user_info), 0, sizeof(plain_hadr_user_info));
+    securec_check(rc, "\0", "\0");
 }

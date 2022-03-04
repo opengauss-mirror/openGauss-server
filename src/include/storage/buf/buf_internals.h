@@ -96,13 +96,6 @@ typedef struct buftag {
     BlockNumber blockNum; /* blknum relative to begin of reln */
 } BufferTag;
 
-typedef struct buftagnocompress {
-    RelFileNodeV2 rnode;
-    ForkNumber forkNum;
-    BlockNumber blockNum; /* blknum relative to begin of reln */
-} BufferTagSecondVer;
-
-
 typedef struct buftagnohbkt {
     RelFileNodeOld rnode; /* physical relation identifier */
     ForkNumber forkNum;
@@ -346,6 +339,6 @@ extern void DropRelFileNodeAllLocalBuffers(const RelFileNode& rnode);
 extern void AtEOXact_LocalBuffers(bool isCommit);
 extern void update_wait_lockid(LWLock* lock);
 extern char* PageDataEncryptForBuffer(Page page, BufferDesc *bufdesc, bool is_segbuf = false);
-extern void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod = WITH_NORMAL_CACHE);
+extern void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod = WITH_NORMAL_CACHE, bool skipFsync = false);
 extern void LocalBufferFlushAllBuffer();
 #endif /* BUFMGR_INTERNALS_H */

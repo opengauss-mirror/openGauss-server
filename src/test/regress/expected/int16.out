@@ -1,0 +1,259 @@
+--
+-- INT16
+-- Test int16 128-bit integers.
+--
+CREATE SCHEMA schema_int16;
+SET search_path = schema_int16;
+SET ENABLE_BETA_FEATURES = OFF;
+-- should fail
+CREATE TABLE INT16_TBL(q1 int16, q2 int16, q3 serial);
+ERROR:  It's not supported to create int16 column
+SET ENABLE_BETA_FEATURES = ON;
+CREATE TABLE INT16_TBL(q1 int16, q2 int16, q3 serial);
+NOTICE:  CREATE TABLE will create implicit sequence "int16_tbl_q3_seq" for serial column "int16_tbl.q3"
+-- do not support create btree index on int16 for now
+CREATE INDEX int16idx on INT16_TBL(q1);
+ERROR:  data type int16 has no default operator class for access method "btree"
+HINT:  You must specify an operator class for the index or define a default operator class for the data type.
+INSERT INTO INT16_TBL VALUES('  123   ','  456');
+INSERT INTO INT16_TBL VALUES('456   ','12345678901234567890123456789');
+INSERT INTO INT16_TBL VALUES('123456789012345678901234567890','123');
+INSERT INTO INT16_TBL VALUES(+1234567890123456789012345678901,'12345678901234567890123456789012');
+INSERT INTO INT16_TBL VALUES('+123456789012345678901234567890123','-1234567890123456789012345678901234');
+-- test boundary
+INSERT INTO INT16_TBL VALUES(170141183460469231731687303715884105727, -170141183460469231731687303715884105728);
+INSERT INTO INT16_TBL VALUES(170141183460469231731687303715884105728, 0);
+ERROR:  int128 out of range
+CONTEXT:  referenced column: q1
+INSERT INTO INT16_TBL VALUES(0, -170141183460469231731687303715884105729);
+ERROR:  int128 out of range
+CONTEXT:  referenced column: q2
+-- bad inputs
+INSERT INTO INT16_TBL(q1) VALUES ('      ');
+ERROR:  invalid input syntax for type int16: "      "
+LINE 1: INSERT INTO INT16_TBL(q1) VALUES ('      ');
+                                          ^
+DETAIL:  cannot convert input text to int16
+CONTEXT:  referenced column: q1
+INSERT INTO INT16_TBL(q1) VALUES ('xxx');
+ERROR:  invalid input syntax for type int16: "xxx"
+LINE 1: INSERT INTO INT16_TBL(q1) VALUES ('xxx');
+                                          ^
+DETAIL:  cannot convert input text to int16
+CONTEXT:  referenced column: q1
+INSERT INTO INT16_TBL(q1) VALUES ('4321170141183460469231731687303715884105727');
+ERROR:  value "4321170141183460469231731687303715884105727" is out of range for type int16
+LINE 1: INSERT INTO INT16_TBL(q1) VALUES ('4321170141183460469231731...
+                                          ^
+DETAIL:  text exceeds the length of int16
+CONTEXT:  referenced column: q1
+INSERT INTO INT16_TBL(q1) VALUES ('-143170141183460469231731687303715884105727');
+ERROR:  value "-143170141183460469231731687303715884105727" is out of range for type int16
+LINE 1: INSERT INTO INT16_TBL(q1) VALUES ('-143170141183460469231731...
+                                          ^
+DETAIL:  text exceeds the length of int16
+CONTEXT:  referenced column: q1
+INSERT INTO INT16_TBL(q1) VALUES ('- 123');
+ERROR:  invalid input syntax for type int16: "- 123"
+LINE 1: INSERT INTO INT16_TBL(q1) VALUES ('- 123');
+                                          ^
+DETAIL:  cannot convert input text to int16
+CONTEXT:  referenced column: q1
+INSERT INTO INT16_TBL(q1) VALUES ('  345     5');
+ERROR:  invalid input syntax for type int16: "  345     5"
+LINE 1: INSERT INTO INT16_TBL(q1) VALUES ('  345     5');
+                                          ^
+DETAIL:  text contain invalid character
+CONTEXT:  referenced column: q1
+INSERT INTO INT16_TBL(q1) VALUES ('');
+-- do not support order for now
+SELECT * FROM INT16_TBL ORDER BY q1,q2;
+ERROR:  could not identify an ordering operator for type int16
+LINE 1: SELECT * FROM INT16_TBL ORDER BY q1,q2;
+                                         ^
+HINT:  Use an explicit ordering operator or modify the query.
+-- support compare
+SELECT count(*) FROM INT16_TBL WHERE q2 = q2 + 1;
+ count 
+-------
+     0
+(1 row)
+
+SELECT count(*) FROM INT16_TBL WHERE q2 <> q2 - 1;
+ERROR:  int16 out of range
+DETAIL:  result is too large for int16
+SELECT count(*) FROM INT16_TBL WHERE q2 < q2 * 1;
+ count 
+-------
+     0
+(1 row)
+
+SELECT count(*) FROM INT16_TBL WHERE q2 <= q2 / 1;
+ count 
+-------
+     6
+(1 row)
+
+SELECT count(*) FROM INT16_TBL WHERE q2 <= q2;
+ count 
+-------
+     6
+(1 row)
+
+SELECT count(*) FROM INT16_TBL WHERE q2 > q2 + 1;
+ count 
+-------
+     0
+(1 row)
+
+SELECT count(*) FROM INT16_TBL WHERE q2 >= q2 + 1;
+ count 
+-------
+     0
+(1 row)
+
+-- support type casts
+\dC int16
+                          List of casts
+   Source type    |   Target type    |  Function  |   Implicit?   
+------------------+------------------+------------+---------------
+ bigint           | int16            | int16      | yes
+ boolean          | int16            | int16      | yes
+ double precision | int16            | int16      | yes
+ int16            | bigint           | int8       | in assignment
+ int16            | boolean          | int16_bool | yes
+ int16            | double precision | float8     | yes
+ int16            | integer          | int4       | in assignment
+ int16            | numeric          | numeric    | yes
+ int16            | oid              | oid        | yes
+ int16            | real             | float4     | yes
+ int16            | smallint         | int2       | in assignment
+ int16            | tinyint          | i16toi1    | in assignment
+ integer          | int16            | int16      | yes
+ numeric          | int16            | int16      | yes
+ oid              | int16            | int16      | yes
+ real             | int16            | int16      | yes
+ smallint         | int16            | int16      | yes
+ tinyint          | int16            | int16      | yes
+(18 rows)
+
+SELECT CAST(q1 AS int2) FROM INT16_TBL WHERE q3 < 3 ORDER BY q3;
+ q1  
+-----
+ 123
+ 456
+(2 rows)
+
+SELECT CAST(q1 AS int4) FROM INT16_TBL WHERE q3 < 3 ORDER BY q3;
+ q1  
+-----
+ 123
+ 456
+(2 rows)
+
+SELECT CAST(q1 AS int8) FROM INT16_TBL WHERE q3 < 3 ORDER BY q3;
+ q1  
+-----
+ 123
+ 456
+(2 rows)
+
+SELECT CAST(q1 AS numeric) FROM INT16_TBL ORDER BY q3;
+                   q1                    
+-----------------------------------------
+                                     123
+                                     456
+          123456789012345678901234567890
+         1234567890123456789012345678901
+       123456789012345678901234567890123
+ 170141183460469231731687303715884105727
+                                        
+(7 rows)
+
+SELECT CAST(q1 AS float4) FROM INT16_TBL ORDER BY q3;
+     q1      
+-------------
+         123
+         456
+ 1.23457e+29
+ 1.23457e+30
+ 1.23457e+32
+ 1.70141e+38
+            
+(7 rows)
+
+SELECT CAST(q1 AS float8) FROM INT16_TBL ORDER BY q3;
+          q1          
+----------------------
+                  123
+                  456
+ 1.23456789012346e+29
+ 1.23456789012346e+30
+ 1.23456789012346e+32
+ 1.70141183460469e+38
+                     
+(7 rows)
+
+SELECT CAST(q1 AS boolean) FROM INT16_TBL ORDER BY q3;
+ q1 
+----
+ t
+ t
+ t
+ t
+ t
+ t
+ 
+(7 rows)
+
+-- some may overflow
+SELECT CAST(q1 AS int2) FROM INT16_TBL ORDER BY q3;
+ERROR:  smallint out of range
+DETAIL:  cannot cast value too large for smallint
+CONTEXT:  referenced column: q1
+SELECT CAST(q1 AS int4) FROM INT16_TBL ORDER BY q3;
+ERROR:  integer out of range
+DETAIL:  cannot cast value too large for integer
+CONTEXT:  referenced column: q1
+SELECT CAST(q1 AS int8) FROM INT16_TBL ORDER BY q3;
+ERROR:  bigint out of range
+DETAIL:  cannot cast value too large for bigint
+CONTEXT:  referenced column: q1
+SELECT CAST(q1 AS oid) FROM INT16_TBL ORDER BY q3;
+ERROR:  OID out of range
+DETAIL:  cannot cast value too large for OID
+CONTEXT:  referenced column: q1
+-- cast to int16
+CREATE TABLE TEST_TBL(
+    v1 bigint,
+    v2 boolean,
+    v3 double precision,
+    v4 integer,
+    v5 numeric,
+    v6 oid,
+    v7 real,
+    v8 smallint,
+    v9 tinyint);
+INSERT INTO TEST_TBL VALUES(1, 2, 3, 4, 5, 6, 7, 8, 9);
+CREATE TABLE CAST_TBL(
+    v1 int16,
+    v2 int16,
+    v3 int16,
+    v4 int16,
+    v5 int16,
+    v6 int16,
+    v7 int16,
+    v8 int16,
+    v9 int16);
+INSERT INTO CAST_TBL SELECT * FROM TEST_TBL;
+SELECT * FROM CAST_TBL;
+ v1 | v2 | v3 | v4 | v5 | v6 | v7 | v8 | v9 
+----+----+----+----+----+----+----+----+----
+  1 |  1 |  3 |  4 |  5 |  6 |  7 |  8 |  9
+(1 row)
+
+DROP SCHEMA schema_int16 CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table int16_tbl
+drop cascades to table test_tbl
+drop cascades to table cast_tbl

@@ -167,6 +167,7 @@ extern void RemoveJobById(Oid objectId);
 extern void check_job_permission(HeapTuple tuple, bool check_running = true);
 extern int jobid_alloc(uint16* pusJobId, int64 job_max_number = JOBID_MAX_NUMBER);
 extern void update_pg_job_dbname(Oid jobid, const char* dbname);
+extern void update_pg_job_username(Oid jobid, const char* username);
 extern char* get_real_search_schema();
 extern void check_interval_valid(int4 job_id, Relation rel, Datum interval);
 extern void check_job_status(Datum job_status);

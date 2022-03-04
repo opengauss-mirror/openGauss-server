@@ -1,0 +1,19 @@
+<refentry id="SQL-PURGE">
+<refmeta>
+<refentrytitle>PURGE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>PURGE</refname>
+<refpurpose>purge object from gs_recyclebin</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+PURGE { TABLE [schema_name.]table_name          
+        | INDEX index_name         
+        | RECYCLEBIN       
+      }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

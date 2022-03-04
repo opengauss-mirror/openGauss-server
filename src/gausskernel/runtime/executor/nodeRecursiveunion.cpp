@@ -136,6 +136,17 @@ static inline void RecursiveUnionWaitCondNegtive(const bool* true_cond, const bo
     return;
 }
 
+static void markIterationStats(RecursiveUnionState* node, bool isSW)
+{
+    if (node->ps.instrument == NULL) {
+        return;
+    }
+    if (isSW) {
+        markSWLevelEnd(node->swstate, node->swstate->sw_numtuples);
+        markSWLevelBegin(node->swstate);
+    }
+}
+
 /* ----------------------------------------------------------------
  *		ExecRecursiveUnion(node)
  *
@@ -160,7 +171,9 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
     PlanState* inner_plan = innerPlanState(node);
     RecursiveUnion* plan = (RecursiveUnion*)node->ps.plan;
     TupleTableSlot* slot = NULL;
+    TupleTableSlot* swSlot = NULL;
     bool is_new = false;
+    bool isSW = IsUnderStartWith((RecursiveUnion *)node->ps.plan);
 
     /* 0. build hash table if it is NULL */
     if (plan->numCols > 0) {
@@ -173,8 +186,10 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
     if (!node->recursing) {
         for (;;) {
             slot = ExecProcNode(outer_plan);
-            if (TupIsNull(slot))
+            if (TupIsNull(slot)) {
+                markIterationStats(node, isSW);
                 break;
+            }
             if (plan->numCols > 0) {
                 /* Find or build hashtable entry for this tuple's group */
                 LookupTupleHashEntry(node->hashtable, slot, &is_new);
@@ -187,11 +202,17 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
             }
 
             /*
-             * Add RUITR and nessary internal pseudo columns before store into worktable,
-             * only processed in start-with case
+             * For START WITH CONNECT BY, create converted tuple with pseudo columns.
              */
-            if (IsUnderStartWith((RecursiveUnion *)node->ps.plan)) {
-                slot = ConvertRuScanOutputSlot(node, slot, false);
+            slot = isSW ? ConvertRuScanOutputSlot(node, slot, false) : slot;
+            swSlot = isSW ? GetStartWithSlot(node, slot) : NULL;
+            if (isSW && swSlot == NULL) {
+                /*
+                 * SWCB terminal condition met. Time to stop.
+                 * Discarding the last tuple.
+                 */
+                markSWLevelEnd(node->swstate, node->swstate->sw_numtuples - 1);
+                break;
             }
 
             /* Each non-duplicate tuple goes to the working table ... */
@@ -201,7 +222,7 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
             node->step_tuple_produced++;
 
             /* ... and to the caller */
-            return slot;
+            return (isSW ? swSlot : slot);
         }
 
         /* Mark none-recursive part is down */
@@ -237,12 +258,15 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
         slot = ExecProcNode(inner_plan);
         if (TupIsNull(slot)) {
             /* debug information for SWCBcase */
-            if (IsUnderStartWith((RecursiveUnion *)node->ps.plan)) {
+            if (IsUnderStartWith((RecursiveUnion *)node->ps.plan) &&
+                !node->intermediate_empty) {
                 ereport(DEBUG1, (errmodule(MOD_EXECUTOR),
                         errmsg("[SWCB DEBUG] current iteration is done: level:%d rownum_current:%d rownum_total:%lu",
                         node->iteration + 1,
                         node->swstate->sw_numtuples,
                         node->swstate->sw_rownum)));
+                markSWLevelEnd(node->swstate, node->swstate->sw_numtuples);
+                markSWLevelBegin(node->swstate);
             }
 #ifdef ENABLE_MULTIPLE_NODES
             /*
@@ -348,7 +372,8 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
 
 
         /* For start-with, reason ditto */
-        if (IsUnderStartWith((RecursiveUnion *)node->ps.plan)) {
+        bool isSW = IsUnderStartWith((RecursiveUnion*)node->ps.plan);
+        if (isSW) {
             int max_times = u_sess->attr.attr_sql.max_recursive_times;
             StartWithOp *swplan = (StartWithOp *)node->swstate->ps.plan;
 
@@ -365,6 +390,15 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
             }
 
             slot = ConvertRuScanOutputSlot(node, slot, true);
+            swSlot = GetStartWithSlot(node, slot);
+            if (isSW && swSlot == NULL) {
+                /*
+                 * SWCB terminal condition met. Time to stop.
+                 * Discarding the last tuple.
+                 */
+                markSWLevelEnd(node->swstate, node->swstate->sw_numtuples - 1);
+                break;
+            }
 
             /*
              * In ORDER SIBLINGS case, as we add SORT-Operator(material) on top of
@@ -373,7 +407,7 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
             if (swplan->swoptions->siblings_orderby_clause) {
                 StartWithOpState *swstate = (StartWithOpState *)node->swstate;
                 if (swstate->sw_nocycleStopOrderSiblings) {
-                    return (TupleTableSlot *)NULL;
+                    return (TupleTableSlot*)NULL;
                 }
 
                 if (CheckCycleExeception(swstate, slot)) {
@@ -391,6 +425,8 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
         tuplestore_puttupleslot(node->intermediate_table, slot);
 
         /* ... and return it */
+        /* it is okay to point slot to swSlot and return now, if necessary */
+        slot = isSW ? swSlot : slot;
         inner_plan->state->es_skip_early_free = orig_early_free;
 
 #ifdef ENABLE_MULTIPLE_NODES

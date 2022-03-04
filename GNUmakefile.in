@@ -66,6 +66,7 @@ install:
 	+@echo "openGauss installation complete."
 else
 ifeq ($(enable_privategauss), yes)
+ifneq ($(enable_lite_mode), yes)
 install:
 	$(MAKE) install_mysql_fdw
 	$(MAKE) install_oracle_fdw
@@ -75,6 +76,16 @@ install:
 	$(MAKE) -C $(root_builddir)/privategauss/kernel/extension/packages $@
 	$(MAKE) -C $(root_builddir)/contrib/gsredistribute $@
 	+@echo "openGauss installation complete."
+else
+install:
+	$(MAKE) install_mysql_fdw
+	$(MAKE) install_oracle_fdw
+	$(MAKE) install_pldebugger
+	$(MAKE) -C contrib/postgres_fdw $@
+	$(MAKE) -C contrib/hstore $@
+	$(MAKE) -C $(root_builddir)/privategauss/kernel/extension/packages $@
+	+@echo "openGauss installation complete."
+endif
 else
 install:
 	$(MAKE) install_mysql_fdw
@@ -130,6 +141,8 @@ fastcheck_parallel_initdb: all
 qunitcheck: all
 
 fastcheck_single: all
+
+upgradecheck_single: all
 
 fastcheck_single_comm_proxy: all
 

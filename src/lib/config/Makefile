@@ -53,7 +53,7 @@ libconfig.a: $(OBJS)
 	$(AR) $(AROPT) $@ $^
 
 utconfig:
-	$(CC) -fPIC -shared $(CFLAGS) $(CPPFLAGS) cm_config.cpp -L$(SECURE_LIB_PATH) -lsecurec -o libutconfig.so
+	$(CC) -fPIC -shared $(CFLAGS) $(CPPFLAGS) cm_config.cpp -L$(SECURE_LIB_PATH) -l$(SECURE_C_CHECK) -o libutconfig.so
 	mv libutconfig.so $(top_builddir)/../distribute/test/ut/lib/
 
 install: all installdirs

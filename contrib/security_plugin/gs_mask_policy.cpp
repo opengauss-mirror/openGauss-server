@@ -196,7 +196,7 @@ static bool is_valid_for_masking(const char* func_name, Oid funcnsp, int& funcid
         bool is_valid = true;
         /* try to find function on pg_proc */
         for (int i = 0; i < catlist->n_members && is_valid; ++i) {
-            HeapTuple	proctup = &catlist->members[i]->tuple;
+            HeapTuple	proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
             Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
             /* verify namespace */
             if (procform->pronamespace != funcnsp) {

@@ -93,6 +93,7 @@
 #include "utils/relcache.h"
 
 static const int NAPTIME_PER_CYCLE = 10; /* max sleep time between cycles (10ms) */
+static const float HALF = 0.5;
 
 typedef struct FlushPosition {
     dlist_node node;
@@ -965,7 +966,7 @@ static bool CheckTimeout(bool *pingSent, TimestampTz lastRecvTimestamp)
          */
         if (!(*pingSent)) {
             timeout = TimestampTzPlusMilliseconds(lastRecvTimestamp,
-                (u_sess->attr.attr_storage.wal_receiver_timeout / 2));
+                (u_sess->attr.attr_storage.wal_receiver_timeout * HALF));
             if (now >= timeout) {
                 requestReply = true;
                 *pingSent = true;
@@ -974,6 +975,14 @@ static bool CheckTimeout(bool *pingSent, TimestampTz lastRecvTimestamp)
     }
 
     return requestReply;
+}
+
+static inline void ProcessApplyWorkerInterrupts(void)
+{
+    if (t_thrd.applyworker_cxt.got_SIGTERM) {
+        ereport(FATAL, (errcode(ERRCODE_ADMIN_SHUTDOWN),
+                        errmsg("terminating logical replication worker due to administrator command")));
+    }
 }
 
 /*
@@ -1015,6 +1024,7 @@ static void ApplyLoop(void)
             ApplyWorkerProcessMsg(type, &s, &last_received);
 
             while ((WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_receive(0, &type, &buf, &len)) {
+                ProcessApplyWorkerInterrupts();
                 last_recv_timestamp = GetCurrentTimestamp();
                 ping_sent = false;
                 s.data = buf;
@@ -1395,7 +1405,7 @@ void ApplyWorkerMain()
                     PGC_BACKEND, PGC_S_OVERRIDE);
 
     /* Keep us informed about subscription changes. */
-    CacheRegisterSyscacheCallback(SUBSCRIPTIONOID, subscription_change_cb, (Datum)0);
+    CacheRegisterThreadSyscacheCallback(SUBSCRIPTIONOID, subscription_change_cb, (Datum)0);
 
     ereport(LOG, (errmsg("logical replication apply for worker subscription \"%s\" has started",
         t_thrd.applyworker_cxt.mySubscription->name)));
@@ -1412,16 +1422,12 @@ void ApplyWorkerMain()
 
     CommitTransactionCommand();
 
-    /* Sensitive options for subscription, will be encrypted when saved to catalog. */
-    const char* sensitiveOptionsArray[] = {"password"};
-    const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
-    List *defList = ConninfoToDefList(t_thrd.applyworker_cxt.mySubscription->conninfo);
-    DecryptOptions(defList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
-    char *conninfo = DefListToString(defList);
-    bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(conninfo, NULL,
+    char *decryptConnInfo = DecryptConninfo(t_thrd.applyworker_cxt.mySubscription->conninfo);
+    bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(decryptConnInfo, NULL,
         t_thrd.applyworker_cxt.mySubscription->name, -1);
-    pfree_ext(defList);
-    pfree_ext(conninfo);
+    rc = memset_s(decryptConnInfo, strlen(decryptConnInfo), 0, strlen(decryptConnInfo));
+    securec_check(rc, "", "");
+    pfree_ext(decryptConnInfo);
     if (!connectSuccess) {
         ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("could not connect to the publisher")));
     }
@@ -1474,6 +1480,7 @@ List* ConninfoToDefList(const char *conn)
     char* cp = NULL;
     char* cp2 = NULL;
     char *buf = pstrdup(conn);
+    size_t len = strlen(buf);
 
     cp = buf;
 
@@ -1531,7 +1538,7 @@ List* ConninfoToDefList(const char *conn)
             for (;;) {
                 if (*cp == '\0') {
                     pfree(buf);
-                    ereport(LOG, (errmsg("unterminated quoted string in connection info string")));
+                    ereport(ERROR, (errmsg("unterminated quoted string in connection info string")));
                 }
                 if (*cp == '\\') {
                     cp++;
@@ -1554,14 +1561,18 @@ List* ConninfoToDefList(const char *conn)
          */
         result = lappend(result, makeDefElem(pstrdup(pname), (Node *)makeString(pstrdup(pval))));
     }
+
+    int rc = memset_s(buf, len, 0, len);
+    securec_check(rc, "", "");
     pfree(buf);
     return result;
 }
 
 char* DefListToString(const List *defList)
 {
-    if (defList == NIL) {
-        return NULL;
+    if (unlikely(defList == NIL)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("LogicDecode[Publication]: failed to transfer DefElem list to string, null input")));
     }
 
     ListCell* cell = NULL;

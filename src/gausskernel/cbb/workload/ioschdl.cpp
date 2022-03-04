@@ -950,9 +950,9 @@ static void WLMmonitor_MainLoop(void)
             ProcessConfigFile(PGC_SIGHUP);
         }
 
-        if (u_sess->sig_cxt.got_PoolReload) {
+        if (IsGotPoolReload()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         }
 
         ResetLatch(&t_thrd.wlm_cxt.wlm_mainloop_latch);
@@ -1237,6 +1237,8 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
             t_thrd.wlm_cxt.wlm_xact_start = false;
             t_thrd.wlm_cxt.wlm_init_done = false;
         }
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         /*
          *   Notice: at the most time it isn't necessary to call because
@@ -1383,9 +1385,9 @@ static void WLMarbiter_MainLoop(void)
             ProcessConfigFile(PGC_SIGHUP);
         }
 
-        if (u_sess->sig_cxt.got_PoolReload) {
+        if (IsGotPoolReload()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         }
 
         ResetLatch(&t_thrd.wlm_cxt.wlm_mainloop_latch);
@@ -1562,6 +1564,8 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
             t_thrd.wlm_cxt.wlm_xact_start = false;
             t_thrd.wlm_cxt.wlm_init_done = false;
         }
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         /*
          *   Notice: at the most time it isn't necessary to call because

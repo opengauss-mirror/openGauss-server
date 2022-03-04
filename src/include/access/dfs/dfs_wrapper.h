@@ -23,7 +23,9 @@
 
 #ifndef DFS_WRAPPER_H
 #define DFS_WRAPPER_H
+#ifndef ENABLE_LITE_MODE
 #include "orc/Exceptions.hh"
+#endif
 #include "access/dfs/dfs_am.h"
 #include "access/dfs/dfs_common.h"
 #include "catalog/pg_collation.h"

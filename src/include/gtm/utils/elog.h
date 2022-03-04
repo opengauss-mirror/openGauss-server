@@ -219,7 +219,7 @@ extern int errhint(const char* fmt, ...)
     } while (0)
 #else
 #define elog elog_start(__FILE__, __LINE__, PG_FUNCNAME_MACRO), elog_finish
-#endif /* PCLINT_CHECK */
+#endif
 
 extern void elog_start(const char* filename, int lineno, const char* funcname);
 extern void elog_finish(int elevel, const char* fmt, ...)

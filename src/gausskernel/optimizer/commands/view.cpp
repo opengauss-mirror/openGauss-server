@@ -146,7 +146,7 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
      * namespace is temporary.
      */
     lockmode = replace ? AccessExclusiveLock : NoLock;
-    (void)RangeVarGetAndCheckCreationNamespace(relation, lockmode, &viewOid);
+    (void)RangeVarGetAndCheckCreationNamespace(relation, lockmode, &viewOid, RELKIND_VIEW);
     
     bool flag = OidIsValid(viewOid) && replace;
     if (flag) {
@@ -557,7 +557,7 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
 
      if (stmt->relkind == OBJECT_MATVIEW) {
         /* Relation Already Created */
-        (void)RangeVarGetAndCheckCreationNamespace(view, NoLock, &viewOid);
+        (void)RangeVarGetAndCheckCreationNamespace(view, NoLock, &viewOid, RELKIND_MATVIEW);
 
 #ifdef ENABLE_MULTIPLE_NODES
         /* try to send CREATE MATERIALIZED VIEW to DNs, Only consider PGXC now. */

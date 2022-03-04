@@ -9,8 +9,8 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
- * Portions Copyright (c) 2021, openGauss Contributors
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * src/include/utils/syscache.h
  *
  * -------------------------------------------------------------------------
@@ -111,6 +111,8 @@ enum SysCacheIdentifier {
     PGXCAPPWGMAPPINGOID,
     PGXCSLICERELID,
 #endif
+    SUBSCRIPTIONNAME,
+    SUBSCRIPTIONOID,
     PROCNAMEARGSNSP,
 #ifndef ENABLE_MULTIPLE_NODES
     PROCALLARGS,
@@ -132,6 +134,7 @@ enum SysCacheIdentifier {
     STREAMOID,
     STREAMRELID,
     REAPERCQOID,
+    PUBLICATIONRELMAP,
     SYNOID,
     SYNONYMNAMENSP,
     TABLESPACEOID,
@@ -155,12 +158,19 @@ enum SysCacheIdentifier {
     PKGNAMENSP,
     PUBLICATIONNAME,
     PUBLICATIONOID,
-    PUBLICATIONREL,
-    PUBLICATIONRELMAP,
-    SUBSCRIPTIONNAME,
-    SUBSCRIPTIONOID
+    UIDRELID,
+    DBPRIVOID,
+    DBPRIVROLE,
+    DBPRIVROLEPRIV
 };
-
+struct cachedesc {
+    Oid reloid;   /* OID of the relation being cached */
+    Oid indoid;   /* OID of index relation for this cache */
+    int nkeys;    /* # of keys needed for cache lookup */
+    int key[CATCACHE_MAXKEYS];   /* attribute numbers of key attrs */
+    int nbuckets; /* number of hash buckets for this cache */
+};
+extern const cachedesc cacheinfo[];
 extern int SysCacheSize;
 
 extern void InitCatalogCache(void);
@@ -177,10 +187,12 @@ extern HeapTuple SearchSysCache3(int cacheId, Datum key1, Datum key2, Datum key3
 extern HeapTuple SearchSysCache4(int cacheId, Datum key1, Datum key2, Datum key3, Datum key4);
 
 extern void ReleaseSysCache(HeapTuple tuple);
+extern void ReleaseSysCacheList(catclist *cl);
 
 /* convenience routines */
 extern HeapTuple SearchSysCacheCopy(int cacheId, Datum key1, Datum key2, Datum key3, Datum key4, int level = DEBUG2);
 extern bool SearchSysCacheExists(int cacheId, Datum key1, Datum key2, Datum key3, Datum key4);
+
 extern Oid GetSysCacheOid(int cacheId, Datum key1, Datum key2, Datum key3, Datum key4);
 
 extern HeapTuple SearchSysCacheAttName(Oid relid, const char* attname);
@@ -193,6 +205,10 @@ extern uint32 GetSysCacheHashValue(int cacheId, Datum key1, Datum key2, Datum ke
 
 /* list-search interface.  Users of this must import catcache.h too */
 extern struct catclist* SearchSysCacheList(int cacheId, int nkeys, Datum key1, Datum key2, Datum key3, Datum key4);
+
+#ifndef ENABLE_MULTIPLE_NODES
+extern bool SearchSysCacheExistsForProcAllArgs(Datum key1, Datum key2, Datum key3, Datum key4, Datum proArgModes);
+#endif
 
 /*
  * The use of the macros below rather than direct calls to the corresponding
@@ -226,7 +242,5 @@ extern struct catclist* SearchSysCacheList(int cacheId, int nkeys, Datum key1, D
 #define SearchSysCacheList2(cacheId, key1, key2) SearchSysCacheList(cacheId, 2, key1, key2, 0, 0)
 #define SearchSysCacheList3(cacheId, key1, key2, key3) SearchSysCacheList(cacheId, 3, key1, key2, key3, 0)
 #define SearchSysCacheList4(cacheId, key1, key2, key3, key4) SearchSysCacheList(cacheId, 4, key1, key2, key3, key4)
-
-#define ReleaseSysCacheList(x) ReleaseCatCacheList(x)
 
 #endif /* SYSCACHE_H */

@@ -37,6 +37,7 @@
 #endif
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/partitionkey.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
@@ -67,13 +68,10 @@ static void expandTupleDesc(TupleDesc tupdesc, Alias* eref, int rtindex, int sub
     bool include_dropped, List** colnames, List** colvars);
 static void setRteOrientation(Relation rel, RangeTblEntry* rte);
 static int32* getValuesTypmods(RangeTblEntry* rte);
+
 #ifndef PGXC
 static int specialAttNum(const char* attname);
 #endif
-
-static Oid getPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
-static Oid getSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel,
-                                    Oid *partOid);
 
 static char *ReplaceSWCTEOutSrting(ParseState *pstate, RangeTblEntry *rte, char *label)
 {
@@ -584,12 +582,13 @@ Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, in
             continue;
         }
         if (strcmp(strVal(lfirst(c)), colname) == 0) {
+
             if (result != NULL) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_AMBIGUOUS_COLUMN),
-                        errmsg("column reference \"%s\" is ambiguous", colname),
-                        parser_errposition(pstate, location)));
+                        (errcode(ERRCODE_AMBIGUOUS_COLUMN), errmsg("column reference \"%s\" is ambiguous", colname),
+                         parser_errposition(pstate, location)));
             }
+
             /*
              * When user specifies a query on a hidden column. but it actually invisible to the user.
              * So just ignore this column, this only happens on timeseries table.
@@ -682,6 +681,17 @@ Node* colNameToVar(ParseState* pstate, char* colname, bool localonly, int locati
             if (newresult != NULL) {
                 if (final_rte != NULL) {
                     *final_rte = rte;
+                }
+
+                /*
+                 * Under normal circumstances, the alias of the column with the same name needs to be specified, but in
+                 * some cases, it can not be specified. For example, the scene of 'merge into (matched)' takes
+                 * priority to find in the target RTE. If it is found, it will jump out. Otherwise, it will be found
+                 * in the source RTE. This search order is also found in the order of the RTE list, use_level of pstate
+                 * attribute represents whether to use this rule.
+                 */
+                if (result != NULL && pstate->use_level) {
+                    break;
                 }
 
                 if (result != NULL) {
@@ -967,159 +977,7 @@ static void buildScalarFunctionAlias(Node* funcexpr, char* funcname, Alias* alia
     eref->colnames = list_make1(makeString(eref->aliasname));
 }
 
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		: select * from partition (partition_name)
- *				: or select from partition for (partition_values_list)
- * Description	: get partition oid for rte->partitionOid
- */
-static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* pstate, Relation rel)
-{
-    Oid partitionOid = InvalidOid;
 
-    if (!PointerIsValid(rte) || !PointerIsValid(relation) || !PointerIsValid(pstate) || !PointerIsValid(rel)) {
-        return InvalidOid;
-    }
-
-    /* relation is not partitioned table. */
-    if (!rte->ispartrel || rte->relkind != RELKIND_RELATION) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation \"%s\" is not partitioned table", relation->relname)));
-    } else {
-        /* relation is partitioned table, from clause is partition (partition_name). */
-        if (PointerIsValid(relation->partitionname)) {
-            partitionOid = partitionNameGetPartitionOid(rte->relid,
-                relation->partitionname,
-                PART_OBJ_TYPE_TABLE_PARTITION,
-                AccessShareLock,
-                true,
-                false,
-                NULL,
-                NULL,
-                NoLock);
-            /* partiton does not exist. */
-            if (!OidIsValid(partitionOid)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_TABLE),
-                        errmsg("partition \"%s\" of relation \"%s\" does not exist",
-                            relation->partitionname,
-                            relation->relname)));
-            }
-
-            rte->pname = makeAlias(relation->partitionname, NIL);
-        } else {
-            /* from clause is partition for (partition_key_values_list). */
-            if (rel->partMap->type == PART_TYPE_LIST) {
-                ListPartitionDefState* listPartDef = NULL;
-                listPartDef = makeNode(ListPartitionDefState);
-                listPartDef->boundary = relation->partitionKeyValuesList;
-                listPartDef->boundary = transformListPartitionValue(pstate, listPartDef->boundary, false, true);
-                listPartDef->boundary = transformIntoTargetType(
-                        rel->rd_att->attrs, (((ListPartitionMap*)rel->partMap)->partitionKey)->values[0], listPartDef->boundary);
-
-                rte->plist = listPartDef->boundary;
-
-                partitionOid =
-                        partitionValuesGetPartitionOid(rel, listPartDef->boundary, AccessShareLock, true, true, false);
-
-                pfree_ext(listPartDef);
-            } else if (rel->partMap->type == PART_TYPE_HASH) {
-                HashPartitionDefState* hashPartDef = NULL;
-                hashPartDef = makeNode(HashPartitionDefState);
-                hashPartDef->boundary = relation->partitionKeyValuesList;
-                hashPartDef->boundary = transformListPartitionValue(pstate, hashPartDef->boundary, false, true);
-                hashPartDef->boundary = transformIntoTargetType(
-                        rel->rd_att->attrs, (((HashPartitionMap*)rel->partMap)->partitionKey)->values[0], hashPartDef->boundary);
-
-                rte->plist = hashPartDef->boundary;
-
-                partitionOid =
-                        partitionValuesGetPartitionOid(rel, hashPartDef->boundary, AccessShareLock, true, true, false);
-
-                pfree_ext(hashPartDef);
-            } else {
-                RangePartitionDefState* rangePartDef = NULL;
-                rangePartDef = makeNode(RangePartitionDefState);
-                rangePartDef->boundary = relation->partitionKeyValuesList;
-
-                transformPartitionValue(pstate, (Node*)rangePartDef, false);
-
-                rangePartDef->boundary = transformConstIntoTargetType(
-                        rel->rd_att->attrs, ((RangePartitionMap*)rel->partMap)->partitionKey, rangePartDef->boundary);
-
-                rte->plist = rangePartDef->boundary;
-
-                partitionOid =
-                        partitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessShareLock, true, true, false);
-
-                pfree_ext(rangePartDef);
-            }
-
-            /* partition does not exist. */
-            if (!OidIsValid(partitionOid)) {
-                if (rel->partMap->type == PART_TYPE_RANGE || 
-                    rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                            errmsg("The partition number is invalid or out-of-range")));
-                } else {
-                    /* shouldn't happen */
-                    ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unsupported partition type")));
-                }
-            }
-        }
-    }
-
-    return partitionOid;
-}
-
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		: select * from subpartition (subpartition_name)
- * Description	: get partition oid for rte->partitionOid
- */
-static Oid getSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel,
-                                    Oid *partOid)
-{
-    Oid subPartitionOid = InvalidOid;
-
-    if (!PointerIsValid(rte) || !PointerIsValid(relation) || !PointerIsValid(pstate) || !PointerIsValid(rel)) {
-        return InvalidOid;
-    }
-
-    /* relation is not partitioned table. */
-    if (!rte->ispartrel || rte->relkind != RELKIND_RELATION) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation \"%s\" is not partitioned table", relation->relname)));
-    } else {
-        /* relation is partitioned table, from clause is subpartition (subpartition_name). */
-        if (PointerIsValid(relation->subpartitionname)) {
-            subPartitionOid = partitionNameGetPartitionOid(rte->relid,
-                relation->subpartitionname,
-                PART_OBJ_TYPE_TABLE_SUB_PARTITION,
-                AccessShareLock,
-                true,
-                false,
-                NULL,
-                NULL,
-                NoLock,
-                partOid);
-            /* partiton does not exist. */
-            if (!OidIsValid(subPartitionOid)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_TABLE),
-                        errmsg("subpartition \"%s\" of relation \"%s\" does not exist",
-                            relation->subpartitionname,
-                            relation->relname)));
-            }
-
-            rte->pname = makeAlias(relation->subpartitionname, NIL);
-        }
-    }
-    return subPartitionOid;
-}
 
 /*
  * Open a table during parse analysis
@@ -1355,7 +1213,7 @@ RangeTblEntry* addRangeTableEntry(ParseState* pstate, RangeVar* relation, Alias*
     /* select from clause contain subpartition. */
     if (relation->issubpartition) {
         rte->isContainSubPartition = true;
-        rte->subpartitionOid = getSubPartitionOidForRTE(rte, relation, pstate, rel, &rte->partitionOid);
+        rte->subpartitionOid = GetSubPartitionOidForRTE(rte, relation, pstate, rel, &rte->partitionOid);
     }
     if (!rte->relhasbucket && relation->isbucket) {
         ereport(ERROR, (errmsg("table is normal,cannot contains buckets(0,1,2...)")));
@@ -2906,7 +2764,8 @@ int attnameAttNum(Relation rd, const char* attname, bool sysColOK)
     if (sysColOK) {
         if ((i = specialAttNum(attname)) != InvalidAttrNumber) {
             if ((i != ObjectIdAttributeNumber || rd->rd_rel->relhasoids) &&
-                (i != BucketIdAttributeNumber || RELATION_HAS_BUCKET(rd))) {
+                (i != BucketIdAttributeNumber || RELATION_HAS_BUCKET(rd)) &&
+                (i != UidAttributeNumber || RELATION_HAS_UIDS(rd))) {
                 return i;
             }
         }
@@ -2952,7 +2811,8 @@ Name attnumAttName(Relation rd, int attid)
     if (attid <= 0) {
         Form_pg_attribute sysatt;
 
-        sysatt = SystemAttributeDefinition(attid, rd->rd_rel->relhasoids, RELATION_HAS_BUCKET(rd));
+        sysatt = SystemAttributeDefinition(attid, rd->rd_rel->relhasoids,
+            RELATION_HAS_BUCKET(rd), RELATION_HAS_UIDS(rd));
         return &sysatt->attname;
     }
     if (attid > rd->rd_att->natts) {
@@ -2973,7 +2833,8 @@ Oid attnumTypeId(Relation rd, int attid)
     if (attid <= 0) {
         Form_pg_attribute sysatt;
 
-        sysatt = SystemAttributeDefinition(attid, rd->rd_rel->relhasoids, RELATION_HAS_BUCKET(rd));
+        sysatt = SystemAttributeDefinition(attid, rd->rd_rel->relhasoids,
+            RELATION_HAS_BUCKET(rd), RELATION_HAS_UIDS(rd));
         return sysatt->atttypid;
     }
     if (attid > rd->rd_att->natts) {

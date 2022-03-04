@@ -16,7 +16,7 @@
  *  scores.h
  *
  * IDENTIFICATION
- *        src/include/dbmind/db4ai/executor/gd/scores.h
+ *        src/include/db4ai/scores.h
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -44,8 +44,13 @@ inline void scores_init(Scores *scores)
 }
 
 // (tp + tn) / n
-inline double get_accuracy(const Scores *scores)
+inline double get_accuracy(const Scores *scores, bool *has)
 {
+    if (scores->count == 0) {
+        *has = false;
+        return 0;
+    }
+    *has = true;
     return (scores->tp + scores->tn) / (double)scores->count;
 }
 

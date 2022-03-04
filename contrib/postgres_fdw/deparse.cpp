@@ -46,6 +46,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
+#include "libpq/pqexpbuffer.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/var.h"
@@ -1150,6 +1151,7 @@ static void deparseRelation(StringInfo buf, Relation rel)
     const char *nspname = NULL;
     const char *relname = NULL;
     ListCell *lc;
+    char parttype = PARTTYPE_NON_PARTITIONED_RELATION;
 
     /* obtain additional catalog information. */
     ForeignTable* table = GetForeignTable(RelationGetRelid(rel));
@@ -1176,6 +1178,33 @@ static void deparseRelation(StringInfo buf, Relation rel)
     }
     if (relname == NULL) {
         relname = RelationGetRelationName(rel);
+    }
+
+    /* foreign table could not be built from a partitioned table */
+    UserMapping* user = GetUserMapping(rel->rd_rel->relowner, table->serverid);
+    ForeignServer *server = GetForeignServer(table->serverid);
+    PGconn* conn = GetConnection(server, user, false);
+
+    PQExpBuffer query = createPQExpBuffer();
+    appendPQExpBuffer(query,
+        "SELECT c.parttype FROM pg_class c, pg_namespace n "
+        "WHERE c.relname = '%s' and c.relnamespace = n.oid and n.nspname = '%s'",
+        quote_identifier(relname), quote_identifier(nspname));
+
+    PGresult* res = pgfdw_exec_query(conn, query->data);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        pgfdw_report_error(ERROR, res, conn, true, query->data);
+    }
+    /* res may be empty as the relname/nspname validation is not checked */
+    if (PQntuples(res) > 0) {
+        parttype = *PQgetvalue(res, 0, 0);
+    }
+    PQclear(res);
+    destroyPQExpBuffer(query);
+
+    if (!ENABLE_SQL_BETA_FEATURE(PARTITION_FDW_ON) &&
+        (parttype == PARTTYPE_PARTITIONED_RELATION || parttype == PARTTYPE_SUBPARTITIONED_RELATION)) {
+        ereport(ERROR, (errmsg("could not operate foreign table on partitioned table")));
     }
 
     appendStringInfo(buf, "%s.%s", quote_identifier(nspname), quote_identifier(relname));

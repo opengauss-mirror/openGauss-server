@@ -41,9 +41,10 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_db_role_setting.h"
 #include "catalog/pg_job.h"
+#include "catalog/pg_subscription.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_tablespace.h"
-#include "catalog/pg_subscription.h"
+#include "catalog/pg_uid_fn.h"
 #include "catalog/pgxc_slice.h"
 #include "catalog/storage_xlog.h"
 #include "commands/comment.h"
@@ -1102,6 +1103,9 @@ void dropdb(const char* dbname, bool missing_ok)
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for database %u", db_id)));
 
+    if (EnableGlobalSysCache()) {
+        g_instance.global_sysdbcache.DropDB(db_id, true);
+    }
     simple_heap_delete(pgdbrel, &tup->t_self);
 
     ReleaseSysCache(tup);
@@ -1121,6 +1125,7 @@ void dropdb(const char* dbname, bool missing_ok)
      * Remove shared dependency references for the database.
      */
     dropDatabaseDependencies(db_id);
+    DeleteDatabaseUidEntry(db_id);
 
     /*
      * Request an immediate checkpoint to flush all the dirty pages in share buffer
@@ -1287,6 +1292,16 @@ void RenameDatabase(const char* oldname, const char* newname)
     if (!HeapTupleIsValid(newtup))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for database %u", db_id)));
     (void)namestrcpy(&(((Form_pg_database)GETSTRUCT(newtup))->datname), newname);
+
+    /*
+     * We have to do GSC DropDb to invalid the GSC content of that database even we do rename on dbName
+     * rename db dont change GSC content, but a name swap for two db may cause lsc fake cache hit, which
+     * brings about inconsistent data event
+     **/
+    if (EnableGlobalSysCache()) {
+        g_instance.global_sysdbcache.DropDB(db_id, false);
+    }
+
     simple_heap_update(rel, &newtup->t_self, newtup);
     CatalogUpdateIndexes(rel, newtup);
 
@@ -1555,6 +1570,9 @@ static void movedb(const char* dbname, const char* tblspcname)
 
         newtuple =
             (HeapTuple) tableam_tops_modify_tuple(oldtuple, RelationGetDescr(pgdbrel), new_record, new_record_nulls, new_record_repl);
+        if (EnableGlobalSysCache()) {
+            g_instance.global_sysdbcache.DropDB(db_id, false);
+        }
         simple_heap_update(pgdbrel, &oldtuple->t_self, newtuple);
 
         /* Update indexes */
@@ -1803,6 +1821,9 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
     }
 
     newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(rel), new_record, new_record_nulls, new_record_repl);
+    if (EnableGlobalSysCache() && privateobject != NULL) {
+        g_instance.global_sysdbcache.DropDB(HeapTupleGetOid(tuple), false);
+    }
     simple_heap_update(rel, &tuple->t_self, newtuple);
 
     /* Update indexes */
@@ -2377,7 +2398,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
     }
 }
 
-void xlog_db_drop(Oid dbId, Oid tbSpcId)
+void do_db_drop(Oid dbId, Oid tbSpcId)
 {
     char* dst_path = GetDatabasePath(dbId, tbSpcId);
 
@@ -2397,7 +2418,7 @@ void xlog_db_drop(Oid dbId, Oid tbSpcId)
 
     /* Also, clean out any fsync requests that might be pending in md.c */
     ForgetDatabaseSyncRequests(dbId);
-
+    
     /* Clean out the xlog relcache too */
     XLogDropDatabase(dbId);
 
@@ -2446,6 +2467,13 @@ void xlogRemoveRemainSegsByDropDB(Oid dbId, Oid tablespaceId)
     remainSegsLock.unLock();
 }
 
+void xlog_db_drop(XLogRecPtr lsn, Oid dbId, Oid tbSpcId)
+{
+    UpdateMinRecoveryPoint(lsn, false);
+    do_db_drop(dbId, tbSpcId);
+    xlogRemoveRemainSegsByDropDB(dbId, tbSpcId);
+}
+
 void dbase_redo(XLogReaderState* record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -2455,8 +2483,7 @@ void dbase_redo(XLogReaderState* record)
         xlog_db_create(xlrec->db_id, xlrec->tablespace_id, xlrec->src_db_id, xlrec->src_tablespace_id);
     } else if (info == XLOG_DBASE_DROP) {
         xl_dbase_drop_rec* xlrec = (xl_dbase_drop_rec*)XLogRecGetData(record);
-        xlog_db_drop(xlrec->db_id, xlrec->tablespace_id);
-        xlogRemoveRemainSegsByDropDB(xlrec->db_id, xlrec->tablespace_id);
+        xlog_db_drop(record->EndRecPtr, xlrec->db_id, xlrec->tablespace_id);
     } else
         ereport(PANIC, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("dbase_redo: unknown op code %hhu", info)));
 

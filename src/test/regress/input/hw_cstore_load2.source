@@ -403,14 +403,14 @@ DROP TABLE LINEITEM_PART_DATE;
 --
 --
 SET DATESTYLE='ISO, MDY';
-CREATE TABLE DTS2017011006555_TBL
+CREATE TABLE TESTTABLE_TBL
 (
 C_INT INT,
 c_timestamp timestamp,
 c_timestamp_w timestamp without time zone
 ) distribute by hash(C_INT);
-COPY DTS2017011006555_TBL FROM STDIN with (delimiter ',',timestamp_format 'yy/mm/dd/hh24/mi/ss');
+COPY TESTTABLE_TBL FROM STDIN with (delimiter ',',timestamp_format 'yy/mm/dd/hh24/mi/ss');
 02,00/01/01/00/00/00,00/01/01/00/00/00
 \.
-SELECT * FROM DTS2017011006555_TBL;
-DROP TABLE DTS2017011006555_TBL;
+SELECT * FROM TESTTABLE_TBL;
+DROP TABLE TESTTABLE_TBL;

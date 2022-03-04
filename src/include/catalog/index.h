@@ -20,7 +20,6 @@
 #include "utils/tuplesort.h"
 
 #define DEFAULT_INDEX_TYPE	"btree"
-#define DEFAULT_HASH_INDEX_TYPE "hash"
 #define DEFAULT_CSTORE_INDEX_TYPE "psort"
 #define DEFAULT_GIST_INDEX_TYPE	"gist"
 #define CSTORE_BTREE_INDEX_TYPE "cbtree"
@@ -183,12 +182,13 @@ extern void index_set_state_flags(Oid indexId, IndexStateFlagsAction action);
 extern void reindex_indexpart_internal(Relation heapRelation, 
                                        Relation iRel, 
                                        IndexInfo* indexInfo, 
-                                       Oid indexPartId);
+                                       Oid indexPartId,
+                                       void *baseDesc);
 extern void reindex_index(Oid indexId, Oid indexPartId,
                           bool skip_constraint_checks, AdaptMem *memInfo,
                           bool dbWide,
                           void *baseDesc = NULL);
-extern void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, IndexInfo* indexInfo);
+extern void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, IndexInfo* indexInfo, void* baseDesc);
 
 /* Flag bits for ReindexRelation(): */
 #define REINDEX_REL_PROCESS_TOAST		0x01
@@ -238,7 +238,7 @@ extern void AddGPIForPartition(Oid partTableOid, Oid partOid);
 extern void AddGPIForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid);
 void AddCBIForPartition(Relation partTableRel, Relation tempTableRel, const List* indexRelList, 
     const List* indexDestOidList);
-extern void DeleteGPITuplesForPartition(Oid partTableOid, Oid partOid);
+extern bool DeleteGPITuplesForPartition(Oid partTableOid, Oid partOid);
 extern void DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid);
 extern void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset, int2 bktId);
 extern bool RecheckIndexTuple(IndexScanDesc scan, TupleTableSlot *slot);

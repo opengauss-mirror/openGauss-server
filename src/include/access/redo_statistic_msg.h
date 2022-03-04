@@ -36,6 +36,11 @@ typedef struct RedoWaitInfo {
     int64 counter;
 } RedoWaitInfo;
 
+typedef struct XLogRedoNumStatics {
+    volatile uint64 total_num;
+    volatile uint64 extra_num;
+} XLogRedoNumStatics;
+
 typedef enum RedoWaitStats {
     WAIT_READ_XLOG = 0,
     WAIT_READ_DATA,

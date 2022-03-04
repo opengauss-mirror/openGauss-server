@@ -35,6 +35,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/heapam.h"
+#include "access/tableam.h"
 #include "access/transam.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -42,10 +43,14 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_control.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_object.h"
 #include "catalog/gs_package.h"
 #include "catalog/gs_package_fn.h"
+#include "catalog/gs_db_privilege.h"
 #include "commands/defrem.h"
+#include "commands/typecmds.h"
 #include "pgxc/pgxc.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
@@ -61,12 +66,12 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
                     errmsg("not support create package in distributed database")));
 #endif
+    u_sess->plsql_cxt.debug_query_string = pstrdup(queryString);
     Oid packageId;
     Oid namespaceId;
     char* pkgname = NULL;
     char* pkgspecsrc = NULL;
     Oid pkgOwner;
-    AclResult aclresult;
 
     /* Convert list of names to a name and namespace */
     namespaceId = QualifiedNameGetCreationNamespace(stmt->pkgname, &pkgname);
@@ -84,11 +89,7 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
      * namespace, if the owner of the namespce has the same name as the namescpe
      */
     bool isAlter = false;
-    u_sess->plsql_cxt.sourceText = pstrdup(queryString);
-    /* Check we have creation rights in target namespace */
-    aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
-    if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+    bool anyResult = CheckCreatePrivilegeInNamespace(namespaceId, GetUserId(), CREATE_ANY_PACKAGE);
 
     //@Temp Table. Lock Cluster after determine whether is a temp object,
     // so we can decide if locking other coordinator
@@ -97,7 +98,7 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
     pkgspecsrc = stmt->pkgspec;
 
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
-        pkgOwner = GetUserIdFromNspId(namespaceId);
+        pkgOwner = GetUserIdFromNspId(namespaceId, false, anyResult);
 
         if (!OidIsValid(pkgOwner))
             pkgOwner = GetUserId();
@@ -106,9 +107,7 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
             isAlter = true;
 
         if (isAlter) {
-            aclresult = pg_namespace_aclcheck(namespaceId, pkgOwner, ACL_CREATE);
-            if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+            (void)CheckCreatePrivilegeInNamespace(namespaceId, pkgOwner, CREATE_ANY_PACKAGE);
         }
     } else {
         pkgOwner = GetUserId();
@@ -136,6 +135,9 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
                 errcause("debug mode"),
                 erraction("check package spec")));   
     }
+    if (u_sess->plsql_cxt.debug_query_string) {
+        pfree_ext(u_sess->plsql_cxt.debug_query_string);
+    }
 }
 
 
@@ -145,12 +147,12 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
         ereport(ERROR, (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
                     errmsg("not support create package in distributed database")));
 #endif
+    u_sess->plsql_cxt.debug_query_string = pstrdup(queryString);
     //Oid packageId;
     Oid namespaceId;
     char* pkgname = NULL;
     char* pkgBodySrc = NULL;
     Oid pkgOwner;
-    AclResult aclresult;
 
     /* Convert list of names to a name and namespace */
     namespaceId = QualifiedNameGetCreationNamespace(stmt->pkgname, &pkgname);
@@ -160,11 +162,7 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
      * namespace, if the owner of the namespce has the same name as the namescpe
      */
     bool isAlter = false;
-    u_sess->plsql_cxt.sourceText = pstrdup(queryString);
-    /* Check we have creation rights in target namespace */
-    aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
-    if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+    bool anyResult = CheckCreatePrivilegeInNamespace(namespaceId, GetUserId(), CREATE_ANY_PACKAGE);
 
     //@Temp Table. Lock Cluster after determine whether is a temp object,
     // so we can decide if locking other coordinator
@@ -173,7 +171,7 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
     pkgBodySrc = stmt->pkgbody;
 
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
-        pkgOwner = GetUserIdFromNspId(namespaceId);
+        pkgOwner = GetUserIdFromNspId(namespaceId, false, anyResult);
 
         if (!OidIsValid(pkgOwner))
             pkgOwner = GetUserId();
@@ -181,9 +179,7 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
             isAlter = true;
 
         if (isAlter) {
-            aclresult = pg_namespace_aclcheck(namespaceId, pkgOwner, ACL_CREATE);
-            if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+            (void)CheckCreatePrivilegeInNamespace(namespaceId, pkgOwner, CREATE_ANY_PACKAGE);
         }
     } else {
         pkgOwner = GetUserId();
@@ -204,4 +200,113 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
                 errcause("package body is null"),
                 erraction("check package body")));   
     }
+    if (u_sess->plsql_cxt.debug_query_string) {
+        pfree_ext(u_sess->plsql_cxt.debug_query_string);
+    }
+}
+
+/*
+ * Change package owner by name
+ */
+void AlterPackageOwner(List* name, Oid newOwnerId)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        errmsg("package not supported in distributed database")));
+#endif
+    Oid pkgOid = PackageNameListGetOid(name, false);
+    Relation rel;
+    HeapTuple tup;
+    if (IsSystemObjOid(pkgOid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                errmsg("ownerId change failed for package %u, because it is a builtin package.", pkgOid)));
+    }
+    rel = heap_open(PackageRelationId, RowExclusiveLock);
+    tup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
+    /* should not happen */
+    if (!HeapTupleIsValid(tup)) {
+        ereport(
+            ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for package %u", pkgOid)));
+    }
+
+    TrForbidAccessRbObject(PACKAGEOID, pkgOid);
+
+    Form_gs_package gs_package_tuple = (Form_gs_package)GETSTRUCT(tup);
+    /*
+     * If the new owner is the same as the existing owner, consider the
+     * command to have succeeded.  This is for dump restoration purposes.
+     */
+    if (gs_package_tuple->pkgowner == newOwnerId) {
+        ReleaseSysCache(tup);
+        /* Recode time of change the funciton owner. */
+        UpdatePgObjectMtime(pkgOid, OBJECT_TYPE_PKGSPEC);
+        heap_close(rel, NoLock);
+        return;
+    }
+
+    Datum repl_val[Natts_gs_package];
+    bool repl_null[Natts_gs_package];
+    bool repl_repl[Natts_gs_package];
+    Acl* newAcl = NULL;
+    Datum aclDatum;
+    bool isNull = false;
+    HeapTuple newtuple;
+    AclResult aclresult;
+
+    /* Superusers can always do it */
+    if (!superuser()) {
+        /* Otherwise, must be owner of the existing object */
+        if (!pg_package_ownercheck(pkgOid, GetUserId()))
+            aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PACKAGE, NameStr(gs_package_tuple->pkgname));
+
+        /* Must be able to become new owner */
+        check_is_member_of_role(GetUserId(), newOwnerId);
+
+        /* New owner must have CREATE privilege on namespace */
+        aclresult = pg_namespace_aclcheck(gs_package_tuple->pkgnamespace, newOwnerId, ACL_CREATE);
+        if (aclresult != ACLCHECK_OK)
+            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(gs_package_tuple->pkgnamespace));
+    }
+
+    /* alter owner of procedure in packgae */
+    AlterFunctionOwnerByPkg(pkgOid, newOwnerId);
+    /* alter packgae type onwer */
+    AlterTypeOwnerByPkg(pkgOid, newOwnerId);
+
+    errno_t errorno = EOK;
+    errorno = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
+    securec_check(errorno, "\0", "\0");
+    errorno = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
+    securec_check(errorno, "\0", "\0");
+
+    repl_repl[Anum_gs_package_pkgowner - 1] = true;
+    repl_val[Anum_gs_package_pkgowner - 1] = ObjectIdGetDatum(newOwnerId);
+
+    /*
+     * Determine the modified ACL for the new owner.  This is only
+     * necessary when the ACL is non-null.
+     */
+    aclDatum = SysCacheGetAttr(PACKAGEOID, tup, Anum_gs_package_pkgacl, &isNull);
+    if (!isNull) {
+        newAcl = aclnewowner(DatumGetAclP(aclDatum), gs_package_tuple->pkgowner, newOwnerId);
+        repl_repl[Anum_gs_package_pkgacl - 1] = true;
+        repl_val[Anum_gs_package_pkgacl - 1] = PointerGetDatum(newAcl);
+    }
+
+    newtuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+
+    simple_heap_update(rel, &newtuple->t_self, newtuple);
+    CatalogUpdateIndexes(rel, newtuple);
+
+    tableam_tops_free_tuple(newtuple);
+
+    /* Update owner dependency reference */
+    changeDependencyOnOwner(PackageRelationId, pkgOid, newOwnerId);
+
+    ReleaseSysCache(tup);
+    /* Recode time of change the funciton owner. */
+    UpdatePgObjectMtime(pkgOid, OBJECT_TYPE_PKGSPEC);
+    heap_close(rel, NoLock);
+    return;
 }

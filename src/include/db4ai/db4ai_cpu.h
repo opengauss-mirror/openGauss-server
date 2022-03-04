@@ -12,11 +12,10 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 ---------------------------------------------------------------------------------------
 
-mrc_cpu.h
-        Code to provide micro-optimizations
+db4ai_cpu.h
 
 IDENTIFICATION
-    src/include/dbmind/db4ai/executor/mrc_cpu.h
+    src/include/db4ai/db4ai_cpu.h
 
 ---------------------------------------------------------------------------------------
 **/

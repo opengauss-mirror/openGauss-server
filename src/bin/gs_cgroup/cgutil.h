@@ -69,10 +69,6 @@ typedef struct {
     char hpath[MAXPGPATH];                       /* GAUSSHOME path */
     char mpoint[MAXPGPATH];                      /* mount point path */
     char mpoints[MOUNT_SUBSYS_KINDS][MAXPGPATH]; /* subsys mount points */
-    char bpsread[IODATA_LEN];                    /* io bps read data */
-    char iopsread[IODATA_LEN];                   /* io iops read data */
-    char bpswrite[IODATA_LEN];                   /* io bps write data */
-    char iopswrite[IODATA_LEN];                  /* io iops write data */
     char topname[GPNAME_LEN];                    /* top group name */
     char bkdname[GPNAME_LEN];                    /* backend group name */
     char clsname[GPNAME_LEN];                    /* class name */

@@ -203,13 +203,30 @@ typedef struct {
 } PoolConnectionInfo;
 
 /*
+ * Record global connection status for function 'comm_check_connection_status'
+ * This struct in g_instance.pooler_cxt is defined to g_GlobalConnStatus!
+ */
+typedef struct GlobalConnStatus {
+    /* Record connection status */
+    struct ConnectionStatus **connEntries;
+
+    /* Numbers of coordiantors and primary datanodes for connEntries */
+    int totalEntriesCount;
+
+    /* Lock of this struct */
+    pthread_mutex_t connectionStatusLock;
+} GlobalConnStatus;
+
+/*
  * ConnectionStatus entry for pg_conn_status view
  */
-typedef struct {
+typedef struct ConnectionStatus {
+    Oid remote_nodeoid;  /* remode node oid */
     char *remote_name;
     char *remote_host;
     int remote_port;
-    bool is_connected;
+    bool is_connected;  /* connection status flag, record by creating socket connection */
+    bool no_error_occur;  /* pooler connect status flag, record by creating pooler connection */
     int sock;
 } ConnectionStatus;
 
@@ -406,6 +423,11 @@ extern void reload_user_name_pgoptions(PoolGeneralInfo* info, PoolAgent* agent, 
 extern bool release_slot_to_nodepool(PGXCNodePool* nodePool, bool force_destroy, PGXCNodePoolSlot* slot);
 extern void free_pool_conn(PoolConnDef* conndef_for_validate);
 
+extern void FillNodeConnectionStatus(ConnectionStatus *connsEntry, int entryCnt);
+extern void RecreateGlobalConnEntries();
+extern void ResetPoolerConnectionStatus();
+extern void FlushPoolerConnectionStatus(Oid nodeOid);
+
 /* The root memory context */
 extern MemoryContext PoolerMemoryContext;
 
@@ -427,6 +449,9 @@ extern int agentCount;
 extern PoolAgent** poolAgents;
 extern pthread_mutex_t g_poolAgentsLock;
 extern int MaxAgentCount;
+
+/* GlobalConnStatus -- Record connection status in memory */
+#define g_GlobalConnStatus (g_instance.pooler_cxt.globalConnStatus)
 
 #define PROTO_TCP 1
 #define get_agent(handle) ((PoolAgent*)(handle))

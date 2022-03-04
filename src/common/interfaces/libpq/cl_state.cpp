@@ -49,7 +49,6 @@ PGClientLogic::PGClientLogic(PGconn *conn, JNIEnv *java_env, jobject jdbc_handle
       droppedColumnSettings_size(0),
       droppedColumnSettings_allocated(0),
       isInvalidOperationOnColumn(false),
-      should_refresh_function(false),
       isDuringRefreshCacheOnError(false),
       is_external_err(false),
       cacheRefreshType(CacheRefreshType::CACHE_ALL),

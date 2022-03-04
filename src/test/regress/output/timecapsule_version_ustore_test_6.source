@@ -1,40 +1,21 @@
 set enable_default_ustore_table = on;
-show vacuum_defer_cleanup_age;
- vacuum_defer_cleanup_age 
---------------------------
+show undo_retention_time;
+ undo_retention_time 
+---------------------
  0
 (1 row)
 
-show version_retention_age;
- version_retention_age 
------------------------
- 0
-(1 row)
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 900" > /dev/null 2>&1
 select pg_sleep(4);
  pg_sleep 
 ----------
  
 (1 row)
 
-show vacuum_defer_cleanup_age;
- vacuum_defer_cleanup_age 
---------------------------
- 10000
-(1 row)
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
-select pg_sleep(4);
- pg_sleep 
-----------
- 
-(1 row)
-
-show version_retention_age;
- version_retention_age 
------------------------
- 10000
+show undo_retention_time;
+ undo_retention_time 
+---------------------
+ 15min
 (1 row)
 
 create schema schema_test_ztt2;
@@ -1436,41 +1417,22 @@ drop TABLESPACE new_tablespace_1;
 drop TABLESPACE new_tablespace_2;
 drop schema schema_test_ztt2;
 reset search_path;
-show vacuum_defer_cleanup_age;
- vacuum_defer_cleanup_age 
---------------------------
- 10000
-(1 row)
-
 show version_retention_age;
  version_retention_age 
 -----------------------
- 10000
-(1 row)
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
-select pg_sleep(4);
- pg_sleep 
-----------
- 
-(1 row)
-
-show vacuum_defer_cleanup_age;
- vacuum_defer_cleanup_age 
---------------------------
  0
 (1 row)
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 0" > /dev/null 2>&1
 select pg_sleep(4);
  pg_sleep 
 ----------
  
 (1 row)
 
-show version_retention_age;
- version_retention_age 
------------------------
+show undo_retention_time;
+ undo_retention_time 
+---------------------
  0
 (1 row)
 

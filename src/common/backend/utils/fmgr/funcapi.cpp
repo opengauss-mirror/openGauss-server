@@ -17,6 +17,7 @@
 #include "knl/knl_variable.h"
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"
@@ -173,6 +174,100 @@ static void shutdown_multi_func_call(Datum arg)
     MemoryContextDelete(funcctx->multi_call_memory_ctx);
 }
 
+bool is_function_with_plpgsql_language_and_outparam(Oid funcid)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!enable_out_param_override() || u_sess->attr.attr_sql.sql_compatibility != A_FORMAT || funcid == InvalidOid) {
+        return false;
+    }
+#else
+    return false;
+#endif
+    char* funclang = get_func_langname(funcid);
+    if (strcasecmp(funclang, "plpgsql") != 0) {
+        pfree(funclang);
+        return false;
+    }
+    pfree(funclang);
+
+    HeapTuple tp;
+    bool existOutParam = false;
+    bool isNull = false;
+    tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+    if (!HeapTupleIsValid(tp)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        (errmsg("cache lookup failed for function %u", funcid), errdetail("N/A."),
+                         errcause("System error."), erraction("Contact engineer to support."))));
+    }
+    Datum pprokind = SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_prokind, &isNull);
+    if ((!isNull && !PROC_IS_FUNC(pprokind))) {
+        ReleaseSysCache(tp);
+        return false;
+    }
+    isNull = false;
+    (void)SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_proallargtypes, &isNull);
+    if (!isNull) {
+        existOutParam = true;
+    }
+    ReleaseSysCache(tp);
+    return existOutParam;
+}
+
+TupleDesc get_func_param_desc(HeapTuple tp, Oid resultTypeId, int* return_out_args_num)
+{
+    Oid *p_argtypes = NULL;
+    char **p_argnames = NULL;
+    char *p_argmodes = NULL;
+    int p_nargs = get_func_arg_info(tp, &p_argtypes, &p_argnames, &p_argmodes);
+    char* p_name = NameStr(((Form_pg_proc)GETSTRUCT(tp))->proname);
+    int out_args_num = 0;
+    for (int i = 0; i < p_nargs; i++) {
+        if (p_argmodes[i] == 'o' || p_argmodes[i] == 'b') {
+            out_args_num++;
+        }
+    }
+    if (return_out_args_num != NULL) {
+        *return_out_args_num = out_args_num;
+    }
+    /* The return field is in the first column, and the parameter starts in the second column. */
+    TupleDesc resultTupleDesc = CreateTemplateTupleDesc(out_args_num + 1, false);
+    TupleDescInitEntry(resultTupleDesc, (AttrNumber)1, p_name, resultTypeId, -1, 0);
+    int attindex = 2;
+    for (int i = 0; i < p_nargs; i++) {
+        if (p_argmodes[i] == 'o' || p_argmodes[i] == 'b') {
+            TupleDescInitEntry(resultTupleDesc, (AttrNumber)attindex, p_argnames[i], p_argtypes[i], p_argmodes[i],
+                               0);
+            attindex++;
+        }
+    }
+
+    return resultTupleDesc;
+}
+
+void construct_func_param_desc(Oid funcid, TypeFuncClass* typclass, TupleDesc* tupdesc, Oid* resultTypeId)
+{
+    if (tupdesc == NULL || resultTypeId == NULL || typclass == NULL) {
+        return;
+    }
+    Oid paramTypeOid = is_function_with_plpgsql_language_and_outparam(funcid);
+    if (paramTypeOid == InvalidOid) {
+        return;
+    }
+    /* Contruct argument tuple descriptor */
+    HeapTuple tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+    if (!HeapTupleIsValid(tp)) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmodule(MOD_PLSQL),
+                        errmsg("Cache lookup failed for function %u", funcid),
+                        errdetail("Fail to get the function param type oid.")));
+    }
+
+    *tupdesc = get_func_param_desc(tp, *resultTypeId);
+    *resultTypeId = RECORDOID;
+    *typclass = TYPEFUNC_COMPOSITE;
+
+    ReleaseSysCache(tp);
+}
+
 /*
  * get_call_result_type
  *		Given a function's call info record, determine the kind of datatype
@@ -215,6 +310,9 @@ TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* res
     if (expr && IsA(expr, FuncExpr)) {
         result = internal_get_result_type(((FuncExpr*)expr)->funcid, expr, NULL, resultTypeId, resultTupleDesc, 
             resultTypeId_orig);
+
+        /* A_FORMAT return param seperation */
+        construct_func_param_desc(((FuncExpr*)expr)->funcid, &result, resultTupleDesc, resultTypeId);
     } else if (expr && IsA(expr, OpExpr)) {
         result = internal_get_result_type(get_opcode(((OpExpr*)expr)->opno), expr, NULL, resultTypeId, resultTupleDesc,
             NULL);
@@ -732,6 +830,7 @@ static TypeFuncClass get_type_func_class(Oid typid)
         case TYPTYPE_DOMAIN:
         case TYPTYPE_ENUM:
         case TYPTYPE_RANGE:
+        case TYPTYPE_TABLEOF:
             return TYPEFUNC_SCALAR;
 
         case TYPTYPE_PSEUDO:

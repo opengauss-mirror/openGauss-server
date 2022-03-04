@@ -144,9 +144,23 @@ WHERE p1.oid != p2.oid AND
     p1.pronargs = p2.pronargs AND
     p1.proargtypes = p2.proargtypes
 ORDER by 1, 2, 3;
- oid | proname | oid | proname 
------+---------+-----+---------
-(0 rows)
+  oid  |        proname         |  oid  |        proname         
+-------+------------------------+-------+------------------------
+ 15303 | format_write           | 15364 | format_write
+ 15316 | sql_set_sql            | 15397 | sql_set_sql
+ 15317 | sql_run                | 15400 | sql_run
+ 15318 | sql_unregister_context | 15401 | sql_unregister_context
+ 15357 | close                  | 15469 | close
+ 15364 | format_write           | 15303 | format_write
+ 15385 | substr                 | 15481 | substr
+ 15386 | substr                 | 15482 | substr
+ 15397 | sql_set_sql            | 15316 | sql_set_sql
+ 15400 | sql_run                | 15317 | sql_run
+ 15401 | sql_unregister_context | 15318 | sql_unregister_context
+ 15469 | close                  | 15357 | close
+ 15481 | substr                 | 15385 | substr
+ 15482 | substr                 | 15386 | substr
+(14 rows)
 
 -- Considering only built-in procs (prolang = 12), look for multiple uses
 -- of the same internal function (ie, matching prosrc fields).  It's OK to
@@ -577,7 +591,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  1752 | trunc
  1753 | trunc
  1818 | regexeqsel
- 1849 | nlssort
  1982 | comm_check_connection_status
  1983 | pg_log_comm_status
  1984 | pg_comm_recv_stream
@@ -669,6 +682,9 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2852 | pg_current_xlog_insert_location
  2853 | pg_stat_get_backend_waiting
  2860 | gs_current_xlog_insert_end_location
+ 2861 | gs_stat_wal_entrytable
+ 2862 | gs_walwriter_flush_position
+ 2863 | gs_walwriter_flush_stat
  2893 | xml_in
  2894 | xml_out
  2895 | xmlcomment
@@ -1218,6 +1234,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4428 | byteawithoutordercolout
  4430 | gs_undo_meta
  4431 | gs_undo_translot
+ 4434 | gs_stat_undo
  4435 | gs_upload_obs_file
  4436 | gs_download_obs_file
  4440 | byteawithoutorderwithequalcolin
@@ -1240,6 +1257,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4505 | interval_list_agg_transfn
  4507 | interval_list_agg_noarg2_transfn
  4520 | gs_stat_activity_timeout
+ 4579 | gs_get_active_archiving_standby
+ 4580 | gs_pitr_archive_slot_force_advance
+ 4581 | gs_pitr_clean_history_global_barriers
+ 4582 | gs_pitr_get_warning_for_xlog_force_recycle
  4601 | checksumtext_agg_transfn
  4650 | gs_paxos_stat_replication
  4651 | pg_cbm_tracked_location
@@ -1275,7 +1296,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4764 | ubtoptions
  4765 | ubtcostestimate
  4767 | gs_read_block_from_remote
- 4768 | gs_read_block_from_remote
  4789 | remote_rto_stat
  4800 | job_cancel
  4801 | job_finish
@@ -1331,6 +1351,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5128 | gs_get_obs_file_context
  5129 | gs_set_obs_file_context
  5130 | gs_get_hadr_key_cn
+ 5255 | pg_shared_memctx_view
+ 5256 | pg_thread_memctx_view
  5345 | pv_builtin_functions
  5519 | int1cmp
  5520 | hashint1
@@ -1393,6 +1415,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5813 | hash16out
  5814 | hash32in
  5815 | hash32out
+ 5997 | gs_mark_indisvalid
  5998 | gs_deployment
  5999 | get_gtm_lite_status
  6000 | getbucket
@@ -1466,7 +1489,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6667 | network_smaller
  6668 | max
  6669 | min
- 7000 | pg_stat_segment_space_info
  7001 | pg_stat_segment_extent_usage
  7002 | gs_space_shrink
  7003 | pg_stat_remain_segment_info
@@ -1482,6 +1504,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  7106 | db4ai_predict_by_float8
  7107 | db4ai_predict_by_numeric
  7108 | db4ai_predict_by_text
+ 7109 | db4ai_predict_by_float8_array
  7777 | sysdate
  7800 | init
  7801 | analyze_query
@@ -1500,18 +1523,12 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  7882 | array_varchar_exists
  7883 | array_varchar_prior
  7886 | array_varchar_deleteidx
- 7887 | array_integer_deleteidx
- 7888 | array_integer_exists
- 7891 | array_integer_next
- 7892 | array_integer_prior
  7893 | gs_stat_ustore
- 7894 | array_union
  7998 | set_working_grand_version_num_manually
  8001 | get_paxos_replication_info
- 8413 | pg_read_binary_file_blocks 
  8050 | datalength
  8642 | gs_txid_oldestxmin
- 8700 | array_union_distinct
+ 8700 | array_cat_distinct
  8701 | array_intersect
  8702 | array_intersect_distinct
  8703 | array_except
@@ -1539,6 +1556,11 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9033 | gs_get_local_barrier_status
  9034 | gs_get_global_barriers_status
  9035 | gs_set_obs_delete_location_with_slotname
+ 9037 | gs_set_standby_cluster_target_barrier_id
+ 9038 | gs_query_standby_cluster_barrier_id_exist
+ 9039 | gs_get_standby_cluster_barrier_status
+ 9036 | gs_gsc_clean
+ 9037 | gs_gsc_dbstat_info
  9130 | has_cek_privilege
  9131 | has_cek_privilege
  9132 | has_cek_privilege
@@ -1553,7 +1575,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9141 | gs_streaming_dr_service_truncation_check
  9350 | sys_connect_by_path
  9351 | connect_by_root
- 9376 | gs_write_term_log
  9982 | tdigest_mergep
  9983 | tdigest_in
  9984 | tdigest_out
@@ -1564,7 +1585,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9989 | tdigest_merge
  9990 | percentile_of_value
  9999 | pg_test_err_contain_err
-(1148 rows)
+--?.*
 
 -- **************** pg_cast ****************
 -- Catch bogus values in pg_cast columns (other than cases detected by

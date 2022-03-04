@@ -5,10 +5,10 @@
     <repoType>Generic</repoType>
     <id>
         <offering>${offering}</offering>
-        <version>${BVersion}</version>
-        <snapshot>Y</snapshot>
+        <version>${version}</version>
+        <snapshot>${snapshot}</snapshot>
     </id>
-    <isClear>Y</isClear>
+    <isClear>N</isClear>
     <copies>
         <copy>
             <source></source>
@@ -17,66 +17,61 @@
     </copies>
     </artifact>
     <dependencies>
-       <dependency>
+        <dependency>
             <versionType>BVersion</versionType>
             <repoType>Generic</repoType>
             <id>
                 <offering>Huawei Secure C</offering>
                 <version>Huawei Secure C V100R001C01SPC010B002</version>
             </id>
-            <isClear>Y</isClear>
             <copies>
                 <copy>
                     <source></source>
                     <dest></dest>
                 </copy>
             </copies>
-       </dependency>
-       <dependency>
+        </dependency>
+        <dependency>
             <versionType>BVersion</versionType>
             <repoType>Generic</repoType>
             <id>
                 <offering>DOPRA SSP</offering>
-                <version>DOPRA SSP V300R021C00SPC020B100</version>
+                <version>DOPRA SSP V300R021C10SPC010B100</version>
             </id>
-            <isClear>Y</isClear>
             <copies>
                 <copy>
                     <source></source>
-                    <dest></dest>
+                    <dest>dopra_ssp</dest>
                 </copy>
             </copies>
-       </dependency>
-       <dependency>
+        </dependency>
+        <dependency>
             <versionType>BVersion</versionType>
             <repoType>Generic</repoType>
             <id>
-                <offering>Cloud Compiler JDK</offering>
-                <version>Cloud Compiler JDK V100R003C30SPC300B001</version>
+                <offering>BiSheng JDK Enterprise</offering>
+                <version>BiSheng JDK Enterprise 2.1.0.320.B001</version>
             </id>
-            <isClear>Y</isClear>
             <copies>
                 <copy>
                     <source></source>
-                    <dest></dest>
+                    <dest>huaweijdk</dest>
                 </copy>
             </copies>
-       </dependency>
-       <dependency>
+        </dependency>
+        <dependency>
             <versionType>BVersion</versionType>
             <repoType>Generic</repoType>
             <id>
                 <offering>KMC</offering>
-                <version>KMC 21.0.0.B003</version>
+                <version>KMC 21.1.0.B006</version>
             </id>
-            <isClear>Y</isClear>
             <copies>
                 <copy>
                     <source></source>
                     <dest></dest>
-                    <DEL>Y</DEL>
                 </copy>
             </copies>
-       </dependency>
+        </dependency>
     </dependencies>
 </project>

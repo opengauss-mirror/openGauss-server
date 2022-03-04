@@ -44,9 +44,10 @@
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/double_write.h"
 #include "catalog/namespace.h"
-#include "catalog/pg_type.h"
 #include "catalog/pg_authid.h"
+#include "catalog/pg_database.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_type.h"
 #include "commands/async.h"
 #include "commands/matview.h"
 #include "commands/prepare.h"
@@ -210,7 +211,6 @@ typedef struct AttachInfoContext {
 } AttachInfoContext;
 
 #define PARAMS_LEN 4096
-#define PRINTF_DST_MAX 32
 #define PRINFT_DST_MAX_DOUBLE 64
 #define MEMCPY_DST_NUM 4
 
@@ -588,6 +588,7 @@ static int SocketBackend(StringInfo inBuf)
         case 'F': /* fastpath function call */
         case 'I': /* Push, Pop schema name */
         case 'L': /* Link gc_fdw */
+        case 'J': /* Trace ID */
             break;
 
         case 'X': /* terminate */
@@ -653,6 +654,7 @@ static int SocketBackend(StringInfo inBuf)
         case 'k': /* Global session ID */
         case 'z': /* PBE for DDL */
         case 'y': /* sequence from cn 2 dn */
+        case 'T': /* consistency point */
             break;
 #endif
 
@@ -1379,9 +1381,8 @@ void exec_simple_plan(PlannedStmt* plan)
     CommandDest dest = (CommandDest)t_thrd.postgres_cxt.whereToSendOutput;
     MemoryContext oldcontext;
     bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
-    bool was_logged = false;
     bool isTopLevel = false;
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
 
     if (plan == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("Invaild parameter.")));
@@ -1668,9 +1669,9 @@ void exec_simple_plan(PlannedStmt* plan)
     /*
      * Emit duration logging if appropriate.
      */
-    switch (check_log_duration(msec_str, was_logged)) {
+    switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms, debugid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            Assert(false);
             break;
         case 2:
             ereport(LOG,
@@ -2133,7 +2134,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
     bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
     bool was_logged = false;
     bool isTopLevel = false;
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
     List* query_string_locationlist = NIL;
     int stmt_num = 0;
     size_t query_string_len = 0;
@@ -2785,16 +2786,16 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
      */
     switch (check_log_duration(msec_str, was_logged)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms, queryid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms, queryid %ld, unique id %lu", msec_str,
+                u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, query_string);
-            ereport(LOG,
-                (errmsg("duration: %s ms queryid %ld unique id %ld statement: %s", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id,mask_string),
-                    errhidestmt(true),
-                    errdetail_execute(parsetree_list)));
+            ereport(LOG, (errmsg("duration: %s ms queryid %ld unique id %ld statement: %s", msec_str,
+                u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id, mask_string),
+                    errhidestmt(true), errdetail_execute(parsetree_list)));
             MASK_PASSWORD_END(mask_string, query_string);
             break;
         }
@@ -3042,9 +3043,7 @@ static void exec_plan_with_params(StringInfo input_message)
              */
             params->params[paramno].pflags = PARAM_FLAG_CONST;
             params->params[paramno].ptype = ptype;
-            params->params[paramno].tableOfIndexType = InvalidOid;
-            params->params[paramno].tableOfIndex = NULL;
-            params->params[paramno].isnestedtable = false;
+            params->params[paramno].tabInfo = NULL;
         }
     } else
         params = NULL;
@@ -3205,7 +3204,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
     CachedPlanSource* psrc = NULL;
     bool is_named = false;
     bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
     char* mask_string = NULL;
 #ifdef ENABLE_MULTIPLE_NODES
     bool runOnSingleNode = false;
@@ -3625,7 +3624,7 @@ pass_parsing:
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms, queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            Assert(false);
             break;
         case 2: {
             char* cur_mask_string = NULL;
@@ -3849,8 +3848,7 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
              */
             params->params[paramno].pflags = PARAM_FLAG_CONST;
             params->params[paramno].ptype = ptype;
-            params->params[paramno].tableOfIndexType = InvalidOid;
-            params->params[paramno].tableOfIndex = NULL;
+            params->params[paramno].tabInfo = NULL;
 
             /* Reset the compatible illegal chars import flag */
             u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;
@@ -4121,9 +4119,7 @@ void exec_get_ddl_params(StringInfo input_message)
              */
             params->params[paramno].pflags = PARAM_FLAG_CONST;
             params->params[paramno].ptype = ptype;
-            params->params[paramno].tableOfIndexType = InvalidOid;
-            params->params[paramno].tableOfIndex = NULL;
-            params->params[paramno].isnestedtable = false;
+            params->params[paramno].tabInfo = NULL;
         }
     } else {
         params = NULL;
@@ -4174,7 +4170,7 @@ static void exec_bind_message(StringInfo input_message)
     MemoryContext oldContext;
     bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
     bool snapshot_set = false;
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
     u_sess->parser_cxt.param_info = NULL;
     u_sess->parser_cxt.param_message = NULL;
 
@@ -4672,9 +4668,7 @@ static void exec_bind_message(StringInfo input_message)
              */
             params->params[paramno].pflags = PARAM_FLAG_CONST;
             params->params[paramno].ptype = ptype;
-            params->params[paramno].isnestedtable = false;
-            params->params[paramno].tableOfIndexType = InvalidOid;
-            params->params[paramno].tableOfIndex = NULL;
+            params->params[paramno].tabInfo = NULL;
 
             /* Reset the compatible illegal chars import flag */
             u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;
@@ -4788,7 +4782,7 @@ static void exec_bind_message(StringInfo input_message)
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms, queryid %ld, unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            Assert(false);
             break;
         case 2: {
             char* mask_string = NULL;
@@ -4838,7 +4832,7 @@ static void exec_execute_message(const char* portal_name, long max_rows)
     bool is_xact_command = false;
     bool execute_is_fetch = false;
     bool was_logged = false;
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
 
     gstrace_entry(GS_TRC_ID_exec_execute_message);
     /* Adjust destination to tell printtup.c what to do */
@@ -5053,7 +5047,8 @@ static void exec_execute_message(const char* portal_name, long max_rows)
      */
     switch (check_log_duration(msec_str, was_logged)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms queryid %ld unique id %ld", msec_str,
+                u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
@@ -5172,6 +5167,7 @@ int check_log_duration(char* msec_str, bool was_logged)
         }
     }
 
+    msec_str[0] = '\0';
     return 0;
 }
 
@@ -5871,7 +5867,7 @@ void HandlePoolerReload(void)
     if (IS_PGXC_DATANODE)
         return;
 
-    u_sess->sig_cxt.got_PoolReload = true;
+    ResetGotPoolReload(true);
     u_sess->sig_cxt.cp_PoolReload = true;
 }
 
@@ -6311,6 +6307,12 @@ void ProcessInterrupts(void)
                             errmsg("canceling statement due to %s request", is_datanode ? "coordinator" : "user")));
                 }
             }
+        } else if (pool_validate_cancel_pending && IS_PGXC_COORDINATOR) {
+            InterruptPending = true;
+            t_thrd.int_cxt.QueryCancelPending = true;
+            t_thrd.int_cxt.PoolValidateCancelPending = true;
+            ereport(WARNING, (errmsg("thread receive SIGUSR2 signal but can not INTERRUPT while in DoingCommandRead. "
+                "Set validate and interrupt flag for checking next time.")));
         }
         if (IsJobSnapshotProcess()) {
             ereport(ERROR, (errcode(ERRCODE_QUERY_CANCELED), errmsg("canceling snapshot task")));
@@ -6957,10 +6959,10 @@ void reload_configfile(void)
 /* reload pooler for online business in expansion. */
 void reload_online_pooler()
 {
-    if (u_sess->sig_cxt.got_PoolReload && !IsConnFromGTMTool()) {
+    if (IsGotPoolReload() && !IsConnFromGTMTool()) {
         if (!IsTransactionBlock()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
@@ -7043,14 +7045,18 @@ void RemoveTempNamespace()
     if ((IS_PGXC_COORDINATOR || isSingleMode || u_sess->attr.attr_common.xc_maintenance_mode || IS_SINGLE_NODE) &&
         u_sess->catalog_cxt.deleteTempOnQuiting) {
         MemoryContext current_context = CurrentMemoryContext;
+        ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+        bool need_rebuild_lsc = true;
 
         PG_TRY();
         {
+            t_thrd.proc_cxt.PostInit->InitLoadLocalSysCache(u_sess->proc_cxt.MyDatabaseId,
+                u_sess->proc_cxt.MyDatabaseId == TemplateDbOid ? NULL : u_sess->proc_cxt.MyProcPort->database_name);
+            need_rebuild_lsc = false;
+
             StringInfoData str;
             initStringInfo(&str);
-
             if (u_sess->catalog_cxt.myTempNamespace) {
-                ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
 
                 t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForTempTableDrop",
                     THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
@@ -7080,6 +7086,10 @@ void RemoveTempNamespace()
         PG_CATCH();
         {
             EmitErrorReport();
+            t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+            if (need_rebuild_lsc) {
+                ReBuildLSC();
+            }
             MemoryContextSwitchTo(current_context);
             FlushErrorState();
             ereport(WARNING, (errmsg("Drop temp schema failed. The temp schema will be drop by TwoPhaseCleanner.")));
@@ -7108,16 +7118,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
 #ifdef ENABLE_MULTIPLE_NODES /* PGXC_DATANODE */
     /* Snapshot info */
-    TransactionId xmin;
-    TransactionId xmax;
     uint64 csn;
-    TransactionId recent_global_xmin;
     bool cn_xc_maintain_mode = false;
     bool remote_gtm_mode = false;
     /* Timestamp info */
     TimestampTz gtmstart_timestamp;
     TimestampTz stmtsys_timestamp;
-    GTM_Timeline timeline;
     int ss_need_sync_wait_all = 0;
     errno_t rc = EOK;
     CsnType csn_type;
@@ -7286,6 +7292,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL); /* block everything except SIGQUIT */
 
+    if (IsInitdb) {
+        Assert(!IsUnderPostmaster);
+        g_instance.global_sysdbcache.Init(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+        CreateLocalSysDBCache();
+    }
+
     if (!IsUnderPostmaster) {
         /*
          * Validate we have been given a reasonable-looking t_thrd.proc_cxt.DataDir (if under
@@ -7373,10 +7385,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #endif
 
 #ifndef ENABLE_MULTIPLE_NODES
-        if (!ENABLE_THREAD_POOL) {
+        if (!IS_THREAD_POOL_WORKER) {
             on_shmem_exit(PlDebugerCleanUp, 0);
         }
 #endif
+
+    if (ENABLE_GPC) {
+        on_shmem_exit(cleanGPCPlanProcExit, 0);
+    }
 
     /*
      * Create a per-backend PGPROC struct in shared memory, except in the
@@ -7609,6 +7625,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
 
         /* Since not using PG_TRY, must reset error stack by hand */
+        u_sess->plsql_cxt.cur_exception_cxt = NULL;
         t_thrd.log_cxt.error_context_stack = NULL;
         t_thrd.log_cxt.call_stack = NULL;
         /* reset buffer strategy flag */
@@ -7698,6 +7715,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.msg);
             }
         }
+        u_sess->plsql_cxt.pragma_autonomous = false;
         u_sess->plsql_cxt.curr_compile_context = NULL;
         u_sess->pcache_cxt.gpc_in_batch = false;
         u_sess->pcache_cxt.gpc_in_try_store = false;
@@ -7710,6 +7728,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         u_sess->tri_cxt.exec_row_trigger_on_datanode = false;
 
         u_sess->statement_cxt.executer_run_level = 0;
+
+        /* reset stream for-loop flag when long jump */
+        u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
 
         /* release operator-level hash table in memory */
         releaseExplainTable();
@@ -7731,6 +7752,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         } else {
             AbortCurrentTransaction();
         }
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
         /* Notice: at the most time it isn't necessary to call because
          *   all the LWLocks are released in AbortCurrentTransaction().
          *   but in some rare exception not in one transaction (for
@@ -7757,6 +7780,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         /* reset query_id after sync quit */
         pgstat_report_queryid(0);
+        pgstat_report_unique_sql_id(true);
 
         /*
          * Make sure debug_query_string gets reset before we possibly clobber
@@ -7805,10 +7829,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* We don't have a transaction command open anymore */
         t_thrd.postgres_cxt.xact_started = false;
 
+        t_thrd.xact_cxt.isSelectInto = false;
+
         u_sess->pcache_cxt.cur_stmt_name = NULL;
         /* Now we can allow interrupts again */
         RESUME_INTERRUPTS();
 
+        /* Now we not allow pool_validate interrupts again */
+        PREVENT_POOL_VALIDATE_SIGUSR2();
     }
     oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
 
@@ -7883,11 +7911,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         MemoryContextResetAndDeleteChildren(u_sess->temp_mem_cxt);
         MemoryContextResetAndDeleteChildren(u_sess->stat_cxt.hotkeySessContext);
         u_sess->stat_cxt.hotkeyCandidates = NIL;
+        u_sess->plsql_cxt.pass_func_tupdesc = NULL;
 
         /* reset plpgsql compile flag */
         u_sess->plsql_cxt.compile_context_list = NULL;
         u_sess->plsql_cxt.curr_compile_context = NULL;
         u_sess->plsql_cxt.compile_status = NONE_STATUS;
+        u_sess->plsql_cxt.func_tableof_index = NULL;
+        u_sess->plsql_cxt.portal_depth = 0;
 
         u_sess->statement_cxt.executer_run_level = 0;
 
@@ -7898,6 +7929,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         u_sess->exec_cxt.isLockRows = false;
         t_thrd.postgres_cxt.mark_explain_analyze = false;
         t_thrd.postgres_cxt.mark_explain_only = false;
+        u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
         if (unlikely(t_thrd.log_cxt.msgbuf->data != NULL)) {
             pfree_ext(t_thrd.log_cxt.msgbuf->data);
         }
@@ -7960,7 +7992,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             /* We're ready for a new query, reset wait status and u_sess->debug_query_id */
             pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);
             pgstat_report_queryid(0);
+            pgstat_report_unique_sql_id(true);
 
+            u_sess->trace_cxt.trace_id[0] = '\0';
             /*
              * If connection to client is lost, we do not need to send message to client.
              */
@@ -8019,9 +8053,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         if (IS_THREAD_POOL_WORKER) {
             t_thrd.threadpool_cxt.worker->WaitMission();
+            Assert(CheckMyDatabaseMatch());
             if (!g_instance.archive_obs_cxt.in_switchover && !g_instance.streaming_dr_cxt.isInSwitchover) {
                 Assert(u_sess->status != KNL_SESS_FAKE);
             }
+        } else {
+            /* if we do alter db, reinit syscache */
+            ReLoadLSCWhenWaitMission();
         }
         if (isRestoreMode && !IsAbortedTransactionBlockState()) {
             ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -8051,9 +8089,18 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         }
 
         /*
+         * Record client connection establish time, which start on incommining resuest arrives e.g. poll()
+         * invoked to accept() and end on returning message by server side clientfd.
+         * One session records only once.
+         */
+        u_sess->clientConnTime_cxt.checkOnlyInConnProcess = false;
+
+        /*
          * Check cache size to see if we need to AcceptInvalidationMessages.
          */
         CleanSystemCaches(true);
+
+        CHECK_FOR_INTERRUPTS();
 
         /*
          * (2) Allow asynchronous signals to be executed immediately if they
@@ -8097,6 +8144,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
         t_thrd.postgres_cxt.DoingCommandRead = false;
 
+        CHECK_FOR_INTERRUPTS();
         /*
          * (5) check for any other interesting events that happened while we
          * slept.
@@ -8105,9 +8153,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         // (6) process pooler reload before the next transaction begin.
         //
-        if (u_sess->sig_cxt.got_PoolReload && !IsTransactionOrTransactionBlock() && !IsConnFromGTMTool()) {
+        if (IsGotPoolReload() &&
+            !IsTransactionOrTransactionBlock() && !IsConnFromGTMTool()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         }
 
         /*
@@ -8135,10 +8184,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         u_sess->attr.attr_sql.explain_allow_multinode = false;
 
         /* Reset store procedure's session variables. */
-        stp_reset_opt_values();
+        stp_reset_stmt();
         MemoryContext oldMemory =
             MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+#ifdef ENABLE_LLVM_COMPILE
         CodeGenThreadInitialize();
+#endif
         (void)MemoryContextSwitchTo(oldMemory);
         u_sess->exec_cxt.single_shard_stmt = false;
         /* Set statement_timestamp */
@@ -8303,6 +8354,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             {
                 const char* query_string = NULL;
 
+                pgstat_report_trace_id(&u_sess->trace_cxt, true);
                 query_string = pq_getmsgstring(&input_message);
                 if (query_string == NULL) {
                     ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
@@ -8545,7 +8597,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         u_sess->unique_sql_cxt.unique_sql_user_id = (Oid)pq_getmsgint(&input_message, sizeof(uint32));
                         u_sess->unique_sql_cxt.unique_sql_id = (uint64)pq_getmsgint64(&input_message);
                         u_sess->slow_query_cxt.slow_query.unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
-                        pgstat_report_queryid(u_sess->debug_query_id);
+                        pgstat_report_unique_sql_id(false);
                         Oid procId = 0;
                         uint64 queryId = 0;
                         int64 stamp = 0;
@@ -8704,6 +8756,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
                 pq_getmsgend(&input_message);
                 statement_init_metric_context();
+                instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
                 statement_commit_metirc_context();
 
@@ -8730,6 +8783,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  * this message is complex enough that it seems best to put
                  * the field extraction out-of-line
                  */
+                instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_bind_message(&input_message);
                 break;
 
@@ -8738,6 +8792,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 const char* portal_name = NULL;
                 int max_rows;
 
+                pgstat_report_trace_id(&u_sess->trace_cxt, true);
                 if ((unsigned int)input_message.len > SECUREC_MEM_MAX_LEN)
                     ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid execute message")));
 
@@ -9143,23 +9198,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 rc = memcpy_s(&is_check_xid, sizeof(bool), pq_getmsgbytes(&input_message, sizeof(bool)), sizeof(bool));
                 securec_check(rc, "\0", "\0");
 
-                if (!is_check_xid) {
-                    ereport(DEBUG1, (errmsg("Received new gxid %lu", gxid)));
-                    /* CN function may use gxid from CN to create tmp lib name */
-                    if (!GTM_MODE)
-                        t_thrd.xact_cxt.cn_xid = gxid;
-                    else
-                        SetNextTransactionId(gxid, false);
-                } else {
-                    /* set the check nextxid */
-                    if (module_logging_is_on(MOD_TRANS_XACT))
-                        ereport(LOG,
-                            (errmodule(MOD_TRANS_XACT),
-                                errmsg(
-                                    "update check xid from %lu to %lu", t_thrd.xact_cxt.reserved_nextxid_check, gxid)));
-
-                    t_thrd.xact_cxt.reserved_nextxid_check = gxid;
-                }
+                ereport(DEBUG1, (errmsg("Received new gxid %lu", gxid)));
+                /* CN function may use gxid from CN to create tmp lib name */
+                t_thrd.xact_cxt.cn_xid = gxid;
 
                 pq_getmsgend(&input_message);
             } break;
@@ -9196,56 +9237,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         /* quickly set my recent global xmin */
                         u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
                     }
-                }else { /* gtm mode */
-                    /* Set the snapshot we were passed down */
-                    rc = memcpy_s(
-                        &ss_need_sync_wait_all, sizeof(int), pq_getmsgbytes(&input_message, sizeof(bool)), sizeof(bool));
-                    securec_check(rc, "", "");
-
-                    rc = memcpy_s(&xmin,
-                        sizeof(TransactionId),
-                        pq_getmsgbytes(&input_message, sizeof(TransactionId)),
-                        sizeof(TransactionId));
-                    securec_check(rc, "", "");
-                    rc = memcpy_s(&xmax,
-                        sizeof(TransactionId),
-                        pq_getmsgbytes(&input_message, sizeof(TransactionId)),
-                        sizeof(TransactionId));
-                    securec_check(rc, "", "");
-                    rc = memcpy_s(&recent_global_xmin,
-                        sizeof(TransactionId),
-                        pq_getmsgbytes(&input_message, sizeof(TransactionId)),
-                        sizeof(TransactionId));
-                    securec_check(rc, "", "");
-                    rc = memcpy_s(&csn, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
-                    securec_check(rc, "", "");
-                    rc = memcpy_s(&timeline,
-                        sizeof(GTM_Timeline),
-                        pq_getmsgbytes(&input_message, sizeof(GTM_Timeline)),
-                        sizeof(GTM_Timeline));
-                    securec_check(rc, "", "");
-                    rc = memcpy_s(&cn_xc_maintain_mode,
-                        sizeof(bool),
-                        pq_getmsgbytes(&input_message, sizeof(bool)),
-                        sizeof(bool));
-                    securec_check(rc, "", "");
-                    if (t_thrd.proc->workingVersionNum >= 92012) {
-                        remote_gtm_mode = pq_getmsgbyte(&input_message);
-                    }
-                    pq_getmsgend(&input_message);
-                    /* if message length is correct, set u_sess variables */
-                    u_sess->utils_cxt.RecentGlobalXmin = recent_global_xmin;
-                    u_sess->utils_cxt.cn_xc_maintain_mode = cn_xc_maintain_mode;
-
-                    SetGlobalSnapshotData(xmin, xmax, csn, timeline, ss_need_sync_wait_all);
-                    /*
-                     * Fix u_sess->utils_cxt.RecentGlobalXmin using GetOldestXmin, consider local xmins.
-                     * As we might prune or vacuum dead tuples deleted by xid older than u_sess->utils_cxt.RecentGlobalXmin.
-                     * We should keep u_sess->utils_cxt.RecentGlobalXmin is the minnimum xmin.
-                     * If u_sess->utils_cxt.RecentGlobalXmin is larger than local xmins, tuples being accessed might be
-                     * cleaned.
-                     */
-                    u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
                 }
                 /* check gtm mode, remote should be false, local cannot be true */
                 if (remote_gtm_mode != g_instance.attr.attr_storage.enable_gtm_free &&
@@ -9287,18 +9278,25 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             {
                 int command;
                 char* id = NULL;
-
                 command = pq_getmsgbyte(&input_message);
                 id = (char*)pq_getmsgstring(&input_message);
                 pq_getmsgend(&input_message);
 
                 switch (command) {
                     case CREATE_BARRIER_PREPARE:
-                        ProcessCreateBarrierPrepare(id);
+                        ProcessCreateBarrierPrepare(id, false);
+                        break;
+
+                    case CREATE_SWITCHOVER_BARRIER_PREPARE:
+                        ProcessCreateBarrierPrepare(id, true);
                         break;
 
                     case CREATE_BARRIER_END:
                         ProcessCreateBarrierEnd(id);
+                        break;
+
+                    case CREATE_BARRIER_COMMIT:
+                        ProcessCreateBarrierCommit(id);
                         break;
 
                     case CREATE_BARRIER_EXECUTE:
@@ -9436,19 +9434,26 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             } break;
 #endif
             case 'n': /* commiting */
+            {
                 /* Get the csn passed down */
                 rc = memcpy_s(&csn, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
                 securec_check(rc, "", "");
                 pq_getmsgend(&input_message);
 
+                int nchildren;
+                TransactionId *children = NULL;
+                TransactionId xid = GetTopTransactionIdIfAny();
+                Assert(TransactionIdIsValid(xid));
+                nchildren = xactGetCommittedChildren(&children);
                 /* Set the commit csn to commit_in_progress */
                 SetXact2CommitInProgress(InvalidTransactionId, csn);
+                XLogInsertStandbyCSNCommitting(xid, csn, children, nchildren);
 
                 /* Send back response */
                 pq_putemptymessage('m');
                 pq_flush();
                 break;
-
+            }
             case 'N': /* commit csn */
                 /* Set the commit csn passed down */
                 rc = memcpy_s(&csn, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)), sizeof(uint64));
@@ -9520,6 +9525,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     ereport(ERROR,
                         (errcode(ERRCODE_SYSTEM_ERROR),
                             errmsg("Need to set support_batch_bind=true if executing batch")));
+
+                /*
+                 * reset unique sql start time, otherwise fusionExecute will repeatly report
+                 * elapsed time more.
+                 */
+                u_sess->unique_sql_cxt.unique_sql_start_time = 0;
 
                 pgstatCountSQL4SessionLevel();
                 statement_init_metric_context();
@@ -9609,7 +9620,37 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 flushSequenceMsg();
             }
             break;
+            case 'J':
+            {
+                char* trace_id = NULL;
+                trace_id = (char*)pq_getmsgstring(&input_message);
+                pq_getmsgend(&input_message);
+                if (strlen(trace_id) > MAX_TRACE_ID_SIZE -1) {
+                    trace_id[MAX_TRACE_ID_SIZE - 1] = '\0';
+                    ereport(WARNING, (errmsg("trace_id length cannot exceed %d", MAX_TRACE_ID_SIZE - 1)));
+                }
+                errno_t rc =
+                    memcpy_s(u_sess->trace_cxt.trace_id, MAX_TRACE_ID_SIZE, trace_id, strlen(trace_id) + 1);
+                securec_check(rc, "\0", "\0");
+                elog(DEBUG1, "trace_id:%s start", u_sess->trace_cxt.trace_id);
+            }
+            break;
+#ifdef ENABLE_MULTIPLE_NODES
+            case 'T':
+            {
+                LWLockAcquire(XLogMaxCSNLock, LW_SHARED);
+                CommitSeqNo maxCSN = t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN;
+                LWLockRelease(XLogMaxCSNLock);
 
+                StringInfoData buf;
+                pq_beginmessage(&buf, 'J');
+                pq_sendint64(&buf, maxCSN);
+                pq_sendint8(&buf, t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby);
+                pq_endmessage(&buf);
+                pq_flush();
+            }
+            break;
+#endif
             default:
                 ereport(FATAL,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid frontend message type %c", firstchar)));
@@ -9799,6 +9840,11 @@ void log_disconnections(int code, Datum arg)
                 (errmsg("disconnection: session time: %d:%02d:%02d.%03d ", hours, minutes, seconds, msecs)));
     }
     
+}
+
+void cleanGPCPlanProcExit(int code, Datum arg)
+{
+    GPCCleanUpSessionSavedPlan();
 }
 
 /* Aduit user logout */
@@ -10847,7 +10893,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
     MemoryContext oldContext;
     bool save_log_statement_stats = u_sess->attr.attr_common.log_statement_stats;
     bool snapshot_set = false;
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
 
     int msg_type;
     /* D message */
@@ -11221,9 +11267,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
                  */
                 params->params[paramno].pflags = PARAM_FLAG_CONST;
                 params->params[paramno].ptype = ptype;
-                params->params[paramno].tableOfIndexType = InvalidOid;
-                params->params[paramno].tableOfIndex = NULL;
-                params->params[paramno].isnestedtable = false;
+                params->params[paramno].tabInfo = NULL;
 
                 /* Reset the compatible illegal chars import flag */
                 u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;
@@ -11529,7 +11573,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms, queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            Assert(false);
             break;
         case 2: {
             char* mask_string = NULL;

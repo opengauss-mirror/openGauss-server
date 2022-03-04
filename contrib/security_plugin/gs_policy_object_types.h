@@ -66,7 +66,7 @@ enum PrivType {
     T_LOGIN_SUCCESS,
     T_LOGIN_FAILURE,
     T_COPY,
-    T_OPEN,
+    T_CURSOR,
     T_FETCH,
     T_CLOSE,
     T_ALL
@@ -275,5 +275,7 @@ bool name_list_to_label(PolicyLabelItem *item, List *names, char *name = NULL, s
 void gen_policy_labelitem(PolicyLabelItem &item, const ListCell *rel, int objtype);
 void gen_policy_label_for_commentstmt(PolicyLabelItem &item, const CommentStmt *commentstmt);
 int get_objtype(int object_type);
+CmdType get_rte_commandtype(RangeTblEntry *rte);
+const char *get_cursorinfo(CmdType type);
 
 #endif /* GS_POLICY_OBJECT_TYPES_H_ */

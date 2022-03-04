@@ -30,7 +30,9 @@
 #include "nodes/pg_list.h"
 #include "storage/buf/buffile.h"
 #include "replication/slot.h"
+#ifndef ENABLE_LITE_MODE
 #include "eSDKOBS.h"
+#endif
 
 #define OBS_MAX_UPLOAD_ID_LEN 256
 #define OBS_MAX_FILE_PATH 1024
@@ -130,7 +132,7 @@ typedef struct OBSReadWriteHandler {
     bool in_computing;
     /* size_t	m_offset;	=>get_cond.start_byte */
     /* obs_bucket_context m_bucketCtx; =>m_option.bucket_options */
-
+#ifndef ENABLE_LITE_MODE
     obs_options m_option;
     obs_object_info m_object_info;
 
@@ -144,12 +146,15 @@ typedef struct OBSReadWriteHandler {
          * More OBS operation properties added here
          */
     } properties;
+#endif
 } OBSReadWriteHandler;
 
 typedef struct list_service_data {
     int headerPrinted;
     int allDetails;
+#ifndef ENABLE_LITE_MODE
     obs_status ret_status;
+#endif
 } list_service_data;
 
 extern void SetObsMemoryContext(MemoryContext mctx);

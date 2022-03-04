@@ -21,7 +21,10 @@ include $(top_builddir)/src/Makefile.global
 override CPPFLAGS := -I$(libpq_srcdir) -I$(ZLIB_INCLUDE_PATH) $(CPPFLAGS) -DHAVE_LIBZ -fPIC -fPIE -DFRONTEND -I$(top_builddir)/src/bin/pg_rewind -I$(top_builddir)/src/bin/pg_ctl -I$(LZ4_INCLUDE_PATH)
 
 LDFLAGS += -Wl,-z,relro,-z,now -L$(LZ4_LIB_PATH)
-LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -llz4
+LIBS += -llz4
+ifeq ($(enable_lite_mode), no)
+    LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+endif
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"

@@ -25,8 +25,6 @@
 
 #include "common/fe_memutils.h"
 #include "common/build_query/build_query.h"
-#include "compressed_rewind.h"
-#include "storage/page_compression_impl.h"
 #include "replication/replicainternal.h"
 
 #define BLOCKSIZE (8 * 1024)
@@ -37,8 +35,6 @@
 static int dstfd = -1;
 static char dstpath[MAXPGPATH] = "";
 static bool g_isRelDataFile = false;
-
-static CompressedPcaInfo g_compressedPcaInfo;
 
 static void create_target_dir(const char* path);
 static void remove_target_dir(const char* path);
@@ -104,7 +100,7 @@ void close_target_file(void)
     dstfd = -1;
 }
 
-void write_target_range(char* buf, off_t begin, size_t size, int space, bool compressed)
+void write_target_range(char* buf, off_t begin, size_t size, int space)
 {
     int writeleft;
     char* p = NULL;
@@ -115,7 +111,7 @@ void write_target_range(char* buf, off_t begin, size_t size, int space, bool com
     if (dry_run)
         return;
 
-    if (!compressed && begin % BLOCKSIZE != 0) {
+    if (begin % BLOCKSIZE != 0) {
         (void)close(dstfd);
         dstfd = -1;
         pg_fatal("seek position %ld in target file \"%s\" is not in BLOCKSIZEs\n", size, dstpath);
@@ -1228,143 +1224,4 @@ bool tablespaceDataIsValid(const char* path)
     }
 
     return true;
-}
-
-void CompressedFileTruncate(const char *path, const RewindCompressInfo *rewindCompressInfo)
-{
-    if (dry_run) {
-        return;
-    }
-
-    uint16 chunkSize = rewindCompressInfo->chunkSize;
-
-    BlockNumber oldBlockNumber = rewindCompressInfo->oldBlockNumber;
-    BlockNumber newBlockNumber = rewindCompressInfo->newBlockNumber;
-
-    Assert(oldBlockNumber > newBlockNumber);
-    char pcaPath[MAXPGPATH];
-    FormatPathToPca(path, pcaPath, MAXPGPATH, true);
-
-    int pcaFd = open(pcaPath, O_RDWR | PG_BINARY, 0600);
-    if (pcaFd < 0) {
-        pg_fatal("CompressedFileTruncate: could not open file \"%s\": %s\n", pcaPath, strerror(errno));
-        return;
-    }
-
-    PageCompressHeader* map = pc_mmap(pcaFd, chunkSize, false);
-    if (map == MAP_FAILED) {
-        pg_fatal("CompressedFileTruncate: Failed to mmap file \"%s\": %s\n", pcaPath, strerror(errno));
-        return;
-    }
-    /* write zero to truncated addr */
-    for (BlockNumber blockNumber = newBlockNumber; blockNumber < oldBlockNumber; ++blockNumber) {
-        PageCompressAddr* addr = GET_PAGE_COMPRESS_ADDR(map, chunkSize, blockNumber);
-        for (size_t i = 0; i < addr->allocated_chunks; ++i) {
-            addr->chunknos[i] = 0;
-        }
-        addr->nchunks = 0;
-        addr->allocated_chunks = 0;
-        addr->checksum = 0;
-    }
-    map->last_synced_nblocks = map->nblocks = newBlockNumber;
-
-    /* find the max used chunk number */
-    pc_chunk_number_t beforeUsedChunks = map->allocated_chunks;
-    pc_chunk_number_t max_used_chunkno = 0;
-    for (BlockNumber blockNumber = 0; blockNumber < newBlockNumber; ++blockNumber) {
-        PageCompressAddr* addr = GET_PAGE_COMPRESS_ADDR(map, chunkSize, blockNumber);
-        for (uint8 i = 0; i < addr->allocated_chunks; i++) {
-            if (addr->chunknos[i] > max_used_chunkno) {
-                max_used_chunkno = addr->chunknos[i];
-            }
-        }
-    }
-    map->allocated_chunks = map->last_synced_allocated_chunks = max_used_chunkno;
-
-    /* truncate pcd qfile */
-    if (beforeUsedChunks > max_used_chunkno) {
-        char pcdPath[MAXPGPATH];
-        FormatPathToPcd(path, pcdPath, MAXPGPATH, false);
-        truncate_target_file(pcdPath, max_used_chunkno * chunkSize);
-    }
-    pc_munmap(map);
-    pg_log(PG_PROGRESS, "CompressedFileTruncate: %s\n", path);
-}
-
-void OpenCompressedPcaFile(const char* fileName, int32 chunkSize, int32 algorithm, bool rebuild)
-{
-    if (dry_run) {
-        return;
-    }
-    if (g_compressedPcaInfo.pcaFd != -1 && strcmp(fileName, &g_compressedPcaInfo.path[strlen(pg_data) + 1]) == 0) {
-        /* already open */
-        return;
-    }
-    CloseCompressedPcaFile();
-    int rc = snprintf_s(g_compressedPcaInfo.path, sizeof(g_compressedPcaInfo.path),
-            sizeof(g_compressedPcaInfo.path) - 1,
-            "%s/%s", pg_data, fileName);
-    securec_check_ss_c(rc, "\0", "\0");
-
-    int mode = O_RDWR | PG_BINARY;
-    mode = rebuild ? (mode | O_TRUNC | O_CREAT) : mode;
-
-    g_compressedPcaInfo.pcaFd = open(g_compressedPcaInfo.path, mode, S_IRUSR | S_IWUSR);
-    if (g_compressedPcaInfo.pcaFd < 0) {
-        pg_fatal("could not open compressed pca file \"%s\": %s\n", g_compressedPcaInfo.path, strerror(errno));
-        return;
-    }
-    g_compressedPcaInfo.algorithm = algorithm;
-    g_compressedPcaInfo.chunkSize = chunkSize;
-    g_compressedPcaInfo.pcaMap = (char*) pc_mmap(g_compressedPcaInfo.pcaFd, chunkSize, false);
-    if ((void*)g_compressedPcaInfo.pcaMap == MAP_FAILED) {
-        pg_fatal("OpenCompressedPcaFile: Failed to mmap file \"%s\": %s\n", g_compressedPcaInfo.path, strerror(errno));
-        return;
-    }
-}
-
-void CloseCompressedPcaFile()
-{
-    if (g_compressedPcaInfo.pcaFd == -1) {
-        return;
-    }
-    pc_munmap((PageCompressHeader*)g_compressedPcaInfo.pcaMap);
-    if (close(g_compressedPcaInfo.pcaFd) != 0) {
-        pg_fatal("could not close target file \"%s\": %s\n", g_compressedPcaInfo.path, gs_strerror(errno));
-    }
-    g_compressedPcaInfo.pcaFd = -1;
-    g_compressedPcaInfo.pcaMap = NULL;
-    g_compressedPcaInfo.chunkSize = 0;
-    g_compressedPcaInfo.algorithm = 0;
-}
-
-void FetchCompressedFile(char* buf, BlockNumber blockNumber, int32 size)
-{
-    int32 chunkSize = g_compressedPcaInfo.chunkSize;
-    int needChunks = size / chunkSize;
-
-    PageCompressHeader* pcMap = (PageCompressHeader*) g_compressedPcaInfo.pcaMap;
-    PageCompressAddr* pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunkSize, blockNumber);
-
-    // 2. allocate chunks
-    if (pcAddr->allocated_chunks < needChunks) {
-        auto chunkno = pg_atomic_fetch_add_u32(&pcMap->allocated_chunks, needChunks - pcAddr->allocated_chunks);
-        for (int i = pcAddr->allocated_chunks; i < needChunks; i++) {
-            pcAddr->chunknos[i] = ++chunkno;
-        }
-        pcAddr->allocated_chunks = needChunks;
-    }
-    for (int32 i = 0; i < needChunks; ++i) {
-        auto buffer_pos = buf + chunkSize * i;
-        off_t seekpos = (off_t) OFFSET_OF_PAGE_COMPRESS_CHUNK(chunkSize, pcAddr->chunknos[i]);
-        int32 start = i;
-        while (i < needChunks - 1 && pcAddr->chunknos[i + 1] == pcAddr->chunknos[i] + 1) {
-            i++;
-        }
-        int write_amount = chunkSize * (i - start + 1);
-        // open file dstfd
-        write_target_range(buffer_pos, seekpos, write_amount, 0, true);
-    }
-    pcAddr->nchunks = pcAddr->allocated_chunks;
-    pcAddr->checksum = AddrChecksum32(blockNumber, pcAddr, chunkSize);
 }

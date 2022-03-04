@@ -19,9 +19,15 @@ insert into test_package1 values(50);
 create table dams_ci.test1(col1 int);
 create schema pkgschema1;
 create schema pkgschema2;
+set behavior_compat_options='allow_procedure_compile_check';
 
 drop package if exists exp_pkg;
-
+create or replace package aa
+is
+procedure a(col1 int,col2 in int);
+procedure a(col1 int,col2 in int,col3 out int);
+end aa;
+/
 create or replace package exp_pkg as
   user_exp EXCEPTION;
 end exp_pkg;
@@ -237,13 +243,13 @@ begin
 end;
 /
 drop function if exists func1;
-create or replace package exp_pkg as
+create or replace package exp_pkg1 as
   user_exp EXCEPTION;
   function func1(param int) return number;
-end exp_pkg;
+end exp_pkg1;
 /
 
-create or replace package body exp_pkg as
+create or replace package body exp_pkg1 as
   function func1(param int) return number as
   begin
     if (param = 1) then
@@ -255,9 +261,9 @@ create or replace package body exp_pkg as
         raise info 'user_exp raise';
     return 0;
   end;
-end exp_pkg;
+end exp_pkg1;
 /
-select exp_pkg.func1(1);
+select exp_pkg1.func1(1);
 
 create or replace package transaction_test as
   data1 character(20) := 'global data1';
@@ -281,7 +287,7 @@ end transaction_test;
 drop package transaction_test;
 
 
-drop package if exists exp_pkg;
+drop package if exists exp_pkg1;
 drop package autonomous_pkg_150_1;
 \sf feature_cross_test.func3
 \sf func1
@@ -1186,6 +1192,7 @@ end pckg_test2;
 
 create user test1 password 'Gauss123';
 create user test2 password 'Gauss123';
+ALTER DEFAULT PRIVILEGES IN SCHEMA test1 grant execute on packages to test2;
 SET SESSION AUTHORIZATION test1 password 'Gauss123';
 set behavior_compat_options='plsql_security_definer';
 drop package if exists pkg_auth_1;
@@ -1237,6 +1244,101 @@ drop user test1;
 drop user test2;
 
 call pckg_test2.p1();
+
+create user t2 password 'Gauss_234';
+create user t3 password 'Gauss_234';
+create user t4 password 'Gauss_234';
+create user t5 password 'Gauss_234';
+SET SESSION AUTHORIZATION t2 password 'Gauss_234';
+
+create table tab1(col1 int);
+set behavior_compat_options='plsql_security_definer';
+create or replace package a3 authid current_user
+is
+procedure func_1();
+end a3; 
+/
+create or replace package body a3
+is
+procedure func_1()
+is
+begin
+insert into test1 values(1);
+end;
+end a3;
+/
+\sf a3.func_1
+create or replace procedure test2
+is
+curruser varchar2;
+begin
+select current_user into curruser;
+raise notice '%',curruser;
+insert into t2.tab1 values(1);
+commit;
+select current_user into curruser;
+raise notice '%',curruser;
+insert into t2.tab1 values(2);
+end;
+/
+select proacl,prosecdef from pg_proc where proname='test2';
+grant usage on schema t2 to t3;
+grant usage,create on schema t2 to t3;
+grant execute on all functions in schema t2 to t3;
+SET SESSION AUTHORIZATION t3 password 'Gauss_234';
+call t2.test2();
+set behavior_compat_options='plsql_security_definer';
+create or replace procedure test3
+is
+a int:=1;
+begin
+a:=2/0;
+exception when others then
+t2.test2();
+raise;
+end;
+/
+select proacl,prosecdef from pg_proc where proname='test3';
+grant usage on schema t3 to t3;
+grant usage,create on schema t3 to t4;
+grant execute on all functions in schema t3 to t4;
+SET SESSION AUTHORIZATION t4 password 'Gauss_234';
+set behavior_compat_options='plsql_security_definer';
+create or replace procedure test4
+is
+a int:=1;
+begin
+a:=2/0;
+exception when others then
+t3.test3();
+commit;
+raise;
+end;
+/
+select proacl,prosecdef from pg_proc where proname='test4';
+grant usage on schema t4 to t5;
+grant usage,create on schema t4 to t5;
+grant execute on all functions in schema t4 to t5;
+SET SESSION AUTHORIZATION t5 password 'Gauss_234';
+set behavior_compat_options='plsql_security_definer';
+create or replace procedure test5
+is
+a int:=1;
+begin
+a:=2/0;
+exception when others then
+t4.test4();
+commit;
+raise;
+end;
+/
+select proacl,prosecdef from pg_proc where proname='test5';
+call t5.test5();
+reset session AUTHORIZATION;
+drop user t2 cascade;
+drop user t3 cascade;
+drop user t4 cascade;
+drop user t5 cascade;
 
 create or replace package pkg_same_arg_1
 is
@@ -1451,48 +1553,464 @@ END UT_P_PCKG_DAMS_RECEIVE;
 --package body definition of UT_P_PCKG_DAMS_RECEIVE
 /
 
-create or replace function fun123(va in varchar2, vb in varchar2)
-return character varying[]
-as declare
-vc varchar2[];
-begin
-vc[1] := va;
-vc[2] := vb;
-raise info 'out';
-return vc;
-end;
+create or replace package pck1 as
+procedure p1;
+procedure p2;
+end pck1;
 /
-
-create or replace package pck123 as
-procedure p1();
-function fun123(va in varchar2, vb in varchar2) return character varying[];
-end pck123;
-/
-
-create or replace package body pck123 as
+create or replace package body pck1 as
 procedure p1 as
-va varchar2;
-vb varchar2;
-vc varchar2[];
 begin
-vc = fun123(va,',');
---vc = fun1(va,vb);
+null;
 end;
-function fun123(va in varchar2, vb in varchar2) return character varying[]
-as declare
-vc varchar2[];
+procedure p2 as 
 begin
-vc[1] := va;
-vc[2] := vb;
-return vc;
+drop package pck1;
 end;
-end pck123;
+end pck1;
 /
-
-call pck123.p1();
-
+call pck1.p2();
 --test online help
 \h CREATE PACKAGE
 \h CREATE PACKAGE BODY
 \h DROP PACKAGE
 \h DROP PACKAGE BODY
+
+create schema pkgsch059;
+set current_schema=pkgsch059;
+create table pkgtbl059(c0 int,c1 number(5),c2 varchar2(20),c3 clob,c4 blob);
+insert into pkgtbl059 values(1,1,'varchar1',repeat('clob1',2),'abcdef1');
+insert into pkgtbl059 values(2,2,'varchar10',repeat('clob2',2),'abcdef2');
+
+create type type001 is(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob);
+
+create or replace package pkg059
+is
+  type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob);
+  type type002 is table of pkgsch059.type001 index by integer;
+  type type003 is table of type001 index by integer;
+  col1  type002:=type002();
+  col2  type003:=type003();
+  procedure proc059_1(col3 type002,col4 type003);
+  function func059_2(col5 int) return int;
+end pkg059;
+/
+
+create or replace package body pkg059
+is
+procedure proc059_1(col3 type002,col4 type003)
+is
+begin
+  raise info 'col3 is %',col3;
+  raise info 'col4 is %',col4;
+end;
+function func059_2(col5 int) return int
+is
+begin
+   pkg059.col1(1):=(1,1,'varchar1',repeat('clob1',2),'abcdef1');
+   pkg059.col1(2):=(2,2,'varchar10',repeat('clob2',2),'abcdef2');
+   pkg059.col2('1'):=col1(2);
+   pkg059.col2('-1'):=col1(1);
+   proc059_1(pkg059.col1,pkg059.col2);
+   return pkg059.col1(1).c1;
+end;
+end pkg059;
+/
+
+create or replace package pkg059_1
+is
+procedure proc059_1_1(cp1 pkg059.type002,cp2 out pkg059.type003);
+procedure func059_1_2(cf1 pkg059.type002,cf2 out pkg059.type003);
+end pkg059_1;
+/
+
+
+create or replace package body pkg059_1
+is
+procedure proc059_1_1(cp1 pkg059.type002,cp2 out pkg059.type003)
+is
+cp3 varchar2(30);
+begin
+   raise info 'pkg059.col1 %',pkg059.col1;
+   raise info 'pkg059.col2 %',pkg059.col2;
+   func059_1_2(cf1=>pkg059.col1,cf2=>pkg059.col2);
+   raise info 'cp1 is %',cp1;
+   raise info 'cp2 is %',cp2;
+   raise info 'cp3 is %',cp3;
+end;
+procedure func059_1_2(cf1 pkg059.type002,cf2 out pkg059.type003)
+is
+cf3 number;
+cf4 varchar2(30):='cf4';
+begin
+   cf3:=3;
+   pkg059.func059_2(cf3);
+   raise info 'cf2(1).c1 is %',cf2(1);
+  -- return cf4;
+end;
+end pkg059_1;
+/
+
+
+declare
+de1 pkg059.type002;
+de2 pkg059.type003;
+count int:=2;
+var2  varchar2(30);
+begin
+for i in 1..count loop
+select c0,c1,c2,c3,c4 into de1(i).c1,de1(i).c2,de1(i).c3,de1(i).c4,de1(i).c5 from pkgtbl059 where c0=i;
+select c0+200,c1+200,c2||'200',c3||'200',c4||'200' into de2(i).c1,de2(i).c2,de2(i).c3,de2(i).c4,de2(i).c5 from pkgtbl059 where c0=i;
+end loop;
+  raise info 'de1 is %',de1;
+  raise info 'de2 is %',de2;
+  pkg059_1.proc059_1_1(de1,de2);
+  raise info 'de2 out is %',de2;
+end;
+/
+
+
+
+create or replace package body pkg059
+is
+procedure proc059_1(col3 type002,col4 type003)
+is
+begin
+  raise info 'col3 is %',col3;
+  raise info 'col4 is %',col4;
+end;
+function func059_2(col5 int) return int
+is
+begin
+   pkg059.col1(1):=(1,1,'varchar1',repeat('clob1',2),'abcdef1');
+   pkg059.col1(2):=(2,2,'varchar10',repeat('clob2',2),'abcdef2');
+   col2('1'):=col1(2);
+   col2('-1'):=col1(1);
+   proc059_1(pkg059.col1,pkg059.col2);
+   return pkg059.col1(1).c1;
+end;
+end pkg059;
+/
+
+declare
+de1 pkg059.type002;
+de2 pkg059.type003;
+count int:=2;
+var2  varchar2(30);
+begin
+for i in 1..count loop
+select c0,c1,c2,c3,c4 into de1(i).c1,de1(i).c2,de1(i).c3,de1(i).c4,de1(i).c5 from pkgtbl059 where c0=i;
+select c0+200,c1+200,c2||'200',c3||'200',c4||'200' into de2(i).c1,de2(i).c2,de2(i).c3,de2(i).c4,de2(i).c5 from pkgtbl059 where c0=i;
+end loop;
+  raise info 'de1 is %',de1;
+  raise info 'de2 is %',de2;
+  pkg059_1.proc059_1_1(de1,de2);
+  raise info 'de2 out is %',de2;
+end;
+/
+
+--test alter package owner
+create user alt_package PASSWORD 'gauss@123';
+create user alt_package_2 PASSWORD 'gauss@123';
+create package alt_package.pck1_alter as
+procedure p1();
+type r1 is record(a int, b int);
+type r2 is table of r1;
+type r3 is varray(10) of r1;
+type r4 is ref cursor;
+end pck1_alter;
+/
+create package body alt_package.pck1_alter as
+type r5 is record(a int, b int);
+type r6 is table of r1;
+type r7 is varray(10) of r1;
+type r8 is ref cursor;
+procedure p1 is 
+begin
+null;
+end;
+procedure p2 is 
+begin
+null;
+end;
+end pck1_alter;
+/
+select usename from pg_user where usesysid = (select pkgowner from gs_package where pkgname = 'pck1_alter');
+SET SESSION AUTHORIZATION alt_package_2 password 'gauss@123';
+alter package alt_package.pck1_alter owner to alt_package_2;
+SET SESSION AUTHORIZATION alt_package password 'gauss@123';
+alter package alt_package.pck1_alter owner to alt_package_2;
+reset session AUTHORIZATION;
+alter package alt_package.pck1_alter owner to alt_package_2;
+SET SESSION AUTHORIZATION alt_package password 'gauss@123';
+alter package alt_package.pck1_alter owner to alt_package;
+reset session AUTHORIZATION;
+select usename from pg_user where usesysid = (select pkgowner from gs_package where pkgname = 'pck1_alter');
+SET SESSION AUTHORIZATION alt_package_2 password 'gauss@123';
+call alt_package.pck1_alter.p1();
+reset session AUTHORIZATION;
+grant usage on schema alt_package to alt_package_2;
+grant execute on package alt_package.pck1_alter to alt_package_2; 
+SET SESSION AUTHORIZATION alt_package_2 password 'gauss@123';
+call alt_package.pck1_alter.p1();
+declare
+va alt_package.pck1_alter.r1;
+vb alt_package.pck1_alter.r2;
+vc alt_package.pck1_alter.r3;
+vd alt_package.pck1_alter.r4;
+begin
+va := (1,1);
+vb(1) := (2,3);
+vc(1) := (3,4);
+raise info '%,%,%', va,vb,vc;
+end;
+/
+reset session AUTHORIZATION;
+drop package alt_package.pck1_alter;
+drop user alt_package cascade;
+drop user alt_package_2 cascade;
+
+-- test \h alter package
+\h alter package
+
+-- test \sf procedure with authid
+create or replace procedure p1()
+AUTHID CURRENT_USER
+is 
+begin
+null;
+end;
+/
+
+create or replace procedure p2()
+AUTHID DEFINER
+is 
+begin
+null;
+end;
+/
+
+create or replace procedure p3()
+is
+begin
+null;
+end;
+/
+CREATE OR REPLACE PACKAGE ABORT IS
+PROCEDURE testpro1(var3 int);
+END ABORT;
+/
+CREATE OR REPLACE PACKAGE body ABORT IS
+PROCEDURE testpro1(var3 int)
+is
+begin
+null;
+end;
+END ABORT;
+/
+create or replace package autonomous_pkg_tmp 
+IS 
+count_public int := 10; 
+function autonomous_f_public(num1 int) 
+return int;
+end autonomous_pkg_tmp;
+/
+create or replace package body autonomous_pkg_tmp as 
+count_private int:=20; 
+function autonomous_f_public(num1 int) 
+return int 
+is 
+declare 
+re_int int; 
+begin count_public = num1 + count_public; 
+count_private = num1 + count_private; 
+re_int = count_public +count_private; 
+return re_int; 
+end;
+begin 
+count_public:=0;
+count_private:=0; 
+end autonomous_pkg_tmp;
+/
+create function package_func_overload(col int, col2 out int)
+return integer  package
+as
+declare
+    col_type text;
+begin
+     col := 122;
+     return 0;
+end;
+/
+
+create procedure package_func_overload(col int, col2 out varchar)
+package
+as
+declare
+    col_type text;
+begin
+     col2 := '122';
+end;
+/
+
+reset session AUTHORIZATION;
+begin
+raise notice '%',autonomous_pkg_tmp.count_public;
+end;
+/
+create or replace package pck1 is
+type tp1 is varray(10) of int;
+function f1(in a int,c out tp1) return int;
+end pck1;
+/
+
+create or replace package body pck1 is
+function f1(in a int,c out tp1) return int
+as
+declare
+begin
+c(1):=a;
+return a;
+end;
+end pck1;
+/
+
+declare
+kk pck1.tp1;
+x int := 10;
+res int;
+begin
+res := pck1.f1(x,kk)+1;
+raise info 'res:%',res;
+end;
+/
+
+drop package if exists pck1;
+drop package if exists pck2;
+
+create or replace package pck1 as
+function func1() return int;
+end pck1;
+/
+create or replace package body pck1 as
+xx int :=10;
+function func1() return int as
+begin
+  xx := xx + 1;
+  return xx;
+end;
+end pck1;
+/
+
+create or replace package pck2 as
+function func1() return int;
+end pck2;
+/
+create or replace package body pck2 as
+yy int := pck1.func1();
+function func1() return int as
+begin
+return yy;
+end;
+end pck2;
+/
+
+call pck2.func1();
+
+drop package if exists pck1;
+drop package if exists pck2;
+
+create or replace package pck1 as
+function func2() return int;
+end pck1;
+/
+create or replace package body pck1 as
+function func1() return int as
+begin
+  return 10;
+end;
+function func2() return int as
+begin
+  return func1();
+end;
+end pck1;
+/
+
+create or replace package pck2 as
+function func1() return int;
+end pck2;
+/
+create or replace package body pck2 as
+xx int := pck1.func2();
+function func1() return int as
+begin
+  return xx;
+end;
+end pck2;
+/
+call pck2.func1();
+call pck1.func2();
+
+\sf p1
+\sf p2
+\sf p3
+drop package if exists pck1;
+drop function if exists func1;
+
+create or replace function func1() return int as
+begin
+return 5;
+end;
+/
+
+create or replace package pck1 as
+procedure proc();
+function func2() return int;
+end pck1;
+/
+create or replace package body pck1 as
+xx integer := func1;
+procedure proc() as
+begin
+raise info 'xx is %',xx;
+end;
+function func2() return int as
+begin
+return 10;
+end;
+function func1() return int as
+begin
+return 20;
+end;
+end pck1;
+/
+
+call pck1.proc();
+
+drop function func1;
+
+create or replace package body pck1 as
+xx integer := func1;
+procedure proc() as
+begin
+raise info 'xx is %',xx;
+end;
+function func2() return int as
+begin
+return 10;
+end;
+end pck1;
+/
+call pck1.proc();
+
+--退出会话，重连调用 xx不应该是20，应该在定义时或者调用时就报函数不存在
+call pck1.proc();
+drop package pck1;
+drop package pck2;
+drop procedure p1;
+drop procedure p2;
+drop procedure p3;
+reset behavior_compat_options;
+drop package autonomous_pkg_tmp;
+drop package abort;
+drop schema pkgsch059 cascade;

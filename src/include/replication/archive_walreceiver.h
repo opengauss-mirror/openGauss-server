@@ -48,23 +48,28 @@ extern void archive_disconnect(void);
 /* sizeof(uint32) + OBS_XLOG_SLICE_BLOCK_SIZE */
 #define OBS_XLOG_SLICE_FILE_SIZE (OBS_XLOG_SLICE_BLOCK_SIZE + OBS_XLOG_SLICE_HEADER_SIZE)
 #define OBS_XLOG_SAVED_FILES_NUM 25600 /* 100G*1024*1024*1024/OBS_XLOG_SLICE_BLOCK_SIZE */
-#define IS_DISASTER_RECOVER_MODE \
+#define IS_OBS_DISASTER_RECOVER_MODE \
     (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && GetArchiveRecoverySlot())
-#define IS_CNDISASTER_RECOVER_MODE \
+#define IS_CN_OBS_DISASTER_RECOVER_MODE \
     (IS_PGXC_COORDINATOR  && GetArchiveRecoverySlot())
 #define OBS_ARCHIVE_STATUS_FILE "obs_archive_start_end_record"
-
+#define ARCHIVE_GLOBAL_BARRIER_LIST_PATH "global_barrier_records"
+#define FILE_TIME_INTERVAL 600000
 
 extern int archive_replication_receive(XLogRecPtr startPtr, char **buffer,
                                     int *bufferLength, int timeout_ms, char* inner_buff);
 extern int ArchiveReplicationAchiver(const ArchiveXlogMessage *xlogInfo);
 extern void update_archive_start_end_location_file(XLogRecPtr endPtr, TimestampTz endTime);
-extern int archive_replication_cleanup(XLogRecPtr recPtr, ArchiveConfig *archive_config = NULL);
+extern int archive_replication_cleanup(XLogRecPtr recPtr, ArchiveConfig *archive_config = NULL, bool reverse = false);
 extern void update_recovery_barrier();
 extern void update_stop_barrier();
 extern int archive_replication_get_last_xlog(ArchiveXlogMessage *xloginfo, ArchiveConfig* archive_obs);
 extern bool ArchiveReplicationReadFile(const char* fileName, char* content, int contentLen,
     const char *slotName = NULL);
 extern char* get_local_key_cn(void);
-
+extern void UpdateGlobalBarrierListOnMedia(const char* id, const char* availableCNName);
+extern void WriteGlobalBarrierListStartTimeOnMedia(long cur_time);
+extern uint64 ReadBarrierTimelineRecordFromObs(const char* archiveSlotName);
+extern char* DeleteStopBarrierRecordsOnMedia(long stopBarrierTimestamp, long endBarrierTimestamp = 0);
+extern int GetArchiveXLogFileTotalNum(ArchiveConfig *archiverConfig, XLogRecPtr endLsn);
 #endif

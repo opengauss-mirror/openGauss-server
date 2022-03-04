@@ -19,6 +19,73 @@
 #include "access/nbtree.h"
 #include "access/ubtree.h"
 
+const char* btree_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+
+    switch (info) {
+        case XLOG_BTREE_INSERT_LEAF: {
+            return "bt_insert_leaf";
+            break;
+        }
+        case XLOG_BTREE_INSERT_UPPER: {
+            return "bt_insert_upper";
+            break;
+        }
+        case XLOG_BTREE_INSERT_META: {
+            return "bt_insert_meta";
+            break;
+        }
+        case XLOG_BTREE_SPLIT_L: {
+            return "bt_split_left";
+            break;
+        }
+        case XLOG_BTREE_SPLIT_R: {
+            return "bt_split_right";
+            break;
+        }
+        case XLOG_BTREE_SPLIT_L_ROOT: {
+            return "bt_split_l_root";
+            break;
+        }
+        case XLOG_BTREE_SPLIT_R_ROOT: {
+            return "bt_split_r_root";
+            break;
+        }
+        case XLOG_BTREE_VACUUM: {
+            return "bt_vacuum";
+            break;
+        }
+        case XLOG_BTREE_DELETE: {
+            return "bt_delete";
+            break;
+        }
+        case XLOG_BTREE_UNLINK_PAGE: {
+            return "bt_unlink_page";
+            break;
+        }
+        case XLOG_BTREE_UNLINK_PAGE_META: {
+            return "bt_unlink_page_meta";
+            break;
+        }
+        case XLOG_BTREE_MARK_PAGE_HALFDEAD: {
+            return "bt_mark_page_halfdead";
+            break;
+        }
+        case XLOG_BTREE_NEWROOT: {
+            return "bt_newroot";
+            break;
+        }
+        case XLOG_BTREE_REUSE_PAGE: {
+            return "bt_reuse_page";
+            break;
+        }
+        default:
+            return "unkown_type";
+            break;
+    }
+}
+
 void btree_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
@@ -145,6 +212,81 @@ void btree_desc(StringInfo buf, XLogReaderState *record)
             break;
     }
 }
+
+const char* ubtree_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    switch (info) {
+        case XLOG_UBTREE_INSERT_LEAF: {
+            return "ubt_insert_leaf";
+            break;
+        }
+        case XLOG_UBTREE_INSERT_UPPER: {
+            return "ubt_insert_upper";
+            break;
+        }
+        case XLOG_UBTREE_INSERT_META: {
+            return "ubt_insert_meta";
+            break;
+        }
+        case XLOG_UBTREE_SPLIT_L: {
+            return "ubt_split_l";
+            break;
+        }
+        case XLOG_UBTREE_SPLIT_R: {
+            return "ubt_split_r";
+            break;
+        }
+        case XLOG_UBTREE_SPLIT_L_ROOT: {
+            return "ubt_split_l_root";
+            break;
+        }
+        case XLOG_UBTREE_SPLIT_R_ROOT: {
+            return "ubt_split_r_root";
+            break;
+        }
+        case XLOG_UBTREE_VACUUM: {
+            return "ubt_vacuum";
+            break;
+        }
+        case XLOG_UBTREE_DELETE: {
+            return "ubt_delete";
+            break;
+        }
+        case XLOG_UBTREE_UNLINK_PAGE: {
+            return "ubt_unlink_page";
+            break;
+        }
+        case XLOG_UBTREE_UNLINK_PAGE_META: {
+            return "ubt_unlink_page_meta";
+            break;
+        }
+        case XLOG_UBTREE_MARK_PAGE_HALFDEAD: {
+            return "ubt_mark_page_halfdead";
+            break;
+        }
+        case XLOG_UBTREE_NEWROOT: {
+            return "ubt_newroot";
+            break;
+        }
+        case XLOG_UBTREE_REUSE_PAGE: {
+            return "ubt_reuse_page";
+            break;
+        }
+        case XLOG_UBTREE_MARK_DELETE: {
+            return "ubt_mark_delete";
+            break;
+        }
+        case XLOG_UBTREE_PRUNE_PAGE: {
+            return "ubt_prune_page";
+            break;
+        }
+        default:
+            return "unknown_type";
+            break;
+    }
+}
+
 
 void UBTreeDesc(StringInfo buf, XLogReaderState *record)
 {
@@ -325,6 +467,37 @@ void UBTree2Desc(StringInfo buf, XLogReaderState* record)
         }
         default:
             appendStringInfo(buf, "UNKNOWN");
+            break;
+    }
+}
+
+const char* ubtree2_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+
+    switch (info) {
+        case XLOG_UBTREE2_SHIFT_BASE: {
+            return "ubt2_shift_base";
+            break;
+        }
+        case XLOG_UBTREE2_RECYCLE_QUEUE_INIT_PAGE: {
+            return "ubt2_recycle_init_page";
+            break;
+        }
+        case XLOG_UBTREE2_RECYCLE_QUEUE_ENDPOINT: {
+            return "ubt2_recycle_endpoint";
+            break;
+        }
+        case XLOG_UBTREE2_RECYCLE_QUEUE_MODIFY: {
+            return "ubt2_recycle_modify";
+            break;
+        }
+        case XLOG_UBTREE2_FREEZE: {
+            return "ubt2_freeze";
+            break;
+        }
+        default:
+            return "unknown_type";
             break;
     }
 }

@@ -3,6 +3,12 @@ create table test_lock_for_update (c1 int) with (storage_type=USTORE);
 
 insert into test_lock_for_update values (1);
 
+-- test for update/no key update/share/key share
+select c1 from test_lock_for_update where c1 = 1 for update;
+select c1 from test_lock_for_update where c1 = 1 for no key update;
+select c1 from test_lock_for_update where c1 = 1 for share;
+select c1 from test_lock_for_update where c1 = 1 for key share;
+
 \parallel on 2
 
 begin

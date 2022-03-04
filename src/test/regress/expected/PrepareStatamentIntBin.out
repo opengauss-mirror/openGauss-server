@@ -1,0 +1,65 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_int(key int,_smallint_ smallint ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_int_ int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_bigint_ bigint ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+*******inserting data to the int table
+INSERT INTO t_int (key, _smallint_, _int_, _bigint_) VALUES (?,?,?,?);
+1,-3333,0,3333
+INSERT INTO t_int (key, _smallint_, _int_, _bigint_) VALUES (?,?,?,?);
+2,-1234,256,1234
+*************inserting data verification
+select * from t_int where (_smallint_ = ? and _int_ =?) or _bigint_ =? order by key
+-3333,0,1234
+ key | _smallint_ | _int_ | _bigint_ 
+-----+------------+-------+----------
+   1 |      -3333 |     0 |     3333
+   2 |      -1234 |   256 |     1234
+(2 rows)
+
+***************updating data
+Update t_int set _smallint_= ? , _int_= ? where  _bigint_ = ? or key = ?
+5555,5555,1234,2
+**************updating data verification
+select * from t_int where _smallint_ = ? and _int_ =?
+5555,5555
+ key | _smallint_ | _int_ | _bigint_ 
+-----+------------+-------+----------
+   2 |       5555 |  5555 |     1234
+(1 row)
+
+*************deleting data
+delete from  t_int where _smallint_= ? and _bigint_= ? and _int_ = ?
+5555,1234,5555
+*******************deleting data verification
+select * from t_int where _smallint_= ? and _bigint_= ? and _int_ = ?
+5555,1234,5555
+ key | _smallint_ | _int_ | _bigint_ 
+-----+------------+-------+----------
+(0 rows)
+
+select * from t_int;
+
+ key | _smallint_ | _int_ | _bigint_ 
+-----+------------+-------+----------
+   1 |      -3333 |     0 |     3333
+(1 row)
+
+*************deleting all data
+delete  from t_int
+
+No results were returned by the query.
+**************deleting all data verification
+select * from t_int;
+
+ key | _smallint_ | _int_ | _bigint_ 
+-----+------------+-------+----------
+(0 rows)
+
+drop table t_int;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;

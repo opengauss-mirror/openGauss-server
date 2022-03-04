@@ -251,7 +251,7 @@ bool gistplacetopage(Relation rel, Size freespace, GISTSTATE *giststate, Buffer 
 
             dist->buffer = buffer;
             dist->block.blkno = BufferGetBlockNumber(buffer);
-            dist->page = PageGetTempPageCopySpecial(BufferGetPage(buffer), false);
+            dist->page = PageGetTempPageCopySpecial(BufferGetPage(buffer));
 
             /* clean all flags except F_LEAF */
             GistPageGetOpaque(dist->page)->flags = (is_leaf) ? F_LEAF : 0;
@@ -285,7 +285,7 @@ bool gistplacetopage(Relation rel, Size freespace, GISTSTATE *giststate, Buffer 
             int ndownlinks = 0;
 
             rootpg.buffer = buffer;
-            rootpg.page = PageGetTempPageCopySpecial(BufferGetPage(rootpg.buffer), false);
+            rootpg.page = PageGetTempPageCopySpecial(BufferGetPage(rootpg.buffer));
             GistPageGetOpaque(rootpg.page)->flags = 0;
 
             /* Prepare a vector of all the downlinks */

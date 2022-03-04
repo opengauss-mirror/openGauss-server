@@ -15,6 +15,7 @@
 
 #include "postgres.h"
 #include "pgstat.h"
+#include "catalog/pg_partition_fn.h"
 #include "nodes/relation.h"
 #include "utils/datum.h"
 #include "utils/snapmgr.h"
@@ -44,14 +45,18 @@
 static Bitmapset *UHeapDetermineModifiedColumns(Relation relation, Bitmapset *interesting_cols, UHeapTuple oldtup,
     UHeapTuple newtup);
 static void TtsUHeapMaterialize(TupleTableSlot *slot);
-static void LogUHeapInsert(UHeapWALInfo *walinfo, Relation rel);
+static void LogUHeapInsert(UHeapWALInfo *walinfo, Relation rel, bool isToast = false);
 static void LogUPageExtendTDSlots(Buffer buf, uint8 currTDSlots, uint8 numExtended);
 static void LogUHeapDelete(UHeapWALInfo *walinfo);
 static void LogUHeapUpdate(UHeapWALInfo *oldTupWalinfo, UHeapWALInfo *newTupWalinfo, bool isInplaceUpdate,
-    int undoXorDeltaSize, char *xlogXorDelta, uint16 xorPrefixlen, uint16 xorSurfixlen, Relation rel);
+    int undoXorDeltaSize, char *xlogXorDelta, uint16 xorPrefixlen, uint16 xorSurfixlen, Relation rel,
+    bool isBlockInplaceUpdate);
 static void LogUHeapMultiInsert(UHeapMultiInsertWALInfo *multiWalinfo, bool skipUndo, char *scratch,
     UndoRecPtr *urpvec);
-static void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fxid, Page page, BlockNumber blkno);
+static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockTupleMode mode, bool nowait,
+    TransactionId updateXid, TransactionId lockerXid, SubTransactionId updateSubXid, SubTransactionId lockerSubXid,
+    bool *hasTupLock, bool *multixidIsMySelf, int waitSec = 0);
+
 static Page GetPageBuffer(Relation relation, BlockNumber blkno, Buffer &buffer)
 {
     buffer = ReadBuffer(relation, blkno);
@@ -65,7 +70,6 @@ static bool UHeapPageXidMinMax(Page page, bool multi, ShortTransactionId *min, S
 
     for (offnum = FirstOffsetNumber; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
         UHeapDiskTuple utuple;
-
         RowPtr *rowptr = UPageGetRowPtr(page, offnum);
 
         /* skip tuples which has been pruned */
@@ -73,19 +77,27 @@ static bool UHeapPageXidMinMax(Page page, bool multi, ShortTransactionId *min, S
             continue;
         }
         utuple = (UHeapDiskTuple)UPageGetRowData(page, rowptr);
-        if (!SINGLE_LOCKER_XID_IS_EXCL_LOCKED(utuple->flag) && !SINGLE_LOCKER_XID_IS_SHR_LOCKED(utuple->flag) &&
-            !UHeapTupleHasMultiLockers(utuple->flag)) {
-            continue;
-        }
 
         /* If multi=true, we should only count in tuple marked as multilocked */
-        if (TransactionIdIsNormal(utuple->xid) && (!multi || UHeapTupleHasMultiLockers(utuple->flag))) {
-            if (!found) {
-                found = true;
-                *min = *max = utuple->xid;
-            } else {
-                *min = Min(*min, utuple->xid);
-                *max = Max(*max, utuple->xid);
+        if (!multi) {
+            if (TransactionIdIsNormal(utuple->xid) && !UHeapTupleHasMultiLockers(utuple->flag)) {
+                if (!found) {
+                    found = true;
+                    *min = *max = utuple->xid;
+                } else {
+                    *min = Min(*min, utuple->xid);
+                    *max = Max(*max, utuple->xid);
+                }
+            }
+        } else {
+            if (TransactionIdIsNormal(utuple->xid) && UHeapTupleHasMultiLockers(utuple->flag)) {
+                if (!found) {
+                    found = true;
+                    *min = *max = utuple->xid;
+                } else {
+                    *min = Min(*min, utuple->xid);
+                    *max = Max(*max, utuple->xid);
+                }
             }
         }
     }
@@ -147,14 +159,15 @@ void UHeapPageShiftBase(Buffer buffer, Page page, bool multi, int64 delta)
         }
 
         utuple = (UHeapDiskTuple)UPageGetRowData(page, rowptr);
-        if (!SINGLE_LOCKER_XID_IS_EXCL_LOCKED(utuple->flag) && !SINGLE_LOCKER_XID_IS_SHR_LOCKED(utuple->flag) &&
-            !UHeapTupleHasMultiLockers(utuple->flag)) {
-            utuple->xid = (ShortTransactionId)FrozenTransactionId;
-            continue;
-        }
 
-        if (TransactionIdIsNormal(utuple->xid) && (!multi || UHeapTupleHasMultiLockers(utuple->flag))) {
-            utuple->xid -= delta;
+        if (!multi) {
+            if (TransactionIdIsNormal(utuple->xid) && !UHeapTupleHasMultiLockers(utuple->flag)) {
+                utuple->xid -= delta;
+            }
+        } else {
+            if (TransactionIdIsNormal(utuple->xid) && UHeapTupleHasMultiLockers(utuple->flag)) {
+                utuple->xid -= delta;
+            }
         }
     }
 
@@ -179,7 +192,8 @@ static int FreezeSingleUHeapPage(Relation relation, Buffer buffer)
     RelationBuffer relbuf = {relation, buffer};
 
     // get cutoff xid
-    TransactionId oldestXmin = GetOldestXmin(relation, false, true);
+    TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+    Assert(TransactionIdIsNormal(oldestXmin));
 
     UHeapPagePruneGuts(&relbuf, oldestXmin, InvalidOffsetNumber, 0, false, false, &latestRemovedXid, NULL);
 
@@ -201,8 +215,8 @@ static int FreezeSingleUHeapPage(Relation relation, Buffer buffer)
         utuple.disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, rowptr);
         utuple.disk_tuple_size = RowPtrGetLen(rowptr);
         utuple.table_oid = RelationGetRelid(relation);
+        utuple.t_bucketId = InvalidBktId;
         UHeapTupleCopyBaseFromPage(&utuple, page);
-        // XXX bucket id
 
         if (UHeapTupleHasMultiLockers(utuple.disk_tuple->flag)) {
             continue;
@@ -362,7 +376,7 @@ enum UHeapDMLType {
     UHEAP_DELETE,
 };
 
-template<UHeapDMLType dmlType> void PgStatCountDML(Relation rel, const bool useInplaceUpdate, const bool slotReused)
+template<UHeapDMLType dmlType> void PgStatCountDML(Relation rel, const bool useInplaceUpdate)
 {
     switch (dmlType) {
         case UHEAP_INSERT: {
@@ -374,21 +388,7 @@ template<UHeapDMLType dmlType> void PgStatCountDML(Relation rel, const bool useI
              * As of now, we only count non-inplace updates as that are required to
              * decide whether to trigger autovacuum.
              */
-            if (!useInplaceUpdate) {
-                /*
-                 * If we've performed non-inplace update because of
-                 * slotReused optimization, we shouldn't increase the
-                 * update stats else, it'll trigger autovacuum unnecessarily. But, we
-                 * want to autoanalyze the table periodically.  Hence, we increase the
-                 * insert count.
-                 */
-                if (!slotReused)
-                    pgstat_count_heap_update(rel, false);
-                else
-                    pgstat_count_heap_insert(rel, 1);
-            } else {
-                PgstatCountHeapUpdateInplace(rel);
-            }
+            pgstat_count_heap_update(rel, useInplaceUpdate);
             break;
         }
         case UHEAP_DELETE: {
@@ -404,7 +404,7 @@ template<UHeapDMLType dmlType> void PgStatCountDML(Relation rel, const bool useI
 
 template<UHeapDMLType dmlType> void UHeapFinalizeDML(Relation rel, Buffer buffer, Buffer* newbuf, UHeapTuple utuple,
                                                      UHeapTuple tuple, ItemPointer tid, const bool hasTupLock,
-                                                     const bool useInplaceUpdate, const bool slotReused)
+                                                     const bool useInplaceUpdate)
 {
     UndoPersistence persistence = UndoPersistenceForRelation(rel);
 
@@ -424,7 +424,7 @@ template<UHeapDMLType dmlType> void UHeapFinalizeDML(Relation rel, Buffer buffer
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     }
 
-    PgStatCountDML<dmlType>(rel, useInplaceUpdate, slotReused);
+    PgStatCountDML<dmlType>(rel, useInplaceUpdate);
 
     switch (dmlType) {
         case UHEAP_INSERT:
@@ -453,7 +453,7 @@ template<UHeapDMLType dmlType> void UHeapFinalizeDML(Relation rel, Buffer buffer
     }
 }
 
-static void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fxid, Page page, BlockNumber blkno)
+void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fxid, Page page, BlockNumber blkno)
 {
     bool hasPruned = UHeapPagePruneOptPage(relation, buffer, fxid);
 #ifdef DEBUG_UHEAP
@@ -477,7 +477,19 @@ static void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fx
     }
 }
 
-Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkInsertState bistate)
+static ShortTransactionId UHeapTupleSetModifiedXid(Relation relation,
+    Buffer buffer, UHeapTuple utuple, TransactionId xid)
+{
+    TransactionId xidbase = InvalidTransactionId;
+    ShortTransactionId tupleXid = 0;
+    UHeapTupleCopyBaseFromPage(utuple, BufferGetPage(buffer));
+    xidbase = utuple->t_xid_base;
+    tupleXid = NormalTransactionIdToShort(xidbase, xid);
+    utuple->disk_tuple->xid = tupleXid;
+    return tupleXid;
+}
+
+Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkInsertState bistate, bool isToast)
 {
     Page page;
     bool lockReacquired = false;
@@ -491,9 +503,8 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
     BlockNumber blkno = 0;
     TransactionId minXidInTDSlots = InvalidTransactionId;
     uint16 lower;
-    bool switchBuf = false;
-    bool aggressiveTDSearch = false;
-    BlockNumber firstBlock = InvalidBlockNumber;
+    int retryTimes = 0;
+    int options = 0;
 
     WHITEBOX_TEST_STUB(UHEAP_INSERT_FAILED, WhiteboxDefaultErrorEmit);
     if (utuple == NULL) {
@@ -507,7 +518,7 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
 
     /* Prepare Undo record before buffer lock since undo record length is fixed */
     UndoPersistence persistence = UndoPersistenceForRelation(rel);
-    Oid relOid = RelationIsPartition(rel) ? rel->parentId : RelationGetRelid(rel);
+    Oid relOid = RelationIsPartition(rel) ? GetBaseRelOidOfParition(rel) : RelationGetRelid(rel);
     Oid partitionOid = RelationIsPartition(rel) ? RelationGetRelid(rel) : InvalidOid;
     urecPtr = UHeapPrepareUndoInsert(relOid, partitionOid, RelationGetRelFileNode(rel),
         RelationGetRnodeSpace(rel), persistence, InvalidBuffer, fxid, cid,
@@ -520,20 +531,12 @@ Oid UHeapInsert(RelationData *rel, UHeapTupleData *utuple, CommandId cid, BulkIn
 
     /* Get buffer page from buffer pool and reserve TD slot */
 reacquire_buffer:
-    buffer = RelationGetBufferForUTuple(rel, tuple->disk_tuple_size, InvalidBuffer, 0, bistate, switchBuf);
+    buffer = RelationGetBufferForUTuple(rel, tuple->disk_tuple_size, InvalidBuffer,
+        options, bistate);
 
     Assert(buffer != InvalidBuffer);
 
-    /*
-     * Do aggressive TD slot search after switching buffer
-     * and somehow ended up at the first block.
-    */
-    BlockNumber currBlock = BufferGetBlockNumber(buffer);
-    if (firstBlock == InvalidBlockNumber) {
-        firstBlock = currBlock;
-    } else if (switchBuf && firstBlock == currBlock) {
-        aggressiveTDSearch = true;
-    }
+    (void)UHeapPagePrepareForXid(rel, buffer, fxid, false, false);
 
     page = BufferGetPage(buffer);
     Assert(PageIsValid(page));
@@ -544,7 +547,7 @@ reacquire_buffer:
     lower = phdr->pd_lower;
 
     tdSlot = UHeapPageReserveTransactionSlot(rel, buffer, fxid, &prevUrecptr,
-        &lockReacquired, InvalidBuffer, NULL, &minXidInTDSlots, aggressiveTDSearch);
+        &lockReacquired, InvalidBuffer, &minXidInTDSlots, false);
 
     /*
      * It is possible that available space on the page changed
@@ -552,15 +555,18 @@ reacquire_buffer:
      */
     if (lockReacquired || (lower < phdr->pd_lower)) {
         UnlockReleaseBuffer(buffer);
-        switchBuf = false;
+        LimitRetryTimes(retryTimes++);
+        if (retryTimes > FORCE_EXTEND_THRESHOLD) {
+            options |= UHEAP_INSERT_EXTEND;
+        }
         goto reacquire_buffer;
     }
 
     if (tdSlot == InvalidTDSlotId) {
         UnlockReleaseBuffer(buffer);
         UHeapSleepOrWaitForTDSlot(minXidInTDSlots, fxid, true);
-        // cant switch buffer anymore to avoid bouncing between blocks
-        switchBuf = !aggressiveTDSearch;
+        LimitRetryTimes(retryTimes++);
+        options |= UHEAP_INSERT_EXTEND;
         goto reacquire_buffer;
     }
 
@@ -592,12 +598,12 @@ reacquire_buffer:
     UHeapTupleHeaderSetTDSlot(tuple->disk_tuple, tdSlot);
     UHeapTupleHeaderSetLockerTDSlot(tuple->disk_tuple, InvalidTDSlotId);
 
-    UHeapTupleSetRawXid(tuple, FrozenTransactionId);
+    UHeapTupleSetModifiedXid(rel, buffer, tuple, fxid);
 
     /* Put utuple into buffer page */
     RelationPutUTuple(rel, buffer, tuple);
 
-    UHeapRecordPotentialFreeSpace(rel, buffer, -1 * SHORTALIGN(tuple->disk_tuple_size));
+    UHeapRecordPotentialFreeSpace(buffer, -1 * SHORTALIGN(tuple->disk_tuple_size));
 
     /* Update the UndoRecord now that we know where the tuple is located on the Page */
     UndoRecord *undorec = (*u_sess->ustore_cxt.urecvec)[0];
@@ -654,13 +660,13 @@ reacquire_buffer:
         insWalInfo.xlum = &xlum;
 
         /* do the actual logging */
-        LogUHeapInsert(&insWalInfo, rel);
+        LogUHeapInsert(&insWalInfo, rel, isToast);
     }
     undo::FinishUndoMeta(&xlum, persistence);
 
     END_CRIT_SECTION();
     /* Clean up */
-    UHeapFinalizeDML<UHEAP_INSERT>(rel, buffer, NULL, utuple, tuple, NULL, false, false, false);
+    UHeapFinalizeDML<UHEAP_INSERT>(rel, buffer, NULL, utuple, tuple, NULL, false, false);
 
     return InvalidOid;
 }
@@ -674,8 +680,10 @@ static TransactionId UHeapFetchInsertXidGuts(UndoRecord *urec, UHeapTupleTransIn
 
     while (true) {
         urec->Reset(uheapinfo.urec_add);
-        int rc = FetchUndoRecord(urec, InplaceSatisfyUndoRecord, blk, offnum, uheapinfo.xid);
-        if (rc == UNDO_RET_FAIL) {
+        UndoTraversalState rc = FetchUndoRecord(urec, InplaceSatisfyUndoRecord, blk, offnum, uheapinfo.xid);
+        if (rc == UNDO_TRAVERSAL_ABORT) {
+            ereport(ERROR, (errmsg("snapshot too old! the undo record has been force discard.")));
+        } else if (rc != UNDO_TRAVERSAL_COMPLETE) {
             /*
              * Undo record could be null only when it's undo log is/about to
              * be discarded. We cannot use any assert for checking is the log
@@ -760,6 +768,7 @@ UHeapTuple UHeapPrepareInsert(Relation rel, UHeapTupleData *tuple, int options)
     tuple->disk_tuple->td_id = UHEAPTUP_SLOT_FROZEN;
     tuple->disk_tuple->locker_td_id = UHEAPTUP_SLOT_FROZEN;
     tuple->table_oid = RelationGetRelid(rel);
+    tuple->t_bucketId = InvalidBktId;
 
     if (rel->rd_rel->relkind != RELKIND_RELATION) {
         /* toast table entries should never be recursively toasted */
@@ -773,303 +782,6 @@ UHeapTuple UHeapPrepareInsert(Relation rel, UHeapTupleData *tuple, int options)
     }
 }
 
-/*
- * ComputeNewXidInfomask - Given the old values of tuple header's infomask,
- * compute the new values for tuple header which includes lock mode, new
- * infomask and transaction slot.
- *
- * We don't clear the multi lockers bit in this function as for that we need
- * to ensure that all the lockers are gone.  Unfortunately, it is not easy to
- * do that as we need to traverse all the undo chains for the current page to
- * ensure the same and doing it here which is quite common code path doesn't
- * seem advisable.  We clear this bit lazily when we detect the conflict and
- * we anyway need to traverse the undo chains for the page.
- *
- * We ensure that the tuple always point to the transaction slot of latest
- * inserter/updater except for cases where we lock first and then update the
- * tuple (aka locks via EvalPlanQual mechanism).  This is because for visibility
- * checks, we only need inserter/updater's xact information.  Keeping their
- * slot on the tuple avoids the overheads of fetching xact information from
- * undo during visibility checks.  Also, note that the latest inserter/updater
- * can be an aborted transaction whose rollback actions are still pending.
- *
- * For example, say after a committed insert/update, a new request arrives to
- * lock the tuple in key share mode, we will keep the inserter's/updater's slot
- * on the tuple and set the multi-locker and key-share bit.  If the inserter/
- * updater is already known to be having a frozen slot (visible to every one),
- * we will set the key-share locker bit and the tuple will indicate a frozen
- * slot.  Similarly, for a new updater, if the tuple has a single locker, then
- * the undo will have a frozen tuple and for multi-lockers, the undo of updater
- * will have previous inserter/updater slot; in both cases the new tuple will
- * point to the updaters slot.  Now, the rollback of a single locker will set
- * the frozen slot on tuple and the rollback of multi-locker won't change slot
- * information on tuple.  We don't want to keep the slot of locker on the
- * tuple as after rollback, we will lose track of last updater/inserter.
- *
- * When we are locking for the purpose of updating the tuple, we don't need
- * to preserve previous updater's information and we also keep the latest
- * slot on tuple.  This is only true when there are no previous lockers on
- * the tuple.
- */
-static void ComputeNewXidInfomask(UHeapTuple uhtup, Buffer buf, TransactionId tupXid, int tupTdSlot,
-    uint16 oldInfomask, TransactionId addToXid, int tdSlot, TransactionId singleLockerXid, LockTupleMode mode,
-    LockOper lockoper, uint16 *resultInfomask, int *resultTdSlot)
-{
-    int newTdSlot = tdSlot;
-    uint16 newInfomask = 0;
-    bool oldTupleHasUpdate = false;
-    bool transactionIdisInProgressForTupXid = false;
-    bool isUpdate = (lockoper == ForUpdate || lockoper == LockForUpdate);
-    uint32 needSync = 0;
-
-    Assert(TransactionIdIsValid(addToXid));
-
-    if (lockoper == ForUpdate && TransactionIdIsCurrentTransactionId(singleLockerXid))
-        mode = LockTupleExclusive;
-    else if (UHeapTupleHasMultiLockers(oldInfomask)) {
-        UGetMultiLockInfo(oldInfomask, tupXid, tupTdSlot, addToXid, &newInfomask, &newTdSlot, &mode,
-            &oldTupleHasUpdate, lockoper);
-    } else {
-    restart:
-        transactionIdisInProgressForTupXid = TransactionIdIsInProgress(tupXid, &needSync, true, false, true, false);
-        /* Since recording csnlog and clog before removing xid from procarray, need sync until proc remove the according
-         * xid. In case that we treat the tupXid is still in progress */
-        if (needSync) {
-            needSync = 0;
-            SyncLocalXidWait(tupXid);
-            goto restart;
-        }
-        if ((IsUHeapTupleModified(oldInfomask) && transactionIdisInProgressForTupXid)) {
-            UGetMultiLockInfo(oldInfomask, tupXid, tupTdSlot, addToXid, &newInfomask, &newTdSlot, &mode,
-                &oldTupleHasUpdate, lockoper);
-        } else if (!isUpdate && TransactionIdIsInProgress(singleLockerXid, NULL, true, false, true)) {
-            LockTupleMode oldMode;
-
-            /*
-             * When there is a single in-progress locker on the tuple and previous
-             * inserter/updater became all visible, we've to set multi-locker flag
-             * and highest lock mode. If current transaction tries to reacquire a
-             * lock, we don't set multi-locker flag.
-             */
-            Assert(UHEAP_XID_IS_LOCKED_ONLY(oldInfomask));
-            if (singleLockerXid != addToXid) {
-                elog(PANIC, "Set infomask UHEAP_MULTI_LOCKERS."); // not fall through here in ustore
-                newInfomask |= UHEAP_MULTI_LOCKERS;
-                newTdSlot = tupTdSlot;
-            }
-
-            oldMode = GetOldLockMode(oldInfomask);
-            /* Acquire the strongest of both. */
-            if (mode < oldMode)
-                mode = oldMode;
-
-            /* Keep the old tuple slot as it is */
-            newTdSlot = tupTdSlot;
-        } else if (!isUpdate && transactionIdisInProgressForTupXid) {
-            /*
-             * Normally if the tuple is not modified and the current transaction
-             * is in progress, the other transaction can't lock the tuple except
-             * itself.
-             *
-             * However, this can happen while locking the updated tuple chain.  We
-             * keep the transaction slot of original tuple as that will allow us
-             * to check the visibility of tuple by just referring the current
-             * transaction slot.
-             */
-            Assert((tupXid == addToXid));
-
-            if (tupXid != addToXid) {
-                elog(PANIC, "Set infomask UHEAP_MULTI_LOCKERS."); // not fall through here in ustore
-                newInfomask |= UHEAP_MULTI_LOCKERS;
-            }
-
-            newTdSlot = tupTdSlot;
-        } else if (!isUpdate && tupTdSlot == UHEAPTUP_SLOT_FROZEN) {
-            /*
-             * It's a frozen update or insert, so the locker must not change the
-             * slot on a tuple.  The lockmode to be used on tuple is computed
-             * below. There could be a single committed/aborted locker
-             * (multilocker case is handled in the first condition). In that case,
-             * we can ignore the locker. If the locker is still in progress, it'll
-             * be handled in above case.
-             */
-            newTdSlot = UHEAPTUP_SLOT_FROZEN;
-        } else if (!isUpdate && !UHEAP_XID_IS_LOCKED_ONLY(oldInfomask) && tupTdSlot != UHEAPTUP_SLOT_FROZEN) {
-            /*
-             * It's a committed update/insert or an aborted update whose rollback
-             * action is still pending, so we gotta preserve him as updater of the
-             * tuple.  Also, indicate that tuple has multiple lockers.
-             *
-             * Note that tuple xid could be invalid if the undo records
-             * corresponding to the tuple transaction is discarded.  In that case,
-             * it can be considered as committed.
-             */
-            elog(PANIC, "Set infomask UHEAP_MULTI_LOCKERS."); // not fall through here in ustore
-            newInfomask |= UHEAP_MULTI_LOCKERS;
-            oldTupleHasUpdate = true;
-
-            if (UHeapTupleIsInPlaceUpdated(oldInfomask))
-                newInfomask |= UHEAP_INPLACE_UPDATED;
-            else if (UHeapTupleIsUpdated(oldInfomask))
-                newInfomask |= UHEAP_UPDATED;
-            else {
-                /* This is a freshly inserted tuple. */
-                oldTupleHasUpdate = false;
-            }
-
-            if (!oldTupleHasUpdate) {
-                /*
-                 * This is a freshly inserted tuple, allow to set the requested
-                 * lock mode on tuple.
-                 */
-            } else {
-                LockTupleMode oldMode;
-
-                if (UHEAP_XID_IS_EXCL_LOCKED(oldInfomask))
-                    oldMode = LockTupleExclusive;
-                else if (UHEAP_XID_IS_NOKEY_EXCL_LOCKED(oldInfomask))
-                    oldMode = LockTupleNoKeyExclusive;
-                else {
-                    /*
-                     * Tuple must not be locked in any other mode as we are here
-                     * because either the tuple is updated or inserted and the
-                     * corresponding transaction is committed.
-                     */
-                    Assert(!(UHEAP_XID_IS_KEYSHR_LOCKED(oldInfomask) || UHEAP_XID_IS_SHR_LOCKED(oldInfomask)));
-
-                    oldMode = LockTupleNoKeyExclusive;
-                }
-
-                if (mode < oldMode)
-                    mode = oldMode;
-            }
-
-            newTdSlot = tupTdSlot;
-        } else if (!isUpdate && UHEAP_XID_IS_LOCKED_ONLY(oldInfomask) && tupTdSlot != UHEAPTUP_SLOT_FROZEN) {
-            LockTupleMode oldMode;
-
-            /*
-             * This case arises for committed/aborted non-inplace updates where
-             * the newly inserted tuple is marked as locked-only, but multi-locker
-             * bit is not set.
-             *
-             * Note that tuple xid could be invalid if the undo records
-             * corresponding to the tuple transaction is discarded.  In that case,
-             * it can be considered as committed.
-             */
-            elog(PANIC, "Set infomask UHEAP_MULTI_LOCKERS."); // not fall through here in ustore
-            newInfomask |= UHEAP_MULTI_LOCKERS;
-            /* The tuple is locked-only. */
-            Assert(!(oldInfomask & (UHEAP_DELETED | UHEAP_UPDATED | UHEAP_INPLACE_UPDATED)));
-            oldMode = GetOldLockMode(oldInfomask);
-            /* Acquire the strongest of both. */
-            if (mode < oldMode)
-                mode = oldMode;
-
-            /* Keep the old tuple slot as it is */
-            newTdSlot = tupTdSlot;
-        } else if (isUpdate && TransactionIdIsValid(singleLockerXid) && !UHeapTransactionIdDidCommit(singleLockerXid)) {
-            LockTupleMode oldMode;
-
-            /*
-             * There can be a non-conflicting in-progress key share locker on the
-             * tuple and we want to update the tuple in no-key exclusive mode.  In
-             * that case, we should set the multilocker flag as well.
-             *
-             * Note that, the single locker xid can be aborted whose rollback
-             * actions are still pending.  The scenario should be handled in the
-             * same way as an in-progress single locker, i.e., we should set the
-             * multilocker flag accordingly.  Else, the rollback of single locker
-             * might resotre the infomask of the tuple incorrectly.
-             */
-            Assert(UHEAP_XID_IS_LOCKED_ONLY(oldInfomask));
-            if (singleLockerXid != addToXid) {
-                elog(PANIC, "Set infomask UHEAP_MULTI_LOCKERS."); // not fall through here in ustore
-                newInfomask |= UHEAP_MULTI_LOCKERS;
-
-                /*
-                 * If the tuple has multilocker and we're locking the tuple for
-                 * update, we insert multilocker type of undo instead of
-                 * lock-for-update undo.  For multilocker undo, we keep the old
-                 * tuple slot as it is.
-                 */
-                if (lockoper == LockForUpdate)
-                    newTdSlot = tupTdSlot;
-            }
-
-            oldMode = GetOldLockMode(oldInfomask);
-            if (oldMode == LockTupleExclusive) {
-                /*
-                 * singleLockerXid is aborted and this xid is from t_xid,
-                 * see inplaceheap_lock_tuple_guts
-                 * LockOnly exclusive lock doesn't do actual rollback to data page.
-                 */
-            } else {
-                /* Acquire the strongest of both. */
-                Assert(singleLockerXid == addToXid || mode > oldMode);
-                if (mode < oldMode)
-                    mode = oldMode;
-            }
-        }
-    }
-    /*
-     * For LockOnly mode and LockForUpdate mode with multilocker flag on the
-     * tuple, we keep the old transaction slot as it is.  Since we're not
-     * changing the xid slot in the tuple, we shouldn't remove the existing
-     * (if any) invalid xact flag from the tuple.
-     */
-    if (!isUpdate || ((lockoper == LockForUpdate) && UHeapTupleHasMultiLockers(newInfomask))) {
-        if (UHeapTupleHasInvalidXact(oldInfomask))
-            newInfomask |= UHEAP_INVALID_XACT_SLOT;
-    }
-
-    if (isUpdate && !UHeapTupleHasMultiLockers(newInfomask)) {
-        if (lockoper == LockForUpdate) {
-            /*
-             * When we are locking for the purpose of updating the tuple, we
-             * don't need to preserve previous updater's information.
-             */
-            newInfomask |= UHEAP_XID_LOCK_ONLY;
-            if (mode == LockTupleExclusive)
-                newInfomask |= UHEAP_XID_EXCL_LOCK;
-            else
-                newInfomask |= UHEAP_XID_NOKEY_EXCL_LOCK;
-        } else if (mode == LockTupleExclusive)
-            newInfomask |= UHEAP_XID_EXCL_LOCK;
-    } else {
-        if (lockoper != ForUpdate && !oldTupleHasUpdate)
-            newInfomask |= UHEAP_XID_LOCK_ONLY;
-        switch (mode) {
-            case LockTupleKeyShare:
-                newInfomask |= UHEAP_XID_KEYSHR_LOCK;
-                break;
-            case LockTupleShared:
-                newInfomask |= UHEAP_XID_SHR_LOCK;
-                break;
-            case LockTupleNoKeyExclusive:
-                newInfomask |= UHEAP_XID_NOKEY_EXCL_LOCK;
-                break;
-            case LockTupleExclusive:
-                newInfomask |= UHEAP_XID_EXCL_LOCK;
-                break;
-            default:
-                elog(ERROR, "invalid lock mode");
-        }
-    }
-
-    *resultInfomask = newInfomask;
-
-    if (resultTdSlot) {
-        *resultTdSlot = newTdSlot;
-    }
-
-    /*
-     * We store the reserved transaction slot only when we update the tuple.
-     * For lock only, we keep the old transaction slot in the tuple.
-     */
-    Assert(isUpdate || newTdSlot == tupTdSlot);
-}
-
 static bool TestPriorXmaxGuts(UHeapTupleTransInfo *tdinfo, const UHeapTuple tuple, UHeapDiskTupleData *tupHdr,
     Buffer buffer, TransactionId priorXmax)
 {
@@ -1078,7 +790,7 @@ static bool TestPriorXmaxGuts(UHeapTupleTransInfo *tdinfo, const UHeapTuple tupl
     ItemPointer tid = &(tuple->ctid);
     BlockNumber  blkno  = ItemPointerGetBlockNumber(tid);
     OffsetNumber offnum = ItemPointerGetOffsetNumber(tid);
-    int rc PG_USED_FOR_ASSERTS_ONLY;
+    UndoTraversalState rc = UNDO_TRAVERSAL_DEFAULT;
 
     do {
         int prev_trans_slot_id = tdinfo->td_slot;
@@ -1087,9 +799,9 @@ static bool TestPriorXmaxGuts(UHeapTupleTransInfo *tdinfo, const UHeapTuple tupl
         urec->Reset(tdinfo->urec_add);
 
         rc = FetchUndoRecord(urec, InplaceSatisfyUndoRecord, blkno, offnum, tdinfo->xid);
-
-        // the tuple cannot be all-visible, at least the current snapshot cannot see this tuple
-        Assert(rc != UNDO_RET_FAIL);
+        if (rc == UNDO_TRAVERSAL_ABORT) {
+            ereport(ERROR, (errmsg("snapshot too old! the undo record has been force discard.")));
+        }
 
         tdinfo->td_slot = UpdateTupleHeaderFromUndoRecord(urec, tupHdr, BufferGetPage(buffer));
 
@@ -1108,8 +820,11 @@ static bool TestPriorXmaxGuts(UHeapTupleTransInfo *tdinfo, const UHeapTuple tupl
 
         // td is reused, then check undo for trans info
         if (UHeapTupleHasInvalidXact(tupHdr->flag)) {
-            FetchTransInfoFromUndo(blkno, offnum, tdinfo->xid, tdinfo, NULL);
-        }        
+            UndoTraversalState state = FetchTransInfoFromUndo(blkno, offnum, tdinfo->xid, tdinfo, NULL, false);
+            if (state == UNDO_TRAVERSAL_ABORT) {
+                ereport(ERROR, (errmsg("snapshot too old! the undo record has been force discard.")));
+            }
+        }
     } while (tdinfo->urec_add != 0);
 
     DELETE_EX(urec);
@@ -1145,7 +860,10 @@ static bool TestPriorXmax(Relation relation, Buffer buffer, Snapshot snapshot, U
         return false;
     }
 
-    UHeapTupleGetTransInfo(buffer, offnum, &tdinfo);
+    UndoTraversalState state = UHeapTupleGetTransInfo(buffer, offnum, &tdinfo);
+    if (state == UNDO_TRAVERSAL_ABORT) {
+        ereport(ERROR, (errmsg("snapshot too old! the undo record has been force discard.")));
+    }
 
     if (TransactionIdEquals(priorXmax, tdinfo.xid)) {
         valid = true;
@@ -1458,7 +1176,7 @@ out:
  */
 static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockTupleMode mode, bool nowait,
     TransactionId updateXid, TransactionId lockerXid, SubTransactionId updateSubXid, SubTransactionId lockerSubXid,
-    bool *hasTupLock, bool *multixidIsMySelf)
+    bool *hasTupLock, bool *multixidIsMySelf, int waitSec)
 {
     Assert(utuple->tupTableType == UHEAP_TUPLE);
     uint16 flag = utuple->disk_tuple->flag;
@@ -1491,7 +1209,7 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
                         errmsg("could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
                 }
             } else {
-                LockTuple(relation, &(utuple->ctid), tupleLockType, true);
+                LockTuple(relation, &(utuple->ctid), tupleLockType, true, waitSec);
             }
 
             *hasTupLock = true;
@@ -1504,7 +1222,7 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
                     errmsg("could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
             }
         } else {
-            MultiXactIdWait(xwait, GetMXactStatusForLock(mode, false), NULL);
+            MultiXactIdWait(xwait, GetMXactStatusForLock(mode, false), NULL, waitSec);
         }
 
         // reacquire lock
@@ -1565,7 +1283,7 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
                             "could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
                     }
                 } else {
-                    LockTuple(relation, &(utuple->ctid), tupleLockType, true);
+                    LockTuple(relation, &(utuple->ctid), tupleLockType, true, waitSec);
                 }
 
                 *hasTupLock = true;
@@ -1594,10 +1312,10 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
                 }
             } else {
                 if (InvalidSubTransactionId != subXid) {
-                    SubXactLockTableWait(topXid, subXid);
+                    SubXactLockTableWait(topXid, subXid, waitSec);
                     isSubXact = true;
                 } else {
-                    XactLockTableWait(topXid, true);
+                    XactLockTableWait(topXid, true, waitSec);
                 }
             }
 
@@ -1622,17 +1340,14 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
  * Callers: UHeapUpdate, UHeapLockTuple
  * This function will do locking, UNDO and WAL logging part.
  */
-static void UHeapExecuteLockTuple(Relation relation, Buffer buffer, UHeapTuple utuple, LockTupleMode mode,
-    bool clearMultiXact)
+static void UHeapExecuteLockTuple(Relation relation, Buffer buffer, UHeapTuple utuple, LockTupleMode mode)
 {
     Assert(utuple->tupTableType == UHEAP_TUPLE);
     TransactionId xid = InvalidTransactionId;
     TransactionId xidOnTup = InvalidTransactionId;
     TransactionId curxid = InvalidTransactionId;
-
-    if (mode == LockTupleKeyShare || mode == LockTupleNoKeyExclusive) {
-        ereport(ERROR, (errmsg("For Key Share and For No Key Update is not support for ustore.")));
-    }
+    TransactionId xidbase = InvalidTransactionId;
+    bool multi = false;
 
     if (mode == LockTupleExclusive) {
         xid = GetCurrentTransactionId();
@@ -1642,23 +1357,16 @@ static void UHeapExecuteLockTuple(Relation relation, Buffer buffer, UHeapTuple u
         if (IsSubTransaction()) {
             curxid = GetCurrentTransactionId();
         }
-
     }
 
     START_CRIT_SECTION();
 
-    if (clearMultiXact)
-        utuple->disk_tuple->flag &= ~UHEAP_MULTI_LOCKERS;
-
-    uint16 infomask = 0, oldinfomask = utuple->disk_tuple->flag;
+    uint16 oldinfomask = utuple->disk_tuple->flag;
 
     // return new tuple header to caller
     utuple->disk_tuple->flag &= ~UHEAP_LOCK_STATUS_MASK;
-    utuple->disk_tuple->flag |= infomask;
     UHeapTupleHeaderClearSingleLocker(utuple->disk_tuple);
-
-    TransactionId xidbase = InvalidTransactionId;
-    bool multi = false;
+    utuple->disk_tuple->flag |= SINGLE_LOCKER_XID_IS_LOCK;
 
     if (mode == LockTupleExclusive) {
         if (IsSubTransaction()) {
@@ -1751,9 +1459,10 @@ static bool IsTupleLockedByUs(UHeapTuple utuple, TransactionId xid, LockTupleMod
 
 
 TM_Result UHeapLockTuple(Relation relation, UHeapTuple tuple, Buffer* buffer,
-                 CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
-                 bool follow_updates, bool eval, Snapshot snapshot,
-                 bool isSelectForUpdate, bool allowLockSelf, bool isUpsert, TransactionId conflictXid)
+    CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
+    bool follow_updates, bool eval, Snapshot snapshot,
+    bool isSelectForUpdate, bool allowLockSelf, bool isUpsert, TransactionId conflictXid,
+    int waitSec)
 {
     RowPtr *rp = NULL;
     UHeapTupleData utuple;
@@ -1762,7 +1471,6 @@ TM_Result UHeapLockTuple(Relation relation, UHeapTuple tuple, Buffer* buffer,
     OffsetNumber   offnum;
     ItemPointerData         ctid;
     ItemPointer             tid = &tuple->ctid;
-    bool           clearMultiXact = false; // shall we clear the multi-xact bit? this is used for shared lockers
     TM_Result      result;
     TransactionId  updateXid      = InvalidTransactionId,
                    lockerXid      = InvalidTransactionId;
@@ -1772,9 +1480,14 @@ TM_Result UHeapLockTuple(Relation relation, UHeapTuple tuple, Buffer* buffer,
     bool           hasTupLock = false;
     UHeapTupleTransInfo tdinfo;
     bool multixidIsMyself = false;
+    int retryTimes = 0;
 
     if (mode == LockTupleShared && !isSelectForUpdate) {
         ereport(ERROR, (errmsg("UStore only supports share lock from select-for-share statement.")));
+    }
+
+    if (mode == LockTupleKeyShare || mode == LockTupleNoKeyExclusive) {
+        ereport(ERROR, (errmsg("For Key Share and For No Key Update is not support for ustore.")));
     }
 
     // lock buffer and fetch tuple row pointer
@@ -1800,7 +1513,9 @@ check_tup_satisfies_update:
     multixidIsMyself = false;
 
     if (result == TM_Invisible) {
-        Assert(0);
+        UnlockReleaseBuffer(*buffer);
+        ereport(defence_errlevel(), (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("attempted to lock invisible tuple")));
     } else if (result == TM_BeingModified || result == TM_Ok) {
 #ifdef ENABLE_WHITEBOX
         if (result != TM_Ok) {
@@ -1834,7 +1549,8 @@ check_tup_satisfies_update:
         if (result != TM_Ok) {
             // wait for remaining updater/locker to terminate
             if (!UHeapWait(relation, *buffer, &utuple, mode, nowait, updateXid, lockerXid, updateSubXid, lockerSubXid,
-                &hasTupLock, &multixidIsMyself)) {
+                &hasTupLock, &multixidIsMyself, waitSec)) {
+                LimitRetryTimes(retryTimes++);
                 goto check_tup_satisfies_update;
             }
         }
@@ -1885,9 +1601,7 @@ check_tup_satisfies_update:
     utuple.disk_tuple_size = RowPtrGetLen(rp);
     utuple.ctid = *tid;
 
-    /* clear multi-xact when our lock mode is exclusive */
-    clearMultiXact = (mode == LockTupleExclusive);
-    (void)UHeapExecuteLockTuple(relation, *buffer, &utuple, mode, clearMultiXact);
+    (void)UHeapExecuteLockTuple(relation, *buffer, &utuple, mode);
 
     // return the locked tuple to caller
     UHeapCopyTupleWithBuffer(&utuple, tuple);
@@ -1958,7 +1672,6 @@ bool TableFetchAndStore(Relation scanRelation, Snapshot snapshot, Tuple tuple, B
     return false;
 }
 
-
 TM_Result UHeapDelete(Relation relation, ItemPointer tid, CommandId cid, Snapshot crosscheck, Snapshot snapshot,
     bool wait, TupleTableSlot** oldslot, TM_FailureData *tmfd, bool changingPart, bool allowDeleteSelf)
 {
@@ -1966,7 +1679,6 @@ TM_Result UHeapDelete(Relation relation, ItemPointer tid, CommandId cid, Snapsho
     Buffer buffer;
     UndoRecPtr prevUrecptr;
     int transSlotId;
-    uint16 newInfomask;
     bool lockReacquired;
     TransactionId fxid = GetTopTransactionId();
     UndoRecPtr urecptr = INVALID_UNDO_REC_PTR;
@@ -1981,11 +1693,10 @@ TM_Result UHeapDelete(Relation relation, ItemPointer tid, CommandId cid, Snapsho
     SubTransactionId subxid = InvalidSubTransactionId;
     TM_Result result;
     UHeapTupleTransInfo tdinfo;
-    uint16 tempInfomask, newInfoMask;
-    int newTDSlotId;
     StringInfoData undotup;
     bool multixidIsMyself = false;
     TransactionId minXidInTDSlots = InvalidTransactionId;
+    int retryTimes = 0;
 
     Assert(ItemPointerIsValid(tid));
     
@@ -2023,6 +1734,7 @@ check_tup_satisfies_update:
 
         if (!UHeapWait(relation, buffer, &utuple, LockTupleExclusive, false, updateXid, lockerXid,
             updateSubXid, lockerSubXid, &hasTupLock, &multixidIsMyself)) {
+            LimitRetryTimes(retryTimes++);
             goto check_tup_satisfies_update;
         }
 
@@ -2087,7 +1799,7 @@ check_tup_satisfies_update:
     }
 
     transSlotId = UHeapPageReserveTransactionSlot(relation, buffer, fxid,
-        &prevUrecptr, &lockReacquired, InvalidBuffer, NULL, &minXidInTDSlots);
+        &prevUrecptr, &lockReacquired, InvalidBuffer, &minXidInTDSlots);
 
     /*
      * We need to re-fetch the row information since it might
@@ -2115,6 +1827,7 @@ check_tup_satisfies_update:
      * refetch the tuple here.
      */
     Assert(!RowPtrIsDeleted(rp));
+    (void)UHeapPagePrepareForXid(relation, buffer, fxid, false, false);
     utuple.disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, rp);
     utuple.disk_tuple_size = RowPtrGetLen(rp);
 
@@ -2139,15 +1852,6 @@ check_tup_satisfies_update:
         tdinfo.td_slot = UHEAPTUP_SLOT_FROZEN;
         tdinfo.xid = InvalidTransactionId;
     }
-
-    utuple.disk_tuple->flag &= ~UHEAP_MULTI_LOCKERS;
-    tempInfomask = utuple.disk_tuple->flag;
-
-    /* Compute the new flag to store into the tuple. */
-    ComputeNewXidInfomask(&utuple, buffer, tdinfo.xid, tdinfo.td_slot, tempInfomask, fxid, transSlotId, lockerXid,
-        LockTupleExclusive, ForUpdate, &newInfoMask, &newTDSlotId);
-
-    Assert(newTDSlotId == transSlotId);
 
     if (TransactionIdOlderThanAllUndo(tdinfo.xid)) {
         tdinfo.xid = FrozenTransactionId;
@@ -2175,7 +1879,7 @@ check_tup_satisfies_update:
 
     /* Prepare Undo */
     UndoPersistence persistence = UndoPersistenceForRelation(relation);
-    Oid relOid = RelationIsPartition(relation) ? relation->parentId : RelationGetRelid(relation);
+    Oid relOid = RelationIsPartition(relation) ? GetBaseRelOidOfParition(relation) : RelationGetRelid(relation);
 
     Oid partitionOid = RelationIsPartition(relation) ? RelationGetRelid(relation) : InvalidOid;
     urecptr = UHeapPrepareUndoDelete(relOid, partitionOid, RelationGetRelFileNode(relation),
@@ -2198,16 +1902,12 @@ check_tup_satisfies_update:
      */
     UPageSetPrunable(page, fxid);
 
-    UHeapRecordPotentialFreeSpace(relation, buffer, SHORTALIGN(utuple.disk_tuple_size));
-
-    /* Fixme: Temporary hack, this value should come from ComputeNewXidInfomask() */
-    newInfomask = UHEAP_XID_EXCL_LOCK;
+    UHeapRecordPotentialFreeSpace(buffer, SHORTALIGN(utuple.disk_tuple_size));
 
     UHeapTupleHeaderSetTDSlot(utuple.disk_tuple, transSlotId);
     utuple.disk_tuple->flag &= ~UHEAP_VIS_STATUS_MASK;
-    utuple.disk_tuple->flag |= UHEAP_DELETED | newInfomask;
-
-    utuple.disk_tuple->flag &= ~SINGLE_LOCKER_XID_IS_LOCK;
+    utuple.disk_tuple->flag |= UHEAP_DELETED | UHEAP_XID_EXCL_LOCK;
+    UHeapTupleSetModifiedXid(relation, buffer, &utuple, fxid);
 
     /* Signal that this is actually a move into another partition */
     if (changingPart)
@@ -2269,9 +1969,64 @@ check_tup_satisfies_update:
     END_CRIT_SECTION();
 
     pfree(undotup.data);
-    UHeapFinalizeDML<UHEAP_DELETE>(relation, buffer, NULL, &utuple, NULL, &(utuple.ctid), hasTupLock, false, false);
+    UHeapFinalizeDML<UHEAP_DELETE>(relation, buffer, NULL, &utuple, NULL, &(utuple.ctid), hasTupLock, false);
 
     return TM_Ok;
+}
+
+static void PutInplaceUpdateTuple(UHeapTuple oldTup, UHeapTuple newTup, RowPtr *lp)
+{
+    /*
+     * For inplace updates, we copy the entire data portion including null
+     * bitmap of new tuple.
+     *
+     * For the special case where we are doing inplace updates even when
+     * the new tuple is bigger, we need to adjust the old tuple's location
+     * so that new tuple can be copied at that location as it is.
+     */
+    RowPtrChangeLen(lp, newTup->disk_tuple_size);
+    errno_t rc = memcpy_s((char *)oldTup->disk_tuple + SizeOfUHeapDiskTupleData,
+        newTup->disk_tuple_size - SizeOfUHeapDiskTupleData,
+        (char *)newTup->disk_tuple + SizeOfUHeapDiskTupleData,
+        newTup->disk_tuple_size - SizeOfUHeapDiskTupleData);
+    securec_check(rc, "\0", "\0");
+    /*
+     * Copy everything from new tuple in infomask apart from visibility
+     * flags.
+     */
+    oldTup->disk_tuple->flag = oldTup->disk_tuple->flag & UHEAP_VIS_STATUS_MASK;
+    oldTup->disk_tuple->flag |= (newTup->disk_tuple->flag & ~UHEAP_VIS_STATUS_MASK);
+    /* Copy number of attributes in tuple. */
+    UHeapTupleHeaderSetNatts(oldTup->disk_tuple, UHeapTupleHeaderGetNatts(newTup->disk_tuple));
+    /* also update the tuple length and self pointer */
+    oldTup->disk_tuple_size = newTup->disk_tuple_size;
+    oldTup->disk_tuple->t_hoff = newTup->disk_tuple->t_hoff;
+    return;
+}
+
+void PutBlockInplaceUpdateTuple(Page page, Item item, RowPtr *lp, Size size)
+{
+    UHeapPageHeaderData *uphdr = (UHeapPageHeaderData *)page;
+    Size alignedSize = SHORTALIGN(size);
+    int upper = (int)uphdr->pd_upper - (int)alignedSize;
+    Assert((int)uphdr->pd_upper >= (int)alignedSize);
+    Assert(upper >= uphdr->pd_lower);
+
+    if (upper < uphdr->pd_lower || (int)uphdr->pd_upper < (int)alignedSize) {
+        elog(PANIC, "upper=%d, lower=%d, size=%d, tuplesize=%d, newupper=%d.",
+            (int)uphdr->pd_upper, (int)uphdr->pd_lower, (int)size, (int)alignedSize, upper);
+    }
+
+    /* set the item pointer */
+    SetNormalRowPointer(lp, upper, size);
+
+    /* copy the item's data onto the page */
+    errno_t rc = memcpy_s((char *) page + upper, size, item, size);
+    securec_check(rc, "\0", "\0");
+
+    /* adjust page header */
+    uphdr->pd_upper = (uint16)upper;
+    return;
 }
 
 /*
@@ -2288,12 +2043,9 @@ TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer ot
     bool *indexkey_update_flag, Bitmapset **modifiedIdxAttrs, bool allow_inplace_update)
 {
     TM_Result result = TM_Ok;
-    TransactionId fxid;
-    TransactionId xid = GetTopTransactionId();
-    fxid = xid;
+    TransactionId fxid = GetTopTransactionId();
     TransactionId saveTupXid;
     TransactionId oldestXidHavingUndo;
-    TransactionId singleLockerXid = InvalidTransactionId;
     Bitmapset *inplaceUpdAttrs = NULL;
     Bitmapset *keyAttrs = NULL;
     Bitmapset *interestingAttrs = NULL;
@@ -2316,11 +2068,11 @@ TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer ot
     Size pagefree = 0;
     int oldtupNewTransSlot = InvalidTDSlotId;
     int newtupTransSlot = InvalidTDSlotId;
-    int resultTransSlotId = InvalidTDSlotId;
     OffsetNumber oldOffnum = 0;
     bool haveTupleLock = false;
     bool isIndexUpdated = false;
     bool useInplaceUpdate = false;
+    bool useBlockInplaceUpdate = false;
     bool checkedLockers = false;
     bool lockerRemains = false;
     bool anyMultiLockerMemberAlive = false;
@@ -2328,16 +2080,13 @@ TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer ot
     bool oldbufLockReacquired = false;
     bool needToast = false;
     bool hasSubXactLock = false;
-    bool slotReused = false;
     bool inplaceUpdated = false;
     bool doReacquire = false;
     UHeapTupleTransInfo txactinfo;
-    uint16 oldInfomask = 0;
-    uint16 newInfomask = 0;
-    uint16 tempInfomask = 0;
     uint16 infomaskOldTuple = 0;
     uint16 infomaskNewTuple = 0;
     TransactionId lockerXid = InvalidTransactionId;
+    ShortTransactionId tupleXid = 0;
     SubTransactionId lockerSubXid = InvalidSubTransactionId;
     SubTransactionId updateSubXid = InvalidSubTransactionId;
     SubTransactionId subxid = InvalidSubTransactionId;
@@ -2350,6 +2099,7 @@ TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer ot
     LockTupleMode lockmode;
     TransactionId minXidInTDSlots = InvalidTransactionId;
     bool oldBufLockReleased = false;
+    int retryTimes = 0;
 
     Assert(newtup->tupTableType == UHEAP_TUPLE);
     Assert(ItemPointerIsValid(otid));
@@ -2427,8 +2177,8 @@ check_tup_satisfies_update:
 
     if (result == TM_Invisible) {
         UnlockReleaseBuffer(buffer);
-        ereport(PANIC, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg("attempted to update invisible inplace heap tuple")));
+        ereport(defence_errlevel(), (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("attempted to update invisible tuple")));
     } else if ((result == TM_BeingModified) && wait) {
 #ifdef ENABLE_WHITEBOX
         ereport(WARNING, (errmsg("UHeapUpdate returned %d", result)));
@@ -2504,8 +2254,8 @@ check_tup_satisfies_update:
 
         bms_free(inplaceUpdAttrs);
         bms_free(keyAttrs);
-        *indexkey_update_flag =
-            !UHeapTupleIsInPlaceUpdated(((UHeapTuple)newtup)->disk_tuple->flag) || *modifiedIdxAttrs != NULL;
+        *indexkey_update_flag = !UHeapTupleIsInPlaceUpdated(((UHeapTuple)newtup)->disk_tuple->flag) ||
+            (modifiedIdxAttrs != NULL && *modifiedIdxAttrs != NULL);
 
 #ifdef ENABLE_WHITEBOX
         ereport(WARNING, (errmsg("UHeapUpdate returned %d", result)));
@@ -2574,24 +2324,8 @@ check_tup_satisfies_update:
         }
     } else if (newtupsize <= oldtupsize) {
         useInplaceUpdate = true;
-        if (allow_inplace_update == false) {
-            useInplaceUpdate = false;
-        }
-    } else {
-        /* Pass delta space required to accommodate the new tuple. */
-        useInplaceUpdate = UHeapPagePruneOpt(relation, buffer, oldOffnum, newtupsize - oldtupsize);
-
-        if (allow_inplace_update == false) {
-            useInplaceUpdate = false;
-        }
-
-#ifdef DEBUG_UHEAP
-        if (!useInplaceUpdate)
-            UHEAPSTAT_COUNT_NONINPLACE_UPDATE_CAUSE(PAGE_PRUNE_FAILED);
-#endif
-        /* The page might have been modified, so refresh disk_tuple */
-        oldtup.disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, lp);
     }
+
     /*
      * Acquire subtransaction lock, if current transaction is a
      * subtransaction.
@@ -2609,7 +2343,7 @@ check_tup_satisfies_update:
      * that by releasing the buffer lock.
      */
     oldtupNewTransSlot = UHeapPageReserveTransactionSlot(relation, buffer, fxid, &prevUrecptr,
-        &lockReacquired, InvalidBuffer, &slotReused, &minXidInTDSlots);
+        &lockReacquired, InvalidBuffer, &minXidInTDSlots);
 
     /*
      * We need to re-fetch the row information since it might
@@ -2620,6 +2354,7 @@ check_tup_satisfies_update:
     pagefree = PageGetUHeapFreeSpace(page);
 
     if (lockReacquired) {
+        LimitRetryTimes(retryTimes++);
         goto check_tup_satisfies_update;
     }
 
@@ -2627,6 +2362,7 @@ check_tup_satisfies_update:
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
         UHeapSleepOrWaitForTDSlot(minXidInTDSlots, fxid);
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+        LimitRetryTimes(retryTimes++);
         goto check_tup_satisfies_update;
     }
 
@@ -2638,40 +2374,9 @@ check_tup_satisfies_update:
      * refetch the tuple here.
      */
     Assert(!RowPtrIsDeleted(lp));
+    (void)UHeapPagePrepareForXid(relation, buffer, fxid, false, false);
     oldtup.disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, lp);
     oldtup.disk_tuple_size = RowPtrGetLen(lp);
-
-    /*
-     * Using a transaction slot of transaction that is still not all-visible
-     * will lead to undo access during tuple visibility checks and that sucks
-     * the performance.  To avoid accessing undo, we perform non-inplace
-     * updates so as to distribute the tuple across pages so that we don't
-     * face scarcity of transaction slots on the page.  However, we must have
-     * a hard limit for this optimization, else the number of blocks will
-     * increase without any bound.
-     */
-    if (slotReused) {
-        BlockNumber nblocks = RelationGetNumberOfBlocks(relation);
-
-#ifdef DEBUG_UHEAP
-        UHEAPSTAT_COUNT_NONINPLACE_UPDATE_CAUSE(SLOT_REUSED);
-#endif
-
-        if (nblocks <= NUM_BLOCKS_FOR_NON_INPLACE_UPDATES) {
-            useInplaceUpdate = false;
-#ifdef DEBUG_UHEAP
-            UHEAPSTAT_COUNT_NONINPLACE_UPDATE_CAUSE(nblocks_LESS_THAN_NBLOCKS);
-#endif
-        } else
-            slotReused = false;
-    }
-
-#ifdef DEBUG_UHEAP
-    if (!useInplaceUpdate)
-        UHEAPSTAT_COUNT_UPDATE(NON_INPLACE_UPDATE);
-    else
-        UHEAPSTAT_COUNT_UPDATE(INPLACE_UPDATE);
-#endif
 
     /*
      * If the slot is marked as frozen, the latest modifier of the tuple must
@@ -2694,7 +2399,7 @@ check_tup_satisfies_update:
      * undo tuple belongs to previous epoch and hence all-visible.  See
      * comments atop of file inplaceheapam_visibility.c.
      */
-    oldestXidHavingUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    oldestXidHavingUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
     if (TransactionIdPrecedes(txactinfo.xid, oldestXidHavingUndo)) {
         txactinfo.xid = FrozenTransactionId;
         oldUpdaterXid = FrozenTransactionId;
@@ -2702,14 +2407,29 @@ check_tup_satisfies_update:
 
     Assert(!UHeapTupleIsUpdated(oldtup.disk_tuple->flag));
 
+    if (!allow_inplace_update) {
+        useInplaceUpdate = false;
+        useBlockInplaceUpdate = false;
+    } else if (!useInplaceUpdate) {
+        /* Pass delta space required to accommodate the new tuple. */
+        useInplaceUpdate = UHeapPagePruneOpt(relation, buffer, oldOffnum,
+            newtupsize - oldtupsize);
+        /* The page might have been modified, so refresh disk_tuple */
+        oldtup.disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, lp);
+        if (!useInplaceUpdate && newtupsize <= pagefree) {
+            /* Reserved for link update. */
+            useInplaceUpdate = false;
+            useBlockInplaceUpdate = false;
+        }
+    }
+
     /*
      * updated tuple doesn't fit on current page or the toaster needs to be
      * activated or transaction slot has been reused.  To prevent concurrent
      * sessions from updating the tuple, we have to temporarily mark it
      * locked, while we release the page lock.
      */
-    Assert(!slotReused || !useInplaceUpdate);
-    if (slotReused || (!useInplaceUpdate && newtupsize > pagefree) || needToast) {
+    if (!useInplaceUpdate) {
         BlockNumber oldblk, newblk;
         TD oldTD;
 
@@ -2717,7 +2437,7 @@ check_tup_satisfies_update:
         oldTD.undo_record_ptr = txactinfo.urec_add;
 
         if (!alreadyLocked) {
-            (void)UHeapExecuteLockTuple(relation, buffer, &oldtup, LockTupleExclusive, true);
+            (void)UHeapExecuteLockTuple(relation, buffer, &oldtup, LockTupleExclusive);
         }
 
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
@@ -2742,8 +2462,7 @@ check_tup_satisfies_update:
          * perform non-inplace update in a separate page so as to reduce
          * contention on transaction slots.
          */
-        if (slotReused || newtupsize > pagefree) {
-            Assert(!useInplaceUpdate);
+        if (!needToast) {
             newbuf = RelationGetBufferForUTuple(relation, uheaptup->disk_tuple_size, buffer, 0, NULL);
         } else {
             /* Re-acquire the lock on the old tuple's page. */
@@ -2776,7 +2495,7 @@ check_tup_satisfies_update:
 
             lower = ((UHeapPageHeaderData *)npage)->pd_lower;
             newtupTransSlot = UHeapPageReserveTransactionSlot(relation, newbuf, fxid, &newPrevUrecptr,
-                &lockReacquired, InvalidBuffer, NULL, &minXidInTDSlots);
+                &lockReacquired, InvalidBuffer, &minXidInTDSlots);
 
             /*
              * It is possible that available space on the page changed
@@ -2926,7 +2645,7 @@ check_tup_satisfies_update:
     oldTD.xactid = oldUpdaterXid;
     oldTD.undo_record_ptr = txactinfo.urec_add;
     UndoPersistence persistence = UndoPersistenceForRelation(relation);
-    Oid relOid = RelationIsPartition(relation) ? relation->parentId : RelationGetRelid(relation);
+    Oid relOid = RelationIsPartition(relation) ? GetBaseRelOidOfParition(relation) : RelationGetRelid(relation);
     Oid partitionOid = RelationIsPartition(relation) ? RelationGetRelid(relation) : InvalidOid;
 
     /* calculate xor delta for inplaceupdate, to allocate correct undo size */
@@ -3001,28 +2720,13 @@ check_tup_satisfies_update:
         appendBinaryStringInfo(undorec->Rawdata(), (char *)&xorDeltaFlags, sizeof(uint8));
     }
 
-    oldtup.disk_tuple->flag &= ~UHEAP_MULTI_LOCKERS;
-    tempInfomask = oldtup.disk_tuple->flag;
-
-
-    /* Compute the new xid and infomask to store into the tuple. */
-    ComputeNewXidInfomask(&oldtup, buffer, saveTupXid, txactinfo.td_slot, tempInfomask, xid, oldtupNewTransSlot,
-        singleLockerXid, lockmode, ForUpdate, &oldInfomask, &resultTransSlotId);
-
-    /*
-     * There must not be any stronger locker than the current operation,
-     * otherwise it would have waited for it to finish.
-     */
-    Assert(resultTransSlotId == oldtupNewTransSlot);
-
-    newInfomask = 0;
-
     if (useInplaceUpdate) {
-        infomaskOldTuple = infomaskNewTuple = oldInfomask | newInfomask | UHEAP_INPLACE_UPDATED;
+        infomaskOldTuple = infomaskNewTuple = UHEAP_XID_EXCL_LOCK | UHEAP_INPLACE_UPDATED;
     } else {
-        infomaskOldTuple = oldInfomask | UHEAP_UPDATED;
-        infomaskNewTuple = newInfomask;
+        infomaskOldTuple = UHEAP_XID_EXCL_LOCK | UHEAP_UPDATED;
+        infomaskNewTuple = 0;
     }
+
     /* No ereport(ERROR) from here till changes are logged */
     START_CRIT_SECTION();
     /*
@@ -3031,26 +2735,32 @@ check_tup_satisfies_update:
      * become DEAD sooner or later.  If the transaction finally aborts, the
      * subsequent page pruning will be a no-op and the hint will be cleared.
      */
-    if (!useInplaceUpdate || (uheaptup->disk_tuple_size < oldtup.disk_tuple_size)) {
-        UPageSetPrunable(page, xid);
+    if (!useInplaceUpdate || (uheaptup->disk_tuple_size < oldtup.disk_tuple_size) || useBlockInplaceUpdate) {
+        UPageSetPrunable(page, fxid);
     }
 
     /* oldtup should be pointing to right place in page */
     Assert(oldtup.disk_tuple == (UHeapDiskTuple)UPageGetRowData(page, lp));
 
-    UHeapTupleHeaderSetTDSlot(oldtup.disk_tuple, resultTransSlotId);
+    UHeapTupleHeaderSetTDSlot(oldtup.disk_tuple, oldtupNewTransSlot);
     oldtup.disk_tuple->flag &= ~UHEAP_VIS_STATUS_MASK;
     oldtup.disk_tuple->flag |= infomaskOldTuple;
-
-    infomaskNewTuple &= ~UHEAP_XID_LOCK_ONLY;
-    infomaskNewTuple &= ~SINGLE_LOCKER_XID_IS_LOCK;
+    tupleXid = UHeapTupleSetModifiedXid(relation, buffer, &oldtup, fxid);
 
     /* keep the new tuple copy updated for the caller */
     UHeapTupleHeaderSetTDSlot(uheaptup->disk_tuple, newtupTransSlot);
     uheaptup->disk_tuple->flag &= ~UHEAP_VIS_STATUS_MASK;
     uheaptup->disk_tuple->flag |= infomaskNewTuple;
     uheaptup->xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
+    if (buffer == newbuf) {
+        UHeapTupleSetRawXid(uheaptup, tupleXid);
+    } else {
+        (void)UHeapPagePrepareForXid(relation, newbuf, fxid, false, false);
+        UHeapTupleSetModifiedXid(relation, newbuf, uheaptup, fxid);
+    }
+
     if (useInplaceUpdate) {
+        Assert(buffer == newbuf);
         if (prefixlen > 0) {
             appendBinaryStringInfo(undorec->Rawdata(), (char *)&prefixlen, sizeof(uint16));
         }
@@ -3076,31 +2786,13 @@ check_tup_satisfies_update:
             appendBinaryStringInfo(undorec->Rawdata(), (char *)&subxid, sizeof(SubTransactionId));
         }
 
-        /*
-         * For inplace updates, we copy the entire data portion including null
-         * bitmap of new tuple.
-         *
-         * For the special case where we are doing inplace updates even when
-         * the new tuple is bigger, we need to adjust the old tuple's location
-         * so that new tuple can be copied at that location as it is.
-         */
-        RowPtrChangeLen(lp, uheaptup->disk_tuple_size);
-        rc = memcpy_s((char *)oldtup.disk_tuple + SizeOfUHeapDiskTupleData,
-            uheaptup->disk_tuple_size - SizeOfUHeapDiskTupleData,
-            (char *)uheaptup->disk_tuple + SizeOfUHeapDiskTupleData,
-            uheaptup->disk_tuple_size - SizeOfUHeapDiskTupleData);
-        securec_check(rc, "\0", "\0");
-        /*
-         * Copy everything from new tuple in infomask apart from visibility
-         * flags.
-         */
-        oldtup.disk_tuple->flag = oldtup.disk_tuple->flag & UHEAP_VIS_STATUS_MASK;
-        oldtup.disk_tuple->flag |= (uheaptup->disk_tuple->flag & ~UHEAP_VIS_STATUS_MASK);
-        /* Copy number of attributes in tuple. */
-        UHeapTupleHeaderSetNatts(oldtup.disk_tuple, UHeapTupleHeaderGetNatts(newtup->disk_tuple));
-        /* also update the tuple length and self pointer */
-        oldtup.disk_tuple_size = uheaptup->disk_tuple_size;
-        oldtup.disk_tuple->t_hoff = uheaptup->disk_tuple->t_hoff;
+        if (!useBlockInplaceUpdate) {
+            PutInplaceUpdateTuple(&oldtup, uheaptup, lp);
+        } else {
+            PutBlockInplaceUpdateTuple(page, (Item)uheaptup->disk_tuple, lp, uheaptup->disk_tuple_size);
+            /* update the potential freespace */
+            UHeapRecordPotentialFreeSpace(buffer, SHORTALIGN(oldtupsize) - SHORTALIGN(newtupsize));
+        }
         ItemPointerCopy(&oldtup.ctid, &uheaptup->ctid);
     } else {
 #ifdef USE_ASSERT_CHECKING
@@ -3128,8 +2820,8 @@ check_tup_satisfies_update:
         }
 
         /* update the potential freespace */
-        UHeapRecordPotentialFreeSpace(relation, buffer, SHORTALIGN(oldtupsize));
-        UHeapRecordPotentialFreeSpace(relation, newbuf, -1 * SHORTALIGN(newtupsize));
+        UHeapRecordPotentialFreeSpace(buffer, SHORTALIGN(oldtupsize));
+        UHeapRecordPotentialFreeSpace(newbuf, -1 * SHORTALIGN(newtupsize));
     }
 
     InsertPreparedUndo(u_sess->ustore_cxt.urecvec);
@@ -3230,7 +2922,7 @@ check_tup_satisfies_update:
         Assert(oldupWalInfo.hZone != NULL);
 
         LogUHeapUpdate(&oldupWalInfo, &newupWalInfo, useInplaceUpdate, undoXorDeltaSize, xlogXorDelta, prefixlen,
-            suffixlen, relation);
+            suffixlen, relation, useBlockInplaceUpdate);
     }
 
     undo::FinishUndoMeta(&xlum, persistence);
@@ -3242,7 +2934,7 @@ check_tup_satisfies_update:
     /* be tidy */
     pfree(undotup.data);
     UHeapFinalizeDML<UHEAP_UPDATE>(relation, buffer, &newbuf, newtup, uheaptup, &(oldtup.ctid),
-                                   haveTupleLock, useInplaceUpdate, slotReused);
+        haveTupleLock, useInplaceUpdate);
 
     bms_free(inplaceUpdAttrs);
     bms_free(interestingAttrs);
@@ -3329,42 +3021,34 @@ void UHeapMultiInsert(Relation relation, UHeapTuple *tuples, int ntuples, Comman
         undo::XlogUndoMeta xlum;
         Buffer buffer = InvalidBuffer;
         int nthispage = 0;
+        int retryTimes = 0;
         int tdSlot = InvalidTDSlotId;
         UndoRecPtr urecPtr = INVALID_UNDO_REC_PTR, prevUrecptr = INVALID_UNDO_REC_PTR,
                    first_urecptr = INVALID_UNDO_REC_PTR;
         OffsetNumber maxRequiredOffset;
         bool lockReacquired = false;
         UHeapFreeOffsetRanges *ufreeOffsetRanges = NULL;
-        bool switchBuf = false;
-        bool aggressiveTDSearch = false;
-        BlockNumber firstBlock = InvalidBlockNumber;
+        bool setTupleXid = false;
+        ShortTransactionId tupleXid = 0;
 
         CHECK_FOR_INTERRUPTS();
 
         /* IO collector and IO scheduler */
+#ifdef ENABLE_MULTIPLE_NODES
         if (ENABLE_WORKLOAD_CONTROL)
             IOSchedulerAndUpdate(IO_TYPE_WRITE, 1, IO_TYPE_ROW);
+#endif
 
         WHITEBOX_TEST_STUB(UHEAP_MULTI_INSERT_FAILED, WhiteboxDefaultErrorEmit);
 
         UHeapResetWaitTimeForTDSlot();
 
 reacquire_buffer:
-        buffer = RelationGetBufferForUTuple(relation, uheaptuples[ndone]->disk_tuple_size, InvalidBuffer, options, 
-            bistate, switchBuf);
+        buffer = RelationGetBufferForUTuple(relation, uheaptuples[ndone]->disk_tuple_size, InvalidBuffer,
+            options, bistate);
+        (void)UHeapPagePrepareForXid(relation, buffer, fxid, false, false);
         page = BufferGetPage(buffer);
         phdr = (UHeapPageHeaderData *)page;
-
-        /*
-         * Do aggressive TD slot search after switching buffer
-         * and somehow ended up at the first block.
-        */
-        BlockNumber currBlock = BufferGetBlockNumber(buffer);
-        if (firstBlock == InvalidBlockNumber) {
-            firstBlock = currBlock;
-        } else if (switchBuf && firstBlock == currBlock) {
-            aggressiveTDSearch = true;
-        }
 
         /*
          * Get the unused offset ranges in the page. This is required for
@@ -3383,28 +3067,31 @@ reacquire_buffer:
         if (!skipUndo) {
             lower = phdr->pd_lower;
             tdSlot = UHeapPageReserveTransactionSlot(relation, buffer, fxid, &prevUrecptr, &lockReacquired, 
-                InvalidBuffer, NULL, &minXidInTDSlots, aggressiveTDSearch);
+                InvalidBuffer, &minXidInTDSlots);
             /*
              * It is possible that available space on the page changed
              * as part of TD reservation operation. If so, go back and reacquire the buffer.
              */
             if (lockReacquired || lower < phdr->pd_lower) {
                 UnlockReleaseBuffer(buffer);
-                switchBuf = false;
+                LimitRetryTimes(retryTimes++);
+                if (retryTimes > FORCE_EXTEND_THRESHOLD) {
+                    options |= UHEAP_INSERT_EXTEND;
+                }
                 goto reacquire_buffer;
             }
 
             if (tdSlot == InvalidTDSlotId) {
                 UnlockReleaseBuffer(buffer);
                 UHeapSleepOrWaitForTDSlot(minXidInTDSlots, fxid, true);
-                // cant switch buffer anymore to avoid bouncing between blocks
-                switchBuf = !aggressiveTDSearch;
+                LimitRetryTimes(retryTimes++);
+                options |= UHEAP_INSERT_EXTEND;
                 goto reacquire_buffer;
             }
 
             Assert(tdSlot != InvalidTDSlotId);
 
-            Oid relOid = RelationIsPartition(relation) ? relation->parentId : RelationGetRelid(relation);
+            Oid relOid = RelationIsPartition(relation) ? GetBaseRelOidOfParition(relation) : RelationGetRelid(relation);
             Oid partitionOid = RelationIsPartition(relation) ? RelationGetRelid(relation) : InvalidOid;
 
             urecPtr = UHeapPrepareUndoMultiInsert(relOid, partitionOid, RelationGetRelFileNode(relation),
@@ -3438,12 +3125,18 @@ reacquire_buffer:
                     break;
                 UHeapTupleHeaderSetTDSlot(uheaptup->disk_tuple, tdSlot);
                 UHeapTupleHeaderSetLockerTDSlot(uheaptup->disk_tuple, InvalidTDSlotId);
+                if (!setTupleXid) {
+                    tupleXid = UHeapTupleSetModifiedXid(relation, buffer, uheaptup, fxid);
+                    setTupleXid = true;
+                } else {
+                    UHeapTupleSetRawXid(uheaptup, tupleXid);
+                }
 #ifdef USE_ASSERT_CHECKING
                 CheckTupleValidity(relation, uheaptup);
 #endif
                 RelationPutUTuple(relation, buffer, uheaptup);
 
-                UHeapRecordPotentialFreeSpace(relation, buffer, -1 * SHORTALIGN(uheaptup->disk_tuple_size));
+                UHeapRecordPotentialFreeSpace(buffer, -1 * SHORTALIGN(uheaptup->disk_tuple_size));
 
                 /*
                  * Let's make sure that we've decided the offset ranges
@@ -3556,7 +3249,7 @@ reacquire_buffer:
         }
 
         ndone += nthispage;
-        switchBuf = false;
+        options &= ~UHEAP_INSERT_EXTEND;
     }
 
     /*
@@ -3652,7 +3345,7 @@ int UPageGetTDSlotId(Buffer buf, TransactionId fxid, UndoRecPtr *urecAdd)
     return InvalidTDSlotId;
 }
 
-static bool UHeapPageReserveTransactionSlotReuseLoop(int *pslotNo, Page page, UndoRecPtr *urecPtr, bool *slotReused)
+static bool UHeapPageReserveTransactionSlotReuseLoop(int *pslotNo, Page page, UndoRecPtr *urecPtr)
 {
     int slotNo;
     int tdCount = UPageGetTDSlotCount(page);
@@ -3663,10 +3356,6 @@ static bool UHeapPageReserveTransactionSlotReuseLoop(int *pslotNo, Page page, Un
 
         if (!TransactionIdIsValid(thistrans->xactid)) {
             *urecPtr = thistrans->undo_record_ptr;
-
-            if (slotReused && (*urecPtr != INVALID_UNDO_REC_PTR)) {
-                *slotReused = true;
-            }
 #ifdef DEBUG_UHEAP
             if (*urecPtr != INVALID_UNDO_REC_PTR) {
                 /* Got a slot after invalidation */
@@ -3701,9 +3390,8 @@ static bool UHeapPageReserveTransactionSlotReuseLoop(int *pslotNo, Page page, Un
  * aggressiveSearch - we try to reuse td slots from committed and aborted txns.
  * If none, we extend the td slots beyond the initial threshold
  */
-int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId fxid,
-    UndoRecPtr *urecPtr, bool *lockReacquired, Buffer otherBuf, bool *slotReused,
-    TransactionId *minXid, bool aggressiveSearch)
+int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId fxid, UndoRecPtr *urecPtr,
+    bool *lockReacquired, Buffer otherBuf, TransactionId *minXid, bool aggressiveSearch)
 {
     Page page = BufferGetPage(buf);
     int latestFreeTDSlot = InvalidTDSlotId;
@@ -3714,6 +3402,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
     TransactionId currMinXid = MaxTransactionId;
 
     *lockReacquired = false;
+    WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_RESERVE_TD);
 
     /*
      * For temp relations, we don't have to check all the slots since no other
@@ -3736,6 +3425,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
 
         if (TransactionIdEquals(thistrans->xactid, fxid)) {
             *urecPtr = thistrans->undo_record_ptr;
+            pgstat_report_waitstatus(oldStatus);
             return (slotNo + 1);
         } else if (!TransactionIdIsValid(thistrans->xactid))
             latestFreeTDSlot = slotNo;
@@ -3750,6 +3440,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
 #ifdef DEBUG_UHEAP
                     UHEAPSTAT_COUNT_GET_TRANSSLOT_FROM(TRANSSLOT_RESERVED_BY_CURRENT_XID);
 #endif
+                    pgstat_report_waitstatus(oldStatus);
                     return (slotNo + 1);
                 } else {
                     currMinXid = Min(currMinXid, thistrans->xactid);
@@ -3763,6 +3454,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
 
     if (latestFreeTDSlot >= 0) {
         *urecPtr = tdPtr->td_info[latestFreeTDSlot].undo_record_ptr;
+        pgstat_report_waitstatus(oldStatus);
         return (latestFreeTDSlot + 1);
     }
 
@@ -3777,16 +3469,19 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
     *minXid = currMinXid;
 
     /* no transaction slot available, try to reuse some existing slot */
-    if (UHeapPageFreezeTransSlots(relation, buf, lockReacquired, NULL, otherBuf, aggressiveSearch)) {
+    if (UHeapPageFreezeTransSlots(relation, buf, lockReacquired, NULL, otherBuf)) {
         /*
          * If the lock is reacquired inside, then we allow callers to reverify
          * the condition whether then can still perform the required
          * operation.
          */
-        if (*lockReacquired)
+        if (*lockReacquired) {
+            pgstat_report_waitstatus(oldStatus);
             return InvalidTDSlotId;
+        }
 
-        if (UHeapPageReserveTransactionSlotReuseLoop(&slotNo, page, urecPtr, slotReused)) {
+        if (UHeapPageReserveTransactionSlotReuseLoop(&slotNo, page, urecPtr)) {
+            pgstat_report_waitstatus(oldStatus);
             return (slotNo + 1);
         }
 
@@ -3807,6 +3502,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
          */
         ereport(DEBUG5, (errmsg("Could not extend TD slots beyond threshold Rel: %s, blkno: %d",
             RelationGetRelationName(relation), BufferGetBlockNumber(buf))));
+        pgstat_report_waitstatus(oldStatus);
         return InvalidTDSlotId;
     }
     /*
@@ -3821,6 +3517,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
          */
         ereport(DEBUG5, (errmsg("TD array extended by %d slots for Rel: %s, blkno: %d",
             nExtended, RelationGetRelationName(relation), BufferGetBlockNumber(buf))));
+        pgstat_report_waitstatus(oldStatus);
         return (tdCount + 1);
     }
     ereport(DEBUG5, (errmsg("Could not extend TD array for Rel: %s, blkno: %d",
@@ -3830,6 +3527,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
     UHEAPSTAT_COUNT_GET_TRANSSLOT_FROM(TRANSSLOT_CANNOT_GET);
 #endif
 
+    pgstat_report_waitstatus(oldStatus);
     /* no transaction slot available */
     return InvalidTDSlotId;
 }
@@ -3896,7 +3594,7 @@ int UHeapPageReserveTransactionSlot(Relation relation, Buffer buf, TransactionId
  * false otherwise.
  */
 bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquired, TD *transinfo, 
-    Buffer otherBuf, bool aggressiveFreeze)
+    Buffer otherBuf)
 {
     int nFrozenSlots = 0;
     int *completedXactSlots = NULL;
@@ -3909,7 +3607,7 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
     int numSlots = GetTDCount((UHeapPageHeaderData *)page);
     UHeapPageTDData *tdPtr = (UHeapPageTDData *)PageGetTDPointer(page);
     transinfo = tdPtr->td_info;
-    TransactionId oldestXid = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    TransactionId oldestXid = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
 
     /*
      * Clear the slot information from tuples.  The basic idea is to collect
@@ -3996,11 +3694,6 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
         END_CRIT_SECTION();
 
         result = true;
-        goto cleanup;
-    }
-
-    /* Some callers want a fast way to check if there is a reusable td slot or not. */
-    if (!aggressiveFreeze) {
         goto cleanup;
     }
 
@@ -4098,7 +3791,9 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
             LockBuffer(otherBuf, BUFFER_LOCK_UNLOCK);
 
         for (i = 0; i < nAbortedXactSlots; i++) {
+            WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TD_ROLLBACK);
             ExecuteUndoActionsPage(urecptr[i], relation, buf, fxid[i]);
+            pgstat_report_waitstatus(oldStatus);
         }
 
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
@@ -4184,7 +3879,6 @@ void UHeapFreezeOrInvalidateTuples(Buffer buf, int nSlots, const int *slots, boo
             if (locker_td_id == slots[i]) {
                 tupHdr = (UHeapDiskTuple)UPageGetRowData(page, rowptr);
                 UHeapTupleHeaderSetLockerTDSlot(tupHdr, UHEAPTUP_SLOT_FROZEN);
-                tupHdr->flag &= ~UHEAP_XID_LOCK_ONLY;
             }
 
             if (tdSlot == slots[i]) {
@@ -4268,7 +3962,7 @@ void UHeapReserveDualPageTDSlot(Relation relation, Buffer oldbuf, Buffer newbuf,
 
     /* Reserve the transaction slot for new buffer. */
     *newbufTransSlotId = UHeapPageReserveTransactionSlot(relation, newbuf, fxid,
-        newbufPrevUrecptr, lockReacquired, oldbuf, NULL, minXidInTDSlots);
+        newbufPrevUrecptr, lockReacquired, oldbuf, minXidInTDSlots);
 
     /*
      * Try again if the buffer lock is released and reacquired. Or if we
@@ -4285,7 +3979,7 @@ void UHeapReserveDualPageTDSlot(Relation relation, Buffer oldbuf, Buffer newbuf,
 
     /* Get the transaction slot for old buffer. */
     *oldbufTransSlotId = UHeapPageReserveTransactionSlot(relation, oldbuf, fxid, oldbufPrevUrecptr,
-        oldbufLockReacquired, newbuf, NULL, minXidInTDSlots);
+        oldbufLockReacquired, newbuf, minXidInTDSlots);
 }
 
 /*
@@ -4316,27 +4010,6 @@ void UHeapPageSetUndo(Buffer buffer, int transSlotId, TransactionId fxid, UndoRe
     }
 }
 
-
-/*
- * Given two versions of the same "flag" for a tuple, compare them and
- * return whether the relevant status for a tuple xid has changed.  This is
- * used after a buffer lock has been released and reacquired: we want to ensure
- * that the tuple state continues to be the same it was when we previously
- * examined it.
- *
- * Note the xid field itself must be compared separately.
- */
-static inline bool XidInfomaskChanged(uint16 newInfomask, uint16 oldInfomask)
-{
-    const uint16 interesting = UHEAP_MULTI_LOCKERS | UHEAP_XID_LOCK_ONLY | UHEAP_LOCK_MASK;
-
-    if ((newInfomask & interesting) != (oldInfomask & interesting))
-        return true;
-
-    return false;
-}
-
-
 /*
  * UHeapDetermineModifiedColumns - Check which columns are being updated.
  * This is same as HeapDetermineModifiedColumns except that it takes
@@ -4364,9 +4037,9 @@ CommandId UHeapTupleGetCid(UHeapTuple utuple, Buffer buffer)
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
     urec->Reset(tdinfo.urec_add);
 
-    int rc = FetchUndoRecord(urec, InplaceSatisfyUndoRecord, ItemPointerGetBlockNumber(&utuple->ctid),
+    UndoTraversalState rc = FetchUndoRecord(urec, InplaceSatisfyUndoRecord, ItemPointerGetBlockNumber(&utuple->ctid),
         ItemPointerGetOffsetNumber(&utuple->ctid), InvalidTransactionId);
-    if (rc == UNDO_RET_FAIL) {
+    if (rc != UNDO_TRAVERSAL_COMPLETE) {
         return InvalidCommandId;
     }
 
@@ -4616,65 +4289,6 @@ UndoRecPtr UHeapPrepareUndoDelete(Oid relOid, Oid partitionOid, Oid relfilenode,
     return urecptr;
 }
 
-UndoRecPtr UHeapPrepareUndoLock(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
-    UndoPersistence persistence, Buffer buffer, OffsetNumber offnum, TransactionId xid, SubTransactionId subxid,
-    CommandId cid, UndoRecPtr prevurpInOneBlk, UndoRecPtr prevurpInOneXact, _in_ TD *oldtd, UHeapTuple oldtuple,
-    BlockNumber blk, XlUndoHeader *xlundohdr, undo::XlogUndoMeta *xlundometa)
-{
-    Assert(oldtuple->tupTableType == UHEAP_TUPLE);
-
-    UndoRecord *urec = u_sess->ustore_cxt.undo_records[0];
-    URecVector *urecvec = u_sess->ustore_cxt.urecvec;
-
-    /* Just to keep compiler quite */
-    urec->SetUtype(UNDO_XID_LOCK_ONLY);
-    urec->SetUinfo(UNDO_UREC_INFO_PAYLOAD);
-    urec->SetXid(xid);
-    urec->SetCid(cid);
-    urec->SetReloid(relOid);
-    urec->SetPartitionoid(partitionOid);
-    urec->SetBlkprev(prevurpInOneBlk);
-    urec->SetRelfilenode(relfilenode);
-    urec->SetTablespace(tablespace);
-
-    if (t_thrd.xlog_cxt.InRecovery) {
-        urec->SetBlkno(blk);
-    } else {
-        if (BufferIsValid(buffer)) {
-            urec->SetBlkno(BufferGetBlockNumber(buffer));
-        } else {
-            urec->SetBlkno(InvalidBlockNumber);
-        }
-    }
-    urec->SetOffset(offnum);
-    urec->SetPrevurp(t_thrd.xlog_cxt.InRecovery ? prevurpInOneXact : GetCurrentTransactionUndoRecPtr(persistence));
-    if (oldtd) {
-        urec->SetOldXactId(oldtd->xactid);
-    }
-    urec->SetNeedInsert(true);
-
-    /* Copy over the entire tuple header to the undorecord */
-    initStringInfo(urec->Rawdata());
-    appendBinaryStringInfo(urec->Rawdata(), (char *)oldtuple->disk_tuple + OffsetTdId,
-        SizeOfUHeapDiskTupleHeaderExceptXid);
-    if (subxid != InvalidSubTransactionId) {
-        urec->SetUinfo(UNDO_UREC_INFO_CONTAINS_SUBXACT);
-        appendBinaryStringInfo(urec->Rawdata(), (char *)&subxid, sizeof(SubTransactionId));
-    }
-
-    bool status = PrepareUndoRecord(urecvec, persistence, xlundohdr, xlundometa);
-
-    /* Do not continue if there was a failure during Undo preparation */
-    if (status != UNDO_RET_SUCC) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("Failed to generate UndoRecord")));
-    }
-
-    UndoRecPtr urecptr = urec->Urp();
-    Assert(IS_VALID_UNDO_REC_PTR(urecptr));
-
-    return urecptr;
-}
-
 /*
  * Return the TD slot id assigned to xid on the Page, if any.
  * Return InvalidTDSlotId if there isn't any.
@@ -4703,7 +4317,7 @@ int UHeapPageGetTDSlotId(Buffer buffer, TransactionId xid, UndoRecPtr *urp)
 static void PopulateXLUndoHeader(XlUndoHeader *xlundohdr, const UHeapWALInfo *walinfo, const Relation rel)
 {
     if (rel != NULL) {
-        xlundohdr->relOid = RelationIsPartition(rel) ? rel->parentId : RelationGetRelid(rel);
+        xlundohdr->relOid = RelationIsPartition(rel) ? GetBaseRelOidOfParition(rel) : RelationGetRelid(rel);
     } else {
         xlundohdr->relOid = walinfo->relOid;
     }
@@ -4721,7 +4335,7 @@ static void PopulateXLUHeapHeader(XlUHeapHeader *xlhdr, const UHeapDiskTuple dis
     xlhdr->t_hoff = diskTuple->t_hoff;
 }
 
-static void LogUHeapInsert(UHeapWALInfo *walinfo, Relation rel)
+static void LogUHeapInsert(UHeapWALInfo *walinfo, Relation rel, bool isToast)
 {
     XlUndoHeader xlundohdr;
     XlUHeapInsert xlrec;
@@ -4765,6 +4379,8 @@ static void LogUHeapInsert(UHeapWALInfo *walinfo, Relation rel)
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec, SizeOfUHeapInsert);
 
+    CommitSeqNo curCSN = InvalidCommitSeqNo;
+    LogCSN(&curCSN);
     XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
     if ((walinfo->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         ereport(DEBUG5, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("blkprev=%lu", walinfo->blkprev)));
@@ -4813,7 +4429,7 @@ static void LogUHeapInsert(UHeapWALInfo *walinfo, Relation rel)
     /* filtering by origin on a row level is much more efficient */
     XLogIncludeOrigin();
 
-    recptr = XLogInsert(RM_UHEAP_ID, info);
+    recptr = XLogInsert(RM_UHEAP_ID, info, InvalidBktId, isToast);
 
     PageSetLSN(page, recptr);
     SetUndoPageLSN(u_sess->ustore_cxt.urecvec, recptr);
@@ -4850,6 +4466,8 @@ static void LogUHeapDelete(UHeapWALInfo *walinfo)
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec, SizeOfUHeapDelete);
     XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
+    CommitSeqNo curCSN = InvalidCommitSeqNo;
+    LogCSN(&curCSN);
 
     XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
    
@@ -4887,7 +4505,8 @@ static void LogUHeapDelete(UHeapWALInfo *walinfo)
 }
 
 static void LogUHeapUpdate(UHeapWALInfo *oldTupWalinfo, UHeapWALInfo *newTupWalinfo, bool isInplaceUpdate,
-    int undoXorDeltaSize, char *xlogXorDelta, uint16 xorPrefixlen, uint16 xorSurfixlen, Relation rel)
+    int undoXorDeltaSize, char *xlogXorDelta, uint16 xorPrefixlen, uint16 xorSurfixlen, Relation rel,
+    bool isBlockInplaceUpdate)
 {
     char *oldp = NULL;
     char *newp = NULL;
@@ -4913,7 +4532,7 @@ static void LogUHeapUpdate(UHeapWALInfo *oldTupWalinfo, UHeapWALInfo *newTupWali
     Assert(oldTupWalinfo->oldUTuple.data);
     oldTup = (UHeapDiskTupleData *)oldTupWalinfo->oldUTuple.data;
     oldTupLen = oldTupWalinfo->oldUTuple.len;
-    inplaceTup = oldTupWalinfo->utuple;
+    inplaceTup = isBlockInplaceUpdate ? newTupWalinfo->utuple : oldTupWalinfo->utuple;
     Assert(inplaceTup->tupTableType == UHEAP_TUPLE);
     nonInplaceNewTup = newTupWalinfo->utuple;
     if (isInplaceUpdate) {
@@ -5041,6 +4660,8 @@ static void LogUHeapUpdate(UHeapWALInfo *oldTupWalinfo, UHeapWALInfo *newTupWali
         if (rel->rd_rel->relkind == RELKIND_TOASTVALUE) {
             info |= XLOG_UHEAP_INIT_TOAST_PAGE;
         }
+    } else if (isBlockInplaceUpdate) {
+        xlrec.flags |= XLZ_BLOCK_INPLACE_UPDATE;
     }
 
     xlrec.flags |= XLZ_HAS_UPDATE_UNDOTUPLE;
@@ -5052,6 +4673,9 @@ static void LogUHeapUpdate(UHeapWALInfo *oldTupWalinfo, UHeapWALInfo *newTupWali
 
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec, SizeOfUHeapUpdate);
+    CommitSeqNo curCSN = InvalidCommitSeqNo;
+    LogCSN(&curCSN);
+
     XLogRegisterData((char *)&xlundohdr, SizeOfXLUndoHeader);
     if ((oldTupWalinfo->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
         XLogRegisterData((char *)&(oldTupWalinfo->hasSubXact), sizeof(bool));
@@ -5265,13 +4889,16 @@ bool UHeapExecPendingUndoActions(Relation relation, Buffer buffer, TransactionId
      * crash, and after restart, status of this transaction will not be
      * aborted but we should still consider it as aborted because it dit not commit.
      */
-    if (TransactionIdIsValid(xid) && UHeapTransactionIdDidAbort(xid)) {
+    if (TransactionIdIsValid(xid) && !UHeapTransactionIdDidCommit(xid) &&
+        !TransactionIdIsInProgress(xid, NULL, false, false)) {
         /*
          * Release the buffer lock here to prevent deadlock.
          * This is because the actual rollback will reacquire the lock.
          */
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_TD_ROLLBACK);
         ExecuteUndoActionsPage(slotUrecPtr, relation, buffer, xid);
+        pgstat_report_waitstatus(oldStatus);
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
         /* We better not find this xid in any td slot anymore */
@@ -5413,7 +5040,7 @@ static void LogUHeapMultiInsert(UHeapMultiInsertWALInfo *multiWalinfo, bool skip
      * All undo records have same information apart from the payload data.
      * Hence, we can copy the same from the last record.
      */
-    xlundohdr.relOid = RelationIsPartition(multiWalinfo->relation) ? multiWalinfo->relation->parentId :
+    xlundohdr.relOid = RelationIsPartition(multiWalinfo->relation) ? GetBaseRelOidOfParition(multiWalinfo->relation) :
                                                                       multiWalinfo->relation->rd_id;
     xlundohdr.urecptr = multiWalinfo->genWalInfo->urecptr;
     xlundohdr.flag = multiWalinfo->genWalInfo->flag;
@@ -5522,6 +5149,9 @@ static void LogUHeapMultiInsert(UHeapMultiInsertWALInfo *multiWalinfo, bool skip
         XLogRegisterData((char *)&uheappage->td_count, sizeof(uint16));
     }
 
+    CommitSeqNo curCSN = InvalidCommitSeqNo;
+    LogCSN(&curCSN);
+
     /* copy xl_multi_insert_tuple in maindata */
     XLogRegisterData((char *)xlrec, tupledata - scratch);
 
@@ -5561,7 +5191,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     int tdSlot = InvalidTDSlotId;
     UHeapTupleTransInfo tdinfo;
     UndoRecord *urec = NULL;
-    int rc PG_USED_FOR_ASSERTS_ONLY;
+    UndoTraversalState rc = UNDO_TRAVERSAL_DEFAULT;
     Page page = NULL;
     int zoneId;
 
@@ -5585,7 +5215,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
     rc = FetchUndoRecord(urec, InplaceSatisfyUndoRecord, blkno, offnum, tdinfo.xid);
 
     /* the tuple cannot be all-visible because it's inserted by current transaction */
-    Assert(rc != UNDO_RET_FAIL);
+    Assert(rc != UNDO_TRAVERSAL_DEFAULT);
     Assert(urec->Utype() == UNDO_INSERT && urec->Offset() == offnum && urec->Xid() == tdinfo.xid);
 
     START_CRIT_SECTION();
@@ -5618,7 +5248,7 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
         urecOld->SetUrp(prevUrp);
         rc = FetchUndoRecord(urecOld, NULL, InvalidBlockNumber, InvalidOffsetNumber,
             InvalidTransactionId);
-        if (rc == UNDO_RET_FAIL || urecOld->Xid() != fxid) {
+        if (rc != UNDO_TRAVERSAL_COMPLETE || urecOld->Xid() != fxid) {
             xid = InvalidTransactionId;
         }
         DELETE_EX(urecOld);
@@ -5711,7 +5341,8 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple utuple)
  * on the relation associated with the tuple).  Any failure is reported
  * via ereport().
  */
-void SimpleUHeapDelete(Relation relation, ItemPointer tid, Snapshot snapshot, TupleTableSlot** oldslot)
+void SimpleUHeapDelete(Relation relation, ItemPointer tid, Snapshot snapshot, TupleTableSlot** oldslot,
+    TransactionId* tmfdXmin)
 {
     TM_Result result;
     TM_FailureData tmfd;
@@ -5741,6 +5372,9 @@ void SimpleUHeapDelete(Relation relation, ItemPointer tid, Snapshot snapshot, Tu
         default:
             elog(ERROR, "unrecognized UHeapDelete status: %u", result);
             break;
+    }
+    if (tmfdXmin != NULL) {
+        *tmfdXmin = tmfd.xmin;
     }
 }
 
@@ -5789,15 +5423,13 @@ uint8 UPageExtendTDSlots(Relation relation, Buffer buf)
     char *start;
     char *end;
     int i;
-    Page page;
+    Page page = BufferGetPage(buf);
     uint8 currTDSlots;
-    uint16 freeSpace;
+    uint16 freeSpace = PageGetUHeapFreeSpace(page);
     size_t linePtrSize;
     errno_t ret = EOK;
     TD *thistrans = NULL;
     UHeapPageTDData *tdPtr = NULL;
-
-    page = BufferGetPage(buf);
     UHeapPageHeaderData *phdr = (UHeapPageHeaderData *)page;
     tdPtr = (UHeapPageTDData *)PageGetTDPointer(page);
     currTDSlots = phdr->td_count;
@@ -5820,7 +5452,6 @@ uint8 UPageExtendTDSlots(Relation relation, Buffer buf)
      * TD array. In case of insufficient space, extend
      * according to free space
      */
-    freeSpace = phdr->pd_upper - phdr->pd_lower;
     if (freeSpace < (numExtended * sizeof(TD))) {
         numExtended = freeSpace / sizeof(TD);
     }

@@ -708,6 +708,7 @@ with_ossp_uuid
 with_selinux
 krb_srvtab
 with_python
+with_openeuler_os
 enable_thread_safety
 INCLUDES
 TAS
@@ -741,12 +742,15 @@ enable_llt
 enable_llvm
 llvm_major_version
 llvm_minor_version
+flex_major_version
+flex_minor_version
 enable_ut
 enable_qunit
 enable_jemalloc
 enable_jemalloc_debug
 enable_privategauss
 enable_multiple_nodes
+enable_lite_mode
 enable_mot
 enable_memory_check
 enable_mysql_fdw
@@ -754,7 +758,6 @@ enable_oracle_fdw
 enable_thread_check
 enable_shared
 default_gs_version
-default_kernel_version
 default_port
 WANTED_LANGUAGES
 enable_nls
@@ -824,12 +827,14 @@ enable_integer_datetimes
 enable_nls
 with_pgport
 with_gs_version
+with_openeuler_os
 enable_shared
 enable_rpath
 enable_jemalloc
 enable_jemalloc_debug
 enable_privategauss
 enable_multiple_nodes
+enable_lite_mode
 enable_mot
 enable_memory_check
 enable_mysql_fdw
@@ -1311,6 +1316,11 @@ Try \`$0 --help' for more information." >&2
   esac
 done
 
+# if compile with_openeuler_os. it should use gcc on os.
+if test "${with_openeuler_os+set}" = set; then
+  gcc_version=$(gcc --version | sed q | awk -F')' '{print $2}' | awk '{print $1}')
+fi
+
 if test -n "$ac_prev"; then
   ac_option=--`echo $ac_prev | sed 's/_/-/g'`
   { $as_echo "$as_me: error: missing argument to $ac_option" >&2
@@ -1549,6 +1559,7 @@ Optional Features:
   --disable-float4-byval  disable float4 passed by value
   --disable-float8-byval  disable float8 passed by value
   --enable-ccache         build with ccache reducing compile time
+  --enable-lite-mode      generate the gauss product as lite mode
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -2655,8 +2666,8 @@ $as_echo "$as_me: error: argument required for --with-gs-version option" >&2;}
   esac
 
 else
-  product=$(cat build/script/gauss.spec | grep 'PRODUCT' | awk -F "=" '{print $2}')
-  version=$(cat build/script/gauss.spec | grep 'VERSION' | awk -F "=" '{print $2}')
+  product=$(cat build/script/gaussdb.ver | grep 'PRODUCT' | awk -F "=" '{print $2}')
+  version=$(cat build/script/gaussdb.ver | grep 'VERSION' | awk -F "=" '{print $2}')
   gitversion=$(git log 2>/dev/null | grep commit | head -1 | awk '{print $2}' | cut -b 1-8)
   commits=$(git log 2>/dev/null | grep "See in merge request" | wc -l)
   debug_str=""
@@ -2666,11 +2677,9 @@ else
   fi
 
   if test "$enable_ccache" = yes; then
-      default_gs_version="(openGauss 2.1.0 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
-      default_kernel_version="(GaussDB Kernel V500R002C00 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
+      default_gs_version="($product $version build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
   else
       default_gs_version="($product $version build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
-      default_kernel_version="($product $version build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
   fi
 fi
 
@@ -2679,7 +2688,7 @@ fi
 $as_echo "$default_gs_version" >&6; }
 
 cat >>confdefs.h <<_ACEOF
-#define DEF_GS_VERSION "${default_kernel_version}"
+#define DEF_GS_VERSION "${default_gs_version}"
 _ACEOF
 
 
@@ -2874,14 +2883,6 @@ if test "${enable_mot+set}" = set; then
 
         { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&5
             $as_echo "$as_me: error: --enable-mot option is not supported with --enable-multiple-nodes option" >&2;}
-          { (exit 1); exit 1; }; }
-
-      fi
-
-      if test "$enable_llvm" = no; then
-
-        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --disable-llvm option" >&5
-            $as_echo "$as_me: error: --enable-mot option is not supported with --disable-llvm option" >&2;}
           { (exit 1); exit 1; }; }
 
       fi
@@ -3185,6 +3186,91 @@ else
 
 fi
 
+#
+# --enable-lite-mode enables
+#
+
+# Check whether --enable-lite-mode was given.
+if test "${enable_lite_mode+set}" = set; then
+  enableval=$enable_lite_mode;
+  case $enableval in
+    yes)
+      if test "$enable_multiple_nodes" = yes; then
+        { { $as_echo "$as_me:$LINENO: error: --enable-lite-mode option is not supported with --enable-multiple-nodes option" >&5
+            $as_echo "$as_me: error: --enable-lite-mode option is not supported with --enable-multiple-nodes option" >&2;}
+              { (exit 1); exit 1; }; }
+      fi
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-lite-mode option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-lite-mode option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  enable_lite_mode=no
+
+fi
+
+if test "$enable_multiple_nodes" = yes; then
+
+  enable_lite_mode=no
+fi
+
+if test "$enable_lite_mode" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_LITE_MODE 1
+_ACEOF
+
+fi
+
+
+#
+# --with-openeuler-os enable
+#
+# Check whether --with-openeuler-os was given.
+if test "${with_openeuler_os+set}" = set; then
+  enableval=$with_openeuler_os;
+  case $enableval in
+    yes)
+      if test "$enable_multiple_nodes" = yes; then
+        { { $as_echo "$as_me:$LINENO: error: --with-openeuler-os option is not supported with --enable-multiple-nodes option" >&5
+            $as_echo "$as_me: error: --with-openeuler-os option is not supported with --enable-multiple-nodes option" >&2;}
+              { (exit 1); exit 1; }; }
+      fi
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --with-openeuler-os option" >&5
+$as_echo "$as_me: error: no argument expected for --with-openeuler-os option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+  esac
+
+else
+  with_openeuler_os=no
+
+fi
+
+if test "$enable_multiple_nodes" = yes; then
+
+  with_openeuler_os=no
+fi
+
+if test "$with_openeuler_os" = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define WITH_OPENEULER_OS 1
+_ACEOF
+
+fi
 
 
 #
@@ -5771,10 +5857,14 @@ if test "${enable_llvm+set}" = set; then
   case $enableval in
     yes)
 
+if test "$enable_lite_mode" = yes; then
+{ $as_echo "$as_me:$LINENO: enable_lite_mode is open, llvm will close" >&5
+$as_echo "$as_me: enable_lite_mode is open, llvm will close" >&2;}
+else
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_LLVM_COMPILE 1
 _ACEOF
-
+fi
       ;;
     no)
       :
@@ -5787,15 +5877,19 @@ $as_echo "$as_me: error: no argument expected for --enable-llvm option" >&2;}
   esac
 
 else
+if test "$enable_lite_mode" = yes; then
+{ $as_echo "$as_me:$LINENO: enable_lite_mode is open, llvm will close" >&5
+$as_echo "$as_me: enable_lite_mode is open, llvm will close" >&2;}
+else
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_LLVM_COMPILE 1
 _ACEOF
-enable_llvm=yes
+fi
 
 fi
 
 llvm_version_str='10.0.0'
-if [ ! -z "${with_3rdpartydir}" ]; then
+if [[ ! -z "${with_3rdpartydir}" ]] && [[ "$enable_lite_mode" != yes ]]; then
     platstr=$(sh src/get_PlatForm_str.sh)
     llvm_version_str=`${with_3rdpartydir}/dependency/${platstr}/llvm/comm/bin/llvm-config --version`
 fi
@@ -6527,7 +6621,7 @@ fi
 # JDK
 #
 with_jdk=''
-if [ ! -z "${with_3rdpartydir}" ]; then
+if [[ ! -z "${with_3rdpartydir}" ]] && [[ "$with_openeuler_os" != yes ]]; then
     platstr=$(sh src/get_PlatForm_str.sh)
     cpuarch=$(uname -m)
     for d in "openjdk8" "huaweijdk8"; do
@@ -7822,6 +7916,14 @@ else
   pgac_flex_version=`$FLEX --version 2>/dev/null`
   { $as_echo "$as_me:$LINENO: using $pgac_flex_version" >&5
 $as_echo "$as_me: using $pgac_flex_version" >&6;}
+
+flex_major_version=$(echo $pgac_flex_version | awk '{print $2}' | awk -F "." '{print $1}')
+flex_minor_version=$(echo $pgac_flex_version | awk '{print $2}' | awk -F "." '{print $2}')
+
+cat >>confdefs.h <<_ACEOF
+#define FLEX_MAJOR_VERSION $flex_major_version
+#define FLEX_MINOR_VERSION $flex_minor_version
+_ACEOF
 fi
 
 
@@ -9258,7 +9360,7 @@ $as_echo "$as_me: WARNING:
 *** Not using spinlocks will cause poor performance." >&2;}
 fi
 
-if test "$with_gssapi" = no ; then
+if test "$with_gssapi_" = no ; then
   if test "$PORTNAME" != "win32"; then
     { $as_echo "$as_me:$LINENO: checking for library containing gss_init_sec_context" >&5
 $as_echo_n "checking for library containing gss_init_sec_context... " >&6; }
@@ -12552,7 +12654,7 @@ fi
 
 fi
 
-if test "$with_gssapi" = no ; then
+if test "$with_gssapi_" = no ; then
 
 for ac_header in gssapi/gssapi.h
 do
@@ -29687,7 +29789,7 @@ fi
 
 if test "$enable_multiple_nodes" = yes; then
 cat >>confdefs.h <<_ACEOF
-#define PG_VERSION_STR "openGauss $OPENGAUSS_VERSION ${default_kernel_version} on $host, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
+#define PG_VERSION_STR "openGauss $OPENGAUSS_VERSION ${default_gs_version} on $host, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
 _ACEOF
 else
 cat >>confdefs.h <<_ACEOF
@@ -31156,8 +31258,10 @@ find src/gausskernel/ -name "*.y" | sort >> ./ereport.txt
 find src/common/backend -name "*.cpp" | sort >> ./ereport.txt
 find src/gausskernel/ -name "*.cpp" | sort >> ./ereport.txt
 
-if [[ "$enable_multiple_nodes" != no ]] || [[ "$enable_privategauss" != no ]]; then
-  find ../distribute/cm -name "*.l" | sort > ./cm_ereport.txt
-  find ../distribute/cm -name "*.y" | sort >> ./cm_ereport.txt
-  find ../distribute/cm -name "*.cpp" | sort >> ./cm_ereport.txt
+if [[ "$enable_lite_mode" != yes ]]; then
+  if [[ "$enable_multiple_nodes" != no ]] || [[ "$enable_privategauss" != no ]]; then
+    find ../distribute/cm -name "*.l" | sort > ./cm_ereport.txt
+    find ../distribute/cm -name "*.y" | sort >> ./cm_ereport.txt
+    find ../distribute/cm -name "*.cpp" | sort >> ./cm_ereport.txt
+  fi
 fi

@@ -277,6 +277,7 @@ void slashUsage(unsigned short int pager)
     fprintf(output, _("  \\di[S+] [PATTERN]      list indexes\n"));
     fprintf(output, _("  \\dl                    list large objects, same as \\lo_list\n"));
     fprintf(output, _("  \\dL[S+] [PATTERN]      list procedural languages\n"));
+    fprintf(output, _("  \\dm[S+] [PATTERN]      list materialized views\n"));
     fprintf(output, _("  \\dn[S+] [PATTERN]      list schemas\n"));
     fprintf(output, _("  \\do[S]  [PATTERN]      list operators\n"));
     fprintf(output, _("  \\dO[S+] [PATTERN]      list collations\n"));
@@ -304,8 +305,8 @@ void slashUsage(unsigned short int pager)
     fprintf(output,
         _("  \\pset NAME [VALUE]     set table output option\n"
           "                         (NAME := {format|border|expanded|fieldsep|fieldsep_zero|footer|null|\n"
-          "                         numericlocale|recordsep|recordsep_zero|tuples_only|title|tableattr|pager"
-          "|sqlerror_handle})\n"));
+          "                         numericlocale|recordsep|recordsep_zero|tuples_only|title|tableattr|pager|\n"
+          "                         feedback})\n"));
     fprintf(output, _("  \\t [on|off]            show only rows (currently %s)\n"), ON(pset.popt.topt.tuples_only));
     fprintf(output, _("  \\T [STRING]            set HTML <table> tag attributes, or unset if none\n"));
     fprintf(output,

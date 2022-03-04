@@ -275,6 +275,7 @@ void StreamSaveTxnContext(StreamTxnContext* stc)
     StreamTxnContextSaveComboCid(stc);
     StreamTxnContextSaveXact(stc);
     StreamTxnContextSaveSnapmgr(stc);
+    StreamTxnContextSaveInvalidMsg(stc);
 }
 
 void StreamRestoreTxnContext(StreamTxnContext* stc)
@@ -282,6 +283,7 @@ void StreamRestoreTxnContext(StreamTxnContext* stc)
     StreamTxnContextRestoreComboCid(stc);
     StreamTxnContextRestoreXact(stc);
     StreamTxnContextRestoreSnapmgr(stc);
+    StreamTxnContextRestoreInvalidMsg(stc);
 }
 
 /*
@@ -720,6 +722,7 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
             producer->setSharedContext(sharedContext);
             producer->setUniqueSQLKey(u_sess->unique_sql_cxt.unique_sql_id,
                 u_sess->unique_sql_cxt.unique_sql_user_id, u_sess->unique_sql_cxt.unique_sql_cn_id);
+            producer->setGlobalSessionId(&u_sess->globalSessionId);
             producerSMPList = lappend(producerSMPList, producer);
 
             /* Add all producer to node group to avoid possible consumer-not-deinit */
@@ -738,6 +741,7 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
             StreamProducer(key, pstmt, streamNode, u_sess->stream_cxt.stream_runtime_mem_cxt, consumerNum, transType);
         producer->setUniqueSQLKey(u_sess->unique_sql_cxt.unique_sql_id,
             u_sess->unique_sql_cxt.unique_sql_user_id, u_sess->unique_sql_cxt.unique_sql_cn_id);
+        producer->setGlobalSessionId(&u_sess->globalSessionId);
         producerSMPList = lappend(producerSMPList, producer);
     }
 

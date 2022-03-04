@@ -56,9 +56,9 @@ CREATE MODEL abalone USING linear_regression
        FROM abalone@train
        WITH seed = 1;
 
-SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, modeldata, weight,
-       hyperparametersnames,  hyperparametersvalues, hyperparametersoids, coefnames, coefvalues, coefoids,
-       trainingscoresname, trainingscoresvalue, modeldescribe
+SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, weight,
+       hyperparametersnames,  hyperparametersvalues, hyperparametersoids, 
+       trainingscoresname, trainingscoresvalue, length(modeldata) as model_data_len
   FROM gs_model_warehouse;
 
 SELECT id, target, prediction, abs(prediction-target) as residual

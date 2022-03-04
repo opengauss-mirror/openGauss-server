@@ -30,6 +30,12 @@ typedef struct pg_conn PGconn;
 class RecordProcessor {
 public:
     static bool DeProcessRecord(PGconn* conn, const char* processedData, size_t processedDataSize,
-        const int* original_typesid, int format, unsigned char** plainText, size_t& plainTextSize, bool* is_decrypted);
+        const int* original_typesid,  const size_t original_typesid_size,  int format,
+        unsigned char** plainText, size_t& plainTextSize, bool* is_decrypted);
+
+private:
+    static const size_t m_NULL_TERMINATION_SIZE = 1;
+    static const size_t m_BYTEA_PREFIX_SIZE = 2;
+
 };
 #endif

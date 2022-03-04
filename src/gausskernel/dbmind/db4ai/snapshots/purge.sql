@@ -46,7 +46,7 @@ BEGIN
         GET STACKED DIAGNOSTICS e_stack_act = PG_EXCEPTION_CONTEXT;
 
         IF CURRENT_SCHEMA = 'db4ai' THEN
-            e_stack_act := replace(e_stack_act, 'ion pur', 'ion db4ai.pur');
+            e_stack_act := pg_catalog.replace(e_stack_act, 'ion pur', 'ion db4ai.pur');
         END IF;
 
         IF e_stack_act NOT LIKE 'referenced column: purge_snapshot_internal
@@ -63,7 +63,7 @@ PL/pgSQL function db4ai.purge_snapshot(name,name) line 71 at PERFORM%'
         SELECT commands, comment, id, parent_id, matrix_id FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name
             INTO STRICT pushed_cmds, pushed_comment, s_id, p_id, m_id;
     EXCEPTION WHEN NO_DATA_FOUND THEN
-        RAISE EXCEPTION 'snapshot %.% does not exist' , quote_ident(i_schema), quote_ident(i_name);
+        RAISE EXCEPTION 'snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
     END;
 
     -- update descendants, if any
@@ -75,40 +75,40 @@ PL/pgSQL function db4ai.purge_snapshot(name,name) line 71 at PERFORM%'
                        ELSE pushed_comment || ' | ' || comment END
         WHERE parent_id = s_id;
     IF p_id IS NULL AND SQL%ROWCOUNT > 0 THEN
-        RAISE EXCEPTION 'cannot purge root snapshot ''%.%'' having dependent snapshots', quote_ident(i_schema), quote_ident(i_name)
+        RAISE EXCEPTION 'cannot purge root snapshot ''%.%'' having dependent snapshots', pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name)
         USING HINT = 'purge all dependent snapshots first';
     END IF;
 
     IF m_id IS NULL THEN
-        EXECUTE 'DROP VIEW db4ai.v' || s_id;
-        EXECUTE 'DROP TABLE db4ai.t' || s_id;
+        EXECUTE 'DROP VIEW db4ai.v' || s_id::TEXT;
+        EXECUTE 'DROP TABLE db4ai.t' || s_id::TEXT;
         RAISE NOTICE 'PURGE_SNAPSHOT: MSS backing table dropped';
     ELSE
-        SELECT array_agg(id) FROM db4ai.snapshot WHERE matrix_id = m_id AND id <> s_id INTO STRICT o_id;
+        SELECT pg_catalog.array_agg(id) FROM db4ai.snapshot WHERE matrix_id = m_id AND id <> s_id INTO STRICT o_id;
 
-        IF o_id IS NULL OR array_length(o_id, 1) = 0 OR array_length(o_id, 1) IS NULL THEN
-            EXECUTE 'DROP VIEW db4ai.v' || s_id;
-            EXECUTE 'DROP TABLE db4ai.t' || m_id;
+        IF o_id IS NULL OR pg_catalog.array_length(o_id, 1) = 0 OR pg_catalog.array_length(o_id, 1) IS NULL THEN
+            EXECUTE 'DROP VIEW db4ai.v' || s_id::TEXT;
+            EXECUTE 'DROP TABLE db4ai.t' || m_id::TEXT;
             RAISE NOTICE 'PURGE_SNAPSHOT: CSS backing table dropped';
         ELSE
-            EXECUTE 'DELETE FROM db4ai.t' || m_id || ' WHERE _' || s_id || ' AND NOT (_' || array_to_string(o_id, ' OR _') || ')';
+            EXECUTE 'DELETE FROM db4ai.t' || m_id::TEXT || ' WHERE _' || s_id::TEXT || ' AND NOT (_' || pg_catalog.array_to_string(o_id, ' OR _') || ')';
             GET DIAGNOSTICS affected = ROW_COUNT;
 
-            SELECT array_agg(quote_ident(column_name))
+            SELECT pg_catalog.array_agg(pg_catalog.quote_ident(column_name))
             FROM  ( SELECT column_name
                     FROM information_schema.columns
-                    WHERE table_schema = 'db4ai' AND table_name = ANY ( ('{v' || array_to_string(s_id || o_id, ',v') || '}')::NAME[] )
+                    WHERE table_schema = 'db4ai' AND table_name = ANY ( ('{v' || pg_catalog.array_to_string(s_id || o_id, ',v') || '}')::NAME[] )
                     GROUP BY column_name
-                    HAVING SUM(CASE table_name WHEN 'v' || s_id THEN 0 ELSE 1 END) = 0 )
+                    HAVING SUM(CASE table_name WHEN 'v' || s_id::TEXT THEN 0 ELSE 1 END) = 0 )
             INTO STRICT drop_cols;
 
-            EXECUTE 'DROP VIEW db4ai.v' || s_id;
+            EXECUTE 'DROP VIEW db4ai.v' || s_id::TEXT;
 
             IF TRUE OR drop_cols IS NULL THEN
-                EXECUTE 'ALTER TABLE db4ai.t' || m_id || ' DROP _' || s_id;
+                EXECUTE 'ALTER TABLE db4ai.t' || m_id::TEXT || ' DROP _' || s_id::TEXT;
                 RAISE NOTICE 'PURGE_SNAPSHOT: orphaned rows dropped: %, orphaned columns dropped: none', affected;
             ELSE
-                EXECUTE 'ALTER TABLE db4ai.t' || m_id || ' DROP _' || s_id || ', DROP ' || array_to_string(drop_cols, ', DROP ');
+                EXECUTE 'ALTER TABLE db4ai.t' || m_id::TEXT || ' DROP _' || s_id::TEXT || ', DROP ' || pg_catalog.array_to_string(drop_cols, ', DROP ');
                 RAISE NOTICE 'PURGE_SNAPSHOT: orphaned rows dropped: %, orphaned columns dropped: %', affected, drop_cols;
             END IF;
         END IF;
@@ -117,7 +117,7 @@ PL/pgSQL function db4ai.purge_snapshot(name,name) line 71 at PERFORM%'
     DELETE FROM db4ai.snapshot WHERE schema = i_schema AND name = i_name;
     IF SQL%ROWCOUNT = 0 THEN
         -- checked before, this should never happen
-        RAISE INFO 'snapshot %.% does not exist' , quote_ident(i_schema), quote_ident(i_name);
+        RAISE INFO 'snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
     END IF;
 END;
 $$;
@@ -140,14 +140,14 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || current_setting('db4ai.message_level');
-        RAISE INFO 'effective client_min_messages is ''%''', upper(current_setting('db4ai.message_level'));
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
 
     -- obtain active snapshot mode
     BEGIN
-        s_mode := upper(current_setting('db4ai_snapshot_mode'));
+        s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
@@ -158,12 +158,12 @@ BEGIN
 
     -- obtain relevant configuration parameters
     BEGIN
-        s_vers_del := current_setting('db4ai_snapshot_version_delimiter');
+        s_vers_del := pg_catalog.current_setting('db4ai_snapshot_version_delimiter');
     EXCEPTION WHEN OTHERS THEN
         s_vers_del := '@';
     END;
     BEGIN
-        s_vers_sep := upper(current_setting('db4ai_snapshot_version_separator'));
+        s_vers_sep := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_version_separator'));
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
@@ -173,7 +173,7 @@ BEGIN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
     END IF;
 
-    current_compatibility_mode := current_setting('sql_compatibility');
+    current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
@@ -183,17 +183,17 @@ BEGIN
     IF i_name IS NULL OR i_name = '' THEN
         RAISE EXCEPTION 'i_name cannot be NULL or empty';
     ELSE
-        i_name := replace(i_name, chr(1), s_vers_del);
-        i_name := replace(i_name, chr(2), s_vers_sep);
-        s_name_vers := regexp_split_to_array(i_name, s_vers_del);
-        IF array_length(s_name_vers, 1) <> 2 OR array_length(s_name_vers, 2) <> none_represent THEN
+        i_name := pg_catalog.replace(i_name, pg_catalog.chr(1), s_vers_del);
+        i_name := pg_catalog.replace(i_name, pg_catalog.chr(2), s_vers_sep);
+        s_name_vers := pg_catalog.regexp_split_to_array(i_name, s_vers_del);
+        IF pg_catalog.array_length(s_name_vers, 1) <> 2 OR pg_catalog.array_length(s_name_vers, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_name must contain exactly one ''%'' character', s_vers_del
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
     END IF;
 
     BEGIN
-        EXECUTE 'DROP VIEW ' || quote_ident(i_schema) || '.' || quote_ident(i_name);
+        EXECUTE 'DROP VIEW ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name);
     EXCEPTION WHEN OTHERS THEN
     END;
 

@@ -4,9 +4,9 @@
  *	  definitions for executor state nodes
  *
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/nodes/execnodes.h
  *
@@ -304,6 +304,7 @@ typedef struct ProjectionInfo {
     TupleTableSlot* pi_slot;
     ExprDoneCond* pi_itemIsDone;
     bool pi_directMap;
+    bool pi_topPlan;             /* Whether the outermost layer query */
     int pi_numSimpleVars;
     int* pi_varSlotOffsets;
     int* pi_varNumbers;
@@ -658,6 +659,7 @@ typedef struct ExecRowMark {
     Index rowmarkId;         /* unique identifier for resjunk columns */
     RowMarkType markType;    /* see enum in nodes/plannodes.h */
     bool noWait;             /* NOWAIT option */
+    int waitSec;      /* WAIT time Sec */
     ItemPointerData curCtid; /* ctid of currently locked tuple, if any */
     int numAttrs;            /* number of attributes in subplan */
 } ExecRowMark;
@@ -1346,11 +1348,12 @@ typedef struct MergeActionState {
  */
 typedef struct UpsertState
 {
-	NodeTag			type;
-	UpsertAction	us_action; 				/* Flags showing DUPLICATE UPDATE NOTHING or SOMETHING */
-	TupleTableSlot	*us_existing;			/* slot to store existing target tuple in */
-	List			*us_excludedtlist;		/* the excluded pseudo relation's tlist */
-	TupleTableSlot	*us_updateproj;			/* slot to update */
+    NodeTag         type;
+    UpsertAction    us_action;              /* Flags showing DUPLICATE UPDATE NOTHING or SOMETHING */
+    TupleTableSlot  *us_existing;           /* slot to store existing target tuple in */
+    List            *us_excludedtlist;      /* the excluded pseudo relation's tlist */
+    TupleTableSlot  *us_updateproj;         /* slot to update */
+    List            *us_updateWhere;        /* state for the upsert where clause */
 } UpsertState;
 
 /* ----------------
@@ -1519,6 +1522,8 @@ typedef struct StartWithOpState
      */
     TargetEntry *sw_pseudoCols[PSEUDO_COLUMN_NUM];
 
+    IterationStats iterStats;
+
     /* variables to help calculate pseodu return columns */
     TupleTableSlot      *sw_workingSlot;  /* A dedicate slot to hold tuple-2-tuple
                                              conversion in side of StartWithOp node,
@@ -1600,6 +1605,28 @@ typedef struct SampleScanParams {
 } SampleScanParams;
 
 /* ----------------------------------------------------------------
+*				 Batch Scan Information
+* ----------------------------------------------------------------
+*/
+struct ScanBatchResult {
+    int rows;           /* rows number for current page. */
+    TupleTableSlot** scanTupleSlotInBatch; /* array size of BatchMaxSize, stores tuples scanned in a page */
+};
+
+struct ScanBatchState {
+    VectorBatch*    pCurrentBatch;  /* for output in batch */
+    VectorBatch*    pScanBatch;     /* batch formed from tuples */
+    int             scanTupleSlotMaxNum; /* max row number of tuples can be scanned once */
+    int             colNum;
+    int *colId;    /* for qual and project, only save the used cols. */
+    int maxcolId;
+    bool *nullflag;  /*indicate the batch has null value for performance */
+    bool *lateRead;  /* for project */
+    bool scanfinished; /* last time return with rows, but pages of this partition is read out */
+    ScanBatchResult scanBatch;
+};
+
+/* ----------------------------------------------------------------
  *				 Scan State Information
  * ----------------------------------------------------------------
  */
@@ -1626,6 +1653,7 @@ struct SeqScanAccessor;
  */
 typedef TupleTableSlot *(*ExecScanAccessMtd) (ScanState *node);
 typedef bool(*ExecScanRecheckMtd) (ScanState *node, TupleTableSlot *slot);
+typedef void (*SeqScanGetNextMtd)(TableScanDesc scan, TupleTableSlot* slot, ScanDirection direction);
 
 typedef struct ScanState {
     PlanState ps; /* its first field is NodeTag */
@@ -1651,7 +1679,10 @@ typedef struct ScanState {
     RangeScanInRedis rangeScanInRedis;         /* if it is a range scan in redistribution time */
     bool isSampleScan;               /* identify is it table sample scan or not. */
     SampleScanParams sampleScanInfo; /* TABLESAMPLE params include type/seed/repeatable. */
+    SeqScanGetNextMtd  fillNextSlotFunc;
     ExecScanAccessMtd ScanNextMtd;
+    bool scanBatchMode;
+    ScanBatchState* scanBatchState;
 } ScanState;
 
 /*
@@ -2574,133 +2605,38 @@ inline bool BitmapNodeNeedSwitchPartRel(BitmapHeapScanState* node)
     return tbm_is_global(node->tbm) && GPIScanCheckPartOid(node->gpi_scan, node->tbmres->partitionOid);
 }
 
-/*
- * DB4AI GD node: used for train models using Gradient Descent
- */
+// DB4AI state node
 
-struct GradientDescentAlgorithm;
-struct GradientDescentExpr;
-struct OptimizerGD;
-struct ShuffleGD;
+struct AlgorithmAPI;
+struct TrainModelState;
 
-typedef struct GradientDescentState {
-    ScanState               ss;     /* its first field is NodeTag */
-    GradientDescentAlgorithm* algorithm;
-    OptimizerGD*            optimizer;
-    ShuffleGD*              shuffle;
-        
-    // tuple description
-    TupleDesc               tupdesc;
-    int                     n_features; // number of features
+typedef struct ModelTuple {
+    Datum               *values;    // attributes value
+    bool                *isnull;    // whether an attribute is null
+    Oid                 *typid;     // type of an attribute
+    bool                *typbyval;  // attribute is passed by value or by reference
+    int16               *typlen;    // the length of an attribute
+    int                 ncolumns;   // number of attributes
+} ModelTuple;
 
-    // dependant var binary values
-    int                     num_classes;
-    Datum                   binary_classes[2];
+// returns the next data row, or nullptr when iteration has finished
+typedef bool (*callback_ml_fetch)(void *callback_data, ModelTuple *tuple);
 
-    // training state
-    bool                    done;   // when finished
-    Matrix                  weights;
-    double                  learning_rate;
-    int                     n_iterations;
-    int                     usecs;          // execution time
-    int                     processed;  // tuples
-    int                     discarded;
-    float                   loss;
-    Scores                  scores;
-} GradientDescentState;
+// restarts the iteration of the dataset without fetching any tuple at all
+typedef void (*callback_ml_rescan)(void *callback_data);
 
-
-typedef struct GradientDescentExprState {
-    ExprState               xprstate;
-    PlanState*              ps;
-    GradientDescentExpr*    xpr;
-} GradientDescentExprState;
-
-/*
- * DB4AI k-means node
- */
-
-/*
- * to keep running statistics on each cluster being constructed
- */
-class IncrementalStatistics {
-    uint64_t population = 0;
-    double max_value = 0.;
-    double min_value = DBL_MAX;
-    double total = 0.;
-    double s = 0;
-
-public:
-    
-    IncrementalStatistics operator+(IncrementalStatistics const& rhs) const;
-    IncrementalStatistics operator-(IncrementalStatistics const& rhs) const;
-    IncrementalStatistics& operator+=(IncrementalStatistics const& rhs);
-    IncrementalStatistics& operator-=(IncrementalStatistics const& rhs);
-    
-    double getMin() const;
-    void setMin(double);
-    double getMax() const;
-    void setMax(double);
-    double getTotal() const;
-    void setTotal(double);
-    uint64_t getPopulation() const;
-    void setPopulation(uint64_t);
-    double getEmpiricalMean() const;
-    double getEmpiricalVariance() const;
-    double getEmpiricalStdDev() const;
-    bool reset();
-};
-
-/*
- * internal representation of a centroid
- */
-typedef struct Centroid {
-    IncrementalStatistics statistics;
-    ArrayType* coordinates = nullptr;
-    uint32_t id = 0U;
-} Centroid;
-
-/*
- * current state of the algorithm
- */
-typedef struct KMeansStateDescription {
-    Centroid* centroids[2] = {nullptr};
-    ArrayType* bbox_min = nullptr;
-    ArrayType* bbox_max = nullptr;
-    
-    double (* distance)(double const*, double const*, uint32_t const dimension) = nullptr;
-    
-    double execution_time = 0.;
-    double seeding_time = 0.;
-    IncrementalStatistics solution_statistics[2];
-    uint64_t num_good_points = 0UL;
-    uint64_t num_dead_points = 0UL;
-    uint32_t current_iteration = 0U;
-    uint32_t current_centroid = 0U;
-    uint32_t dimension = 0U;
-    uint32_t num_centroids = 0U;
-    uint32_t actual_num_iterations = 0U;
-} KMeansStateDescription;
-
-/*
- * current state of the k-means node
- */
-typedef struct KMeansState {
-    ScanState sst;
-    KMeansStateDescription description;
-    bool done = false;
-} KMeansState;
-
-/*
- * internal representation of a point (not a centroid)
- */
-typedef struct GSPoint {
-    ArrayType* pg_coordinates = nullptr;
-    uint32_t weight = 1U;
-    uint32_t id = 0ULL;
-    double distance_to_closest_centroid = DBL_MAX;
-    bool should_free = false;
-} GSPoint;
-
+typedef struct TrainModelState {
+    ScanState           ss;     /* its first field is NodeTag */
+    const TrainModel    *config;
+    AlgorithmAPI        *algorithm;
+    int                 finished;   // number of configurations still running
+    // row data
+    ModelTuple          tuple; // data as well as metadata
+    bool                row_allocated;
+    // utility functions
+    callback_ml_fetch   fetch;
+    callback_ml_rescan  rescan;
+    void                *callback_data; // for direct ML, used by the fetch callback
+} TrainModelState;
 #endif /* EXECNODES_H */
 

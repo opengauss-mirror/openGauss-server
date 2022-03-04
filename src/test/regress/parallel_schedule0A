@@ -5,12 +5,10 @@
 # this limits the number of connections needed to run the tests.
 # ----------
 
-# test nlssort_pinyin
-test: nlssort_pinyin
+test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index
+test: hw_subpartition_vacuum_partition
 
-# test replace func and trunc func
-test: replace_func_with_two_args
-test: trunc_func_for_date
+test: replace_func_with_two_args trunc_func_for_date updatable_views
 
 test: analyze_commands
 #test: single_node_job
@@ -165,7 +163,7 @@ test: single_node_sequence
 
 # run and check forbidden functions are still forbidden to use in single node
 test: single_node_forbidden
-test: single_node_mergeinto
+test: single_node_mergeinto merge_subquery merge_subquery3
 
 # Trigger tests
 test: single_node_triggers
@@ -247,11 +245,13 @@ test: hw_createtbl_llt
 test: sqlLLT
 #test: hw_sql_llt#
 
+test: upsert_where
+
 #test: upsert_prepare
 #test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
 #test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test
 #test: upsert_grammer_test_02 upsert_restriction upsert_composite
-#test: upsert_trigger_test upsert_explain
+#test: upsert_trigger_test upsert_explain upsert_where upsert_where_sublink
 #test: upsert_clean
 
 # all pass
@@ -294,6 +294,7 @@ test: tpch01 tpch03 tpch04 libcomm_check_status tpch03_querymem
 test: tpch05 tpch06 tpch07 tpch08
 test: tpch09 tpch10 tpch11 tpch12
 test: tpch13 tpch14 tpch15 tpch16
+#test: tpch_vector_optimal
 test: tpch18 tpch19 tpch20 tpch18_querymem
 test: tpch21 tpch22 tpch11_pretty_performance
 #test: tpch02 tpch17
@@ -387,17 +388,20 @@ test: temp__3
 # so keep this parallel group to at most 19 tests
 # ----------
 #test: plpgsql
-test: plpgsql_array_opengauss plpgsql_table_opengauss plpgsql_multiset arrayinterface_single 
+test: plpgsql_multiset
+test: plpgsql_array_opengauss 
+test: plpgsql_table_opengauss
+test: arrayinterface_single 
 #arrayinterface_ted
 #test: plancache limit rangefuncs prepare
-test: plpgsql_array_opengauss arrayinterface_single
 # arrayinterface_ted
-test: plpgsql_assign_value_to_array_attribute plpgsql_cursor_rowtype
+test: plpgsql_assign_value_to_array_attribute
+test: plpgsql_cursor_rowtype
 test: plpgsql_array_of_record
 test: plpgsql_assign_list
 test: plpgsql_package_type
 test: plpgsql_record_attrname
-test: hw_package_valriable
+test: hw_package_variable
 test: returning largeobject
 test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
 test: goto
@@ -549,5 +553,9 @@ test: llvm_vecsort llvm_vecsort2
 
 test: udf_crem create_c_function
 
-test: smp
+test: smp single_node_user_mapping
 # test: hw_package
+# publication and subscription, we need to record audit log for them, so seperate them into two test group
+test: publication
+test: subscription
+test: fdw_audit

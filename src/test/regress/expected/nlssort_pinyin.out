@@ -1,0 +1,777 @@
+create schema nlssort_pinyin_schema;
+set search_path = nlssort_pinyin_schema;
+-- test null
+select nlssort(NULL, 'nls_sort=schinese_pinyin_m');
+ nlssort 
+---------
+ 
+(1 row)
+
+select nlssort('', NULL);
+ nlssort 
+---------
+ 
+(1 row)
+
+select nlssort(NULL, NULL);
+ nlssort 
+---------
+ 
+(1 row)
+
+-- test wrong parameter
+select nlssort('', ' nls_sort =  schinese_pinyin_m  ');
+ nlssort 
+---------
+ 
+(1 row)
+
+select nlssort('', ' nls_sort =  generic_m_ci  ');
+ nlssort 
+---------
+ 
+(1 row)
+
+select nlssort('', 'nls_sort=s chinese_pinyin_m');
+ERROR:  Sort method nls_sort=s chinese_pinyin_m is not supported!
+DETAIL:  Not support the given sort method.
+CONTEXT:  referenced column: nlssort
+select nlssort('', 'nls_sort=g eneric_m_ci');
+ERROR:  Sort method nls_sort=g eneric_m_ci is not supported!
+DETAIL:  Not support the given sort method.
+CONTEXT:  referenced column: nlssort
+select nlssort('', 'nls_sort=schinese');
+ERROR:  Sort method nls_sort=schinese is not supported!
+DETAIL:  Not support the given sort method.
+CONTEXT:  referenced column: nlssort
+select nlssort('', 'nls_sort=generic');
+ERROR:  Sort method nls_sort=generic is not supported!
+DETAIL:  Not support the given sort method.
+CONTEXT:  referenced column: nlssort
+-- test single char nlssort code
+select nlssort('', 'nls_sort=schinese_pinyin_m');
+ nlssort 
+---------
+ 
+(1 row)
+
+select nlssort('', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFF0001000000
+(1 row)
+
+select nlssort('$', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 00870000010001
+(1 row)
+
+select nlssort('&', 'nls_sort=schinese_pinyin_m');
+ nlssort  
+----------
+ 00000028
+(1 row)
+
+select nlssort('''', 'nls_sort=schinese_pinyin_m');
+ nlssort  
+----------
+ 00000029
+(1 row)
+
+select nlssort('0', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 01790000020002
+(1 row)
+
+select nlssort('A', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 01EA0000020006
+(1 row)
+
+select nlssort('\', 'nls_sort=schinese_pinyin_m');
+ nlssort  
+----------
+ 0000003A
+(1 row)
+
+select nlssort('a', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 01EA0000020002
+(1 row)
+
+select nlssort('倰', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 74950000010001
+(1 row)
+
+select nlssort('冔', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ AD100000010001
+(1 row)
+
+select nlssort('勆', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 733E0000010001
+(1 row)
+
+select nlssort('', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFFE4DE000000
+(1 row)
+
+select nlssort('「', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFF300C000000
+(1 row)
+
+select nlssort('★', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFF2605000000
+(1 row)
+
+select nlssort('ⅰ', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 021B0000020004
+(1 row)
+
+select nlssort('⒈', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 017A0000020005
+(1 row)
+
+select nlssort('⑴', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 017A0000020004
+(1 row)
+
+select nlssort('①', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 017A0000020006
+(1 row)
+
+select nlssort('㈠', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFF3220000000
+(1 row)
+
+select nlssort('Ⅰ', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 021B000002000A
+(1 row)
+
+select nlssort('Ⅴ', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 02610000020009
+(1 row)
+
+select nlssort('', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFFE592000000
+(1 row)
+
+select nlssort('０', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 01790000020003
+(1 row)
+
+select nlssort('Ａ', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 01EA0000020007
+(1 row)
+
+select nlssort('ａ', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 01EA0000020003
+(1 row)
+
+select nlssort('ぎ', 'nls_sort=schinese_pinyin_m');
+     nlssort      
+------------------
+ 3705000002BD0002
+(1 row)
+
+select nlssort('ガ', 'nls_sort=schinese_pinyin_m');
+     nlssort      
+------------------
+ 3704000002BD0003
+(1 row)
+
+select nlssort('α', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 028B0000020002
+(1 row)
+
+select nlssort('猋', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 40650000010001
+(1 row)
+
+select nlssort('珬', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ AD480000010001
+(1 row)
+
+select nlssort('甂', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ 3FF60000010001
+(1 row)
+
+select nlssort('Ꮬ', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFF13DC000000
+(1 row)
+
+select nlssort('ᴂ', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFF1D02000000
+(1 row)
+
+select nlssort('겷', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFFACB7000000
+(1 row)
+
+select nlssort('뛑', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFFB6D1000000
+(1 row)
+
+select nlssort('', 'nls_sort=schinese_pinyin_m');
+    nlssort     
+----------------
+ FFFFF3BC000000
+(1 row)
+
+select nlssort('𡤝', 'nls_sort=schinese_pinyin_m');
+        nlssort         
+------------------------
+ FFFFD846FFFFDD1D000000
+(1 row)
+
+select nlssort('𦪫', 'nls_sort=schinese_pinyin_m');
+        nlssort         
+------------------------
+ FFFFD85AFFFFDEAB000000
+(1 row)
+
+select nlssort('𰀅', 'nls_sort=schinese_pinyin_m');
+        nlssort         
+------------------------
+ FFFFD880FFFFDC05000000
+(1 row)
+
+select nlssort('', 'nls_sort=generic_m_ci');
+ nlssort 
+---------
+ 
+(1 row)
+
+select nlssort('', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFF00010000
+(1 row)
+
+select nlssort('$', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 0087000001
+(1 row)
+
+select nlssort('&', 'nls_sort=generic_m_ci');
+ nlssort 
+---------
+ 0000
+(1 row)
+
+select nlssort('''', 'nls_sort=generic_m_ci');
+ nlssort 
+---------
+ 0000
+(1 row)
+
+select nlssort('0', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 0179000002
+(1 row)
+
+select nlssort('A', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 01EA000002
+(1 row)
+
+select nlssort('\', 'nls_sort=generic_m_ci');
+ nlssort 
+---------
+ 0000
+(1 row)
+
+select nlssort('a', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 01EA000002
+(1 row)
+
+select nlssort('倰', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 7495000001
+(1 row)
+
+select nlssort('冔', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ AD10000001
+(1 row)
+
+select nlssort('勆', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 733E000001
+(1 row)
+
+select nlssort('', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFFE4DE0000
+(1 row)
+
+select nlssort('「', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFF300C0000
+(1 row)
+
+select nlssort('★', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFF26050000
+(1 row)
+
+select nlssort('ⅰ', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 021B000002
+(1 row)
+
+select nlssort('⒈', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 017A000002
+(1 row)
+
+select nlssort('⑴', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 017A000002
+(1 row)
+
+select nlssort('①', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 017A000002
+(1 row)
+
+select nlssort('㈠', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFF32200000
+(1 row)
+
+select nlssort('Ⅰ', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 021B000002
+(1 row)
+
+select nlssort('Ⅴ', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 0261000002
+(1 row)
+
+select nlssort('', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFFE5920000
+(1 row)
+
+select nlssort('０', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 0179000002
+(1 row)
+
+select nlssort('Ａ', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 01EA000002
+(1 row)
+
+select nlssort('ａ', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 01EA000002
+(1 row)
+
+select nlssort('ぎ', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ 3705000002BD
+(1 row)
+
+select nlssort('ガ', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ 3704000002BD
+(1 row)
+
+select nlssort('α', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 028B000002
+(1 row)
+
+select nlssort('猋', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 4065000001
+(1 row)
+
+select nlssort('珬', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ AD48000001
+(1 row)
+
+select nlssort('甂', 'nls_sort=generic_m_ci');
+  nlssort   
+------------
+ 3FF6000001
+(1 row)
+
+select nlssort('Ꮬ', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFF13DC0000
+(1 row)
+
+select nlssort('ᴂ', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFF1D020000
+(1 row)
+
+select nlssort('겷', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFFACB70000
+(1 row)
+
+select nlssort('뛑', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFFB6D10000
+(1 row)
+
+select nlssort('', 'nls_sort=generic_m_ci');
+   nlssort    
+--------------
+ FFFFF3BC0000
+(1 row)
+
+select nlssort('𡤝', 'nls_sort=generic_m_ci');
+       nlssort        
+----------------------
+ FFFFD846FFFFDD1D0000
+(1 row)
+
+select nlssort('𦪫', 'nls_sort=generic_m_ci');
+       nlssort        
+----------------------
+ FFFFD85AFFFFDEAB0000
+(1 row)
+
+select nlssort('𰀅', 'nls_sort=generic_m_ci');
+       nlssort        
+----------------------
+ FFFFD880FFFFDC050000
+(1 row)
+
+-- test multi chars nlssort code
+select nlssort('       ', 'nls_sort=schinese_pinyin_m');
+ nlssort  
+----------
+ 00000023
+(1 row)
+
+select nlssort('AbC啊  ', 'nls_sort=schinese_pinyin_m');
+                nlssort                 
+----------------------------------------
+ 01EA01EF01F43B2C0000020202010006020701
+(1 row)
+
+select nlssort('AbC 啊  ', 'nls_sort=schinese_pinyin_m');
+                 nlssort                  
+------------------------------------------
+ 01EA01EF01F43B2C000002020201000602072301
+(1 row)
+
+select nlssort('  AbC啊  ', 'nls_sort=schinese_pinyin_m');
+                  nlssort                   
+--------------------------------------------
+ 01EA01EF01F43B2C00000202020100232306020701
+(1 row)
+
+select nlssort('       ', 'nls_sort=generic_m_ci');
+ nlssort 
+---------
+ 0000
+(1 row)
+
+select nlssort('AbC啊  ', 'nls_sort=generic_m_ci');
+           nlssort            
+------------------------------
+ 01EA01EF01F43B2C000002020201
+(1 row)
+
+select nlssort('AbC 啊  ', 'nls_sort=generic_m_ci');
+           nlssort            
+------------------------------
+ 01EA01EF01F43B2C000002020201
+(1 row)
+
+select nlssort('  AbC啊  ', 'nls_sort=generic_m_ci');
+           nlssort            
+------------------------------
+ 01EA01EF01F43B2C000002020201
+(1 row)
+
+-- test nlssort func user in order by statement
+drop table if exists tb_test;
+NOTICE:  table "tb_test" does not exist, skipping
+create table tb_test(c1 text);
+insert into tb_test values('');
+insert into tb_test values('');
+insert into tb_test values('$');
+insert into tb_test values('&');
+insert into tb_test values('''');
+insert into tb_test values('0');
+insert into tb_test values('A');
+insert into tb_test values('\');
+insert into tb_test values('a');
+insert into tb_test values('倰');
+insert into tb_test values('冔');
+insert into tb_test values('勆');
+insert into tb_test values('');
+insert into tb_test values('「');
+insert into tb_test values('★');
+insert into tb_test values('ⅰ');
+insert into tb_test values('⒈');
+insert into tb_test values('⑴');
+insert into tb_test values('①');
+insert into tb_test values('㈠');
+insert into tb_test values('Ⅰ');
+insert into tb_test values('Ⅴ');
+insert into tb_test values('');
+insert into tb_test values('０');
+insert into tb_test values('Ａ');
+insert into tb_test values('ａ');
+insert into tb_test values('ぎ');
+insert into tb_test values('ガ');
+insert into tb_test values('α');
+insert into tb_test values('猋');
+insert into tb_test values('珬');
+insert into tb_test values('甂');
+insert into tb_test values('Ꮬ');
+insert into tb_test values('ᴂ');
+insert into tb_test values('겷');
+insert into tb_test values('뛑');
+insert into tb_test values('');
+insert into tb_test values('𡤝');
+insert into tb_test values('𦪫');
+insert into tb_test values('𰀅');
+insert into tb_test values('       ');
+insert into tb_test values('AbC啊  ');
+insert into tb_test values('AbC 啊  ');
+insert into tb_test values('  AbC啊  ');
+select c1,  nlssort(c1, 'nls_sort=schinese_pinyin_m') from tb_test order by nlssort(c1, 'nls_sort=schinese_pinyin_m');
+    c1     |                  nlssort                   
+-----------+--------------------------------------------
+           | 00000023
+ &         | 00000028
+ '         | 00000029
+ \         | 0000003A
+ $         | 00870000010001
+ 0         | 01790000020002
+ ０        | 01790000020003
+ ⑴         | 017A0000020004
+ ⒈         | 017A0000020005
+ ①         | 017A0000020006
+ a         | 01EA0000020002
+ ａ        | 01EA0000020003
+ A         | 01EA0000020006
+ Ａ        | 01EA0000020007
+ AbC啊     | 01EA01EF01F43B2C0000020202010006020701
+ AbC 啊    | 01EA01EF01F43B2C000002020201000602072301
+   AbC啊   | 01EA01EF01F43B2C00000202020100232306020701
+ ⅰ         | 021B0000020004
+ Ⅰ         | 021B000002000A
+ Ⅴ         | 02610000020009
+ α         | 028B0000020002
+ ガ        | 3704000002BD0003
+ ぎ        | 3705000002BD0002
+ 甂        | 3FF60000010001
+ 猋        | 40650000010001
+ 勆        | 733E0000010001
+ 倰        | 74950000010001
+ 冔        | AD100000010001
+ 珬        | AD480000010001
+ \x01      | FFFF0001000000
+ Ꮬ         | FFFF13DC000000
+ ᴂ         | FFFF1D02000000
+ ★         | FFFF2605000000
+ 「        | FFFF300C000000
+ ㈠        | FFFF3220000000
+ 겷        | FFFFACB7000000
+ 뛑        | FFFFB6D1000000
+ 𡤝        | FFFFD846FFFFDD1D000000
+ 𦪫        | FFFFD85AFFFFDEAB000000
+ 𰀅         | FFFFD880FFFFDC05000000
+          | FFFFE4DE000000
+          | FFFFE592000000
+          | FFFFF3BC000000
+           | 
+(44 rows)
+
+select c1,  nlssort(c1, 'nls_sort=generic_m_ci') from tb_test order by nlssort(c1, 'nls_sort=generic_m_ci');
+    c1     |           nlssort            
+-----------+------------------------------
+ &         | 0000
+           | 0000
+ \         | 0000
+ '         | 0000
+ $         | 0087000001
+ ０        | 0179000002
+ 0         | 0179000002
+ ⑴         | 017A000002
+ ①         | 017A000002
+ ⒈         | 017A000002
+ a         | 01EA000002
+ Ａ        | 01EA000002
+ A         | 01EA000002
+ ａ        | 01EA000002
+   AbC啊   | 01EA01EF01F43B2C000002020201
+ AbC啊     | 01EA01EF01F43B2C000002020201
+ AbC 啊    | 01EA01EF01F43B2C000002020201
+ Ⅰ         | 021B000002
+ ⅰ         | 021B000002
+ Ⅴ         | 0261000002
+ α         | 028B000002
+ ガ        | 3704000002BD
+ ぎ        | 3705000002BD
+ 甂        | 3FF6000001
+ 猋        | 4065000001
+ 勆        | 733E000001
+ 倰        | 7495000001
+ 冔        | AD10000001
+ 珬        | AD48000001
+ \x01      | FFFF00010000
+ Ꮬ         | FFFF13DC0000
+ ᴂ         | FFFF1D020000
+ ★         | FFFF26050000
+ 「        | FFFF300C0000
+ ㈠        | FFFF32200000
+ 겷        | FFFFACB70000
+ 뛑        | FFFFB6D10000
+ 𡤝        | FFFFD846FFFFDD1D0000
+ 𦪫        | FFFFD85AFFFFDEAB0000
+ 𰀅         | FFFFD880FFFFDC050000
+          | FFFFE4DE0000
+          | FFFFE5920000
+          | FFFFF3BC0000
+           | 
+(44 rows)
+
+-- test nlssort func used in procedure (compilation should not report errors)
+drop table if exists tb_test;
+create table tb_test(col1 varchar2);
+create or replace package pckg_test as
+procedure proc_test(i_col1 in varchar2);
+function func_test(i_col1 in varchar2) return varchar2;
+end pckg_test;
+/
+create or replace package body pckg_test as
+procedure proc_test(i_col1 in varchar2) as
+v_a varchar2;
+v_b varchar2;
+begin
+if func_test(i_col1) < func_test('阿') then
+v_a:= func_test(i_col1);
+end if;
+select nlssort(col1,'NLS_SORT=SCHINESE_PINYIN_M') into v_b from tb_test where col1=i_col1;
+end;
+function func_test(i_col1 in varchar2) return varchar2 as
+begin
+return nlssort(i_col1,'NLS_SORT=SCHINESE_PINYIN_M');
+end;
+end pckg_test;
+/
+-- It will core when the length of the first argument is 0.
+-- ORA compatibility mode treats "" as null, so test it in MySQL compatibility mode.
+create database b_dbcompatibility TEMPLATE=template0 dbcompatibility='B';
+\c b_dbcompatibility
+set client_encoding=utf8;
+select nlssort('', 'nls_sort=schinese_pinyin_m');
+ nlssort 
+---------
+ 
+(1 row)
+
+\c regression
+clean connection to all force for database b_dbcompatibility;
+drop database b_dbcompatibility;
+-- test nlssort is shippable or not
+\sf nlssort
+CREATE OR REPLACE FUNCTION pg_catalog.nlssort(text, text)
+ RETURNS text
+ LANGUAGE internal
+ IMMUTABLE NOT FENCED SHIPPABLE
+AS $function$nlssort$function$;
+drop schema nlssort_pinyin_schema cascade;
+NOTICE:  drop cascades to 4 other objects
+DETAIL:  drop cascades to table nlssort_pinyin_schema.tb_test
+--?.*
+drop cascades to function nlssort_pinyin_schema.proc_test(character varying)
+drop cascades to function nlssort_pinyin_schema.func_test(character varying)

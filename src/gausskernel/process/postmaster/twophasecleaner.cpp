@@ -159,6 +159,8 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
         /* Report the error to the server log */
         EmitErrorReport();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         /*
          * Now return to normal top-level context and clear ErrorContext for

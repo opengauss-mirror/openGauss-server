@@ -370,6 +370,9 @@ ProcessConfigFile(GucContext context)
 		if (pre_value)
 			pfree(pre_value);
 	}
+	if (EnableGlobalSysCache()) {
+		g_instance.global_sysdbcache.UpdateGSCConfig(g_instance.attr.attr_memory.global_syscache_threshold);
+	}
 
 	/* Remember when we last successfully loaded the config file. */
 	t_thrd.time_cxt.pg_reload_time = GetCurrentTimestamp();

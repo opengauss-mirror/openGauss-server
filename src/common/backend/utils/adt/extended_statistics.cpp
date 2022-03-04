@@ -621,7 +621,7 @@ bool es_is_type_supported_by_cstore(VacAttrStats* stats)
         return false;
 
     for (unsigned int i = 0; i < stats->num_attrs; ++i) {
-        if (!IsTypeSupportedByCStore(stats->attrtypid[i], stats->attrtypmod[i])) {
+        if (!IsTypeSupportedByCStore(stats->attrtypid[i])) {
             return false;
         }
     }

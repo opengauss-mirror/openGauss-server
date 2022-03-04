@@ -29,8 +29,11 @@
 
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_type.h"
+#include "commands/tablecmds.h"
+#include "nodes/makefuncs.h"
 #include "nodes/parsenodes.h"
 #include "nodes/value.h"
+#include "parser/parse_utilcmd.h"
 #include "utils/array.h"
 #include "utils/lsyscache.h"
 #include "utils/builtins.h"
@@ -48,6 +51,10 @@
  * Review       : 	xuzhongqing 67238
  */
 #define constIsMaxValue(value) ((value)->ismaxvalue)
+
+static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partitionKeyValuesList, ParseState *pstate,
+                                                     RangeTblEntry *rte);
+static void CheckPartitionValuesList(Relation rel, List *subPartitionKeyValuesList);
 
 Datum transformPartitionBoundary(List* bondary, const bool* isTimestamptz)
 {
@@ -431,4 +438,244 @@ int2vector* GetPartitionKey(const PartitionMap* partMap)
     } else {
         return ((RangePartitionMap*)partMap)->partitionKey;
     }
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: select * from partition (partition_name)
+ *				: or select from partition for (partition_values_list)
+ * Description	: get partition oid for rte->partitionOid
+ */
+Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* pstate, Relation rel)
+{
+    Oid partitionOid = InvalidOid;
+
+    if (!PointerIsValid(rte) || !PointerIsValid(relation) || !PointerIsValid(pstate) || !PointerIsValid(rel)) {
+        return InvalidOid;
+    }
+
+    /* relation is not partitioned table. */
+    if (!rte->ispartrel || rte->relkind != RELKIND_RELATION) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
+                        (errmsg("relation \"%s\" is not partitioned table", relation->relname), errdetail("N/A."),
+                         errcause("System error."), erraction("Contact engineer to support."))));
+    } else {
+        /* relation is partitioned table, from clause is partition (partition_name). */
+        if (PointerIsValid(relation->partitionname)) {
+            partitionOid = partitionNameGetPartitionOid(rte->relid,
+                relation->partitionname,
+                PART_OBJ_TYPE_TABLE_PARTITION,
+                AccessShareLock,
+                true,
+                false,
+                NULL,
+                NULL,
+                NoLock);
+            /* partiton does not exist. */
+            if (!OidIsValid(partitionOid)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_TABLE),
+                        errmsg("partition \"%s\" of relation \"%s\" does not exist",
+                            relation->partitionname,
+                            relation->relname)));
+            }
+
+            rte->pname = makeAlias(relation->partitionname, NIL);
+        } else {
+            partitionOid =
+                GetPartitionOidFromPartitionKeyValuesList(rel, relation->partitionKeyValuesList, pstate, rte);
+        }
+    }
+
+    return partitionOid;
+}
+
+
+static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partitionKeyValuesList, ParseState *pstate,
+                                                     RangeTblEntry *rte)
+{
+    CheckPartitionValuesList(rel, partitionKeyValuesList);
+
+    Oid partitionOid = InvalidOid;
+
+    if (rel->partMap->type == PART_TYPE_LIST) {
+        ListPartitionDefState *listPartDef = NULL;
+        listPartDef = makeNode(ListPartitionDefState);
+        listPartDef->boundary = partitionKeyValuesList;
+        listPartDef->boundary = transformListPartitionValue(pstate, listPartDef->boundary, false, true);
+        listPartDef->boundary = transformIntoTargetType(
+            rel->rd_att->attrs, (((ListPartitionMap *)rel->partMap)->partitionKey)->values[0], listPartDef->boundary);
+
+        rte->plist = listPartDef->boundary;
+
+        partitionOid = partitionValuesGetPartitionOid(rel, listPartDef->boundary, AccessShareLock, true, true, false);
+
+        pfree_ext(listPartDef);
+    } else if (rel->partMap->type == PART_TYPE_HASH) {
+        HashPartitionDefState *hashPartDef = NULL;
+        hashPartDef = makeNode(HashPartitionDefState);
+        hashPartDef->boundary = partitionKeyValuesList;
+        hashPartDef->boundary = transformListPartitionValue(pstate, hashPartDef->boundary, false, true);
+        hashPartDef->boundary = transformIntoTargetType(
+            rel->rd_att->attrs, (((HashPartitionMap *)rel->partMap)->partitionKey)->values[0], hashPartDef->boundary);
+
+        rte->plist = hashPartDef->boundary;
+
+        partitionOid = partitionValuesGetPartitionOid(rel, hashPartDef->boundary, AccessShareLock, true, true, false);
+
+        pfree_ext(hashPartDef);
+    } else if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
+        RangePartitionDefState *rangePartDef = NULL;
+        rangePartDef = makeNode(RangePartitionDefState);
+        rangePartDef->boundary = partitionKeyValuesList;
+
+        transformPartitionValue(pstate, (Node *)rangePartDef, false);
+
+        rangePartDef->boundary = transformConstIntoTargetType(
+            rel->rd_att->attrs, ((RangePartitionMap *)rel->partMap)->partitionKey, rangePartDef->boundary);
+
+        rte->plist = rangePartDef->boundary;
+
+        partitionOid = partitionValuesGetPartitionOid(rel, rangePartDef->boundary, AccessShareLock, true, true, false);
+
+        pfree_ext(rangePartDef);
+    } else {
+        /* shouldn't happen. */
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        (errmsg("unsupported partition type"), errdetail("N/A."), errcause("System error."),
+                         erraction("Contact engineer to support."))));
+    }
+
+    /* partition does not exist. */
+    if (!OidIsValid(partitionOid)) {
+        if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_LIST ||
+            rel->partMap->type == PART_TYPE_HASH) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                            (errmsg("Cannot find partition by the value"), errdetail("N/A."),
+                             errcause("The value is incorrect."), erraction("Use the correct value."))));
+        }
+    }
+
+    return partitionOid;
+}
+
+static void SplitValuesList(List *ValuesList, List **partitionKeyValuesList, List **subPartitionKeyValuesList,
+                            Relation rel)
+{
+    uint len = 0;
+    uint cnt = 0;
+    Node* elem = NULL;
+    ListCell *cell = NULL;
+
+    if (rel->partMap->type == PART_TYPE_RANGE) {
+        len = (((RangePartitionMap *)rel->partMap)->partitionKey)->dim1;
+    } else if (rel->partMap->type == PART_TYPE_LIST) {
+        len = (((ListPartitionMap *)rel->partMap)->partitionKey)->dim1;
+    } else if (rel->partMap->type == PART_TYPE_HASH) {
+        len = (((HashPartitionMap *)rel->partMap)->partitionKey)->dim1;
+    } else {
+        /* shouldn't happen */
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        (errmsg("unsupported partition type"), errdetail("N/A."), errcause("System error."),
+                         erraction("Contact engineer to support."))));
+    }
+    /* The subpartition table supports only one partition key. */
+    Assert(len == 1);
+
+    foreach(cell, ValuesList) {
+        elem = (Node*)lfirst(cell);
+        cnt++;
+        if (cnt <= len) {
+            *partitionKeyValuesList = lappend(*partitionKeyValuesList, elem);
+        } else {
+            *subPartitionKeyValuesList = lappend(*subPartitionKeyValuesList, elem);
+        }
+    }
+}
+
+static void CheckPartitionValuesList(Relation rel, List *subPartitionKeyValuesList)
+{
+    int len = 0;
+
+    if (rel->partMap->type == PART_TYPE_RANGE) {
+        len = (((RangePartitionMap *)rel->partMap)->partitionKey)->dim1;
+    } else if (rel->partMap->type == PART_TYPE_LIST) {
+        len = (((ListPartitionMap *)rel->partMap)->partitionKey)->dim1;
+    } else if (rel->partMap->type == PART_TYPE_HASH) {
+        len = (((HashPartitionMap *)rel->partMap)->partitionKey)->dim1;
+    } else {
+        /* shouldn't happen */
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        (errmsg("unsupported partition type"), errdetail("N/A."), errcause("System error."),
+                         erraction("Contact engineer to support."))));
+    }
+
+    if (subPartitionKeyValuesList == NIL || len != subPartitionKeyValuesList->length) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                        (errmsg("number of partitionkey values is not equal to the number of partitioning columns"),
+                         errdetail("N/A."), errcause("The value is incorrect."), erraction("Use the correct value."))));
+    }
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: select * from subpartition (subpartition_name)
+ * Description	: get partition oid for rte->partitionOid
+ */
+Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel, Oid *partOid)
+{
+    Oid subPartitionOid = InvalidOid;
+
+    if (!PointerIsValid(rte) || !PointerIsValid(relation) || !PointerIsValid(pstate) || !PointerIsValid(rel)) {
+        return InvalidOid;
+    }
+
+    /* relation is not partitioned table. */
+    if (!rte->ispartrel || rte->relkind != RELKIND_RELATION || !RelationIsSubPartitioned(rel)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
+                        (errmsg("relation \"%s\" is not subpartitioned table", relation->relname), errdetail("N/A."),
+                         errcause("System error."), erraction("Contact engineer to support."))));
+    } else {
+        /* relation is partitioned table, from clause is subpartition (subpartition_name). */
+        if (PointerIsValid(relation->subpartitionname)) {
+            subPartitionOid = partitionNameGetPartitionOid(rte->relid,
+                relation->subpartitionname,
+                PART_OBJ_TYPE_TABLE_SUB_PARTITION,
+                AccessShareLock,
+                true,
+                false,
+                NULL,
+                NULL,
+                NoLock,
+                partOid);
+            /* partiton does not exist. */
+            if (!OidIsValid(subPartitionOid)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_TABLE),
+                        errmsg("subpartition \"%s\" of relation \"%s\" does not exist",
+                            relation->subpartitionname,
+                            relation->relname)));
+            }
+
+            rte->pname = makeAlias(relation->subpartitionname, NIL);
+        } else {
+            List *partitionKeyValuesList = NIL;
+            List *subPartitionKeyValuesList = NIL;
+            List *tmpList = NIL;
+            SplitValuesList(relation->partitionKeyValuesList, &partitionKeyValuesList, &subPartitionKeyValuesList, rel);
+            *partOid = GetPartitionOidFromPartitionKeyValuesList(rel, partitionKeyValuesList, pstate, rte);
+            tmpList = rte->plist;
+            Partition part = partitionOpen(rel, *partOid, AccessShareLock);
+            Relation partRel = partitionGetRelation(rel, part);
+            CheckPartitionValuesList(partRel, subPartitionKeyValuesList);
+            subPartitionOid =
+                GetPartitionOidFromPartitionKeyValuesList(partRel, subPartitionKeyValuesList, pstate, rte);
+            releaseDummyRelation(&partRel);
+            partitionClose(rel, part, AccessShareLock);
+            rte->plist = list_concat(tmpList, rte->plist);
+        }
+    }
+    return subPartitionOid;
 }

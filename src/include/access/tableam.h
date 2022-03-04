@@ -175,7 +175,7 @@ typedef struct TableAmRoutine {
      * @param: should_free true if clear the slot's tuple contents by pfree_ext() during  ExecClearTuple
      * @return: none
      */
-    void (*tslot_store_tuple)(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool should_free);
+    void (*tslot_store_tuple)(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode);
 
     /*
      * Fill up first natts entries of tts_values and tts_isnull arrays with
@@ -188,6 +188,9 @@ typedef struct TableAmRoutine {
      * @param attnum: index until which slots attributes are extracted.
      */
     void (*tslot_getsomeattrs)(TupleTableSlot *slot, int natts);
+
+
+    void (*tslot_formbatch)(TupleTableSlot* slot, VectorBatch* batch, int cur_rows, int natts);
 
     /*
      * Fetches a given attribute from the slot's current tuple.
@@ -410,6 +413,8 @@ typedef struct TableAmRoutine {
      */
     Tuple (*scan_getnexttuple)(TableScanDesc sscan, ScanDirection direction);
 
+    bool (*scan_GetNextBatch)(TableScanDesc scan, ScanDirection direction);
+
     /*
      * Get next page
      */
@@ -457,7 +462,8 @@ typedef struct TableAmRoutine {
 
     TM_Result (*tuple_lock)(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid, LockTupleMode mode,
         bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
-        ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid);
+        ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
+        int waitSec);
 
     Tuple (*tuple_lock_updated)(CommandId cid, Relation relation, int lockmode, ItemPointer tid,
         TransactionId priorXmax, Snapshot snapshot, bool isSelectForUpdate);
@@ -503,10 +509,11 @@ extern MinimalTuple tableam_tslot_copy_minimal_tuple(TupleTableSlot *slot);
 extern void tableam_tslot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree);
 extern HeapTuple tableam_tslot_get_heap_tuple(TupleTableSlot *slot);
 extern HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot);
-extern void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool should_free);
+extern void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode);
 extern void tableam_tslot_getsomeattrs(TupleTableSlot *slot, int natts);
 extern Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull);
 extern void tableam_tslot_getallattrs(TupleTableSlot *slot);
+extern void tableam_tslot_formbatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows,  int natts);
 extern bool tableam_tslot_attisnull(TupleTableSlot *slot, int attnum);
 extern Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot);
 extern Datum tableam_tops_getsysattr(Tuple tup, int attnum, TupleDesc tuple_desc, bool *isnull,
@@ -588,7 +595,7 @@ extern TM_Result tableam_tuple_update(Relation relation, Relation parentRelation
 extern TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
     LockTupleMode mode, bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
     Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert = false, 
-    TransactionId conflictXid = InvalidTransactionId);
+    TransactionId conflictXid = InvalidTransactionId, int waitSec = 0);
 extern Tuple tableam_tuple_lock_updated(CommandId cid, Relation relation, int lockmode, ItemPointer tid,
     TransactionId priorXmax, Snapshot snapshot = NULL, bool isSelectForUpdate = false);
 extern void tableam_tuple_check_visible(Relation relation, Snapshot snapshot, Tuple tuple, Buffer buffer);
@@ -609,6 +616,7 @@ extern TableScanDesc tableam_scan_begin_bm(Relation relation, Snapshot snapshot,
 extern TableScanDesc tableam_scan_begin_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
     bool allow_strat, bool allow_sync, RangeScanInRedis rangeScanInRedis = { false, 0, 0 });
 extern Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction);
+extern bool tableam_scan_gettuplebatchmode(TableScanDesc sscan, ScanDirection direction);
 extern void tableam_scan_getpage(TableScanDesc sscan, BlockNumber page);
 extern Tuple tableam_scan_gettuple_for_verify(TableScanDesc sscan, ScanDirection direction, bool isValidRelationPage);
 extern void tableam_scan_end(TableScanDesc sscan);

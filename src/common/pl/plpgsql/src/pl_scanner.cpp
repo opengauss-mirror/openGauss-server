@@ -1026,6 +1026,14 @@ static int plpgsql_parse_cursor_attribute(int* loc)
         case T_PACKAGE_CURSOR_ROWCOUNT:
             /* check the valid of cursor variable */
             ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, aux1.lval.str, aux3.lval.str, NULL, NULL);
+            if (ns == NULL) {
+                List *idents = list_make2(makeString(aux1.lval.str), makeString(aux3.lval.str));
+                int dno = plpgsql_pkg_add_unknown_var_to_namespace(idents);
+                if (dno != -1) {
+                    ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, aux1.lval.str, aux3.lval.str, NULL, NULL);
+                }
+                list_free_deep(idents);
+            }
             if (ns != NULL && ns->itemtype == PLPGSQL_NSTYPE_VAR) {
                 PLpgSQL_var* var = (PLpgSQL_var*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];
                 if (!(var != NULL && var->datatype && var->datatype->typoid == REFCURSOROID)) {
@@ -1130,6 +1138,9 @@ bool plpgsql_is_token_keyword(int token)
 static PLpgSQL_package* compilePackageSpec(Oid pkgOid)
 {
     int oldCompileStatus = getCompileStatus();
+    HeapTuple pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
+    bool isnull = false;
+    PLpgSQL_package* pkg = NULL;
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL ||
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
         CompileStatusSwtichTo(COMPILIE_PKG);
@@ -1144,7 +1155,16 @@ static PLpgSQL_package* compilePackageSpec(Oid pkgOid)
     YYSTYPE temp_lval = plpgsql_yylval;
     YYLTYPE temp_lloc = plpgsql_yylloc;
     /* compile package spec */
-    PLpgSQL_package* pkg = plpgsql_package_validator(pkgOid, true, false);
+    if (HeapTupleIsValid(pkgTuple)) {
+        (void)SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgbodyinitsrc, &isnull);
+    }
+    /* if package don't have instantiation string,we don't need compile package body */
+    if (isnull) {
+        pkg = plpgsql_package_validator(pkgOid, true, false);
+    } else {
+        pkg = plpgsql_package_validator(pkgOid, false, false);
+    }
+    ReleaseSysCache(pkgTuple);
     CompileStatusSwtichTo(oldCompileStatus);
     for (int i = 0; i < MAX_PUSHBACKS; i++) {
         pushback_auxdata[i] = temp_pushback_auxdata[i];
@@ -1162,6 +1182,7 @@ PLpgSQL_datum* GetPackageDatum(List* name, bool* isSamePackage)
     PLpgSQL_package* pkg = NULL;
     Oid pkgOid = InvalidOid;
     Oid namespaceId = InvalidOid;
+    Oid currentCompilePkgOid = InvalidOid;
 
     DeconstructQualifiedName(name, &schemaname, &objname, &pkgname);
     if (schemaname != NULL) {
@@ -1175,7 +1196,7 @@ PLpgSQL_datum* GetPackageDatum(List* name, bool* isSamePackage)
 
     PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     if (curr_compile->plpgsql_curr_compile_package != NULL) {
-        Oid currentCompilePkgOid = curr_compile->plpgsql_curr_compile_package->pkg_oid;
+        currentCompilePkgOid = curr_compile->plpgsql_curr_compile_package->pkg_oid;
         if (currentCompilePkgOid == pkgOid) {
             pkg = curr_compile->plpgsql_curr_compile_package;
             if (isSamePackage != NULL) {
@@ -1189,14 +1210,29 @@ PLpgSQL_datum* GetPackageDatum(List* name, bool* isSamePackage)
     }
 
     if (u_sess->plsql_cxt.need_pkg_dependencies) {
+        MemoryContext temp = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
         u_sess->plsql_cxt.pkg_dependencies =
             list_append_unique_oid(u_sess->plsql_cxt.pkg_dependencies, pkgOid);
+        MemoryContextSwitchTo(temp);
     }
     
     if (pkg == NULL) {
         MemoryContext temp = MemoryContextSwitchTo(curr_compile->compile_tmp_cxt);
         pkg = compilePackageSpec(pkgOid);
         MemoryContextSwitchTo(temp);
+    }
+
+    /* when compilePackageSpec, the curr compile package maybe invalided, need to check it */
+    bool compilePackage = curr_compile->plpgsql_curr_compile_package != NULL;
+    if (compilePackage && currentCompilePkgOid != pkgOid) {
+        if (curr_compile->plpgsql_curr_compile_package->pkg_cxt == NULL) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_PLPGSQL_ERROR),
+                 errmsg("concurrent error when compile package."),
+                 errdetail("when compile package, it has been invalidated by other session."),
+                 errcause("excessive concurrency"),
+                 erraction("reduce concurrency and retry")));
+        }
     }
 
     struct PLpgSQL_nsitem* nse = plpgsql_ns_lookup(pkg->public_ns, false, pkgname, objname, NULL, NULL);

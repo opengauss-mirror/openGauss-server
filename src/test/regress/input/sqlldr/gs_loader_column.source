@@ -45,7 +45,6 @@ select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
 \! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position4.ctl data=@abs_srcdir@/data/gs_loader_position4.data port=@portstring@ db=regression passwd=gauss@123 errors=100
 select * from SQLLDR_COL_TBL where col_6 is null;
 
--- issue: DTS2021092327784 TIMESTAMP
 CREATE TABLE SQLLDR_COL_001(
     ID INTEGER,
     NAME VARCHAR2(20),

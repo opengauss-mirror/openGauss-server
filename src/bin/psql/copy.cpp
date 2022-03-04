@@ -226,7 +226,7 @@ static bool ParseParallelOption(struct copy_options* result, char** errToken)
             xstrcat(&result->after_tofrom, token);
 
             token = strtokx(nullptr, whitespace, ",()", NULL, 0, false, false, pset.encoding);
-            if (pg_strcasecmp(token, "true") == 0) {
+            if (pg_strcasecmp(token, "true") == 0 || pg_strcasecmp(token, "on") == 0) {
                 result->hasHeader = true;
                 xstrcat(&result->after_tofrom, " false");
             } else {

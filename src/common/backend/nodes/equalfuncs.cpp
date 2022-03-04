@@ -710,6 +710,7 @@ static bool _equalUpsertExpr(const UpsertExpr* a, const UpsertExpr* b)
     COMPARE_NODE_FIELD(updateTlist);
     COMPARE_NODE_FIELD(exclRelTlist);
     COMPARE_SCALAR_FIELD(exclRelIndex);
+    COMPARE_NODE_FIELD(upsertWhere);
 
     return true;
 }
@@ -1071,6 +1072,23 @@ static bool _equalGrantRoleStmt(const GrantRoleStmt* a, const GrantRoleStmt* b)
     return true;
 }
 
+static bool _equalDbPriv(const DbPriv* a, const DbPriv* b)
+{
+    COMPARE_STRING_FIELD(db_priv_name);
+
+    return true;
+}
+
+static bool _equalGrantDbStmt(const GrantDbStmt* a, const GrantDbStmt* b)
+{
+    COMPARE_SCALAR_FIELD(is_grant);
+    COMPARE_NODE_FIELD(privileges);
+    COMPARE_NODE_FIELD(grantees);
+    COMPARE_SCALAR_FIELD(admin_opt);
+
+    return true;
+}
+
 static bool _equalAlterDefaultPrivilegesStmt(const AlterDefaultPrivilegesStmt* a, const AlterDefaultPrivilegesStmt* b)
 {
     COMPARE_NODE_FIELD(options);
@@ -1190,6 +1208,14 @@ static bool _equalAddPartitionState(const AddPartitionState* a, const AddPartiti
     return true;
 }
 
+static bool _equalAddSubPartitionState(const AddSubPartitionState* a, const AddSubPartitionState* b)
+{
+    COMPARE_STRING_FIELD(partitionName);
+    COMPARE_NODE_FIELD(subPartitionList);
+
+    return true;
+}
+
 static bool _equalIntervalPartitionDefState(const IntervalPartitionDefState* a, const IntervalPartitionDefState* b)
 {
     COMPARE_SCALAR_FIELD(partInterval);
@@ -1203,6 +1229,7 @@ static bool _equalRangePartitionindexDefState(
 {
     COMPARE_STRING_FIELD(name);
     COMPARE_STRING_FIELD(tablespace);
+    COMPARE_NODE_FIELD(sublist);
 
     return true;
 }
@@ -1214,6 +1241,8 @@ static bool _equalPartitionState(const PartitionState* a, const PartitionState* 
     COMPARE_NODE_FIELD(partitionKey);
     COMPARE_NODE_FIELD(partitionList);
     COMPARE_SCALAR_FIELD(rowMovement);
+    COMPARE_NODE_FIELD(subPartitionState);
+    COMPARE_NODE_FIELD(partitionNameList);
     return true;
 }
 
@@ -2130,6 +2159,9 @@ static bool _equalLockStmt(const LockStmt* a, const LockStmt* b)
     COMPARE_NODE_FIELD(relations);
     COMPARE_SCALAR_FIELD(mode);
     COMPARE_SCALAR_FIELD(nowait);
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(waitSec);
+    }
 
     return true;
 }
@@ -2580,6 +2612,9 @@ static bool _equalLockingClause(const LockingClause* a, const LockingClause* b)
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(strength);
     }
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(waitSec);
+    }
 
     return true;
 }
@@ -2644,6 +2679,7 @@ static bool _equalRangeTblEntry(const RangeTblEntry* a, const RangeTblEntry* b)
     COMPARE_SCALAR_FIELD(isexcluded);
     COMPARE_SCALAR_FIELD(sublink_pull_up);
     COMPARE_SCALAR_FIELD(is_ustore);
+    COMPARE_SCALAR_FIELD(pulled_from_subquery);
 
     return true;
 }
@@ -2724,6 +2760,10 @@ static bool _equalRowMarkClause(const RowMarkClause* a, const RowMarkClause* b)
     COMPARE_SCALAR_FIELD(rti);
     COMPARE_SCALAR_FIELD(forUpdate);
     COMPARE_SCALAR_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(waitSec);
+    }
+
     COMPARE_SCALAR_FIELD(pushedDown);
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(strength);
@@ -2759,6 +2799,7 @@ static bool _equalUpsertClause(const UpsertClause* a, const UpsertClause* b)
 {
    COMPARE_NODE_FIELD(targetList);
    COMPARE_LOCATION_FIELD(location);
+   COMPARE_NODE_FIELD(whereClause);
 
    return true;
 }
@@ -3435,6 +3476,9 @@ bool equal(const void* a, const void* b)
         case T_GrantRoleStmt:
             retval = _equalGrantRoleStmt((GrantRoleStmt*)a, (GrantRoleStmt*)b);
             break;
+        case T_GrantDbStmt:
+            retval = _equalGrantDbStmt((GrantDbStmt*)a, (GrantDbStmt*)b);
+            break;
         case T_AlterDefaultPrivilegesStmt:
             retval = _equalAlterDefaultPrivilegesStmt((AlterDefaultPrivilegesStmt*)a, (AlterDefaultPrivilegesStmt*)b);
             break;
@@ -3478,6 +3522,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_AddPartitionState:
             retval = _equalAddPartitionState((AddPartitionState*)a, (AddPartitionState*)b);
+            break;
+        case T_AddSubPartitionState:
+            retval = _equalAddSubPartitionState((AddSubPartitionState*)a, (AddSubPartitionState*)b);
             break;
         case T_SplitInfo:
             retval = _equalSplitInfo((SplitInfo*)a, (SplitInfo*)b);
@@ -3991,6 +4038,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_AccessPriv:
             retval = _equalAccessPriv((AccessPriv*)a, (AccessPriv*)b);
+            break;
+        case T_DbPriv:
+            retval = _equalDbPriv((DbPriv*)a, (DbPriv*)b);
             break;
         case T_XmlSerialize:
             retval = _equalXmlSerialize((XmlSerialize*)a, (XmlSerialize*)b);

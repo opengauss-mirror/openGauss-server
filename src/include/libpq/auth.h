@@ -15,20 +15,22 @@
 #define AUTH_H
 
 #include "libpq/libpq-be.h"
+#ifdef ENABLE_GSS
 #include "gssapi/gssapi.h"
 #include "gssapi/gssapi_krb5.h"
-
+#endif
 #define INITIAL_USER_ID 10
 #define POSTFIX_LENGTH 8
 
 /* The struct for gss kerberos authentication. */
 typedef struct GssConn {
     int sock;
-
+#ifdef ENABLE_GSS
     gss_ctx_id_t gctx;       /* GSS context */
     gss_name_t gtarg_nam;    /* GSS target name */
     gss_buffer_desc ginbuf;  /* GSS input token */
     gss_buffer_desc goutbuf; /* GSS output token */
+#endif    
 } GssConn;
 
 extern char* pg_krb_server_hostname;

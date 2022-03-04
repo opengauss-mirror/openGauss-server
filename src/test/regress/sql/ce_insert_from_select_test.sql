@@ -39,6 +39,13 @@ insert into creditcard_info  select * from creditcard_info1 ;
 insert into creditcard_info1  select * from creditcard_info ;
 insert into creditcard_info1  select * from creditcard_info2 ;
 
+-- error
+INSERT INTO creditcard_info1(id_number, name, credit_card) SELECT id_number, name, credit_card FROM creditcard_info2;
+INSERT INTO creditcard_info1(id_number, credit_card) SELECT id_number, credit_card FROM creditcard_info2;
+
+-- succeed
+INSERT INTO creditcard_info1(id_number, name) SELECT id_number, name FROM creditcard_info2;
+
 drop table creditcard_info;
 drop table creditcard_info1;
 drop table creditcard_info2;

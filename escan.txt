@@ -747,7 +747,6 @@ src/gausskernel/runtime/executor/nodeCtescan.cpp
 src/gausskernel/runtime/executor/nodeExtensible.cpp
 src/gausskernel/runtime/executor/nodeForeignscan.cpp
 src/gausskernel/runtime/executor/nodeFunctionscan.cpp
-src/gausskernel/runtime/executor/nodeGD.cpp
 src/gausskernel/runtime/executor/nodeGroup.cpp
 src/gausskernel/runtime/executor/nodeHash.cpp
 src/gausskernel/runtime/executor/nodeHashjoin.cpp

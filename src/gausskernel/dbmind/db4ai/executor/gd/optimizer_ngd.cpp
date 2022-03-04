@@ -33,7 +33,6 @@
 
 typedef struct OptimizerNormalize {
     OptimizerGD opt;
-    const GradientDescentState *gd_state;
     double learning_rate;
     bool learn; // only first iteration
     double scale_rate;
@@ -45,7 +44,7 @@ static void opt_ngd_end_iteration(OptimizerGD *optimizer)
     OptimizerNormalize *opt = (OptimizerNormalize *)optimizer;
 
     // decay the learning rate with decay^iterations
-    opt->learning_rate *= gd_get_node(opt->gd_state)->decay;
+    opt->learning_rate *= optimizer->hyperp->decay;
 
     // be sure that learns how to normalize only in the first iteration
     opt->learn = false;
@@ -54,16 +53,17 @@ static void opt_ngd_end_iteration(OptimizerGD *optimizer)
 static void opt_ngd_update_batch(OptimizerGD *optimizer, const Matrix *features, const Matrix *dep_var)
 {
     OptimizerNormalize *opt = (OptimizerNormalize *)optimizer;
+    GradientDescent *gd_algo = (GradientDescent*)opt->opt.gd_state->tms.algorithm;
 
     if (opt->learn) {
         Assert(features->columns == opt->scale_gradients.rows);
 
-        gd_float *pf = features->data;
+        float8 *pf = features->data;
         for (int r = 0; r < features->rows; r++) {
-            gd_float *pw = optimizer->weights.data;
-            gd_float *ps = opt->scale_gradients.data;
+            float8 *pw = optimizer->weights.data;
+            float8 *ps = opt->scale_gradients.data;
             for (int c = 0; c < features->columns; c++) {
-                gd_float qx = *pf++;
+                float8 qx = *pf++;
                 qx *= qx;
                 if (qx > *ps) {
                     // update weights and scaling of gradients
@@ -82,16 +82,22 @@ static void opt_ngd_update_batch(OptimizerGD *optimizer, const Matrix *features,
 
     // clear gradients of the batch
     matrix_zeroes(&optimizer->gradients);
-    opt->gd_state->algorithm->gradients_callback(gd_get_node(opt->gd_state), features, dep_var, &optimizer->weights,
-        &optimizer->gradients);
+
+    GradientsConfigGD cfg;
+    cfg.hdr.hyperp = optimizer->hyperp;
+    cfg.hdr.features = features;
+    cfg.hdr.weights = &optimizer->weights;
+    cfg.hdr.gradients = &optimizer->gradients;
+    cfg.dep_var = dep_var;
+    gd_algo->compute_gradients(&cfg.hdr);
 
     elog_matrix(DEBUG1, "optimizer ngd: gradients", &optimizer->gradients);
 
     // normalize gradients
-    gd_float *pg = optimizer->gradients.data;
-    gd_float *ps = opt->scale_gradients.data;
+    float8 *pg = optimizer->gradients.data;
+    float8 *ps = opt->scale_gradients.data;
     for (int r = 0; r < opt->scale_gradients.rows; r++) {
-        gd_float s = 0.0;
+        float8 s = 0.0;
         if (*ps > 0)
             s = (1.0 / opt->scale_rate) / *ps;
 
@@ -114,17 +120,21 @@ static void opt_ngd_release(OptimizerGD *optimizer)
     pfree(optimizer);
 }
 
-OptimizerGD *gd_init_optimizer_ngd(const GradientDescentState *gd_state)
+OptimizerGD *gd_init_optimizer_ngd(const GradientDescentState *gd_state, HyperparametersGD *hyperp)
 {
     OptimizerNormalize *opt = (OptimizerNormalize *)palloc0(sizeof(OptimizerNormalize));
+    opt->opt.hyperp = hyperp;
     opt->opt.start_iteration = nullptr;
     opt->opt.end_iteration = opt_ngd_end_iteration;
     opt->opt.update_batch = opt_ngd_update_batch;
     opt->opt.release = opt_ngd_release;
-    opt->gd_state = gd_state;
-    opt->learning_rate = gd_get_node(gd_state)->learning_rate;
+    opt->opt.finalize = nullptr;
+    opt->opt.gd_state = gd_state;
+    opt->learning_rate = hyperp->learning_rate;
     opt->learn = true;
     opt->scale_rate = 0.0;
     matrix_init(&opt->scale_gradients, gd_state->n_features);
+    matrix_init(&opt->opt.weights, gd_state->n_features);
+    matrix_init(&opt->opt.gradients, gd_state->n_features);
     return &opt->opt;
 }

@@ -1,0 +1,21 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE sbtest1(id int,k INTEGER ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC),c CHAR(120) ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC),pad CHAR(60) ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC));
+insert into sbtest1 values (1,1,1,1)
+create function select_data() returns table(a int, b INTEGER, c CHAR(120), d CHAR(120)) as $BODY$ begin return query(select * from sbtest1); end; $BODY$ LANGUAGE plpgsql; 
+call select_data(); 
+ a | b |                                                            c                                                             |                              d                               
+---+---+--------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------
+ 1 | 1 | 1                                                                                                                        | 1                                                           
+(1 row)
+
+DROP FUNCTION select_data
+DROP TABLE sbtest1;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1

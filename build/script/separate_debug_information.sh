@@ -76,11 +76,14 @@ separate_symbol()
 			echo "$x is a script, do not separate symbol"
 		elif [[ "$x" = *".dat" ]];then
 			echo "$x is a license file, do not separate symbol"
-		elif [[ "$x" = *".sh" ]];then
+                # The following second condition judges whether the file is a shell script without a suffix name. 
+                # Usually, executable shell script has a header comment that indicates which interpreter to use, 
+                # e.g., "#!/usr/bin/env bash".
+		elif [[ "$x" = *".sh" ]] || [[ -f "$x" && -x "$x" && "$(head -c2 $x)" == '#!' ]]; then
 			echo "$x is a shell file, do not separate symbol"
 		elif [[ "$x" = *".la" ]];then
 			echo "$x is a la file, do not separate symbol"
-        elif [[ "$x" = *".crt" ]];then
+                elif [[ "$x" = *".crt" ]];then
 			echo "$x is a crt file, do not separate symbol"	
 		elif [[ "$x" = *".ini" ]];then
 			echo "$x is a ini file, do not separate symbol"	

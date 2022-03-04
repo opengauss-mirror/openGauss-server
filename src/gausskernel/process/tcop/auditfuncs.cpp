@@ -32,8 +32,15 @@
 #include "catalog/namespace.h"
 #include "auditfuncs.h"
 #include "utils/elog.h"
+#include "libpq/libpq-be.h"
 
 #define AUDIT_BUFFERSIZ 512
+
+typedef void (*AuditFunc)(const char* objectname, const char* cmdtext);
+typedef struct AuditFuncMap {
+    ObjectType objType;
+    AuditFunc auditFunc;
+}AuditFuncMap;
 
 static THR_LOCAL ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 static THR_LOCAL ProcessUtility_hook_type prev_ProcessUtility = NULL;
@@ -62,9 +69,13 @@ static void pgaudit_ddl_user(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_view(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_matview(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_function(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_package(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_resourcepool(const char* objectname, const char* cmdtext);
+static void pgaudit_alter_globalconfig(const AlterGlobalConfigStmt* stmt, const char* cmdtext);
+static void pgaudit_drop_globalconfig(const DropGlobalConfigStmt* stmt, const char* cmdtext);
 static void pgaudit_ddl_workload(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_serverforhardoop(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_model(const char* objectname, const char* cmdtext);
 static void pgaudit_process_alter_object(Node* node, const char* querystring);
 static void pgaudit_process_alter_owner(Node* node, const char* querystring);
 static void pgaudit_process_drop_objects(Node* node, const char* querystring);
@@ -74,6 +85,45 @@ static void pgaudit_process_grant_or_revoke_roles(List* grantee_name_list, bool 
 static void pgaudit_delete_files(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_weak_password(const char* cmdtext);
 static void pgaudit_ddl_full_encryption_key(const char* cmdtext);
+static void pgaudit_ddl_type(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_datasource(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_rowlevelsecurity(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_synonym(const char* objectName, const char* cmdText);
+static void pgaudit_ddl_textsearch(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_publication_subscription(const char* objectname, const char* cmdtext);
+static void pgaudit_ddl_fdw(const char* objectname, const char* cmdtext);
+
+static const AuditFuncMap g_auditFuncMap[] = {
+    {OBJECT_SCHEMA, pgaudit_ddl_schema},
+    {OBJECT_TABLE, pgaudit_ddl_table},
+    {OBJECT_FOREIGN_TABLE, pgaudit_ddl_table},
+    {OBJECT_STREAM, pgaudit_ddl_table},
+    {OBJECT_INTERNAL, pgaudit_ddl_table},
+    {OBJECT_TABLESPACE, pgaudit_ddl_tablespace},
+    {OBJECT_ROLE, pgaudit_ddl_user},
+    {OBJECT_USER, pgaudit_ddl_user},
+    {OBJECT_TRIGGER, pgaudit_ddl_trigger},
+    {OBJECT_CONTQUERY, pgaudit_ddl_view},
+    {OBJECT_VIEW, pgaudit_ddl_view},
+    {OBJECT_MATVIEW, pgaudit_ddl_matview},
+    {OBJECT_INDEX, pgaudit_ddl_index},
+    {OBJECT_TYPE, pgaudit_ddl_type},
+    {OBJECT_DATABASE, pgaudit_ddl_database},
+    {OBJECT_FUNCTION, pgaudit_ddl_function},
+    {OBJECT_PACKAGE, pgaudit_ddl_package},
+    {OBJECT_FOREIGN_SERVER, pgaudit_ddl_serverforhardoop},
+    {OBJECT_DATA_SOURCE, pgaudit_ddl_datasource},
+    {OBJECT_DIRECTORY, pgaudit_ddl_directory},
+    {OBJECT_RLSPOLICY, pgaudit_ddl_rowlevelsecurity},
+    {OBJECT_SYNONYM, pgaudit_ddl_synonym},
+    {OBJECT_TSDICTIONARY, pgaudit_ddl_textsearch},
+    {OBJECT_TSCONFIGURATION, pgaudit_ddl_textsearch},
+    {OBJECT_PUBLICATION, pgaudit_ddl_publication_subscription},
+    {OBJECT_SUBSCRIPTION, pgaudit_ddl_publication_subscription},
+    {OBJECT_FDW, pgaudit_ddl_fdw}
+};
+static const int g_auditFuncMapNum = sizeof(g_auditFuncMap) / sizeof(AuditFuncMap);
+
 /*
  * Brief		    : perfstat_agent_init()
  * Description	: Module load callback.
@@ -143,11 +193,11 @@ void pgaudit_system_start_ok(int port)
  * Brief		    : void pgaudit_user_login(bool login_ok, char* object_name,const char* detaisinfo)
  * Description	: audit the user login
  */
-void pgaudit_user_login(bool login_ok, const char* object_name, const char* detaisinfo)
+void pgaudit_user_login(bool login_ok, const char* object_name, const char* detailinfo)
 {
     AuditType audit_type;
     AuditResult audit_result;
-    Assert(detaisinfo);
+    Assert(detailinfo);
     if (login_ok) {
         audit_type = AUDIT_LOGIN_SUCCESS;
         audit_result = AUDIT_OK;
@@ -155,7 +205,15 @@ void pgaudit_user_login(bool login_ok, const char* object_name, const char* deta
         audit_type = AUDIT_LOGIN_FAILED;
         audit_result = AUDIT_FAILED;
     }
-    audit_report(audit_type, audit_result, object_name, detaisinfo);
+
+    char new_login_info[PGAUDIT_MAXLENGTH] = {0};
+    Port *port = u_sess->proc_cxt.MyProcPort;
+    if (port != NULL) {
+        int rc = snprintf_s(new_login_info, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1, "%s, SSL=%s", detailinfo,
+            port->ssl != NULL ? "on" : "off");
+        securec_check_ss(rc, "", "");
+    }
+    audit_report(audit_type, audit_result, object_name, port != NULL ? new_login_info : detailinfo);
 }
 
 /*
@@ -296,12 +354,14 @@ static void pgaudit_ddl_database_object(
         case AUDIT_DDL_INDEX:
         case AUDIT_DDL_SCHEMA:
         case AUDIT_DDL_FUNCTION:
+        case AUDIT_DDL_PACKAGE:
         case AUDIT_DDL_TABLE:
         case AUDIT_DDL_TABLESPACE:
         case AUDIT_DDL_TRIGGER:
         case AUDIT_DDL_USER:
         case AUDIT_DDL_VIEW:
         case AUDIT_DDL_RESOURCEPOOL:
+        case AUDIT_DDL_GLOBALCONFIG:
         case AUDIT_DDL_WORKLOAD:
         case AUDIT_DDL_SERVERFORHADOOP:
         case AUDIT_DDL_DATASOURCE:
@@ -312,6 +372,9 @@ static void pgaudit_ddl_database_object(
         case AUDIT_DDL_TEXTSEARCH:
         case AUDIT_DDL_SEQUENCE:
         case AUDIT_DDL_KEY:
+        case AUDIT_DDL_MODEL:
+        case AUDIT_DDL_PUBLICATION_SUBSCRIPTION:
+        case AUDIT_DDL_FOREIGN_DATA_WRAPPER:
             pgaudit_store_auditstat(audit_type, audit_result, objectname, mask_string);
             break;
         default:
@@ -429,6 +492,20 @@ static void pgaudit_ddl_user(const char* objectname, const char* cmdtext)
 
     Assert(cmdtext != NULL);
     if (!CHECK_AUDIT_DDL(DDL_USER)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(audit_type, audit_result, objectname, cmdtext);
+    return;
+}
+
+static void pgaudit_ddl_model(const char* objectname, const char* cmdtext)
+{
+    AuditType audit_type = AUDIT_DDL_MODEL;
+    AuditResult audit_result = AUDIT_OK;
+
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_MODEL)) {
         return;
     }
 
@@ -643,6 +720,23 @@ static void pgaudit_ddl_function(const char* objectname, const char* cmdtext)
 }
 
 /*
+ * Brief		    : pgaudit_ddl_package(const char* objectname, const char* cmdtext)
+ * Description	: Audit the operations of package
+ */
+static void pgaudit_ddl_package(const char* objectname, const char* cmdtext)
+{
+    AuditType audit_type = AUDIT_DDL_PACKAGE;
+    AuditResult audit_result = AUDIT_OK;
+
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_PACKAGE)) {
+        return;
+    }
+    pgaudit_ddl_database_object(audit_type, audit_result, objectname, cmdtext);
+    return;
+}
+
+/*
  * Brief		    : pgaudit_ddl_resourcepool(const char* objectname, const char* cmdtext)
  * Description	: Audit the operations of resource pool
  */
@@ -657,6 +751,42 @@ static void pgaudit_ddl_resourcepool(const char* objectname, const char* cmdtext
     }
 
     pgaudit_ddl_database_object(audit_type, audit_result, objectname, cmdtext);
+    return;
+}
+
+/*
+ * Brief		    : pgaudit_ddl_resourcepool(const char* objectname, const char* cmdtext)
+ * Description	: Audit the operations of gs_global_config
+ */
+static void pgaudit_alter_globalconfig(const AlterGlobalConfigStmt* stmt, const char* cmdtext)
+{
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_GLOBALCONFIG)) {
+        return;
+    }
+    ListCell* option = NULL;
+    foreach (option, stmt->options) {
+        DefElem *defel = (DefElem *)lfirst(option);
+        pgaudit_ddl_database_object(AUDIT_DDL_GLOBALCONFIG, AUDIT_OK, defel->defname, cmdtext);
+    }
+    return;
+}
+
+/*
+ * Brief		    : pgaudit_ddl_resourcepool(const char* objectname, const char* cmdtext)
+ * Description	: Audit the operations of gs_global_config
+ */
+static void pgaudit_drop_globalconfig(const DropGlobalConfigStmt* stmt, const char* cmdtext)
+{
+    Assert(cmdtext != NULL);
+    if (!CHECK_AUDIT_DDL(DDL_GLOBALCONFIG)) {
+        return;
+    }
+    ListCell* option = NULL;
+    foreach (option, stmt->options) {
+        const char *global_name = strVal(lfirst(option));
+        pgaudit_ddl_database_object(AUDIT_DDL_GLOBALCONFIG, AUDIT_OK, global_name, cmdtext);
+    }
     return;
 }
 
@@ -846,6 +976,42 @@ static void pgaudit_ddl_textsearch(const char* objectname, const char* cmdtext)
 }
 
 /*
+ * pgaudit_ddl_publication_subscription:
+ * 	Audit the operations of publication and subscription
+ *
+ * @IN objectname:  publication name or subscription name
+ * @IN cmdtext:  cmd string
+ * @RETURN: void
+ */
+static void pgaudit_ddl_publication_subscription(const char* objectname, const char* cmdtext)
+{
+    if (!CHECK_AUDIT_DDL(DDL_PUBLICATION_SUBSCRIPTION)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(AUDIT_DDL_PUBLICATION_SUBSCRIPTION, AUDIT_OK, objectname, cmdtext);
+    return;
+}
+
+/*
+ * pgaudit_ddl_fdw:
+ * 	Audit the operations of foreign data wrapper
+ *
+ * @IN objectname:  foreign data wrapper name
+ * @IN cmdtext:  cmd string
+ * @RETURN: void
+ */
+static void pgaudit_ddl_fdw(const char* objectname, const char* cmdtext)
+{
+    if (!CHECK_AUDIT_DDL(DDL_FOREIGN_DATA_WRAPPER)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(AUDIT_DDL_FOREIGN_DATA_WRAPPER, AUDIT_OK, objectname, cmdtext);
+    return;
+}
+
+/*
  * @Description: audit the operation of set parameter.
  * @in objectname : the object name need audited.
  * @in cmdtext : the command text need audited.
@@ -923,6 +1089,11 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
                 objectname = NameListToString(names);
                 pgaudit_ddl_function(objectname, querystring);
             } break;
+            case OBJECT_PACKAGE:
+            case OBJECT_PACKAGE_BODY: {
+                objectname = NameListToString(names);
+                pgaudit_ddl_package(objectname, querystring);
+            } break;
             case OBJECT_FOREIGN_SERVER: {
                 objectname = NameListToString(names);
                 pgaudit_ddl_serverforhardoop(objectname, querystring);
@@ -953,6 +1124,19 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
             case OBJECT_COLUMN_SETTING: {
                 pgaudit_ddl_full_encryption_key(querystring);
             } break;
+            case OBJECT_DB4AI_MODEL: {
+                rel = makeRangeVarFromNameList(names);
+                objectname = rel->relname;
+                pgaudit_ddl_model(objectname, querystring);
+            } break;
+            case OBJECT_PUBLICATION:
+                objectname = NameListToString(names);
+                pgaudit_ddl_publication_subscription(objectname, querystring);
+                break;
+            case OBJECT_FDW:
+                objectname = NameListToString(names);
+                pgaudit_ddl_fdw(objectname, querystring);
+                break;
             default:
                 break;
         }
@@ -966,66 +1150,11 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
 static void pgaudit_audit_object(const char* objname, int ObjectType, const char* cmdtext)
 {
     Assert(cmdtext);
-    switch (ObjectType) {
-        case OBJECT_SCHEMA:
-            pgaudit_ddl_schema(objname, cmdtext);
-            break;
-        case OBJECT_TABLE:
-        case OBJECT_FOREIGN_TABLE: /* Execute ALTER FOREIGN TABLE RENAME */
-        case OBJECT_STREAM:
-        case OBJECT_INTERNAL:
-            pgaudit_ddl_table(objname, cmdtext);
-            break;
-        case OBJECT_TABLESPACE:
-            pgaudit_ddl_tablespace(objname, cmdtext);
-            break;
-        case OBJECT_ROLE:
-        case OBJECT_USER:
-            pgaudit_ddl_user(objname, cmdtext);
-            break;
-        case OBJECT_TRIGGER:
-            pgaudit_ddl_trigger(objname, cmdtext);
-            break;
-        case OBJECT_CONTQUERY:
-        case OBJECT_VIEW:
-            pgaudit_ddl_view(objname, cmdtext);
-            break;
-        case OBJECT_MATVIEW:
-            pgaudit_ddl_matview(objname, cmdtext);
-            break;
-        case OBJECT_INDEX:
-            pgaudit_ddl_index(objname, cmdtext);
-            break;
-        case OBJECT_TYPE:
-            pgaudit_ddl_type(objname, cmdtext);
-            break;
-        case OBJECT_DATABASE:
-            pgaudit_ddl_database(objname, cmdtext);
-            break;
-        case OBJECT_FUNCTION:
-            pgaudit_ddl_function(objname, cmdtext);
-            break;
-        case OBJECT_FOREIGN_SERVER:
-            pgaudit_ddl_serverforhardoop(objname, cmdtext);
-            break;
-        case OBJECT_DATA_SOURCE:
-            pgaudit_ddl_datasource(objname, cmdtext);
-            break;
-        case OBJECT_DIRECTORY:
-            pgaudit_ddl_directory(objname, cmdtext);
-            break;
-        case OBJECT_RLSPOLICY:
-            pgaudit_ddl_rowlevelsecurity(objname, cmdtext);
-            break;
-        case OBJECT_SYNONYM:
-            pgaudit_ddl_synonym(objname, cmdtext);
-            break;
-        case OBJECT_TSDICTIONARY:
-        case OBJECT_TSCONFIGURATION:
-            pgaudit_ddl_textsearch(objname, cmdtext);
-            break;
-        default:
-            break;
+    for (int i = 0; i < g_auditFuncMapNum; i++) {
+        if (g_auditFuncMap[i].objType == ObjectType) {
+            g_auditFuncMap[i].auditFunc(objname, cmdtext);
+            return;
+        }
     }
 }
 
@@ -1061,6 +1190,9 @@ static void pgaudit_process_alter_owner(Node* node, const char* querystring)
         case OBJECT_TSDICTIONARY:
         case OBJECT_TSCONFIGURATION:
         case OBJECT_TYPE:
+        case OBJECT_PACKAGE:
+        case OBJECT_PUBLICATION:
+        case OBJECT_SUBSCRIPTION:
             objectname = NameListToString(alterownerstmt->object);
             break;
         default:
@@ -1106,6 +1238,7 @@ static void pgaudit_process_rename_object(Node* node, const char* querystring)
         case OBJECT_SCHEMA:
         case OBJECT_TABLESPACE:
         case OBJECT_TRIGGER:
+        case OBJECT_FDW:
         case OBJECT_FOREIGN_SERVER:
         case OBJECT_RLSPOLICY:
         case OBJECT_DATA_SOURCE:
@@ -1115,6 +1248,8 @@ static void pgaudit_process_rename_object(Node* node, const char* querystring)
         case OBJECT_TYPE:
         case OBJECT_TSDICTIONARY:
         case OBJECT_TSCONFIGURATION:
+        case OBJECT_PUBLICATION:
+        case OBJECT_SUBSCRIPTION:
             objectname = NameListToString(stmt->object);
             break;
         case OBJECT_TABLE:
@@ -1254,6 +1389,18 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             CreateStmt* createforeignstmt = (CreateStmt*)(parsetree);
             pgaudit_ddl_table(createforeignstmt->relation->relname, queryString);
         } break;
+        case T_CreateUserMappingStmt: {
+            CreateUserMappingStmt *createUserMappingStmt = (CreateUserMappingStmt*)parsetree;
+            pgaudit_ddl_user(createUserMappingStmt->username, queryString);
+        } break;
+        case T_AlterUserMappingStmt: {
+            AlterUserMappingStmt *alterUserMappingStmt = (AlterUserMappingStmt*)parsetree;
+            pgaudit_ddl_user(alterUserMappingStmt->username, queryString);
+        } break;
+        case T_DropUserMappingStmt: {
+            DropUserMappingStmt *dropUserMappingStmt = (DropUserMappingStmt*)parsetree;
+            pgaudit_ddl_user(dropUserMappingStmt->username, queryString);
+        } break;
         case T_CreateRoleStmt: { /* Audit create user */
             CreateRoleStmt* createrolestmt = (CreateRoleStmt*)(parsetree);
             pgaudit_ddl_user(createrolestmt->role, queryString);
@@ -1338,6 +1485,10 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             object_name_pointer = pgaudit_get_function_name(createfunctionstmt->funcname);
             pgaudit_ddl_function(object_name_pointer, queryString);
         } break;
+        case T_CreatePackageStmt:
+        case T_CreatePackageBodyStmt: {
+            pgaudit_ddl_package(object_name_pointer, queryString);
+        }
         case T_AlterFunctionStmt: { /* Audit  procedure */
             AlterFunctionStmt* alterfunctionstmt = (AlterFunctionStmt*)(parsetree);
 
@@ -1376,6 +1527,10 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             GrantRoleStmt* grantrolestmt = (GrantRoleStmt*)(parsetree);
             pgaudit_process_grant_or_revoke_roles(grantrolestmt->grantee_roles, grantrolestmt->is_grant, queryString);
         } break;
+        case T_GrantDbStmt: { /* Audit grant or revoke any privilege */
+            GrantDbStmt* grantdbstmt = (GrantDbStmt*)(parsetree);
+            pgaudit_process_grant_or_revoke_roles(grantdbstmt->grantees, grantdbstmt->is_grant, queryString);
+        } break;
         case T_DropStmt: /* Audit drop objct */
             pgaudit_process_drop_objects(parsetree, queryString);
             break;
@@ -1402,6 +1557,14 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
         case T_DropResourcePoolStmt: {
             DropResourcePoolStmt* dropresourcepoolStmt = (DropResourcePoolStmt*)(parsetree);
             pgaudit_ddl_resourcepool(dropresourcepoolStmt->pool_name, queryString);
+        } break;
+        case T_AlterGlobalConfigStmt: {
+            AlterGlobalConfigStmt* alterglobalconfigStmt = (AlterGlobalConfigStmt*)(parsetree);
+            pgaudit_alter_globalconfig(alterglobalconfigStmt, queryString);
+        } break;
+        case T_DropGlobalConfigStmt: {
+            DropGlobalConfigStmt* dropglobalconfigStmt = (DropGlobalConfigStmt*)(parsetree);
+            pgaudit_drop_globalconfig(dropglobalconfigStmt, queryString);
         } break;
         case T_CreateWorkloadGroupStmt: {
             CreateWorkloadGroupStmt* createworkloadgroupstmt = (CreateWorkloadGroupStmt*)(parsetree);
@@ -1558,7 +1721,38 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             TimeCapsuleStmt *stmt = (TimeCapsuleStmt *)parsetree;
             pgaudit_ddl_table(stmt->relation->relname, queryString);
         } break;
-
+        case T_CreateModelStmt: {
+            CreateModelStmt* createModelStmt = (CreateModelStmt*)(parsetree);
+            pgaudit_ddl_model(createModelStmt->model, queryString);
+        } break;
+        case T_CreatePublicationStmt: {
+            CreatePublicationStmt *stmt = (CreatePublicationStmt*)parsetree;
+            pgaudit_ddl_publication_subscription(stmt->pubname, queryString);
+        } break;
+        case T_AlterPublicationStmt: {
+            AlterPublicationStmt *stmt = (AlterPublicationStmt*)parsetree;
+            pgaudit_ddl_publication_subscription(stmt->pubname, queryString);
+        } break;
+        case T_CreateSubscriptionStmt: {
+            CreateSubscriptionStmt *stmt = (CreateSubscriptionStmt*)parsetree;
+            pgaudit_ddl_publication_subscription(stmt->subname, queryString);
+        } break;
+        case T_AlterSubscriptionStmt: {
+            AlterSubscriptionStmt *stmt = (AlterSubscriptionStmt*)parsetree;
+            pgaudit_ddl_publication_subscription(stmt->subname, queryString);
+        } break;
+        case T_DropSubscriptionStmt: {
+            DropSubscriptionStmt *stmt = (DropSubscriptionStmt*)parsetree;
+            pgaudit_ddl_publication_subscription(stmt->subname, queryString);
+        } break;
+        case T_CreateFdwStmt: {
+            CreateFdwStmt *stmt = (CreateFdwStmt*)parsetree;
+            pgaudit_ddl_fdw(stmt->fdwname, queryString);
+        } break;
+        case T_AlterFdwStmt: {
+            AlterFdwStmt *stmt = (AlterFdwStmt*)parsetree;
+            pgaudit_ddl_fdw(stmt->fdwname, queryString);
+        } break;
         default:
             break;
     }

@@ -51,6 +51,7 @@
 #include "storage/procarray.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
+#include "replication/walreceiver.h"
 
 /*
  * Defines for CSNLOG page sizes.  A page is the same BLCKSZ as is used
@@ -117,9 +118,6 @@ void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId *subxid
 
     /* for standby node, don't set invalid or abort csn mark. */
     if ((t_thrd.xact_cxt.useLocalSnapshot ||
-#ifdef ENABLE_MULTIPLE_NODES
-         RecoveryInProgress() ||
-#endif
          g_instance.attr.attr_storage.IsRoachStandbyCluster) &&
         csn <= COMMITSEQNO_ABORTED) {
         return;
@@ -156,6 +154,9 @@ void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId *subxid
         offset = i;
         pageno = TransactionIdToCSNPage(subxids[offset]);
         xid = InvalidTransactionId;
+    }
+    if (IS_DISASTER_RECOVER_MODE && COMMITSEQNO_IS_COMMITTED(csn)) {
+        UpdateXLogMaxCSN(csn);
     }
 }
 
@@ -458,6 +459,30 @@ CommitSeqNo CSNLogGetNestCommitSeqNo(TransactionId xid)
 }
 
 /**
+ * @Description: Interrogate the CSN of a transaction in the CSN log recursively.
+ * @in xid -  the transaction id
+ * @return -  return the csn of the top parent of the input transaction
+ */
+CommitSeqNo CSNLogGetDRCommitSeqNo(TransactionId xid)
+{
+    CommitSeqNo csn = InvalidCommitSeqNo;
+    PG_TRY();
+    {
+        csn = CSNLogGetCommitSeqNo(xid);
+    }
+    PG_CATCH();
+    {
+        if (t_thrd.xact_cxt.slru_errcause == SLRU_OPEN_FAILED) {
+            csn = InvalidCommitSeqNo;
+        } else {
+            PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
+    return csn;
+}
+
+/**
  * @Description: Determine the CSN of a transaction, walking the
  * subtransaction tree if needed
  * @in xid -  the transaction id
@@ -590,26 +615,12 @@ static int ZeroCSNLOGPage(int64 pageno)
  * @in oldestActiveXID -  the oldest active transaction id
  * @return -  no return
  */
-void StartupCSNLOG(bool isUpgrade)
+void StartupCSNLOG()
 {
-    if (isUpgrade) {
-        /* for shutdown condition, we just rezero the next page of next_id */
-        int64 endPage = TransactionIdToCSNPage(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
-
-        CSN_LWLOCK_ACQUIRE(endPage, LW_EXCLUSIVE);
-        (void)ZeroCSNLOGPage(endPage);
-        CSN_LWLOCK_RELEASE(endPage);
-
-        t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage = endPage;
-        elog(LOG, "startup csnlog at xid:%lu, pageno:%ld", t_thrd.xact_cxt.ShmemVariableCache->nextXid,
-             t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
-    } else {
-        /* for non-shutdown condition, we jsut set the last extend page */
-        int64 lastExtendPage = TransactionIdToCSNPage(t_thrd.xact_cxt.ShmemVariableCache->nextXid - 1);
-        t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage = lastExtendPage;
-        elog(LOG, "startup csnlog without extend at xid:%lu, pageno:%ld",
-             t_thrd.xact_cxt.ShmemVariableCache->nextXid - 1, t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
-    }
+    int64 lastExtendPage = TransactionIdToCSNPage(t_thrd.xact_cxt.ShmemVariableCache->nextXid - 1);
+    t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage = lastExtendPage;
+    elog(LOG, "startup csnlog without extend at xid:%lu, pageno:%ld",
+        t_thrd.xact_cxt.ShmemVariableCache->nextXid - 1, t_thrd.xact_cxt.ShmemVariableCache->lastExtendCSNLogpage);
     t_thrd.xact_cxt.ShmemVariableCache->startExtendCSNLogpage = 0;
 }
 
@@ -785,7 +796,11 @@ void ExtendCSNLOG(TransactionId newestXact)
 void TruncateCSNLOG(TransactionId oldestXact)
 {
     int64 cutoffPage;
-
+    TransactionId CatalogXmin = GetReplicationSlotCatalogXmin();
+    if (CatalogXmin >= FirstNormalTransactionId) {
+        oldestXact = Min(oldestXact, CatalogXmin);
+    }
+    u_sess->utils_cxt.RecentDataXmin = oldestXact;
     /*
      * The cutoff point is the start of the segment containing oldestXact. We
      * pass the *page* containing oldestXact to SimpleLruTruncate.

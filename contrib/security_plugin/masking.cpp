@@ -58,6 +58,10 @@
 #define static
 #endif
 
+using StrMap = gs_stl::gs_map<gs_stl::gs_string, masking_result>;
+static THR_LOCAL StrMap* masked_prepared_stmts = NULL;
+static THR_LOCAL StrMap* masked_cursor_stmts = NULL;
+
 void reset_node_location()
 {
     t_thrd.security_policy_cxt.node_location = 0;
@@ -204,16 +208,17 @@ static bool get_function_id(int vartype, const char* funcname, Oid *funcid, Oid 
 #endif
     if (catlist != NULL) {
         for (int i = 0; i < catlist->n_members; ++i) {
-            HeapTuple    proctup = &catlist->members[i]->tuple;
+            HeapTuple    proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
             Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
             if (procform && (int)procform->prorettype == vartype && procform->pronamespace == schemaid) {
                 (*funcid) = HeapTupleGetOid(proctup);
                 (*rettype) = procform->prorettype;
-                break;
+                ReleaseSysCacheList(catlist);
+                return true;
             }
         }
         ReleaseSysCacheList(catlist);
-        return true;
+        return false;
     }
     return false;
 }
@@ -1212,4 +1217,202 @@ bool parser_target_entry(ParseState *pstate, TargetEntry *&old_tle,
             break;
     }
     return is_masking;
+}
+
+void free_masked_cursor_stmts()
+{
+    if (masked_cursor_stmts != NULL) {
+        delete masked_cursor_stmts;
+        masked_cursor_stmts = NULL;
+    }
+}
+
+void free_masked_prepared_stmts()
+{
+    if (masked_prepared_stmts) {
+        delete masked_prepared_stmts;
+        masked_prepared_stmts = NULL;
+    }
+}
+
+void close_cursor_stmt_as_masked(const char* name)
+{
+    if (masked_cursor_stmts == NULL) {
+        return;
+    }
+
+    masked_cursor_stmts->erase(name);
+    if (masked_cursor_stmts->empty() || (strcasecmp(name, "all") == 0)) {
+        delete masked_cursor_stmts;
+        masked_cursor_stmts = NULL;
+    }
+}
+
+void unprepare_stmt_as_masked(const char* name)
+{
+    unprepare_stmt(name);
+    if (!masked_prepared_stmts) {
+        return;
+    }
+    masked_prepared_stmts->erase(name);
+    if (masked_prepared_stmts->empty() || !strcasecmp(name, "all")) {
+        delete masked_prepared_stmts;
+        masked_prepared_stmts = NULL;
+    }
+}
+
+void set_prepare_stmt_as_masked(const char* name, const masking_result *result)
+{
+    if (!masked_prepared_stmts) {
+        masked_prepared_stmts = new StrMap;
+    }
+    (*masked_prepared_stmts)[name] = (*result);
+}
+
+void set_cursor_stmt_as_masked(const char* name, const masking_result *result)
+{
+    if (!masked_cursor_stmts) {
+        masked_cursor_stmts = new StrMap;
+    }
+    (*masked_cursor_stmts)[name] = (*result);
+}
+
+template< class T>
+static inline void flush_stmt_masking_result(const char* name, T* stmts)
+{
+    if (stmts) {
+        StrMap::const_iterator it = stmts->find(name);
+        if (it != stmts->end()) {
+            flush_masking_result(it->second);
+        }
+    }
+}
+
+void flush_cursor_stmt_masking_result(const char* name)
+{
+    flush_stmt_masking_result(name, masked_cursor_stmts);
+}
+
+void flush_prepare_stmt_masking_result(const char* name)
+{
+    flush_stmt_masking_result(name, masked_prepared_stmts);
+}
+
+bool process_union_masking(Node *union_node, ParseState *pstate, const Query *query, const policy_set *policy_ids,
+    bool audit_exist)
+{
+    if (union_node == NULL) {
+        return false;
+    }
+    switch (nodeTag(union_node)) {
+        /* For each union, we get its query recursively for masking until it doesn't have any union query */
+        case T_SetOperationStmt: {
+            SetOperationStmt *stmt = (SetOperationStmt *)union_node;
+            if (stmt->op != SETOP_UNION) {
+                return false;
+            }
+            process_union_masking((Node *)(stmt->larg), pstate, query, policy_ids, audit_exist);
+            process_union_masking((Node *)(stmt->rarg), pstate, query, policy_ids, audit_exist);
+        }
+            break;
+        case T_RangeTblRef: {
+            RangeTblRef *ref = (RangeTblRef *)union_node;
+            if (ref->rtindex <= 0 || ref->rtindex > list_length(query->rtable)) {
+                return false;
+            }
+            Query *mostQuery = rt_fetch(ref->rtindex, query->rtable)->subquery;
+            process_masking(pstate, mostQuery, policy_ids, audit_exist);
+        }
+            break;
+        default:
+            break;
+    }
+    return true;
+}
+
+/*
+ * Main entrance for masking
+ * Identify components in query tree that need to do masking.
+ * This function will find all parts which need masking of select query,
+ * mainly includes CTE / setOperation / normal select columns.
+ */
+void process_masking(ParseState *pstate, Query *query, const policy_set *policy_ids, bool audit_exist)
+{
+    if (query == NULL) {
+        return;
+    }
+
+    /* set-operation tree UNION query */
+    if (!process_union_masking(query->setOperations, pstate, query, policy_ids, audit_exist)) {
+        ListCell *lc = NULL;
+        /* For each Cte, we get its query recursively for masking, and then handle this query in normal way */
+        if (query->cteList != NIL) {
+            foreach(lc, query->cteList) {
+                CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
+                Query *cte_query = (Query *)cte->ctequery;
+                process_masking(pstate, cte_query, policy_ids, audit_exist);
+            }
+        }
+        /* find subquery and process each subquery node */
+        if (query->rtable != NULL) {
+            foreach(lc, query->rtable) {
+                RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+                Query *subquery = (Query *)rte->subquery;
+                process_masking(pstate, subquery, policy_ids, audit_exist);
+            }
+        }
+        select_PostParseAnalyze(pstate, query, policy_ids, audit_exist);
+    }
+}
+
+void select_PostParseAnalyze(ParseState *pstate, Query *&query, const policy_set *policy_ids, bool audit_exist)
+{
+    Assert(query != NULL);
+    List *targetList = NIL;
+    targetList = (query->targetList != NIL) ? query->targetList : pstate->p_target_list;
+    handle_masking(targetList, pstate, policy_ids, query->rtable, query->utilityStmt);
+
+    /* deal with function type label */
+    load_function_label(query, audit_exist);
+}
+
+/*
+ * Do masking for given target list
+ * this function will parse each RTE of the list
+ * and then will check wether each node need to do mask.
+ */
+bool handle_masking(List *targetList, ParseState *pstate, const policy_set *policy_ids, List *rtable, Node *utilityNode)
+{
+    if (targetList == NIL || policy_ids->empty()) {
+        return false;
+    }
+    ListCell *temp = NULL;
+    masking_result masking_result;
+    foreach (temp, targetList) {
+        TargetEntry *old_tle = (TargetEntry *)lfirst(temp);
+        /* Shuffle masking columns can only select directly with out other operations */
+        parser_target_entry(pstate, old_tle, policy_ids, &masking_result, rtable, true);
+    }
+    if (masking_result.size() <= 0) {
+        return false;
+    }
+    if (strlen(t_thrd.security_policy_cxt.prepare_stmt_name) > 0) {
+        /* prepare statement was masked */
+        set_prepare_stmt_as_masked(t_thrd.security_policy_cxt.prepare_stmt_name,
+            &masking_result); /* save masking event for executing case */
+    } else if (utilityNode != NULL) {
+        switch (nodeTag(utilityNode)) {
+            case T_DeclareCursorStmt: {
+                DeclareCursorStmt *stmt = (DeclareCursorStmt *)utilityNode;
+                /* save masking event for fetching case */
+                set_cursor_stmt_as_masked(stmt->portalname, &masking_result);
+            }
+            break;
+            default:
+                flush_masking_result(&masking_result); /* invoke masking event */
+        }
+    } else {
+        flush_masking_result(&masking_result); /* invoke masking event */
+    }
+    return true;
 }

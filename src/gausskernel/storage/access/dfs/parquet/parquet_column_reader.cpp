@@ -21,9 +21,11 @@
  *
  * -------------------------------------------------------------------------
  */
+#ifndef ENABLE_LITE_MODE
 #include "parquet/platform.h"
 #include "parquet/statistics.h"
 #include "parquet/types.h"
+#endif
 
 #include "parquet_column_reader.h"
 #include "parquet_input_stream_adapter.h"
@@ -33,7 +35,9 @@
 #include "access/dfs/dfs_query.h"
 #include "access/dfs/dfs_query_check.h"
 #include "access/dfs/dfs_wrapper.h"
+#ifndef ENABLE_LITE_MODE
 #include "arrow/util/bit-util.h"
+#endif
 
 namespace dfs {
 namespace reader {
@@ -1348,7 +1352,11 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                 if (!nullFilter(isSelected, i)) {
                     bool tmpValue = data[i];
                     if (checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<BoolWrapper, bool>(tmpValue, predicate);
+#else
+                        isSelected[i] = HdfsPredicateCheckValue<BoolWrapper, bool>(tmpValue, predicate);
+#endif
                     }
 
                     increaseBloomFilterRows(&isSelected[i], tmpValue);
@@ -1375,8 +1383,12 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                         if (!nullFilter(isSelected, i)) {
                             int64_t tmpValue = static_cast<int64_t>(data[i]);
                             if (checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                                 isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(tmpValue,
                                                                                                          predicate);
+#else
+                                isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(tmpValue, predicate);
+#endif
                             }
 
                             increaseBloomFilterRows(&isSelected[i], tmpValue);
@@ -1393,7 +1405,11 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                 if (!nullFilter(isSelected, i)) {
                     int64_t tmpValue = static_cast<int64_t>(data[i]);
                     if (checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(tmpValue, predicate);
+#else
+                        isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(tmpValue, predicate);
+#endif
                     }
 
                     increaseBloomFilterRows(&isSelected[i], tmpValue);
@@ -1432,7 +1448,11 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                 if (!nullFilter(isSelected, i)) {
                     double tmpValue = static_cast<double>(data[i]);
                     if (checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Float8Wrapper, double>(tmpValue, predicate);
+#else
+                        isSelected[i] = HdfsPredicateCheckValue<Float8Wrapper, double>(tmpValue, predicate);
+#endif
                     }
 
                     increaseBloomFilterRows(&isSelected[i], tmpValue);
@@ -1446,7 +1466,11 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                 if (!nullFilter(isSelected, i)) {
                     double tmpValue = static_cast<double>(data[i]);
                     if (checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Float8Wrapper, double>(tmpValue, predicate);
+#else
+                        isSelected[i] = HdfsPredicateCheckValue<Float8Wrapper, double>(tmpValue, predicate);
+#endif
                     }
 
                     increaseBloomFilterRows(&isSelected[i], tmpValue);

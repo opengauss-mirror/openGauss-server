@@ -194,6 +194,7 @@ static void init_gram_state(PsqlScanState state);
 static void analyze_state(const char* text,PsqlScanState state);
 static int upperstrcmp(const char *str1,const char *str2);
 static  GramIdentify keywordRead(const char* text);
+static bool IsTranscationTokens(char* yytext, char* token);
 
 #define YY_DECL int yylex(PsqlScanState lex_param)
 
@@ -637,13 +638,13 @@ other			.
 					if (lex_param->begin_state == BEGIN_UNDEFINED)
 					{
 						/* For a transaction statement, all possible tokens after BEGIN are here */
-						if (strncasecmp(yytext, "transaction", strlen("transaction")) == 0 ||
-							 strncasecmp(yytext, "work", strlen("work")) == 0 ||
-							 strncasecmp(yytext, "isolation", strlen("isolation")) == 0 ||
-							 strncasecmp(yytext, "read", strlen("read")) == 0 ||
-							 strncasecmp(yytext, "deferrable", strlen("deferrable")) == 0 ||
-							 strncasecmp(yytext, "not", strlen("not")) == 0 ||
-							 strncasecmp(yytext, ";", strlen(";")) == 0)
+						if (IsTranscationTokens(yytext, "transaction") ||
+							IsTranscationTokens(yytext, "work") ||
+                            IsTranscationTokens(yytext, "isolation") ||
+                            IsTranscationTokens(yytext, "read") ||
+                            IsTranscationTokens(yytext, "deferrable") ||
+                            IsTranscationTokens(yytext, "not") ||
+							strncasecmp(yytext, ";", strlen(";")) == 0)
 							lex_param->begin_state = BEGIN_TRANSACTION;
 						else
 							lex_param->begin_state = BEGIN_ANOYBLOCK;
@@ -2041,6 +2042,23 @@ extract_substring(const char *txt, int len)
 	return result;
 }
 
+static bool IsTranscationTokens(char* yytext, char* token)
+{
+    int token_len = strlen(token);
+    if (strncasecmp(yytext, token, token_len) == 0) {
+        if (strlen(yytext) > token_len) {
+            if ((yytext[token_len] >= '0' && yytext[token_len] <= '9') ||
+                (yytext[token_len] >= 'a' && yytext[token_len] <= 'z') ||
+                (yytext[token_len] >= 'A' && yytext[token_len] <= 'Z') ||
+                yytext[token_len] == '_') {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 /*
  * escape_variable --- process :'VARIABLE' or :"VARIABLE"
  *
@@ -2235,7 +2253,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->gram_state[IDEN_AS] = true;
 			state->gram_state[IDEN_IS] = true;
 			state->gram_state[IDEN_DETERMINISTIC] = true;
-			state->count_to_read = 7;
+			state->count_to_read = -1;
 			break;
 		case IDEN_DETERMINISTIC:
                         /* when meet a DETERMINISTIC, we can read max identify number is 6  */

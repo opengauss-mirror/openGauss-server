@@ -1,0 +1,414 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS copyCMK CASCADE;
+NOTICE:  client master key "copycmk" does not exist
+CREATE CLIENT MASTER KEY copyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+-- test AEAD_AES_128_CBC_HMAC_SHA256
+CREATE COLUMN ENCRYPTION KEY copyCEK1 WITH VALUES (CLIENT_MASTER_KEY = copyCMK, ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY copyCEK2 WITH VALUES (CLIENT_MASTER_KEY = copyCMK, ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY copyCEK3 WITH VALUES (CLIENT_MASTER_KEY = copyCMK, ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS CopyTbl(
+    i0 INT, 
+    i1 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = copyCEK1, ENCRYPTION_TYPE = DETERMINISTIC), 
+    i2 TEXT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = copyCEK2, ENCRYPTION_TYPE = DETERMINISTIC),
+    i3 TEXT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = copyCEK3, ENCRYPTION_TYPE = DETERMINISTIC)  default 'stuff'
+    );
+-- 1 check copy from
+-- 1.a check copy the whole table
+-- missing data: should fail
+COPY CopyTbl FROM stdin;
+ERROR:  missing data for column "i1"
+CONTEXT:  COPY copytbl, line 1: ""
+-- check \N
+copy CopyTbl from stdin;
+--1.b check copy part of the table
+COPY CopyTbl (i0, i1,i2) FROM stdin;
+copy CopyTbl(i0,i2) from stdin;
+-- should fail: non-existent column in column list
+copy CopyTbl(col2) from stdin;
+ERROR:  column "col2" of relation "copytbl" does not exist
+-- should fail: too many columns in column list
+copy CopyTbl(i0,i1,i2,i3,i1,i3) from stdin;
+ERROR:  column "i1" specified more than once
+SELECT * FROM CopyTbl ORDER BY i0;
+  i0  | i1 | i2 |  i3   
+------+----+----+-------
+    1 |    | \N | NN
+   10 | 10 | 7  | stuff
+   11 | 20 | 8  | stuff
+ 1001 |    | 12 | stuff
+(4 rows)
+
+--3 check options
+--3.a format
+COPY CopyTbl from stdin(FORMAT CSV);
+COPY CopyTbl from stdin(FORMAT TEXT);
+--3.b oids DO NOT SUPPORT oids
+-- should fail: table "CopyTbl" does not have OIDs
+COPY CopyTbl from stdin WITH OIDS;
+ERROR:  table "copytbl" does not have OIDs
+--3.c option:delimiter
+copy CopyTbl from stdin with delimiter ',';
+--should fail
+copy CopyTbl from stdin with delimiter 'a';
+ERROR:  delimiter "a" cannot contain any characters in"\.abcdefghijklmnopqrstuvwxyz0123456789"
+--should fail
+copy CopyTbl from stdin with delimiter E'\r';
+ERROR:  COPY delimiter cannot be newline or carriage return
+--should fail:  delimiter must be no more than 10 bytes
+copy CopyTbl from stdin with delimiter '|,%^&*@#$%%^||||';
+ERROR:  COPY delimiter must be less than 10 bytes
+--3.d option:null force not null
+COPY CopyTbl from stdin WITH NULL AS '';
+--should fail
+COPY CopyTbl from stdin WITH NULL AS E'\r';
+ERROR:  COPY null representation cannot use newline or carriage return
+--should fail
+COPY CopyTbl from stdin WITH delimiter ',' NULL ',';
+ERROR:  COPY delimiter must not appear in the NULL specification
+--should fail
+COPY CopyTbl from stdin WITH CSV quote ',' NULL ',';
+ERROR:  delimiter cannot contain quote character
+-- force not null only available in csv mode and copy from
+-- ? no use
+COPY CopyTbl from stdin WITH CSV FORCE NOT NULL i2;
+COPY CopyTbl from stdin (FORMAT CSV, FORCE_NOT_NULL(i2));
+--3.e option:quote force_quote
+COPY CopyTbl TO stdout WITH csv;
+1,,\N,NN
+10,10,7,stuff
+11,20,8,stuff
+1001,,12,stuff
+3000,1,2,3
+1002,1,2,3
+1006,,2,3
+1,2,3,4
+1,2,3,4
+COPY CopyTbl TO stdout WITH csv quote '''' delimiter '|';
+1||\N|NN
+10|10|7|stuff
+11|20|8|stuff
+1001||12|stuff
+3000|1|2|3
+1002|1|2|3
+1006||2|3
+1|2|3|4
+1|2|3|4
+COPY CopyTbl TO stdout WITH CSV FORCE QUOTE i3;
+1,,\N,"NN"
+10,10,7,"stuff"
+11,20,8,"stuff"
+1001,,12,"stuff"
+3000,1,2,"3"
+1002,1,2,"3"
+1006,,2,"3"
+1,2,3,"4"
+1,2,3,"4"
+COPY CopyTbl TO stdout WITH CSV FORCE QUOTE *;
+"1",,"\N","NN"
+"10","10","7","stuff"
+"11","20","8","stuff"
+"1001",,"12","stuff"
+"3000","1","2","3"
+"1002","1","2","3"
+"1006",,"2","3"
+"1","2","3","4"
+"1","2","3","4"
+--3.f escape
+--fail to decrypt
+-- COPY CopyTbl TO stdout (FORMAT CSV, ESCAPE E'\\');
+--3.g option: eol
+-- fail
+-- COPY CopyTbl from stdin WITH EOL 'EOL_CRNL';
+-- COPY CopyTbl from stdin WITH EOL 'EOL_CR';
+-- COPY CopyTbl from stdin WITH EOL 'EOL_NL';
+--3.h ignore extra data
+copy CopyTbl from stdin with delimiter '|' ignore_extra_data;
+--3.h encoding 
+COPY CopyTbl to stdout WITH DELIMITER AS ',' ENCODING 'utf8';
+1,\N,\\N,NN
+10,10,7,stuff
+11,20,8,stuff
+1001,\N,12,stuff
+3000,1,2,3
+1002,1,2,3
+1006,\N,2,3
+1,2,3,4
+1,2,3,4
+1,2,3,4
+COPY CopyTbl to stdout WITH DELIMITER AS ',' ENCODING 'sql_ascii';
+1,\N,\\N,NN
+10,10,7,stuff
+11,20,8,stuff
+1001,\N,12,stuff
+3000,1,2,3
+1002,1,2,3
+1006,\N,2,3
+1,2,3,4
+1,2,3,4
+1,2,3,4
+--4 check copy out
+COPY CopyTbl TO stdout WITH CSV;
+1,,\N,NN
+10,10,7,stuff
+11,20,8,stuff
+1001,,12,stuff
+3000,1,2,3
+1002,1,2,3
+1006,,2,3
+1,2,3,4
+1,2,3,4
+1,2,3,4
+COPY CopyTbl TO stdout WITH CSV QUOTE '''' DELIMITER '|';
+1||\N|NN
+10|10|7|stuff
+11|20|8|stuff
+1001||12|stuff
+3000|1|2|3
+1002|1|2|3
+1006||2|3
+1|2|3|4
+1|2|3|4
+1|2|3|4
+COPY CopyTbl TO stdout WITH CSV FORCE QUOTE *;
+"1",,"\N","NN"
+"10","10","7","stuff"
+"11","20","8","stuff"
+"1001",,"12","stuff"
+"3000","1","2","3"
+"1002","1","2","3"
+"1006",,"2","3"
+"1","2","3","4"
+"1","2","3","4"
+"1","2","3","4"
+COPY CopyTbl TO stdout WITH CSV FORCE QUOTE i2 ENCODING 'sql_ascii';
+1,,"\N",NN
+10,10,"7",stuff
+11,20,"8",stuff
+1001,,"12",stuff
+3000,1,"2",3
+1002,1,"2",3
+1006,,"2",3
+1,2,"3",4
+1,2,"3",4
+1,2,"3",4
+-- Repeat above tests with new 9.0 option syntax
+COPY CopyTbl TO stdout (FORMAT CSV);
+1,,\N,NN
+10,10,7,stuff
+11,20,8,stuff
+1001,,12,stuff
+3000,1,2,3
+1002,1,2,3
+1006,,2,3
+1,2,3,4
+1,2,3,4
+1,2,3,4
+COPY CopyTbl TO stdout (FORMAT TEXT);
+1	\N	\\N	NN
+10	10	7	stuff
+11	20	8	stuff
+1001	\N	12	stuff
+3000	1	2	3
+1002	1	2	3
+1006	\N	2	3
+1	2	3	4
+1	2	3	4
+1	2	3	4
+COPY CopyTbl TO stdout (FORMAT CSV, QUOTE '''', DELIMITER '|');
+1||\N|NN
+10|10|7|stuff
+11|20|8|stuff
+1001||12|stuff
+3000|1|2|3
+1002|1|2|3
+1006||2|3
+1|2|3|4
+1|2|3|4
+1|2|3|4
+COPY CopyTbl TO stdout (FORMAT CSV, FORCE_QUOTE *);
+"1",,"\N","NN"
+"10","10","7","stuff"
+"11","20","8","stuff"
+"1001",,"12","stuff"
+"3000","1","2","3"
+"1002","1","2","3"
+"1006",,"2","3"
+"1","2","3","4"
+"1","2","3","4"
+"1","2","3","4"
+COPY CopyTbl TO stdout (FORMAT CSV, FORCE_QUOTE(i2),ENCODING 'sql_ascii');
+1,,"\N",NN
+10,10,"7",stuff
+11,20,"8",stuff
+1001,,"12",stuff
+3000,1,"2",3
+1002,1,"2",3
+1006,,"2",3
+1,2,"3",4
+1,2,"3",4
+1,2,"3",4
+-- Repeat above tests with \copy
+\copy CopyTbl TO stdout (FORMAT CSV);
+1,,\N,NN
+10,10,7,stuff
+11,20,8,stuff
+1001,,12,stuff
+3000,1,2,3
+1002,1,2,3
+1006,,2,3
+1,2,3,4
+1,2,3,4
+1,2,3,4
+\copy CopyTbl TO stdout (FORMAT TEXT);
+1	\N	\\N	NN
+10	10	7	stuff
+11	20	8	stuff
+1001	\N	12	stuff
+3000	1	2	3
+1002	1	2	3
+1006	\N	2	3
+1	2	3	4
+1	2	3	4
+1	2	3	4
+\copy CopyTbl TO stdout (FORMAT CSV, QUOTE '''', DELIMITER '|');
+1||\N|NN
+10|10|7|stuff
+11|20|8|stuff
+1001||12|stuff
+3000|1|2|3
+1002|1|2|3
+1006||2|3
+1|2|3|4
+1|2|3|4
+1|2|3|4
+\copy CopyTbl TO stdout (FORMAT CSV, FORCE_QUOTE *);
+"1",,"\N","NN"
+"10","10","7","stuff"
+"11","20","8","stuff"
+"1001",,"12","stuff"
+"3000","1","2","3"
+"1002","1","2","3"
+"1006",,"2","3"
+"1","2","3","4"
+"1","2","3","4"
+"1","2","3","4"
+\copy CopyTbl TO stdout (FORMAT CSV, FORCE_QUOTE(i2),ENCODING 'sql_ascii');
+1,,"\N",NN
+10,10,"7",stuff
+11,20,"8",stuff
+1001,,"12",stuff
+3000,1,"2",3
+1002,1,"2",3
+1006,,"2",3
+1,2,"3",4
+1,2,"3",4
+1,2,"3",4
+-- test end of copy marker
+CREATE COLUMN ENCRYPTION KEY copyCEK4 WITH VALUES (CLIENT_MASTER_KEY = copyCMK, ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
+create table test_eoc(
+    a int,
+    b text ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = copyCEK4, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+copy test_eoc from stdin csv;
+select * from test_eoc order by a;
+ a |  b   
+---+------
+ 1 | a\.
+ 2 | \.b
+ 3 | c\.d
+ 4 | \.
+(4 rows)
+
+--5 check copy select
+CREATE COLUMN ENCRYPTION KEY copyCEK5 WITH VALUES (CLIENT_MASTER_KEY = copyCMK, ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
+create table test_select(
+    a int,
+    b text ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = copyCEK5, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+insert into test_select values (1, 'a');
+insert into test_select values (2, 'b');
+insert into test_select values (3, 'c');
+insert into test_select values (4, 'd');
+insert into test_select values (5, 'e');
+CREATE COLUMN ENCRYPTION KEY copyCEK6 WITH VALUES (CLIENT_MASTER_KEY = copyCMK, ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
+create table test_select_2(
+    a int,
+    b text ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = copyCEK6, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+insert into test_select_2 values (1, 'A');
+insert into test_select_2 values (2, 'B');
+insert into test_select_2 values (3, 'C');
+insert into test_select_2 values (4, 'D');
+insert into test_select_2 values (5, 'E');
+--6. test COPY select table TO
+--a. test COPY (select) TO
+copy (select * from test_select order by 1) to stdout;
+1	a
+2	b
+3	c
+4	d
+5	e
+copy (select * from test_select order by 1) to stdout;
+1	a
+2	b
+3	c
+4	d
+5	e
+copy (select b from test_select where a=1) to stdout;
+a
+--b. test COPY (select for update) TO
+copy (select b from test_select where a=3 for update) to stdout;
+c
+-- should fail
+copy (select * from test_select) from stdin;
+ERROR:  syntax error at or near "from"
+LINE 1: copy (select * from test_select) from stdin;
+                                         ^
+-- should fail
+copy (select * from test_select) (a,b) to stdout;
+ERROR:  syntax error at or near "("
+LINE 1: copy (select * from test_select) (a,b) to stdout;
+                                         ^
+--c.test join
+copy (select * from test_select join test_select_2 using (a) order by 1) to stdout;
+1	a	A
+2	b	B
+3	c	C
+4	d	D
+5	e	E
+--d. Test subselect
+copy (select * from (select b from test_select where a = 1)) to stdout;
+a
+--e. test headers, CSV and quotes
+copy (select b from test_select where a = 1) to stdout csv header force quote b;
+b
+"a"
+--f. test psql builtins, plain table
+\copy (select * from test_select order by 1) to stdout;
+1	a
+2	b
+3	c
+4	d
+5	e
+-- fail to decrypt
+-- \copy (select "a",'a','a""'||b,(a + 1)*a,b,"test_select"."b" from test_select where a=3) to stdout;
+DROP TABLE CopyTbl;
+DROP TABLE test_eoc;
+DROP TABLE test_select;
+DROP TABLE test_select_2;
+DROP CLIENT MASTER KEY copyCMK CASCADE;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to column encryption key: copycek1
+drop cascades to column encryption key: copycek2
+drop cascades to column encryption key: copycek3
+drop cascades to column encryption key: copycek4
+drop cascades to column encryption key: copycek5
+drop cascades to column encryption key: copycek6
+\! gs_ktool -d all
+DELETE ALL
+ 1

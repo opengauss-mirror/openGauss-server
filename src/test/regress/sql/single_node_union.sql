@@ -109,6 +109,27 @@ SELECT q1 FROM int8_tbl EXCEPT ALL SELECT q2 FROM int8_tbl;
 
 SELECT q1 FROM int8_tbl EXCEPT ALL SELECT DISTINCT q2 FROM int8_tbl;
 
+-- Test that single node stream plan handles INTERSECT and EXCEPT correctly
+set query_dop = 10;
+
+SELECT q2 FROM int8_tbl INTERSECT SELECT q1 FROM int8_tbl ORDER BY 1;
+
+SELECT q2 FROM int8_tbl INTERSECT ALL SELECT q1 FROM int8_tbl ORDER BY 1;
+
+SELECT q2 FROM int8_tbl EXCEPT SELECT q1 FROM int8_tbl ORDER BY 1;
+
+SELECT q2 FROM int8_tbl EXCEPT ALL SELECT q1 FROM int8_tbl ORDER BY 1;
+
+SELECT q2 FROM int8_tbl EXCEPT ALL SELECT DISTINCT q1 FROM int8_tbl ORDER BY 1;
+
+SELECT q1 FROM int8_tbl EXCEPT SELECT q2 FROM int8_tbl;
+
+SELECT q1 FROM int8_tbl EXCEPT ALL SELECT q2 FROM int8_tbl;
+
+SELECT q1 FROM int8_tbl EXCEPT ALL SELECT DISTINCT q2 FROM int8_tbl;
+
+set query_dop = 1;
+
 --
 -- Mixed types
 --
@@ -196,6 +217,27 @@ explain (costs off)
   SELECT * FROM t2) t
  WHERE ab = 'ab';
 
+-- Test that single node stream plan handles UNION correctly
+set query_dop = 10;
+
+explain (costs off)
+ SELECT * FROM
+ (SELECT a || b AS ab FROM t1
+  UNION ALL
+  SELECT * FROM t2) t
+ WHERE ab = 'ab';
+
+explain (costs off)
+ SELECT * FROM
+ (SELECT a || b AS ab FROM t1
+  UNION
+  SELECT * FROM t2) t
+ WHERE ab = 'ab';
+
+set query_dop = 1;
+
+
+
 --
 -- Test that ORDER BY for UNION ALL can be pushed down to inheritance
 -- children.
@@ -270,6 +312,59 @@ SELECT * FROM
    UNION
    SELECT 2 AS t, 4 AS x) ss
 WHERE x > 3;
+
+-- Test that single node stream plan handles UNION sub-selects correctly
+set query_dop = 10;
+
+explain (costs off)
+ SELECT * FROM
+  (SELECT 1 AS t, * FROM tenk1 a
+   UNION ALL
+   SELECT 2 AS t, * FROM tenk1 b) c
+ WHERE t = 2;
+
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, 2 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4;
+
+SELECT * FROM
+  (SELECT 1 AS t, 2 AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4;
+
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, generate_series(1,10) AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+
+SELECT * FROM
+  (SELECT 1 AS t, generate_series(1,10) AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x < 4
+ORDER BY x;
+
+explain (costs off)
+SELECT * FROM
+  (SELECT 1 AS t, (random()*3)::int AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x > 3;
+
+SELECT * FROM
+  (SELECT 1 AS t, (random()*3)::int AS x
+   UNION
+   SELECT 2 AS t, 4 AS x) ss
+WHERE x > 3;
+
+set query_dop = 1;
 
 -- Test proper handling of parameterized appendrel paths when the
 -- potential join qual is expensive

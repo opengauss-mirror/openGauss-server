@@ -26,7 +26,11 @@
 #ifndef DFS_QUERY_H
 #define DFS_QUERY_H
 
+#include "pg_config.h"
+
+#ifndef ENABLE_LITE_MODE
 #include "orc/Exceptions.hh"
+#endif
 #include "access/dfs/dfs_am.h"
 #include "catalog/pg_collation.h"
 #include "nodes/execnodes.h"
@@ -44,6 +48,7 @@
 #define DFS_PRIVATE_ITEM "DfsPrivateItem"
 #define DFS_NUMERIC64_MAX_PRECISION 18
 
+#ifdef ENABLE_LLVM_COMPILE
 extern bool CodeGenThreadObjectReady();
 extern bool ForeignScanExprCodeGen(Expr *expr, PlanState *parent, void **jittedFunc);
 
@@ -52,6 +57,7 @@ extern bool ForeignScanExprCodeGen(Expr *expr, PlanState *parent, void **jittedF
  */
 typedef bool (*evaPredicateDouble)(double value);
 typedef bool (*evaPredicateInt)(int64_t value);
+#endif
 
 /*
  * define the strategy numbers for hdfs foriegn scan. -1 is invalid,
@@ -103,9 +109,11 @@ public:
     Oid m_collation;               // collation to use, if needed
     bool m_keepFalse;              // the check result keeps false if it is true
     T *m_argument;                 // store value
+#ifdef ENABLE_LLVM_COMPILE
     char *m_predFunc;    /* IR function pointer */
     bool m_isPredJitted; /* whether use LLVM optimization or not. if the m_isPredJitted is true, use it */
     void *m_jittedFunc;  /* machine code address pointer. */
+#endif
 
 public:
     /*
@@ -124,9 +132,11 @@ public:
           m_keepFalse(false)
     {
         m_argument = New(CurrentMemoryContext) T(strategy);
+#ifdef ENABLE_LLVM_COMPILE
         m_predFunc = NULL;
         m_isPredJitted = false;
         m_jittedFunc = NULL;
+#endif
     }
 
     ~HdfsScanPredicate()
@@ -184,6 +194,7 @@ public:
     }
 };
 
+#ifdef ENABLE_LLVM_COMPILE
 /*
  * Brief        : Function to check if a value of basic type can match the clauses list pushed
  *                down. Here we do not check the length of scanClauses, and the caller need ensure it.
@@ -261,6 +272,8 @@ bool HdfsPredicateCheckValueDoubleForLlvm(baseType &value, List *&scanClauses)
 
     return true;
 }
+#endif
+
 
 /**
  * @Description: Identify the qual which could be pushed down to

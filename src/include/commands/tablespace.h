@@ -137,6 +137,7 @@ extern void check_create_dir(char* location);
 
 extern void tblspc_redo(XLogReaderState* rptr);
 extern void tblspc_desc(StringInfo buf, XLogReaderState* record);
+extern const char* tblspc_type_name(uint8 subtype);
 extern uint64 pg_cal_tablespace_size_oid(Oid tblspcOid);
 extern Oid ConvertToPgclassRelTablespaceOid(Oid tblspc);
 extern Oid ConvertToRelfilenodeTblspcOid(Oid tblspc);

@@ -32,7 +32,12 @@
 #include "storage/sinval.h"
 #include "utils/plancache.h"
 
+#ifndef ENABLE_LITE_MODE
 #define GPC_NUM_OF_BUCKETS (128)
+#else
+#define GPC_NUM_OF_BUCKETS (2)
+#endif
+
 #define GPC_HTAB_SIZE (128)
 #define GLOBALPLANCACHEKEY_MAGIC (953717831)
 #define CAS_SLEEP_DURATION (2)
@@ -206,6 +211,7 @@ extern void GPCResetAll();
 void GPCCleanDatanodeStatement(int dn_stmt_num, const char* stmt_name);
 void GPCReGplan(CachedPlanSource* plansource);
 void CNGPCCleanUpSession();
+void GPCCleanUpSessionSavedPlan();
 List* CopyLocalStmt(const List* stmt_list, const MemoryContext parent_cxt, MemoryContext* plan_context);
 bool SPIParseEnableGPC(const Node *node);
 void CleanSessGPCPtr(knl_session_context* currentSession);

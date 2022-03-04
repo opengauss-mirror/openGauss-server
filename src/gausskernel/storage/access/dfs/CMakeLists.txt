@@ -39,17 +39,22 @@ add_static_objtarget(gausskernel_storage_access_dfs TGT_dfs_SRC TGT_dfs_INC "${d
 set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/carbondata 
     ${CMAKE_CURRENT_SOURCE_DIR}/csv
-    ${CMAKE_CURRENT_SOURCE_DIR}/orc 
-    ${CMAKE_CURRENT_SOURCE_DIR}/parquet
     ${CMAKE_CURRENT_SOURCE_DIR}/text
 )
+
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    list(APPEND CMAKE_MODULE_PATH
+        ${CMAKE_CURRENT_SOURCE_DIR}/orc
+        ${CMAKE_CURRENT_SOURCE_DIR}/parquet
+    )
+    add_subdirectory(orc)
+    add_subdirectory(parquet)
+endif()
 
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON")
     add_subdirectory(carbondata)
 endif()
 add_subdirectory(csv)
-add_subdirectory(orc)
-add_subdirectory(parquet)
 add_subdirectory(text)
 
 install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/region_map

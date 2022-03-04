@@ -27,7 +27,7 @@ extern void mark_index_clustered(Relation rel, Oid indexOid);
 extern Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode = AccessExclusiveLock);
 
 extern Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabHeapDesc, Datum partTabRelOptions,
-    Oid oldPartOid, Oid partToastOid, Oid NewTableSpace, bool isCStore = false);
+    Oid oldPartOid, Oid partToastOid, Oid NewTableSpace, bool isCStore = false, Oid subpartFilenode = InvalidOid);
 extern double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation NewHeap, TransactionId OldestXmin,
     TransactionId FreezeXid, bool verbose, bool use_sort, AdaptMem* memUsage);
 extern double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHeap, TransactionId oldestXmin,

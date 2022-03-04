@@ -12,7 +12,8 @@
 #ifndef _STARTUP_H
 #define _STARTUP_H
 
-typedef enum { NOTIFY_PRIMARY = 0, NOTIFY_STANDBY, NOTIFY_FAILOVER, NOTIFY_SWITCHOVER, NUM_NOTIFYS } NotifyReason;
+typedef enum { NOTIFY_PRIMARY = 0, NOTIFY_STANDBY, NOTIFY_CASCADE_STANDBY, NOTIFY_FAILOVER,
+               NOTIFY_SWITCHOVER, NUM_NOTIFYS } NotifyReason;
 
 /*
  * Save the notify signal reason in the share memory.

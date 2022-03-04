@@ -71,6 +71,30 @@ void heap3_new_cid(StringInfo buf, int bucket_id, xl_heap_new_cid *xlrec)
     appendStringInfo(buf, "; cmin: %u, cmax: %u, combo: %u", xlrec->cmin, xlrec->cmax, xlrec->combocid);
 }
 
+const char* heap_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    info &= XLOG_HEAP_OPMASK;
+    if (info == XLOG_HEAP_INSERT) {
+        return "heap_insert";
+    } else if (info == XLOG_HEAP_DELETE) {
+        return "heap_delete";
+    } else if (info == XLOG_HEAP_UPDATE) {
+        return "heap_update";
+    } else if (info == XLOG_HEAP_HOT_UPDATE) {
+        return "heap_hot_update";
+    } else if (info == XLOG_HEAP_NEWPAGE) {
+        return "heap_newpage";
+    } else if (info == XLOG_HEAP_LOCK) {
+        return "heap_lock";
+    } else if (info == XLOG_HEAP_INPLACE) {
+        return "heap_inplace";
+    } else if (info == XLOG_HEAP_BASE_SHIFT) {
+        return "base_shift";
+    }
+    return "unkown_type";
+}
+
 void heap_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
@@ -145,6 +169,31 @@ void heap_desc(StringInfo buf, XLogReaderState *record)
         appendStringInfo(buf, "base_shift delta %ld multi %d", xlrec->delta, xlrec->multi);
     } else
         appendStringInfo(buf, "UNKNOWN");
+}
+
+const char* heap2_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    info &= XLOG_HEAP_OPMASK;
+    if (info == XLOG_HEAP2_FREEZE) {
+        return "heap2_freeze";
+    } else if (info == XLOG_HEAP2_CLEAN) {
+        return "heap2_clean";
+    } else if (info == XLOG_HEAP2_PAGE_UPGRADE) {
+        return "heap2_page_udpate";  // not used
+    } else if (info == XLOG_HEAP2_CLEANUP_INFO) {
+        return "heap2_cleanup_info";
+    } else if (info == XLOG_HEAP2_VISIBLE) {
+        return "heap2_visible";
+    } else if (info == XLOG_HEAP2_BCM) {
+        return "heap2_bcm";
+    } else if (info == XLOG_HEAP2_MULTI_INSERT) {
+        return "heap2_multi_insert";
+    } else if (info == XLOG_HEAP2_LOGICAL_NEWPAGE) {
+        return "heap2_logical_newpage";
+    } else {
+        return "unkown_type";
+    }
 }
 
 void heap2_desc(StringInfo buf, XLogReaderState *record)
@@ -278,6 +327,19 @@ void heap2_desc(StringInfo buf, XLogReaderState *record)
         }
     } else
         appendStringInfo(buf, "UNKNOWN");
+}
+
+const char* heap3_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    info &= XLOG_HEAP_OPMASK;
+    if (info == XLOG_HEAP3_NEW_CID) {
+        return "heap3_new_cid";
+    } else if (info == XLOG_HEAP3_REWRITE) {
+        return "heap3_rewrite";
+    } else {
+        return "unkown_type";
+    }
 }
 
 void heap3_desc(StringInfo buf, XLogReaderState *record)

@@ -750,7 +750,8 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
         bool is_select_for_update =
             (list_length(lockrows->rowMarks) == 1 && IsA(linitial(lockrows->rowMarks), PlanRowMark) &&
             ((PlanRowMark *)linitial(lockrows->rowMarks))->markType == ROW_MARK_EXCLUSIVE &&
-            ((PlanRowMark *)linitial(lockrows->rowMarks))->noWait == false);
+            ((PlanRowMark *)linitial(lockrows->rowMarks))->noWait == false &&
+            ((PlanRowMark *)linitial(lockrows->rowMarks))->waitSec == 0);
         if (is_select_for_update) {
             top_plan = top_plan->lefttree;
             ftype = SELECT_FOR_UPDATE_FUSION;
@@ -1223,6 +1224,8 @@ Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition *
             if (!IsBootstrapProcessingMode()) {
                 ResourceOwnerForgetFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, (*partIndex)->partrel);
             }
+        } else {
+            UpdatePartrelPointer((*partIndex)->partrel, *parentIndex, *partIndex);
         }
         index = (*partIndex)->partrel;
     } else {
@@ -1245,6 +1248,8 @@ void InitPartitionRelationInFusion(Oid partOid, Relation parentRel, Partition* p
             if (!IsBootstrapProcessingMode()) {
                 ResourceOwnerForgetFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, (*partRel)->partrel);
             }
+        } else {
+            UpdatePartrelPointer((*partRel)->partrel, parentRel, *partRel);
         }
         *rel = (*partRel)->partrel;
     } else {

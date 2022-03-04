@@ -22,6 +22,8 @@ ALTER [ LARGE ] SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</repl
     [ MAXVALUE <replaceable class="parameter">maxvalue</replaceable> | NO MAXVALUE | NOMAXVALUE ]
     [ OWNED BY { <replaceable class="parameter">table_name</replaceable>.<replaceable class="parameter">column_name</replaceable> | NONE } ];
 ALTER [ LARGE ] SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</replaceable> OWNER TO <replaceable class="PARAMETER">new_owner</replaceable>;
+
+NOTICE: '[ LARGE ]' is only avaliable in CENTRALIZED mode!
 </synopsis>
  </refsynopsisdiv>
 

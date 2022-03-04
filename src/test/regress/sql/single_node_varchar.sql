@@ -64,3 +64,19 @@ INSERT INTO VARCHAR_TBL (f1) VALUES ('abcde');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd    ');
 
 SELECT '' AS four, * FROM VARCHAR_TBL;
+
+create table tab_1(col1 varchar(3)); 
+create table tab_2(col2 char(3));
+insert into tab_2 values('   ');
+insert into tab_1 select col2 from tab_2;
+select * from tab_1 where col1 is null;
+select * from tab_1 where col1='   ';
+
+delete from tab_1;
+set behavior_compat_options = 'char_coerce_compat';
+insert into tab_1 select col2 from tab_2;
+select * from tab_1 where col1 is null;
+select * from tab_1 where col1='   ';
+set behavior_compat_options = ''; 
+drop table tab_1;
+drop table tab_2;

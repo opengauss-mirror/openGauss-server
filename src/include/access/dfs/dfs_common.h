@@ -24,7 +24,11 @@
 #ifndef DFS_COMMON_H
 #define DFS_COMMON_H
 
+#include "pg_config.h"
+
+#ifndef ENABLE_LITE_MODE
 #include "orc/Exceptions.hh"
+#endif
 #include "access/dfs/dfs_am.h"
 #include "catalog/pg_collation.h"
 #include "nodes/execnodes.h"

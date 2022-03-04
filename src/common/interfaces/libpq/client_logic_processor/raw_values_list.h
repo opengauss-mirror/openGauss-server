@@ -49,6 +49,7 @@ public:
 private:
     void quicksort_by_location(int lo, int high);
     int partition_by_location(int lo, int high);
+    void safe_delete(size_t pos);
     size_t m_raw_values_size;
      bool m_should_free_values;
 };

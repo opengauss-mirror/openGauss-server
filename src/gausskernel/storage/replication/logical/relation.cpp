@@ -68,9 +68,11 @@ static void logicalrep_relmap_init()
 {
     HASHCTL ctl;
 
-    if (!t_thrd.applyworker_cxt.logicalRepRelMapContext)
+    if (!t_thrd.applyworker_cxt.logicalRepRelMapContext) {
         t_thrd.applyworker_cxt.logicalRepRelMapContext =
-            AllocSetContextCreate(u_sess->cache_mem_cxt, "LogicalRepRelMapContext", ALLOCSET_DEFAULT_SIZES);
+            AllocSetContextCreate(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT),
+                                  "LogicalRepRelMapContext", ALLOCSET_DEFAULT_SIZES);
+    }
 
     /* Initialize the relation hash table. */
     int rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
@@ -83,7 +85,7 @@ static void logicalrep_relmap_init()
         DEFAULT_LOGICAL_RELMAP_HASH_ELEM, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
     /* Watch for invalidation events. */
-    CacheRegisterRelcacheCallback(logicalrep_relmap_invalidate_cb, (Datum)0);
+    CacheRegisterThreadRelcacheCallback(logicalrep_relmap_invalidate_cb, (Datum)0);
 }
 
 /*

@@ -118,4 +118,5 @@ extern void assign_record_type_typmod(TupleDesc tupDesc);
 
 extern int compare_values_of_enum(TypeCacheEntry* tcache, Oid arg1, Oid arg2);
 
+extern void TypeCacheRelCallback(Datum arg, Oid relid);
 #endif /* TYPCACHE_H */

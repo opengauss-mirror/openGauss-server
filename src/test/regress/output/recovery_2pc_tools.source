@@ -22,6 +22,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  application_name                  | string  |      |         | 
  application_type                  | enum    |      |         | 
  archive_command                   | string  |      |         | 
+ archive_interval                  | integer | s    | 1       | 1000
  archive_mode                      | bool    |      |         | 
  archive_timeout                   | integer | s    | 0       | 1073741823
  array_nulls                       | bool    |      |         |
@@ -38,6 +39,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  audit_directory                   | string  |      |         | 
  audit_dml_state                   | integer |      | 0       | 1
  audit_dml_state_select            | integer |      | 0       | 1
+ audit_xid_info                    | integer |      | 0       | 1
  audit_enabled                     | bool    |      |         | 
  audit_file_remain_threshold       | integer |      | 1       | 1048576
  audit_file_remain_time            | integer |      | 0       | 730
@@ -53,6 +55,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  audit_user_locked                 | integer |      | 0       | 1
  audit_user_violation              | integer |      | 0       | 1
  authentication_timeout            | integer | s    | 1       | 600
+ auto_csn_barrier                  | bool    |      |         | 
  auth_iteration_count              | integer |      | 2048    | 134217728
  autoanalyze                       | bool    |      |         | 
  autoanalyze_timeout               | integer | s    | 0       | 2147483
@@ -151,6 +154,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  default_with_oids                 | bool    |      |         | 
  dfs_partition_directory_length    | integer |      | 92      | 7999
  disable_memory_protect            | bool    |      |         | 
+ dw_file_num                       | integer |      | 1       | 16
+ dw_file_size                      | integer |      | 32      | 256
  dynamic_library_path              | string  |      |         | 
  effective_cache_size              | integer | 8kB  | 1       | 2147483647
  effective_io_concurrency          | integer |      | 0       | 1000
@@ -204,6 +209,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_light_proxy                | bool    |      |         | 
  enable_logical_io_statistics      | bool    |      |         | 
  enable_material                   | bool    |      |         | 
+ enable_memory_context_check_debug | bool    |      |         | 
  enable_memory_context_control     | bool    |      |         | 
  enable_memory_limit               | bool    |      |         | 
  enable_mergejoin                  | bool    |      |         | 
@@ -511,6 +517,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  temp_file_limit                   | integer | kB   | -1      | 2147483647
  temp_tablespaces                  | string  |      |         | 
  thread_pool_attr                  | string  |      |         | 
+ thread_pool_stream_attr           | string  |      |         | 
  TimeZone                          | string  |      |         | 
  timezone_abbreviations            | string  |      |         | 
  topsql_retention_time             | integer |      | 0       | 3650
@@ -541,6 +548,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  update_lockwait_timeout           | integer | ms   | 0       | 2147483647
  update_process_title              | bool    |      |         | 
  upgrade_mode                      | integer |      | 0       | 2147483647
+ uppercase_attribute_name          | bool    |      |         | 
  user_metric_retention_time        | integer |      | 0       | 3650
  use_workload_manager              | bool    |      |         | 
  vacuum_cost_delay                 | integer | ms   | 0       | 100

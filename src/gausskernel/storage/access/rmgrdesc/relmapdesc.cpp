@@ -18,6 +18,16 @@
 
 #include "utils/relmapper.h"
 
+const char* relmap_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_RELMAP_UPDATE) {
+        return "relmap_update";
+    } else {
+        return "unkown_type";
+    }
+}
+
 void relmap_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

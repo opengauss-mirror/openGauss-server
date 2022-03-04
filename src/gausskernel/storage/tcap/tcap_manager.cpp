@@ -52,6 +52,7 @@
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_recyclebin.h"
 #include "catalog/pg_rewrite.h"
@@ -64,6 +65,7 @@
 #include "catalog/pg_ts_parser.h"
 #include "catalog/pg_ts_template.h"
 #include "catalog/pgxc_class.h"
+#include "catalog/pg_partition.h"
 #include "catalog/storage.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
@@ -144,7 +146,7 @@ void TrDescInit(Relation rel, TrObjDesc *desc, TrObjOperType operType,
 
     rc = strncpy_s(desc->originname, NAMEDATALEN, RelationGetRelationName(rel),
         strlen(RelationGetRelationName(rel)));
-    securec_check_ss_c(rc, "\0", "\0");
+    securec_check(rc, "\0", "\0");
 
     desc->operation = operType;
     desc->type = objType;
@@ -159,6 +161,41 @@ void TrDescInit(Relation rel, TrObjDesc *desc, TrObjOperType operType,
     desc->frozenxid = RelationGetRelFrozenxid(rel);
     desc->frozenxid64 = RelationGetRelFrozenxid64(rel);
     desc->canrestore = objType == RB_OBJ_TABLE;
+    desc->canpurge = canpurge;
+}
+
+void TrPartDescInit(Relation rel, Partition part, TrObjDesc *desc, TrObjOperType operType,
+    TrObjType objType, bool canpurge, bool isBaseObj)
+{
+    errno_t rc = EOK;
+
+    /* Notice: desc->id, desc->baseid will be assigned by invoker later. */
+    desc->dbid = u_sess->proc_cxt.MyDatabaseId;
+    desc->relid = part->pd_id;
+
+    (void)TrGenObjName(desc->name, PartitionRelationId, desc->relid);
+
+    rc = strncpy_s(desc->originname, NAMEDATALEN, RelationGetRelationName(rel),
+        strlen(RelationGetRelationName(rel)));
+    securec_check(rc, "\0", "\0");
+    
+    int len = strlen(PartitionGetPartitionName(part)) + strlen(RelationGetRelationName(rel)) + 1;
+    rc = strcat_s(desc->originname, len, PartitionGetPartitionName(part));
+    securec_check(rc, "\0", "\0");
+
+    desc->operation = operType;
+    desc->type = objType;
+    desc->recyclecsn = t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
+    desc->recycletime = GetCurrentTimestamp();
+    desc->createcsn = RelationGetCreatecsn(rel);
+    desc->changecsn = RelationGetChangecsn(rel);
+    desc->nspace = RelationGetNamespace(rel);
+    desc->owner = RelationGetOwner(rel);
+    desc->tablespace = part->pd_part->reltablespace;
+    desc->relfilenode = part->pd_part->relfilenode;
+    desc->frozenxid = part->pd_part->relfrozenxid;
+    desc->frozenxid64 = PartGetRelFrozenxid64(part);
+    desc->canrestore = false;
     desc->canpurge = canpurge;
 }
 
@@ -263,10 +300,11 @@ static bool TrFetchOrinameImpl(Oid nspId, const char *oriname, TrObjType type,
     sd = systable_beginscan(rbRel, RecyclebinDbidNspOrinameIndexId, true, NULL, 3, skey);
     while ((tup = systable_getnext(sd)) != NULL) {
         Form_pg_recyclebin rbForm = (Form_pg_recyclebin)GETSTRUCT(tup);
-        if (rbForm->rcytype != type || (operMode == RB_OPER_RESTORE_DROP && rbForm->rcyoperation != 'd') ||
-            (operMode == RB_OPER_RESTORE_TRUNCATE && rbForm->rcyoperation != 't')) {
+        if ((rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_TABLE) ||
+            (rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_INDEX)) {
             continue;
         }
+
         found = true;
         TrDescRead(desc, tup);
         break;
@@ -278,7 +316,7 @@ static bool TrFetchOrinameImpl(Oid nspId, const char *oriname, TrObjType type,
     return found;
 }
 
-static bool TrFetchName(const char *rcyname, TrObjType type, TrObjDesc *desc)
+bool TrFetchName(const char *rcyname, TrObjType type, TrObjDesc *desc, TrOperMode operMode)
 {
     Relation rbRel;
     SysScanDesc sd;
@@ -294,7 +332,8 @@ static bool TrFetchName(const char *rcyname, TrObjType type, TrObjDesc *desc)
     sd = systable_beginscan(rbRel, RecyclebinNameIndexId, true, NULL, 1, skey);
     if ((tup = systable_getnext(sd)) != NULL) {
         Form_pg_recyclebin rbForm = (Form_pg_recyclebin)GETSTRUCT(tup);
-        if (rbForm->rcytype != type) {
+        if ((rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_TABLE) ||
+            (rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_INDEX)) {
             ereport(ERROR,
                 (errmsg("The recycle object \"%s\" type mismatched.", rcyname)));
         }
@@ -331,6 +370,10 @@ static bool TrFetchOriname(const char *schemaname, const char *relname, TrObjTyp
             }
         }
         list_free_ext(activeSearchPath);
+        if (!found) {
+            nspId = PG_TOAST_NAMESPACE;
+            found = TrFetchOrinameImpl(nspId, relname, type, desc, operMode);
+        }
     }
 
     return found;
@@ -374,7 +417,7 @@ void TrUpdateBaseid(const TrObjDesc *desc)
     return;
 }
 
-static void TrLockRelationImpl(Oid relid)
+static void TrLockRelationImpl(Oid relid, TrObjType type)
 {
     /*
      * Lock failed may due to concurrently purge/timecapsule/DQL
@@ -391,12 +434,18 @@ static void TrLockRelationImpl(Oid relid)
      * really exists or not.
      */
     AcceptInvalidationMessages();
-    if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(relid))) {
+    if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(relid)) && type != RB_OBJ_PARTITION) {
         /* Clean already held locks if error return. */
         UnlockRelationOid(relid, AccessExclusiveLock);
         ereport(ERROR,
             (errcode(ERRCODE_RBIN_UNDEFINED_OBJECT),
                 errmsg("relation \"%u\" does not exist", relid)));
+    } else if (!SearchSysCacheExists1(PARTRELID, ObjectIdGetDatum(relid)) && type == RB_OBJ_PARTITION) {
+        /* Clean already held locks if error return. */
+        UnlockRelationOid(relid, AccessExclusiveLock);
+        ereport(ERROR,
+            (errcode(ERRCODE_RBIN_UNDEFINED_OBJECT),
+                errmsg("partition \"%u\" does not exist", relid)));
     }
 }
 
@@ -412,14 +461,14 @@ static void TrLockRelation(TrObjDesc *desc)
                 (errcode(ERRCODE_RBIN_UNDEFINED_OBJECT),
                     errmsg("relation \"%u\" does not exist", desc->relid)));
         }
-        TrLockRelationImpl(heapOid);
+        TrLockRelationImpl(heapOid, desc->type);
     }
 
     /* Use TRY-CATCH block to clean locks already held if error. */
     PG_TRY();
     {
         /* Lock relation self */
-        TrLockRelationImpl(desc->relid);
+        TrLockRelationImpl(desc->relid, desc->type);
     }
     PG_CATCH();
     {
@@ -482,7 +531,7 @@ static void TrOperMatch(const TrObjDesc *desc, TrOperMode operMode)
 {
     switch (operMode) {
         case RB_OPER_PURGE:
-            if (!desc->canpurge) {
+            if (!desc->canpurge && desc->type != RB_OBJ_PARTITION) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_OPERATION),
                         errmsg("recycle object \"%s\" cannot be purged", desc->name)));
@@ -490,7 +539,7 @@ static void TrOperMatch(const TrObjDesc *desc, TrOperMode operMode)
             break;
 
         case RB_OPER_RESTORE_DROP:
-            if (!desc->canrestore || desc->operation != RB_OPER_DROP) {
+            if ((!desc->canrestore && desc->type != RB_OBJ_PARTITION) || desc->operation != RB_OPER_DROP) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_OPERATION),
                         errmsg("recycle object \"%s\" cannot be restored", desc->name)));
@@ -498,7 +547,7 @@ static void TrOperMatch(const TrObjDesc *desc, TrOperMode operMode)
             break;
 
         case RB_OPER_RESTORE_TRUNCATE:
-            if (!desc->canrestore || desc->operation != RB_OPER_TRUNCATE) {
+            if ((!desc->canrestore && desc->type != RB_OBJ_PARTITION) || desc->operation != RB_OPER_TRUNCATE) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_OPERATION),
                         errmsg("recycle object \"%s\" cannot be restored", desc->name)));
@@ -517,8 +566,7 @@ static void TrOperMatch(const TrObjDesc *desc, TrOperMode operMode)
  * Fetch object from recycle bin for rb operations - purge, restore :
  *     Prefer to fetch as original name, then recycle name.
  */
-void TrOperFetch(const RangeVar *purobj, TrObjType objtype,
-    TrObjDesc *desc, TrOperMode operMode)
+void TrOperFetch(const RangeVar *purobj, TrObjType objtype, TrObjDesc *desc, TrOperMode operMode)
 {
     bool found = false;
 
@@ -528,7 +576,7 @@ void TrOperFetch(const RangeVar *purobj, TrObjType objtype,
     found = TrFetchOriname(purobj->schemaname, purobj->relname, objtype, desc, operMode);
     /* if not found, then fetch as recycle name */
     if (!found) {
-        found = TrFetchName(purobj->relname, objtype, desc);
+        found = TrFetchName(purobj->relname, objtype, desc, operMode);
     }
 
     /* not found, throw error */
@@ -542,6 +590,7 @@ void TrOperFetch(const RangeVar *purobj, TrObjType objtype,
 
     return;
 }
+
 static void TrPermRestore(TrObjDesc *desc, TrOperMode operMode)
 {
     AclResult aclCreateResult;
@@ -674,11 +723,9 @@ bool NeedTrComm(Oid relid)
         /* table is non ordinary table, or */
         classForm->relkind != RELKIND_RELATION ||
         /* is non heap table, or */
-        rel->rd_tam_type != TAM_HEAP ||
+        rel->rd_tam_type == TAM_HEAP ||
         /* is non regular table, or */
         classForm->relpersistence != RELPERSISTENCE_PERMANENT ||
-        /* is partitioned table, or */
-        classForm->parttype != PARTTYPE_NON_PARTITIONED_RELATION ||
         /* is shared table across databases, or */
         classForm->relisshared ||
         /* has derived classes, or */
@@ -722,6 +769,15 @@ TrObjType TrGetObjType(Oid nspId, char relKind)
             break;
         case RELKIND_TOASTVALUE:
             type = RB_OBJ_TOAST;
+            break;
+        case PARTTYPE_PARTITIONED_RELATION:
+            type = RB_OBJ_PARTITION;
+            break;
+        case RELKIND_GLOBAL_INDEX:
+            type = RB_OBJ_GLOBAL_INDEX;
+            break;
+        case RELKIND_MATVIEW:
+            type = RB_OBJ_MATVIEW;
             break;
         default:
             /* Never reached here. */
@@ -832,7 +888,7 @@ static void TrDoPurgeObject(TrObjDesc *desc)
     }
 }
 
-void TrPurgeObject(const RangeVar *purobj, TrObjType type)
+void TrPurgeObject(RangeVar *purobj, TrObjType type)
 {
     TrObjDesc desc;
 
@@ -862,8 +918,12 @@ static bool TrFetchExec(TrFetchMatchHook matchHook, Oid objId, SysScanDesc sd, T
     HeapTuple tup;
     while ((tup = systable_getnext(sd)) != NULL) {
         Form_pg_recyclebin rbForm = (Form_pg_recyclebin)GETSTRUCT(tup);
-        if (rbForm->rcytype == RB_OBJ_TABLE && matchHook(sd->heap_rel, tup, objId)) {
+        if ((rbForm->rcytype == RB_OBJ_TABLE) && matchHook(sd->heap_rel, tup, objId)) {
             Assert (rbForm->rcycanpurge);
+            TrDescRead(desc, tup);
+            return false;
+        } else if ((rbForm->rcytype == RB_OBJ_PARTITION) && matchHook(sd->heap_rel, tup, objId)) {
+            Assert (!rbForm->rcycanpurge);
             TrDescRead(desc, tup);
             return false;
         }
@@ -909,7 +969,7 @@ static bool TrPurgeBatch(TrFetchBeginHook beginHook, TrFetchMatchHook matchHook,
             if (errcode == ERRCODE_RBIN_LOCK_NOT_AVAILABLE) {
                 errno_t rc;
                 rc = strncpy_s(localRes->errMsg, RB_MAX_ERRMSG_SIZE, Geterrmsg(), RB_MAX_ERRMSG_SIZE - 1);
-                securec_check_c(rc, "\0", "\0");
+                securec_check(rc, "\0", "\0");
                 localRes->skippedNum++;
             } else if (errcode == ERRCODE_RBIN_UNDEFINED_OBJECT) {
                 localRes->undefinedNum++;
@@ -1094,7 +1154,7 @@ static bool TrFetchMatchAuto(Relation rbRel, HeapTuple rbTup, Oid objId)
     TimestampDifference(isNull ? 0 : DatumGetTimestampTz(datumRcyTime), 
         GetCurrentTimestamp(), &secs, &msecs);
 
-    return secs > u_sess->attr.attr_storage.recyclebin_retention || secs < 0;
+    return secs > u_sess->attr.attr_storage.recyclebin_retention_time || secs < 0;
 }
 
 void TrPurgeAuto(int64 id)
@@ -1108,24 +1168,46 @@ void TrPurgeAuto(int64 id)
     } while (!eof);
 }
 
-void TrSwapRelfilenode(Relation rbRel, HeapTuple rbTup)
+void TrSwapRelfilenode(Relation rbRel, HeapTuple rbTup, bool isPart)
 {
     Relation relRel;
     HeapTuple relTup;
     HeapTuple newTup;
     TrObjDesc desc;
-    int maxNattr = Max(Natts_pg_class, Natts_pg_recyclebin);
+    int maxNattr = 0;
     Datum *values = NULL;
     bool *nulls = NULL;
     bool *replaces = NULL;
     NameData name;
     errno_t rc = EOK;
+    bool isNull = false;
+    int relfilenoIndex = 0;
+    int frozenxidIndex = 0;
+    int frozenxid64Index = 0;
+    bool isPartition = false;
 
     TrDescRead(&desc, rbTup);
 
-    /* 1. Update pg_class */
-    relRel = heap_open(RelationRelationId, RowExclusiveLock);
-    relTup = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(desc.relid));
+    if (desc.type == RB_OBJ_PARTITION  || (desc.type == RB_OBJ_INDEX && isPart)) {
+        isPartition = true;
+    }
+    if (isPartition) {
+        maxNattr = Max(Natts_pg_partition, Natts_pg_recyclebin);
+        relRel = heap_open(PartitionRelationId, RowExclusiveLock);
+        relTup = SearchSysCacheCopy1(PARTRELID, ObjectIdGetDatum(desc.relid));
+        relfilenoIndex = Anum_pg_partition_relfilenode;
+        frozenxidIndex = Anum_pg_partition_relfrozenxid;
+        frozenxid64Index = Anum_pg_partition_relfrozenxid64;
+    } else {
+        maxNattr = Max(Natts_pg_class, Natts_pg_recyclebin);
+        relRel = heap_open(RelationRelationId, RowExclusiveLock);
+        relTup = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(desc.relid));
+        relfilenoIndex = Anum_pg_class_relfilenode;
+        frozenxidIndex = Anum_pg_class_relfrozenxid;
+        frozenxid64Index = Anum_pg_class_relfrozenxid64;
+    }
+
+    /* 1. Update pg_class or pg_partition */
     if (!HeapTupleIsValid(relTup)) {
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_TABLE),
@@ -1136,14 +1218,14 @@ void TrSwapRelfilenode(Relation rbRel, HeapTuple rbTup)
     nulls = (bool *)palloc0(sizeof(bool) * maxNattr);
     replaces = (bool *)palloc0(sizeof(bool) * maxNattr);
 
-    replaces[Anum_pg_class_relfilenode - 1] = true;
-    values[Anum_pg_class_relfilenode - 1] = ObjectIdGetDatum(desc.relfilenode);
+    replaces[relfilenoIndex - 1] = true;
+    values[relfilenoIndex - 1] = ObjectIdGetDatum(desc.relfilenode);
 
-    replaces[Anum_pg_class_relfrozenxid - 1] = true;
-    values[Anum_pg_class_relfrozenxid - 1] = ShortTransactionIdGetDatum(desc.frozenxid);
+    replaces[frozenxidIndex - 1] = true;
+    values[frozenxidIndex - 1] = ShortTransactionIdGetDatum(desc.frozenxid);
 
-    replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
-    values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(desc.frozenxid64);
+    replaces[frozenxid64Index - 1] = true;
+    values[frozenxid64Index - 1] = TransactionIdGetDatum(desc.frozenxid64);
 
     newTup = heap_modify_tuple(relTup, RelationGetDescr(relRel), values, nulls, replaces);
 
@@ -1166,27 +1248,39 @@ void TrSwapRelfilenode(Relation rbRel, HeapTuple rbTup)
     values[Anum_pg_recyclebin_rcyname - 1] = NameGetDatum(&name);
 
     replaces[Anum_pg_recyclebin_rcyoriginname - 1] = true;
-    values[Anum_pg_recyclebin_rcyoriginname - 1] =
-        NameGetDatum(&((Form_pg_class)GETSTRUCT(relTup))->relname);
+    if (isPartition) {
+        values[Anum_pg_recyclebin_rcyoriginname - 1] = NameGetDatum(&desc.originname);
+    } else {
+        values[Anum_pg_recyclebin_rcyoriginname - 1] = NameGetDatum(&((Form_pg_class)GETSTRUCT(relTup))->relname);
+    }
 
     replaces[Anum_pg_recyclebin_rcyrecyclecsn - 1] = true;
-    values[Anum_pg_recyclebin_rcyrecyclecsn - 1] =
-        Int64GetDatum(t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+    values[Anum_pg_recyclebin_rcyrecyclecsn - 1] = Int64GetDatum(t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
 
     replaces[Anum_pg_recyclebin_rcyrecycletime - 1] = true;
     values[Anum_pg_recyclebin_rcyrecycletime - 1] = TimestampTzGetDatum(GetCurrentTimestamp());
 
     replaces[Anum_pg_recyclebin_rcyrelfilenode - 1] = true;
-    values[Anum_pg_recyclebin_rcyrelfilenode - 1] =
-        ObjectIdGetDatum(((Form_pg_class)GETSTRUCT(relTup))->relfilenode);
+    if (isPartition) {
+        values[Anum_pg_recyclebin_rcyrelfilenode - 1] =
+            ObjectIdGetDatum(((Form_pg_partition)GETSTRUCT(relTup))->relfilenode);
+    } else {
+        values[Anum_pg_recyclebin_rcyrelfilenode - 1] =
+            ObjectIdGetDatum(((Form_pg_class)GETSTRUCT(relTup))->relfilenode);
+    }
 
     replaces[Anum_pg_recyclebin_rcyfrozenxid - 1] = true;
-    values[Anum_pg_recyclebin_rcyfrozenxid - 1] =
-        ShortTransactionIdGetDatum(((Form_pg_class)GETSTRUCT(relTup))->relfrozenxid);
+    if (isPartition) {
+        values[Anum_pg_recyclebin_rcyfrozenxid - 1] =
+            ShortTransactionIdGetDatum(((Form_pg_partition)GETSTRUCT(relTup))->relfrozenxid);
+    } else {
+        values[Anum_pg_recyclebin_rcyfrozenxid - 1] =
+            ShortTransactionIdGetDatum(((Form_pg_class)GETSTRUCT(relTup))->relfrozenxid);
+    }
 
     replaces[Anum_pg_recyclebin_rcyfrozenxid64 - 1] = true;
-    values[Anum_pg_recyclebin_rcyfrozenxid64 - 1] =
-        TransactionIdGetDatum(((Form_pg_class)GETSTRUCT(relTup))->relfrozenxid64);
+    Datum xid64datum = heap_getattr(relTup, frozenxid64Index, RelationGetDescr(relRel), &isNull);
+    values[Anum_pg_recyclebin_rcyfrozenxid64 - 1] = DatumGetTransactionId(xid64datum);
 
     newTup = heap_modify_tuple(rbTup, RelationGetDescr(rbRel), values, nulls, replaces);
 
@@ -1202,6 +1296,7 @@ void TrSwapRelfilenode(Relation rbRel, HeapTuple rbTup)
 
     heap_freetuple_ext(relTup);
     heap_close(relRel, RowExclusiveLock);
+    return;
 }
 
 void TrBaseRelMatched(TrObjDesc *baseDesc)

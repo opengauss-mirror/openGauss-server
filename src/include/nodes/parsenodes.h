@@ -362,6 +362,8 @@ typedef struct RangeTblEntry {
     /* For sublink in targetlist pull up */
     bool sublink_pull_up;       /* mark the subquery is sublink pulled up */
     Bitmapset *extraUpdatedCols; /* generated columns being updated */
+    bool pulled_from_subquery; /* mark whether it is pulled-up from subquery to the current level, for upsert remote
+                                  query deparse */
 } RangeTblEntry;
 
 /*
@@ -477,6 +479,7 @@ typedef struct RowMarkClause {
     Index rti;       /* range table index of target relation */
     bool forUpdate;  /* for compatibility, we reserve this filed but don't use it */
     bool noWait;     /* NOWAIT option */
+    int waitSec;      /* WAIT time Sec */
     bool pushedDown; /* pushed down from higher query level? */
     LockClauseStrength strength;
 } RowMarkClause;
@@ -666,6 +669,23 @@ typedef struct GrantRoleStmt {
     char* grantor;         /* set grantor to other than current role */
     DropBehavior behavior; /* drop behavior (for REVOKE) */
 } GrantRoleStmt;
+
+/* ----------------------
+ * Grant/Revoke Database Privilege Statement
+ * ----------------------
+ */
+typedef struct GrantDbStmt {
+    NodeTag type;
+    bool is_grant;       /* true = GRANT, false = REVOKE */
+    bool admin_opt;      /* with admin option */
+    List* privileges;    /* list of DbPriv nodes */
+    List* grantees;      /* list of PrivGrantee nodes */
+} GrantDbStmt;
+
+typedef struct DbPriv {
+    NodeTag type;
+    char* db_priv_name;    /* string name of sys privilege */
+} DbPriv;
 
 /* ----------------------
  *	Alter Default Privileges Statement
@@ -1698,7 +1718,7 @@ typedef struct VacuumStmt {
  */
 typedef struct BarrierStmt {
     NodeTag type;
-    const char* id; /* User supplied barrier id, if any */
+    char* id; /* User supplied barrier id, if any */
 } BarrierStmt;
 
 /*
@@ -1975,6 +1995,16 @@ typedef struct DropResourcePoolStmt {
     char* pool_name;
 } DropResourcePoolStmt;
 
+typedef struct AlterGlobalConfigStmt {
+    NodeTag type;
+    List* options;
+} AlterGlobalConfigStmt;
+
+typedef struct DropGlobalConfigStmt {
+    NodeTag type;
+    List* options;
+} DropGlobalConfigStmt;
+
 /*
  * ----------------------
  *      Create Workload Group statement
@@ -2096,6 +2126,8 @@ typedef struct LockStmt {
     List* relations; /* relations to lock */
     int mode;        /* lock mode */
     bool nowait;     /* no wait mode */
+    bool cancelable; /* send term to lock holder */
+    int waitSec;      /* WAIT time Sec */
 } LockStmt;
 
 /* ----------------------

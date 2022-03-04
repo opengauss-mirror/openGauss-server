@@ -135,6 +135,7 @@ typedef struct TupleTableSlot {
     int tts_nvalid;                /* # of valid values in tts_values */
     Datum* tts_values;             /* current per-attribute values */
     bool* tts_isnull;              /* current per-attribute isnull flags */
+    Datum* tts_lobPointers;
     MinimalTuple tts_mintuple;     /* minimal tuple, or NULL if none */
     HeapTupleData tts_minhdr;      /* workspace for minimal-tuple-only case */
     long tts_off;                  /* saved state for slot_deform_tuple */
@@ -157,6 +158,8 @@ extern TupleTableSlot* MakeSingleTupleTableSlot(TupleDesc tupdesc, bool allocSlo
 extern void ExecDropSingleTupleTableSlot(TupleTableSlot* slot);
 extern void ExecSetSlotDescriptor(TupleTableSlot* slot, TupleDesc tupdesc);
 extern TupleTableSlot* ExecStoreTuple(Tuple tuple, TupleTableSlot* slot, Buffer buffer, bool shouldFree);
+extern TupleTableSlot *ExecStoreTupleBatch(HeapTuple tuple, TupleTableSlot *slot,
+    Buffer buffer, bool shouldFree, int rownum);
 extern TupleTableSlot* ExecStoreMinimalTuple(MinimalTuple mtup, TupleTableSlot* slot, bool shouldFree);
 
 #ifdef PGXC
@@ -183,11 +186,13 @@ extern MinimalTuple heap_slot_copy_minimal_tuple(TupleTableSlot *slot);
 extern void heap_slot_store_minimal_tuple(MinimalTuple mtup, TupleTableSlot *slot, bool shouldFree);
 extern HeapTuple heap_slot_get_heap_tuple (TupleTableSlot* slot);
 extern HeapTuple heap_slot_copy_heap_tuple (TupleTableSlot *slot);
-extern void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer buffer, bool should_free);
+extern void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer buffer, bool shouldFree, bool batchMode);
 extern Datum heap_slot_getattr(TupleTableSlot* slot, int attnum, bool* isnull, bool need_transform_anyarray = false);
 extern void heap_slot_getallattrs(TupleTableSlot* slot, bool need_transform_anyarray = false);
+extern void slot_getallattrsfast(TupleTableSlot *slot, int maxIdx);
 extern void heap_slot_getsomeattrs(TupleTableSlot* slot, int attnum);
 extern bool heap_slot_attisnull(TupleTableSlot* slot, int attnum);
+extern void heap_slot_formbatch(TupleTableSlot* slot, struct VectorBatch* batch, int cur_rows, int attnum);
 
 #endif /* !FRONTEND_PARSER */
 #endif /* TUPTABLE_H */

@@ -163,8 +163,7 @@
 #include "securec.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
-#include "executor/node/nodeGD.h"
-#include "executor/node/nodeKMeans.h"
+#include "executor/node/nodeTrainModel.h"
 
 #define NODENAMELEN 64
 
@@ -396,10 +395,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitVecMergeJoin((VecMergeJoin*)node, estate, eflags);
         case T_VecWindowAgg:
             return (PlanState*)ExecInitVecWindowAgg((VecWindowAgg*)node, estate, eflags);
-        case T_GradientDescent:
-            return (PlanState*)ExecInitGradientDescent((GradientDescent*)node, estate, eflags);
-        case T_KMeans:
-            return (PlanState*)ExecInitKMeans((KMeans*)node, estate, eflags);
+        case T_TrainModel:
+            return (PlanState*)ExecInitTrainModel((TrainModel*)node, estate, eflags);
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
@@ -703,10 +700,8 @@ TupleTableSlot* ExecProcNodeByType(PlanState* node)
             result = ExecStream((StreamState*)node);
             t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
             return result;
-        case T_GradientDescentState:
-            return ExecGradientDescent((GradientDescentState*)node);
-        case T_KMeansState:
-            return ExecKMeans((KMeansState*)node);
+        case T_TrainModelState:
+            return ExecTrainModel((TrainModelState*)node);
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
@@ -744,6 +739,16 @@ void ExecProcNodeInstr(PlanState* node, TupleTableSlot* result)
             node->state->es_last_processed = node->state->es_processed;
             node->instrument->firsttuple = INSTR_TIME_GET_DOUBLE(first_tuple);
             break;
+        case T_SeqScanState:
+            if (((SeqScanState*) node)->scanBatchMode) {
+                if (!TupIsNull(result)) {
+                    /* Batch mode does not collect memory info as it takes too much CPU resources. */
+                    InstrStopNode(node->instrument, ((SeqScanState*)node)->scanBatchState->scanBatch.rows, false);
+                } else {
+                    InstrStopNode(node->instrument, 0.0);
+                }
+                break;
+            }
         default:
             InstrStopNode(node->instrument, TupIsNull(result) ? 0.0 : 1.0);
             break;
@@ -769,6 +774,11 @@ static inline TupleTableSlot *ExecResultWrap(PlanState *node)
 {
     return ExecResult((ResultState*)node);
 };
+
+static inline TupleTableSlot *ExecVecToRowWrap(PlanState *node)
+{
+    return ExecVecToRow((VecToRowState*)node);
+}
 
 static inline TupleTableSlot *ExecModifyTableWrap(PlanState *node)
 {
@@ -930,6 +940,11 @@ static inline TupleTableSlot *ExecRemoteQueryWrap(PlanState *node)
     return ExecRemoteQuery((RemoteQueryState *)node);
 };
 
+static inline TupleTableSlot *ExecTrainModelWrap(PlanState *node)
+{
+   return ExecTrainModel((TrainModelState*)node);
+}
+
 static inline TupleTableSlot *ExecStreamWrap(PlanState *node)
 {
     return ExecStream((StreamState *)node);
@@ -937,6 +952,7 @@ static inline TupleTableSlot *ExecStreamWrap(PlanState *node)
 
 ExecProcFuncType g_execProcFuncTable[] = {
     ExecResultWrap,
+    ExecVecToRowWrap,
     DefaultExecProc,
     ExecModifyTableWrap,
     ExecModifyTableWrap,
@@ -976,6 +992,7 @@ ExecProcFuncType g_execProcFuncTable[] = {
     ExecLockRowsWrap,
     ExecLimitWrap,
     ExecRemoteQueryWrap,
+    ExecTrainModelWrap,
     ExecStreamWrap
 };
 
@@ -993,9 +1010,11 @@ TupleTableSlot* ExecProcNode(PlanState* node)
     MemoryContext old_context;
 
     /* Response to stop or cancel signal. */
+#ifdef ENABLE_MULTIPLE_NODES
     if (unlikely(executorEarlyStop())) {
         return NULL;
     }
+#endif
 
     /* Switch to Node Level Memory Context */
     old_context = MemoryContextSwitchTo(node->nodeContext);
@@ -1008,15 +1027,15 @@ TupleTableSlot* ExecProcNode(PlanState* node)
         InstrStartNode(node->instrument);
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
     if (unlikely(planstate_need_stub(node))) {
         result = ExecProcNodeStub(node);
-    } else {
+    } else
+#endif
+    {
         int index = (int)(nodeTag(node))-T_ResultState;
-        if (likely(index <= 0 && index <= T_StreamState - T_ResultState)) {
-            result = g_execProcFuncTable[index](node);
-        } else {
-            result = ExecProcNodeByType(node);
-        }
+        Assert(index >= 0 && index <= T_StreamState - T_ResultState);
+        result = g_execProcFuncTable[index](node);
     }
 
     if (node->instrument != NULL) {
@@ -1599,12 +1618,8 @@ static void ExecEndNodeByType(PlanState* node)
             ExecEndVecWindowAgg((VecWindowAggState*)node);
             break;
 
-        case T_GradientDescentState:
-            ExecEndGradientDescent((GradientDescentState*)node);
-            break;
-    
-        case T_KMeansState:
-            ExecEndKMeans((KMeansState*)node);
+        case T_TrainModelState:
+            ExecEndTrainModel((TrainModelState*)node);
             break;
             
         default:

@@ -1,0 +1,673 @@
+-- FOR PL/pgSQL ARRAY of RECORD TYPE scenarios --
+-- check compatibility --
+show sql_compatibility; -- expect ORA --
+ sql_compatibility 
+-------------------
+ A
+(1 row)
+
+-- create new schema --
+drop schema if exists plpgsql_arrayofrecord;
+NOTICE:  schema "plpgsql_arrayofrecord" does not exist, skipping
+create schema plpgsql_arrayofrecord;
+set current_schema = plpgsql_arrayofrecord;
+-- initialize table and type--
+create type info as (name varchar2(50), age int, address varchar2(20));
+create type customer as (id number(10), c_info info);
+----------------------------------------------------
+------------------ START OF TESTS ------------------
+----------------------------------------------------
+-- test record of record
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type cust is record  (id number(10), info r1);
+    va cust; 
+begin
+    va := (1, ('Vera' ,32, 'Paris'));
+    return (va.info).age;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      32
+(1 row)
+
+-- test record of array
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is VARRAY(10) of customer; 
+    type custs is record  (c_list r1);
+    va custs; 
+begin
+    va.c_list := ARRAY[(1, ('Vera' ,32, 'Paris')),(2, ('Zera' ,25, 'London')),(3, ('Alice' ,22, 'Bangkok'))];
+    return va.c_list[2].c_info.age;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      25
+(1 row)
+
+-- test record of table
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is table of customer index by varchar(10); 
+    type custs is record  (c_list r1);
+    va custs; 
+begin
+    va.c_list('a') := (1, ('Vera' ,32, 'Paris'));
+    va.c_list('aa') := (2, ('Zera' ,25, 'London'));
+    va.c_list('aaa') := (3, ('Alice' ,22, 'Bangkok'));
+    return va.c_list['aa'].c_info.age;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      25
+(1 row)
+
+-- test array of record
+create or replace function get_age RETURNS int as $$ 
+declare
+    type cust is record  (id int, c_info info);
+    type custs is VARRAY(10) of cust;   
+    va custs; 
+    vb int;
+begin
+    va := ARRAY[(1, ('Vera' ,32, 'Paris')),(2, ('Zera' ,25, 'London')),(3, ('Alice' ,22, 'Bangkok'))];
+    return va[2].c_info.age;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      25
+(1 row)
+
+-- test table of record
+create or replace function get_age RETURNS int as $$ 
+declare
+    type cust is record  (id int, c_info info);
+    type custs is table of cust index by varchar(10);   
+    va custs; 
+begin
+    va('a') := (1, ('Vera' ,32, 'Paris'));
+    va('aa') := (2, ('Zera' ,25, 'London'));
+    va('aaa') := (3, ('Alice' ,22, 'Bangkok'));
+    return va['aa'].c_info.age;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      25
+(1 row)
+
+-- test table of record assign value to attribute
+create or replace function get_age RETURNS int as $$ 
+declare
+    type cust is record  (id int, c_info info);
+    type custs is table of cust index by varchar(10);   
+    va custs; 
+begin
+    va('a').id := 1;
+    va('a').c_info := ('Vera' ,32, 'Paris');
+    va('aa').id := 2;
+    va('aa').c_info := ('Zera' ,25, 'London');
+    va('aaa').id := 3;
+    va('aaa').c_info := ('Alice' ,22, 'Bangkok');
+    return va['aa'].c_info.age;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      25
+(1 row)
+
+-- test table of record assign value to attribute
+create table custs_record (id int, c_info info);
+insert into custs_record values(1, ('Vera' ,32, 'Paris'));
+insert into custs_record values(2, ('Zera' ,25, 'London'));
+insert into custs_record values(3, ('Alice' ,22, 'Bangkok'));
+create or replace function get_age RETURNS int as $$ 
+declare
+    type cust is record  (id int, c_info info);
+    type custs is table of cust index by varchar(10);   
+	va custs;
+begin
+	select id into va('a').id from custs_record where id = 1;
+	select c_info into va('a').c_info from custs_record where id = 1;
+	select id into va('aa').id from custs_record where id = 2;
+	select c_info into va('aa').c_info from custs_record where id = 2;
+	select id into va('aa').id from custs_record where id = 3;
+	select c_info into va('aa').c_info from custs_record where id = 3;
+    return va['aa'].c_info.age;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      22
+(1 row)
+
+drop table custs_record;
+ 
+-- test record of record of record
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r2 is record  (id number(10), info r1);
+    type cust is record (c_info r2, id int);
+	
+    va cust;
+    vb int;	
+begin
+    va := ((1, ('Vera' ,32, 'Paris')),1);
+    vb := (va.c_info).info.age;
+    return vb;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      32
+(1 row)
+
+-- test record of record: second use record
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r2 is record  (id number(10), info r1);
+    type r3 is record (id number(10),info r1);
+	
+    va r3;
+    vb r2;
+    vc int;
+begin
+    va := (1, ('Vera' ,32, 'Paris'));
+    vb.id := va.id;
+    vb.info := va.info;
+    vc := (vb.info).age;
+    return vc;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      32
+(1 row)
+
+-- array of record of array of record
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r1_arr is VARRAY(10) of r1;
+    type r2 is record (col1 r1_arr);
+    type r2_arr is VARRAY(10) of r2;
+	
+    va r2_arr;
+    vb int;	
+begin
+    va(1).col1 := ARRAY[('Vera' ,32, 'Paris'),('Zera' ,25, 'London')];
+    va(2).col1 := ARRAY[('Jack' ,22, 'New York'),('Li' ,18, 'Beijing')];
+    vb := va[2].col1[2].age;
+    return vb;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      18
+(1 row)
+
+-- table of record of table of record
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r1_arr is table of r1;
+    type r2 is record (col1 r1_arr);
+    type r2_arr is table of r2;
+	
+    va r2_arr;
+    vb int;	
+begin
+    va(1).col1 := ARRAY[('Vera' ,32, 'Paris'),('Zera' ,25, 'London')];
+    va(2).col1 := ARRAY[('Jack' ,22, 'New York'),('Li' ,18, 'Beijing')];
+    va(2).col1(2).age = 45;
+    raise info '%', va;
+    return 1;
+end;
+$$ language plpgsql;
+select get_age();
+INFO:  {"(\"{\"\"(Vera,32,Paris)\"\",\"\"(Zera,25,London)\"\"}\")","(\"{\"\"(Jack,22,\\\\\"\"New York\\\\\"\")\"\",\"\"(Li,45,Beijing)\"\"}\")"}
+CONTEXT:  referenced column: get_age
+ get_age 
+---------
+       1
+(1 row)
+
+-- record of table of record
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r1_arr is table of r1;
+    type r2 is record (col1 r1_arr);
+	
+    va r2;
+    vb int;	
+begin
+    va.col1 := ARRAY[('Vera' ,32, 'Paris'),('Zera' ,25, 'London')];
+    va.col1(2).age = 45;
+    raise info '%', va;
+    return 1;
+end;
+$$ language plpgsql;
+select get_age();
+INFO:  ("{""(Vera,32,Paris)"",""(Zera,45,London)""}")
+CONTEXT:  referenced column: get_age
+ get_age 
+---------
+       1
+(1 row)
+
+--test: types should be droped when drop function
+select typname from pg_type where typtype = 'c' and typarray != 0 and typnamespace = (select oid from pg_namespace where nspname = current_schema) order by typname desc;
+--?.*
+--?.*
+ info
+ customer
+--?.*
+(3 rows)
+
+drop function get_age();
+select typname from pg_type where typtype = 'c' and typarray != 0 and typnamespace = (select oid from pg_namespace where nspname = current_schema) order by typname desc;
+ typname  
+----------
+ info
+ customer
+(2 rows)
+
+--test: name of special characters
+create or replace function "GET::INT;;INT" RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r1_arr is VARRAY(10) of r1;
+    type r2 is record (col1 r1_arr);
+    type r2_arr is VARRAY(10) of r2;
+	
+    va r2_arr;
+    vb int;	
+begin
+    va(1).col1 := ARRAY[('Vera' ,32, 'Paris'),('Zera' ,25, 'London')];
+    va(2).col1 := ARRAY[('Jack' ,22, 'New York'),('Li' ,18, 'Beijing')];
+    vb := va[2].col1[2].age;
+    return vb;
+end;
+$$ language plpgsql;
+select "GET::INT;;INT"();
+ GET::INT;;INT 
+---------------
+            18
+(1 row)
+
+DROP FUNCTION "GET::INT;;INT"();
+-- test record duplicate name situations, record var
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20));
+    type r2 is record  (id number(10), info r1);
+    type cust is record (c_info r2, id int);
+    type get_age_r1 is record (a int, b int);
+    va cust;
+    vb int;	
+    vc get_age_r1;
+begin
+    va := ((1, ('Vera' ,32, 'Paris',1,2,3)),1);
+    vb := (va.c_info).info.age;
+    vc := (1,2);
+    return vc.a;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+       1
+(1 row)
+
+-- test record duplicate name situations, record var
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20));
+    type get_age_r1 is record (a int, b int);
+    type r2 is record  (id number(10), info r1);
+    type cust is record (c_info r2, id int);
+    va cust;
+    vb int;	
+    vc get_age_r1;
+begin
+    va := ((1, ('Vera' ,32, 'Paris',1,2,3)),1);
+    vb := (va.c_info).info.age;
+    vc := (4,5);
+    return vc.b;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+       5
+(1 row)
+
+-- test record duplicate name situations, varray var
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20));
+    type get_age_r1 is VARRAY(10) of int;
+    type r2 is record  (id number(10), info r1);
+    type cust is record (c_info r2, id int);
+    va cust;
+    vb int;	
+    vc get_age_r1;
+begin
+    va := ((1, ('Vera' ,32, 'Paris',1,2,3)),1);
+    vb := (va.c_info).info.age;
+    vc := array[1,2,3,4,5];
+    return vc(2);
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+       2
+(1 row)
+
+-- test record duplicate name situations, varray var
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20));
+    type r2 is record  (id number(10), info r1);
+    type cust is record (c_info r2, id int);
+    type get_age_r1 is VARRAY(10) of int;
+    va cust;
+    vb int;
+    vc get_age_r1;
+begin
+    va := ((1, ('Vera' ,32, 'Paris',1,2,3)),1);
+    vb := (va.c_info).info.age;
+    vc := array[1,2,3,4,5];
+    return vc(3);
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+       3
+(1 row)
+
+-- test record duplicate name situations,  var
+create or replace function get_age RETURNS int as $$ 
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20));
+    get_age_r1 int;
+    type r2 is record  (id number(10), info r1);
+    type cust is record (c_info r2, id int);
+    va cust;
+    vb int;	
+begin
+    va := ((1, ('Vera' ,32, 'Paris',1,2,3)),1);
+    vb := (va.c_info).info.age;
+    get_age_r1 :=10;
+    return get_age_r1;
+end;
+$$ language plpgsql;
+select get_age();
+ get_age 
+---------
+      10
+(1 row)
+
+drop function get_age();
+-- ERROR: typename too long
+create or replace function get_age RETURNS int as $$ 
+declare
+    type rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type cust is record  (id number(10), info rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr1);
+    va cust; 
+begin
+    va := (1, ('Vera' ,32, 'Paris'));
+    return (va.info).age;
+end;
+$$ language plpgsql;
+ERROR:  type name too long
+--?.*
+CONTEXT:  compilation of PL/pgSQL function "get_age" near line 4
+--ERROR: record type nested is not supported in anonymous block.
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type cust is record  (id number(10), info r1);
+    va cust; 
+begin
+    va := (1, ('Vera' ,32, 'Paris'));
+end;
+/
+ERROR:  array or record type nesting is not supported in anonymous block yet.
+DETAIL:  Define a record type of record is not supported yet.
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+--ERROR: record type nested is not supported in anonymous block.
+declare
+    type cust is record  (id int, c_info info);
+    type custs is VARRAY(10) of cust;   
+    va custs; 
+begin
+    va := ARRAY[(1, ('Vera' ,32, 'Paris')),(2, ('Zera' ,25, 'London')),(3, ('Alice' ,22, 'Bangkok'))];
+end;
+/
+ERROR:  array or record type nesting is not supported in anonymous block yet.
+DETAIL:  Define array type "custs" of record is not supported yet.
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+--ERROR: record type nested is not supported in anonymous block.
+declare
+    type cust is record  (id int, c_info info);
+    type custs is table of cust index by varchar(10);   
+	va custs; 
+begin
+    va('a') := (1, ('Vera' ,32, 'Paris'));
+    va('aa') := (2, ('Zera' ,25, 'London'));
+    va('aaa') := (3, ('Alice' ,22, 'Bangkok'));
+end;
+/
+ERROR:  array or record type nesting is not supported in anonymous block yet.
+DETAIL:  Define table type "custs" of record is not supported yet.
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 2
+-- test package: public function
+create or replace package package_test as 
+    function get_age() return int;
+end package_test;
+/
+create or replace package body package_test as 
+    function get_age() return int is
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r1_arr is VARRAY(10) of r1;
+    type r2 is record (col1 r1_arr);
+    type r2_arr is VARRAY(10) of r2;
+    va r2_arr;
+    vb int;	
+begin
+    va(1).col1 := ARRAY[('Vera' ,32, 'Paris'),('Zera' ,25, 'London')];
+    va(2).col1 := ARRAY[('Jack' ,22, 'New York'),('Li' ,18, 'Beijing')];
+    vb := va[2].col1[2].age;
+    return vb;
+end;
+end package_test;
+/
+select package_test.get_age();
+ get_age 
+---------
+      18
+(1 row)
+
+DROP PACKAGE package_test;
+NOTICE:  drop cascades to function plpgsql_arrayofrecord.get_age()
+-- test package: private function
+create or replace package package_test as 
+    a int;
+end package_test;
+/
+create or replace package body package_test as 
+    function get_age() return int is
+declare
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r1_arr is VARRAY(10) of r1;
+    type r2 is record (col1 r1_arr);
+    type r2_arr is VARRAY(10) of r2;
+    va r2_arr;
+    vb int;	
+begin
+    va(1).col1 := ARRAY[('Vera' ,32, 'Paris'),('Zera' ,25, 'London')];
+    va(2).col1 := ARRAY[('Jack' ,22, 'New York'),('Li' ,18, 'Beijing')];
+    vb := va[2].col1[2].age;
+    return vb;
+end;
+end package_test;
+/
+DROP PACKAGE package_test;
+NOTICE:  drop cascades to function plpgsql_arrayofrecord.get_age()
+-- test package: public variable
+create or replace package package_test as 
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r1_arr is VARRAY(10) of r1;
+    type r2 is record (col1 r1_arr);
+    type r2_arr is VARRAY(10) of r2;
+end package_test;
+/
+create or replace package body package_test as 
+    a int;
+end package_test;
+/
+DROP PACKAGE package_test;
+-- test package: private variable
+create or replace package package_test as 
+    a int;
+end package_test;
+/
+create or replace package body package_test as 
+    type r1 is record  (name varchar2(50), age int, address varchar2(20)); 
+    type r1_arr is VARRAY(10) of r1;
+    type r2 is record (col1 r1_arr);
+    type r2_arr is VARRAY(10) of r2;
+end package_test;
+/
+drop package package_test;
+select typname from pg_type where typtype = 'c' and typarray != 0 and typnamespace = (select oid from pg_namespace where nspname = current_schema) order by typname desc;
+ typname  
+----------
+ info
+ customer
+(2 rows)
+
+--test table of record variable initialization
+create or replace package package_test is
+type rec_data is record(aa varchar2(10));
+type tab_data is table of rec_data;
+procedure p1;
+end package_test;
+/
+create or replace package body package_test is
+procedure p1 is
+var1 tab_data;
+begin
+var1 :=tab_data();
+end;
+end package_test;
+/
+call package_test.p1();
+ p1 
+----
+ 
+(1 row)
+
+drop package package_test;
+NOTICE:  drop cascades to function plpgsql_arrayofrecord.p1()
+--test duplicated type name
+-- create type "package_test.tab_data" as (a int, b int);
+-- create or replace package package_test is
+-- type rec_data is record(aa varchar2(10));
+-- type tab_data is table of rec_data;
+-- procedure p1;
+-- end package_test;
+-- /
+-- DROP TYPE "package_test.tab_data";
+--test record.array.extend
+create or replace package pck1 is
+type ta is varray(10) of int;
+type tb is record(va ta);
+procedure p1;
+end pck1;
+/
+create or replace package body pck1 is
+procedure p1() is
+v1 tb;
+begin
+v1.va.extend(9);
+raise NOTICE '%',v1.va.first;
+raise NOTICE '%',v1.va.count();
+v1.va.delete();
+end;
+end pck1;
+/
+call pck1.p1();
+NOTICE:  <NULL>
+NOTICE:  <NULL>
+ p1 
+----
+ 
+(1 row)
+
+DROP PACKAGE pck1;
+NOTICE:  drop cascades to function plpgsql_arrayofrecord.p1()
+-- test array of table nest same record
+create or replace package pkg100
+as
+type ty0 is record (a int, b varchar);
+type ty1 is table of ty0 index by varchar;
+type ty2 is varray(10) of ty0;
+va ty1;
+vb ty2;
+procedure p1;
+end pkg100;
+/
+create or replace package body pkg100
+as
+procedure p1 as
+begin
+va ('abc') := (1,'a');
+vb (1) := (2, 'b');
+raise info 'va: %', va;
+raise info 'vb: %', vb;
+end;
+end pkg100;
+/
+call pkg100.p1();
+INFO:  va: {"(1,a)"}
+INFO:  vb: {"(2,b)"}
+ p1 
+----
+ 
+(1 row)
+
+drop package pkg100;
+NOTICE:  drop cascades to function plpgsql_arrayofrecord.p1()
+--------------------------------------------------
+------------------ END OF TESTS ------------------
+--------------------------------------------------
+drop function if exists get_age();
+NOTICE:  function get_age() does not exist, skipping
+drop type if exists customer;
+drop type if exists info;
+-- clean up --
+drop schema if exists plpgsql_arrayofrecord cascade;

@@ -55,7 +55,7 @@ char* get_tsfile_prefix_tmp(bool isExecCN)
         "%s/tsearch_data/%ld%lu",
         tmpSharepath,
         GetCurrentTransactionStartTimestamp(),
-        (GTM_MODE) ? (GetCurrentTransactionId()) : (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
+        (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
 
     /* We need to check for my_exec_path */
     check_backend_env(strinfo.data);

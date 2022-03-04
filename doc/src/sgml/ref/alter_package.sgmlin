@@ -1,0 +1,16 @@
+<refentry id="SQL-ALTER_PACKAGE">
+<refmeta>
+<refentrytitle>ALTER PACKAGE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ALTER PACKAGE</refname>
+<refpurpose>change the definition of a package</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ALTER PACKAGE package_name OWNER TO new_owner;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

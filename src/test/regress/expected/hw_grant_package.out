@@ -1,0 +1,102 @@
+create user test_grant1 password 'Gauss123';
+create user test_grant2 password 'Gauss123';
+SET SESSION AUTHORIZATION test_grant1 password 'Gauss123';
+create type s_type as (
+    id integer,
+    name varchar,
+    addr text
+);
+create or replace package pck3 is
+type r2 is table of s_type index by varchar(10);
+type r3 is table of s_type index by integer;
+procedure p1;
+procedure p2(b int, va r2, a int, vb r3);
+end pck3;
+/
+create or replace package body pck3  is
+procedure p1 as 
+va r2;
+vb r3;
+b int;
+begin
+va('a') := (1, 'zhangsan', 'shanghai');
+vb(5) := (10086,'aa','bb');
+vb(233) := (10087,'aa','bb');
+p2(b,va,1,vb);
+end;
+procedure p2(b int, va r2, a int, vb r3) as 
+begin
+raise info 'va:%', va('a');
+raise info 'vb(233):%', vb(233);
+raise info 'vb:%', vb;
+end;
+end pck3;
+/
+CREATE OR REPLACE package pkg_auth_1
+is
+a int;
+END pkg_auth_1;
+/
+CREATE OR REPLACE package body pkg_auth_1
+is
+END pkg_auth_1;
+/
+CREATE OR REPLACE package pkg_auth_2
+is
+b int;
+procedure a();
+END pkg_auth_2;
+/
+CREATE OR REPLACE package body pkg_auth_2
+is
+procedure a 
+is
+begin
+pkg_auth_1.a:=1;
+end;
+END pkg_auth_2;
+/
+grant usage on schema test_grant1 to test_grant2;
+SET SESSION AUTHORIZATION test_grant2 password 'Gauss123';
+grant execute,drop on all packages in schema test_grant1 to test_grant2;
+ERROR:  permission denied for package pck3
+DETAIL:  N/A
+SET SESSION AUTHORIZATION test_grant1 password 'Gauss123';
+grant execute,drop on all packages in schema test_grant1 to test_grant2;
+SET SESSION AUTHORIZATION test_grant2 password 'Gauss123';
+call test_grant1.pck3.p1();
+INFO:  va:(1,zhangsan,shanghai)
+CONTEXT:  SQL statement "CALL p2(b,va,1,vb)"
+PL/pgSQL function p1() line 9 at PERFORM
+INFO:  vb(233):(10087,aa,bb)
+CONTEXT:  SQL statement "CALL p2(b,va,1,vb)"
+PL/pgSQL function p1() line 9 at PERFORM
+INFO:  vb:{"(10086,aa,bb)","(10087,aa,bb)"}
+CONTEXT:  SQL statement "CALL p2(b,va,1,vb)"
+PL/pgSQL function p1() line 9 at PERFORM
+ p1 
+----
+ 
+(1 row)
+
+begin
+test_grant1.pkg_auth_1.a:=1;
+end;
+/
+begin
+test_grant1.pkg_auth_2.a();
+end;
+/
+SET SESSION AUTHORIZATION test_grant2 password 'Gauss123';
+drop package test_grant1.pkg_auth_1;
+SET SESSION AUTHORIZATION test_grant1 password 'Gauss123';
+drop package test_grant1.pkg_auth_2;
+NOTICE:  drop cascades to function test_grant1.a()
+drop package pck3;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function test_grant1.p1()
+drop cascades to function test_grant1.p2(integer,_s_type[],integer,_s_type[])
+drop type s_type;
+reset session AUTHORIZATION;
+drop user test_grant1;
+drop user test_grant2;

@@ -134,12 +134,13 @@ TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt, TableAmType tupslotTable
     slot->tts_values = NULL;
     slot->tts_isnull = NULL;
     slot->tts_mintuple = NULL;
+#ifdef ENABLE_MULTIPLE_NODES
     slot->tts_per_tuple_mcxt = has_tuple_mcxt ? AllocSetContextCreate(slot->tts_mcxt,
         "SlotPerTupleMcxt",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE) : NULL;
-
+#endif
     slot->tts_tupslotTableAm = tupslotTableAm;
 
     return slot;
@@ -194,6 +195,7 @@ void ExecResetTupleTable(List* tuple_table, /* tuple table */
                 pfree_ext(slot->tts_values);
             if (slot->tts_isnull)
                 pfree_ext(slot->tts_isnull);
+            pfree_ext(slot->tts_lobPointers);
             if (slot->tts_per_tuple_mcxt)
                 MemoryContextDelete(slot->tts_per_tuple_mcxt);
             pfree_ext(slot);
@@ -263,6 +265,8 @@ void ExecDropSingleTupleTableSlot(TupleTableSlot* slot)
         pfree_ext(slot->tts_isnull);
     }
 
+    pfree_ext(slot->tts_lobPointers);
+
     if (slot->tts_per_tuple_mcxt != NULL) {
         MemoryContextDelete(slot->tts_per_tuple_mcxt);
     }
@@ -309,6 +313,7 @@ void ExecSetSlotDescriptor(TupleTableSlot* slot, /* slot to change */
     if (slot->tts_isnull != NULL) {
         pfree_ext(slot->tts_isnull);
     }
+    pfree_ext(slot->tts_lobPointers);
     /*
      * Install the new descriptor; if it's refcounted, bump its refcount.
      */
@@ -321,6 +326,7 @@ void ExecSetSlotDescriptor(TupleTableSlot* slot, /* slot to change */
      */
     slot->tts_values = (Datum*)MemoryContextAlloc(slot->tts_mcxt, tup_desc->natts * sizeof(Datum));
     slot->tts_isnull = (bool*)MemoryContextAlloc(slot->tts_mcxt, tup_desc->natts * sizeof(bool));
+    slot->tts_lobPointers = (Datum*)MemoryContextAlloc(slot->tts_mcxt, tup_desc->natts * sizeof(Datum));
 }
 
 /* --------------------------------
@@ -377,7 +383,7 @@ TupleTableSlot* ExecStoreTuple(Tuple tuple, TupleTableSlot* slot, Buffer buffer,
         tuple = (Tuple)UHeapToHeap(slot->tts_tupleDescriptor, (UHeapTuple)tuple);
     }
 
-    tableam_tslot_store_tuple(tuple, slot, buffer, should_free);
+    tableam_tslot_store_tuple(tuple, slot, buffer, should_free, false);
 
     return slot;
 }
@@ -438,7 +444,7 @@ TupleTableSlot* ExecClearTuple(TupleTableSlot* slot) /* return: slot passed slot
     slot->tts_shouldFree = false;
     slot->tts_shouldFreeMin = false;
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     if (slot->tts_shouldFreeRow) {
         pfree_ext(slot->tts_dataRow);
     }

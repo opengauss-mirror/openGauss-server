@@ -16,6 +16,7 @@
 #define _PG_NUMERIC_GS_H_
 
 #include "fmgr.h"
+#include "vecexecutor/vectorbatch.h"
 
 #define NUMERIC_HDRSZ (VARHDRSZ + sizeof(uint16) + sizeof(int16))
 #define NUMERIC_HDRSZ_SHORT (VARHDRSZ + sizeof(uint16))
@@ -159,10 +160,14 @@
  * @IN  value: the value of bi64
  * @IN  scale: the scale of bi64
  */
-inline Datum makeNumeric64(int64 value, uint8 scale)
+inline Datum makeNumeric64(int64 value, uint8 scale, ScalarVector *arr = NULL)
 {
-    Numeric result;
-    result = (Numeric)palloc(NUMERIC_64SZ);
+    Numeric result = NULL;
+    if (arr == NULL) {
+        result = (Numeric)palloc(NUMERIC_64SZ);
+    } else {
+        result = (Numeric)arr->m_buf->Allocate(NUMERIC_64SZ);
+    }
     SET_VARSIZE(result, NUMERIC_64SZ);
     result->choice.n_header = NUMERIC_64 + scale;
     *((int64*)(result->choice.n_bi.n_data)) = value;
@@ -174,10 +179,14 @@ inline Datum makeNumeric64(int64 value, uint8 scale)
  * @IN  value: the value of bi128
  * @IN  scale: the scale of bi128
  */
-inline Datum makeNumeric128(int128 value, uint8 scale)
+inline Datum makeNumeric128(int128 value, uint8 scale, ScalarVector *arr = NULL)
 {
     Numeric result;
-    result = (Numeric)palloc(NUMERIC_128SZ);
+    if (arr == NULL) {
+        result = (Numeric)palloc(NUMERIC_128SZ);
+    } else {
+        result = (Numeric)arr->m_buf->Allocate(NUMERIC_128SZ);
+    }
     SET_VARSIZE(result, NUMERIC_128SZ);
     result->choice.n_header = NUMERIC_128 + scale;
     errno_t rc = EOK;

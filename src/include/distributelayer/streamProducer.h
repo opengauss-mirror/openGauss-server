@@ -272,6 +272,8 @@ public:
     }
 
     void setUniqueSQLKey(uint64 unique_sql_id, Oid unique_user_id, uint32 unique_cn_id);
+    void setGlobalSessionId(GlobalSessionId* globalSessionId);
+    void getGlobalSessionId(GlobalSessionId* globalSessionId);
 
     /* The plan the producer thread will run. */
     PlannedStmt* m_plan;
@@ -503,6 +505,9 @@ private:
     uint64 m_uniqueSQLId;
     Oid m_uniqueSQLUserId;
     uint32 m_uniqueSQLCNId;
+
+    /* global session id */
+    GlobalSessionId m_globalSessionId;
 };
 
 extern THR_LOCAL StreamProducer* streamProducer;

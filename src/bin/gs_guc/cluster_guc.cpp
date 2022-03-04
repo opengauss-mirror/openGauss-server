@@ -493,6 +493,10 @@ char* modify_parameter_value(const char* value, bool localMode)
                 buffer[j] = '\\';
                 j++;
             }
+            if (j >= MAX_VALUE_LEN) {
+                write_stderr(_("%s: out of memory\n"), progname);
+                exit(1);
+            }
             buffer[j] = value[i];
         } else {
             buffer[j] = value[i];
@@ -3518,6 +3522,15 @@ bool check_cn_dn_parameter_is_valid()
             char* segmentTestParam = "segment_test_param";
             len = (strlen(tmp) > strlen(segmentTestParam)) ? strlen(tmp) : strlen(segmentTestParam);
             if (strncmp(tmp, segmentTestParam, len) == 0) {
+                all_valid = false;
+                (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect."
+                                "not work on this mode.\n",
+                    config_param[para_num]);
+            }
+            /* enable_memory_context_check_debug  only work on debug mode */
+            char* memCtxCheckParam = "enable_memory_context_check_debug";
+            len = (strlen(tmp) > strlen(memCtxCheckParam)) ? strlen(tmp) : strlen(memCtxCheckParam);
+            if (strncmp(tmp, memCtxCheckParam, len) == 0) {
                 all_valid = false;
                 (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect."
                                 "not work on this mode.\n",

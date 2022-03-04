@@ -126,6 +126,7 @@ DecodedXLogBlockOp XLogAtomicDecodeBlockData(char *data, int len);
 /*
  * APIs used for segment store metadata.
  */
+BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, bool *foundPtr);
 Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode);
 void SegReleaseBuffer(Buffer buffer);
 void SegUnlockReleaseBuffer(Buffer buffer);
@@ -184,6 +185,8 @@ const char* XlogGetRemainExtentTypeName(StatRemainExtentType remainExtentType);
 
 extern Oid get_database_oid_by_name(const char *dbname);
 extern Oid get_tablespace_oid_by_name(const char *tablespacename);
-extern StorageType PartitionGetStorageType(Oid parentOid);
+extern void redo_xlog_deal_alloc_seg(uint8 opCode, Buffer buffer, const char* data, int data_len,
+    TransactionId xid);
+extern StorageType PartitionGetStorageType(Partition partition, Oid parentOid);
 
 #endif

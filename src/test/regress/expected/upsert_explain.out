@@ -40,7 +40,7 @@ EXPLAIN PERFORMANCE insert into up_expl_hash values(1,1,1) on duplicate key upda
 --? Insert on upsert_test_explain.up_expl_hash  (cost=.* rows=1 width=0) (actual time=.* rows=1 loops=1)
    Conflict Resolution: UPDATE
    Conflict Arbiter Indexes: up_expl_hash_c3_key
-   (Buffers: shared hit=4)
+--?   (Buffers: shared hit=.*)
 --?   (CPU: ex c/r=.*, ex row=1, ex cyc=.*, inc cyc=.*)
 --?   ->  Result  (cost=.* rows=1 width=0) (actual time=.* rows=1 loops=1)
          Output: 1, 1, 1

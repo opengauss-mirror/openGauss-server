@@ -1,0 +1,434 @@
+--prepare
+DROP SCHEMA segment_subpartition_scan CASCADE;
+CREATE SCHEMA segment_subpartition_scan;
+SET CURRENT_SCHEMA TO segment_subpartition_scan;
+
+--scan
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (SEGMENT=ON)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+);
+
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+
+explain(costs off, verbose on) select * from range_list order by 1, 2, 3, 4;
+select * from range_list order by 1, 2, 3, 4;
+
+create index idx_month_code on range_list(month_code) local;
+create index idx_dept_code on range_list(dept_code) local;
+create index idx_user_no on range_list(user_no) local;
+
+set enable_seqscan = off;
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+
+set enable_bitmapscan = off;
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+
+reset enable_seqscan;
+reset enable_bitmapscan;
+
+drop table range_list;
+
+CREATE TABLE range_list
+(
+    col_1 VARCHAR2 ( 30 )  ,
+    col_2 VARCHAR2 ( 30 )  NOT NULL ,
+    col_3 VARCHAR2 ( 30 ) NOT NULL ,
+    ccol_4 	VARCHAR2 ( 30 ), 
+col_5 VARCHAR2 ( 30 ), 
+col_6 VARCHAR2 ( 30 ), 
+col_7 VARCHAR2 ( 30 ), 
+col_8 VARCHAR2 ( 30 ), 
+col_9 VARCHAR2 ( 30 ), 
+col_10 VARCHAR2 ( 30 ), 
+col_11 VARCHAR2 ( 30 ), 
+col_12 VARCHAR2 ( 30 ), 
+col_13 VARCHAR2 ( 30 ), 
+col_14 VARCHAR2 ( 30 ), 
+col_15 VARCHAR2 ( 30 ), 
+col_16 VARCHAR2 ( 30 ), 
+col_17 VARCHAR2 ( 30 ), 
+col_18 VARCHAR2 ( 30 ), 
+col_19 VARCHAR2 ( 30 ), 
+col_20 VARCHAR2 ( 30 ), 
+col_21 VARCHAR2 ( 30 ), 
+col_22 VARCHAR2 ( 30 ), 
+col_23 VARCHAR2 ( 30 ), 
+col_24 VARCHAR2 ( 30 ), 
+col_25 VARCHAR2 ( 30 ), 
+col_26 VARCHAR2 ( 30 ), 
+col_27 VARCHAR2 ( 30 ), 
+col_28 VARCHAR2 ( 30 ), 
+col_29 VARCHAR2 ( 30 ), 
+col_30 VARCHAR2 ( 30 ), 
+col_31 VARCHAR2 ( 30 ), 
+col_32 VARCHAR2 ( 30 ), 
+col_33 VARCHAR2 ( 30 ), 
+col_34 VARCHAR2 ( 30 ), 
+col_35 VARCHAR2 ( 30 ), 
+col_36 VARCHAR2 ( 30 ), 
+col_37 VARCHAR2 ( 30 ), 
+col_38 VARCHAR2 ( 30 ), 
+col_39 VARCHAR2 ( 30 ), 
+col_40 VARCHAR2 ( 30 ), 
+col_41 VARCHAR2 ( 30 ), 
+col_42 VARCHAR2 ( 30 ), 
+col_43 VARCHAR2 ( 30 ), 
+col_44 VARCHAR2 ( 30 ), 
+col_45 VARCHAR2 ( 30 ), 
+col_46 VARCHAR2 ( 30 ), 
+col_47 VARCHAR2 ( 30 ), 
+col_48 VARCHAR2 ( 30 ), 
+col_49 VARCHAR2 ( 30 ), 
+col_50 VARCHAR2 ( 30 ), 
+col_51 VARCHAR2 ( 30 ), 
+col_52 VARCHAR2 ( 30 ), 
+col_53 VARCHAR2 ( 30 ), 
+col_54 VARCHAR2 ( 30 ), 
+col_55 VARCHAR2 ( 30 ), 
+col_56 VARCHAR2 ( 30 ), 
+col_57 VARCHAR2 ( 30 ), 
+col_58 VARCHAR2 ( 30 ), 
+col_59 VARCHAR2 ( 30 ), 
+col_60 VARCHAR2 ( 30 ), 
+col_61 VARCHAR2 ( 30 ), 
+col_62 VARCHAR2 ( 30 ), 
+col_63 VARCHAR2 ( 30 ), 
+col_64 VARCHAR2 ( 30 ), 
+col_65 VARCHAR2 ( 30 ), 
+col_66 VARCHAR2 ( 30 ), 
+col_67 VARCHAR2 ( 30 ), 
+col_68 VARCHAR2 ( 30 ), 
+col_69 VARCHAR2 ( 30 ), 
+col_70 VARCHAR2 ( 30 ), 
+col_71 VARCHAR2 ( 30 ), 
+col_72 VARCHAR2 ( 30 ), 
+col_73 VARCHAR2 ( 30 ), 
+col_74 VARCHAR2 ( 30 ), 
+col_75 VARCHAR2 ( 30 ), 
+col_76 VARCHAR2 ( 30 ), 
+col_77 VARCHAR2 ( 30 ), 
+col_78 VARCHAR2 ( 30 ), 
+col_79 VARCHAR2 ( 30 ), 
+col_80 VARCHAR2 ( 30 ), 
+col_81 VARCHAR2 ( 30 ), 
+col_82 VARCHAR2 ( 30 ), 
+col_83 VARCHAR2 ( 30 )
+) WITH (SEGMENT=ON)
+PARTITION BY RANGE (col_1) SUBPARTITION BY list (col_2)
+(
+  PARTITION p_range_1 VALUES LESS THAN( '-10' )
+  (
+SUBPARTITION p_list_1_1 VALUES ( '-1' ),
+SUBPARTITION p_list_1_2 VALUES ( '-2' ),
+SUBPARTITION p_list_1_3 VALUES ( '-3' ),
+SUBPARTITION p_list_1_4 VALUES ( '-4' ),
+SUBPARTITION p_list_1_5 VALUES ( '-5' ),
+SUBPARTITION p_list_1_6 VALUES ( '-6' ),
+SUBPARTITION p_list_1_7 VALUES ( '-7' ),
+SUBPARTITION p_list_1_8 VALUES ( '-8' ),
+SUBPARTITION p_list_1_9 VALUES ( '-9' ),
+SUBPARTITION p_list_1_10 VALUES ( '-10' ),
+SUBPARTITION p_list_1_11 VALUES ( '-11' ),
+SUBPARTITION p_list_1_12 VALUES ( '-12' ),
+SUBPARTITION p_list_1_13 VALUES ( '-13' ),
+SUBPARTITION p_list_1_14 VALUES ( '-14' ),
+SUBPARTITION p_list_1_15 VALUES ( '-15' ),
+SUBPARTITION p_list_1_16 VALUES ( '-16' ),
+SUBPARTITION p_list_1_17 VALUES ( '-17' ),
+SUBPARTITION p_list_1_18 VALUES ( '-18' ),
+SUBPARTITION p_list_1_19 VALUES ( '-19' ),
+SUBPARTITION p_list_1_20 VALUES ( '-20' ),
+SUBPARTITION p_list_1_21 VALUES ( '-21' ),
+SUBPARTITION p_list_1_22 VALUES ( '-22' ),
+SUBPARTITION p_list_1_23 VALUES ( '-23' ),
+SUBPARTITION p_list_1_24 VALUES ( '-24' ),
+SUBPARTITION p_list_1_25 VALUES ( '-25' ),
+SUBPARTITION p_list_1_26 VALUES ( '-26' ),
+SUBPARTITION p_list_1_27 VALUES ( '-27' ),
+SUBPARTITION p_list_1_28 VALUES ( '-28' ),
+SUBPARTITION p_list_1_29 VALUES ( '-29' ),
+SUBPARTITION p_list_1_30 VALUES ( '-30' ),
+SUBPARTITION p_list_1_31 VALUES ( '-31' ),
+SUBPARTITION p_list_1_32 VALUES ( '-32' ),
+SUBPARTITION p_list_1_33 VALUES ( '-33' ),
+SUBPARTITION p_list_1_34 VALUES ( '-34' ),
+SUBPARTITION p_list_1_35 VALUES ( '-35' ),
+SUBPARTITION p_list_1_36 VALUES ( '-36' ),
+SUBPARTITION p_list_1_37 VALUES ( '-37' ),
+SUBPARTITION p_list_1_38 VALUES ( '-38' ),
+SUBPARTITION p_list_1_39 VALUES ( '-39' ),
+SUBPARTITION p_list_1_40 VALUES ( '-40' ),
+SUBPARTITION p_list_1_41 VALUES ( '-41' ),
+SUBPARTITION p_list_1_42 VALUES ( '-42' ),
+SUBPARTITION p_list_1_43 VALUES ( '-43' ),
+SUBPARTITION p_list_1_44 VALUES ( '-44' ),
+SUBPARTITION p_list_1_45 VALUES ( '-45' ),
+SUBPARTITION p_list_1_46 VALUES ( '-46' ),
+SUBPARTITION p_list_1_47 VALUES ( '-47' ),
+SUBPARTITION p_list_1_48 VALUES ( '-48' ),
+SUBPARTITION p_list_1_49 VALUES ( '-49' ),
+SUBPARTITION p_list_1_50 VALUES ( '-50' ),
+SUBPARTITION p_list_1_51 VALUES ( default )
+  ),
+    PARTITION p_range_2 VALUES LESS THAN('10 ')
+  (
+SUBPARTITION p_list_2_1 VALUES (  '1' ),
+SUBPARTITION p_list_2_2 VALUES (  '2' ),
+SUBPARTITION p_list_2_3 VALUES (  '3' ),
+SUBPARTITION p_list_2_4 VALUES (  '4' ),
+SUBPARTITION p_list_2_5 VALUES (  '5' ),
+SUBPARTITION p_list_2__6 VALUES (  '-6' ),
+SUBPARTITION p_list_2_6 VALUES (  '6' ),
+SUBPARTITION p_list_2_7 VALUES (  '7' ),
+SUBPARTITION p_list_2_8 VALUES (  '8' ),
+SUBPARTITION p_list_2_9 VALUES (  '9' ),
+SUBPARTITION p_list_2_10 VALUES (  '10' ),
+SUBPARTITION p_list_2_11 VALUES (  '11' ),
+SUBPARTITION p_list_2_12 VALUES (  '12' ),
+SUBPARTITION p_list_2_13 VALUES (  '13' ),
+SUBPARTITION p_list_2_14 VALUES (  '14' ),
+SUBPARTITION p_list_2_15 VALUES (  '15' ),
+SUBPARTITION p_list_2_16 VALUES (  '16' ),
+SUBPARTITION p_list_2_17 VALUES (  '17' ),
+SUBPARTITION p_list_2_18 VALUES (  '18' ),
+SUBPARTITION p_list_2_19 VALUES (  '19' ),
+SUBPARTITION p_list_2_20 VALUES (  '20' ),
+SUBPARTITION p_list_2_21 VALUES (  '21' ),
+SUBPARTITION p_list_2_22 VALUES (  '22' ),
+SUBPARTITION p_list_2_23 VALUES (  '23' ),
+SUBPARTITION p_list_2_24 VALUES (  '24' ),
+SUBPARTITION p_list_2_25 VALUES (  '25' ),
+SUBPARTITION p_list_2_26 VALUES (  '26' ),
+SUBPARTITION p_list_2_27 VALUES (  '27' ),
+SUBPARTITION p_list_2_28 VALUES (  '28' ),
+SUBPARTITION p_list_2_29 VALUES (  '29' ),
+SUBPARTITION p_list_2_30 VALUES (  '30' ),
+SUBPARTITION p_list_2_31 VALUES (  '31' ),
+SUBPARTITION p_list_2_32 VALUES (  '32' ),
+SUBPARTITION p_list_2_33 VALUES (  '33' ),
+SUBPARTITION p_list_2_34 VALUES (  '34' ),
+SUBPARTITION p_list_2_35 VALUES (  '35' ),
+SUBPARTITION p_list_2_36 VALUES (  '36' ),
+SUBPARTITION p_list_2_37 VALUES (  '37' ),
+SUBPARTITION p_list_2_38 VALUES (  '38' ),
+SUBPARTITION p_list_2_39 VALUES (  '39' ),
+SUBPARTITION p_list_2_40 VALUES (  '40' ),
+SUBPARTITION p_list_2_41 VALUES (  '41' ),
+SUBPARTITION p_list_2_42 VALUES (  '42' ),
+SUBPARTITION p_list_2_43 VALUES (  '43' ),
+SUBPARTITION p_list_2_44 VALUES (  '44' ),
+SUBPARTITION p_list_2_45 VALUES (  '45' ),
+SUBPARTITION p_list_2_46 VALUES (  '46' ),
+SUBPARTITION p_list_2_47 VALUES (  '47' ),
+SUBPARTITION p_list_2_48 VALUES (  '48' ),
+SUBPARTITION p_list_2_49 VALUES (  '49' ),
+SUBPARTITION p_list_2_50 VALUES (  '50' ),
+SUBPARTITION p_list_2_51 VALUES ( default )
+  ),
+    PARTITION p_range_3 VALUES LESS THAN( '20 '),
+
+   PARTITION p_range_4 VALUES LESS THAN( '30' )
+   (
+    SUBPARTITION p_list_4_1 VALUES ( default )
+  ),
+   PARTITION p_range_5 VALUES LESS THAN( '40' )
+   (
+   SUBPARTITION p_list_5_1 VALUES (  '41' ),
+SUBPARTITION p_list_5_2 VALUES (  '42' ),
+SUBPARTITION p_list_5_3 VALUES (  '43' ),
+SUBPARTITION p_list_5_4 VALUES (  '44' ),
+SUBPARTITION p_list_5_5 VALUES (  '45' ),
+SUBPARTITION p_list_5_6 VALUES (  '46' ),
+SUBPARTITION p_list_5_7 VALUES (  '47' ),
+SUBPARTITION p_list_5_8 VALUES (  '48' ),
+SUBPARTITION p_list_5_9 VALUES (  '49' ),
+SUBPARTITION p_list_5_10 VALUES (  '50' ),
+SUBPARTITION p_list_5_11 VALUES (  '51' ),
+SUBPARTITION p_list_5_12 VALUES (  '52' ),
+SUBPARTITION p_list_5_13 VALUES (  '53' ),
+SUBPARTITION p_list_5_14 VALUES (  '54' ),
+SUBPARTITION p_list_5_15 VALUES (  '55' ),
+SUBPARTITION p_list_5_16 VALUES (  '56' ),
+SUBPARTITION p_list_5_17 VALUES (  '57' ),
+SUBPARTITION p_list_5_18 VALUES (  '58' ),
+SUBPARTITION p_list_5_19 VALUES (  '59' ),
+SUBPARTITION p_list_5_20 VALUES (  '60' ),
+SUBPARTITION p_list_5_21 VALUES (  '61' ),
+SUBPARTITION p_list_5_22 VALUES (  '62' ),
+SUBPARTITION p_list_5_23 VALUES (  '63' ),
+SUBPARTITION p_list_5_24 VALUES (  '64' ),
+SUBPARTITION p_list_5_25 VALUES (  '65' ),
+SUBPARTITION p_list_5_26 VALUES (  '66' ),
+SUBPARTITION p_list_5_27 VALUES (  '67' ),
+SUBPARTITION p_list_5_28 VALUES (  '68' ),
+SUBPARTITION p_list_5_29 VALUES (  '69' ),
+SUBPARTITION p_list_5_30 VALUES (  '70' ),
+SUBPARTITION p_list_5_31 VALUES (  '71' ),
+SUBPARTITION p_list_5_32 VALUES (  '72' ),
+SUBPARTITION p_list_5_33 VALUES (  '73' ),
+SUBPARTITION p_list_5_34 VALUES (  '74' ),
+SUBPARTITION p_list_5_35 VALUES (  '75' ),
+SUBPARTITION p_list_5_36 VALUES (  '76' ),
+SUBPARTITION p_list_5_37 VALUES (  '77' ),
+SUBPARTITION p_list_5_38 VALUES (  '78' ),
+SUBPARTITION p_list_5_39 VALUES (  '79' ),
+SUBPARTITION p_list_5_40 VALUES (  '80' ),
+SUBPARTITION p_list_5_41 VALUES (  '81' ),
+SUBPARTITION p_list_5_42 VALUES (  '82' ),
+SUBPARTITION p_list_5_43 VALUES (  '83' ),
+SUBPARTITION p_list_5_44 VALUES (  '84' ),
+SUBPARTITION p_list_5_45 VALUES (  '85' ),
+SUBPARTITION p_list_5_46 VALUES (  '86' ),
+SUBPARTITION p_list_5_47 VALUES (  '87' ),
+SUBPARTITION p_list_5_48 VALUES (  '88' ),
+SUBPARTITION p_list_5_49 VALUES (  '89' ),
+SUBPARTITION p_list_5_50 VALUES (  '90' ),
+SUBPARTITION p_list_5_51 VALUES (  '91' ),
+SUBPARTITION p_list_5_52 VALUES (  '92' ),
+SUBPARTITION p_list_5_53 VALUES (  '93' ),
+SUBPARTITION p_list_5_54 VALUES (  '94' ),
+SUBPARTITION p_list_5_55 VALUES (  '95' ),
+SUBPARTITION p_list_5_56 VALUES (  '96' ),
+SUBPARTITION p_list_5_57 VALUES (  '97' ),
+SUBPARTITION p_list_5_58 VALUES (  '98' ),
+SUBPARTITION p_list_5_59 VALUES (  '99' ),
+SUBPARTITION p_list_5_60 VALUES (  '100' ),
+SUBPARTITION p_list_5_61 VALUES (  '101' ),
+SUBPARTITION p_list_5_62 VALUES (  '102' ),
+SUBPARTITION p_list_5_63 VALUES (  '103' ),
+SUBPARTITION p_list_5_64 VALUES (  '104' ),
+SUBPARTITION p_list_5_65 VALUES (  '105' ),
+SUBPARTITION p_list_5_66 VALUES (  '106' ),
+SUBPARTITION p_list_5_67 VALUES (  '107' ),
+SUBPARTITION p_list_5_68 VALUES (  '108' ),
+SUBPARTITION p_list_5_69 VALUES (  '109' ),
+SUBPARTITION p_list_5_70 VALUES (  '110' ),
+SUBPARTITION p_list_5_71 VALUES (  '111' ),
+SUBPARTITION p_list_5_72 VALUES (  '112' ),
+SUBPARTITION p_list_5_73 VALUES (  '113' ),
+SUBPARTITION p_list_5_74 VALUES (  '114' ),
+SUBPARTITION p_list_5_75 VALUES (  '115' ),
+SUBPARTITION p_list_5_76 VALUES (  '116' ),
+SUBPARTITION p_list_5_77 VALUES (  '117' ),
+SUBPARTITION p_list_5_78 VALUES (  '118' ),
+SUBPARTITION p_list_5_79 VALUES (  '119' ),
+SUBPARTITION p_list_5_80 VALUES ( default )
+  ),
+   PARTITION p_range_6 VALUES LESS THAN( MAXVALUE )
+) ENABLE ROW MOVEMENT;
+create index on range_list(col_2) local;
+explain (costs off, verbose off) select * from range_list where col_2 in  (select col_1 from range_list  where col_1 >10 and col_1<100) order by 1 limit 100;
+ALTER INDEX range_list_col_2_idx MODIFY PARTITION p_list_5_14_col_2_idx  UNUSABLE; 
+explain (costs off, verbose off) select * from range_list where col_2 in  (select col_1 from range_list  where col_1 >10 and col_1<100) order by 1 limit 100;
+drop table range_list;
+
+create table range_range_jade(jid int,jn int,name varchar2) WITH (SEGMENT=ON) partition by range (jid) subpartition by range(jn)
+(
+  partition hrp1 values less than(16)(
+    subpartition hrp1_1 values less than(16),
+subpartition hrp1_2 values less than(26),
+subpartition hrp1_3 values less than(36),
+    subpartition hrp1_4 values less than(maxvalue)),
+  partition hrp2 values less than(26)(
+    subpartition hrp2_1 values less than(maxvalue)),
+  partition hrp3 values less than(36)(
+    subpartition hrp3_1 values less than(16),
+subpartition hrp3_2 values less than(26),
+    subpartition hrp3_3 values less than(maxvalue)),
+  partition hrp4 values less than(maxvalue)(
+    subpartition hrp4_1 values less than(16),
+    subpartition hrp4_2 values less than(maxvalue))
+)ENABLE ROW MOVEMENT;
+-- no errors
+set enable_partition_opfusion = on;
+insert into range_range_jade values(1,2,'jade');
+reset enable_partition_opfusion;
+drop table range_range_jade;
+
+drop table list_range_02;
+CREATE TABLE IF NOT EXISTS list_range_02
+(
+ col_1 int ,
+ col_2 int,
+col_3 VARCHAR2 ( 30 ) ,
+ col_4 int
+) WITH (SEGMENT=ON)
+PARTITION BY list (col_1) SUBPARTITION BY range (col_2)
+(
+ PARTITION p_list_1 VALUES(-1,-2,-3,-4,-5,-6,-7,-8,-9,-10 )
+ (
+ SUBPARTITION p_range_1_1 VALUES LESS THAN( -10 ),
+ SUBPARTITION p_range_1_2 VALUES LESS THAN( 0 ),
+ SUBPARTITION p_range_1_3 VALUES LESS THAN( 10 ),
+ SUBPARTITION p_range_1_4 VALUES LESS THAN( 20 ),
+ SUBPARTITION p_range_1_5 VALUES LESS THAN( 50 )
+ ),
+ PARTITION p_list_2 VALUES(1,2,3,4,5,6,7,8,9,10 ),
+ PARTITION p_list_3 VALUES(11,12,13,14,15,16,17,18,19,20)
+ (
+ SUBPARTITION p_range_3_1 VALUES LESS THAN( 15 ),
+ SUBPARTITION p_range_3_2 VALUES LESS THAN( MAXVALUE )
+ ),
+ PARTITION p_list_4 VALUES(21,22,23,24,25,26,27,28,29,30)
+ (
+ SUBPARTITION p_range_4_1 VALUES LESS THAN( -10 ),
+ SUBPARTITION p_range_4_2 VALUES LESS THAN( 0 ),
+ SUBPARTITION p_range_4_3 VALUES LESS THAN( 10 ),
+ SUBPARTITION p_range_4_4 VALUES LESS THAN( 20 ),
+ SUBPARTITION p_range_4_5 VALUES LESS THAN( 50 )
+ ),
+ PARTITION p_list_5 VALUES(31,32,33,34,35,36,37,38,39,40)
+ (
+ SUBPARTITION p_range_5_1 VALUES LESS THAN( MAXVALUE )
+ ),
+ PARTITION p_list_6 VALUES(41,42,43,44,45,46,47,48,49,50)
+ (
+ SUBPARTITION p_range_6_1 VALUES LESS THAN( -10 ),
+ SUBPARTITION p_range_6_2 VALUES LESS THAN( 0 ),
+ SUBPARTITION p_range_6_3 VALUES LESS THAN( 10 ),
+ SUBPARTITION p_range_6_4 VALUES LESS THAN( 20 ),
+ SUBPARTITION p_range_6_5 VALUES LESS THAN( 50 )
+ ),
+ PARTITION p_list_7 VALUES(default)
+) ENABLE ROW MOVEMENT;
+
+create index index_01 on list_range_02(col_2) local ;
+
+explain (costs off)  select * from list_range_02 where col_2 in
+          (select col_1 from list_range_02 subpartition(p_list_2_subpartdefault1)
+           where col_1 >10 and col_1 <100) and col_1 +col_2 =50 and col_2 in  (100,200,300 );
+drop table list_range_02;
+DROP SCHEMA segment_subpartition_scan CASCADE;
+RESET CURRENT_SCHEMA;

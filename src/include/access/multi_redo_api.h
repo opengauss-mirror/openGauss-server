@@ -68,12 +68,12 @@ static inline int get_recovery_undozidworkers_num()
     return 1;
 }
 
-static inline bool IsExtremeRedo()
+inline bool IsExtremeRedo()
 {
     return g_instance.comm_cxt.predo_cxt.redoType == EXTREME_REDO && (get_real_recovery_parallelism() > 1);
 }
 
-static inline bool IsParallelRedo()
+inline bool IsParallelRedo()
 {
     return g_instance.comm_cxt.predo_cxt.redoType == PARALLEL_REDO && (get_real_recovery_parallelism() > 1);
 }
@@ -110,10 +110,33 @@ void SwitchToDispatcherContext();
 void FreeAllocatedRedoItem();
 void** GetXLogInvalidPagesFromWorkers();
 void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code);
-bool IsExtremeRtoReadWorkerRunning();
 RedoWaitInfo GetRedoIoEvent(int32 event_id);
 void GetRedoWrokerStatistic(uint32* realNum, RedoWorkerStatsData* worker, uint32 workerLen);
 bool IsExtremeRtoSmartShutdown();
 void ExtremeRtoRedoManagerSendEndToStartup();
+void CountXLogNumbers(XLogReaderState *record);
+void ApplyRedoRecord(XLogReaderState* record);
+void DiagLogRedoRecord(XLogReaderState *record, const char *funcName);
+void GetRedoWorkerTimeCount(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum);
+void ResetXLogStatics();
+
+static inline void GetRedoStartTime(RedoTimeCost &cost)
+{
+    cost.startTime = GetCurrentTimestamp();
+}
+
+static inline void CountRedoTime(RedoTimeCost &cost)
+{
+    cost.totalDuration += GetCurrentTimestamp() - cost.startTime;
+    cost.counter += 1;
+}
+
+static inline void CountAndGetRedoTime(RedoTimeCost &curCost, RedoTimeCost &nextCost)
+{
+    uint64 curTime = GetCurrentTimestamp();
+    curCost.totalDuration += curTime - curCost.startTime;
+    curCost.counter += 1;
+    nextCost.startTime = curTime;
+}
 
 #endif

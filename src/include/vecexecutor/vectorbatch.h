@@ -27,7 +27,6 @@
 #define VECTORBATCH_H_
 
 #include "postgres.h"
-#include "knl/knl_variable.h"
 #include "access/tupdesc.h"
 #include "lib/stringinfo.h"
 #include "catalog/pg_type.h"
@@ -97,12 +96,6 @@ inline bool COL_IS_ENCODE(int typeId)
         default:
             return true;
     }
-}
-
-template <int typeId>
-bool COL_IS_ENCODE_T()
-{
-    return COL_IS_ENCODE(typeId);
 }
 
 #define BOTH_NOT_NULL(flag1, flag2) (likely(NOT_NULL((flag1) | (flag2))))
@@ -432,7 +425,7 @@ public:
 
     // Pack the batch
     //
-    void Pack(const bool* sel);
+    void Pack(const bool *sel);
 
     /* Optimzed Pack function */
     void OptimizePack(const bool* sel, List* CopyVars);
@@ -454,7 +447,7 @@ public:
 public:
     /* Pack template function. */
     template <bool copyMatch, bool hasSysCol>
-    void PackT(_in_ const bool* sel);
+    void PackT(const bool* sel);
 
     /* Optimize template function. */
     template <bool copyMatch, bool hasSysCol>
@@ -510,7 +503,7 @@ inline ScalarValue ScalarVector::DatumToScalarT(Datum datumVal, bool isNull)
     DBG_ASSERT(datumType != InvalidOid);
 
     if (!isNull) {
-        if (COL_IS_ENCODE_T<datumType>()) {
+        if (COL_IS_ENCODE(datumType)) {
             switch (datumType) {
                 case MACADDROID:
                     val = DatumFixLenToScalar(datumVal, 6);

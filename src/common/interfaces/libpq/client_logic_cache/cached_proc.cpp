@@ -25,10 +25,20 @@
 #include "libpq-int.h"
 #include "client_logic_common/client_logic_utils.h"
 
+/*
+ * @Description checks if param is used as output parameter
+ * @Param param_mode
+ * @Return true if param is output param, else false
+ */
+static const bool is_output_param(const char param_mode)
+{
+    return param_mode == FUNC_PARAM_OUT || param_mode == FUNC_PARAM_INOUT || param_mode == FUNC_PARAM_TABLE;
+}
+
 CachedProc::~CachedProc()
 {
     if (m_proargnames) {
-        for (size_t i = 0; i < m_nallargtypes; i++) {
+        for (size_t i = 0; i < m_nargnames; i++) {
             if (m_proargnames[i])
                 libpq_free(m_proargnames[i]);
         }
@@ -41,6 +51,7 @@ CachedProc::~CachedProc()
     libpq_free(m_proargtypes);
     libpq_free(m_proallargtypes);
     libpq_free(m_proallargtypes_orig);
+    libpq_free(m_proargmodes);
     if (m_original_ids) {
         libpq_free(m_original_ids);
         m_original_ids = NULL;
@@ -52,8 +63,8 @@ void CachedProc::set_original_ids()
     if (m_original_ids == NULL) {
         m_original_ids = (int*)malloc(get_num_processed_args() * sizeof(int));
         if (m_original_ids == NULL) {
-            fprintf(stderr, "cannot allocate memory for m_original_ids\n");
-            exit(EXIT_FAILURE);
+            printfPQExpBuffer(&m_conn->errorMessage, libpq_gettext("cannot allocate memory for m_original_ids\n"));
+            return;
         }
         for (size_t i = 0; i < get_num_processed_args(); i++) {
             m_original_ids[i] = get_original_id(i);
@@ -63,12 +74,13 @@ void CachedProc::set_original_ids()
 
 const Oid CachedProc::get_original_id(const size_t idx) const
 {
-    if (idx >= m_nallargtypes_orig || !m_proallargtypes) {
+    if (idx >= m_nallargtypes || !m_proallargtypes) {
         return InvalidOid;
     }
     size_t index = 0;
-    for (size_t i = 0; i < m_nallargtypes_orig; i++) {
-        if (is_clientlogic_datatype(m_proallargtypes[i])) {
+    for (size_t i = 0; i < m_nallargtypes; i++) {
+        /* Since this function is for use on response, for deprocessing the result set, input parms should be skipped */
+        if (is_clientlogic_datatype(m_proallargtypes[i]) && is_output_param(m_proargmodes[i])) {
             if (index == idx) {
                 return m_proallargtypes_orig[i];
             }

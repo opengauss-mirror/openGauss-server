@@ -15,6 +15,7 @@
 #define OUTPUT_PLUGIN_H
 
 #include "replication/reorderbuffer.h"
+#include "replication/parallel_reorderbuffer.h"
 
 struct LogicalDecodingContext;
 struct OutputPluginCallbacks;
@@ -36,6 +37,7 @@ typedef struct OutputPluginOptions {
  * when loading an output plugin shared library.
  */
 typedef void (*LogicalOutputPluginInit)(struct OutputPluginCallbacks* cb);
+typedef void (*ParallelLogicalOutputPluginInit)(struct ParallelOutputPluginCallbacks* cb);
 
 /*
  * Callback that gets called in a user-defined plugin. ctx->private_data can
@@ -58,10 +60,23 @@ typedef void (*LogicalDecodeBeginCB)(struct LogicalDecodingContext* ctx, Reorder
 typedef void (*LogicalDecodeChangeCB)(
     struct LogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation, ReorderBufferChange* change);
 
+typedef void (*ParallelLogicalDecodeChangeCB)(
+    struct ParallelLogicalDecodingContext* ctx, ReorderBufferTXN* txn, Relation relation, ParallelReorderBufferChange* change);
+
 /*
  * Called for every (explicit or implicit) COMMIT of a successful transaction.
  */
 typedef void (*LogicalDecodeCommitCB)(struct LogicalDecodingContext* ctx, ReorderBufferTXN* txn, XLogRecPtr commit_lsn);
+
+/*
+ * Called for every (explicit or implicit) COMMIT of a successful transaction.
+ */
+typedef void (*LogicalDecodeAbortCB)(struct LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
+
+/*
+ * Called for every (explicit or implicit) COMMIT of a successful transaction.
+ */
+typedef void (*LogicalDecodePrepareCB)(struct LogicalDecodingContext* ctx, ReorderBufferTXN* txn);
 
 /*
  * Called to shutdown an output plugin.
@@ -81,9 +96,20 @@ typedef struct OutputPluginCallbacks {
     LogicalDecodeBeginCB begin_cb;
     LogicalDecodeChangeCB change_cb;
     LogicalDecodeCommitCB commit_cb;
+    LogicalDecodeAbortCB abort_cb;
+    LogicalDecodePrepareCB prepare_cb;
     LogicalDecodeShutdownCB shutdown_cb;
     LogicalDecodeFilterByOriginCB filter_by_origin_cb;
 } OutputPluginCallbacks;
+
+typedef struct ParallelOutputPluginCallbacks {
+    LogicalDecodeStartupCB startup_cb;
+    LogicalDecodeBeginCB begin_cb;
+    ParallelLogicalDecodeChangeCB change_cb;
+    LogicalDecodeCommitCB commit_cb;
+    LogicalDecodeShutdownCB shutdown_cb;
+    LogicalDecodeFilterByOriginCB filter_by_origin_cb;
+} ParallelOutputPluginCallbacks;
 
 extern void OutputPluginPrepareWrite(struct LogicalDecodingContext* ctx, bool last_write);
 extern void OutputPluginWrite(struct LogicalDecodingContext* ctx, bool last_write);

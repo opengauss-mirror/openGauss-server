@@ -233,7 +233,7 @@ bool get_ordering_op_properties(Oid opno, Oid* opfamily, Oid* opcintype, int16* 
      */
     catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple tuple = &catlist->members[i]->tuple;
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
         /* must be btree */
         if (!OID_IS_BTREE(aform->amopmethod)) {
@@ -404,7 +404,7 @@ Oid get_ordering_op_for_equality_op(Oid opno, bool use_lhs_type)
      */
     catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple tuple = &catlist->members[i]->tuple;
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
         /* must be btree */
         if (!OID_IS_BTREE(aform->amopmethod)) {
@@ -456,7 +456,7 @@ List* get_mergejoin_opfamilies(Oid opno)
     catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
 
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple tuple = &catlist->members[i]->tuple;
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
         /* must be btree equality */
         if (OID_IS_BTREE(aform->amopmethod) && aform->amopstrategy == BTEqualStrategyNumber) {
@@ -501,7 +501,7 @@ bool get_compatible_hash_operators(Oid opno, Oid* lhs_opno, Oid* rhs_opno)
      */
     catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple tuple = &catlist->members[i]->tuple;
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
         if (aform->amopmethod == HASH_AM_OID && aform->amopstrategy == HTEqualStrategyNumber) {
             /* No extra lookup needed if given operator is single-type */
@@ -586,7 +586,7 @@ bool get_op_hash_functions(Oid opno, RegProcedure* lhs_procno, RegProcedure* rhs
     catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
 
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple tuple = &catlist->members[i]->tuple;
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
 
         if (aform->amopmethod == HASH_AM_OID && aform->amopstrategy == HTEqualStrategyNumber) {
@@ -653,7 +653,7 @@ List* get_op_btree_interpretation(Oid opno)
      */
     catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno));
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple op_tuple = &catlist->members[i]->tuple;
+        HeapTuple op_tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_amop op_form = (Form_pg_amop)GETSTRUCT(op_tuple);
         StrategyNumber op_strategy;
         /* must be btree */
@@ -680,7 +680,7 @@ List* get_op_btree_interpretation(Oid opno)
         if (OidIsValid(op_negator)) {
             catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(op_negator));
             for (i = 0; i < catlist->n_members; i++) {
-                HeapTuple op_tuple = &catlist->members[i]->tuple;
+                HeapTuple op_tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
                 Form_pg_amop op_form = (Form_pg_amop)GETSTRUCT(op_tuple);
                 StrategyNumber op_strategy;
                 /* must be btree */
@@ -734,7 +734,7 @@ bool equality_ops_are_compatible(Oid opno1, Oid opno2)
     catlist = SearchSysCacheList1(AMOPOPID, ObjectIdGetDatum(opno1));
     result = false;
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple op_tuple = &catlist->members[i]->tuple;
+        HeapTuple op_tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_amop op_form = (Form_pg_amop)GETSTRUCT(op_tuple);
         /* must be btree or hash */
         if (OID_IS_BTREE(op_form->amopmethod) || op_form->amopmethod == HASH_AM_OID) {
@@ -1518,7 +1518,7 @@ char* get_func_langname(Oid funcid)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
     }
     Datum datum = heap_getattr(tp, Anum_pg_proc_prolang, RelationGetDescr(relation), &isNull);
-    langoid = DatumGetInt16(datum);
+    langoid = DatumGetObjectId(datum);
     heap_close(relation, NoLock);
     ReleaseSysCache(tp);
 
@@ -1729,7 +1729,6 @@ Oid get_valid_relname_relid(const char* relnamespace, const char* relname)
     Oid oldnspid = InvalidOid;
     Oid relid = InvalidOid;
     Oid oldrelid = InvalidOid;
-    uint64 inval_count = 0;
     bool retry = false;
     Assert(relnamespace != NULL);
     Assert(relname != NULL);
@@ -1741,8 +1740,13 @@ Oid get_valid_relname_relid(const char* relnamespace, const char* relname)
      * the answer doesn't change.
      *
      */
+    uint64 sess_inval_count;
+    uint64 thrd_inval_count = 0;
     for (;;) {
-        inval_count = u_sess->inval_cxt.SharedInvalidMessageCounter;
+        sess_inval_count = u_sess->inval_cxt.SIMCounter;
+        if (EnableLocalSysCache()) {
+            thrd_inval_count = t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;
+        }
         nspid = get_namespace_oid(relnamespace, false);
         relid = get_relname_relid(relname, nspid);
         /*
@@ -1797,8 +1801,15 @@ Oid get_valid_relname_relid(const char* relnamespace, const char* relname)
             LockDatabaseObject(NamespaceRelationId, nspid, 0, AccessShareLock);
         }
         /* If no invalidation message were processed, we're done! */
-        if (inval_count == u_sess->inval_cxt.SharedInvalidMessageCounter) {
-            break;
+        if (EnableLocalSysCache()) {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter &&
+                thrd_inval_count == t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter) {
+                break;
+            }
+        } else {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter) {
+                break;
+            }
         }
         /*
          * Let's repeat the name lookup, to make
@@ -2597,7 +2608,7 @@ Oid get_pgxc_nodeoid(const char* nodename)
     int i;
     memlist = SearchSysCacheList1(PGXCNODENAME, PointerGetDatum(nodename));
     for (i = 0; i < memlist->n_members; i++) {
-        HeapTuple tup = &memlist->members[i]->tuple;
+        HeapTuple tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, i);
         char node_type = ((Form_pgxc_node)GETSTRUCT(tup))->node_type;
         if (node_type == PGXC_NODE_COORDINATOR || node_type == PGXC_NODE_DATANODE) {
             node_oid = HeapTupleGetOid(tup);
@@ -2615,7 +2626,7 @@ Oid get_pgxc_datanodeoid(const char* nodename, bool missingOK)
     int i;
     memlist = SearchSysCacheList1(PGXCNODENAME, PointerGetDatum(nodename));
     for (i = 0; i < memlist->n_members; i++) {
-        HeapTuple tup = &memlist->members[i]->tuple;
+        HeapTuple tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, i);
         char node_type = ((Form_pgxc_node)GETSTRUCT(tup))->node_type;
         if (node_type == PGXC_NODE_DATANODE) {
             dn_oid = HeapTupleGetOid(tup);
@@ -2657,7 +2668,7 @@ bool check_pgxc_node_name_is_exist(
     Assert(host != NULL);
     memlist = SearchSysCacheList1(PGXCNODENAME, PointerGetDatum(nodename));
     for (i = 0; i < memlist->n_members; i++) {
-        HeapTuple tup = &memlist->members[i]->tuple;
+        HeapTuple tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, i);
         const char* host_exist = NameStr(((Form_pgxc_node)GETSTRUCT(tup))->node_host);
         int port_exist = ((Form_pgxc_node)GETSTRUCT(tup))->node_port;
         int comm_sctp_port_exist = ((Form_pgxc_node)GETSTRUCT(tup))->sctp_port;
@@ -2745,7 +2756,7 @@ void get_node_info(const char* nodename, bool* node_is_ccn, ItemPointer tuple_po
             heap_close(rel, AccessShareLock);
             return;
         }
-        tuple = &memlist->members[0]->tuple;
+        tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, 0);
         /* get nodeis_central for the node */
         Datum centralDatum = SysCacheGetAttr(PGXCNODEOID, tuple, Anum_pgxc_node_is_central, &is_null);
         if (!is_null) {
@@ -2861,7 +2872,7 @@ bool is_pgxc_central_nodename(const char* nodename)
         is_central = false;
         goto result;
     }
-    tup = &memlist->members[0]->tuple;
+    tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(memlist, 0);
     central_datum = ((Form_pgxc_node)GETSTRUCT(tup))->nodeis_central;
     is_central = DatumGetBool(central_datum);
 result:
@@ -5041,7 +5052,7 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
     /* Search syscache by name only */
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_common.IsInplaceUpgrade) {
+    if (t_thrd.proc->workingVersionNum < 92470) {
         catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
     } else {
         catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(funcname));
@@ -5075,7 +5086,7 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
 #endif
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple proctup = &catlist->members[i]->tuple;
+        HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
         if (OidIsValid(funcnamespace)) {
             /* Consider only procs in specified namespace */
@@ -5138,8 +5149,9 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
                 continue;
         }
 
+        Oid func_oid = HeapTupleGetOid(proctup);
         ReleaseSysCacheList(catlist);
-        return HeapTupleGetOid(proctup);
+        return func_oid;
     }
     ReleaseSysCacheList(catlist);
     return InvalidOid;
@@ -5160,7 +5172,7 @@ Oid get_func_oid_ext(const char* funcname, Oid funcnamespace, Oid funcrettype, i
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
 #endif
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple proctup = &catlist->members[i]->tuple;
+        HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
         if (OidIsValid(funcnamespace)) {
             /* Consider only procs in specified namespace */
@@ -5186,8 +5198,9 @@ Oid get_func_oid_ext(const char* funcname, Oid funcnamespace, Oid funcrettype, i
         if (j < funcnargs) {
             continue;
         }
+        Oid func_oid = HeapTupleGetOid(proctup);
         ReleaseSysCacheList(catlist);
-        return HeapTupleGetOid(proctup);
+        return func_oid;
     }
     ReleaseSysCacheList(catlist);
     return InvalidOid;

@@ -1,0 +1,1930 @@
+-- check define_program_argument
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 3, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | number_of_arguments | 3
+ program1 | enabled             | false
+ program1 | comments            | test
+(6 rows)
+
+select what, job_name from pg_job_proc;
+ what | job_name 
+------+----------
+(0 rows)
+
+select DBE_SCHEDULER.define_program_argument('program1', 0, 'arg0', 'int', 16);
+ERROR:  Argument position specified is out of range.
+DETAIL:  Argument 0 should within range (0, 3].
+CONTEXT:  referenced column: define_program_argument
+select DBE_SCHEDULER.define_program_argument('program1', 4, 'arg4', 'int', 16); 
+ERROR:  Argument position specified is out of range.
+DETAIL:  Argument 4 should within range (0, 3].
+CONTEXT:  referenced column: define_program_argument
+select DBE_SCHEDULER.define_program_argument('program2', 1, 'arg1', 'boolean', false); 
+ERROR:  Can not find attribute 'object_type' of object name 'program2'.
+DETAIL:  N/A
+CONTEXT:  referenced column: define_program_argument
+select DBE_SCHEDULER.define_program_argument('program1', 1, 'arg1', 'boolean', false); 
+ define_program_argument 
+-------------------------
+ 
+(1 row)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+                 1 | boolean       | program1 | arg1          |                | 
+(1 row)
+
+select DBE_SCHEDULER.define_program_argument('program1', 1, 'arg1', 'int', 16); 
+ define_program_argument 
+-------------------------
+ 
+(1 row)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+                 1 | int           | program1 | arg1          |                | 16
+(1 row)
+
+select DBE_SCHEDULER.define_program_argument('program1', 2, 'arg2', 'boolean', 'false', false); 
+ define_program_argument 
+-------------------------
+ 
+(1 row)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+                 1 | int           | program1 | arg1          |                | 16
+                 2 | boolean       | program1 | arg2          |                | false
+(2 rows)
+
+select DBE_SCHEDULER.drop_program('program1', true);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+ dbname | node_name | interval | nspname | job_name | end_date | enable 
+--------+-----------+----------+---------+----------+----------+--------
+(0 rows)
+
+select what, job_name from pg_job_proc;
+ what | job_name 
+------+----------
+(0 rows)
+
+-- check create_program / drop_program
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 3, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_program('program2', 'sql', 'select pg_sleep(1);', 3, false, 'test');
+ERROR:  program_type sql not support.
+DETAIL:  Invalid program type.
+CONTEXT:  referenced column: create_program
+select DBE_SCHEDULER.create_program('program2', 'STORED_PROCEDURE', 'select pg_sleep(1);', 3, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job('job1', 'program1', '2021-07-20',  'interval ''3 minute''', '2121-07-20', 'DEFAULT_JOB_CLASS', false, false,'test', 'style', NULL, NULL);
+ create_job 
+------------
+ 
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job1
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value    
+----------+---------------------+----------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | number_of_arguments | 3
+ program1 | enabled             | false
+ program1 | comments            | test
+ program2 | object_type         | program
+ program2 | program_type        | stored_procedure
+ program2 | program_action      | select pg_sleep(1);
+ program2 | number_of_arguments | 3
+ program2 | enabled             | false
+ program2 | comments            | test
+ job1     | object_type         | job
+ job1     | program_name        | program1
+ job1     | schedule_name       | inline_schedule_job1
+ job1     | job_class           | default_job_class
+ job1     | auto_drop           | false
+ job1     | comments            | test
+ job1     | job_style           | style
+ job1     | credential_name     | 
+ job1     | destination_name    | 
+(21 rows)
+
+select DBE_SCHEDULER.drop_program('program2,program1', false);
+ERROR:  program_name program1 refered by job job1
+DETAIL:  N/A
+CONTEXT:  SQL statement "CALL dbe_scheduler.drop_single_program(name_list[i],force)"
+PL/pgSQL function dbe_scheduler.drop_program(text,boolean) line 8 at PERFORM
+referenced column: drop_program
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value    
+----------+---------------------+----------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | number_of_arguments | 3
+ program1 | enabled             | false
+ program1 | comments            | test
+ program2 | object_type         | program
+ program2 | program_type        | stored_procedure
+ program2 | program_action      | select pg_sleep(1);
+ program2 | number_of_arguments | 3
+ program2 | enabled             | false
+ program2 | comments            | test
+ job1     | object_type         | job
+ job1     | program_name        | program1
+ job1     | schedule_name       | inline_schedule_job1
+ job1     | job_class           | default_job_class
+ job1     | auto_drop           | false
+ job1     | comments            | test
+ job1     | job_style           | style
+ job1     | credential_name     | 
+ job1     | destination_name    | 
+(21 rows)
+
+select DBE_SCHEDULER.drop_program('program1,program2', true);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |  attribute_name  |   attribute_value    
+----------+------------------+----------------------
+ job1     | object_type      | job
+ job1     | program_name     | program1
+ job1     | schedule_name    | inline_schedule_job1
+ job1     | job_class        | default_job_class
+ job1     | auto_drop        | false
+ job1     | comments         | test
+ job1     | job_style        | style
+ job1     | credential_name  | 
+ job1     | destination_name | 
+(9 rows)
+
+select DBE_SCHEDULER.drop_job('program1,job1', true, false, 'STOP_ON_FIRST_ERROR');
+NOTICE:  Undefined object program1.
+CONTEXT:  referenced column: drop_job
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job1,program1', true, false, 'TRANSACTIONAL');
+ERROR:  Undefined object program1.
+CONTEXT:  referenced column: drop_job
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |  attribute_name  |   attribute_value    
+----------+------------------+----------------------
+ job1     | object_type      | job
+ job1     | program_name     | program1
+ job1     | schedule_name    | inline_schedule_job1
+ job1     | job_class        | default_job_class
+ job1     | auto_drop        | false
+ job1     | comments         | test
+ job1     | job_style        | style
+ job1     | credential_name  | 
+ job1     | destination_name | 
+(9 rows)
+
+select DBE_SCHEDULER.drop_job('job1,program1', true, false, 'ABSORB_ERRORS');
+NOTICE:  Undefined object program1.
+CONTEXT:  referenced column: drop_job
+ drop_job 
+----------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+ dbname | node_name | interval | nspname | job_name | end_date | enable 
+--------+-----------+----------+---------+----------+----------+--------
+(0 rows)
+
+select what, job_name from pg_job_proc;
+ what | job_name 
+------+----------
+(0 rows)
+
+-- set_attribute
+--program
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 3, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_argument', '2', NULL);
+ERROR:  Fail to update attribute.
+DETAIL:  Attribute entry number_of_argument not found.
+CONTEXT:  referenced column: set_attribute
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', '2', NULL);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | comments            | test
+ program1 | number_of_arguments | 2
+ program1 | enabled             | false
+(6 rows)
+
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', 3, NULL);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | comments            | test
+ program1 | number_of_arguments | 3
+ program1 | enabled             | false
+(6 rows)
+
+select DBE_SCHEDULER.set_attribute('program1', 'enabled', true);
+ERROR:  Can not find argument info of object 'program1'.
+DETAIL:  N/A
+CONTEXT:  referenced column: set_attribute
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | comments            | test
+ program1 | number_of_arguments | 3
+ program1 | enabled             | false
+(6 rows)
+
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', 0, NULL);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'enabled', true);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | comments            | test
+ program1 | number_of_arguments | 0
+ program1 | enabled             | true
+(6 rows)
+
+select DBE_SCHEDULER.create_schedule('schedule1', NULL, 'sysdate', NULL, 'test');
+ create_schedule 
+-----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job1', program_name=>'program1', schedule_name=>'schedule1');
+ create_job 
+------------
+ 
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job1
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'program_action', 'create role r1 password ''12345'';', NULL); -- failed
+ERROR:  Job action specified is not allowed.
+DETAIL:  Job action cannot be executed securely.
+CONTEXT:  referenced column: set_attribute
+select DBE_SCHEDULER.set_attribute('program1', 'program_action', 'select pg_sleep(2);', NULL);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(2); | job1
+(1 row)
+
+--schedule
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name  |   attribute_name    |   attribute_value   
+-----------+---------------------+---------------------
+ program1  | object_type         | program
+ program1  | program_type        | stored_procedure
+ program1  | comments            | test
+ program1  | number_of_arguments | 0
+ program1  | enabled             | true
+ schedule1 | object_type         | schedule
+ schedule1 | start_date          | 
+ schedule1 | repeat_interval     | sysdate
+ schedule1 | end_date            | 
+ schedule1 | comments            | test
+ job1      | object_type         | job
+ job1      | program_name        | program1
+ job1      | schedule_name       | schedule1
+ job1      | job_class           | default_job_class
+ job1      | auto_drop           | true
+ job1      | comments            | 
+ job1      | job_style           | regular
+ job1      | credential_name     | 
+ job1      | destination_name    | 
+ program1  | program_action      | select pg_sleep(2);
+(20 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | job1     | Sat Jan 01 00:00:00 4000 | f
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('schedule1', 'start_date', '2021-7-20');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('schedule1', 'end_date', '2021-7-20');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('schedule1', 'repeat_interval', 'interval ''2000 s''');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name  |   attribute_name    |   attribute_value   
+-----------+---------------------+---------------------
+ program1  | object_type         | program
+ program1  | program_type        | stored_procedure
+ program1  | comments            | test
+ program1  | number_of_arguments | 0
+ program1  | enabled             | true
+ schedule1 | object_type         | schedule
+ schedule1 | comments            | test
+ job1      | object_type         | job
+ job1      | program_name        | program1
+ job1      | schedule_name       | schedule1
+ job1      | job_class           | default_job_class
+ job1      | auto_drop           | true
+ job1      | comments            | 
+ job1      | job_style           | regular
+ job1      | credential_name     | 
+ job1      | destination_name    | 
+ program1  | program_action      | select pg_sleep(2);
+ schedule1 | start_date          | 2021-7-20
+ schedule1 | end_date            | 2021-7-20
+ schedule1 | repeat_interval     | interval '2000 s'
+(20 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name |     interval      | nspname | job_name |         end_date         | enable 
+------------+-----------+-------------------+---------+----------+--------------------------+--------
+ regression | datanode1 | interval '2000 s' | public  | job1     | Tue Jul 20 00:00:00 2021 | f
+(1 row)
+
+--job
+select DBE_SCHEDULER.create_program('program2', 'STORED_PROCEDURE', 'select pg_sleep(1);', 3, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_schedule('schedule2', NULL, 'sysdate', NULL, 'test');
+ create_schedule 
+-----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'program_name', 'program2');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'schedule_name', 'schedule2');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'job_class', 'unknown');
+ERROR:  Can not find attribute 'object_type' of object name 'unknown'.
+DETAIL:  N/A
+CONTEXT:  referenced column: set_attribute
+select DBE_SCHEDULER.create_job_class('test');
+ create_job_class 
+------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'job_class', 'test');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'enabled', true);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name  |     attribute_name      |   attribute_value   
+-----------+-------------------------+---------------------
+ program1  | object_type             | program
+ program1  | program_type            | stored_procedure
+ program1  | comments                | test
+ program1  | number_of_arguments     | 0
+ program1  | enabled                 | true
+ schedule1 | object_type             | schedule
+ schedule1 | comments                | test
+ job1      | object_type             | job
+ job1      | auto_drop               | true
+ job1      | comments                | 
+ job1      | job_style               | regular
+ job1      | credential_name         | 
+ job1      | destination_name        | 
+ program1  | program_action          | select pg_sleep(2);
+ schedule1 | start_date              | 2021-7-20
+ schedule1 | end_date                | 2021-7-20
+ schedule1 | repeat_interval         | interval '2000 s'
+ program2  | object_type             | program
+ program2  | program_type            | stored_procedure
+ program2  | program_action          | select pg_sleep(1);
+ program2  | number_of_arguments     | 3
+ program2  | enabled                 | false
+ program2  | comments                | test
+ schedule2 | object_type             | schedule
+ schedule2 | start_date              | 
+ schedule2 | repeat_interval         | sysdate
+ schedule2 | end_date                | 
+ schedule2 | comments                | test
+ job1      | program_name            | program2
+ job1      | schedule_name           | schedule2
+ test      | object_type             | job_class
+ test      | resource_consumer_group | 
+ test      | service                 | 
+ test      | logging_level           | 0
+ test      | log_history             | 
+ test      | comments                | 
+ job1      | job_class               | test
+(37 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | job1     | Sat Jan 01 00:00:00 4000 | t
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job1
+(1 row)
+
+select DBE_SCHEDULER.drop_program('program1,program2', true);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job1', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_schedule('schedule1,schedule2', false);
+ drop_schedule 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_job_class('test');
+ drop_job_class 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job1', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(1);');
+ create_job 
+------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value    
+---------------------+---------------------+----------------------
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | inline_schedule_job1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+(15 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | null     | public  | job1     | Sat Jan 01 00:00:00 4000 | f
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job1
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value    
+---------------------+---------------------+----------------------
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | inline_schedule_job1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+(15 rows)
+
+select DBE_SCHEDULER.set_attribute('job1', 'start_date', '2021-7-20');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'end_date', '2021-7-20');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'repeat_interval', 'interval ''2000 s''');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'number_of_arguments', 2);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'job_action', 'create role r1 password ''12345'';'); -- failed
+ERROR:  Job action specified is not allowed.
+DETAIL:  Job action cannot be executed securely.
+CONTEXT:  referenced column: set_attribute
+select DBE_SCHEDULER.set_attribute('job1', 'job_action', 'select pg_sleep(2);');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('job1', 'job_type', 'STORED_PROCEDURE');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value    
+---------------------+---------------------+----------------------
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | inline_schedule_job1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+ inline_program_job1 | number_of_arguments | 2
+ inline_program_job1 | program_action      | select pg_sleep(2);
+ inline_program_job1 | program_type        | stored_procedure
+(15 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name |     interval      | nspname | job_name |         end_date         | enable 
+------------+-----------+-------------------+---------+----------+--------------------------+--------
+ regression | datanode1 | interval '2000 s' | public  | job1     | Tue Jul 20 00:00:00 2021 | f
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(2); | job1
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job1', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+--create_schedule dropxxx
+select DBE_SCHEDULER.create_schedule('schedule1', NULL, 'sysdate', NULL, 'test');
+ create_schedule 
+-----------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name  | attribute_name  | attribute_value 
+-----------+-----------------+-----------------
+ schedule1 | object_type     | schedule
+ schedule1 | start_date      | 
+ schedule1 | repeat_interval | sysdate
+ schedule1 | end_date        | 
+ schedule1 | comments        | test
+(5 rows)
+
+select DBE_SCHEDULER.create_schedule('schedule2', NULL, 'sysdate', NULL, 'test');
+ create_schedule 
+-----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job('job1', 'schedule1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 0, 'DEFAULT_JOB_CLASS', true, true, NULL, NULL, NULL);
+ create_job 
+------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value   
+---------------------+---------------------+---------------------
+ schedule1           | object_type         | schedule
+ schedule1           | start_date          | 
+ schedule1           | repeat_interval     | sysdate
+ schedule1           | end_date            | 
+ schedule1           | comments            | test
+ schedule2           | object_type         | schedule
+ schedule2           | start_date          | 
+ schedule2           | repeat_interval     | sysdate
+ schedule2           | end_date            | 
+ schedule2           | comments            | test
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | schedule1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+(25 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | job1     | Sat Jan 01 00:00:00 4000 | t
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job1
+(1 row)
+
+select DBE_SCHEDULER.drop_job('schedule1', true, false, 'STOP_ON_FIRST_ERROR');
+NOTICE:  name schedule1 is schedule.
+CONTEXT:  referenced column: drop_job
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_program('schedule1', false);
+ERROR:  Cannot find program type of program schedule1.
+DETAIL:  Invalid program format.
+CONTEXT:  SQL statement "CALL dbe_scheduler.drop_single_program(name_list[i],force)"
+PL/pgSQL function dbe_scheduler.drop_program(text,boolean) line 8 at PERFORM
+referenced column: drop_program
+select DBE_SCHEDULER.drop_schedule('schedule1', false);
+ERROR:  schedule_name schedule1 refered by job job1
+DETAIL:  N/A
+CONTEXT:  SQL statement "CALL dbe_scheduler.drop_single_schedule(name_list[i],force)"
+PL/pgSQL function dbe_scheduler.drop_schedule(text,boolean) line 8 at PERFORM
+referenced column: drop_schedule
+select DBE_SCHEDULER.drop_schedule('schedule1,schedule2', true);
+ drop_schedule 
+---------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value   
+---------------------+---------------------+---------------------
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | schedule1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+(15 rows)
+
+select DBE_SCHEDULER.drop_job('job1', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+ dbname | node_name | interval | nspname | job_name | end_date | enable 
+--------+-----------+----------+---------+----------+----------+--------
+(0 rows)
+
+select what, job_name from pg_job_proc;
+ what | job_name 
+------+----------
+(0 rows)
+
+--set_job_arguemnt_value
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 3, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job('job1', 'program1', '2021-07-20', 'sysdate', '2121-07-20', 'DEFAULT_JOB_CLASS', false, false,'test', 'style', NULL, NULL);
+ create_job 
+------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value    
+----------+---------------------+----------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | number_of_arguments | 3
+ program1 | enabled             | false
+ program1 | comments            | test
+ job1     | object_type         | job
+ job1     | program_name        | program1
+ job1     | schedule_name       | inline_schedule_job1
+ job1     | job_class           | default_job_class
+ job1     | auto_drop           | false
+ job1     | comments            | test
+ job1     | job_style           | style
+ job1     | credential_name     | 
+ job1     | destination_name    | 
+(15 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | job1     | Sun Jul 20 00:00:00 2121 | f
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job1
+(1 row)
+
+select DBE_SCHEDULER.set_job_argument_value('job1', 1, 1);
+ set_job_argument_value 
+------------------------
+ 
+(1 row)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name |   argument_name    | argument_value | default_value 
+-------------------+---------------+----------+--------------------+----------------+---------------
+                 1 | text          | job1     | default_argument_1 | 1              | 
+(1 row)
+
+select DBE_SCHEDULER.set_job_argument_value('job1', 1, 11);
+ set_job_argument_value 
+------------------------
+ 
+(1 row)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name |   argument_name    | argument_value | default_value 
+-------------------+---------------+----------+--------------------+----------------+---------------
+                 1 | text          | job1     | default_argument_1 | 11             | 
+(1 row)
+
+select DBE_SCHEDULER.set_job_argument_value('job1', 'default_name_of_arg1', 111);
+ERROR:  Fail to set job argument value.
+DETAIL:  Argument default_name_of_arg1 was never defined.
+CONTEXT:  referenced column: set_job_argument_value
+select * from gs_job_argument;
+ argument_position | argument_type | job_name |   argument_name    | argument_value | default_value 
+-------------------+---------------+----------+--------------------+----------------+---------------
+                 1 | text          | job1     | default_argument_1 | 11             | 
+(1 row)
+
+select DBE_SCHEDULER.define_program_argument('program1', 2, 'arg2', 'boolean', 'false', false); 
+ define_program_argument 
+-------------------------
+ 
+(1 row)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+                 2 | boolean       | program1 | arg2          |                | false
+(1 row)
+
+select DBE_SCHEDULER.set_job_argument_value('job1', 'arg2', 2);
+ set_job_argument_value 
+------------------------
+ 
+(1 row)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name |   argument_name    | argument_value | default_value 
+-------------------+---------------+----------+--------------------+----------------+---------------
+                 2 | boolean       | program1 | arg2               |                | false
+                 2 | boolean       | job1     | default_argument_2 | 2              | 
+(2 rows)
+
+select DBE_SCHEDULER.set_job_argument_value('job1', 'arg2', 22);
+ set_job_argument_value 
+------------------------
+ 
+(1 row)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name |   argument_name    | argument_value | default_value 
+-------------------+---------------+----------+--------------------+----------------+---------------
+                 2 | boolean       | program1 | arg2               |                | false
+                 2 | boolean       | job1     | default_argument_2 | 22             | 
+(2 rows)
+
+select DBE_SCHEDULER.drop_job('job1', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_program('program1', false);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+ dbname | node_name | interval | nspname | job_name | end_date | enable 
+--------+-----------+----------+---------+----------+----------+--------
+(0 rows)
+
+select what, job_name from pg_job_proc;
+ what | job_name 
+------+----------
+(0 rows)
+
+-- check create_job
+select DBE_SCHEDULER.create_schedule('schedule1', NULL, 'sysdate', '2021-7-28', 'test');
+ create_schedule 
+-----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 3, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job1', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(1);');
+ create_job 
+------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |       attribute_value        
+---------------------+---------------------+------------------------------
+ schedule1           | object_type         | schedule
+ schedule1           | start_date          | 
+ schedule1           | repeat_interval     | sysdate
+ schedule1           | end_date            | Wed Jul 28 00:00:00 2021 PDT
+ schedule1           | comments            | test
+ program1            | object_type         | program
+ program1            | program_type        | stored_procedure
+ program1            | program_action      | select pg_sleep(1);
+ program1            | number_of_arguments | 3
+ program1            | enabled             | false
+ program1            | comments            | test
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | inline_schedule_job1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+(26 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | null     | public  | job1     | Sat Jan 01 00:00:00 4000 | f
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job1
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job1', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job2', program_name=>'program1', schedule_name=>'schedule1');
+ create_job 
+------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name  |   attribute_name    |       attribute_value        
+-----------+---------------------+------------------------------
+ schedule1 | object_type         | schedule
+ schedule1 | start_date          | 
+ schedule1 | repeat_interval     | sysdate
+ schedule1 | end_date            | Wed Jul 28 00:00:00 2021 PDT
+ schedule1 | comments            | test
+ program1  | object_type         | program
+ program1  | program_type        | stored_procedure
+ program1  | program_action      | select pg_sleep(1);
+ program1  | number_of_arguments | 3
+ program1  | enabled             | false
+ program1  | comments            | test
+ job2      | object_type         | job
+ job2      | program_name        | program1
+ job2      | schedule_name       | schedule1
+ job2      | job_class           | default_job_class
+ job2      | auto_drop           | true
+ job2      | comments            | 
+ job2      | job_style           | regular
+ job2      | credential_name     | 
+ job2      | destination_name    | 
+(20 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | job2     | Wed Jul 28 00:00:00 2021 | f
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job2
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job2', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job3', program_name=>'program1');
+ create_job 
+------------
+ 
+(1 row)
+
+select job_name, enable from pg_job where job_name = 'job3';
+ job_name | enable 
+----------+--------
+ job3     | f
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name  |   attribute_name    |       attribute_value        
+-----------+---------------------+------------------------------
+ schedule1 | object_type         | schedule
+ schedule1 | start_date          | 
+ schedule1 | repeat_interval     | sysdate
+ schedule1 | end_date            | Wed Jul 28 00:00:00 2021 PDT
+ schedule1 | comments            | test
+ program1  | object_type         | program
+ program1  | program_type        | stored_procedure
+ program1  | program_action      | select pg_sleep(1);
+ program1  | number_of_arguments | 3
+ program1  | enabled             | false
+ program1  | comments            | test
+ job3      | object_type         | job
+ job3      | program_name        | program1
+ job3      | schedule_name       | inline_schedule_job3
+ job3      | job_class           | default_job_class
+ job3      | auto_drop           | true
+ job3      | comments            | 
+ job3      | job_style           | regular
+ job3      | credential_name     | 
+ job3      | destination_name    | 
+(20 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | null     | public  | job3     | Sat Jan 01 00:00:00 4000 | f
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(1); | job3
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job3', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job4', schedule_name=>'schedule1', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(4);');
+ create_job 
+------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |       attribute_value        
+---------------------+---------------------+------------------------------
+ schedule1           | object_type         | schedule
+ schedule1           | start_date          | 
+ schedule1           | repeat_interval     | sysdate
+ schedule1           | end_date            | Wed Jul 28 00:00:00 2021 PDT
+ schedule1           | comments            | test
+ program1            | object_type         | program
+ program1            | program_type        | stored_procedure
+ program1            | program_action      | select pg_sleep(1);
+ program1            | number_of_arguments | 3
+ program1            | enabled             | false
+ program1            | comments            | test
+ inline_program_job4 | object_type         | program
+ inline_program_job4 | program_type        | stored_procedure
+ inline_program_job4 | program_action      | select pg_sleep(4);
+ inline_program_job4 | number_of_arguments | 0
+ inline_program_job4 | enabled             | true
+ inline_program_job4 | comments            | 
+ job4                | object_type         | job
+ job4                | program_name        | inline_program_job4
+ job4                | schedule_name       | schedule1
+ job4                | job_class           | default_job_class
+ job4                | auto_drop           | true
+ job4                | comments            | 
+ job4                | job_style           | 
+ job4                | credential_name     | 
+ job4                | destination_name    | 
+(26 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | job4     | Wed Jul 28 00:00:00 2021 | f
+(1 row)
+
+select what, job_name from pg_job_proc;
+        what         | job_name 
+---------------------+----------
+ select pg_sleep(4); | job4
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job4', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_schedule('schedule1', true);
+ drop_schedule 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_program('program1', false);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+ dbname | node_name | interval | nspname | job_name | end_date | enable 
+--------+-----------+----------+---------+----------+----------+--------
+(0 rows)
+
+select what, job_name from pg_job_proc;
+ what | job_name 
+------+----------
+(0 rows)
+
+-- enable/disable
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 0, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | number_of_arguments | 0
+ program1 | enabled             | false
+ program1 | comments            | test
+(6 rows)
+
+select DBE_SCHEDULER.enable('program1', 'STOP_ON_FIRST_ERROR');
+ enable 
+--------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | number_of_arguments | 0
+ program1 | comments            | test
+ program1 | enabled             | true
+(6 rows)
+
+select DBE_SCHEDULER.disable('program1', false, 'STOP_ON_FIRST_ERROR');
+ disable 
+---------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | number_of_arguments | 0
+ program1 | comments            | test
+ program1 | enabled             | false
+(6 rows)
+
+select DBE_SCHEDULER.create_job(job_name=>'job1', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(1);');
+ create_job 
+------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value    
+---------------------+---------------------+----------------------
+ program1            | object_type         | program
+ program1            | program_type        | stored_procedure
+ program1            | program_action      | select pg_sleep(1);
+ program1            | number_of_arguments | 0
+ program1            | comments            | test
+ program1            | enabled             | false
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | inline_schedule_job1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+(21 rows)
+
+select DBE_SCHEDULER.enable('job1', 'STOP_ON_FIRST_ERROR');
+ enable 
+--------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value    
+---------------------+---------------------+----------------------
+ program1            | object_type         | program
+ program1            | program_type        | stored_procedure
+ program1            | program_action      | select pg_sleep(1);
+ program1            | number_of_arguments | 0
+ program1            | comments            | test
+ program1            | enabled             | false
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | inline_schedule_job1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+(21 rows)
+
+select DBE_SCHEDULER.disable('job1', false, 'STOP_ON_FIRST_ERROR');
+ disable 
+---------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value    
+---------------------+---------------------+----------------------
+ program1            | object_type         | program
+ program1            | program_type        | stored_procedure
+ program1            | program_action      | select pg_sleep(1);
+ program1            | number_of_arguments | 0
+ program1            | comments            | test
+ program1            | enabled             | false
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | inline_schedule_job1
+ job1                | job_class           | default_job_class
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+(21 rows)
+
+select DBE_SCHEDULER.drop_job('job1', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_program('program1', false);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+ dbname | node_name | interval | nspname | job_name | end_date | enable 
+--------+-----------+----------+---------+----------+----------+--------
+(0 rows)
+
+select what, job_name from pg_job_proc;
+ what | job_name 
+------+----------
+(0 rows)
+
+--create / drop job_class
+select DBE_SCHEDULER.create_job_class('test');
+ create_job_class 
+------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job1', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(1);', job_class=>'test');
+ create_job 
+------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job3', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(1);', job_class=>'testxxx');
+ERROR:  Can not find attribute 'object_type' of object name 'testxxx'.
+DETAIL:  N/A
+CONTEXT:  referenced column: create_job
+select DBE_SCHEDULER.create_job(job_name=>'job2', job_type=>'STORED_PROCEDURE', job_action=>'select pg_sleep(1);');
+ create_job 
+------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |     attribute_name      |   attribute_value    
+---------------------+-------------------------+----------------------
+ test                | object_type             | job_class
+ test                | resource_consumer_group | 
+ test                | service                 | 
+ test                | logging_level           | 0
+ test                | log_history             | 
+ test                | comments                | 
+ inline_program_job1 | object_type             | program
+ inline_program_job1 | program_type            | stored_procedure
+ inline_program_job1 | program_action          | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments     | 0
+ inline_program_job1 | enabled                 | true
+ inline_program_job1 | comments                | 
+ job1                | object_type             | job
+ job1                | program_name            | inline_program_job1
+ job1                | schedule_name           | inline_schedule_job1
+ job1                | job_class               | test
+ job1                | auto_drop               | true
+ job1                | comments                | 
+ job1                | job_style               | 
+ job1                | credential_name         | 
+ job1                | destination_name        | 
+ inline_program_job2 | object_type             | program
+ inline_program_job2 | program_type            | stored_procedure
+ inline_program_job2 | program_action          | select pg_sleep(1);
+ inline_program_job2 | number_of_arguments     | 0
+ inline_program_job2 | enabled                 | true
+ inline_program_job2 | comments                | 
+ job2                | object_type             | job
+ job2                | program_name            | inline_program_job2
+ job2                | schedule_name           | inline_schedule_job2
+ job2                | job_class               | default_job_class
+ job2                | auto_drop               | true
+ job2                | comments                | 
+ job2                | job_style               | 
+ job2                | credential_name         | 
+ job2                | destination_name        | 
+(36 rows)
+
+select DBE_SCHEDULER.set_attribute('job2', 'job_class', 'test');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |     attribute_name      |   attribute_value    
+---------------------+-------------------------+----------------------
+ test                | object_type             | job_class
+ test                | resource_consumer_group | 
+ test                | service                 | 
+ test                | logging_level           | 0
+ test                | log_history             | 
+ test                | comments                | 
+ inline_program_job1 | object_type             | program
+ inline_program_job1 | program_type            | stored_procedure
+ inline_program_job1 | program_action          | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments     | 0
+ inline_program_job1 | enabled                 | true
+ inline_program_job1 | comments                | 
+ job1                | object_type             | job
+ job1                | program_name            | inline_program_job1
+ job1                | schedule_name           | inline_schedule_job1
+ job1                | job_class               | test
+ job1                | auto_drop               | true
+ job1                | comments                | 
+ job1                | job_style               | 
+ job1                | credential_name         | 
+ job1                | destination_name        | 
+ inline_program_job2 | object_type             | program
+ inline_program_job2 | program_type            | stored_procedure
+ inline_program_job2 | program_action          | select pg_sleep(1);
+ inline_program_job2 | number_of_arguments     | 0
+ inline_program_job2 | enabled                 | true
+ inline_program_job2 | comments                | 
+ job2                | object_type             | job
+ job2                | program_name            | inline_program_job2
+ job2                | schedule_name           | inline_schedule_job2
+ job2                | auto_drop               | true
+ job2                | comments                | 
+ job2                | job_style               | 
+ job2                | credential_name         | 
+ job2                | destination_name        | 
+ job2                | job_class               | test
+(36 rows)
+
+select DBE_SCHEDULER.drop_job_class('test', false);
+ERROR:  job_class test refered by job job1
+DETAIL:  N/A
+CONTEXT:  SQL statement "CALL dbe_scheduler.drop_single_job_class(name_list[i],force)"
+PL/pgSQL function dbe_scheduler.drop_job_class(text,boolean) line 8 at PERFORM
+referenced column: drop_job_class
+select DBE_SCHEDULER.drop_job_class('test', true);
+ drop_job_class 
+----------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+      job_name       |   attribute_name    |   attribute_value    
+---------------------+---------------------+----------------------
+ inline_program_job1 | object_type         | program
+ inline_program_job1 | program_type        | stored_procedure
+ inline_program_job1 | program_action      | select pg_sleep(1);
+ inline_program_job1 | number_of_arguments | 0
+ inline_program_job1 | enabled             | true
+ inline_program_job1 | comments            | 
+ job1                | object_type         | job
+ job1                | program_name        | inline_program_job1
+ job1                | schedule_name       | inline_schedule_job1
+ job1                | auto_drop           | true
+ job1                | comments            | 
+ job1                | job_style           | 
+ job1                | credential_name     | 
+ job1                | destination_name    | 
+ inline_program_job2 | object_type         | program
+ inline_program_job2 | program_type        | stored_procedure
+ inline_program_job2 | program_action      | select pg_sleep(1);
+ inline_program_job2 | number_of_arguments | 0
+ inline_program_job2 | enabled             | true
+ inline_program_job2 | comments            | 
+ job2                | object_type         | job
+ job2                | program_name        | inline_program_job2
+ job2                | schedule_name       | inline_schedule_job2
+ job2                | auto_drop           | true
+ job2                | comments            | 
+ job2                | job_style           | 
+ job2                | credential_name     | 
+ job2                | destination_name    | 
+ job1                | job_class           | DEFAULT_JOB_CLASS
+ job2                | job_class           | DEFAULT_JOB_CLASS
+(30 rows)
+
+select DBE_SCHEDULER.drop_job('job1,job2', true, false, 'STOP_ON_FIRST_ERROR');
+ drop_job 
+----------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+select * from gs_job_argument;
+ argument_position | argument_type | job_name | argument_name | argument_value | default_value 
+-------------------+---------------+----------+---------------+----------------+---------------
+(0 rows)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job where start_date is not null;
+ dbname | node_name | interval | nspname | job_name | end_date | enable 
+--------+-----------+----------+---------+----------+----------+--------
+(0 rows)
+
+select what, job_name from pg_job_proc;
+ what | job_name 
+------+----------
+(0 rows)
+
+-- generate_job_name
+select DBE_SCHEDULER.generate_job_name();
+ generate_job_name 
+-------------------
+ JOB$_1
+(1 row)
+
+select DBE_SCHEDULER.generate_job_name('');
+ generate_job_name 
+-------------------
+ 2
+(1 row)
+
+select DBE_SCHEDULER.generate_job_name('job_prefix_');
+ generate_job_name 
+-------------------
+ job_prefix_3
+(1 row)
+
+create table t1(c1 int);
+create or replace procedure p1(id int) as
+begin
+  insert into t1 values(id);
+end;
+/
+select DBE_SCHEDULER.create_program('program2', 'STORED_PROCEDURE', 'public.p1', 1, true, 'test');
+ERROR:  Can not find argument info of object 'program2'.
+DETAIL:  N/A
+CONTEXT:  referenced column: create_program
+select DBE_SCHEDULER.create_program('program2', 'STORED_PROCEDURE', 'public.p1', 1, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.define_program_argument('program2', 1, 'arg1', 'int', 2);
+ define_program_argument 
+-------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.enable('program2', 'TRANSACTIONAL');
+ enable 
+--------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job2', program_name=>'program2', enabled=>true, auto_drop=>false);
+ create_job 
+------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.run_job('job2', false);
+ run_job 
+---------
+ 
+(1 row)
+
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from t1;
+ c1 
+----
+  2
+(1 row)
+
+select DBE_SCHEDULER.create_job(job_name=>'job3', job_type=>'PLSQL_BLOCK', job_action=>'insert into public.t1 values(3);', enabled=>true, auto_drop=>false);
+ create_job 
+------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.run_job('job3', false);
+ run_job 
+---------
+ 
+(1 row)
+
+select pg_sleep(2);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from t1;
+ c1 
+----
+  2
+  3
+(2 rows)
+
+drop table t1;
+select DBE_SCHEDULER.drop_job('job2', true);
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_job('job3', true);
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_program('program2', true);
+ drop_program 
+--------------
+ 
+(1 row)
+
+-- others
+select DBE_SCHEDULER.create_program('program1', 'STORED_PROCEDURE', 'select pg_sleep(1);', 1, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.enable('program1', 'TRANSACTIONAL');
+ERROR:  Can not find argument info of object 'program1'.
+CONTEXT:  referenced column: enable
+select DBE_SCHEDULER.define_program_argument('program1', 1, 'arg1', 'int', 16);
+ define_program_argument 
+-------------------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.enable('program1', 'TRANSACTIONAL');
+ enable 
+--------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name |   attribute_name    |   attribute_value   
+----------+---------------------+---------------------
+ program1 | object_type         | program
+ program1 | program_type        | stored_procedure
+ program1 | program_action      | select pg_sleep(1);
+ program1 | number_of_arguments | 1
+ program1 | comments            | test
+ program1 | enabled             | true
+(6 rows)
+
+select DBE_SCHEDULER.set_attribute('program1', 'program_type', 'PLSQL_BLOCK');
+ERROR:  Invalid program type or argument
+DETAIL:  Program type PLSQL_BLOCK must has no argument
+CONTEXT:  referenced column: set_attribute
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', 0);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', 1);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'program_type', 'STORED_PROCEDURE');
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', -1);
+ERROR:  Invalid program arguments
+DETAIL:  Program arguments must less euqal than 255 and greater euqal than zero
+CONTEXT:  referenced column: set_attribute
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', 0);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', 1);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', 255);
+ set_attribute 
+---------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.set_attribute('program1', 'number_of_arguments', 256);
+ERROR:  Invalid program arguments
+DETAIL:  Program arguments must less euqal than 255 and greater euqal than zero
+CONTEXT:  referenced column: set_attribute
+select DBE_SCHEDULER.drop_program('program1', true);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select * from gs_job_attribute where attribute_name <> 'owner'; -- empty
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+
+select DBE_SCHEDULER.create_program('programdb1', 'PLSQL_BLOCK', 'select pg_sleep(1);', 0, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job('jobdb1', 'programdb1', '2021-07-20', 'sysdate', '2121-07-20', 'DEFAULT_JOB_CLASS', false, false,'test', 'style', NULL, NULL);
+ create_job 
+------------
+ 
+(1 row)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | jobdb1   | Sun Jul 20 00:00:00 2121 | f
+(1 row)
+
+create database test11;
+\c test11
+select DBE_SCHEDULER.create_program('programdb1', 'PLSQL_BLOCK', 'select pg_sleep(1);', 0, false, 'test');
+ create_program 
+----------------
+ 
+(1 row)
+
+select DBE_SCHEDULER.create_job('jobdb1', 'programdb1', '2021-07-20', 'sysdate', '2121-07-20', 'DEFAULT_JOB_CLASS', false, false,'test', 'style', NULL, NULL);
+ create_job 
+------------
+ 
+(1 row)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | jobdb1   | Sun Jul 20 00:00:00 2121 | f
+ test11     | datanode1 | sysdate  | public  | jobdb1   | Sun Jul 20 00:00:00 2121 | f
+(2 rows)
+
+select dbe_scheduler.run_job('jobdb1', false);
+ run_job 
+---------
+ 
+(1 row)
+
+select dbe_scheduler.drop_job('jobdb1');
+ drop_job 
+----------
+ 
+(1 row)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job;
+   dbname   | node_name | interval | nspname | job_name |         end_date         | enable 
+------------+-----------+----------+---------+----------+--------------------------+--------
+ regression | datanode1 | sysdate  | public  | jobdb1   | Sun Jul 20 00:00:00 2121 | f
+(1 row)
+
+\c regression
+select dbe_scheduler.drop_job('jobdb1');
+ drop_job 
+----------
+ 
+(1 row)
+
+select DBE_SCHEDULER.drop_program('programdb1', true);
+ drop_program 
+--------------
+ 
+(1 row)
+
+select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job;
+ dbname | node_name | interval | nspname | job_name | end_date | enable 
+--------+-----------+----------+---------+----------+----------+--------
+(0 rows)
+
+select * from gs_job_attribute where attribute_name <> 'owner';
+ job_name | attribute_name | attribute_value 
+----------+----------------+-----------------
+(0 rows)
+

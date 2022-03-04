@@ -289,13 +289,15 @@ static void TxnSnapInsert(void)
  */
 static void TxnSnapDelete(void)
 {
+#define TXNSNAP_EXTRA_RETRNTION_TIME 900
     Relation rel;
     ScanKeyData skey[2];
     SysScanDesc sd;
     HeapTuple tup;
 
-    /* Retent snapshots for up to 3 days. */
-    const int64 snapRetentionMs = 86400000L * 3;
+    /* Retent snapshots for up to undo_retention_time + 15min. */
+    const int64 snapRetentionMs = 1000L * (u_sess->attr.attr_storage.undo_retention_time +
+        TXNSNAP_EXTRA_RETRNTION_TIME);
     TimestampTz ft = TimestampTzPlusMilliseconds(GetCurrentTimestamp(), snapRetentionMs * -1);
 
     rel = heap_open(SnapshotRelationId, RowExclusiveLock);
@@ -318,11 +320,21 @@ static void TxnSnapDelete(void)
  */
 static void TxnSnapWorkerImpl(void)
 {
+    int retentionTime = u_sess->attr.attr_storage.undo_retention_time;
+    TimestampTz result;
+
     StartTransactionCommand();
 
     TxnSnapInsert();
 
     TxnSnapDelete();
+
+#ifdef HAVE_INT64_TIMESTAMP
+    result = GetCurrentTimestamp() - retentionTime * (INT64CONST(1000000));
+#else
+    result = GetCurrentTimestamp() - retentionTime;
+#endif
+    g_instance.flashback_cxt.oldestXminInFlashback = TvFetchSnpxminRecycle(result);
 
     CommitTransactionCommand();
 }
@@ -456,6 +468,9 @@ NON_EXEC_STATIC void TxnSnapWorkerMain()
          * Abort the current transaction in order to recover.
          */
         AbortCurrentTransaction();
+
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         /* Notice: at the most time it isn't necessary to call because
          *   all the LWLocks are released in AbortCurrentTransaction().
@@ -756,6 +771,9 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
          * Abort the current transaction in order to recover.
          */
         AbortCurrentTransaction();
+
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         LWLockReleaseAll();
 

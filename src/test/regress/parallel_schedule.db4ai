@@ -8,9 +8,13 @@
 #--------------------------
 ## DB4AI
 #--------------------------
+test: single_node_opr_sanity
 test: db4ai_snapshots
 test: db4ai_gd_train_predict
 test: db4ai_gd_houses
 test: db4ai_gd_snapshots
+test: db4ai_svm_kernels
+test: db4ai_gd_pca_train_predict
 test: db4ai_kmeans_train_predict
-
+test: db4ai_xgboost_train_predict
+test: db4ai_explain_model

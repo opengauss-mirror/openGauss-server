@@ -231,6 +231,7 @@ extern void PGXCConnClean(int code, Datum arg);
 
 /* Look at information cached in node handles */
 extern int PGXCNodeGetNodeId(Oid nodeoid, char node_type);
+extern int PGXCNodeDRGetNodeId(Oid nodeoid);
 extern Oid PGXCNodeGetNodeOid(int nodeid, char node_type);
 extern int PGXCNodeGetNodeIdFromName(const char* node_name, char node_type);
 extern char* PGXCNodeGetNodeNameFromId(int nodeid, char node_type);

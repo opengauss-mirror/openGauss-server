@@ -23,6 +23,7 @@
 
 #include "utils/plpgsql.h"
 #include "pgstat.h"
+#include "catalog/pg_proc.h"
 #include "parser/parse_node.h"
 #include "client_logic/client_logic_proc.h"
 #ifdef STREAMPLAN
@@ -37,10 +38,10 @@
 PG_MODULE_MAGIC;
 #endif
 
-typedef struct pl_validate_expr_info {
-    PLpgSQL_expr* expr;
+typedef struct pl_validate_expr_info : PLpgSQL_expr {
     SQLFunctionParseInfoPtr pinfo;
 } pl_validate_expr_info;
+
 
 static void plpgsql_crete_proc_parser_setup(struct ParseState* pstate, pl_validate_expr_info* pl_validate_info);
 static ResourceOwnerData* create_temp_resourceowner(const char* name);
@@ -53,12 +54,63 @@ static void pl_validate_stmt(PLpgSQL_stmt* stmt, PLpgSQL_function* func, SQLFunc
     SPIPlanPtr* plan, List** dynexec_list);
 static void pl_validate_stmts(List* stmts, PLpgSQL_function* func, SQLFunctionParseInfoPtr pinfo, SPIPlanPtr* plan,
     List** dynexec_list);
+static void plpgsql_fn_parser_replace_param_type_for_insert(struct ParseState* pstate, int param_no,
+    Oid param_new_type,  Oid relid, const char *col_name);
+static int find_input_param_count(char *argmodes, int n_modes, int param_no);
+
+static int find_input_param_count(char *argmodes, int n_modes, int param_no)
+{
+    int real_param_no = 0;
+    Assert(argmodes[param_no - 1] == PROARGMODE_IN || argmodes[param_no - 1] == PROARGMODE_INOUT ||
+        argmodes[param_no - 1] == PROARGMODE_VARIADIC);
+    for (int i = 0; i < param_no && i < n_modes; i++) {
+        if (argmodes[i] == PROARGMODE_IN || argmodes[i] == PROARGMODE_INOUT ||
+            argmodes[i] == PROARGMODE_VARIADIC) {
+            real_param_no++;
+        }
+    }
+    return real_param_no;
+}
+
+static void plpgsql_fn_parser_replace_param_type_for_insert(struct ParseState* pstate, int param_no,
+    Oid param_new_type, Oid relid, const char *col_name)
+{
+    int real_param_no = 0;
+    /* Find real param no - skip out params in count */
+    if (param_no > 1) {
+        PLpgSQL_expr *expr = (PLpgSQL_expr*)pstate->p_ref_hook_state;
+        HeapTuple tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(expr->func->fn_oid));
+        if (!HeapTupleIsValid(tuple)) {
+            return;
+        }
+        char *argmodes = NULL;
+        bool isNull;
+        Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tuple, Anum_pg_proc_proargmodes, &isNull);
+        ArrayType *arr = NULL;
+        if (!isNull  && proargmodes != PointerGetDatum(NULL) && (arr = DatumGetArrayTypeP(proargmodes)) != NULL) {
+            int n_modes = ARR_DIMS(arr)[0];
+            argmodes = (char*)ARR_DATA_PTR(arr);
+            if (param_no > n_modes) {
+                /* prarmeter is plpgsql valiable - nothing to do */
+                return;
+            }
+            /* just verify than used input parameter */
+            real_param_no = find_input_param_count(argmodes, n_modes, param_no);
+        }
+        ReleaseSysCache(tuple);
+    }
+    if (real_param_no == 0) {
+        real_param_no = param_no;
+    }
+    /* call sql function */
+    sql_fn_parser_replace_param_type_for_insert(pstate, real_param_no, param_new_type, relid, col_name);
+}
 
 void plpgsql_crete_proc_parser_setup(struct ParseState* pstate, pl_validate_expr_info* pl_validate_info)
 {
-    plpgsql_parser_setup(pstate, pl_validate_info->expr);
+    plpgsql_parser_setup(pstate, pl_validate_info);
     pstate->p_create_proc_operator_hook = plpgsql_create_proc_operator_ref;
-    pstate->p_create_proc_insert_hook = sql_fn_parser_replace_param_type_for_insert;
+    pstate->p_create_proc_insert_hook = plpgsql_fn_parser_replace_param_type_for_insert;
     pstate->p_cl_hook_state = pl_validate_info->pinfo;
 }
 
@@ -68,9 +120,9 @@ void pl_validate_expression(PLpgSQL_expr* expr, PLpgSQL_function* func, SQLFunct
         return;
     }
     pl_validate_expr_info pl_validate_info;
-    pl_validate_info.expr = expr;
-    pl_validate_info.expr->func = func;
-    pl_validate_info.expr->func->pre_parse_trig = true;
+    *(PLpgSQL_expr*)&pl_validate_info = *expr;
+    pl_validate_info.func = func;
+    pl_validate_info.func->pre_parse_trig = true;
     pl_validate_info.pinfo = pinfo;
     /*
      * Generate plan
@@ -109,10 +161,15 @@ void pl_validate_function_sql(PLpgSQL_function* func, bool is_replace)
         /* we cannot handle functions with client logic on the server side */
         return;
     }
+     /*
+     * since function with the same func_id may exist already
+     * first delete old gs_cl_proc info related to the previous create function call
+     */
+
+    delete_proc_client_info(func->fn_oid);
     if (func->fn_nargs == 0 && !is_fn_retval_handled(func->fn_rettype)) {
         /* Nothiing to validate - no input, no return */
         /* if there is some info in gs_cl_proc - remove it */
-        delete_proc_client_info(func->fn_oid);
         return;
     }
     bool stored_prepase_trig = func->pre_parse_trig;

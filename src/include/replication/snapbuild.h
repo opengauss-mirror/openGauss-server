@@ -51,6 +51,7 @@ typedef struct SnapBuild SnapBuild;
 
 /* forward declare so we don't have to include reorderbuffer.h */
 struct ReorderBuffer;
+struct ParallelReorderBuffer;
 
 /* forward declare so we don't have to include heapam_xlog.h */
 struct xl_heap_new_cid;

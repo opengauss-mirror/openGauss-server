@@ -25,10 +25,12 @@
 #define SRC_BACKEND_ACCESS_DFS_ORC_ORC_STREAM_ADAPTER_H
 #include <string>
 
+#ifndef ENABLE_LITE_MODE
 /* Becareful: liborc header file must before  openGauss header file */
 #include "orc/Adaptor.hh"
 #include "orc/Exceptions.hh"
 #include "orc/OrcFile.hh"
+#endif
 
 namespace orc {
 class OrcInputStreamAdapter : public InputStream {

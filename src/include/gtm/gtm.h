@@ -184,6 +184,9 @@ GTM_ThreadInfo* GTM_GetThreadInfo(GTM_ThreadID thrid);
 extern void DestroyConnectControlTable(void);
 extern void RebuildConnectControlTable(void);
 
+extern uint64 GTM_ConPointTblFind(const char* cnName);
+extern void GTM_ConPointTblInsert(const char* cnName, uint64 consistencyPoint);
+
 /*
  * pthread keys to get thread specific information
  */

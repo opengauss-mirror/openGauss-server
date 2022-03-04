@@ -1704,6 +1704,29 @@ bool Processor::run_pre_rlspolicy_using(const Node *stmt, StatementData *stateme
     return true;
 }
 
+bool Processor::run_pre_create_function_stmt(const CreateFunctionStmt *stmt, StatementData *statement_data)
+{
+    if (stmt == NULL || statement_data == NULL) {
+        return false;
+    }
+
+    if (stmt->parameters == NULL) {
+        return true;
+    }
+
+    foreach_cell (lc, stmt->parameters) {
+        FunctionParameter* fp  = (FunctionParameter*) lfirst(lc);
+        const char* p_name =  strVal(llast(fp->argType->names));
+        if (strcmp(p_name, "byteawithoutordercol") == 0 || strcmp(p_name, "byteawithoutorderwithequalcol") == 0) {
+            printfPQExpBuffer(&statement_data->conn->errorMessage,
+                libpq_gettext("ERROR(CLIENT): could not support functions when full encryption is on.\n"));
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool Processor::run_pre_create_rlspolicy_stmt(const CreateRlsPolicyStmt *stmt, StatementData *statement_data)
 {
     if (statement_data->GetCacheManager()->is_cache_empty()) {
@@ -1923,7 +1946,6 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
             /*
                 rewrite query in the CREATE VIEW clause if query has relevant columns
             */
-
             return run_pre_select_statement((SelectStmt *)((ViewStmt *)stmt)->query, statement_data);
         case T_DropStmt:
             return run_pre_drop_statement((DropStmt *)stmt, statement_data);
@@ -1939,9 +1961,17 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
             return run_pre_create_rlspolicy_stmt((CreateRlsPolicyStmt *)stmt, statement_data);
         case T_AlterRlsPolicyStmt:
             return run_pre_alter_rlspolicy_stmt((AlterRlsPolicyStmt *)stmt, statement_data);
-        case T_CreateFunctionStmt:
-            current_statement->cacheRefresh |= CacheRefreshType::PROCEDURES;
-            return func_processor::run_pre_create_function_stmt(((CreateFunctionStmt*)stmt)->options, statement_data);
+        case T_CreateFunctionStmt: {
+            if (!run_pre_create_function_stmt((const CreateFunctionStmt *)stmt, statement_data)) {
+                return false;
+            }
+            List* options = ((CreateFunctionStmt*)stmt)->options;
+            bool res = func_processor::run_pre_create_function_stmt(options, statement_data);
+            if (res) {
+                current_statement->cacheRefresh |= CacheRefreshType::PROCEDURES;
+            }
+            return res;
+        }
         case T_DoStmt:
             return func_processor::run_pre_create_function_stmt(((DoStmt*)stmt)->args, statement_data, true);
         case T_MergeStmt:
@@ -2095,7 +2125,10 @@ bool Processor::run_pre_query(StatementData *statement_data, bool is_inner_query
     foreach (stmt_iter, stmts) {
         Node *stmt = (Node *)lfirst(stmt_iter);
         if (!run_pre_statement(stmt, statement_data)) {
-            conn->client_logic->pendingStatements->clear();
+            /* in inner query in function parse, it is normal when it return false, so it need not clear memery */
+            if (!is_inner_query) {
+                run_post_query(conn, true);
+            }
             return false;
         }
     }
@@ -2144,187 +2177,5 @@ bool Processor::run_pre_exec(StatementData *statement_data)
     }
 
     statement_data->replace_raw_values();
-    return true;
-}
-
-void Processor::remove_dropped_column_settings(PGconn *conn, const bool is_success)
-{
-    Assert(conn->client_logic && conn->client_logic->enable_client_encryption);
-    if (conn->client_logic->droppedColumnSettings_size == 0) {
-        return;
-    }
-
-    if (!is_success) {
-        conn->client_logic->droppedColumnSettings_size = 0;
-        return;
-    }
-
-    for (size_t i = 0; i < conn->client_logic->droppedColumnSettings_size; ++i) {
-        const char *object_name = conn->client_logic->droppedColumnSettings[i].data;
-        HooksManager::ColumnSettings::set_deletion_expected(*conn->client_logic, object_name, false);
-    }
-    conn->client_logic->droppedColumnSettings_size = 0;
-}
-
-void Processor::remove_dropped_global_settings(PGconn *conn, const bool is_success)
-{
-    ObjName *cur_cmk = conn->client_logic->droppedGlobalSettings;
-    ObjName *to_free = NULL;
-    
-    Assert(conn->client_logic && conn->client_logic->enable_client_encryption);
-    if (cur_cmk == NULL) {
-        return;
-    }
-
-    if (!is_success) {
-        free_obj_list(conn->client_logic->droppedGlobalSettings);
-        conn->client_logic->droppedGlobalSettings = NULL;
-        return;
-    }
-
-    while (cur_cmk != NULL) {
-        HooksManager::GlobalSettings::set_deletion_expected(*conn->client_logic, cur_cmk->obj_name, false);
-        to_free = cur_cmk;
-        cur_cmk = cur_cmk->next;
-        libpq_free(to_free);
-    }
-    conn->client_logic->droppedGlobalSettings = NULL;
-}
-
-const bool Processor::remove_droppend_schemas(PGconn *conn, const bool is_success)
-{
-    Assert(conn->client_logic && conn->client_logic->enable_client_encryption);
-    if (conn->client_logic->droppedSchemas_size == 0) {
-        return true;
-    }
-
-    if (!is_success) {
-        conn->client_logic->droppedSchemas_size = 0;
-        return true;
-    }
-
-    for (size_t i = 0; i < conn->client_logic->droppedSchemas_size; ++i) {
-        const char *object_name = conn->client_logic->droppedSchemas[i].data;
-        HooksManager::GlobalSettings::set_deletion_expected(*conn->client_logic, object_name, true);
-        HooksManager::ColumnSettings::set_deletion_expected(*conn->client_logic, object_name, true);
-        conn->client_logic->m_cached_column_manager->remove_schema(object_name);
-    }
-    conn->client_logic->droppedSchemas_size = 0;
-    return true;
-}
-bool Processor::accept_pending_statements(PGconn *conn, bool is_success)
-{
-    Assert(conn->client_logic && conn->client_logic->enable_client_encryption);
-    if (!is_success) {
-        conn->client_logic->pendingStatements->clear();
-        return true;
-    }
-
-    conn->client_logic->preparedStatements->merge(conn->client_logic->pendingStatements);
-    conn->client_logic->pendingStatements->clear();
-    return true;
-}
-
-void handle_post_set_stmt(PGconn *conn, const bool is_success)
-{
-    if (!is_success) {
-        return;
-    }
-    if (conn->client_logic->val_to_update & updateGucValues::GUC_ROLE) {
-        conn->client_logic->m_cached_column_manager->set_user_schema(conn->client_logic->tmpGucParams.role.c_str());
-        conn->client_logic->gucParams.role = conn->client_logic->tmpGucParams.role;
-        conn->client_logic->val_to_update ^= updateGucValues::GUC_ROLE;
-    }
-    if (conn->client_logic->val_to_update & updateGucValues::SEARCH_PATH) {
-        conn->client_logic->m_cached_column_manager->load_search_path(
-            conn->client_logic->tmpGucParams.searchpathStr.c_str(),
-            conn->client_logic->gucParams.role.c_str());
-        conn->client_logic->val_to_update ^= updateGucValues::SEARCH_PATH;
-    }
-    if (conn->client_logic->val_to_update & updateGucValues::BACKSLASH_QUOTE) {
-        conn->client_logic->gucParams.backslash_quote = conn->client_logic->tmpGucParams.backslash_quote;
-        conn->client_logic->val_to_update ^= updateGucValues::BACKSLASH_QUOTE;
-    }
-    if (conn->client_logic->val_to_update & updateGucValues::CONFORMING) {
-        conn->client_logic->gucParams.standard_conforming_strings =
-            conn->client_logic->tmpGucParams.standard_conforming_strings;
-        conn->client_logic->val_to_update ^= updateGucValues::CONFORMING;
-    }
-    if (conn->client_logic->val_to_update & updateGucValues::ESCAPE_STRING) {
-        conn->client_logic->gucParams.escape_string_warning = conn->client_logic->tmpGucParams.escape_string_warning;
-        conn->client_logic->val_to_update ^= updateGucValues::ESCAPE_STRING;
-    }
-}
-
-bool Processor::run_post_query(PGconn *conn)
-{
-    if (!conn) {
-        return false;
-    }
-
-    Assert(conn->client_logic && conn->client_logic->enable_client_encryption);
-    if (conn->client_logic->rawValuesForReplace) {
-        conn->client_logic->rawValuesForReplace->clear();
-    }
-
-    conn->client_logic->raw_values_for_post_query.clear();
-    char last_stmt_name[NAMEDATALEN];
-    errno_t rc = EOK;
-    rc = memset_s(last_stmt_name, NAMEDATALEN, 0, NAMEDATALEN);
-    securec_check_c(rc, "\0", "\0");
-    /* swap local lastStmtName with lastStmtName object on connection */
-
-    check_memcpy_s(
-        memcpy_s(last_stmt_name, NAMEDATALEN, conn->client_logic->lastStmtName, NAMEDATALEN));
-    check_memset_s(memset_s(conn->client_logic->lastStmtName, NAMEDATALEN,  0, NAMEDATALEN));
-
-        int last_result = conn->client_logic->m_lastResultStatus;
-    conn->client_logic->m_lastResultStatus = PGRES_EMPTY_QUERY;
-
-    bool is_success = (last_result == PGRES_COMMAND_OK);
-
-    accept_pending_statements(conn, is_success);
-    remove_droppend_schemas(conn, is_success);
-    remove_dropped_global_settings(conn, is_success);
-    remove_dropped_column_settings(conn, is_success);
-    handle_post_set_stmt(conn, is_success);
-    conn->client_logic->clear_functions_list();
-    if (!is_success || (conn->queryclass != PGQUERY_SIMPLE && conn->queryclass != PGQUERY_EXTENDED)) {
-        /* we only want to process successful queries that were actually executed */
-        return true;
-    }
-
-    PreparedStatement *prepared_statement = conn->client_logic->preparedStatements->get_or_create(last_stmt_name);
-    if (!prepared_statement) {
-        return false;
-    }
-
-    if (!is_success || (conn->queryclass != PGQUERY_SIMPLE && conn->queryclass != PGQUERY_EXTENDED)) {
-        /* we only want to process successful queries that were actually executed */
-        return true;
-    }
-
-    if ((prepared_statement->cacheRefresh & CacheRefreshType::GLOBAL_SETTING) == CacheRefreshType::GLOBAL_SETTING &&
-        prepared_statement->m_function_name[0] != '\0') {
-        /*
-         * run post_create hook requirements after the arguments have been validaity and the Global Setting is sure to
-         * be created We conduct this operation here to support incremental executions of post_create. So we only call
-         * post_create for the new Global Setting and not for existing Global Settings. We actually create a copy of the
-         * hook here but we don't save it in memory - we toss it right away. The hook will be saved in memory when the
-         * CacheLoader loads it from the catalog table
-         */
-        bool ret = HooksManager::GlobalSettings::post_create(*conn->client_logic, prepared_statement->m_function_name,
-            prepared_statement->m_string_args);
-        if (!ret) {
-            return false;
-        }
-    }
-    /*
-     * we override the cacheRefreshType from the (prepared) statement object
-     * otherwise, the cacheRefreshType is filled with the value from the getReadyForQuery
-     */
-    conn->client_logic->cacheRefreshType = prepared_statement->cacheRefresh;
-    prepared_statement->cacheRefresh = CacheRefreshType::CACHE_NONE;
-    conn->client_logic->m_cached_column_manager->load_cache(conn);
     return true;
 }

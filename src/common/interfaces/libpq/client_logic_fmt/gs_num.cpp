@@ -45,8 +45,7 @@
  * int1_bin -
  * convert string to integer
  */
-unsigned char *int1_bin(const PGconn* conn, const char *text, Oid typelem, int atttypmod,
-    size_t *binary_size, char *err_msg)
+unsigned char *int1_bin(const PGconn* conn, const char *text, size_t *binary_size, char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
     if (binary == NULL) {
@@ -67,7 +66,7 @@ unsigned char *int1_bin(const PGconn* conn, const char *text, Oid typelem, int a
  * int1_bout -
  * converts a unsigned 8-bit integer to its string representation
  */
-char *int1_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *int1_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     if (size != sizeof(int64)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
@@ -84,7 +83,7 @@ char *int1_bout(const unsigned char *binary, size_t size, Oid typelem, int attty
     return text;
 }
 
-unsigned char *int1_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, const char *err_msg)
+unsigned char *int1_badjust(unsigned char *binary, size_t *binary_size, const char *err_msg)
 {
     binary = (unsigned char *)libpq_realloc(binary, *binary_size, sizeof(int64));
     if (binary == NULL) {
@@ -97,19 +96,15 @@ unsigned char *int1_badjust(unsigned char *binary, size_t *binary_size, Oid type
     return binary;
 }
 
-unsigned char *int1_brestore(const unsigned char *binary_in, size_t size, Oid typelem, int atttypmod,
-    size_t *result_size, const char *err_msg)
+unsigned char *int1_brestore(const unsigned char *binary_in, size_t size, size_t *result_size, const char *err_msg)
 {
     if (size != sizeof(int64)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
     }
-    unsigned char *result = (unsigned char *)malloc(sizeof(int8));
+    unsigned char *result = (unsigned char *)calloc(1, sizeof(int8));
     if (result == NULL) {
         return NULL;
     }
-    errno_t rc = EOK;
-    rc = memset_s(result, sizeof(int8), 0, sizeof(int8));
-    securec_check_c(rc, "\0", "\0");
     *(int8 *)result = *(const int8 *)binary_in;
     *result_size = sizeof(int8);
     return result;
@@ -119,7 +114,7 @@ unsigned char *int1_brestore(const unsigned char *binary_in, size_t size, Oid ty
  * int2_bin -
  * Convert input string to a signed 16 bit integer.
  */
-unsigned char *int2_bin(const PGconn *conn, const char *text, Oid typelem, int atttypmod, size_t *binary_size,
+unsigned char *int2_bin(const PGconn *conn, const char *text, size_t *binary_size,
     char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
@@ -141,7 +136,7 @@ unsigned char *int2_bin(const PGconn *conn, const char *text, Oid typelem, int a
  * int2_bin -
  * converts a signed 16-bit integer to its string representation
  */
-char *int2_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *int2_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     if (size != sizeof(int64)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
@@ -158,7 +153,7 @@ char *int2_bout(const unsigned char *binary, size_t size, Oid typelem, int attty
     return text;
 }
 
-unsigned char *int2_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, const char *err_msg)
+unsigned char *int2_badjust(unsigned char *binary, size_t *binary_size, const char *err_msg)
 {
     binary = (unsigned char *)libpq_realloc(binary, *binary_size, sizeof(int64));
     if (binary == NULL) {
@@ -173,7 +168,7 @@ unsigned char *int2_badjust(unsigned char *binary, size_t *binary_size, Oid type
     return binary;
 }
 
-unsigned char *int2_brestore(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size,
+unsigned char *int2_brestore(const unsigned char *binary, size_t size, size_t *result_size,
     const char *err_msg)
 {
     if (size != sizeof(int64)) {
@@ -195,7 +190,7 @@ unsigned char *int2_brestore(const unsigned char *binary, size_t size, Oid typel
  * int4_bin -
  * Convert input string to a signed 32 bit integer.
  */
-unsigned char *int4_bin(const PGconn *conn, const char *text, Oid typelem, int atttypmod, size_t *binary_size,
+unsigned char *int4_bin(const PGconn *conn, const char *text, size_t *binary_size,
     char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
@@ -217,7 +212,7 @@ unsigned char *int4_bin(const PGconn *conn, const char *text, Oid typelem, int a
  * int4_bout -
  * converts a signed 32-bit integer to its string representation
  */
-char *int4_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *int4_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     if (size != sizeof(int64)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
@@ -235,7 +230,7 @@ char *int4_bout(const unsigned char *binary, size_t size, Oid typelem, int attty
     return text;
 }
 
-unsigned char *int4_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, const char *err_msg)
+unsigned char *int4_badjust(unsigned char *binary, size_t *binary_size, const char *err_msg)
 {
     binary = (unsigned char *)libpq_realloc(binary, *binary_size, sizeof(int64));
     if (binary == NULL) {
@@ -250,8 +245,7 @@ unsigned char *int4_badjust(unsigned char *binary, size_t *binary_size, Oid type
     return binary;
 }
 
-unsigned char *int4_brestore(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size,
-    const char *err_msg)
+unsigned char *int4_brestore(const unsigned char *binary, size_t size, size_t *result_size, const char *err_msg)
 {
     if (size != sizeof(int64)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
@@ -272,7 +266,7 @@ unsigned char *int4_brestore(const unsigned char *binary, size_t size, Oid typel
  * int8_bin -
  * try to parse a string into an 64-bit integer.
  */
-unsigned char *int8_bin(const PGconn *conn, const char *text, Oid typelem, int atttypmod, size_t *binary_size,
+unsigned char *int8_bin(const PGconn *conn, const char *text, size_t *binary_size,
     char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
@@ -294,7 +288,7 @@ unsigned char *int8_bin(const PGconn *conn, const char *text, Oid typelem, int a
  * int8_bout -
  * convert a signed 64-bit integer to its string representation
  */
-char *int8_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *int8_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     if (size != sizeof(int64)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
@@ -317,8 +311,7 @@ char *int8_bout(const unsigned char *binary, size_t size, Oid typelem, int attty
  * because how the data is saved in disk and how the client/application expects to retrieve it
  * are different, change the endianess
  */
-unsigned char *int8_badjust(unsigned char *binary, size_t *binary_size, 
-    Oid typelem, int atttypmod, const char *err_msg)
+unsigned char *int8_badjust(unsigned char *binary, size_t *binary_size, const char *err_msg)
 {
     *binary_size = sizeof(int64);
     long &n = *(long *)binary;
@@ -330,8 +323,7 @@ unsigned char *int8_badjust(unsigned char *binary, size_t *binary_size,
  * restore_binary -
  * restore binary array, change the endianess
  */
-unsigned char *int8_brestore(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size,
-    const char *err_msg)
+unsigned char *int8_brestore(const unsigned char *binary, size_t size, size_t *result_size, const char *err_msg)
 {
     if (size != sizeof(int64)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
@@ -352,20 +344,20 @@ unsigned char *int8_brestore(const unsigned char *binary, size_t size, Oid typel
  * float4_bin -
  * try to parse a string into a float.
  */
-unsigned char *float4_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg)
+unsigned char *float4_bin(const char *text, size_t *binary_size, char *err_msg)
 {
-    unsigned char *binary = (unsigned char *)malloc(sizeof(float4));
+    unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
     if (binary == NULL) {
         return NULL;
     }
     errno_t rc = EOK;
-    rc = memset_s(binary, sizeof(float4), 0, sizeof(float4));
+    rc = memset_s(binary, sizeof(int64), 0, sizeof(int64));
     securec_check_c(rc, "\0", "\0");
     if (!scan_float4(text, (float4 *)binary, err_msg)) {
         free(binary);
         return NULL;
     }
-    *binary_size = sizeof(float4);
+    *binary_size = sizeof(int64);
     return binary;
 }
 
@@ -373,9 +365,9 @@ unsigned char *float4_bin(const char *text, Oid typelem, int atttypmod, size_t *
  * float4_bout -
  * converts a float4 number to a ascii string
  */
-char *float4_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *float4_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
-    if (size != sizeof(float4)) {
+    if (size != sizeof(int64)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
     }
     char *text = (char *)malloc(MAXFLOATWIDTH + 1);
@@ -394,7 +386,7 @@ char *float4_bout(const unsigned char *binary, size_t size, Oid typelem, int att
  * float8_bin -
  * try to parse a string into a float8.
  */
-unsigned char *float8_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg)
+unsigned char *float8_bin(const char *text, size_t *binary_size, char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(float8));
     if (binary == NULL) {
@@ -415,7 +407,7 @@ unsigned char *float8_bin(const char *text, Oid typelem, int atttypmod, size_t *
  * float4_bout -
  * converts a float8 number to a ascii string
  */
-char *float8_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *float8_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     if (size != sizeof(float8)) {
         ereport_null(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
@@ -441,8 +433,7 @@ char *float8_bout(const unsigned char *binary, size_t size, Oid typelem, int att
  * converts a numeric data type string to
  * a NumericChoice struct(binary array)
  */
-unsigned char *numeric_bin(const PGconn* conn, const char *text, Oid typelem, int atttypmod, 
-    size_t *binary_size, char *err_msg)
+unsigned char *numeric_bin(const PGconn* conn, const char *text, int atttypmod, size_t *binary_size, char *err_msg)
 {
     return scan_numeric(conn, text, atttypmod, binary_size, err_msg);
 }
@@ -453,7 +444,7 @@ unsigned char *numeric_bin(const PGconn* conn, const char *text, Oid typelem, in
  * converts a NumericChoice struct(binary array)
  * to a numeric data type string
  */
-char *numeric_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *numeric_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     size_t len = NUMERIC_MAX_PRECISION + NUMERIC_MAX_RESULT_SCALE + 1;
     if (size > len) {
@@ -467,7 +458,7 @@ char *numeric_bout(const unsigned char *binary, size_t size, Oid typelem, int at
     errno_t rc = EOK;
     rc = memset_s(text, len, 0, len);
     securec_check_c(rc, "\0", "\0");
-    if (!numerictoa((NumericChoice *)binary, text, len)) {
+    if (!numerictoa((NumericData *)binary, text, len)) {
         free(text);
         return NULL;
     }
@@ -475,7 +466,7 @@ char *numeric_bout(const unsigned char *binary, size_t size, Oid typelem, int at
     return text;
 }
 
-unsigned char *numeric_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, char *err_msg)
+unsigned char *numeric_badjust(unsigned char *binary, size_t *binary_size, int atttypmod, char *err_msg)
 {
     if (apply_typmod((NumericVar *)binary, atttypmod, err_msg)) {
         NumericVar nv_copy = *(NumericVar *)binary;

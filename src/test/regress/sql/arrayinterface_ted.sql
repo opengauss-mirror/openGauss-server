@@ -1,0 +1,292 @@
+-- FOR VARRAY INTERFACE --
+
+-- check compatibility --
+show sql_compatibility;
+-- create new schema --
+drop schema if exists plpgsql_array_interface_ted;
+create schema plpgsql_array_interface_ted;
+set current_schema = plpgsql_array_interface_ted;
+
+-- test array interface extend trim and delete --
+create or replace procedure array_interface_p1()
+as
+declare
+    colors varchar[] := array['red','orange',null,'blue'];
+    colors1 varchar[] := array['red','blue'];
+begin
+    raise NOTICE'%',colors;
+    colors.extend;
+    colors.extend(1);
+    raise NOTICE'%',colors;
+    colors.trim;
+    colors.trim(1);
+    raise NOTICE'%',colors;
+    colors.delete;
+    raise NOTICE'%',colors;
+    colors1.delete;
+    raise NOTICE'%',colors1;
+end;
+/
+
+call array_interface_p1();
+
+-- test array interface extend trim and delete --
+create or replace procedure array_interface_p1()
+as
+declare
+    colors varchar[] := array['red'];
+    colors1 varchar[] := array['red','blue'];
+begin
+    raise NOTICE'%',colors;
+    colors.EXTEND;
+    colors.EXTEND(3);
+    raise NOTICE'%',colors;
+    colors.TRIM;
+    colors.TRIM(1);
+    raise NOTICE'%',colors;
+    colors.DELETE;
+    raise NOTICE'%',colors;
+    colors1.DELETE;
+    raise NOTICE'%',colors1;
+end;
+/
+
+call array_interface_p1();
+
+-- test array interface extend mistake format --
+create or replace procedure array_interface_p1()
+as
+declare
+    colors varchar[] := array['red'];
+begin
+    raise NOTICE'%',colors;
+    colors.extend[1];
+    raise NOTICE'%',colors;
+    colors.extend[-1];
+    raise NOTICE'%',colors;
+end;
+/
+
+--call array_interface_p1();
+
+-- test array interface trim mistake format --
+create or replace procedure array_interface_p1()
+as
+declare
+    colors varchar[] := array['red','orange','green','blue','indigo','violet'];
+begin
+    raise NOTICE'%',colors;
+    colors.trim[1];
+    raise NOTICE'%',colors;
+    colors.trim[-1];
+    raise NOTICE'%',colors;
+end;
+/
+
+--call array_interface_p1();
+
+-- test array interface delete mistake format --
+create or replace procedure array_interface_p1()
+as
+declare
+    colors varchar[] := array['red','orange','green','blue','indigo','violet'];
+    colors2 varchar[] := array['red','orange','green','blue','indigo','violet'];
+    colors3 varchar[] := array['red','orange','green','blue','indigo','violet'];
+    colors4 varchar[] := array['red','orange','green','blue','indigo','violet'];
+begin
+    raise NOTICE'%',colors;
+    colors.delete(-1);
+    raise NOTICE'%',colors;
+    raise NOTICE'%',colors2;
+    colors2.delete(1);
+    raise NOTICE'%',colors2;
+    raise NOTICE'%',colors3;
+    colors3.delete(10);
+    raise NOTICE'%',colors3;
+    raise NOTICE'%',colors4;
+    colors4.delete[-1];
+    raise NOTICE'%',colors4;
+end;
+/
+
+--call array_interface_p1();
+
+-- test array name use special character --
+create or replace procedure array_interface_p1()
+as
+declare
+    "!arr#%" varchar[]:=array['red','orange','green','blue','indigo'];
+    "@*ar&" integer[]:=array[1,0,5,6,8,3,9];
+begin
+    raise NOTICE '%',"!arr#%";
+    "!arr#%".extend(3);
+    raise NOTICE '%',"!arr#%";
+    "!arr#%".trim(3);
+    raise NOTICE '%',"!arr#%";
+    "@*ar&".delete;
+    raise NOTICE '%',"@*ar&";
+end;
+/
+
+call array_interface_p1();
+
+-- test array name use special character mistake --
+create or replace procedure array_interface_p1()
+as
+declare
+    @*ar& integer[]:=array[1,0,5,6,8,3,9];
+begin
+    raise NOTICE'%',@*ar&;
+    @*ar&.extend(3);
+    raise NOTICE'%',@*ar&;
+end;
+/
+
+-- call array_interface_p1();
+
+-- test array interface extend with large parameter --
+create or replace procedure array_interface_p1()
+as
+declare
+    arr integer[] := array[1,0,5,6,8,3,9];
+begin
+    raise NOTICE'%',arr;
+    arr.extend(10000);
+    raise NOTICE'%',arr.count;
+end;
+/
+
+call array_interface_p1();
+
+-- test array interface trim --
+create or replace procedure array_interface_p1()
+as
+declare
+    arr integer[] := array[1,0,5];
+begin
+    raise NOTICE'%',arr;
+    arr.trim(10);
+    raise NOTICE'%',arr;
+    end;
+/
+
+call array_interface_p1();
+
+-- test array interface delete with empty array --
+create or replace procedure array_interface_p1()
+as
+declare
+    arr integer[] := array[]::integer[];
+begin
+    raise NOTICE'%',arr;
+    arr.delete;
+    raise NOTICE'%',arr;
+end;
+/
+
+call array_interface_p1();
+
+-- test array interface delete missing ; --
+create or replace procedure array_interface_p1()
+as
+declare
+    colors varchar[] := array['red','orange','green','blue','indigo','violet'];
+begin
+    raise NOTICE'%',colors;
+    colors.delete
+    raise NOTICE'%',colors;
+end;
+/
+
+-- test call array interface of another package
+create or replace package pck1 is
+    type ta is varray(10) of varchar(100);
+    tb ta := ta('1','2','3', '4', '5');
+end pck1;
+/
+
+create or replace package pck2 is
+    procedure proc1;
+    end pck2;
+/
+
+create or replace package body pck2 is
+procedure proc1() is
+begin
+    raise NOTICE '%',pck1.tb;
+    raise NOTICE '%',pck1.tb.count;
+    raise NOTICE '%',pck1.tb.first;
+    raise NOTICE '%',pck1.tb.last;
+    raise NOTICE '%',pck1.tb.count();
+    raise NOTICE '%',pck1.tb.first();
+    raise NOTICE '%',pck1.tb.last();
+    for i in  pck1.tb.first .. pck1.tb.last
+    loop
+        if pck1.tb.exists(i) then
+            raise NOTICE '%',pck1.tb[i];
+        else
+            raise NOTICE '<Null>';
+	end if;
+    end loop;
+    pck1.tb.extend;
+    raise NOTICE '%',pck1.tb;
+    pck1.tb.extend();
+    raise NOTICE '%',pck1.tb;
+    pck1.tb.extend(2);
+    raise NOTICE '%',pck1.tb;
+    pck1.tb.trim;
+    raise NOTICE '%',pck1.tb;
+    pck1.tb.trim();
+    raise NOTICE '%',pck1.tb;
+    pck1.tb.trim(2);
+    raise NOTICE '%',pck1.tb;
+    pck1.tb.delete;
+    raise NOTICE '%',pck1.tb;
+    pck1.tb.extend;
+    raise NOTICE '%',pck1.tb;
+    pck1.tb.delete();
+    raise NOTICE '%',pck1.tb;
+end;
+end pck2;
+/
+
+call pck2.proc1();
+
+-- test array interface delete with index --
+create or replace procedure array_interface_p1() as
+declare
+    array1 integer[] := array[1,2,3,4,5];
+    indx integer;
+begin
+    raise NOTICE '%', array1;
+    raise NOTICE '%', array1.count;
+    raise NOTICE '%', array1.first;
+    raise NOTICE '%', array1.last;
+    indx := array1.first;
+    array1.delete(indx);
+    raise NOTICE '%', array1;
+    raise NOTICE '%', array1.count;
+    raise NOTICE '%', array1.first;
+    raise NOTICE '%', array1.last;
+    array1 := array[1,2,3,4,5];
+    indx := array1.last;
+    array1.delete(indx);
+    raise NOTICE '%', array1;
+    raise NOTICE '%', array1.count;
+    raise NOTICE '%', array1.first;
+    raise NOTICE '%', array1.last;
+    array1 := array[1,2,3,4,5];
+    array1.delete(3);
+    raise NOTICE '%', array1;
+    raise NOTICE '%', array1.count;
+    raise NOTICE '%', array1.first;
+    raise NOTICE '%', array1.last;
+end;
+/
+
+call array_interface_p1();
+
+-- clean up --
+drop package if exists pck2;
+drop package if exists pck1;
+drop schema if exists plpgsql_array_interface_ted cascade;

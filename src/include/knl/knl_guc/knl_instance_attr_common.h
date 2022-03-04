@@ -51,6 +51,7 @@ typedef struct knl_instance_attr_common {
     bool enable_thread_pool;
     bool enable_ffic_log;
     bool enable_global_plancache;
+    bool enable_global_syscache;
     int max_files_per_process;
     int pgstat_track_activity_query_size;
     int GtmHostPortArray[MAX_GTM_HOST_NUM];
@@ -70,6 +71,7 @@ typedef struct knl_instance_attr_common {
     char* PGXCNodeName;
     char* transparent_encrypt_kms_url;
     char* thread_pool_attr;
+    char* thread_pool_stream_attr;
     char* comm_proxy_attr;
     char* numa_distribute_mode;
 
@@ -98,6 +100,7 @@ typedef struct knl_instance_attr_common {
     bool enable_auto_clean_unique_sql;
 #endif
     int cluster_run_mode;
+    int stream_cluster_run_mode;
 } knl_instance_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_COMMON_H_ */

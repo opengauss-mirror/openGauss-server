@@ -98,7 +98,6 @@ DECLARE
 	para3  bigint = 2;
 	para4  varchar;
 BEGIN
-   package_func_overload(1, 1);
    package_func_overload(1, para1);
    package_func_overload(1, para2);
    package_func_overload(1, para3);
@@ -620,4 +619,73 @@ end;
 
 drop schema package_schema cascade;
 drop schema package_nps cascade;
+
 \c regression;
+
+drop schema if exists s1;
+drop schema if exists s2;
+create schema s1;
+create schema s2;
+set current_schema to s1;
+create function package_func_overload_1(col int)
+returns integer as $$
+declare
+begin
+    return 0;
+end;
+$$ language plpgsql;
+set current_schema to s2;
+create function package_func_overload_1(col int)
+returns integer as $$
+declare
+begin
+    return 0;
+end;
+$$ language plpgsql;
+
+reset current_schema;
+drop schema s1 cascade;
+drop schema s2 cascade;
+
+create schema s;
+set current_schema to s;
+CREATE OR REPLACE PACKAGE p1 IS
+PROCEDURE testpro1(var3 int);
+PROCEDURE testpro1(var2 char);
+END p1;
+/
+
+create function testpro1(col int)
+returns integer as $$
+declare
+begin
+     return 0;
+end;
+$$ language plpgsql;
+
+reset current_schema;
+drop schema s cascade;
+
+drop package if exists pkg112;
+create or replace package pkg112 
+as
+type ty1 is table of integer index by integer;
+procedure p1(v1 in ty1,v2 out ty1,v3 inout ty1,v4 int);
+procedure p1(v2 out ty1,v3 inout ty1,v4 int);
+procedure p4();
+pv1 ty1;
+end pkg112;
+/
+set behavior_compat_options='proc_outparam_override';
+drop package if exists pkg112;
+create or replace package pkg112 
+as
+type ty1 is table of integer index by integer;
+procedure p1(v1 in ty1,v2 out ty1,v3 inout ty1,v4 int);
+procedure p1(v2 out ty1,v3 inout ty1,v4 int);
+procedure p4();
+pv1 ty1;
+end pkg112;
+/
+drop package if exists pkg112;
+set behavior_compat_options='';

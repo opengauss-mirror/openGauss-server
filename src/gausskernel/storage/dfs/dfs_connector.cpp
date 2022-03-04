@@ -37,7 +37,12 @@ DFSConnector *createConnector(MemoryContext ctx, Oid foreignTableId)
     switch (srvType) {
         case T_OBS_SERVER:
         case T_TXT_CSV_OBS_SERVER: {
+#ifndef ENABLE_LITE_MODE
             return New(ctx) OBSConnector(ctx, foreignTableId);
+#else
+            FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+            return NULL;
+#endif
         }
         case T_HDFS_SERVER: {
             FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
@@ -62,7 +67,12 @@ DFSConnector *createConnector(MemoryContext ctx, ServerTypeOption srvType, void 
 {
     switch (srvType) {
         case T_OBS_SERVER: {
+#ifndef ENABLE_LITE_MODE
             return New(ctx) OBSConnector(ctx, (ObsOptions *)options);
+#else
+            FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+            return NULL;
+#endif
             break;
         }
         case T_HDFS_SERVER: {

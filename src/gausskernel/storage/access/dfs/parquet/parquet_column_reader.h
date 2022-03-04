@@ -24,7 +24,9 @@
 #ifndef PQRQUET_COLUMN_READER_H
 #define PQRQUET_COLUMN_READER_H
 
+#ifndef ENABLE_LITE_MODE
 #include "parquet/api/reader.h"
+#endif
 
 #include "utils/date.h"
 #include "utils/timestamp.h"

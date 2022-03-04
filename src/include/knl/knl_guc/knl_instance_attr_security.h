@@ -56,6 +56,7 @@ typedef struct knl_instance_attr_security {
     char* transparent_encrypt_kms_region;
     bool use_elastic_search;
     char* elastic_search_ip_addr;
+    int audit_thread_num;   
 } knl_instance_attr_security;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_SECURITY_H_ */

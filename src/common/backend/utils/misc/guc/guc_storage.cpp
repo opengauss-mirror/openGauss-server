@@ -209,6 +209,8 @@ static int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
 #ifndef ENABLE_MULTIPLE_NODES
 static void assign_dcf_election_timeout(int newval, void* extra);
+static void assign_dcf_auto_elc_priority_en(int newval, void* extra);
+static void assign_dcf_election_switch_threshold(int newval, void* extra);
 static void assign_dcf_run_mode(int newval, void* extra);
 static void assign_dcf_log_level(const char* newval, void* extra);
 static void assign_dcf_max_log_file_size(int newval, void* extra);
@@ -605,6 +607,18 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"enable_wal_shipping_compression",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("enable compress xlog during xlog shipping."),
+            NULL},
+            &g_instance.attr.attr_storage.enable_wal_shipping_compression,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         {{"enable_mix_replication",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -641,7 +655,6 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 #endif
-
         {{"ha_module_debug",
             PGC_USERSET,
             NODE_ALL,
@@ -879,6 +892,17 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_defer_calculate_snapshot",
+            PGC_SIGHUP,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Enable defer to calculate mvcc snapshot when commit"),
+            NULL},
+            &u_sess->attr.attr_storage.enable_defer_calculate_snapshot,
+            true,
+            NULL,
+            NULL,
+            NULL},
 #ifdef USE_ASSERT_CHECKING
         {{"enable_segment",
             PGC_SIGHUP,
@@ -938,6 +962,20 @@ static void InitStorageConfigureNamesBool()
             gettext_noop("create hash bucket table, only used in debug mode"),
             NULL},
             &u_sess->attr.attr_storage.enable_hashbucket,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
+
+#ifdef ENABLE_MULTIPLE_NODES
+        {{"auto_csn_barrier",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            WAL,
+            gettext_noop("Enable auto csn barrier creation."),
+            NULL},
+            &g_instance.attr.attr_storage.auto_csn_barrier,
             false,
             NULL,
             NULL,
@@ -1287,6 +1325,32 @@ static void InitStorageConfigureNamesInt()
             600,
             NULL,
             assign_dcf_election_timeout,
+            NULL},
+        {{"dcf_enable_auto_election_priority",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_PAXOS,
+            gettext_noop("Sets the election priority of local DCF node."),
+            NULL},
+            &u_sess->attr.attr_storage.dcf_attr.dcf_auto_elc_priority_en,
+            1,
+            0,
+            1,
+            NULL,
+            assign_dcf_auto_elc_priority_en,
+            NULL},
+        {{"dcf_election_switch_threshold",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_PAXOS,
+            gettext_noop("Sets the election switch threshold of local DCF node."),
+            NULL},
+            &u_sess->attr.attr_storage.dcf_attr.dcf_election_switch_threshold,
+            0,
+            0,
+            INT_MAX,
+            NULL,
+            assign_dcf_election_switch_threshold,
             NULL},
         {{"dcf_max_log_file_size",
             PGC_SIGHUP,
@@ -2035,7 +2099,34 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
+        {{"wal_flush_timeout",
+            PGC_SIGHUP,
+            NODE_ALL,
+            WAL_SETTINGS,
+            gettext_noop("set timeout when iterator table entry."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
+            &g_instance.attr.attr_storage.wal_flush_timeout,
+            2,
+            0,
+            90000000,
+            NULL,
+            NULL,
+            NULL},
+        {{"wal_flush_delay",
+            PGC_SIGHUP,
+            NODE_ALL,
+            WAL_SETTINGS,
+            gettext_noop("set delay time when iterator table entry."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
+            &g_instance.attr.attr_storage.wal_flush_delay,
+            1,
+            0,
+            90000000,
+            NULL,
+            NULL,
+            NULL},
         {{"checkpoint_wait_timeout",
             PGC_SIGHUP,
             NODE_ALL,
@@ -2080,6 +2171,20 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"archive_interval",
+            PGC_SIGHUP,
+            NODE_ALL,
+            WAL_ARCHIVING,
+            gettext_noop("OBS archive time interval."),
+            NULL,
+            GUC_UNIT_S},
+            &u_sess->attr.attr_storage.archive_interval,
+            1,
+            1,
+            1000,
+            NULL,
+            NULL,
+            NULL},
         /* see max_connections */
         {{"max_wal_senders",
             PGC_POSTMASTER,
@@ -2094,7 +2199,7 @@ static void InitStorageConfigureNamesInt()
             16,
 #endif
             0,
-            MAX_BACKENDS,
+            1024,
             NULL,
             NULL,
             NULL},
@@ -2108,7 +2213,7 @@ static void InitStorageConfigureNamesInt()
             &g_instance.attr.attr_storage.max_replication_slots,
             8,
             0,
-            MAX_BACKENDS, /* XXX? */
+            1024, /* XXX? */
             NULL,
             NULL,
             NULL},
@@ -2729,6 +2834,34 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+         {{"dw_file_num",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            WAL_CHECKPOINTS,
+            gettext_noop("Sets the number of dw batch files."),
+            NULL,
+            0},
+            &g_instance.attr.attr_storage.dw_file_num,
+            1,
+            1,
+            16,
+            NULL,
+            NULL,
+            NULL},
+         {{"dw_file_size",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            WAL_CHECKPOINTS,
+            gettext_noop("Sets the size of each dw batch file."),
+            NULL,
+            0},
+            &g_instance.attr.attr_storage.dw_file_size,
+            256,
+            32,
+            256,
+            NULL,
+            NULL,
+            NULL},
         {{"recovery_parse_workers",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -2889,27 +3022,27 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL},
         {{"undo_space_limit_size",
-            PGC_POSTMASTER,
+            PGC_SIGHUP,
             NODE_SINGLENODE,
             RESOURCES_DISK,
             gettext_noop("Undo space limit size for force recycle."),
             NULL,
             GUC_UNIT_BLOCKS},
-            &g_instance.attr.attr_storage.undo_space_limit_size,
-            4194304,  /* 32 GB */
+            &u_sess->attr.attr_storage.undo_space_limit_size,
+            33554432,  /* 256 GB */
             102400,   /* 800 MB */
             INT_MAX,
             NULL,
             NULL,
             NULL},
         {{"undo_limit_size_per_transaction",
-            PGC_POSTMASTER,
+            PGC_SIGHUP,
             NODE_SINGLENODE,
             RESOURCES_DISK,
             gettext_noop("Undo limit size per transaction."),
             NULL,
             GUC_UNIT_BLOCKS},
-            &g_instance.attr.attr_storage.undo_limit_size_transaction,
+            &u_sess->attr.attr_storage.undo_limit_size_transaction,
             4194304,  /* 32 GB */
             256,      /* 2 MB */
             INT_MAX,
@@ -2990,7 +3123,7 @@ static void InitStorageConfigureNamesInt()
             gettext_noop("Set gtm option, 0 for GTM ,1 GTMLite and 2 GTMFree"),
             NULL},
             &g_instance.attr.attr_storage.gtm_option,
-            GTMOPTION_GTM,
+            GTMOPTION_GTMLITE,
             GTMOPTION_GTM,
             GTMOPTION_GTMFREE,
             NULL,
@@ -3044,9 +3177,23 @@ static void InitStorageConfigureNamesInt()
             gettext_noop("Sets the maximum retention time of objects in recyclebin."),
             NULL,
             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.recyclebin_retention,
+            &u_sess->attr.attr_storage.recyclebin_retention_time,
             900,
             1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+        {{"undo_retention_time",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            UNGROUPED,
+            gettext_noop("Sets the maximum retention time of undo record."),
+            NULL,
+            GUC_UNIT_S},
+            &u_sess->attr.attr_storage.undo_retention_time,
+            0,
+            0,
             INT_MAX,
             NULL,
             NULL,
@@ -3743,7 +3890,7 @@ static void InitStorageConfigureNamesString()
             NULL,
             GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.num_internal_lock_partitions_str,
-            "CLOG_PART=256,CSNLOG_PART=512,LOG2_LOCKTABLE_PART=4,TWOPHASE_PART=1",
+            "CLOG_PART=256,CSNLOG_PART=512,LOG2_LOCKTABLE_PART=4,TWOPHASE_PART=1,FASTPATH_PART=20",
             NULL,
             NULL,
             NULL},
@@ -3886,6 +4033,18 @@ static void InitStorageConfigureNamesString()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_storage.xlog_lock_file_path,
             NULL,
+            NULL,
+            NULL,
+            NULL},
+        {{"redo_bind_cpu_attr",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            WAL_SETTINGS,
+            gettext_noop("bind redo worker threads to specified cpus"),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.redo_bind_cpu_attr,
+            "nobind",
             NULL,
             NULL,
             NULL},
@@ -4130,6 +4289,7 @@ bool check_enable_gtm_free(bool* newval, void** extra, GucSource source)
 /* Initialize storage critical lwlock partition num */
 void InitializeNumLwLockPartitions(void)
 {
+    Assert(lengthof(LWLockPartInfo) == LWLOCK_PART_KIND);
     /* set default values */
     SetLWLockPartDefaultNum();
     /* Do str copy and remove space. */
@@ -4300,6 +4460,118 @@ static inline bool GetReplCurArrayIsNull()
 }
 #endif
 
+static int IsReplConnInfoChanged(const char* replConnInfo, const char* newval)
+{
+    char* temptok = NULL;
+    char* toker = NULL;
+    char* temp = NULL;
+    char* token = NULL;
+    char* tmpToken = NULL;
+    char* oldReplStr = NULL;
+    char* newReplStr = NULL;
+    int repl_length = 0;
+    replconninfo* newReplInfo = NULL;
+    replconninfo* ReplInfo_1 = t_thrd.postmaster_cxt.ReplConnArray[1];
+    if (replConnInfo == NULL || newval == NULL) {
+        return NO_CHANGE;
+    }
+
+    newReplInfo = ParseReplConnInfo(newval, &repl_length);
+    oldReplStr = pstrdup(replConnInfo);
+    newReplStr = pstrdup(newval);
+
+    /* Added replication info and enabled new ip or port */
+    if (strcmp(oldReplStr, "") == 0) {
+        if (strcmp(newReplStr, "") != 0) {
+            /* ReplConnInfo_1 is not configured, it is considered to be new repconninfo */
+            if (ReplInfo_1 == NULL) {
+                pfree_ext(newReplInfo);
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return ADD_REPL_CONN_INFO_WITH_NEW_LOCAL_IP_PORT;
+            }
+        
+            if (strcmp(ReplInfo_1->localhost, newReplInfo->localhost) != 0 || 
+                ReplInfo_1->localport != newReplInfo->localport ||
+                ReplInfo_1->localheartbeatport != newReplInfo->localheartbeatport) {
+                pfree_ext(newReplInfo);
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return ADD_REPL_CONN_INFO_WITH_NEW_LOCAL_IP_PORT;
+            } else {
+                pfree_ext(newReplInfo);
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return ADD_REPL_CONN_INFO_WITH_OLD_LOCAL_IP_PORT;
+            }
+        } else {
+            pfree_ext(newReplInfo);
+            pfree_ext(oldReplStr);
+            pfree_ext(newReplStr);
+            return NO_CHANGE;
+        }
+    }
+
+    pfree_ext(newReplInfo);
+    temp = strstr(oldReplStr, "iscascade");
+    if (temp == NULL) {
+        temptok = strstr(newReplStr, "iscascade");
+        if (temptok == NULL) {
+            /* Modify the old replication info,
+            excluding disaster recovery configuration information */
+            if (strcmp(oldReplStr, newReplStr) == 0) {
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return NO_CHANGE;
+            } else {
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return OLD_REPL_CHANGE_IP_OR_PORT;
+            }
+        } else {
+            toker = strstr(newReplStr, "iscrossregion");
+            if (toker == NULL) {
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return OLD_REPL_CHANGE_IP_OR_PORT;
+            } else {
+                /* Modify the old replication info and
+                add disaster recovery configuration information */
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return ADD_DISASTER_RECOVERY_INFO;
+            }
+        }
+    } else {
+        temptok = strstr(newReplStr, "iscascade");
+        if (temptok == NULL) {
+            /* Modify the replication info message,
+            the new message does not carry disaster recovery information */
+            token = strtok_r(oldReplStr, "d", &tmpToken);
+            if (strncasecmp(token, newReplStr, strlen(newReplStr)) == 0) {
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return NO_CHANGE;
+            } else {
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return OLD_REPL_CHANGE_IP_OR_PORT;
+            }
+        } else {
+            /* Modify the replication info carrying disaster recovery information */
+            if (strcmp(oldReplStr, newReplStr) == 0) {
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return NO_CHANGE;
+            } else {
+                pfree_ext(oldReplStr);
+                pfree_ext(newReplStr);
+                return OLD_REPL_CHANGE_IP_OR_PORT;
+            }
+        }
+    }
+}
+
 /*
  * @@GaussDB@@
  * Brief			: Parse replconninfo1.
@@ -4316,9 +4588,9 @@ static void assign_replconninfo1(const char* newval, void* extra)
      * At present, ReplConnArray is only used by PM, so it is safe.
      */
     t_thrd.postmaster_cxt.ReplConnArray[1] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[1] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[1], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[1] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[1] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[1] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[1], newval);
 
 #ifndef ENABLE_MULTIPLE_NODES
         /* perceive single --> primary_standby */
@@ -4326,6 +4598,7 @@ static void assign_replconninfo1(const char* newval, void* extra)
             t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE &&
             !GetReplCurArrayIsNull()) {
                 t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
+                g_instance.global_sysdbcache.RefreshHotStandby();
         }
 #endif
     }
@@ -4343,9 +4616,9 @@ static void assign_replconninfo2(const char* newval, void* extra)
         pfree(t_thrd.postmaster_cxt.ReplConnArray[2]);
 
     t_thrd.postmaster_cxt.ReplConnArray[2] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[2] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[2], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[2] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[2] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[2] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[2], newval);
     }
 }
 
@@ -4357,9 +4630,9 @@ static void assign_replconninfo3(const char* newval, void* extra)
         pfree(t_thrd.postmaster_cxt.ReplConnArray[3]);
 
     t_thrd.postmaster_cxt.ReplConnArray[3] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[3] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[3], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[3] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[3] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[3] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[3], newval);
     }
 }
 
@@ -4371,9 +4644,9 @@ static void assign_replconninfo4(const char* newval, void* extra)
         pfree(t_thrd.postmaster_cxt.ReplConnArray[4]);
 
     t_thrd.postmaster_cxt.ReplConnArray[4] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[4] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[4], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[4] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[4] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[4] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[4], newval);
     }
 }
 
@@ -4385,9 +4658,9 @@ static void assign_replconninfo5(const char* newval, void* extra)
         pfree(t_thrd.postmaster_cxt.ReplConnArray[5]);
 
     t_thrd.postmaster_cxt.ReplConnArray[5] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[5] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[5], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[5] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[5] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[5] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[5], newval);
     }
 }
 
@@ -4399,9 +4672,9 @@ static void assign_replconninfo6(const char* newval, void* extra)
         pfree(t_thrd.postmaster_cxt.ReplConnArray[6]);
 
     t_thrd.postmaster_cxt.ReplConnArray[6] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[6] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[6], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[6] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[6] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[6] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[6], newval);
     }
 }
 
@@ -4413,9 +4686,9 @@ static void assign_replconninfo7(const char* newval, void* extra)
         pfree(t_thrd.postmaster_cxt.ReplConnArray[7]);
 
     t_thrd.postmaster_cxt.ReplConnArray[7] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[7] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[7], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[7] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[7] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[7] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[7], newval);
     }
 }
 
@@ -4428,9 +4701,9 @@ static void assign_replconninfo8(const char* newval, void* extra)
     }
 
     t_thrd.postmaster_cxt.ReplConnArray[8] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[8] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[8], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[8] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[8] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[8] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[8], newval);
     }
 }
 
@@ -4443,9 +4716,9 @@ static void assign_replconninfo9(const char* newval, void* extra)
     }
 
     t_thrd.postmaster_cxt.ReplConnArray[9] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[9] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[9], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[9] = true;
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[9] != NULL && newval != NULL) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[9] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[9], newval);
     }
 }
 
@@ -4459,8 +4732,9 @@ static void assign_replconninfo10(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[10] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[10] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[10], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[10] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[10], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[10] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[10], newval);
     }
 }
 
@@ -4474,8 +4748,9 @@ static void assign_replconninfo11(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[11] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[11] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[11], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[11] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[11], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[11] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[11], newval);
     }
 }
 
@@ -4489,8 +4764,9 @@ static void assign_replconninfo12(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[12] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[12] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[12], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[12] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[12], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[12] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[12], newval);
     }
 }
 
@@ -4504,8 +4780,9 @@ static void assign_replconninfo13(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[13] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[13] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[13], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[13] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[13], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[13] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[13], newval);
     }
 }
 
@@ -4519,8 +4796,9 @@ static void assign_replconninfo14(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[14] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[14] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[14], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[14] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[14], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[14] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[14], newval);
     }
 }
 
@@ -4534,8 +4812,9 @@ static void assign_replconninfo15(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[15] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[15] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[15], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[15] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[15], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[15] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[15], newval);
     }
 }
 
@@ -4549,8 +4828,9 @@ static void assign_replconninfo16(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[16] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[16] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[16], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[16] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[16], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[16] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[16], newval);
     }
 }
 
@@ -4564,8 +4844,9 @@ static void assign_replconninfo17(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[17] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[17] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[17], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[17] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[17], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[17] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[17], newval);
     }
 }
 
@@ -4579,8 +4860,9 @@ static void assign_replconninfo18(const char* newval, void* extra)
 
     t_thrd.postmaster_cxt.ReplConnArray[18] = ParseReplConnInfo(newval, &repl_length);
     if (u_sess->attr.attr_storage.ReplConnInfoArr[18] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[18], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[18] = true;
+        IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[18], newval)) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[18] =
+            IsReplConnInfoChanged(u_sess->attr.attr_storage.ReplConnInfoArr[18], newval);
     }
 }
 
@@ -5029,6 +5311,33 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
                 }
             }
 
+#ifdef ENABLE_LITE_MODE
+            iter = strstr(token, "sslmode");
+            if (iter != NULL) {
+                iter += sizeof("sslmode");
+                while (*iter == ' ' || *iter == '=') {
+                    iter++;
+                }
+
+                pNext = iter;
+                iplen = 0;
+                while (*pNext != ' ' && *pNext != '\0') {
+                    iplen++;
+                    pNext++;
+                }
+                errorno = strncpy_s(repl[parsed].sslmode, SSL_MODE_LEN - 1, iter, iplen);
+                securec_check(errorno, "\0", "\0");
+                repl[parsed].sslmode[iplen] = '\0';
+
+                if (strcmp(repl[parsed].sslmode, "disable") != 0 && strcmp(repl[parsed].sslmode, "allow") != 0 &&
+                    strcmp(repl[parsed].sslmode, "prefer") != 0 && strcmp(repl[parsed].sslmode, "require") != 0 &&
+                    strcmp(repl[parsed].sslmode, "verify-ca") != 0 && strcmp(repl[parsed].sslmode, "verify-full") != 0) {
+                    errorno = strcpy_s(repl[parsed].sslmode, SSL_MODE_LEN, "prefer");
+                    securec_check(errorno, "\0", "\0");
+                }
+            }
+#endif
+
             token = strtok_r(NULL, ",", &tmp_token);
             parsed++;
         }
@@ -5148,6 +5457,20 @@ static void assign_dcf_election_timeout(int newval, void* extra)
     u_sess->attr.attr_storage.dcf_attr.dcf_election_timeout = newval;
     if (t_thrd.proc_cxt.MyProcPid == PostmasterPid)
         dcf_set_param("ELECTION_TIMEOUT", std::to_string(newval).c_str());
+}
+
+static void assign_dcf_auto_elc_priority_en(int newval, void* extra)
+{
+    u_sess->attr.attr_storage.dcf_attr.dcf_auto_elc_priority_en = newval;
+    if (t_thrd.proc_cxt.MyProcPid == PostmasterPid)
+        dcf_set_param("AUTO_ELC_PRIORITY_EN", std::to_string(newval).c_str());
+}
+
+static void assign_dcf_election_switch_threshold(int newval, void* extra)
+{
+    u_sess->attr.attr_storage.dcf_attr.dcf_election_switch_threshold = newval;
+    if (t_thrd.proc_cxt.MyProcPid == PostmasterPid)
+        dcf_set_param("ELECTION_SWITCH_THRESHOLD", std::to_string(newval).c_str());
 }
 
 static void assign_dcf_run_mode(int newval, void* extra)

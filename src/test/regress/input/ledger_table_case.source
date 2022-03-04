@@ -391,7 +391,7 @@ CREATE SCHEMA blockchain;
 CREATE USER test_normal_user PASSWORD 'Gauss_234';
 ALTER SCHEMA blockchain OWNER TO test_normal_user;
 DROP USER test_normal_user CASCADE;
-ALTER SCHEMA blockchain OWNER TO @login_user@;
+ALTER SCHEMA blockchain OWNER TO "@login_user@";
 DROP USER test_normal_user CASCADE;
 
 

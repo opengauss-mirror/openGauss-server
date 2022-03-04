@@ -77,9 +77,9 @@ static void InitializeAttoptCache(void)
     ctl.hcxt = u_sess->cache_mem_cxt;
     u_sess->cache_cxt.att_opt_cache_hash =
         hash_create("Attopt cache", 256, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-
+    
     /* Watch for invalidation events. */
-    CacheRegisterSyscacheCallback(ATTNUM, InvalidateAttoptCacheCallback, (Datum)0);
+    CacheRegisterSessionSyscacheCallback(ATTNUM, InvalidateAttoptCacheCallback, (Datum)0);
 }
 
 /*

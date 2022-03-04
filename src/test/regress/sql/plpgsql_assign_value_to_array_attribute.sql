@@ -1,0 +1,464 @@
+-- FOR PL/pgSQL VARRAY Assign Value to Attribute scenarios --
+
+-- check compatibility --
+-- create new schema --
+drop schema if exists plpgsql_arrayassign;
+create schema plpgsql_arrayassign;
+set current_schema = plpgsql_arrayassign;
+
+-- initialize table and type--
+create type info as (name varchar2(50), age int, address varchar2(20), salary float(2));
+create type customer as (id number(10), c_info info);
+create table customers (id number(10), c_info info);
+
+insert into customers (id, c_info) values (1, ('Vera' ,32, 'Paris', 22999.00));
+insert into customers (id, c_info) values (2, ('Zera' ,25, 'London', 5999.00));
+insert into customers (id, c_info) values (3, ('Alice' ,22, 'Bangkok', 9800.98));
+insert into customers (id, c_info) values (4, ('Jim' ,26, 'Dubai', 18700.00));
+insert into customers (id, c_info) values (5, ('Kevin' ,28, 'Singapore', 18999.00));
+insert into customers (id, c_info) values (6, ('Gauss' ,42, 'Beijing', 32999.00));
+
+----------------------------------------------------
+------------------ START OF TESTS ------------------
+----------------------------------------------------
+
+-- test assign value by :=
+create or replace function get_customers RETURNS customer[] as $$ 
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin
+    customer_list(1) := (1, ('Vera' ,32, 'Paris', 22999.00));
+    customer_list(2) := (2, ('Zera' ,25, 'London', 5999.00));
+    customer_list(2).id := 3;
+    customer_list(2).c_info := ('Alice' ,22, 'Bangkok', 9800.98);
+    customer_list(3).id := 4;
+    customer_list(3).c_info := ('Jim' ,26, 'Dubai', 18700.00);
+    return customer_list;
+end;
+$$ language plpgsql;
+select get_customers();
+
+-- test assign value by select into
+create or replace function get_customers RETURNS customer[] as $$ 
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin
+    customer_list(1) := (1, ('Vera' ,32, 'Paris', 22999.00));
+    customer_list(2) := (2, ('Zera' ,25, 'London', 5999.00));
+    select id into customer_list(2).id from customers where id = 3;
+    select c_info into customer_list(2).c_info from customers where id = 3;
+    select id into customer_list(3).id from customers where id = 4;
+    select c_info into customer_list(3).c_info from customers where id = 4;
+    return customer_list;
+end;
+$$ language plpgsql;
+select get_customers();
+
+-- test assign value by fetch into
+create or replace function get_customers RETURNS customer[] as $$ 
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+    CURSOR C1 IS SELECT id FROM customers ORDER by id;
+    CURSOR C2 IS SELECT c_info FROM customers ORDER by id;
+begin
+    customer_list(1) := (1, ('Vera' ,32, 'Paris', 22999.00));
+    customer_list(2) := (2, ('Zera' ,25, 'London', 5999.00));
+    OPEN C1;
+    OPEN C2;
+    FETCH C1 into customer_list(2).id;
+    FETCH C2 into customer_list(2).c_info;
+    FETCH C1 into customer_list(3).id;
+    FETCH C2 into customer_list(3).c_info;
+    CLOSE C1;
+    CLOSE C2;
+    return customer_list;
+end;
+$$ language plpgsql;
+select get_customers();
+
+-- test assign value by EXECUTE IMMEDIATE into
+create or replace function get_customers RETURNS customer[] as $$ 
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin
+    customer_list(1) := (1, ('Vera' ,32, 'Paris', 22999.00));
+    customer_list(2) := (2, ('Zera' ,25, 'London', 5999.00));
+    EXECUTE IMMEDIATE 'select id from customers where id = :1'
+        INTO customer_list(2).id 
+	    USING IN 3;
+    EXECUTE IMMEDIATE 'select c_info from customers where id = :1'
+        INTO customer_list(2).c_info
+	    USING IN 3;
+    EXECUTE IMMEDIATE 'select id from customers where id = :1'
+        INTO customer_list(3).id 
+	    USING IN 4;
+    EXECUTE IMMEDIATE 'select c_info from customers where id = :1'
+        INTO customer_list(3).c_info
+	    USING IN 4;
+    return customer_list;
+end;
+$$ language plpgsql;
+select get_customers();
+
+-- test assign value in two-dimensional arrays 
+-- (only := support assign value in two-dimensional arrays)
+create or replace function get_customers RETURNS customer[] as $$ 
+declare
+    customer_list customer[][];
+begin 
+    customer_list:= array[[(1, ('Vera' ,32, 'Paris', 22999.00)),(2, ('Zera' ,25, 'London', 5999.00))],
+                          [(3, ('Alice' ,22, 'Bangkok', 9800.98)),(4, ('Jim' ,26, 'Dubai', 18700.00))]];
+    customer_list(1)(1).id := 5;
+    customer_list(1)(1).c_info := ('Kevin' ,28, 'Singapore', 18999.00);
+    customer_list(1)(2).id := 6;
+    customer_list(1)(2).c_info := ('Gauss' ,42, 'Beijing', 32999.00);
+    customer_list(2)(1).id := 7;
+    customer_list(2)(1).c_info := ('Bob' ,24, 'Shanghai', 28999.00);
+    customer_list(2)(2).id := 8;
+    customer_list(2)(2).c_info := ('Jack' ,56, 'Hongkong', 8999.00);
+    return customer_list;
+end;
+$$ language plpgsql;
+select get_customers();
+
+-- test assign value with loop, if, case 
+create or replace function get_customers RETURNS customer[] as $$ 
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+    CURSOR C1 IS SELECT * FROM customers ORDER by id;
+    counter int := 0;
+begin 
+    for n in C1 loop
+	    counter := counter + 1;
+        customer_list(counter).id := n.id;
+		customer_list(counter).c_info := n.c_info;
+	end loop;
+	
+	IF counter > 1 THEN
+	    counter := counter + 1;
+        select id into customer_list(counter).id from customers where id = 1;
+        select c_info into customer_list(counter).c_info from customers where id = 1;
+	ELSE
+	    counter := counter + 1;
+        customer_list(counter).id := 7;
+		customer_list(counter).c_info := ('Bob' ,24, 'Shanghai', 28999.00);
+	END IF;
+	
+	CASE counter
+	    WHEN 1 THEN
+		    customer_list(counter + 1).id := 7;
+		    customer_list(counter + 1).c_info := ('Bob' ,24, 'Shanghai', 28999.00);
+		WHEN 2 THEN
+		    customer_list(counter + 1).id := 8;
+		    customer_list(counter + 1).c_info := ('Bob' ,24, 'Shanghai', 28999.00);
+		ELSE
+		    customer_list(counter + 1).id := 9;
+		    customer_list(counter + 1).c_info := ('Bob' ,24, 'Shanghai', 28999.00);
+	END CASE;
+return customer_list;
+end;
+$$ language plpgsql;
+select get_customers();
+
+--ERROR: assign value to deep level attribute is not supported yet
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).c_info.name;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with T_CWORD type
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).a.b.c;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with T_CWORD type
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).a.b.c.d.e.f;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with T_DATUM type
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).customer_list.id;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with T_DATUM type
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).customer_list.c;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with T_DATUM type
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).customer_list;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with type name
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).c_list;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with T_WORD type
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).a;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with keyword
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).if;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect attribute name with keyword
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1).end;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test missing attribute name
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    select 'bob' into customer_list(1). ;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test missing attribute name
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    customer_list(1). := 'bob';
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test illegal attribute name
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    customer_list(1).6a := 'bob';
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test illegal attribute name
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    customer_list(1).%# := 'bob';
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect array name : spelling error
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin 
+    customer_lis(1).id := 3;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect array name : scalar variable
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+	a int;
+begin 
+    a(1).id := 3;
+    return customer_list;
+end;
+$$ language plpgsql;
+call get_customers();
+
+--ERROR: test incorrect array name : array type name
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+	a int;
+begin 
+    c_list(1).id := 3;
+    return customer_list;
+end;
+$$ language plpgsql;
+
+--ERROR: test incorrect array name : array element type is not composite
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer;
+	type i_list is VARRAY(10) of int; 
+    customer_list c_list:=c_list();
+	a i_list := i_list();
+begin 
+    a(1).id := 3;
+    return customer_list;
+end;
+$$ language plpgsql;
+call get_customers();
+
+--ERROR: test incorrect array name : array element type is record/row
+create or replace function get_customers RETURNS customer[] as $$
+declare
+    type c_list is VARRAY(10) of customer;
+    customer_list c_list:=c_list();
+	a customers;
+begin 
+    a(1).id := 3;
+    return customer_list;
+end;
+$$ language plpgsql;
+call get_customers();
+
+--ERROR: test array dimensions exceeds the maximum.
+create or replace function get_customers RETURNS customer[] as $$ 
+declare
+    type c_list is VARRAY(10) of customer; 
+    customer_list c_list:=c_list();
+begin
+    customer_list(1) := (1, ('Vera' ,32, 'Paris', 22999.00));
+    customer_list(2) := (2, ('Zera' ,25, 'London', 5999.00));
+    customer_list(1)(2)(3)(4)(5)(6)(7).id := 3;
+    return customer_list;
+end;
+$$ language plpgsql;
+call get_customers();
+
+-- Test PLPGSQL ARRAY defined with type from different schema
+drop schema if exists test_pl_array_schema;
+create schema test_pl_array_schema;
+create TYPE test_pl_array_schema.desc_tab as (
+      col_type            int ,
+      col_max_len         int ,
+      col_name            VARCHAR2(32)  ,
+      col_name_len        int ,
+      col_schema_name     VARCHAR2(32) ,
+      col_schema_name_len int ,
+      col_precision       int ,
+      col_scale           int ,
+      col_charsetid       int ,
+      col_charsetform     int ,
+      col_null_ok         BOOLEAN);	  
+create TYPE test_pl_array_schema.varchar2_table as (str VARCHAR2(2000));
+create TYPE test_pl_array_schema.number_table as (num NUMBER);
+create TYPE test_pl_array_schema.date_table as (dat DATE);
+create TYPE test_pl_array_schema.comp_table as (a int, b VARCHAR2(10));
+
+create or replace function get_table_array RETURNS void as $$ 
+declare
+    type num_arr is VARRAY(10) of test_pl_array_schema.number_table;
+    v_a num_arr:=num_arr();
+    type varchar2_arr is VARRAY(10) of test_pl_array_schema.varchar2_table;
+    v_b varchar2_arr:=varchar2_arr();
+    type date_arr is VARRAY(10) of test_pl_array_schema.date_table;
+    v_c date_arr:=date_arr();
+    type tab_arr is VARRAY(10) of test_pl_array_schema.desc_tab;
+    v_d tab_arr:=tab_arr();	
+    type comp_arr is VARRAY(10) of test_pl_array_schema.comp_table;
+    v_e comp_arr:=comp_arr();	
+begin 	
+    v_a.extend(1);
+    v_a(1).num := 1;
+    v_b.extend(1);
+    v_b(1).str := 'aaa';
+    v_c.extend(1);
+    v_c(1).dat := '2003-04-12 04:05:06';
+    v_d.extend(1);
+    v_d(1).col_type := 22;
+    v_e.extend(1);
+    v_e(1) := (11,'haha');
+    RAISE NOTICE '% % % % % % ', v_a(1).num, v_b(1).str, v_c(1).dat, v_d(1).col_type, v_e(1).a, v_e(1).b;
+end;
+$$ language plpgsql;
+call get_table_array();
+
+--------------------------------------------------
+------------------ END OF TESTS ------------------
+--------------------------------------------------
+
+drop function if exists get_table_array;
+drop type if exists test_pl_array_schema.comp_table;
+drop type if exists test_pl_array_schema.date_table;
+drop type if exists test_pl_array_schema.number_table;
+drop type if exists test_pl_array_schema.varchar2_table;
+drop type if exists test_pl_array_schema.desc_tab;
+drop function if exists get_customers;
+drop table if exists customers;
+drop type if exists customer;
+drop type if exists info;
+
+-- clean up --
+drop schema if exists test_pl_array_schema cascade;
+drop schema if exists plpgsql_arrayassign cascade;

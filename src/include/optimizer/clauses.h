@@ -4,9 +4,9 @@
  *	  prototypes for clauses.c.
  *
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/optimizer/clauses.h
  *
@@ -21,6 +21,12 @@
 
 #define is_opclause(clause) ((clause) != NULL && IsA(clause, OpExpr))
 #define is_funcclause(clause) ((clause) != NULL && IsA(clause, FuncExpr))
+
+#ifdef ENABLE_MULTIPLE_NODES
+#define AFORMAT_NULL_TEST_MODE false
+#else
+#define AFORMAT_NULL_TEST_MODE (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && AFORMAT_NULL_TEST)
+#endif
 
 typedef struct {
     int numWindowFuncs; /* total number of WindowFuncs found */
@@ -123,5 +129,7 @@ static inline void ExcludeRownumExpr(ParseState* pstate, Node* expr)
 }
 
 extern List* get_quals_lists(Node *jtnode);
+
+extern bool isTableofType(Oid typeOid, Oid* base_oid, Oid* indexbyType);
 
 #endif /* CLAUSES_H */

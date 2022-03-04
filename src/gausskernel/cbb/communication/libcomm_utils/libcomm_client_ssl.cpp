@@ -51,10 +51,10 @@ void LibCommErrFree(void* buf) {
 
 /* security ciphers suites in SSL connection */
 static const char* ssl_ciphers_map[] = {
-    TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,   /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256 */
-    TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,   /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
-    TLS1_TXT_DHE_RSA_WITH_AES_128_CCM,          /* TLS_DHE_RSA_WITH_AES_128_CCM */
-    TLS1_TXT_DHE_RSA_WITH_AES_256_CCM,          /* TLS_DHE_RSA_WITH_AES_256_CCM */
+    TLS1_TXT_ECDHE_RSA_WITH_AES_128_GCM_SHA256,     /* TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 */
+    TLS1_TXT_ECDHE_RSA_WITH_AES_256_GCM_SHA384,     /* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 */
+    TLS1_TXT_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,   /* TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 */
+    TLS1_TXT_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,   /* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 */
     NULL};
 
 static int LibCommClientCheckPermissionCipherFile(const char* parent_dir, LibCommConn * conn, const char* username);
@@ -402,8 +402,43 @@ static int LibCommClientSSLLoadKeyFile(LibCommConn* conn, bool have_homedir, con
     LIBCOMM_ELOG(LOG, "LibCommClientSSLLoadKeyFile sslkey %s", conn->sslkey);
     return 0;
 }
+
+static void LibCommClientSSLLoadCrlFile(LibCommConn* conn, bool have_homedir, const PathData *homedir)
+{
+    struct stat buf;
+    char fnBuf[MAXPATH] = {0};
+    int nRet = 0;
+    bool userSetSslCrl = false;
+    X509_STORE* cvstore = SSL_CTX_get_cert_store(g_libCommClientSSLContext);
+    if (cvstore == NULL) {
+        return;
+    }
+
+    if ((conn->sslcrl != NULL) && strlen(conn->sslcrl) > 0) {
+        nRet = snprintf_s(fnBuf, MAXPATH, MAXPATH - 1, "%s/%s", getcwd(NULL,0), conn->sslcrl);
+        securec_check_ss_c(nRet, "\0", "\0");
+        userSetSslCrl = true;
+    } else if (have_homedir) {
+        nRet = snprintf_s(fnBuf, MAXPATH, MAXPATH - 1, "%s/%s", homedir->data, ROOT_CRL_FILE);
+        securec_check_ss_c(nRet, "\0", "\0");
+    } else {
+        fnBuf[0] = '\0';
+    }
+
+    if (fnBuf[0] == '\0') {
+        return;
+    }
+    /* Set the flags to check against the complete CRL chain */
+    if (stat(fnBuf, &buf) == 0 && X509_STORE_load_locations(cvstore, fnBuf, NULL) == 1) {
+        (void)X509_STORE_set_flags(cvstore, X509_V_FLAG_CRL_CHECK | X509_V_FLAG_CRL_CHECK_ALL);
+    } else if (userSetSslCrl) {
+        LIBCOMM_ELOG(WARNING, "could not load SSL certificate revocation list (file \"%s\")\n", fnBuf);
+    }
+}
+
 #define MAX_CERTIFICATE_DEPTH_SUPPORTED 20 /* The max certificate depth supported. */
-static int LibCommClientSSLLoadRootCertFile(LibCommConn* conn, bool have_homedir, const PathData *homedir) {
+static int LibCommClientSSLLoadRootCertFile(LibCommConn* conn, bool have_homedir, const PathData *homedir)
+{
     struct stat buf;
     char fnBuf[MAXPATH] = {0};
     int nRet = 0;
@@ -436,29 +471,7 @@ static int LibCommClientSSLLoadRootCertFile(LibCommConn* conn, bool have_homedir
             return -1;
         }
 #endif
-        /* check root cert file permission */ 
-        if (SSL_CTX_get_cert_store(g_libCommClientSSLContext) != NULL) {
-            if ((conn->sslcrl != NULL) && strlen(conn->sslcrl) > 0) {
-                nRet = snprintf_s(fnBuf, MAXPATH, MAXPATH - 1, "%s/%s", getcwd(NULL,0), conn->sslcrl);
-                securec_check_ss_c(nRet, "\0", "\0");
-            } else if (have_homedir) {
-                nRet = snprintf_s(fnBuf, MAXPATH, MAXPATH - 1, "%s/%s", homedir->data, ROOT_CRL_FILE);
-                securec_check_ss_c(nRet, "\0", "\0");
-            } else {
-                fnBuf[0] = '\0';
-            }
-            /* Set the flags to check against the complete CRL chain */
-            if (fnBuf[0] != '\0' && stat(fnBuf, &buf) == 0) {
-                if (X509_STORE_load_locations(SSL_CTX_get_cert_store(g_libCommClientSSLContext), fnBuf, NULL) == 1) {
-                    (void)X509_STORE_set_flags(SSL_CTX_get_cert_store(g_libCommClientSSLContext),
-                        X509_V_FLAG_CRL_CHECK | X509_V_FLAG_CRL_CHECK_ALL);
-                } else {
-                    LIBCOMM_ELOG(ERROR,"could not load SSL certificate revocation list (file \"%s\")\n", conn->sslcrl);
-                    return -1;
-                }
-            }
-        }
-
+        LibCommClientSSLLoadCrlFile(conn, have_homedir, homedir);
         /* Check the DH length to make sure it's at least 2048. */
         SSL_set_security_callback(conn->ssl, LibCommClientSSLDHVerifyCb);
 

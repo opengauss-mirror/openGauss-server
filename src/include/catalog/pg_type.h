@@ -832,8 +832,9 @@ DATA(insert OID = 4407 ( _TdigestData		PGNSP PGUID -1 f b A f t \054 0 4406 0 ar
 #define  TYPCATEGORY_USER		'U'
 #define  TYPCATEGORY_BITSTRING	'V'		/* er ... "varbit"? */
 #define  TYPCATEGORY_UNKNOWN	'X'
-#define  TYPCATEGORY_TABLEOF    'O'     /* table of type, index by int */
+#define  TYPCATEGORY_TABLEOF    'O'     /* table of type */
 #define  TYPCATEGORY_TABLEOF_VARCHAR  'Q' /* table of type, index by varchar */
+#define  TYPCATEGORY_TABLEOF_INTEGER  'F' /* table of type, index by integer */
 
 /* Is a type OID a polymorphic pseudotype?	(Beware of multiple evaluation) */
 #define IsPolymorphicType(typid)  \

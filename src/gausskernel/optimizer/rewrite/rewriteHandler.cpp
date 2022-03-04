@@ -74,7 +74,8 @@ static TargetEntry* process_matched_tle(TargetEntry* src_tle, TargetEntry* prior
 static Node* get_assignment_input(Node* node);
 static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List* attrnos);
 static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Relation target_relation);
-static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, bool noWait, bool pushedDown);
+static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, bool noWait, bool pushedDown,
+                                int waitSec);
 static List* matchLocks(CmdType event, RuleLock* rulelocks, int varno, Query* parsetree);
 static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePushedDown);
 
@@ -98,8 +99,8 @@ static bool pull_qual_vars_walker(Node* node, pull_qual_vars_context* context);
  * to the current subquery, requiring all rels to be opened with RowShareLock.
  * This should always be false at the start of the recursion.
  *
- * A secondary purpose of this routine is to fix up JOIN RTE references to
- * dropped columns (see details below).  Because the RTEs are modified in
+ * Caution: A secondary purpose of this routine is to fix up JOIN RTE references
+ * to dropped columns (see details below).  Because the RTEs are modified in
  * place, it is generally appropriate for the caller of this routine to have
  * first done a copyObject() to make a writable copy of the querytree in the
  * current memory context.
@@ -1571,7 +1572,25 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
     AcquireRewriteLocks(rule_action, forUpdatePushedDown);
 
     /*
+     * If FOR [KEY] UPDATE/SHARE of view, mark all the contained tables as implicit
+     * FOR [KEY] UPDATE/SHARE, the same as the parser would have done if the view's
+     * subquery had been written out explicitly.
+     *
+     * Note: we don't consider forUpdatePushedDown here; such marks will be
+     * made by recursing from the upper level in markQueryForLocking.
+     */
+    if (rc != NULL)
+        markQueryForLocking(rule_action, (Node*)rule_action->jointree, rc->strength, rc->noWait, true,
+                            rc->waitSec);
+
+    /*
      * Recursively expand any view references inside the view.
+     *
+     * Note: this must happen after markQueryForLocking.  That way, any UPDATE
+     * permission bits needed for sub-views are initially applied to their
+     * RTE_RELATION RTEs by markQueryForLocking, and then transferred to their
+     * OLD rangetable entries by the action below (in a recursive call of this
+     * routine).
      */
     rule_action = fireRIRrules(rule_action, activeRIRs, forUpdatePushedDown);
 
@@ -1607,17 +1626,6 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
     rte->updatedCols = NULL;
     rte->extraUpdatedCols = NULL;
 
-    /*
-     * If FOR [KEY] UPDATE/SHARE of view, mark all the contained tables as implicit
-     * FOR [KEY] UPDATE/SHARE, the same as the parser would have done if the view's
-     * subquery had been written out explicitly.
-     *
-     * Note: we don't consider forUpdatePushedDown here; such marks will be
-     * made by recursing from the upper level in markQueryForLocking.
-     */
-    if (rc != NULL)
-        markQueryForLocking(rule_action, (Node*)rule_action->jointree, rc->strength, rc->noWait, true);
-
     return parsetree;
 }
 
@@ -1632,7 +1640,8 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
  * OLD and NEW rels for updating.  The best way to handle that seems to be
  * to scan the jointree to determine which rels are used.
  */
-static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, bool noWait, bool pushedDown)
+static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, bool noWait, bool pushedDown,
+                                int waitSec)
 {
     if (jtnode == NULL)
         return;
@@ -1641,12 +1650,13 @@ static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength str
         RangeTblEntry* rte = rt_fetch(rti, qry->rtable);
 
         if (rte->rtekind == RTE_RELATION) {
-            applyLockingClause(qry, rti, strength, noWait, pushedDown);
+            applyLockingClause(qry, rti, strength, noWait, pushedDown, waitSec);
             rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
         } else if (rte->rtekind == RTE_SUBQUERY) {
-            applyLockingClause(qry, rti, strength, noWait, pushedDown);
-            /* FOR [KYE] UPDATE/SHARE of subquery is propagated to subquery's rels */
-            markQueryForLocking(rte->subquery, (Node*)rte->subquery->jointree, strength, noWait, true);
+            applyLockingClause(qry, rti, strength, noWait, pushedDown, waitSec);
+            /* FOR UPDATE/SHARE of subquery is propagated to subquery's rels */
+            markQueryForLocking(rte->subquery, (Node*)rte->subquery->jointree, strength, noWait, true,
+                                waitSec);
         }
         /* other RTE types are unaffected by FOR UPDATE */
     } else if (IsA(jtnode, FromExpr)) {
@@ -1654,12 +1664,12 @@ static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength str
         ListCell* l = NULL;
 
         foreach (l, f->fromlist)
-            markQueryForLocking(qry, (Node*)lfirst(l), strength, noWait, pushedDown);
+            markQueryForLocking(qry, (Node*)lfirst(l), strength, noWait, pushedDown, waitSec);
     } else if (IsA(jtnode, JoinExpr)) {
         JoinExpr* j = (JoinExpr*)jtnode;
 
-        markQueryForLocking(qry, j->larg, strength, noWait, pushedDown);
-        markQueryForLocking(qry, j->rarg, strength, noWait, pushedDown);
+        markQueryForLocking(qry, j->larg, strength, noWait, pushedDown, waitSec);
+        markQueryForLocking(qry, j->rarg, strength, noWait, pushedDown, waitSec);
     } else
         ereport(ERROR,
             (errmodule(MOD_OPT_REWRITE),
@@ -3007,7 +3017,7 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
      */
     RangeVar *relation = stmt->into->rel;
     if (relation->schemaname == NULL && relation->relpersistence != RELPERSISTENCE_TEMP) {
-        Oid namespaceid = RangeVarGetAndCheckCreationNamespace(relation, NoLock, NULL);
+        Oid namespaceid = RangeVarGetAndCheckCreationNamespace(relation, NoLock, NULL, RELKIND_RELATION);
         relation->schemaname = get_namespace_name(namespaceid);
     }
 
@@ -3071,7 +3081,7 @@ List *QueryRewriteRefresh(Query *parse_tree)
     RangeVar *relation = stmt->relation;
 
     if (relation->schemaname == NULL && relation->relpersistence != RELPERSISTENCE_TEMP) {
-        Oid namespaceid = RangeVarGetAndCheckCreationNamespace(relation, NoLock, NULL);
+        Oid namespaceid = RangeVarGetAndCheckCreationNamespace(relation, NoLock, NULL, RELKIND_MATVIEW);
         relation->schemaname = get_namespace_name(namespaceid);
     }
 
@@ -3134,8 +3144,10 @@ List *QueryRewriteRefresh(Query *parse_tree)
 
     dataQuery = (Query *) linitial(actions);
 
-    deparse_query(dataQuery, cquery, NIL, false, false, NULL);
+    Query* parsetree = (Query*)copyObject(dataQuery);
+    deparse_query(parsetree, cquery, NIL, false, false, NULL);
     char* selectstr = pstrdup(cquery->data);
+    pfree_ext(parsetree);
 
     initStringInfo(cquery);
     appendStringInfo(cquery, "INSERT ");

@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS check_age_null_1 (id int, age int  ENCRYPTED WITH (CO
 insert into check_age_null_1 values(1, 2);
 insert into check_age_null_1 values(2, NULL);
 ERROR:  new row for relation "check_age_null_1" violates check constraint "check_age_null_1_age_check"
-DETAIL:  Failing row contains (2, null).
+DETAIL:  N/A
 select * from check_age_null_1 order by id;
  id | age 
 ----+-----
@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS check_age_null_2 (id int, age int  ENCRYPTED WITH (CO
 insert into check_age_null_2 values(1, 2);
 insert into check_age_null_2 values(2, NULL);
 ERROR:  new row for relation "check_age_null_2" violates check constraint "check_age_null_2_age_check"
-DETAIL:  Failing row contains (2, null).
+DETAIL:  N/A
 select * from check_age_null_2 order by id;
  id | age 
 ----+-----
@@ -260,7 +260,7 @@ CREATE TABLE IF NOT EXISTS check_randomage_null_1 (id int, age int  ENCRYPTED WI
 insert into check_randomage_null_1 values(1, 2);
 insert into check_randomage_null_1 values(2, NULL);
 ERROR:  new row for relation "check_randomage_null_1" violates check constraint "check_randomage_null_1_age_check"
-DETAIL:  Failing row contains (2, null).
+DETAIL:  N/A
 select * from check_randomage_null_1 order by id;
  id | age 
 ----+-----
@@ -271,7 +271,7 @@ CREATE TABLE IF NOT EXISTS check_randomage_null_2 (id int, age int  ENCRYPTED WI
 insert into check_randomage_null_2 values(1, 2);
 insert into check_randomage_null_2 values(2, NULL);
 ERROR:  new row for relation "check_randomage_null_2" violates check constraint "check_randomage_null_2_age_check"
-DETAIL:  Failing row contains (2, null).
+DETAIL:  N/A
 select * from check_randomage_null_2 order by id;
  id | age 
 ----+-----

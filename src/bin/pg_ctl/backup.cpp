@@ -306,6 +306,14 @@ static int tblspaceIndex = 0;
         exit(1);                                                                                 \
     }
 
+#define FREE_AND_RESET(ptr)  \
+    do {                     \
+        if (NULL != (ptr)) { \
+            free(ptr);       \
+            (ptr) = NULL;    \
+        }                    \
+    } while (0)
+
 static void DisconnectConnection()
 {
     if (streamConn != NULL) {
@@ -803,6 +811,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             pg_log(PG_WARNING, _("could not read COPY data: %s\n"), PQerrorMessage(conn));
 
             DisconnectConnection();
+            FREE_AND_RESET(copybuf);
             return false;
         }
 
@@ -816,6 +825,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 pg_log(PG_WARNING, _("invalid tar block header size: %d\n"), r);
 
                 DisconnectConnection();
+                FREE_AND_RESET(copybuf);
                 return false;
             }
             totaldone += BUILD_PATH_LEN;
@@ -823,6 +833,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             if (sscanf_s(copybuf + 1048, "%20lo", &current_len_left) != 1) {
                 pg_log(PG_WARNING, _("could not parse file size\n"));
                 DisconnectConnection();
+                FREE_AND_RESET(copybuf);
                 return false;
             }
 
@@ -830,6 +841,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             if (sscanf_s(&copybuf[1024], "%07o ", &filemode) != 1) {
                 pg_log(PG_WARNING, _("could not parse file mode\n"));
                 DisconnectConnection();
+                FREE_AND_RESET(copybuf);
                 return false;
             }
 
@@ -839,6 +851,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             if (current_len_left < 0 || current_len_left > INT_MAX - 511) {
                 pg_log(PG_WARNING, _("current_len_left is invalid\n"));
                 DisconnectConnection();
+                FREE_AND_RESET(copybuf);
                 return false;
             }
             current_padding = ((current_len_left + 511) & ~511) - current_len_left;
@@ -877,6 +890,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                                     strerror(errno));
 
                                 DisconnectConnection();
+                                FREE_AND_RESET(copybuf);
                                 return false;
                             }
                         }
@@ -898,6 +912,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                             pg_log(PG_WARNING, _("could not create symbolic link from \"%s\" to \"%s\": %s\n"),
                                 filename, &copybuf[1081], strerror(errno));
                             DisconnectConnection();
+                            FREE_AND_RESET(copybuf);
                             return false;
                         }
                     }
@@ -920,12 +935,14 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                             pg_log(PG_WARNING, _("could not create symbolic link from \"%s\" to \"%s\": %s\n"),
                                 filename, &copybuf[1081], strerror(errno));
                             DisconnectConnection();
+                            FREE_AND_RESET(copybuf);
                             return false;
                         }
                     }
                 } else {
                     pg_log(PG_WARNING, _("unrecognized link indicator \"%c\"\n"), copybuf[1080]);
                     DisconnectConnection();
+                    FREE_AND_RESET(copybuf);
                     return false;
                 }
                 continue; /* directory or link handled */
@@ -943,6 +960,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             if (NULL == file) {
                 pg_log(PG_WARNING, _("could not create file \"%s\": %s\n"), filename, strerror(errno));
                 DisconnectConnection();
+                FREE_AND_RESET(copybuf);
                 return false;
             }
 
@@ -979,6 +997,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                 if (fwrite(copybuf, r, 1, file) != 1) {
                     pg_log(PG_WARNING, _("could not write to file \"%s\": %s\n"), filename, strerror(errno));
                     DisconnectConnection();
+                    FREE_AND_RESET(copybuf);
                     return false;
                 }
             }
@@ -1010,6 +1029,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
         file = NULL;
         pg_log(PG_WARNING, _("COPY stream ended before last file was finished\n"));
         DisconnectConnection();
+        FREE_AND_RESET(copybuf);
         return false;
     }
 
@@ -2286,7 +2306,7 @@ static bool backup_dw_file(const char* target_dir)
     char* unaligned_buf = NULL;
 
     /* Delete the dw file, if it exists. */
-    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s/%s", target_dir, DW_FILE_NAME);
+    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s/%s", target_dir, OLD_DW_FILE_NAME);
     securec_check_ss_c(rc, "\0", "\0");
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {

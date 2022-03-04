@@ -19,6 +19,7 @@
 #include "access/xact.h"
 #include "commands/async.h"
 #include "miscadmin.h"
+#include "postmaster/bgworker.h"
 #include "storage/ipc.h"
 #include "storage/sinvaladt.h"
 #include "utils/globalplancache.h"
@@ -40,14 +41,44 @@
  */
 THR_LOCAL volatile sig_atomic_t catchupInterruptPending = false;
 
+static void GlobalInvalidSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n, bool is_commit)
+{
+    Assert(EnableGlobalSysCache());
+    for (int i = 0; i < n; i++) {
+        SharedInvalidationMessage *msg = (SharedInvalidationMessage *)(msgs + i);
+        if (msg->id >= 0) {
+            t_thrd.lsc_cxt.lsc->systabcache.CacheIdHashValueInvalidateGlobal(msg->cc.dbId, msg->cc.id,
+                msg->cc.hashValue, is_commit);
+        } else if (msg->id == SHAREDINVALCATALOG_ID) {
+            t_thrd.lsc_cxt.lsc->systabcache.CatalogCacheFlushCatalogGlobal(msg->cat.dbId, msg->cat.catId, is_commit);
+        } else if (msg->id == SHAREDINVALRELCACHE_ID) {
+            t_thrd.lsc_cxt.lsc->tabdefcache.InvalidateGlobalRelation(msg->rc.dbId, msg->rc.relId, is_commit);
+        } else if (msg->id == SHAREDINVALPARTCACHE_ID) {
+            t_thrd.lsc_cxt.lsc->partdefcache.InvalidateGlobalPartition(msg->pc.dbId, msg->pc.partId, is_commit);
+        }
+        /* global relmap are backups of relmapfile, so no need to deal with the msg */
+    }
+}
+
+void GlobalExecuteSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n)
+{
+    /* threads who not support gsc dont need invalid global before commit */
+    if (!EnableLocalSysCache()) {
+        return;
+    }
+    GlobalInvalidSharedInvalidMessages(msgs, n, IS_THREAD_POOL_STREAM || IsBgWorkerProcess());
+}
 /*
  * SendSharedInvalidMessages
  *	Add shared-cache-invalidation message(s) to the global SI message queue.
  */
 void SendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n)
 {
+    /* threads who not support gsc still need invalid global when commit */
+    if (EnableGlobalSysCache()) {
+        GlobalInvalidSharedInvalidMessages(msgs, n, true);
+    }
     SIInsertDataEntries(msgs, n);
-
     if (ENABLE_GPC && g_instance.plan_cache != NULL) {
         g_instance.plan_cache->InvalMsg(msgs, n);
     }
@@ -69,39 +100,48 @@ void SendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n)
  * and counters; it's so that a recursive call can process messages already
  * sucked out of sinvaladt.c.
  */
-void ReceiveSharedInvalidMessages(void (*invalFunction)(SharedInvalidationMessage* msg), void (*resetFunction)(void))
+void ReceiveSharedInvalidMessages(void (*invalFunction)(SharedInvalidationMessage* msg), void (*resetFunction)(void), 
+    bool worksession)
 {
+    knl_u_inval_context *inval_cxt;
+    if (!EnableLocalSysCache()) {
+        inval_cxt = &u_sess->inval_cxt;
+    } else if (worksession) {
+        inval_cxt = &u_sess->inval_cxt;
+    } else {
+        inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+    }
     /* Deal with any messages still pending from an outer recursion */
-    while (u_sess->inval_cxt.nextmsg < u_sess->inval_cxt.nummsgs) {
-        SharedInvalidationMessage msg = u_sess->inval_cxt.messages[u_sess->inval_cxt.nextmsg++];
+    while (inval_cxt->nextmsg < inval_cxt->nummsgs) {
+        SharedInvalidationMessage msg = inval_cxt->messages[inval_cxt->nextmsg++];
 
-        u_sess->inval_cxt.SharedInvalidMessageCounter++;
+        inval_cxt->SIMCounter++;
         invalFunction(&msg);
     }
 
     do {
         int getResult;
 
-        u_sess->inval_cxt.nextmsg = u_sess->inval_cxt.nummsgs = 0;
+        inval_cxt->nextmsg = inval_cxt->nummsgs = 0;
 
         /* Try to get some more messages */
-        getResult = SIGetDataEntries(u_sess->inval_cxt.messages, MAXINVALMSGS);
+        getResult = SIGetDataEntries(inval_cxt->messages, MAXINVALMSGS, worksession);
         if (getResult < 0) {
             /* got a reset message */
             ereport(DEBUG4, (errmsg("cache state reset")));
-            u_sess->inval_cxt.SharedInvalidMessageCounter++;
+            inval_cxt->SIMCounter++;
             resetFunction();
             break; /* nothing more to do */
         }
 
         /* Process them, being wary that a recursive call might eat some */
-        u_sess->inval_cxt.nextmsg = 0;
-        u_sess->inval_cxt.nummsgs = getResult;
+        inval_cxt->nextmsg = 0;
+        inval_cxt->nummsgs = getResult;
 
-        while (u_sess->inval_cxt.nextmsg < u_sess->inval_cxt.nummsgs) {
-            SharedInvalidationMessage msg = u_sess->inval_cxt.messages[u_sess->inval_cxt.nextmsg++];
+        while (inval_cxt->nextmsg < inval_cxt->nummsgs) {
+            SharedInvalidationMessage msg = inval_cxt->messages[inval_cxt->nextmsg++];
 
-            u_sess->inval_cxt.SharedInvalidMessageCounter++;
+            inval_cxt->SIMCounter++;
             invalFunction(&msg);
         }
 
@@ -109,7 +149,7 @@ void ReceiveSharedInvalidMessages(void (*invalFunction)(SharedInvalidationMessag
          * We only need to loop if the last SIGetDataEntries call (which might
          * have been within a recursive call) returned a full buffer.
          */
-    } while (u_sess->inval_cxt.nummsgs == MAXINVALMSGS);
+    } while (inval_cxt->nummsgs == MAXINVALMSGS);
 
     /*
      * We are now caught up.  If we received a catchup signal, reset that

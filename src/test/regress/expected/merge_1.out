@@ -60,7 +60,7 @@ WHEN MATCHED THEN
                                                                 QUERY PLAN                                                                 
 -------------------------------------------------------------------------------------------------------------------------------------------
  Merge on mergeinto_1.products_row p
-   Update Cond: (p.product_id = 5)
+   Update Cond: (np.product_id = 5)
    ->  Hash Join
          Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, np.ctid
          Hash Cond: (p.product_id = np.product_id)

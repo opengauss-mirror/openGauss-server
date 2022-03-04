@@ -29,6 +29,7 @@
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vectorbatch.h"
 
+extern struct varlena *DetoastDatumBatch(struct varlena* datum, ScalarVector* arr);
 extern RowToVecState* ExecInitRowToVec(RowToVec* node, EState* estate, int eflags);
 extern VectorBatch* ExecRowToVec(RowToVecState* node);
 extern void ExecEndRowToVec(RowToVecState* node);

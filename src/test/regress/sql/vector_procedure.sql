@@ -1,0 +1,40 @@
+create schema force_vector_engine;
+set current_schema=force_vector_engine;
+
+create type pro_tblof_ty_015 as (c1 int,c2 char(10),c3 clob,c4 blob);
+create table pro_tblof_tbl_015(c1 int,c2 pro_tblof_ty_015);
+insert into pro_tblof_tbl_015 values(1,(1,'char',repeat('静夜思',16),hextoraw('12345')));
+insert into pro_tblof_tbl_015 values(2,(2,'char',repeat('静夜思',16),hextoraw('12345')));
+insert into pro_tblof_tbl_015 values(3,(3,'char',repeat('静夜思',16),hextoraw('12345')));
+insert into pro_tblof_tbl_015 values(4,(4,'char',repeat('静夜思',16),hextoraw('12345')));
+insert into pro_tblof_tbl_015 values(5,(5,'char',repeat('静夜思',16),hextoraw('12345')));
+create type pro_tblof_015 is table of pro_tblof_ty_015;
+
+create or replace procedure pro_tblof_pro_015(col1 int,col2 int)
+as
+tblof001 pro_tblof_015;
+tblof002 pro_tblof_ty_015;
+i int:=1;
+begin
+select count(*) into col1 from pro_tblof_tbl_015;
+loop
+select c2 into tblof001(i) from pro_tblof_tbl_015 where c1=i;
+if tblof001(i).c1%2=0 then
+tblof001(i).c1=0;
+else
+tblof001(i).c1=1;
+end if;
+i=i+1;
+if i>col1 then
+exit;
+end if;
+end loop;
+raise info 'tblof001 is %',tblof001;
+raise info 'i is %',i;
+end;
+/
+
+set try_vector_engine_strategy='force';
+call pro_tblof_pro_015(6,6);
+set try_vector_engine_strategy='off';
+drop schema force_vector_engine cascade;

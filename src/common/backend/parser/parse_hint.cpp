@@ -92,6 +92,7 @@ static void drop_duplicate_gather_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_scan_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_skew_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_predpush_hint(PlannerInfo* root, HintState* hstate);
+static void drop_duplicate_predpush_same_level_hint(PlannerInfo* root, HintState* hstate);
 static int find_relid_aliasname(Query* parse, const char* aliasname, bool find_in_rtable = false);
 static Relids create_bms_of_relids(
     PlannerInfo* root, Query* parse, Hint* hint, List* relnamelist = NIL, Relids currelids = NULL);
@@ -184,8 +185,8 @@ static void append_value(StringInfo buf, Value* value, Node* node)
     }
 }
 
-#define HINT_NUM 15
-#define HINT_KEYWORD_NUM 20
+#define HINT_NUM 16
+#define HINT_KEYWORD_NUM 21
 
 typedef struct {
     HintKeyword keyword;
@@ -206,6 +207,7 @@ const char* G_HINT_KEYWORD[HINT_KEYWORD_NUM] = {
     (char*) HINT_INDEXONLYSCAN,
     (char*) HINT_SKEW,
     (char*) HINT_PRED_PUSH,
+    (char*) HINT_PRED_PUSH_SAME_LEVEL,
     (char*) HINT_REWRITE,
     (char*) HINT_GATHER,
     (char*) HINT_NO_EXPAND,
@@ -299,6 +301,32 @@ Relids predpush_candidates_same_level(PlannerInfo *root)
 }
 
 /*
+ * is_predpush_same_level_matched
+ *    Check if the predpush samwe level is matched.
+ * @param predpush same level hint, relids from baserel, param path info.
+ * @param check_dest: don't check dest id when create paths.
+ * @return true if matched.
+ */
+bool is_predpush_same_level_matched(PredpushSameLevelHint* hint, Relids relids, ParamPathInfo* ppi)
+{
+    if (ppi == NULL) {
+        return false;
+    }
+    if (hint->dest_id == 0 || hint->candidates == NULL) {
+        return false;
+    }
+
+    if (!bms_is_member(hint->dest_id, relids)) {
+        return false;
+    }
+
+    if (!bms_equal(ppi->ppi_req_outer, hint->candidates)) {
+        return false;
+    }
+    return true;
+}
+
+/*
  * @Description: get the prompts for no_gpc hint into subquery.
  * @in hint: subquery no_gpc hint.
  * @out buf: String buf.
@@ -376,6 +404,35 @@ static void PredpushHintDesc(PredpushHint* hint, StringInfo buf)
 
     if (hint->candidates != NULL)
         appendStringInfo(buf, ")");
+
+    appendStringInfoString(buf, ")");
+}
+
+/*
+ * @Description: get the prompts for predicate pushdown same level.
+ * @in hint: predicate pushdown same level hint.
+ * @out buf: String buf.
+ */
+static void PredpushSameLevelHintDesc(PredpushSameLevelHint* hint, StringInfo buf)
+{
+    Hint base_hint = hint->base;
+
+    Assert(buf != NULL);
+
+    appendStringInfo(buf, " %s(", KeywordDesc(hint->base.hint_keyword));
+
+    if (hint->candidates != NULL) {
+        appendStringInfo(buf, "(");
+    }
+
+    relnamesToBuf(base_hint.relnames, buf);
+    if (hint->dest_name != NULL) {
+        appendStringInfo(buf, ", %s", hint->dest_name);
+    }
+
+    if (hint->candidates != NULL) {
+        appendStringInfo(buf, ")");
+    }
 
     appendStringInfoString(buf, ")");
 }
@@ -712,6 +769,9 @@ char* descHint(Hint* hint)
         case T_PredpushHint:
             PredpushHintDesc((PredpushHint*)hint, &str);
             break;
+        case T_PredpushSameLevelHint:
+            PredpushSameLevelHintDesc((PredpushSameLevelHint*)hint, &str);
+            break;
         case T_RewriteHint:
             RewriteHintDesc((RewriteHint*)hint, &str);
             break;
@@ -775,6 +835,7 @@ void desc_hint_in_state(PlannerInfo* root, HintState* hstate)
     find_unused_hint_to_buf(hstate->block_name_hint, &str_buf);
     find_unused_hint_to_buf(hstate->set_hint, &str_buf);
     find_unused_hint_to_buf(hstate->no_gpc_hint, &str_buf);
+    find_unused_hint_to_buf(hstate->predpush_same_level_hint, &str_buf);
 
     /* for skew hint */
     ListCell* lc = NULL;
@@ -800,6 +861,21 @@ void desc_hint_in_state(PlannerInfo* root, HintState* hstate)
  * @in hint: predicate pushdown hint.
  */
 static void PredpushHintDelete(PredpushHint* hint)
+{
+    if (hint == NULL)
+        return;
+
+    HINT_FREE_RELNAMES(hint);
+
+    bms_free(hint->candidates);
+    pfree_ext(hint);
+}
+
+/*
+ * @Description: Delete predicate pushdown same level, free memory.
+ * @in hint: predicate pushdown same level hint.
+ */
+static void PredpushSameLevelHintDelete(PredpushSameLevelHint* hint)
 {
     if (hint == NULL)
         return;
@@ -1023,6 +1099,9 @@ void hintDelete(Hint* hint)
         case T_PredpushHint:
             PredpushHintDelete((PredpushHint*)hint);
             break;
+        case T_PredpushSameLevelHint:
+            PredpushSameLevelHintDelete((PredpushSameLevelHint*)hint);
+            break;
         case T_RewriteHint:
             RewriteHintDelete((RewriteHint*)hint);
             break;
@@ -1095,6 +1174,11 @@ void HintStateDelete(HintState* hintState)
         PredpushHint* hint = (PredpushHint*)lfirst(lc);
         PredpushHintDelete(hint);
     }
+
+    foreach (lc, hintState->predpush_same_level_hint) {
+        PredpushSameLevelHint* hint = (PredpushSameLevelHint*)lfirst(lc);
+        PredpushSameLevelHintDelete(hint);
+    }
 }
 
 /*
@@ -1117,6 +1201,7 @@ HintState* HintStateCreate()
     hstate->hint_warning = NIL;
     hstate->multi_node_hint = false;
     hstate->predpush_hint = NIL;
+    hstate->predpush_same_level_hint = NIL;
     hstate->rewrite_hint = NIL;
     hstate->gather_hint = NIL;
     hstate->set_hint = NIL;
@@ -1256,6 +1341,11 @@ static void AddPredpushHint(HintState* hstate, Hint* hint)
     hstate->predpush_hint = lappend(hstate->predpush_hint, hint);
 }
 
+static void AddPredpushSameLevelHint(HintState* hstate, Hint* hint)
+{
+    hstate->predpush_same_level_hint = lappend(hstate->predpush_same_level_hint, hint);
+}
+
 static void AddRewriteHint(HintState* hstate, Hint* hint)
 {
     hstate->rewrite_hint = lappend(hstate->rewrite_hint, hint);
@@ -1303,6 +1393,7 @@ const AddHintFunc G_HINT_CREATOR[HINT_NUM] = {
     AddScanMethodHint,
     AddMultiNodeHint,
     AddPredpushHint,
+    AddPredpushSameLevelHint,
     AddSkewHint,
     AddRewriteHint,
     AddGatherHint,
@@ -1454,7 +1545,7 @@ static Relids create_bms_of_relids(PlannerInfo* root, Query* parse, Hint* hint, 
 
     /* For skew hint we will found relation from parse`s rtable. */
     bool find_in_rtable = false;
-    if (IsA(hint, SkewHint) || IsA(hint, PredpushHint)) {
+    if (IsA(hint, SkewHint) || IsA(hint, PredpushHint) || IsA(hint, PredpushSameLevelHint)) {
         find_in_rtable = true;
 	}
 
@@ -1548,6 +1639,9 @@ static List* set_hint_relids(PlannerInfo* root, Query* parse, List* l)
                     break;
                 case T_PredpushHint:
                     ((PredpushHint*)hint)->candidates = relids;
+                    break;
+                case T_PredpushSameLevelHint:
+                    ((PredpushSameLevelHint*)hint)->candidates = relids;
                     break;
                 default:
                     break;
@@ -1969,6 +2063,38 @@ static void drop_duplicate_predpush_hint(PlannerInfo* root, HintState* hstate)
 
     if (hasError) {
         hstate->predpush_hint = delete_invalid_hint(root, hstate, hstate->predpush_hint);
+    }
+}
+
+/*
+ * @Description: Delete duplicate predpush same level hint.
+ * @in hstate: Hint state.
+ */
+static void drop_duplicate_predpush_same_level_hint(PlannerInfo* root, HintState* hstate)
+{
+    bool hasError = false;
+    ListCell* lc = NULL;
+
+    foreach (lc, hstate->predpush_same_level_hint) {
+        PredpushSameLevelHint* predpushSameLevelHint = (PredpushSameLevelHint*)lfirst(lc);
+
+        if (predpushSameLevelHint->base.state != HINT_STATE_DUPLICATION) {
+            ListCell* lc_next = lnext(lc);
+            while (lc_next != NULL) {
+                PredpushSameLevelHint* predpush_same_level_hint = (PredpushSameLevelHint*)lfirst(lc_next);
+
+                if (predpushSameLevelHint->dest_id == predpush_same_level_hint->dest_id) {
+                    predpush_same_level_hint->base.state = HINT_STATE_DUPLICATION;
+                    hasError = true;
+                }
+
+                lc_next = lnext(lc_next);
+            }
+        }
+    }
+
+    if (hasError) {
+        hstate->predpush_same_level_hint = delete_invalid_hint(root, hstate, hstate->predpush_same_level_hint);
     }
 }
 
@@ -3204,7 +3330,7 @@ static void transform_skew_hint(PlannerInfo* root, Query* parse, List* skew_hint
  *  transfrom subquery name
  * @in root: query level info.
  * @in parse: parse tree.
- * @in skew_hint_list: SkewHint list.
+ * @in predpush_hint_list: predpush hint list.
  */
 static void transform_predpush_hint(PlannerInfo* root, Query* parse, List* predpush_hint_list)
 {
@@ -3224,6 +3350,37 @@ static void transform_predpush_hint(PlannerInfo* root, Query* parse, List* predp
         }
 
         predpush_hint->dest_id = relid;
+    }
+
+    return;
+}
+
+/*
+ * @Description: Transform predpush same level hint into processible type, including:
+ *  transfrom destination name
+ * @in root: query level info.
+ * @in parse: parse tree.
+ * @in predpush_join_hint_list: predpush same level hint list.
+ */
+static void transform_predpush_same_level_hint(PlannerInfo* root, Query* parse, List* predpush_same_level_hint_list)
+{
+    if (predpush_same_level_hint_list == NIL) {
+        return;
+    }
+
+    ListCell* lc = NULL;
+    foreach (lc, predpush_same_level_hint_list) {
+        PredpushSameLevelHint* predpush_same_level_hint = (PredpushSameLevelHint*)lfirst(lc);
+        if (predpush_same_level_hint->dest_name == NULL) {
+            continue;
+        }
+
+        int relid = find_relid_aliasname(parse, predpush_same_level_hint->dest_name, true);
+        if (relid <= NOTFOUNDRELNAME) {
+            continue;
+        }
+
+        predpush_same_level_hint->dest_id = relid;
     }
 
     return;
@@ -3392,11 +3549,13 @@ void transform_hints(PlannerInfo* root, Query* parse, HintState* hstate)
     hstate->scan_hint = set_hint_relids(root, parse, hstate->scan_hint);
     hstate->skew_hint = set_hint_relids(root, parse, hstate->skew_hint);
     hstate->predpush_hint = set_hint_relids(root, parse, hstate->predpush_hint);
+    hstate->predpush_same_level_hint = set_hint_relids(root, parse, hstate->predpush_same_level_hint);
 
     transform_leading_hint(root, parse, hstate);
 
     /* Transform predpush hint, for subquery name */
     transform_predpush_hint(root, parse, hstate->predpush_hint);
+    transform_predpush_same_level_hint(root, parse, hstate->predpush_same_level_hint);
 
     transform_rewrite_hint(root, parse, hstate->rewrite_hint);
 
@@ -3407,6 +3566,7 @@ void transform_hints(PlannerInfo* root, Query* parse, HintState* hstate)
     drop_duplicate_scan_hint(root, hstate);
     drop_duplicate_skew_hint(root, hstate);
     drop_duplicate_predpush_hint(root, hstate);
+    drop_duplicate_predpush_same_level_hint(root, hstate);
     drop_duplicate_rewrite_hint(root, hstate);
     drop_duplicate_gather_hint(root, hstate);
 
@@ -3582,7 +3742,7 @@ bool permit_predpush(PlannerInfo *root)
     return !predpushHint->negative;
 }
 
-const unsigned int G_NUM_SET_HINT_WHITE_LIST = 32;
+const unsigned int G_NUM_SET_HINT_WHITE_LIST = 33;
 const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     /* keep in the ascending alphabetical order of frequency */
     (char*)"best_agg_plan",
@@ -3616,7 +3776,8 @@ const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     (char*)"node_name",
     (char*)"query_dop",
     (char*)"random_page_cost",
-    (char*)"seq_page_cost"};
+    (char*)"seq_page_cost",
+    (char*)"try_vector_engine_strategy"};
 
 static int param_str_cmp(const void *s1, const void *s2)
 {

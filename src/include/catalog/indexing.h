@@ -100,6 +100,14 @@ DECLARE_UNIQUE_INDEX(pg_auth_members_role_member_index, 2694, on pg_auth_members
 DECLARE_UNIQUE_INDEX(pg_auth_members_member_role_index, 2695, on pg_auth_members using btree(member oid_ops, roleid oid_ops));
 #define AuthMemMemRoleIndexId	2695
 
+/* Add index for gs_db_privilege */
+DECLARE_UNIQUE_INDEX(gs_db_privilege_oid_index, 5568, on gs_db_privilege using btree(oid oid_ops));
+#define DbPrivilegeOidIndexId 5568
+DECLARE_INDEX(gs_db_privilege_roleid_index, 5569, on gs_db_privilege using btree(roleid oid_ops));
+#define DbPrivilegeRoleidIndexId 5569
+DECLARE_UNIQUE_INDEX(gs_db_privilege_roleid_privilege_type_index, 5570, on gs_db_privilege using btree(roleid oid_ops, privilege_type text_ops));
+#define DbPrivilegeRoleidPrivilegeTypeIndexId 5570
+
 DECLARE_UNIQUE_INDEX(pg_cast_oid_index, 2660, on pg_cast using btree(oid oid_ops));
 #define CastOidIndexId	2660
 DECLARE_UNIQUE_INDEX(pg_cast_source_target_index, 2661, on pg_cast using btree(castsource oid_ops, casttarget oid_ops));
@@ -217,7 +225,7 @@ DECLARE_UNIQUE_INDEX(pg_proc_oid_index, 2690, on pg_proc using btree(oid oid_ops
 
 DECLARE_INDEX(pg_proc_proname_args_nsp_index, 2691, on pg_proc using btree(proname name_ops, proargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
 #define ProcedureNameArgsNspIndexId  2691
-DECLARE_UNIQUE_INDEX(pg_proc_proname_all_args_nsp_index, 9666, on pg_proc using btree(proname name_ops, allargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
+DECLARE_INDEX(pg_proc_proname_all_args_nsp_index, 9666, on pg_proc using btree(proname name_ops, allargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
 #define ProcedureNameAllArgsNspIndexId  9666
 
 DECLARE_INDEX(pg_proc_proname_args_nsp_new_index, 9378, on pg_proc using btree(proname name_ops, proargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
@@ -406,6 +414,10 @@ DECLARE_UNIQUE_INDEX(pg_hashbucket_oid_index, 3492, on pg_hashbucket using btree
 #define HashBucketOidIndexId  3492
 DECLARE_INDEX(pg_hashbucket_bid_index,3493, on pg_hashbucket using btree(bucketid oid_ops, bucketcnt int4_ops, bucketmapsize int4_ops));
 #define HashBucketBidIndexId 3493
+
+/* Add index of table oid for gs_uid */
+DECLARE_UNIQUE_INDEX(gs_uid_relid_index, 3499, on gs_uid using btree(relid oid_ops));
+#define UidRelidIndexId  3499
 
 /* Add index of table oid for pg_job, pg_job_proc */
 DECLARE_UNIQUE_INDEX(pg_job_oid_index, 3453, on pg_job using btree(oid oid_ops));

@@ -38,7 +38,7 @@ typedef uint64 UndoSlotPtr;
 
 const uint32 USTORE_VERSION = 92350;
 
-#define UNDO_ZONE_COUNT (1024*1024)
+const int32 UNDO_ZONE_COUNT = 1024*1024;
 
 /* Parameter for calculating the number of locks used in undo zone. */
 #define UNDO_ZONE_LOCK 4
@@ -123,8 +123,6 @@ const int PAGES_READ_NUM = 1024 * 16;
 /* The only valid fork number for undo log buffers. */
 #define UNDO_FORKNUM MAIN_FORKNUM
 
-typedef enum { UNDO_NOT_VALID = 0, UNDO_NOT_RECOVERY = 1, UNDO_RECOVERY = 2, UNDO_DISCARD = 3 } UndoRecoveryStatus;
-
 typedef enum {
     UNDO_PERMANENT = 0,
     UNDO_UNLOGGED = 1,
@@ -137,6 +135,22 @@ typedef enum {
     UNDO_SLOT_SPACE = 1,
     UNDO_SPACE_BUTT
 } UndoSpaceType;
+
+typedef enum {
+    UNDO_TRAVERSAL_DEFAULT = 0,
+    UNDO_TRAVERSAL_COMPLETE,
+    UNDO_TRAVERSAL_STOP,
+    UNDO_TRAVERSAL_ABORT,
+    UNDO_TRAVERSAL_END
+} UndoTraversalState;
+
+typedef enum {
+    UNDO_RECORD_NORMAL = 0,
+    UNDO_RECORD_DISCARD,
+    UNDO_RECORD_FORCE_DISCARD,
+    UNDO_RECORD_NOT_INSERT,
+    UNDO_RECORD_INVALID
+} UndoRecordState;
 
 #define UNDO_PERSISTENCE_LEVELS 3
 
@@ -208,9 +222,6 @@ typedef enum {
 #define UNDO_DELETE 0x03
 #define UNDO_INPLACE_UPDATE 0x04
 #define UNDO_UPDATE 0x05
-#define UNDO_XID_LOCK_ONLY 0x06
-#define UNDO_XID_LOCK_FOR_UPDATE 0x07
-#define UNDO_XID_MULTI_LOCK_ONLY 0x08
 #define UNDO_ITEMID_UNUSED 0x09
 
 #define UNDO_UREC_INFO_UNKNOWN 0x00
@@ -241,4 +252,6 @@ extern const char *UNDO_PERMANENT_DIR;
 extern const char *UNDO_UNLOGGED_DIR;
 extern const char *UNDO_TEMP_DIR;
 
+extern int UNDOZONE_META_PAGE_COUNT;
+extern int UNDOSPACE_META_PAGE_COUNT;
 #endif // __KNL_UUNDOTYPE_H__

@@ -55,6 +55,8 @@ typedef struct DecodingOutputState {
     bool binary_output;
     int64 returned_rows;
 } DecodingOutputState;
+extern void shutdown_cb_wrapper(LogicalDecodingContext *ctx);
+
 
 /*
  * Prepare for a output plugin write.
@@ -115,11 +117,28 @@ void check_permissions(bool for_backup)
     }
 }
 
+void CheckLogicalPremissions(Oid userId)
+{
+    if (g_instance.attr.attr_security.enablePrivilegesSeparate &&
+        !superuser_arg(userId) && !has_rolreplication(userId)&&
+        !is_member_of_role(userId, DEFAULT_ROLE_REPLICATION)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be replication role or a member of the gs_role_replication role "
+                "to use replication slots when separation of privileges is used"))));
+    } else if (!g_instance.attr.attr_security.enablePrivilegesSeparate &&
+        !superuser_arg(userId) && !systemDBA_arg(userId) && !has_rolreplication(userId) &&
+        !is_member_of_role(userId, DEFAULT_ROLE_REPLICATION)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("must be system admin or replication role or a member of the gs_role_replication role "
+                "to use replication slots"))));
+    }
+}
+
 /*
  * This is duplicate code with pg_xlogdump, similar to walsender.c, but
  * we currently don't have the infrastructure (elog!) to share it.
  */
-static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
+static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count, char* xlog_path)
 {
     char *p = NULL;
     XLogRecPtr recptr = InvalidXLogRecPtr;
@@ -138,6 +157,8 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 
         if (t_thrd.logical_cxt.sendFd < 0 || !(((recptr) / XLogSegSize) == t_thrd.logical_cxt.sendSegNo)) {
             char path[MAXPGPATH];
+            errno_t rc = memset_s(path, MAXPGPATH, 0, sizeof(path));
+            securec_check(rc, "", "");
 
             /* Switch to another logfile segment */
             if (t_thrd.logical_cxt.sendFd >= 0) {
@@ -145,11 +166,17 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
             }
 
             t_thrd.logical_cxt.sendSegNo = (recptr) / XLogSegSize;
-            int nRet = 0;
-            nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
-                              (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                              (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
-            securec_check_ss(nRet, "", "");
+            int ret = 0;
+            if (xlog_path == NULL) {
+                ret = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+                                  (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                  (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+            } else {
+                ret = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", xlog_path, tli,
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+            }
+            securec_check_ss(ret, "", "");
 
             t_thrd.logical_cxt.sendFd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
 
@@ -168,9 +195,16 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
             if (lseek(t_thrd.logical_cxt.sendFd, (off_t)startoff, SEEK_SET) < 0) {
                 char path[MAXPGPATH] = "\0";
 
-                int nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
-                                      (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                                      (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+                int nRet = 0;
+                if (xlog_path == NULL) {
+                    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+                } else {
+                    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", xlog_path, tli,
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+                }
                 securec_check_ss(nRet, "", "");
 
                 ereport(ERROR, (errcode_for_file_access(),
@@ -188,12 +222,18 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 
         readbytes = read(t_thrd.logical_cxt.sendFd, p, segbytes);
         if (readbytes <= 0) {
+            int rc = 0;
             char path[MAXPGPATH] = "\0";
-
-            int nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
-                                  (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
-                                  (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
-            securec_check_ss(nRet, "", "");
+            if (xlog_path == NULL) {
+                rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+            } else {
+                rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", xlog_path, tli,
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) / XLogSegmentsPerXLogId),
+                                    (uint32)((t_thrd.logical_cxt.sendSegNo) % XLogSegmentsPerXLogId));
+            }
+            securec_check_ss(rc, "", "");
 
             ereport(ERROR,
                     (errcode_for_file_access(), errmsg("could not read from log segment %s, offset %u, length %lu: %m",
@@ -221,7 +261,7 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
  * loop for now.
  */
 int logical_read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
-                                 char *cur_page, TimeLineID *pageTLI)
+                                 char *cur_page, TimeLineID *pageTLI, char* xlog_path)
 {
     XLogRecPtr flushptr, loc;
     int count;
@@ -259,7 +299,7 @@ int logical_read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePt
     else
         count = (flushptr) - (targetPagePtr);
 
-    XLogRead(cur_page, *pageTLI, targetPagePtr, XLOG_BLCKSZ);
+    XLogRead(cur_page, *pageTLI, targetPagePtr, XLOG_BLCKSZ, xlog_path);
 
     return count;
 }
@@ -315,8 +355,10 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
     int rc = 0;
     char path[MAXPGPATH];
     struct stat st;
+    t_thrd.logical_cxt.IsAreaDecode = false;
 
-    check_permissions();
+    Oid userId = GetUserId();
+    CheckLogicalPremissions(userId);
     ValidateName(NameStr(*name));
     if (RecoveryInProgress() && confirm)
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("couldn't advance in recovery")));
@@ -503,6 +545,306 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
     return (Datum)0;
 }
 
+static XLogRecPtr getStartLsn(FunctionCallInfo fcinfo)
+{
+    XLogRecPtr start_lsn = InvalidXLogRecPtr;
+    if (PG_ARGISNULL(0))
+        start_lsn = InvalidXLogRecPtr;
+    else {
+        const char *str_start_lsn = TextDatumGetCString(PG_GETARG_DATUM(0));
+        ValidateName(str_start_lsn);
+        if (!AssignLsn(&start_lsn, str_start_lsn)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type lsn: \"%s\" "
+                                                                          "of start_lsn",
+                                                                          str_start_lsn)));
+        }
+    }
+    return start_lsn;
+}
+
+static XLogRecPtr getUpToLsn(FunctionCallInfo fcinfo)
+{
+    XLogRecPtr upto_lsn = InvalidXLogRecPtr;
+    if (PG_ARGISNULL(1))
+        upto_lsn = InvalidXLogRecPtr;
+    else {
+        const char *str_upto_lsn = TextDatumGetCString(PG_GETARG_DATUM(1));
+        ValidateName(str_upto_lsn);
+        if (!AssignLsn(&upto_lsn, str_upto_lsn)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type lsn: \"%s\" "
+                                                                          "of upto_lsn",
+                                                                          str_upto_lsn)));
+        }
+    }
+    return upto_lsn;
+}
+
+static int64 getUpToNChanges(FunctionCallInfo fcinfo)
+{
+    if (PG_ARGISNULL(2))
+        return 0;
+    else {
+        return PG_GETARG_INT32(2);
+    }
+}
+
+static void CheckSupportTupleStore(FunctionCallInfo fcinfo)
+{
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("set-valued function called in context that cannot accept a set")));
+    if (!(rsinfo->allowedModes & SFRM_Materialize))
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("materialize mode required, but it is not allowed in this context")));
+}
+
+char* getXlogDirUpdateLsn(FunctionCallInfo fcinfo, XLogRecPtr *start_lsn, XLogRecPtr *upto_lsn) {
+    char* xlog_path = TextDatumGetCString(PG_GETARG_DATUM(4));
+    char* xlog_name =  basename(xlog_path);
+    char* xlog_dir = dirname(xlog_path);
+    uint32 log;
+    uint32 seg;
+    uint32 tli;
+    errno_t ret = sscanf_s(xlog_name, "%08X%08X%08X", &tli, &log, &seg);
+    char *str_lsn = NULL;
+    str_lsn = (char*)palloc(MAXPGPATH);
+    ret = memset_s(str_lsn, MAXPGPATH, '\0', MAXPGPATH);
+    securec_check(ret, "", "");
+    sprintf_s(str_lsn, MAXPGPATH, "%X/%X000000", log, seg);
+    ValidateName(str_lsn);
+    if (!AssignLsn(start_lsn, str_lsn)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid lsn: \"%s\" "
+                                                                      "of start_lsn",
+                                                                      str_lsn)));
+    }
+    ret = memset_s(str_lsn, MAXPGPATH, '\0', MAXPGPATH);
+    securec_check(ret, "", "");
+    sprintf_s(str_lsn, MAXPGPATH, "%X/%XFFFFFF", log, seg);
+    ValidateName(str_lsn);
+    if (!AssignLsn(upto_lsn, str_lsn)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid lsn: \"%s\" "
+                                                                      "of upto_lsn",
+                                                                      str_lsn)));
+    }
+    return xlog_dir;
+}
+
+void CheckAreaDecodeOption(FunctionCallInfo fcinfo)
+{
+    ArrayType *arr = PG_GETARG_ARRAYTYPE_P(5);
+    Size ndim = (Size)(uint)(ARR_NDIM(arr));
+
+    if (ndim > 1) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("array must be one-dimensional")));
+    } else if (array_contains_nulls(arr)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("array must not contain nulls")));
+    } else if (ndim == 1 && ARR_ELEMTYPE(arr) != TEXTOID) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("array must be TEXTOID")));
+    }
+
+}
+
+/*
+ * Decode and ouput changes from start lsn to upto lsn.
+ */
+static Datum pg_logical_get_area_changes_guts(FunctionCallInfo fcinfo)
+{
+    XLogRecPtr start_lsn = InvalidXLogRecPtr;
+    XLogRecPtr upto_lsn = InvalidXLogRecPtr;
+    int64 upto_nchanges = 0;
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    MemoryContext per_query_ctx = NULL;
+    MemoryContext oldcontext = NULL;
+    XLogRecPtr startptr = InvalidXLogRecPtr;
+    XLogRecPtr end_of_wal = InvalidXLogRecPtr;
+    LogicalDecodingContext *ctx = NULL;
+    ResourceOwner old_resowner = t_thrd.utils_cxt.CurrentResourceOwner;
+    ArrayType *arr = NULL;
+    Size ndim = 0;
+    List *options = NIL;
+    DecodingOutputState *p = NULL;
+    char* xlog_dir = NULL;
+    t_thrd.logical_cxt.IsAreaDecode = true;
+
+    Oid userId = GetUserId();
+    CheckLogicalPremissions(userId);
+    if (PG_ARGISNULL(0) && PG_ARGISNULL(4)) {
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("start_lsn and xlog_dir cannot be null at the same time.")));
+    }
+
+    /* arg1 get start lsn    start_lsn */
+    start_lsn = getStartLsn(fcinfo);
+    /* arg2 get end lsn    upto_lsn */
+    upto_lsn = getUpToLsn(fcinfo);
+    /* arg3 how many statements to output    upto_nchanges */
+    upto_nchanges = getUpToNChanges(fcinfo);
+    /* arg4 output format plugin */
+    Name plugin = PG_GETARG_NAME(3);
+    ValidateName(NameStr(*plugin));
+
+    /* check to see if caller supports us returning a tuplestore */
+    CheckSupportTupleStore(fcinfo);
+
+    /* state to write output to */
+    p = (DecodingOutputState *)palloc0(sizeof(DecodingOutputState));
+
+    p->binary_output = false;
+
+    /* Build a tuple descriptor for our result type */
+    if (get_call_result_type(fcinfo, NULL, &p->tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("return type must be a row type")));
+    /*
+     * arg5 which xlog file to decode. If it is NULL, decode the origin xlog.
+     * If xlog_dir is not null, get the xlog dir and update the lsn.
+     */
+    if (PG_ARGISNULL(4)) {
+        xlog_dir = NULL;
+    } else {
+        xlog_dir = getXlogDirUpdateLsn(fcinfo, &start_lsn, &upto_lsn);
+    }
+    /* The memory is controlled. The number of decoded files cannot exceed 10. */
+    XLogRecPtr max_lsn_distance = XLOG_SEG_SIZE * 10;
+    if (upto_lsn < start_lsn) {
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("upto_lsn can not be smaller than start_lsn.")));
+    }
+    if (upto_lsn == InvalidXLogRecPtr || ((upto_lsn - start_lsn) > max_lsn_distance)) {
+        upto_lsn = start_lsn + max_lsn_distance;
+    }
+
+    arr = PG_GETARG_ARRAYTYPE_P(5);
+    ndim = (Size)(uint)(ARR_NDIM(arr));
+
+    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+    oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+    CheckAreaDecodeOption(fcinfo);
+ 
+    if (ndim == 1) {
+        int i = 0;
+        Datum *datum_opts = NULL;
+        int nelems = 0;
+
+        deconstruct_array(arr, TEXTOID, -1, false, 'i', &datum_opts, NULL, &nelems);
+
+        if (nelems % 2 != 0)
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("array must have even number of elements")));
+
+        for (i = 0; i < nelems; i = i + 2) {
+            char *dname = TextDatumGetCString(datum_opts[i]);
+            char *opt = TextDatumGetCString(datum_opts[i + 1]);
+            ValidateName(dname);
+            options = lappend(options, makeDefElem(dname, (Node *)makeString(opt)));
+        }
+    }
+
+    p->tupstore = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = p->tupdesc;
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = p->tupstore;
+
+    /* compute the current end-of-wal */
+    if (!RecoveryInProgress())
+        end_of_wal = GetFlushRecPtr();
+    else
+        end_of_wal = GetXLogReplayRecPtr(NULL);
+
+    CheckLogicalDecodingRequirements(u_sess->proc_cxt.MyDatabaseId);
+
+    PG_TRY();
+    {
+        ctx = CreateDecodingContextForArea(InvalidXLogRecPtr, NameStr(*plugin), options, false, logical_read_local_xlog_page,
+                                    LogicalOutputPrepareWrite, LogicalOutputWrite);
+
+        (void)MemoryContextSwitchTo(oldcontext);
+
+        /*
+         * Check whether the output pluggin writes textual output if that's
+         * what we need.
+         */
+        if (ctx->options.output_type != OUTPUT_PLUGIN_TEXTUAL_OUTPUT)
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("output plugin cannot produce binary output")));
+
+        ctx->output_writer_private = p;
+
+        /* find a valid recptr to start from */
+        startptr = XLogFindNextRecord(ctx->reader, start_lsn, NULL, xlog_dir);
+
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner,
+            "logical decoding", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+
+        /* invalidate non-timetravel entries */
+        InvalidateSystemCaches();
+
+
+        while ((!XLByteEQ(startptr, InvalidXLogRecPtr) && XLByteLT(startptr, end_of_wal)) ||
+               (!XLByteEQ(ctx->reader->EndRecPtr, InvalidXLogRecPtr) && XLByteLT(ctx->reader->EndRecPtr, end_of_wal))) {
+            XLogRecord *record = NULL;
+            char *errm = NULL;
+
+            record = XLogReadRecord(ctx->reader, startptr, &errm, true, xlog_dir);
+            if (errm != NULL) {
+                ereport(WARNING, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                                errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
+                                       (uint32)(ctx->reader->EndRecPtr >> 32), (uint32)ctx->reader->EndRecPtr, errm)));
+                break;
+            }
+
+            startptr = InvalidXLogRecPtr;
+
+            /*
+             * The {begin_txn,change,commit_txn}_wrapper callbacks above will
+             * store the description into our tuplestore.
+             */
+            if (record != NULL)
+                AreaLogicalDecodingProcessRecord(ctx, ctx->reader);
+
+            /* check limits */
+            if (!XLByteEQ(upto_lsn, InvalidXLogRecPtr) && XLByteLE(upto_lsn, ctx->reader->EndRecPtr))
+                break;
+            if (upto_nchanges != 0 && upto_nchanges <= p->returned_rows)
+                break;
+            CHECK_FOR_INTERRUPTS();
+        }
+    }
+    PG_CATCH();
+    {
+        /* clear all timetravel entries */
+        InvalidateSystemCaches();
+
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    tuplestore_donestoring(tupstore);
+    t_thrd.utils_cxt.CurrentResourceOwner = old_resowner;
+
+    if (t_thrd.logical_cxt.sendFd >= 0) {
+        (void)close(t_thrd.logical_cxt.sendFd);
+        t_thrd.logical_cxt.sendFd = -1;
+    }
+
+    /* free context, call shutdown callback */
+    if (ctx->callbacks.shutdown_cb != NULL)
+        shutdown_cb_wrapper(ctx);
+
+    ReorderBufferFree(ctx->reorder);
+    XLogReaderFree(ctx->reader);
+    MemoryContextDelete(ctx->context);
+    InvalidateSystemCaches();
+
+    return (Datum)0;
+
+}
+
 /*
  * SQL function returning the changestream as text, consuming the data.
  */
@@ -539,11 +881,25 @@ Datum pg_logical_slot_peek_binary_changes(PG_FUNCTION_ARGS)
     return ret;
 }
 
+Datum pg_logical_get_area_changes(PG_FUNCTION_ARGS)
+{
+    Datum ret = pg_logical_get_area_changes_guts(fcinfo);
+    return ret;
+}
+
+
 Datum gs_write_term_log(PG_FUNCTION_ARGS)
 {
     if (RecoveryInProgress()) {
         PG_RETURN_BOOL(false);
     }
+
+    /* we are about to start streaming switch over, stop any xlog insert. */
+    if (t_thrd.xlog_cxt.LocalXLogInsertAllowed == 0 && g_instance.streaming_dr_cxt.isInSwitchover == true) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("cannot write term log during streaming disaster recovery")));
+    }
+
     uint32 term_cur = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
         g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
     write_term_log(term_cur);

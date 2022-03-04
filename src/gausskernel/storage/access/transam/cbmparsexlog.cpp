@@ -86,7 +86,7 @@ static void StartExistCBMFile(uint64 lastfileSize);
 static HTAB *CBMPageHashInitialize(MemoryContext memoryContext);
 static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd);
 static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
-                           char *readBuf, TimeLineID *pageTLI);
+                           char *readBuf, TimeLineID *pageTLI, char* xlog_path = NULL);
 
 static void TrackChangeBlock(XLogReaderState *record);
 static void TrackRelPageModification(XLogReaderState *record);
@@ -901,7 +901,7 @@ static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd)
 
 /* XLogreader callback function, to read a WAL page */
 static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
-                           char *readBuf, TimeLineID *pageTLI)
+                           char *readBuf, TimeLineID *pageTLI, char* xlog_path)
 {
     XLogPageReadPrivateCBM *readprivate = (XLogPageReadPrivateCBM *)xlogreader->private_data;
     uint32 targetPageOff;
@@ -1541,6 +1541,10 @@ static void TrackUheapMultiInsert(XLogReaderState *record)
     if (isinit) {
         currLogPtr += sizeof(TransactionId);
         currLogPtr += sizeof(uint16);
+    }
+
+    if ((record->decoded_record->xl_term & XLOG_CONTAIN_CSN) != 0) {
+        currLogPtr += sizeof(CommitSeqNo);
     }
 
     currLogPtr += SizeOfUHeapMultiInsert;

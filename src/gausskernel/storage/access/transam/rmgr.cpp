@@ -29,7 +29,6 @@
 #include "access/gin.h"
 #include "access/gist_private.h"
 #include "access/hash.h"
-#include "access/hash_xlog.h"
 #include "access/heapam.h"
 #include "access/ustore/knl_uredo.h"
 #include "access/multixact.h"
@@ -56,8 +55,8 @@
 #include "access/ustore/knl_uredo.h"
 
 /* must be kept in sync with RmgrData definition in xlog_internal.h */
-#define PG_RMGR(symname, name, redo, desc, startup, cleanup, safe_restartpoint, undo, undo_desc) \
-        {name, redo, desc, startup, cleanup, safe_restartpoint, undo, undo_desc},
+#define PG_RMGR(symname, name, redo, desc, startup, cleanup, safe_restartpoint, undo, undo_desc, type_name) \
+        {name, redo, desc, startup, cleanup, safe_restartpoint, undo, undo_desc, type_name},
 
 const RmgrData RmgrTable[RM_MAX_ID + 1] = {
 #include "access/rmgrlist.h"

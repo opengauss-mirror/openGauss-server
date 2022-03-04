@@ -138,10 +138,10 @@
 #define VFD_CLOSED (-1)
 
 #define FileIsValid(file)                                            \
-    ((file) > 0 && (file) < (int)u_sess->storage_cxt.SizeVfdCache && \
-     u_sess->storage_cxt.VfdCache[file].fileName != NULL)
+    ((file) > 0 && (file) < (int)GetSizeVfdCache() && \
+     GetVfdCache()[file].fileName != NULL)
 
-#define FileIsNotOpen(file) (u_sess->storage_cxt.VfdCache[file].fd == VFD_CLOSED)
+#define FileIsNotOpen(file) (GetVfdCache()[file].fd == VFD_CLOSED)
 
 #define FileUnknownPos ((off_t)-1)
 
@@ -191,16 +191,6 @@ static pthread_mutex_t VFDLockArray[NUM_VFD_PARTITIONS];
 #define VFDMappingPartitionLock(hashcode) \
     (&VFDLockArray[VFDTableHashPartition(hashcode)])
 
-/*
- * pc_munmap
- */
-#define SAFE_MUNMAP(vfdP)                                  \
-    do {                                                   \
-        if ((vfdP)->with_pcmap && (vfdP)->pcmap != NULL) { \
-            UnReferenceAddrFile((vfdP));                   \
-            (vfdP)->pcmap = NULL;                          \
-        }                                                  \
-    } while (0)
 /* --------------------
  *
  * Private Routines
@@ -354,13 +344,11 @@ RelFileNodeForkNum RelFileNodeForkNumFill(RelFileNode* rnode,
         filenode.rnode.node.spcNode = rnode->spcNode;
         filenode.rnode.node.dbNode = rnode->dbNode;
         filenode.rnode.node.bucketNode = rnode->bucketNode;
-        filenode.rnode.node.opt = rnode->opt;
     } else {
         filenode.rnode.node.relNode = InvalidOid;
         filenode.rnode.node.spcNode = InvalidOid;
         filenode.rnode.node.dbNode = InvalidOid;
         filenode.rnode.node.bucketNode = InvalidBktId;
-        filenode.rnode.node.opt = 0;
     }
 
     filenode.rnode.backend = backend;
@@ -581,24 +569,37 @@ void pg_flush_data(int fd, off_t offset, off_t nbytes)
  */
 void InitFileAccess(void)
 {
-    Assert(u_sess->storage_cxt.SizeVfdCache == 0); /* call me only once */
-
-    /* initialize cache header entry */
-    u_sess->storage_cxt.VfdCache =
-        (Vfd*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(vfd));
-
-    if (u_sess->storage_cxt.VfdCache == NULL)
-        ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
-
-    errno_t ret = memset_s((char*)&(u_sess->storage_cxt.VfdCache[0]), sizeof(Vfd), 0, sizeof(Vfd));
-    securec_check(ret, "\0", "\0");
-    u_sess->storage_cxt.VfdCache->fd = VFD_CLOSED;
-
-    u_sess->storage_cxt.SizeVfdCache = 1;
-
-    /* register proc-exit hook to ensure temp files are dropped at exit */
-    if (!IS_THREAD_POOL_SESSION)
+    if (EnableLocalSysCache()) {
+        if(t_thrd.lsc_cxt.lsc->VfdCache != NULL) {
+            return;
+        }
+        /* initialize cache header entry */
+        t_thrd.lsc_cxt.lsc->VfdCache =
+            (Vfd*)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(), sizeof(vfd));
+        if (t_thrd.lsc_cxt.lsc->VfdCache == NULL)
+            ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+        errno_t ret = memset_s((char*)&(t_thrd.lsc_cxt.lsc->VfdCache[0]), sizeof(Vfd), 0, sizeof(Vfd));
+        securec_check(ret, "\0", "\0");
+        t_thrd.lsc_cxt.lsc->VfdCache->fd = VFD_CLOSED;
+        t_thrd.lsc_cxt.lsc->SizeVfdCache = 1;
+        /* register proc-exit hook to ensure temp files are dropped at exit */
+        
         on_proc_exit(AtProcExit_Files, 0);
+    } else {
+        Assert(u_sess->storage_cxt.SizeVfdCache == 0); /* call me only once */
+        /* initialize cache header entry */
+        u_sess->storage_cxt.VfdCache =
+            (Vfd*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(vfd));
+        if (u_sess->storage_cxt.VfdCache == NULL)
+            ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+        errno_t ret = memset_s((char*)&(u_sess->storage_cxt.VfdCache[0]), sizeof(Vfd), 0, sizeof(Vfd));
+        securec_check(ret, "\0", "\0");
+        u_sess->storage_cxt.VfdCache->fd = VFD_CLOSED;
+        u_sess->storage_cxt.SizeVfdCache = 1;
+        /* register proc-exit hook to ensure temp files are dropped at exit */
+        if (!IS_THREAD_POOL_SESSION)
+            on_proc_exit(AtProcExit_Files, 0);
+    }
 }
 
 /*
@@ -863,8 +864,10 @@ tryAgain:
 
 static void _dump_lru(void)
 {
-    int mru = u_sess->storage_cxt.VfdCache[0].lruLessRecently;
-    Vfd* vfdP = &u_sess->storage_cxt.VfdCache[mru];
+    vfd *vfdcache = GetVfdCache();
+    int mru = vfdcache[0].lruLessRecently;
+    Vfd* vfdP = &vfdcache[mru];
+
     char buf[2048];
     errno_t rc = EOK;
 
@@ -873,7 +876,7 @@ static void _dump_lru(void)
 
     while (mru != 0) {
         mru = vfdP->lruLessRecently;
-        vfdP = &u_sess->storage_cxt.VfdCache[mru];
+        vfdP = &vfdcache[mru];
         rc = snprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf), sizeof(buf) - strlen(buf) - 1, "%d ", mru);
         securec_check_ss(rc, "", "");
     }
@@ -888,14 +891,15 @@ static void Delete(File file)
     Vfd* vfdP = NULL;
 
     Assert(file != 0);
+    vfd *vfdcache = GetVfdCache();
 
-    DO_DB(ereport(LOG, (errmsg("Delete %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+    DO_DB(ereport(LOG, (errmsg("Delete %d (%s)", file, vfdcache[file].fileName))));
     DO_DB(_dump_lru());
 
-    vfdP = &u_sess->storage_cxt.VfdCache[file];
+    vfdP = &vfdcache[file];
 
-    u_sess->storage_cxt.VfdCache[vfdP->lruLessRecently].lruMoreRecently = vfdP->lruMoreRecently;
-    u_sess->storage_cxt.VfdCache[vfdP->lruMoreRecently].lruLessRecently = vfdP->lruLessRecently;
+    vfdcache[vfdP->lruLessRecently].lruMoreRecently = vfdP->lruMoreRecently;
+    vfdcache[vfdP->lruMoreRecently].lruLessRecently = vfdP->lruLessRecently;
 
     DO_DB(_dump_lru());
 }
@@ -905,19 +909,19 @@ static void LruDelete(File file)
     Vfd* vfdP = NULL;
 
     Assert(file != 0);
+    vfd *vfdcache = GetVfdCache();
 
-    DO_DB(ereport(LOG, (errmsg("LruDelete %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+    DO_DB(ereport(LOG, (errmsg("LruDelete %d (%s)", file, vfdcache[file].fileName))));
 
-    vfdP = &u_sess->storage_cxt.VfdCache[file];
+    vfdP = &vfdcache[file];
 
-    SAFE_MUNMAP(vfdP);
     /* delete the vfd record from the LRU ring */
     Delete(file);
 
     /* close the file */
     DataFileIdCloseFile(vfdP);
 
-    --u_sess->storage_cxt.nfile;
+    AddVfdNfile(-1);
     vfdP->fd = VFD_CLOSED;
 }
 
@@ -926,16 +930,17 @@ static void Insert(File file)
     Vfd* vfdP = NULL;
 
     Assert(file != 0);
+    vfd *vfdcache = GetVfdCache();
 
-    DO_DB(ereport(LOG, (errmsg("Insert %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+    DO_DB(ereport(LOG, (errmsg("Insert %d (%s)", file, vfdcache[file].fileName))));
     DO_DB(_dump_lru());
 
-    vfdP = &u_sess->storage_cxt.VfdCache[file];
+    vfdP = &vfdcache[file];
 
     vfdP->lruMoreRecently = 0;
-    vfdP->lruLessRecently = u_sess->storage_cxt.VfdCache[0].lruLessRecently;
-    u_sess->storage_cxt.VfdCache[0].lruLessRecently = file;
-    u_sess->storage_cxt.VfdCache[vfdP->lruLessRecently].lruMoreRecently = file;
+    vfdP->lruLessRecently = vfdcache[0].lruLessRecently;
+    vfdcache[0].lruLessRecently = file;
+    vfdcache[vfdP->lruLessRecently].lruMoreRecently = file;
 
     DO_DB(_dump_lru());
 }
@@ -947,10 +952,11 @@ static int LruInsert(File file)
     File rfile;
 
     Assert(file != 0);
+    vfd *vfdcache = GetVfdCache();
 
-    DO_DB(ereport(LOG, (errmsg("LruInsert %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+    DO_DB(ereport(LOG, (errmsg("LruInsert %d (%s)", file, vfdcache[file].fileName))));
 
-    vfdP = &u_sess->storage_cxt.VfdCache[file];
+    vfdP = &vfdcache[file];
 
     if (FileIsNotOpen(file)) {
         rfile = DataFileIdOpenFile(vfdP->fileName, vfdP->fileNode, vfdP->fileFlags, vfdP->fileMode, file);
@@ -975,15 +981,16 @@ static int LruInsert(File file)
  */
 static bool ReleaseLruFile(void)
 {
-    DO_DB(ereport(LOG, (errmsg("ReleaseLruFile. Opened %d", u_sess->storage_cxt.nfile))));
+    DO_DB(ereport(LOG, (errmsg("ReleaseLruFile. Opened %d", GetVfdNfile()))));
 
-    if (u_sess->storage_cxt.nfile > 0) {
+    if (GetVfdNfile() > 0) {
         /*
          * There are opened files and so there should be at least one used vfd
          * in the ring.
          */
-        Assert(u_sess->storage_cxt.VfdCache[0].lruMoreRecently != 0);
-        LruDelete(u_sess->storage_cxt.VfdCache[0].lruMoreRecently);
+        vfd *vfdcache = GetVfdCache();
+        Assert(vfdcache[0].lruMoreRecently != 0);
+        LruDelete(vfdcache[0].lruMoreRecently);
         return true; /* freed a file */
     }
     return false; /* no files available to free */
@@ -995,7 +1002,7 @@ static bool ReleaseLruFile(void)
  */
 static void ReleaseLruFiles(void)
 {
-    while (u_sess->storage_cxt.nfile + u_sess->storage_cxt.numAllocatedDescs >= t_thrd.storage_cxt.max_safe_fds) {
+    while (GetVfdNfile() + u_sess->storage_cxt.numAllocatedDescs >= t_thrd.storage_cxt.max_safe_fds) {
         if (!ReleaseLruFile())
             break;
     }
@@ -1019,23 +1026,23 @@ static void ReallocVfdCache(Size newCacheSize)
         AutoMutexLock recursive_mutext_lock(recursive_mutex);
         recursive_mutext_lock.lock();
         {
-            newVfdCache = (Vfd*)repalloc(u_sess->storage_cxt.VfdCache, sizeof(Vfd) * newCacheSize);
+            newVfdCache = (Vfd*)repalloc(GetVfdCache(), sizeof(Vfd) * newCacheSize);
             if (newVfdCache == NULL) {
                 recursive_mutext_lock.unLock();
                 ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
             }
-            u_sess->storage_cxt.VfdCache = newVfdCache;
+            SetVfdCache(newVfdCache);
         }
         recursive_mutext_lock.unLock();
         return;
     }
 #endif
 
-    newVfdCache = (Vfd*)repalloc(u_sess->storage_cxt.VfdCache, sizeof(Vfd) * newCacheSize);
+    newVfdCache = (Vfd*)repalloc(GetVfdCache(), sizeof(Vfd) * newCacheSize);
     if (newVfdCache == NULL) {
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
     }
-    u_sess->storage_cxt.VfdCache = newVfdCache;
+    SetVfdCache(newVfdCache);
 }
 
 static File AllocateVfd(void)
@@ -1043,17 +1050,19 @@ static File AllocateVfd(void)
     Index i;
     File file;
 
-    DO_DB(ereport(LOG, (errmsg("AllocateVfd. Size %lu", (unsigned long)u_sess->storage_cxt.SizeVfdCache))));
+    DO_DB(ereport(LOG, (errmsg("AllocateVfd. Size %lu", (unsigned long)GetSizeVfdCache()))));
 
-    Assert(u_sess->storage_cxt.SizeVfdCache > 0); /* InitFileAccess not called? */
+    Assert(GetSizeVfdCache() > 0); /* InitFileAccess not called? */
 
-    if (u_sess->storage_cxt.VfdCache[0].nextFree == 0) {
+    vfd *vfdcache = GetVfdCache();
+    if (vfdcache[0].nextFree == 0) {
+        Size SizeVfdCache = GetSizeVfdCache();
         /*
          * The free list is empty so it is time to increase the size of the
          * array.  We choose to double it each time this happens. However,
          * there's not much point in starting *real* small.
          */
-        Size newCacheSize = u_sess->storage_cxt.SizeVfdCache * 2;
+        Size newCacheSize = SizeVfdCache * 2;
         Size maxCacheSize = MaxAllocSize / sizeof(Vfd);
 
         if (newCacheSize < 32) {
@@ -1063,31 +1072,33 @@ static File AllocateVfd(void)
         if (newCacheSize >= maxCacheSize) {
             /* sizeof(Vfd) = 96, if cache great than max cache size, change extend strategy to fix a number size 96M */
             uint32 extendCacheCount = 1024 * 1024;
-            newCacheSize = u_sess->storage_cxt.SizeVfdCache + extendCacheCount;
+            newCacheSize = SizeVfdCache + extendCacheCount;
         }
 
         ReallocVfdCache(newCacheSize);
+        vfdcache = GetVfdCache();
 
         /* Initialize the new entries and link them into the free list. */
-        for (i = (Index)u_sess->storage_cxt.SizeVfdCache; i < newCacheSize; i++) {
-            errno_t ret = memset_s((char*)&(u_sess->storage_cxt.VfdCache[i]), sizeof(Vfd), 0, sizeof(Vfd));
+        for (i = (Index)SizeVfdCache; i < newCacheSize; i++) {
+            errno_t ret = memset_s((char*)&(vfdcache[i]), sizeof(Vfd), 0, sizeof(Vfd));
             securec_check(ret, "\0", "\0");
-            u_sess->storage_cxt.VfdCache[i].nextFree = (File)(i + 1);
-            u_sess->storage_cxt.VfdCache[i].fd = VFD_CLOSED;
+            vfdcache[i].nextFree = (File)(i + 1);
+            vfdcache[i].fd = VFD_CLOSED;
         }
-        u_sess->storage_cxt.VfdCache[newCacheSize - 1].nextFree = 0;
-        u_sess->storage_cxt.VfdCache[0].nextFree = (File)u_sess->storage_cxt.SizeVfdCache;
-        u_sess->storage_cxt.SizeVfdCache = newCacheSize; /* Record the new size */
+        vfdcache[newCacheSize - 1].nextFree = 0;
+        vfdcache[0].nextFree = (File)SizeVfdCache;
+        SetSizeVfdCache(newCacheSize); /* Record the new size */
     }
-    file = u_sess->storage_cxt.VfdCache[0].nextFree;
-    u_sess->storage_cxt.VfdCache[0].nextFree = u_sess->storage_cxt.VfdCache[file].nextFree;
+    file = vfdcache[0].nextFree;
+    vfdcache[0].nextFree = vfdcache[file].nextFree;
 
     return file;
 }
 
 static void FreeVfd(File file)
 {
-    Vfd* vfdP = &u_sess->storage_cxt.VfdCache[file];
+    vfd *vfdcache = GetVfdCache();
+    Vfd* vfdP = &vfdcache[file];
 
     DO_DB(ereport(LOG, (errmsg("FreeVfd: %d (%s)", file, vfdP->fileName ? vfdP->fileName : ""))));
 
@@ -1104,8 +1115,8 @@ static void FreeVfd(File file)
     }
     vfdP->fdstate = 0x0;
 
-    vfdP->nextFree = u_sess->storage_cxt.VfdCache[0].nextFree;
-    u_sess->storage_cxt.VfdCache[0].nextFree = file;
+    vfdP->nextFree = vfdcache[0].nextFree;
+    vfdcache[0].nextFree = file;
     RESUME_INTERRUPTS();
 }
 
@@ -1113,8 +1124,8 @@ static void FreeVfd(File file)
 static int FileAccess(File file)
 {
     int returnValue;
-
-    DO_DB(ereport(LOG, (errmsg("FileAccess %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+    vfd *vfdcache = GetVfdCache();
+    DO_DB(ereport(LOG, (errmsg("FileAccess %d (%s)", file, vfdcache[file].fileName))));
 
     /*
      * Is the file open?  If not, open it and put it at the head of the LRU
@@ -1125,7 +1136,7 @@ static int FileAccess(File file)
         if (returnValue != 0) {
             return returnValue;
         }
-    } else if (u_sess->storage_cxt.VfdCache[0].lruLessRecently != file) {
+    } else if (vfdcache[0].lruLessRecently != file) {
         /*
          * We now know that the file is open and that it is not the last one
          * accessed, so we need to move it to the head of the Lru ring.
@@ -1161,11 +1172,12 @@ ReportTemporaryFileUsage(const char *path, off_t size)
 static void
 RegisterTemporaryFile(File file)
 {
+    vfd *vfdcache = GetVfdCache();
     ResourceOwnerRememberFile(t_thrd.utils_cxt.CurrentResourceOwner, file);
-    u_sess->storage_cxt.VfdCache[file].resowner = t_thrd.utils_cxt.CurrentResourceOwner;
+    vfdcache[file].resowner = t_thrd.utils_cxt.CurrentResourceOwner;
 
     /* Backup mechanism for closing at end of xact. */
-    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_CLOSE_AT_EOXACT;
+    vfdcache[file].fdstate |= FD_CLOSE_AT_EOXACT;
     u_sess->storage_cxt.have_xact_temporary_files = true;
 }
 
@@ -1241,7 +1253,7 @@ static void DataFileIdCloseFile(Vfd* vfdP)
         ereport(PANIC, (errmsg("file cache corrupted, file %s not opened with handle: %d", vfdP->fileName, vfdP->fd)));
     }
 
-    Assert(entry->fd >= 0 && entry->fd == vfdP->fd);
+    Assert(entry->fd >= 0 && (entry->fd == vfdP->fd || (entry->repaired_fd >= 0 && entry->repaired_fd == vfdP->fd)));
 
     // decrease reference count
     entry->refcount--;
@@ -1249,15 +1261,22 @@ static void DataFileIdCloseFile(Vfd* vfdP)
 
     // need to close and remove from cache
     if (entry->refcount == 0) {
+        int fd = entry->fd;
+        int repaired_fd = entry->repaired_fd;
         entry = (DataFileIdCacheEntry*)hash_search_with_hash_value(
                     t_thrd.storage_cxt.DataFileIdCache, (void*)&vfdP->fileNode, newHash, HASH_REMOVE, NULL);
         Assert(entry);
         vfdLock.unLock();
 
-        if (close(vfdP->fd) < 0) {
+        if (close(fd) < 0) {
             ereport(LogLevelOfCloseFileFailed(vfdP),
                     (errcode_for_file_access(),
-                     errmsg("[Global] File(%s) fd(%d) have been closed, %m", vfdP->fileName, vfdP->fd)));
+                     errmsg("[Global] File(%s) fd(%d) have been closed, %m", vfdP->fileName, fd)));
+        }
+        if (repaired_fd >= 0 && close(repaired_fd) < 0) {
+            ereport(LogLevelOfCloseFileFailed(vfdP),
+                    (errcode_for_file_access(),
+                     errmsg("[Global] File(%s) reapired_fd(%d) have been closed, %m", vfdP->fileName, repaired_fd)));
         }
         return;
     }
@@ -1297,7 +1316,7 @@ static File PathNameOpenFile_internal(
 
     // Allocate a new VFD file if FILE_INVALID passed, or reopen it on the 'file'
     if (file == FILE_INVALID) {
-        fnamecopy = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), fileName);
+        fnamecopy = MemoryContextStrdup(LocalSmgrStorageMemoryCxt(), fileName);
         if (fnamecopy == NULL)
             ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
 
@@ -1305,7 +1324,7 @@ static File PathNameOpenFile_internal(
         newVfd = true;
     }
 
-    vfdP = &u_sess->storage_cxt.VfdCache[file];
+    vfdP = &GetVfdCache()[file];
 
     /* Close excess kernel FDs. */
     ReleaseLruFiles();
@@ -1344,7 +1363,7 @@ static File PathNameOpenFile_internal(
         }
         return -1;
     }
-    ++u_sess->storage_cxt.nfile;
+    AddVfdNfile(1);
     DO_DB(ereport(LOG, (errmsg("PathNameOpenFile: success %d", vfdP->fd))));
 
     Insert(file);
@@ -1382,6 +1401,7 @@ static File PathNameOpenFile_internal(
         } else {
             Assert(vfdP->fd >= 0);
             entry->fd = vfdP->fd;
+            entry->repaired_fd = -1;
             entry->refcount = 1;
             vfdLock.unLock();
         }
@@ -1497,8 +1517,9 @@ File OpenTemporaryFile(bool interXact)
                    u_sess->proc_cxt.MyDatabaseTableSpace ? u_sess->proc_cxt.MyDatabaseTableSpace : DEFAULTTABLESPACE_OID,
                    true);
 
+    vfd *vfdcache = GetVfdCache();
     /* Mark it for deletion at close and temporary file size limit */
-    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_DELETE_AT_CLOSE | FD_TEMP_FILE_LIMIT;
+    vfdcache[file].fdstate |= FD_DELETE_AT_CLOSE | FD_TEMP_FILE_LIMIT;
 
     /* Register it with the current resource owner */
     if (!interXact) {
@@ -1560,10 +1581,11 @@ File OpenCacheFile(const char* pathname, bool unlink_owner)
             ERROR, (errcode_for_file_access(), errmsg("could not create temporary cache file \"%s\": %m", tmppath)));
     }
 
+    vfd *vfdcache = GetVfdCache();
     /* mark the special flag for cache file */
-    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_ERRTBL_LOG;
+    vfdcache[file].fdstate |= FD_ERRTBL_LOG;
     if (unlink_owner) {
-        u_sess->storage_cxt.VfdCache[file].fdstate |= FD_ERRTBL_LOG_OWNER;
+        vfdcache[file].fdstate |= FD_ERRTBL_LOG_OWNER;
     }
 
     /* ensure cleanup happens at eoxact */
@@ -1680,15 +1702,13 @@ static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
  */
 void FileCloseWithThief(File file)
 {
-    Vfd* vfdP = &u_sess->storage_cxt.VfdCache[file];
+    Vfd* vfdP = &GetVfdCache()[file];
     if (!FileIsNotOpen(file)) {
-        SAFE_MUNMAP(vfdP);
-
         /* remove the file from the lru ring */
         Delete(file);
         /* the thief has close the real fd */
         Assert(!vfdP->infdCache);
-        --u_sess->storage_cxt.nfile;
+        AddVfdNfile(-1);
         /* clean up fd flag */
         vfdP->fd = VFD_CLOSED;
     }
@@ -1731,7 +1751,7 @@ File PathNameCreateTemporaryFile(char *path, bool error_on_failure)
     }
 
     /* Mark it for temp_file_limit accounting. */
-    u_sess->storage_cxt.VfdCache[file].fdstate |= FD_TEMP_FILE_LIMIT;
+    GetVfdCache()[file].fdstate |= FD_TEMP_FILE_LIMIT;
 
     /* Register it for automatic close. */
     RegisterTemporaryFile(file);
@@ -1816,14 +1836,13 @@ void FileClose(File file)
     Vfd* vfdP = NULL;
 
     Assert(FileIsValid(file));
+    vfd *vfdcache = GetVfdCache();
 
-    DO_DB(ereport(LOG, (errmsg("FileClose: %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+    DO_DB(ereport(LOG, (errmsg("FileClose: %d (%s)", file, vfdcache[file].fileName))));
 
-    vfdP = &u_sess->storage_cxt.VfdCache[file];
+    vfdP = &vfdcache[file];
 
     if (!FileIsNotOpen(file)) {
-        SAFE_MUNMAP(vfdP);
-
         /* remove the file from the lru ring */
         Delete(file);
 
@@ -1837,7 +1856,7 @@ void FileClose(File file)
         /* close the file */
         DataFileIdCloseFile(vfdP);
 
-        --u_sess->storage_cxt.nfile;
+        AddVfdNfile(-1);
         vfdP->fd = VFD_CLOSED;
         RESUME_INTERRUPTS();
     }
@@ -1910,11 +1929,12 @@ int FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info)
     int returnCode;
 
     Assert(FileIsValid(file));
+    vfd *vfdcache = GetVfdCache();
 
     DO_DB(ereport(LOG,
                   (errmsg("FilePrefetch: %d (%s) " INT64_FORMAT " %d",
                           file,
-                          u_sess->storage_cxt.VfdCache[file].fileName,
+                          vfdcache[file].fileName,
                           (int64)offset,
                           amount))));
 
@@ -1923,7 +1943,7 @@ int FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info)
         return returnCode;
 
     pgstat_report_waitevent(wait_event_info);
-    returnCode = posix_fadvise(u_sess->storage_cxt.VfdCache[file].fd, offset, amount, POSIX_FADV_WILLNEED);
+    returnCode = posix_fadvise(vfdcache[file].fd, offset, amount, POSIX_FADV_WILLNEED);
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     return returnCode;
@@ -1938,11 +1958,11 @@ void FileWriteback(File file, off_t offset, off_t nbytes)
     int returnCode;
 
     Assert(FileIsValid(file));
-
+    vfd *vfdcache = GetVfdCache();
     DO_DB(ereport(LOG,
                   (errmsg("FileWriteback: %d (%s) " INT64_FORMAT " " INT64_FORMAT,
                           file,
-                          u_sess->storage_cxt.VfdCache[file].fileName,
+                          vfdcache[file].fileName,
                           (int64)offset,
                           (int64)nbytes))));
 
@@ -1957,7 +1977,7 @@ void FileWriteback(File file, off_t offset, off_t nbytes)
     if (returnCode < 0)
         return;
 
-    pg_flush_data(u_sess->storage_cxt.VfdCache[file].fd, offset, nbytes);
+    pg_flush_data(vfdcache[file].fd, offset, nbytes);
 }
 
 // FilePRead
@@ -1968,12 +1988,12 @@ int FilePRead(File file, char* buffer, int amount, off_t offset, uint32 wait_eve
     int returnCode;
 
     Assert(FileIsValid(file));
-
+    vfd *vfdcache = GetVfdCache();
     DO_DB(ereport(LOG,
                   (errmsg("FilePRead: %d (%s) " INT64_FORMAT " %d",
                           file,
-                          u_sess->storage_cxt.VfdCache[file].fileName,
-                          (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
+                          vfdcache[file].fileName,
+                          (int64)vfdcache[file].seekPos,
                           amount))));
 
     returnCode = FileAccess(file);
@@ -1990,13 +2010,13 @@ retry:
     pgstat_report_waitevent(wait_event_info);
     PGSTAT_INIT_TIME_RECORD();
     PGSTAT_START_TIME_RECORD();
-    returnCode = pread(u_sess->storage_cxt.VfdCache[file].fd, buffer, (size_t)amount, offset);
+    returnCode = pread(vfdcache[file].fd, buffer, (size_t)amount, offset);
     PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
     pgstat_report_waitevent(WAIT_EVENT_END);
     PROFILING_MDIO_END_READ((uint32)amount, returnCode);
 
     if (returnCode >= 0)
-        u_sess->storage_cxt.VfdCache[file].seekPos += returnCode;
+        vfdcache[file].seekPos += returnCode;
     else {
         /*
          * Windows may run out of kernel buffers and return "Insufficient
@@ -2023,7 +2043,7 @@ retry:
             goto retry;
 
         /* Trouble, so assume we don't know the file position anymore */
-        u_sess->storage_cxt.VfdCache[file].seekPos = FileUnknownPos;
+        vfdcache[file].seekPos = FileUnknownPos;
     }
 
     return returnCode;
@@ -2038,22 +2058,23 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastE
      * we did not consider dio here because fallocate has no relation with dio.
      * if buffer == NULL, means can use fallocate, caller will check it
      */
+    vfd *vfdcache = GetVfdCache();
     if (buffer == NULL) {
         if (fastExtendSize == 0) {
             /* fast allocate large disk space for this heap file each 8MB */
             fastExtendSize = (int)(u_sess->attr.attr_storage.fast_extend_file_size * 1024LL);
         }
-
+    
         /* fast allocate large disk space for this file each 8MB */
         if ((offset % fastExtendSize) == 0) {
-            returnCode = fallocate(u_sess->storage_cxt.VfdCache[file].fd, FALLOC_FL_KEEP_SIZE, offset, fastExtendSize);
+            returnCode = fallocate(vfdcache[file].fd, FALLOC_FL_KEEP_SIZE, offset, fastExtendSize);
             if (returnCode != 0) {
                 ereport(ERROR,
                         (errcode_for_file_access(),
                          errmsg("fallocate(fd=%d, amount=%d, offset=%ld),write count(%d), errno(%d), "
                                 "maybe you use adio without XFS filesystem, if you really want do this,"
                                 "please turn off GUC parameter enable_fast_allocate",
-                                u_sess->storage_cxt.VfdCache[file].fd,
+                                vfdcache[file].fd,
                                 fastExtendSize,
                                 (int64)offset,
                                 returnCode,
@@ -2062,14 +2083,14 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastE
         }
 
         /* write all zeros into a new page */
-        returnCode = fallocate(u_sess->storage_cxt.VfdCache[file].fd, 0, offset, amount);
+        returnCode = fallocate(vfdcache[file].fd, 0, offset, amount);
         if (returnCode != 0) {
             ereport(ERROR,
                     (errcode_for_file_access(),
                      errmsg("fallocate(fd=%d, amount=%d, offset=%ld),write count(%d), errno(%d), "
                             "maybe you use adio without XFS filesystem, if you really want do this,"
                             "please turn off GUC parameter enable_fast_allocate",
-                            u_sess->storage_cxt.VfdCache[file].fd,
+                            vfdcache[file].fd,
                             amount,
                             (int64)offset,
                             returnCode,
@@ -2082,7 +2103,7 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastE
         PROFILING_MDIO_START();
         PGSTAT_INIT_TIME_RECORD();
         PGSTAT_START_TIME_RECORD();
-        returnCode = pwrite(u_sess->storage_cxt.VfdCache[file].fd, buffer, (size_t)amount, offset);
+        returnCode = pwrite(vfdcache[file].fd, buffer, (size_t)amount, offset);
         PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
         PROFILING_MDIO_END_WRITE((uint32)amount, returnCode);
     }
@@ -2097,12 +2118,12 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
     int returnCode;
 
     Assert(FileIsValid(file));
-
+    vfd *vfdcache = GetVfdCache();
     DO_DB(ereport(LOG,
                   (errmsg("FilePWrite: %d (%s) " INT64_FORMAT " %d",
                           file,
-                          u_sess->storage_cxt.VfdCache[file].fileName,
-                          (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
+                          vfdcache[file].fileName,
+                          (int64)vfdcache[file].seekPos,
                           amount))));
 
     returnCode = FileAccess(file);
@@ -2121,12 +2142,12 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
      * message if we do that.  All current callers would just throw error
      * immediately anyway, so this is safe at present.
      */
-    if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT) {
-        off_t newPos = u_sess->storage_cxt.VfdCache[file].seekPos + amount;
+    if (vfdcache[file].fdstate & FD_TEMP_FILE_LIMIT) {
+        off_t newPos = vfdcache[file].seekPos + amount;
 
-        if (newPos > u_sess->storage_cxt.VfdCache[file].fileSize) {
+        if (newPos > vfdcache[file].fileSize) {
             uint64 newTotal = u_sess->storage_cxt.temporary_files_size;
-            uint64 incSize = (uint64)(newPos - u_sess->storage_cxt.VfdCache[file].fileSize);
+            uint64 incSize = (uint64)(newPos - vfdcache[file].fileSize);
             WLMGeneralParam* g_wlm_params = &u_sess->wlm_cxt->wlm_params;
             unsigned char state = g_wlm_params->iostate;
             g_wlm_params->iostate = IOSTATE_WRITE;
@@ -2134,7 +2155,7 @@ int FilePWrite(File file, const char* buffer, int amount, off_t offset, uint32 w
             g_wlm_params->iostate = state;
 
             if (u_sess->attr.attr_sql.temp_file_limit >= 0) {
-                newTotal += newPos - u_sess->storage_cxt.VfdCache[file].fileSize;
+                newTotal += newPos - vfdcache[file].fileSize;
                 if (newTotal > (uint64)(uint32)u_sess->attr.attr_sql.temp_file_limit * (uint64)1024)
                     ereport(ERROR,
                             (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
@@ -2156,15 +2177,15 @@ retry:
         errno = ENOSPC;
 
     if (returnCode >= 0) {
-        u_sess->storage_cxt.VfdCache[file].seekPos += returnCode;
+        vfdcache[file].seekPos += returnCode;
 
         /* maintain fileSize and temporary_files_size if it's a temp file */
-        if (u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT) {
-            off_t newPos = u_sess->storage_cxt.VfdCache[file].seekPos;
+        if (vfdcache[file].fdstate & FD_TEMP_FILE_LIMIT) {
+            off_t newPos = vfdcache[file].seekPos;
 
-            if (newPos > u_sess->storage_cxt.VfdCache[file].fileSize) {
-                u_sess->storage_cxt.temporary_files_size += newPos - u_sess->storage_cxt.VfdCache[file].fileSize;
-                u_sess->storage_cxt.VfdCache[file].fileSize = newPos;
+            if (newPos > vfdcache[file].fileSize) {
+                u_sess->storage_cxt.temporary_files_size += newPos - vfdcache[file].fileSize;
+                vfdcache[file].fileSize = newPos;
             }
         }
     } else {
@@ -2189,12 +2210,13 @@ retry:
             goto retry;
 
         /* Trouble, so assume we don't know the file position anymore */
-        u_sess->storage_cxt.VfdCache[file].seekPos = FileUnknownPos;
+        vfdcache[file].seekPos = FileUnknownPos;
     }
 
     return returnCode;
 }
 
+#ifndef ENABLE_LITE_MODE
 template <typename dlistType>
 static int FileAsyncSubmitIO(io_context_t aio_context, dlistType dList, int dListCount)
 {
@@ -2250,7 +2272,7 @@ static int FileAsyncSubmitIO(io_context_t aio_context, dlistType dList, int dLis
 int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn)
 {
     int returnCode = 0;
-
+    vfd *vfdcache = GetVfdCache();
     for (int i = 0; i < dn; i++) {
         File file = dList[i]->aiocb.aio_fildes;
 
@@ -2258,8 +2280,8 @@ int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn)
         DO_DB(ereport(LOG,
                       (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
                               file,
-                              u_sess->storage_cxt.VfdCache[file].fileName,
-                              (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
+                              vfdcache[file].fileName,
+                              (int64)vfdcache[file].seekPos))));
 
         // jeh FileAccess may block opening file
         returnCode = FileAccess(file);
@@ -2270,7 +2292,7 @@ int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn)
         }
 
         /* replace the virtual fd with the real one */
-        dList[i]->aiocb.aio_fildes = u_sess->storage_cxt.VfdCache[file].fd;
+        dList[i]->aiocb.aio_fildes = vfdcache[file].fd;
     }
 
     /*
@@ -2305,7 +2327,7 @@ int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn)
 int FileAsyncWrite(AioDispatchDesc_t** dList, int32 dn)
 {
     int returnCode = 0;
-
+    vfd *vfdcache = GetVfdCache();
     for (int i = 0; i < dn; i++) {
         File file = dList[i]->aiocb.aio_fildes;
 
@@ -2313,8 +2335,8 @@ int FileAsyncWrite(AioDispatchDesc_t** dList, int32 dn)
         DO_DB(ereport(LOG,
                       (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
                               file,
-                              u_sess->storage_cxt.VfdCache[file].fileName,
-                              (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
+                              vfdcache[file].fileName,
+                              (int64)vfdcache[file].seekPos))));
 
         if ((returnCode = FileAccess(file)) < 0) {
             // aio debug error
@@ -2323,7 +2345,7 @@ int FileAsyncWrite(AioDispatchDesc_t** dList, int32 dn)
         }
 
         /* replace the virtual fd with the real one */
-        dList[i]->aiocb.aio_fildes = u_sess->storage_cxt.VfdCache[file].fd;
+        dList[i]->aiocb.aio_fildes = vfdcache[file].fd;
     }
 
     io_context_t aio_context = CompltrContext(dList[0]->blockDesc.reqType, 0);
@@ -2355,7 +2377,7 @@ void FileAsyncCUClose(File* vfdList, int32 vfdnum)
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                      errmsg("FileAsyncCUClose : invalid vfd(%d), SizeVfdCache(%lu)",
                             file,
-                            u_sess->storage_cxt.SizeVfdCache)));
+                            GetSizeVfdCache())));
         }
     }
     return;
@@ -2372,15 +2394,15 @@ int FileAsyncCURead(AioDispatchCUDesc_t** dList, int32 dn)
 {
     int returnCode = 0;
     File file;
-
+    vfd *vfdcache = GetVfdCache();
     for (int i = 0; i < dn; i++) {
         file = dList[i]->aiocb.aio_fildes;
         Assert(FileIsValid(file));
         DO_DB(ereport(LOG,
                       (errmsg("FileAsyncRead: fd(%d), filename(%s), seekpos(%ld)",
                               file,
-                              u_sess->storage_cxt.VfdCache[file].fileName,
-                              (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
+                              vfdcache[file].fileName,
+                              (int64)vfdcache[file].seekPos))));
 
         returnCode = FileAccess(file);
         if (returnCode < 0) {
@@ -2388,7 +2410,7 @@ int FileAsyncCURead(AioDispatchCUDesc_t** dList, int32 dn)
             return returnCode;
         }
         /* replace the virtual fd with the real one */
-        dList[i]->aiocb.aio_fildes = u_sess->storage_cxt.VfdCache[file].fd;
+        dList[i]->aiocb.aio_fildes = vfdcache[file].fd;
     }
 
     io_context_t aio_context = CompltrContext(dList[0]->cuDesc.reqType, 0);
@@ -2413,7 +2435,7 @@ int FileAsyncCURead(AioDispatchCUDesc_t** dList, int32 dn)
 int FileAsyncCUWrite(AioDispatchCUDesc_t** dList, int32 dn)
 {
     int returnCode = 0;
-
+    vfd *vfdcache = GetVfdCache();
     Assert(dn > 0);
     for (int i = 0; i < dn; i++) {
         File file = dList[i]->aiocb.aio_fildes;
@@ -2423,8 +2445,8 @@ int FileAsyncCUWrite(AioDispatchCUDesc_t** dList, int32 dn)
         DO_DB(ereport(LOG,
                       (errmsg("FileAsyncCUWrite: fd(%d), filename(%s), seekpos(%ld)",
                               file,
-                              u_sess->storage_cxt.VfdCache[file].fileName,
-                              (int64)u_sess->storage_cxt.VfdCache[file].seekPos))));
+                              vfdcache[file].fileName,
+                              (int64)vfdcache[file].seekPos))));
 
         returnCode = FileAccess(file);
         if (returnCode < 0) {
@@ -2433,7 +2455,7 @@ int FileAsyncCUWrite(AioDispatchCUDesc_t** dList, int32 dn)
             return returnCode;
         }
         /* replace the virtual fd with the real one */
-        dList[i]->aiocb.aio_fildes = u_sess->storage_cxt.VfdCache[file].fd;
+        dList[i]->aiocb.aio_fildes = vfdcache[file].fd;
     }
 
     io_context_t aio_context = CompltrContext(dList[0]->cuDesc.reqType, 0);
@@ -2445,6 +2467,7 @@ int FileAsyncCUWrite(AioDispatchCUDesc_t** dList, int32 dn)
 
     return returnCode;
 }
+#endif
 
 void FileFastExtendFile(File file, uint32 offset, uint32 size, bool keep_size)
 {
@@ -2462,15 +2485,15 @@ void FileFastExtendFile(File file, uint32 offset, uint32 size, bool keep_size)
     if (keep_size) {
         mode = FALLOC_FL_KEEP_SIZE;
     }
-
-    returnCode = fallocate(u_sess->storage_cxt.VfdCache[file].fd, mode, offset, size);
+    vfd *vfdcache = GetVfdCache();
+    returnCode = fallocate(vfdcache[file].fd, mode, offset, size);
     if (returnCode != 0) {
         ereport(ERROR,
                 (errcode_for_file_access(),
                  errmsg("fallocate(fd=%d, amount=%u, offset=%u),write count(%d), errno(%d), "
                         "maybe you use adio without XFS filesystem, if you really want do this,"
                         "please turn off GUC parameter enable_fast_allocate",
-                        u_sess->storage_cxt.VfdCache[file].fd,
+                        vfdcache[file].fd,
                         size,
                         offset,
                         returnCode,
@@ -2485,8 +2508,9 @@ int FileSync(File file, uint32 wait_event_info)
     int returnCode;
 
     Assert(FileIsValid(file));
+    vfd *vfdcache = GetVfdCache();
 
-    DO_DB(ereport(LOG, (errmsg("FileSync: %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+    DO_DB(ereport(LOG, (errmsg("FileSync: %d (%s)", file, vfdcache[file].fileName))));
 
     returnCode = FileAccess(file);
     if (returnCode < 0)
@@ -2495,7 +2519,7 @@ int FileSync(File file, uint32 wait_event_info)
     pgstat_report_waitevent(wait_event_info);
     PGSTAT_INIT_TIME_RECORD();
     PGSTAT_START_TIME_RECORD();
-    returnCode = pg_fsync(u_sess->storage_cxt.VfdCache[file].fd);
+    returnCode = pg_fsync(vfdcache[file].fd);
     PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
     pgstat_report_waitevent(WAIT_EVENT_END);
 
@@ -2513,12 +2537,12 @@ off_t FileSeek(File file, off_t offset, int whence)
     Assert(FileIsValid(file));
     /* only SEEK_END is valid for multithreading backends */
     Assert(whence == SEEK_END && offset == 0);
-
+    vfd *vfdcache = GetVfdCache();
     DO_DB(ereport(LOG,
                   (errmsg("FileSeek: %d (%s) " INT64_FORMAT " " INT64_FORMAT " %d",
                           file,
-                          u_sess->storage_cxt.VfdCache[file].fileName,
-                          (int64)u_sess->storage_cxt.VfdCache[file].seekPos,
+                          vfdcache[file].fileName,
+                          (int64)vfdcache[file].seekPos,
                           (int64)offset,
                           whence))));
 
@@ -2528,8 +2552,8 @@ off_t FileSeek(File file, off_t offset, int whence)
             return returnCode;
     }
 
-    u_sess->storage_cxt.VfdCache[file].seekPos = lseek(u_sess->storage_cxt.VfdCache[file].fd, offset, whence);
-    return u_sess->storage_cxt.VfdCache[file].seekPos;
+    vfdcache[file].seekPos = lseek(vfdcache[file].fd, offset, whence);
+    return vfdcache[file].seekPos;
 }
 
 /*
@@ -2539,8 +2563,9 @@ off_t FileSeek(File file, off_t offset, int whence)
 off_t FileTell(File file)
 {
     Assert(FileIsValid(file));
-    DO_DB(ereport(LOG, (errmsg("FileTell %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
-    return u_sess->storage_cxt.VfdCache[file].seekPos;
+    vfd *vfdcache = GetVfdCache();
+    DO_DB(ereport(LOG, (errmsg("FileTell %d (%s)", file, vfdcache[file].fileName))));
+    return vfdcache[file].seekPos;
 }
 #endif
 
@@ -2549,24 +2574,25 @@ int FileTruncate(File file, off_t offset, uint32 wait_event_info)
     int returnCode;
 
     Assert(FileIsValid(file));
+    vfd *vfdcache = GetVfdCache();
 
-    DO_DB(ereport(LOG, (errmsg("FileTruncate %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+    DO_DB(ereport(LOG, (errmsg("FileTruncate %d (%s)", file, vfdcache[file].fileName))));
 
     returnCode = FileAccess(file);
     if (returnCode < 0)
         return returnCode;
 
     pgstat_report_waitevent(wait_event_info);
-    returnCode = ftruncate(u_sess->storage_cxt.VfdCache[file].fd, offset);
+    returnCode = ftruncate(vfdcache[file].fd, offset);
     pgstat_report_waitevent(WAIT_EVENT_END);
 
-    if (returnCode == 0 && u_sess->storage_cxt.VfdCache[file].fileSize > offset) {
+    if (returnCode == 0 && vfdcache[file].fileSize > offset) {
         /* adjust our state for truncation of a temp file */
-        Assert(u_sess->storage_cxt.VfdCache[file].fdstate & FD_TEMP_FILE_LIMIT);
-        uint64 descSize = (uint64)(u_sess->storage_cxt.VfdCache[file].fileSize - offset);
+        Assert(vfdcache[file].fdstate & FD_TEMP_FILE_LIMIT);
+        uint64 descSize = (uint64)(vfdcache[file].fileSize - offset);
         perm_space_decrease(GetUserId(), descSize, SP_SPILL);
         u_sess->storage_cxt.temporary_files_size -= descSize;
-        u_sess->storage_cxt.VfdCache[file].fileSize = offset;
+        vfdcache[file].fileSize = offset;
     }
 
     return returnCode;
@@ -2581,8 +2607,9 @@ int FileTruncate(File file, off_t offset, uint32 wait_event_info)
 char* FilePathName(File file)
 {
     Assert(FileIsValid(file));
+    vfd *vfdcache = GetVfdCache();
 
-    return u_sess->storage_cxt.VfdCache[file].fileName;
+    return vfdcache[file].fileName;
 }
 
 /*
@@ -2593,7 +2620,8 @@ char* FilePathName(File file)
 int FileFd(File file)
 {
     Assert(FileIsValid(file));
-    return u_sess->storage_cxt.VfdCache[file].fd;
+    vfd *vfdcache = GetVfdCache();
+    return vfdcache[file].fd;
 }
 
 /*
@@ -2899,6 +2927,12 @@ int OpenTransientFile(FileName fileName, int fileFlags, int fileMode)
     DO_DB(ereport(
               LOG, (errmsg("OpenTransientFile: Allocated %d (%s)", u_sess->storage_cxt.numAllocatedDescs, fileName))));
 
+    if (!ReserveAllocatedDesc()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+            errmsg("exceeded maxAllocatedDescs (%d) while trying to open file \"%s\"",
+                u_sess->storage_cxt.maxAllocatedDescs, fileName)));
+    }
+    ReleaseLruFiles();
     /*
      * The test against MAX_ALLOCATED_DESCS prevents us from overflowing
      * allocatedFiles[]; the test against max_safe_fds prevents BasicOpenFile
@@ -3195,10 +3229,11 @@ int FreeDir(DIR* dir)
 void closeAllVfds(void)
 {
     Index i;
-
-    if (u_sess->storage_cxt.SizeVfdCache > 0) {
+    Size size = 0;
+    size = GetSizeVfdCache();
+    if (size > 0) {
         Assert(FileIsNotOpen(0)); /* Make sure ring not corrupted */
-        for (i = 1; i < u_sess->storage_cxt.SizeVfdCache; i++) {
+        for (i = 1; i < size; i++) {
             if (!FileIsNotOpen(i))
                 LruDelete((File)i);
         }
@@ -3214,19 +3249,19 @@ void DestroyAllVfds(void)
 {
     Index i;
     ereport(DEBUG5, (errmsg("Thread \"%lu\" trace: closeAllVfds", (unsigned long int)t_thrd.proc_cxt.MyProcPid)));
-    if (u_sess->storage_cxt.SizeVfdCache > 0) {
+    if (GetSizeVfdCache() > 0) {
         Assert(FileIsNotOpen(0)); /* Make sure ring not corrupted */
-        for (i = 1; i < u_sess->storage_cxt.SizeVfdCache; i++) {
+        for (i = 1; i < GetSizeVfdCache(); i++) {
             if (FileIsValid((int)i))
                 FileClose((File)i);
         }
-
-        if (u_sess->storage_cxt.VfdCache != NULL) {
-            pfree(u_sess->storage_cxt.VfdCache);
+        vfd *vfdcache = GetVfdCache();
+        if (vfdcache != NULL) {
+            pfree(vfdcache);
         }
     }
-    u_sess->storage_cxt.VfdCache = NULL;
-    u_sess->storage_cxt.SizeVfdCache = 0;
+    SetVfdCache(NULL);
+    SetSizeVfdCache(0);
 }
 
 /*
@@ -3373,13 +3408,14 @@ static void CleanupTempFiles(bool isProcExit)
      * Careful here: at proc_exit we need extra cleanup, not just
      * xact_temporary files.
      */
+    vfd *vfdcache = GetVfdCache();
     if (isProcExit || u_sess->storage_cxt.have_xact_temporary_files) {
         Assert(FileIsNotOpen(0)); /* Make sure ring not corrupted */
-        for (i = 1; i < u_sess->storage_cxt.SizeVfdCache; i++) {
-            unsigned short fdstate = u_sess->storage_cxt.VfdCache[i].fdstate;
+        for (i = 1; i < GetSizeVfdCache(); i++) {
+            unsigned short fdstate = vfdcache[i].fdstate;
 
             if (((fdstate & FD_DELETE_AT_CLOSE) || (fdstate & FD_CLOSE_AT_EOXACT)) && 
-                u_sess->storage_cxt.VfdCache[i].fileName != NULL) {
+                vfdcache[i].fileName != NULL) {
                 /*
                  * If we're in the process of exiting a backend process, close
                  * all temporary files. Otherwise, only close temporary files
@@ -3392,15 +3428,15 @@ static void CleanupTempFiles(bool isProcExit)
                 else if (fdstate & FD_CLOSE_AT_EOXACT) {
                     ereport(WARNING,
                             (errmsg("temporary file %s not closed at end-of-transaction",
-                                    u_sess->storage_cxt.VfdCache[i].fileName)));
+                                    vfdcache[i].fileName)));
                     FileClose((File)i);
                 }
-            } else if ((fdstate & FD_ERRTBL_LOG) && u_sess->storage_cxt.VfdCache[i].fileName != NULL) {
+            } else if ((fdstate & FD_ERRTBL_LOG) && vfdcache[i].fileName != NULL) {
                 /* first unlink the physical file because FileClose() will destroy filename. */
-                if ((fdstate & FD_ERRTBL_LOG_OWNER) && unlink(u_sess->storage_cxt.VfdCache[i].fileName)) {
+                if ((fdstate & FD_ERRTBL_LOG_OWNER) && unlink(vfdcache[i].fileName)) {
                     ereport(WARNING,
                             (errmsg("[ErrorTable/Abort]Unlink cache file failed: %s",
-                                    u_sess->storage_cxt.VfdCache[i].fileName)));
+                                    vfdcache[i].fileName)));
                 }
                 /* close this cache file about error table and clean vfd's flag */
                 FileClose((File)i);
@@ -3719,29 +3755,28 @@ void GetFdGlobalVariables(void*** global_VfdCache, Size** global_SizeVfdCache)
     save_VfdCache = NULL;
     save_SizeVfdCache = 0;
 
-    *global_VfdCache = (void**)&u_sess->storage_cxt.VfdCache;
-    *global_SizeVfdCache = &u_sess->storage_cxt.SizeVfdCache;
+    *global_VfdCache = (void**)GetVfdCachePtr();
+    *global_SizeVfdCache = GetSizeVfdCachePtr();
 }
 
 void SwitchToGlobalVfdCache(void** vfd, Size* vfd_size)
 {
-    save_VfdCache = u_sess->storage_cxt.VfdCache;
-    save_SizeVfdCache = u_sess->storage_cxt.SizeVfdCache;
+    save_VfdCache = GetVfdCache();
+    save_SizeVfdCache = GetSizeVfdCache();
 
-    u_sess->storage_cxt.VfdCache = (Vfd*)*vfd;
-    u_sess->storage_cxt.SizeVfdCache = *vfd_size;
+    SetVfdCache((Vfd *)*vfd);
+    SetSizeVfdCache(*vfd_size);
 }
 
 /* Set the THR_LOCAL VFD information from y */
 void ResetToLocalVfdCache()
 {
     if (save_VfdCache != NULL) {
-        u_sess->storage_cxt.VfdCache = save_VfdCache;
+        SetVfdCache(save_VfdCache);
         save_VfdCache = NULL;
     }
-
     if (save_SizeVfdCache != 0) {
-        u_sess->storage_cxt.SizeVfdCache = save_SizeVfdCache;
+        SetSizeVfdCache(save_SizeVfdCache);
         save_SizeVfdCache = 0;
     }
 }
@@ -3792,6 +3827,31 @@ bool FdRefcntIsZero(SMgrRelation reln, ForkNumber forkNum)
     vfdLock.unLock();
 
     return true;
+}
+
+bool repair_deleted_file_check(RelFileNodeForkNum fileNode, int fd)
+{
+    bool result = true;
+    uint32 newHash = VFDTableHashCode((void*)&fileNode);
+    AutoMutexLock vfdLock(VFDMappingPartitionLock(newHash));
+    vfdLock.lock();
+    DataFileIdCacheEntry* entry =
+        (DataFileIdCacheEntry*)hash_search_with_hash_value(t_thrd.storage_cxt.DataFileIdCache,
+        (void*)&fileNode, newHash, HASH_FIND, NULL);
+    if (fd < 0) {
+        if (entry != NULL && entry->repaired_fd >= 0) {
+            result = false;
+        }
+    } else {
+        if (entry != NULL && entry->fd >= 0) {
+            entry->repaired_fd = entry->fd;
+            entry->fd = fd;
+        } else {
+            result = false;
+        }
+    }
+    vfdLock.unLock();
+    return result;
 }
 
 /*
@@ -3934,48 +3994,3 @@ static void UnlinkIfExistsFname(const char *fname, bool isdir, int elevel)
     }
 }
 
-/*
- * initialize page compress memory map.
- *
- */
-void SetupPageCompressMemoryMap(File file, RelFileNode node, const RelFileNodeForkNum& relFileNodeForkNum)
-{
-    Vfd *vfdP = &u_sess->storage_cxt.VfdCache[file];
-    auto chunk_size = CHUNK_SIZE_LIST[GET_COMPRESS_CHUNK_SIZE(node.opt)];
-    int returnCode = FileAccess(file);
-    if (returnCode < 0) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to open file %s: %m", vfdP->fileName)));
-    }
-    RelFileNodeForkNum newOne(relFileNodeForkNum);
-    newOne.forknumber = PCA_FORKNUM;
-    PageCompressHeader *map = GetPageCompressHeader(vfdP, chunk_size, newOne);
-    vfdP->with_pcmap = true;
-    vfdP->pcmap = map;
-}
-
-/*
- * Return the page compress memory map.
- *
- */
-PageCompressHeader *GetPageCompressMemoryMap(File file, uint32 chunk_size)
-{
-    int returnCode;
-    Vfd *vfdP = &u_sess->storage_cxt.VfdCache[file];
-    PageCompressHeader *map = NULL;
-
-    Assert(FileIsValid(file));
-
-    returnCode = FileAccess(file);
-    if (returnCode < 0) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to open file %s: %m", vfdP->fileName)));
-    }
-
-    Assert(vfdP->with_pcmap);
-    if (vfdP->pcmap == NULL) {
-        map = GetPageCompressHeader(vfdP, chunk_size, vfdP->fileNode);
-        vfdP->with_pcmap = true;
-        vfdP->pcmap = map;
-    }
-
-    return vfdP->pcmap;
-}

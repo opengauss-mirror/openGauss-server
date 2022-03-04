@@ -72,7 +72,7 @@ static char* ssl_cipher_list2string(const char* ciphers[], const int num);
 static int SSL_CTX_set_cipher_list_ex(SSL_CTX* ctx, const char* ciphers[], const int num);
 
 /* security ciphers suites in SSL connection */
-static const char* ossl_cipher_list[] = {TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256, NULL};
+static const char* ossl_cipher_list[] = {TLS1_TXT_ECDHE_RSA_WITH_AES_128_GCM_SHA256, NULL};
 
 /* VPP SSL client configuration information */
 struct gs_openssl_client {

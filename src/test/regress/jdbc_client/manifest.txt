@@ -1,0 +1,5 @@
+Manifest-Version: 1.0
+Class-Path: . ../jdbc_client_lib/gsjdbc4.jar
+Main-Class: gauss.regress.jdbc.JdbcClient
+
+

@@ -37,8 +37,7 @@ typedef struct PGClientLogicParams {
           adjusted_param_values(NULL),
           adjusted_param_lengths(NULL),
           copy_sizes(NULL) {};
-    PGClientLogicParams(const PGClientLogicParams &other);
-    void init(const PGClientLogicParams &other);
+    PGClientLogicParams(const PGClientLogicParams &other) = delete;
     ~PGClientLogicParams();
     char *new_query;
     size_t new_query_size;

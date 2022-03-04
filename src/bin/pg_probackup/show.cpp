@@ -921,7 +921,7 @@ show_archive_plain(const char *instance_name, uint32 xlog_seg_size,
         cur++;
 
         /* Min Segno */
-        GetXLogFileName(segno_tmp, tlinfo->tli, tlinfo->begin_segno, xlog_seg_size);
+        GetXLogFileName(segno_tmp, MAXFNAMELEN, tlinfo->tli, tlinfo->begin_segno, xlog_seg_size);
         rc = snprintf_s(row->min_segno, lengthof(row->min_segno), lengthof(row->min_segno) - 1, "%s",
                    segno_tmp);
         securec_check_ss_c(rc, "\0", "\0");
@@ -930,7 +930,7 @@ show_archive_plain(const char *instance_name, uint32 xlog_seg_size,
         cur++;
 
         /* Max Segno */
-        GetXLogFileName(segno_tmp, tlinfo->tli, tlinfo->end_segno, xlog_seg_size);
+        GetXLogFileName(segno_tmp, MAXFNAMELEN, tlinfo->tli, tlinfo->end_segno, xlog_seg_size);
         rc = snprintf_s(row->max_segno, lengthof(row->max_segno), lengthof(row->max_segno) - 1, "%s",
                    segno_tmp);
         securec_check_ss_c(rc, "\0", "\0");
@@ -1109,12 +1109,12 @@ show_archive_json(const char *instance_name, uint32 xlog_seg_size,
         securec_check_ss_c(rc, "\0", "\0");
         json_add_value(buf, "switchpoint", tmp_buf, json_level, true);
 
-        GetXLogFileName(segno_tmp, tlinfo->tli, tlinfo->begin_segno, xlog_seg_size);
+        GetXLogFileName(segno_tmp, MAXFNAMELEN, tlinfo->tli, tlinfo->begin_segno, xlog_seg_size);
         rc = snprintf_s(tmp_buf, lengthof(tmp_buf), lengthof(tmp_buf) - 1, "%s", segno_tmp);
         securec_check_ss_c(rc, "\0", "\0");
         json_add_value(buf, "min-segno", tmp_buf, json_level, true);
 
-        GetXLogFileName(segno_tmp, tlinfo->tli, tlinfo->end_segno, xlog_seg_size);
+        GetXLogFileName(segno_tmp, MAXFNAMELEN, tlinfo->tli, tlinfo->end_segno, xlog_seg_size);
         rc = snprintf_s(tmp_buf, lengthof(tmp_buf), lengthof(tmp_buf) - 1, "%s", segno_tmp);
         securec_check_ss_c(rc, "\0", "\0");
         json_add_value(buf, "max-segno", tmp_buf, json_level, true);
@@ -1162,12 +1162,12 @@ show_archive_json(const char *instance_name, uint32 xlog_seg_size,
 
                 json_add(buf, JT_BEGIN_OBJECT, &json_level);
 
-                GetXLogFileName(segno_tmp, tlinfo->tli, lost_segments->begin_segno, xlog_seg_size);
+                GetXLogFileName(segno_tmp, MAXFNAMELEN, tlinfo->tli, lost_segments->begin_segno, xlog_seg_size);
                 rc = snprintf_s(tmp_buf, lengthof(tmp_buf), lengthof(tmp_buf) - 1, "%s", segno_tmp);
                 securec_check_ss_c(rc, "\0", "\0");
                 json_add_value(buf, "begin-segno", tmp_buf, json_level, true);
 
-                GetXLogFileName(segno_tmp, tlinfo->tli, lost_segments->end_segno, xlog_seg_size);
+                GetXLogFileName(segno_tmp, MAXFNAMELEN, tlinfo->tli, lost_segments->end_segno, xlog_seg_size);
                 rc = snprintf_s(tmp_buf, lengthof(tmp_buf), lengthof(tmp_buf) - 1, "%s", segno_tmp);
                 securec_check_ss_c(rc, "\0", "\0");
                 json_add_value(buf, "end-segno", tmp_buf, json_level, true);

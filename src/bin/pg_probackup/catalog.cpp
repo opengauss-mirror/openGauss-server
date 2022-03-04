@@ -1432,8 +1432,9 @@ void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timeli
                 * covered by other larger interval.
                 */
 
-                GetXLogFileName(begin_segno_str, tlinfo->tli, interval->begin_segno, instance->xlog_seg_size);
-                GetXLogFileName(end_segno_str, tlinfo->tli, interval->end_segno, instance->xlog_seg_size);
+                GetXLogFileName(begin_segno_str, MAXFNAMELEN, tlinfo->tli, interval->begin_segno,
+                    instance->xlog_seg_size);
+                GetXLogFileName(end_segno_str, MAXFNAMELEN, tlinfo->tli, interval->end_segno, instance->xlog_seg_size);
 
                 elog(LOG, "Timeline %i to stay reachable from timeline %i "
                                 "protect from purge WAL interval between "
@@ -1487,8 +1488,8 @@ void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timeli
             else
                 interval->end_segno = segno;
 
-            GetXLogFileName(begin_segno_str, tlinfo->tli, interval->begin_segno, instance->xlog_seg_size);
-            GetXLogFileName(end_segno_str, tlinfo->tli, interval->end_segno, instance->xlog_seg_size);
+            GetXLogFileName(begin_segno_str, MAXFNAMELEN, tlinfo->tli, interval->begin_segno, instance->xlog_seg_size);
+            GetXLogFileName(end_segno_str, MAXFNAMELEN, tlinfo->tli, interval->end_segno, instance->xlog_seg_size);
 
             elog(LOG, "Archive backup %s to stay consistent "
                             "protect from purge WAL interval "

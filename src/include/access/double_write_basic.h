@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * double_write_basic.h
  *        Define some basic structs of double write which is needed in knl_instance.h
- * 
- * 
+ *
+ *
  * IDENTIFICATION
  *        src/include/access/double_write_basic.h
  *
@@ -33,11 +33,14 @@
 
 static const uint32 HALF_K = 512;
 
-static const char DW_FILE_NAME[] = "global/pg_dw";
+static const char OLD_DW_FILE_NAME[] = "global/pg_dw";
+static const char DW_FILE_NAME_PREFIX[] = "global/pg_dw_";
 static const char SINGLE_DW_FILE_NAME[] = "global/pg_dw_single";
 static const char DW_BUILD_FILE_NAME[] = "global/pg_dw.build";
 static const char DW_UPGRADE_FILE_NAME[] = "global/dw_upgrade";
-
+static const char DW_BATCH_UPGRADE_META_FILE_NAME[] = "global/dw_batch_upgrade_meta";
+static const char DW_BATCH_UPGRADE_BATCH_FILE_NAME[] = "global/dw_batch_upgrade_files";
+static const char DW_META_FILE[] = "global/pg_dw_meta";
 
 static const uint32 DW_TRY_WRITE_TIMES = 8;
 #ifndef WIN32
@@ -52,6 +55,9 @@ static const uint16 DW_FILE_PAGE = 32768;
 
 static const int64 DW_FILE_SIZE = (DW_FILE_PAGE * BLCKSZ);
 
+static const uint64 DW_FILE_SIZE_UNIT = 1024 * 1024;
+static const uint32 MAX_DW_FILE_SIZE_MB = 256;
+
 /**
  * | file_head | batch head | data pages   | batch tail/next batch head | ... |
  * |    0   |     1    | 409 at most |          1           | ... |
@@ -59,6 +65,18 @@ static const int64 DW_FILE_SIZE = (DW_FILE_PAGE * BLCKSZ);
 static const uint16 DW_BATCH_FILE_START = 1;
 
 #define REDUCE_CKS2UINT16(cks) (((cks) >> 16) ^ ((cks)&0xFFFF))
+#define DW_FULL_CKPT 0x1
+
+static const uint32 DW_META_FILE_ALIGN_BYTES = 512 - sizeof(uint32) - sizeof(uint32) - sizeof(uint16) - sizeof(uint16) - sizeof(uint16);
+
+typedef struct st_dw_batch_meta_file{
+    uint32 dw_version;
+    uint32 dw_file_size; /* double write file size */
+    uint16 dw_file_num; /* double write file quantity */
+    uint8 unused[DW_META_FILE_ALIGN_BYTES]; /* make meta file 512B total */
+    uint16 record_state; /* record database bool guc parameter */
+    uint16 checksum;
+}dw_batch_meta_file;
 
 typedef struct st_dw_page_head {
     uint16 page_id; /* page_id in file */
@@ -82,6 +100,9 @@ typedef struct st_dw_file_head {
     dw_page_tail_t tail;
 } dw_file_head_t;
 
+/* write the st_dw_meta_file data into the first three sector of the page */
+static const uint32 DW_META_FILE_BLOCK_NUM = 3;
+
 static const uint32 DW_FILE_HEAD_ID_NUM = 3;
 
 /* write file head 3 times, distributed in start, middle, end of the first page of dw file */
@@ -91,7 +112,7 @@ const static uint64 DW_SLEEP_US = 1000L;
 
 const static uint16 DW_WRITE_STAT_LOWER_LIMIT = 16;
 
-const static int DW_VIEW_COL_NUM = 11;
+const static int DW_VIEW_COL_NUM = 12;
 const static int DW_SINGLE_VIEW_COL_NUM = 6;
 
 const static uint32 DW_VIEW_COL_NAME_LEN = 32;

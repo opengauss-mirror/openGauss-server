@@ -54,6 +54,10 @@
 #include "executor/executor.h"
 
 #include "communication/commproxy_interface.h"
+#ifdef MEMORY_CONTEXT_TRACK
+#include "memory_func.h"
+#endif
+
 
 ThreadPoolSessControl::ThreadPoolSessControl(MemoryContext context)
 {
@@ -466,7 +470,8 @@ void ThreadPoolSessControl::HandlePoolerReload()
     Dlelem* elem = DLGetHead(&m_activelist);
     while (elem != NULL) {
         ctrl= (knl_sess_control*)DLE_VAL(elem);
-        ctrl->sess->sig_cxt.got_PoolReload = true;
+        /* we have already send got_pool_reload to threads */
+        ctrl->sess->sig_cxt.got_pool_reload = true;
         ctrl->sess->sig_cxt.cp_PoolReload = true;
         elem = DLGetSucc(elem);
     }
@@ -561,6 +566,49 @@ void ThreadPoolSessControl::getSessionMemoryDetail(Tuplestorestate* tupStore,
         PG_RE_THROW();
     }
     PG_END_TRY();
+}
+
+void ThreadPoolSessControl::getSessionMemoryContextInfo(const char* ctx_name,
+    StringInfoData* buf, knl_sess_control** sess)
+{
+#ifdef MEMORY_CONTEXT_TRACK
+    AutoMutexLock alock(&m_sessCtrlock);
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = NULL;
+
+    PG_TRY();
+    {
+        HOLD_INTERRUPTS();
+        alock.lock();
+
+        /* collect all the Memory Context status, put in data */
+        elem = DLGetHead(&m_activelist);
+
+        while (elem != NULL) {
+            ctrl = (knl_sess_control*)DLE_VAL(elem);
+            *sess = ctrl;
+            if (ctrl->sess) {
+                (void)syscalllockAcquire(&ctrl->sess->utils_cxt.deleMemContextMutex);
+                gs_recursive_unshared_memory_context(ctrl->sess->top_mem_cxt, ctx_name, buf);
+                (void)syscalllockRelease(&ctrl->sess->utils_cxt.deleMemContextMutex);
+            }
+            elem = DLGetSucc(elem);
+        }
+        alock.unLock();
+
+        RESUME_INTERRUPTS();
+    }
+    PG_CATCH();
+    {
+        if (*sess != NULL) {
+            ctrl = *sess;
+            (void)syscalllockRelease(&ctrl->sess->utils_cxt.deleMemContextMutex);
+        }
+        alock.unLock();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+#endif
 }
 
 knl_session_context* ThreadPoolSessControl::GetSessionByIdx(int idx)

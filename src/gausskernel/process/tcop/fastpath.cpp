@@ -267,7 +267,7 @@ int HandleFunctionRequest(StringInfo msgBuf)
     struct fp_info* fip = NULL;
     bool callit = false;
     bool was_logged = false;
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
     errno_t errorno = EOK;
     errorno = memset_s(&my_fp, sizeof(struct fp_info), 0, sizeof(struct fp_info));
     securec_check(errorno, "\0", "\0");

@@ -40,8 +40,6 @@ typedef struct UMultiLockMember {
     LockTupleMode mode;
 } UMultiLockMember;
 
-LockTupleMode GetOldLockMode(uint16 infomask);
 bool UMultiLockMembersSame(const List *list1, const List *list2);
-void UGetMultiLockInfo(uint16 oldInfomask, TransactionId tupXid, int tupTdSlot, TransactionId addToXid,
-    uint16 *newInfomask, int *newTdSlot, LockTupleMode *mode, bool *oldTupleHasUpdate, LockOper lockoper);
+
 #endif

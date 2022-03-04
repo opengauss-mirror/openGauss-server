@@ -39,6 +39,8 @@
 #include "pgxc/pgxc.h"
 #endif
 
+#include "utils/knl_relcache.h"
+
 static TupleTableSlot* ForeignNext(ForeignScanState* node);
 static bool ForeignRecheck(ForeignScanState* node, TupleTableSlot* slot);
 
@@ -201,8 +203,8 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
 
         fdwroutine = GetFdwRoutine(fdw->fdwhandler);
 
-        /* Save the data for later reuse in u_sess->cache_mem_cxt */
-        FdwRoutine* cfdwroutine = (FdwRoutine*)MemoryContextAlloc(u_sess->cache_mem_cxt, sizeof(FdwRoutine));
+        /* Save the data for later reuse in LocalMyDBCacheMemCxt */
+        FdwRoutine* cfdwroutine = (FdwRoutine*)MemoryContextAlloc(LocalMyDBCacheMemCxt(), sizeof(FdwRoutine));
         rc = memcpy_s(cfdwroutine, sizeof(FdwRoutine), fdwroutine, sizeof(FdwRoutine));
         securec_check(rc, "\0", "\0");
         currentRelation->rd_fdwroutine = cfdwroutine;

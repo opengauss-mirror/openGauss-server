@@ -229,7 +229,7 @@ function exec_sql()
 
     if res=$(gsql $host $port $user $passwd $db -t -c "$sql" 2>&1)
     then
-        echo -e "$res" | sed  -r 's/Connect primary node [0-9]+.[0-9]+.[0-9]+.[0-9]+//g'
+        echo -e "$res"
     else
         echo "ERROR: function exec_sql"
     fi
@@ -267,7 +267,7 @@ function exec_sql_file()
     # delete last line: total time: 10ms
     if res=$(gsql $host $port $user $passwd $db -t -f "$sql_file" 2>&1)
     then
-        echo -e "$res" | sed  -r 's/Connect primary node [0-9]+.[0-9]+.[0-9]+.[0-9]+//g' | sed '$ d'
+        echo -e "$res" | sed '$ d'
     else
         echo "ERROR: function exec_sql_file"
     fi

@@ -73,94 +73,6 @@
 #include "utils/timestamp.h"
 #include "access/redo_common.h"
 
-static bool IsDroppedBucketList(ColFileNodeRel *xnodes, int nrels)
-{
-    RelFileNode preRnode = {0};
-
-    for (int i = 0; i < nrels; i++) {
-        ColFileNodeRel *colFileNodeRel = xnodes + i;
-        ColFileNode node;
-        ColFileNodeCopy(&node, colFileNodeRel);
-        if (IsValidColForkNum(node.forknum)) {
-            return false;
-        }
-        
-        Assert(node.filenode.relNode != InvalidOid);
-        if (!RelFileNodeRelEquals(node.filenode, preRnode)) {
-            preRnode = node.filenode;
-        } else {
-            ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE), (errmsg("[XYQ] %dth founded to be same rnode,"
-                    "preRelNode [%u, %u, %u, %d], cur rnode [%u, %u, %u, %d] %d.", i, preRnode.spcNode,
-                    preRnode.dbNode, preRnode.relNode, preRnode.bucketNode, node.filenode.spcNode,
-                    node.filenode.dbNode, node.filenode.relNode, node.filenode.bucketNode, node.forknum))));
-            return true;
-        }
-    }
-
-    return false;
-}
-
-XLogRecParseState *xact_redo_rmbktlist_parse_to_block(XLogReaderState *record, XLogRecParseState *recordstatehead,
-                                                      uint32 *blocknum, ColFileNodeRel *xnodes, int nrels)
-{
-    uint32 bitmap[BktBitMaxMapCnt] = { 0 };
-    RelFileNode preRnode = { 0 };
-
-    bool firstLoop = true;
-    bool newLoop = false;
-    XLogRecParseState *blockstate = NULL;
-    
-    for (int i = 0; i < nrels; ++i) {
-        ColFileNodeRel *colFileNodeRel = xnodes + i;
-        ColFileNode node;
-        ColFileNodeCopy(&node, colFileNodeRel);
-        Assert(!IsValidColForkNum(node.forknum));
-
-        if (IsSegmentFileNode(node.filenode)) {
-            SMgrRelation reln = smgropen(node.filenode, InvalidBackendId);
-            smgrclose(reln);
-        }
-
-        if (!RelFileNodeRelEquals(node.filenode, preRnode)) {
-            newLoop = true;
-            if (firstLoop && preRnode.spcNode != InvalidOid) {
-                firstLoop = false;
-            }
-            preRnode = node.filenode;
-        }
-
-        if (firstLoop && IsBucketFileNode(node.filenode)) {
-            SET_BKT_MAP_BIT(bitmap, node.filenode.bucketNode);
-        } else if (IsBucketFileNode(node.filenode)) {
-            SegmentCheck(GET_BKT_MAP_BIT(bitmap, node.filenode.bucketNode));
-        }
-
-        if (!newLoop) {
-            continue;
-        }
-
-        newLoop = false;
-        (*blocknum)++;
-        XLogParseBufferAllocListStateFunc(record, &blockstate, &recordstatehead);
-        if (blockstate == NULL) {
-            return NULL;
-        }
-
-        RelFileNodeForkNum filenode = RelFileNodeForkNumFill(&(node.filenode), InvalidBackendId, MAIN_FORKNUM,
-                                                             InvalidBlockNumber);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, blockstate);
-
-        uint32 *bucketList = (uint32 *)palloc(sizeof(bitmap));
-        errno_t err = memcpy_s(bucketList, sizeof(bitmap), bitmap, sizeof(bitmap));
-        securec_check(err, "", "");
-
-        XLogRecSetBlockDdlState(&(blockstate->blockparse.extra_rec.blockddlrec), BLOCK_DDL_DROP_BKTLIST,
-                                false, (char *)bucketList, node.ownerid);
-    }
-
-    return recordstatehead;
-}
-
 /*
  * *************Add for batchredo begin***************
  * for these func ,they don't hold the lock and parse the record
@@ -174,61 +86,15 @@ XLogRecParseState *xact_redo_rmddl_parse_to_block(XLogReaderState *record, XLogR
     XLogRecParseState *blockstate = NULL;
 
     Assert(nrels > 0);
-    
-    for (int i = 0; i < nrels; ++i) {
-        ColFileNodeRel *colFileNode = xnodes + i;
-        ColFileNode node;
-        ColFileNodeCopy(&node, colFileNode);
-        if (!IsValidColForkNum(node.forknum)) {
-            if (SUPPORT_DFS_BATCH && ((IS_PGXC_COORDINATOR && IsValidPaxDfsForkNum(node.forknum)) ||
-                                      (!IS_PGXC_COORDINATOR && IsTruncateDfsForkNum(node.forknum)))) {
-                (*blocknum)++;
-                XLogParseBufferAllocListStateFunc(record, &blockstate, &recordstatehead);
-                if (blockstate == NULL) {
-                    return NULL;
-                }
-                ForkNumber fork = (ForkNumber)node.forknum;
-                RelFileNodeForkNum filenode =
-                    RelFileNodeForkNumFill(&node.filenode, InvalidBackendId, fork, InvalidBlockNumber);
-                XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, blockstate);
-                XLogRecSetBlockDdlState(&(blockstate->blockparse.extra_rec.blockddlrec), BLOCK_DDL_DROP_RELNODE, false,
-                                        NULL, node.ownerid);
-            } else {
-                (*blocknum)++;
-                XLogParseBufferAllocListStateFunc(record, &blockstate, &recordstatehead);
-                if (blockstate == NULL) {
-                    return NULL;
-                }
-                RelFileNodeForkNum filenode =
-                    RelFileNodeForkNumFill(&node.filenode, InvalidBackendId, MAIN_FORKNUM, InvalidBlockNumber);
-                XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, blockstate);
-                XLogRecSetBlockDdlState(&(blockstate->blockparse.extra_rec.blockddlrec), BLOCK_DDL_DROP_RELNODE, false,
-                                        NULL, node.ownerid);
-
-                if (IsSegmentFileNode(node.filenode)) {
-                    SMgrRelation reln = smgropen(node.filenode, InvalidBackendId);
-                    smgrclose(reln);
-                }
-            }
-        } else {
-            if (SUPPORT_COLUMN_BATCH) {
-                (*blocknum)++;
-                XLogParseBufferAllocListStateFunc(record, &blockstate, &recordstatehead);
-                if (blockstate == NULL) {
-                    return NULL;
-                }
-
-                Assert(IsValidColForkNum(node.forknum));
-                int fork = (ForkNumber)node.forknum;
-
-                RelFileNodeForkNum filenode =
-                    RelFileNodeForkNumFill(&node.filenode, InvalidBackendId, fork, InvalidBlockNumber);
-                XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, blockstate);
-                XLogRecSetBlockDdlState(&(blockstate->blockparse.extra_rec.blockddlrec), BLOCK_DDL_DROP_RELNODE, true,
-                                        NULL, node.ownerid);
-            }
-        }
+    (*blocknum)++;
+    XLogParseBufferAllocListStateFunc(record, &blockstate, &recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
     }
+    RelFileNodeForkNum filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, MAIN_FORKNUM, InvalidBlockNumber);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, blockstate);
+    XLogRecSetBlockDdlState(&(blockstate->blockparse.extra_rec.blockddlrec), BLOCK_DDL_DROP_RELNODE, (char *)xnodes,
+        nrels);
 
     return recordstatehead;
 }
@@ -491,12 +357,7 @@ XLogRecParseState *xact_xlog_commit_parse_to_block(XLogReaderState *record, XLog
     XLogRecSetXactDdlState(&blockstate->blockparse.extra_rec.blockxact, nrels, (void *)xnodes, invalidmsgnum,
                            (void *)inval_msgs, nlibrary, (void *)libfilename);
     if (nrels > 0) {
-        bool isBucketList = IsDroppedBucketList(xnodes, nrels);
-        if (isBucketList) {
-            recordstatehead = xact_redo_rmbktlist_parse_to_block(record, recordstatehead, blocknum, xnodes, nrels);
-        } else {
-            recordstatehead = xact_redo_rmddl_parse_to_block(record, recordstatehead, blocknum, xnodes, nrels);
-        }
+        recordstatehead = xact_redo_rmddl_parse_to_block(record, recordstatehead, blocknum, xnodes, nrels);
     }
     return recordstatehead;
 }
@@ -555,12 +416,7 @@ XLogRecParseState *xact_xlog_abort_parse_to_block(XLogReaderState *record, XLogR
     XLogRecSetXactDdlState(&blockstate->blockparse.extra_rec.blockxact, nrels, (void *)xnodes, 0, NULL, nlibrary,
                            (void *)libfilename);
     if (nrels > 0) {
-        bool isBucketList = IsDroppedBucketList(xnodes, nrels);
-        if (isBucketList) {
-            recordstatehead = xact_redo_rmbktlist_parse_to_block(record, recordstatehead, blocknum, xnodes, nrels);
-        } else {
-            recordstatehead = xact_redo_rmddl_parse_to_block(record, recordstatehead, blocknum, xnodes, nrels);
-        }
+        recordstatehead = xact_redo_rmddl_parse_to_block(record, recordstatehead, blocknum, xnodes, nrels);
     }
     return recordstatehead;
 }

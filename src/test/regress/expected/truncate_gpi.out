@@ -1,0 +1,1067 @@
+set datestyle = 'ISO, MDY';
+create materialized view pg_partition_before_truncate as
+    select oid, relname, reloptions, parentid, boundaries
+        from pg_partition where parentid = (
+            select oid from pg_class where relname like 'tg_%'
+        );
+create view check_truncate_results as
+    select pg_class.relname tablename,
+           bef.relname relname,
+           bef.oid < aft.oid oid_changed,
+           bef.parentid = aft.parentid parentid_ok,
+           bef.boundaries = aft.boundaries boundaries_ok
+        from pg_partition_before_truncate bef, pg_partition aft, pg_class
+            where bef.relname = aft.relname
+                  and bef.parentid = aft.parentid
+                  and bef.parentid = pg_class.oid
+                order by bef.oid;
+-- range
+create table tg_range(a date, b int)
+partition by range(a)
+(
+    partition p1 values less than ('2022-01-31 00:00:00'),
+    partition p2 values less than ('2022-02-28 00:00:00'),
+    partition p3 values less than ('2022-03-31 00:00:00')
+);
+create index i_tg_range_global_b on tg_range(b) global;
+create index i_tg_range_global_a_b on tg_range(a,b) global;
+create index i_tg_range_local_a on tg_range(a) local;
+insert into tg_range select '2022-1-5'::date+n1*'1 month'::interval+10*n2*'1 day'::interval, 10*(n1+1)+(n2+1) from generate_series(0,2) t1(n1), generate_series(0,2) t2(n2);
+refresh materialized view pg_partition_before_truncate;
+begin;
+alter table tg_range truncate partition p1 update global index;
+alter table tg_range truncate partition p2 update global index;
+select relname, reloptions, boundaries from pg_partition_before_truncate
+    where parentid = (select oid from pg_class where relname = 'tg_range') order by oid;
+ relname  |                    reloptions                     |       boundaries        
+----------+---------------------------------------------------+-------------------------
+ tg_range | {orientation=row,compression=no,wait_clean_gpi=n} | 
+ p1       | {orientation=row,compression=no}                  | {"2022-01-31 00:00:00"}
+ p2       | {orientation=row,compression=no}                  | {"2022-02-28 00:00:00"}
+ p3       | {orientation=row,compression=no}                  | {"2022-03-31 00:00:00"}
+(4 rows)
+
+select relname, reloptions, boundaries from pg_partition
+    where parentid = (select oid from pg_class where relname = 'tg_range') order by oid;
+ relname  |                    reloptions                     |       boundaries        
+----------+---------------------------------------------------+-------------------------
+ tg_range | {orientation=row,compression=no,wait_clean_gpi=y} | 
+ p3       | {orientation=row,compression=no}                  | {"2022-03-31 00:00:00"}
+ p1       |                                                   | {"2022-01-31 00:00:00"}
+ p2       |                                                   | {"2022-02-28 00:00:00"}
+(4 rows)
+
+select * from check_truncate_results where tablename = 'tg_range';
+ tablename | relname  | oid_changed | parentid_ok | boundaries_ok 
+-----------+----------+-------------+-------------+---------------
+ tg_range  | tg_range | f           | t           | 
+ tg_range  | p1       | t           | t           | t
+ tg_range  | p2       | t           | t           | t
+ tg_range  | p3       | f           | t           | t
+(4 rows)
+
+select * from tg_range;
+          a          | b  
+---------------------+----
+ 2022-03-05 00:00:00 | 31
+ 2022-03-15 00:00:00 | 32
+ 2022-03-25 00:00:00 | 33
+(3 rows)
+
+explain(costs off) select /*+ indexscan(tg_range i_tg_range_global_b) */ * from tg_range where b < 40;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Scan using i_tg_range_global_b on tg_range
+   Index Cond: (b < 40)
+(2 rows)
+
+select /*+ indexscan(tg_range i_tg_range_global_b) */ * from tg_range where b < 40;
+          a          | b  
+---------------------+----
+ 2022-03-05 00:00:00 | 31
+ 2022-03-15 00:00:00 | 32
+ 2022-03-25 00:00:00 | 33
+(3 rows)
+
+explain(costs off) select /*+ indexscan(tg_range i_tg_range_local_a) */ * from tg_range where a < '2022-03-31 00:00:00';
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Index Scan using i_tg_range_local_a on tg_range
+         Index Cond: (a < '2022-03-31 00:00:00'::timestamp without time zone)
+         Selected Partitions:  1..3
+(5 rows)
+
+select /*+ indexscan(tg_range i_tg_range_local_a) */ * from tg_range where a < '2022-03-31 00:00:00';
+          a          | b  
+---------------------+----
+ 2022-03-05 00:00:00 | 31
+ 2022-03-15 00:00:00 | 32
+ 2022-03-25 00:00:00 | 33
+(3 rows)
+
+rollback;
+select relname, reloptions, boundaries from pg_partition_before_truncate
+    where parentid = (select oid from pg_class where relname = 'tg_range') order by oid;
+ relname  |                    reloptions                     |       boundaries        
+----------+---------------------------------------------------+-------------------------
+ tg_range | {orientation=row,compression=no,wait_clean_gpi=n} | 
+ p1       | {orientation=row,compression=no}                  | {"2022-01-31 00:00:00"}
+ p2       | {orientation=row,compression=no}                  | {"2022-02-28 00:00:00"}
+ p3       | {orientation=row,compression=no}                  | {"2022-03-31 00:00:00"}
+(4 rows)
+
+select relname, reloptions, boundaries from pg_partition
+    where parentid = (select oid from pg_class where relname = 'tg_range') order by oid;
+ relname  |                    reloptions                     |       boundaries        
+----------+---------------------------------------------------+-------------------------
+ tg_range | {orientation=row,compression=no,wait_clean_gpi=y} | 
+ p1       | {orientation=row,compression=no}                  | {"2022-01-31 00:00:00"}
+ p2       | {orientation=row,compression=no}                  | {"2022-02-28 00:00:00"}
+ p3       | {orientation=row,compression=no}                  | {"2022-03-31 00:00:00"}
+(4 rows)
+
+select * from check_truncate_results where tablename = 'tg_range';
+ tablename | relname  | oid_changed | parentid_ok | boundaries_ok 
+-----------+----------+-------------+-------------+---------------
+ tg_range  | tg_range | f           | t           | 
+ tg_range  | p1       | f           | t           | t
+ tg_range  | p2       | f           | t           | t
+ tg_range  | p3       | f           | t           | t
+(4 rows)
+
+select * from tg_range;
+          a          | b  
+---------------------+----
+ 2022-01-05 00:00:00 | 11
+ 2022-01-15 00:00:00 | 12
+ 2022-01-25 00:00:00 | 13
+ 2022-02-05 00:00:00 | 21
+ 2022-02-15 00:00:00 | 22
+ 2022-02-25 00:00:00 | 23
+ 2022-03-05 00:00:00 | 31
+ 2022-03-15 00:00:00 | 32
+ 2022-03-25 00:00:00 | 33
+(9 rows)
+
+explain(costs off) select /*+ indexscan(tg_range i_tg_range_global_b) */ * from tg_range where b < 40;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Scan using i_tg_range_global_b on tg_range
+   Index Cond: (b < 40)
+(2 rows)
+
+select /*+ indexscan(tg_range i_tg_range_global_b) */ * from tg_range where b < 40;
+          a          | b  
+---------------------+----
+ 2022-01-05 00:00:00 | 11
+ 2022-01-15 00:00:00 | 12
+ 2022-01-25 00:00:00 | 13
+ 2022-02-05 00:00:00 | 21
+ 2022-02-15 00:00:00 | 22
+ 2022-02-25 00:00:00 | 23
+ 2022-03-05 00:00:00 | 31
+ 2022-03-15 00:00:00 | 32
+ 2022-03-25 00:00:00 | 33
+(9 rows)
+
+explain(costs off) select /*+ indexscan(tg_range i_tg_range_local_a) */ * from tg_range where a < '2022-03-31 00:00:00';
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Index Scan using i_tg_range_local_a on tg_range
+         Index Cond: (a < '2022-03-31 00:00:00'::timestamp without time zone)
+         Selected Partitions:  1..3
+(5 rows)
+
+select /*+ indexscan(tg_range i_tg_range_local_a) */ * from tg_range where a < '2022-03-31 00:00:00';
+          a          | b  
+---------------------+----
+ 2022-01-05 00:00:00 | 11
+ 2022-01-15 00:00:00 | 12
+ 2022-01-25 00:00:00 | 13
+ 2022-02-05 00:00:00 | 21
+ 2022-02-15 00:00:00 | 22
+ 2022-02-25 00:00:00 | 23
+ 2022-03-05 00:00:00 | 31
+ 2022-03-15 00:00:00 | 32
+ 2022-03-25 00:00:00 | 33
+(9 rows)
+
+drop table tg_range;
+-- range without gpi
+create table tg_range_no_gpi(a date, b int)
+partition by range(a)
+(
+    partition p1 values less than ('2022-01-31 00:00:00'),
+    partition p2 values less than ('2022-02-28 00:00:00'),
+    partition p3 values less than ('2022-03-31 00:00:00')
+);
+insert into tg_range_no_gpi select '2022-1-5'::date+n1*'1 month'::interval+10*n2*'1 day'::interval, 10*(n1+1)+(n2+1) from generate_series(0,2) t1(n1), generate_series(0,2) t2(n2);
+refresh materialized view pg_partition_before_truncate;
+alter table tg_range_no_gpi truncate partition p1 update global index;
+alter table tg_range_no_gpi truncate partition p2 update global index;
+select relname, reloptions, boundaries from pg_partition_before_truncate
+    where parentid = (select oid from pg_class where relname = 'tg_range_no_gpi') order by oid;
+     relname     |                    reloptions                     |       boundaries        
+-----------------+---------------------------------------------------+-------------------------
+ tg_range_no_gpi | {orientation=row,compression=no,wait_clean_gpi=n} | 
+ p1              | {orientation=row,compression=no}                  | {"2022-01-31 00:00:00"}
+ p2              | {orientation=row,compression=no}                  | {"2022-02-28 00:00:00"}
+ p3              | {orientation=row,compression=no}                  | {"2022-03-31 00:00:00"}
+(4 rows)
+
+select relname, reloptions, boundaries from pg_partition
+    where parentid = (select oid from pg_class where relname = 'tg_range_no_gpi') order by oid;
+     relname     |                    reloptions                     |       boundaries        
+-----------------+---------------------------------------------------+-------------------------
+ tg_range_no_gpi | {orientation=row,compression=no,wait_clean_gpi=y} | 
+ p1              | {orientation=row,compression=no,wait_clean_gpi=y} | {"2022-01-31 00:00:00"}
+ p2              | {orientation=row,compression=no,wait_clean_gpi=y} | {"2022-02-28 00:00:00"}
+ p3              | {orientation=row,compression=no}                  | {"2022-03-31 00:00:00"}
+(4 rows)
+
+select * from check_truncate_results where tablename = 'tg_range_no_gpi';
+    tablename    |     relname     | oid_changed | parentid_ok | boundaries_ok 
+-----------------+-----------------+-------------+-------------+---------------
+ tg_range_no_gpi | tg_range_no_gpi | f           | t           | 
+ tg_range_no_gpi | p1              | f           | t           | t
+ tg_range_no_gpi | p2              | f           | t           | t
+ tg_range_no_gpi | p3              | f           | t           | t
+(4 rows)
+
+select * from tg_range_no_gpi;
+          a          | b  
+---------------------+----
+ 2022-03-05 00:00:00 | 31
+ 2022-03-15 00:00:00 | 32
+ 2022-03-25 00:00:00 | 33
+(3 rows)
+
+drop table tg_range_no_gpi;
+-- list
+create table tg_list(a int, b int)
+partition by list(a)
+(
+    partition p1 values (0,3,6),
+    partition p2 values (1,4,7),
+    partition p3 values (default)
+);
+create index i_tg_list_global_b on tg_list(b) global;
+create index i_tg_list_global_a_b on tg_list(a,b) global;
+create index i_tg_list_local_a on tg_list(a) local;
+insert into tg_list select a,b from generate_series(0,8) t1(a), generate_series(0,8) t2(b);
+refresh materialized view pg_partition_before_truncate;
+begin;
+alter table tg_list truncate partition p1 update global index;
+alter table tg_list truncate partition p2 update global index;
+alter table tg_list truncate partition p3 update global index;
+select relname, reloptions, boundaries from pg_partition_before_truncate
+    where parentid = (select oid from pg_class where relname = 'tg_list') order by oid;
+ relname |                    reloptions                     | boundaries 
+---------+---------------------------------------------------+------------
+ tg_list | {orientation=row,compression=no,wait_clean_gpi=n} | 
+ p1      | {orientation=row,compression=no}                  | {0,3,6}
+ p2      | {orientation=row,compression=no}                  | {1,4,7}
+ p3      | {orientation=row,compression=no}                  | {NULL}
+(4 rows)
+
+select relname, reloptions, boundaries from pg_partition
+    where parentid = (select oid from pg_class where relname = 'tg_list') order by oid;
+ relname |                    reloptions                     | boundaries 
+---------+---------------------------------------------------+------------
+ tg_list | {orientation=row,compression=no,wait_clean_gpi=y} | 
+ p1      |                                                   | {0,3,6}
+ p2      |                                                   | {1,4,7}
+ p3      |                                                   | {NULL}
+(4 rows)
+
+select * from check_truncate_results where tablename = 'tg_list';
+ tablename | relname | oid_changed | parentid_ok | boundaries_ok 
+-----------+---------+-------------+-------------+---------------
+ tg_list   | tg_list | f           | t           | 
+ tg_list   | p1      | t           | t           | t
+ tg_list   | p2      | t           | t           | t
+ tg_list   | p3      | t           | t           | t
+(4 rows)
+
+select * from tg_list;
+ a | b 
+---+---
+(0 rows)
+
+explain(costs off) select /*+ indexscan(tg_list i_tg_list_global_b) */ * from tg_list where b < 9;
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Scan using i_tg_list_global_b on tg_list
+   Index Cond: (b < 9)
+(2 rows)
+
+select /*+ indexscan(tg_list i_tg_list_global_b) */ * from tg_list where b < 9;
+ a | b 
+---+---
+(0 rows)
+
+explain(costs off) select /*+ indexscan(tg_list i_tg_list_local_a) */ * from tg_list where a < 9;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Index Scan using i_tg_list_local_a on tg_list
+         Index Cond: (a < 9)
+         Selected Partitions:  1..3
+(5 rows)
+
+select /*+ indexscan(tg_list i_tg_list_local_a) */ * from tg_list where a << 9;
+ a | b 
+---+---
+(0 rows)
+
+rollback;
+select relname, reloptions, boundaries from pg_partition_before_truncate
+    where parentid = (select oid from pg_class where relname = 'tg_list') order by oid;
+ relname |                    reloptions                     | boundaries 
+---------+---------------------------------------------------+------------
+ tg_list | {orientation=row,compression=no,wait_clean_gpi=n} | 
+ p1      | {orientation=row,compression=no}                  | {0,3,6}
+ p2      | {orientation=row,compression=no}                  | {1,4,7}
+ p3      | {orientation=row,compression=no}                  | {NULL}
+(4 rows)
+
+select relname, reloptions, boundaries from pg_partition
+    where parentid = (select oid from pg_class where relname = 'tg_list') order by oid;
+ relname |                    reloptions                     | boundaries 
+---------+---------------------------------------------------+------------
+ tg_list | {orientation=row,compression=no,wait_clean_gpi=y} | 
+ p1      | {orientation=row,compression=no}                  | {0,3,6}
+ p2      | {orientation=row,compression=no}                  | {1,4,7}
+ p3      | {orientation=row,compression=no}                  | {NULL}
+(4 rows)
+
+select * from check_truncate_results where tablename = 'tg_list';
+ tablename | relname | oid_changed | parentid_ok | boundaries_ok 
+-----------+---------+-------------+-------------+---------------
+ tg_list   | tg_list | f           | t           | 
+ tg_list   | p1      | f           | t           | t
+ tg_list   | p2      | f           | t           | t
+ tg_list   | p3      | f           | t           | t
+(4 rows)
+
+select * from tg_list;
+ a | b 
+---+---
+ 2 | 0
+ 2 | 1
+ 2 | 2
+ 2 | 3
+ 2 | 4
+ 2 | 5
+ 2 | 6
+ 2 | 7
+ 2 | 8
+ 5 | 0
+ 5 | 1
+ 5 | 2
+ 5 | 3
+ 5 | 4
+ 5 | 5
+ 5 | 6
+ 5 | 7
+ 5 | 8
+ 8 | 0
+ 8 | 1
+ 8 | 2
+ 8 | 3
+ 8 | 4
+ 8 | 5
+ 8 | 6
+ 8 | 7
+ 8 | 8
+ 1 | 0
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+ 1 | 7
+ 1 | 8
+ 4 | 0
+ 4 | 1
+ 4 | 2
+ 4 | 3
+ 4 | 4
+ 4 | 5
+ 4 | 6
+ 4 | 7
+ 4 | 8
+ 7 | 0
+ 7 | 1
+ 7 | 2
+ 7 | 3
+ 7 | 4
+ 7 | 5
+ 7 | 6
+ 7 | 7
+ 7 | 8
+ 0 | 0
+ 0 | 1
+ 0 | 2
+ 0 | 3
+ 0 | 4
+ 0 | 5
+ 0 | 6
+ 0 | 7
+ 0 | 8
+ 3 | 0
+ 3 | 1
+ 3 | 2
+ 3 | 3
+ 3 | 4
+ 3 | 5
+ 3 | 6
+ 3 | 7
+ 3 | 8
+ 6 | 0
+ 6 | 1
+ 6 | 2
+ 6 | 3
+ 6 | 4
+ 6 | 5
+ 6 | 6
+ 6 | 7
+ 6 | 8
+(81 rows)
+
+explain(costs off) select /*+ indexscan(tg_list i_tg_list_global_b) */ * from tg_list where b < 9;
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Scan using i_tg_list_global_b on tg_list
+   Index Cond: (b < 9)
+(2 rows)
+
+select /*+ indexscan(tg_list i_tg_list_global_b) */ * from tg_list where b < 9;
+ a | b 
+---+---
+ 8 | 0
+ 7 | 0
+ 6 | 0
+ 5 | 0
+ 4 | 0
+ 3 | 0
+ 2 | 0
+ 1 | 0
+ 0 | 0
+ 8 | 1
+ 7 | 1
+ 6 | 1
+ 5 | 1
+ 4 | 1
+ 3 | 1
+ 2 | 1
+ 1 | 1
+ 0 | 1
+ 8 | 2
+ 7 | 2
+ 6 | 2
+ 5 | 2
+ 4 | 2
+ 3 | 2
+ 2 | 2
+ 1 | 2
+ 0 | 2
+ 8 | 3
+ 7 | 3
+ 6 | 3
+ 5 | 3
+ 4 | 3
+ 3 | 3
+ 2 | 3
+ 1 | 3
+ 0 | 3
+ 8 | 4
+ 7 | 4
+ 6 | 4
+ 5 | 4
+ 4 | 4
+ 3 | 4
+ 2 | 4
+ 1 | 4
+ 0 | 4
+ 8 | 5
+ 7 | 5
+ 6 | 5
+ 5 | 5
+ 4 | 5
+ 3 | 5
+ 2 | 5
+ 1 | 5
+ 0 | 5
+ 8 | 6
+ 7 | 6
+ 6 | 6
+ 5 | 6
+ 4 | 6
+ 3 | 6
+ 2 | 6
+ 1 | 6
+ 0 | 6
+ 8 | 7
+ 7 | 7
+ 6 | 7
+ 5 | 7
+ 4 | 7
+ 3 | 7
+ 2 | 7
+ 1 | 7
+ 0 | 7
+ 8 | 8
+ 7 | 8
+ 6 | 8
+ 5 | 8
+ 4 | 8
+ 3 | 8
+ 2 | 8
+ 1 | 8
+ 0 | 8
+(81 rows)
+
+explain(costs off) select /*+ indexscan(tg_list i_tg_list_local_a) */ * from tg_list where a < 9;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Index Scan using i_tg_list_local_a on tg_list
+         Index Cond: (a < 9)
+         Selected Partitions:  1..3
+(5 rows)
+
+select /*+ indexscan(tg_list i_tg_list_local_a) */ * from tg_list where a < 9;
+ a | b 
+---+---
+ 2 | 8
+ 2 | 7
+ 2 | 6
+ 2 | 5
+ 2 | 4
+ 2 | 3
+ 2 | 2
+ 2 | 1
+ 2 | 0
+ 5 | 8
+ 5 | 7
+ 5 | 6
+ 5 | 5
+ 5 | 4
+ 5 | 3
+ 5 | 2
+ 5 | 1
+ 5 | 0
+ 8 | 8
+ 8 | 7
+ 8 | 6
+ 8 | 5
+ 8 | 4
+ 8 | 3
+ 8 | 2
+ 8 | 1
+ 8 | 0
+ 1 | 8
+ 1 | 7
+ 1 | 6
+ 1 | 5
+ 1 | 4
+ 1 | 3
+ 1 | 2
+ 1 | 1
+ 1 | 0
+ 4 | 8
+ 4 | 7
+ 4 | 6
+ 4 | 5
+ 4 | 4
+ 4 | 3
+ 4 | 2
+ 4 | 1
+ 4 | 0
+ 7 | 8
+ 7 | 7
+ 7 | 6
+ 7 | 5
+ 7 | 4
+ 7 | 3
+ 7 | 2
+ 7 | 1
+ 7 | 0
+ 0 | 8
+ 0 | 7
+ 0 | 6
+ 0 | 5
+ 0 | 4
+ 0 | 3
+ 0 | 2
+ 0 | 1
+ 0 | 0
+ 3 | 8
+ 3 | 7
+ 3 | 6
+ 3 | 5
+ 3 | 4
+ 3 | 3
+ 3 | 2
+ 3 | 1
+ 3 | 0
+ 6 | 8
+ 6 | 7
+ 6 | 6
+ 6 | 5
+ 6 | 4
+ 6 | 3
+ 6 | 2
+ 6 | 1
+ 6 | 0
+(81 rows)
+
+drop table tg_list;
+-- hash
+create table tg_hash(a int, b int)
+partition by hash(a)
+(
+    partition p1,
+    partition p2,
+    partition p3
+);
+create index i_tg_hash_global_b on tg_hash(b) global;
+create index i_tg_hash_global_a_b on tg_hash(a,b) global;
+create index i_tg_hash_local_a on tg_hash(a) local;
+insert into tg_hash select a,b from generate_series(0,8) t1(a), generate_series(0,8) t2(b);
+refresh materialized view pg_partition_before_truncate;
+begin;
+alter table tg_hash truncate partition p1 update global index;
+alter table tg_hash truncate partition p2 update global index;
+select relname, reloptions, boundaries from pg_partition_before_truncate
+    where parentid = (select oid from pg_class where relname = 'tg_hash') order by oid;
+ relname |                    reloptions                     | boundaries 
+---------+---------------------------------------------------+------------
+ tg_hash | {orientation=row,compression=no,wait_clean_gpi=n} | 
+ p1      | {orientation=row,compression=no}                  | {0}
+ p2      | {orientation=row,compression=no}                  | {1}
+ p3      | {orientation=row,compression=no}                  | {2}
+(4 rows)
+
+select relname, reloptions, boundaries from pg_partition
+    where parentid = (select oid from pg_class where relname = 'tg_hash') order by oid;
+ relname |                    reloptions                     | boundaries 
+---------+---------------------------------------------------+------------
+ tg_hash | {orientation=row,compression=no,wait_clean_gpi=y} | 
+ p3      | {orientation=row,compression=no}                  | {2}
+ p1      |                                                   | {0}
+ p2      |                                                   | {1}
+(4 rows)
+
+select * from check_truncate_results where tablename = 'tg_hash';
+ tablename | relname | oid_changed | parentid_ok | boundaries_ok 
+-----------+---------+-------------+-------------+---------------
+ tg_hash   | tg_hash | f           | t           | 
+ tg_hash   | p1      | t           | t           | t
+ tg_hash   | p2      | t           | t           | t
+ tg_hash   | p3      | f           | t           | t
+(4 rows)
+
+select * from tg_hash;
+ a | b 
+---+---
+ 3 | 0
+ 3 | 1
+ 3 | 2
+ 3 | 3
+ 3 | 4
+ 3 | 5
+ 3 | 6
+ 3 | 7
+ 3 | 8
+ 5 | 0
+ 5 | 1
+ 5 | 2
+ 5 | 3
+ 5 | 4
+ 5 | 5
+ 5 | 6
+ 5 | 7
+ 5 | 8
+(18 rows)
+
+explain(costs off) select /*+ indexscan(tg_hash i_tg_hash_global_b) */ * from tg_hash where b < 9;
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Scan using i_tg_hash_global_b on tg_hash
+   Index Cond: (b < 9)
+(2 rows)
+
+select /*+ indexscan(tg_hash i_tg_hash_global_b) */ * from tg_hash where b < 9;
+ a | b 
+---+---
+ 5 | 0
+ 3 | 0
+ 5 | 1
+ 3 | 1
+ 5 | 2
+ 3 | 2
+ 5 | 3
+ 3 | 3
+ 5 | 4
+ 3 | 4
+ 5 | 5
+ 3 | 5
+ 5 | 6
+ 3 | 6
+ 5 | 7
+ 3 | 7
+ 5 | 8
+ 3 | 8
+(18 rows)
+
+explain(costs off) select /*+ indexscan(tg_hash i_tg_hash_local_a) */ * from tg_hash where a < 9;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Index Scan using i_tg_hash_local_a on tg_hash
+         Index Cond: (a < 9)
+         Selected Partitions:  1..3
+(5 rows)
+
+select /*+ indexscan(tg_hash i_tg_hash_local_a) */ * from tg_hash where a << 9;
+ a | b 
+---+---
+ 3 | 0
+ 3 | 1
+ 3 | 2
+ 3 | 3
+ 3 | 4
+ 3 | 5
+ 3 | 6
+ 3 | 7
+ 3 | 8
+ 5 | 0
+ 5 | 1
+ 5 | 2
+ 5 | 3
+ 5 | 4
+ 5 | 5
+ 5 | 6
+ 5 | 7
+ 5 | 8
+(18 rows)
+
+rollback;
+select relname, reloptions, boundaries from pg_partition_before_truncate
+    where parentid = (select oid from pg_class where relname = 'tg_hash') order by oid;
+ relname |                    reloptions                     | boundaries 
+---------+---------------------------------------------------+------------
+ tg_hash | {orientation=row,compression=no,wait_clean_gpi=n} | 
+ p1      | {orientation=row,compression=no}                  | {0}
+ p2      | {orientation=row,compression=no}                  | {1}
+ p3      | {orientation=row,compression=no}                  | {2}
+(4 rows)
+
+select relname, reloptions, boundaries from pg_partition
+    where parentid = (select oid from pg_class where relname = 'tg_hash') order by oid;
+ relname |                    reloptions                     | boundaries 
+---------+---------------------------------------------------+------------
+ tg_hash | {orientation=row,compression=no,wait_clean_gpi=y} | 
+ p1      | {orientation=row,compression=no}                  | {0}
+ p2      | {orientation=row,compression=no}                  | {1}
+ p3      | {orientation=row,compression=no}                  | {2}
+(4 rows)
+
+select * from check_truncate_results where tablename = 'tg_hash';
+ tablename | relname | oid_changed | parentid_ok | boundaries_ok 
+-----------+---------+-------------+-------------+---------------
+ tg_hash   | tg_hash | f           | t           | 
+ tg_hash   | p1      | f           | t           | t
+ tg_hash   | p2      | f           | t           | t
+ tg_hash   | p3      | f           | t           | t
+(4 rows)
+
+select * from tg_hash;
+ a | b 
+---+---
+ 3 | 0
+ 3 | 1
+ 3 | 2
+ 3 | 3
+ 3 | 4
+ 3 | 5
+ 3 | 6
+ 3 | 7
+ 3 | 8
+ 5 | 0
+ 5 | 1
+ 5 | 2
+ 5 | 3
+ 5 | 4
+ 5 | 5
+ 5 | 6
+ 5 | 7
+ 5 | 8
+ 0 | 0
+ 0 | 1
+ 0 | 2
+ 0 | 3
+ 0 | 4
+ 0 | 5
+ 0 | 6
+ 0 | 7
+ 0 | 8
+ 2 | 0
+ 2 | 1
+ 2 | 2
+ 2 | 3
+ 2 | 4
+ 2 | 5
+ 2 | 6
+ 2 | 7
+ 2 | 8
+ 6 | 0
+ 6 | 1
+ 6 | 2
+ 6 | 3
+ 6 | 4
+ 6 | 5
+ 6 | 6
+ 6 | 7
+ 6 | 8
+ 7 | 0
+ 7 | 1
+ 7 | 2
+ 7 | 3
+ 7 | 4
+ 7 | 5
+ 7 | 6
+ 7 | 7
+ 7 | 8
+ 1 | 0
+ 1 | 1
+ 1 | 2
+ 1 | 3
+ 1 | 4
+ 1 | 5
+ 1 | 6
+ 1 | 7
+ 1 | 8
+ 4 | 0
+ 4 | 1
+ 4 | 2
+ 4 | 3
+ 4 | 4
+ 4 | 5
+ 4 | 6
+ 4 | 7
+ 4 | 8
+ 8 | 0
+ 8 | 1
+ 8 | 2
+ 8 | 3
+ 8 | 4
+ 8 | 5
+ 8 | 6
+ 8 | 7
+ 8 | 8
+(81 rows)
+
+explain(costs off) select /*+ indexscan(tg_hash i_tg_hash_global_b) */ * from tg_hash where b < 9;
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Scan using i_tg_hash_global_b on tg_hash
+   Index Cond: (b < 9)
+(2 rows)
+
+select /*+ indexscan(tg_hash i_tg_hash_global_b) */ * from tg_hash where b < 9;
+ a | b 
+---+---
+ 8 | 0
+ 7 | 0
+ 6 | 0
+ 5 | 0
+ 4 | 0
+ 3 | 0
+ 2 | 0
+ 1 | 0
+ 0 | 0
+ 8 | 1
+ 7 | 1
+ 6 | 1
+ 5 | 1
+ 4 | 1
+ 3 | 1
+ 2 | 1
+ 1 | 1
+ 0 | 1
+ 8 | 2
+ 7 | 2
+ 6 | 2
+ 5 | 2
+ 4 | 2
+ 3 | 2
+ 2 | 2
+ 1 | 2
+ 0 | 2
+ 8 | 3
+ 7 | 3
+ 6 | 3
+ 5 | 3
+ 4 | 3
+ 3 | 3
+ 2 | 3
+ 1 | 3
+ 0 | 3
+ 8 | 4
+ 7 | 4
+ 6 | 4
+ 5 | 4
+ 4 | 4
+ 3 | 4
+ 2 | 4
+ 1 | 4
+ 0 | 4
+ 8 | 5
+ 7 | 5
+ 6 | 5
+ 5 | 5
+ 4 | 5
+ 3 | 5
+ 2 | 5
+ 1 | 5
+ 0 | 5
+ 8 | 6
+ 7 | 6
+ 6 | 6
+ 5 | 6
+ 4 | 6
+ 3 | 6
+ 2 | 6
+ 1 | 6
+ 0 | 6
+ 8 | 7
+ 7 | 7
+ 6 | 7
+ 5 | 7
+ 4 | 7
+ 3 | 7
+ 2 | 7
+ 1 | 7
+ 0 | 7
+ 8 | 8
+ 7 | 8
+ 6 | 8
+ 5 | 8
+ 4 | 8
+ 3 | 8
+ 2 | 8
+ 1 | 8
+ 0 | 8
+(81 rows)
+
+explain(costs off) select /*+ indexscan(tg_hash i_tg_hash_local_a) */ * from tg_hash where a < 9;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Partition Iterator
+   Iterations: 3
+   ->  Partitioned Index Scan using i_tg_hash_local_a on tg_hash
+         Index Cond: (a < 9)
+         Selected Partitions:  1..3
+(5 rows)
+
+select /*+ indexscan(tg_hash i_tg_hash_local_a) */ * from tg_hash where a < 9;
+ a | b 
+---+---
+ 3 | 8
+ 3 | 7
+ 3 | 6
+ 3 | 5
+ 3 | 4
+ 3 | 3
+ 3 | 2
+ 3 | 1
+ 3 | 0
+ 5 | 8
+ 5 | 7
+ 5 | 6
+ 5 | 5
+ 5 | 4
+ 5 | 3
+ 5 | 2
+ 5 | 1
+ 5 | 0
+ 0 | 8
+ 0 | 7
+ 0 | 6
+ 0 | 5
+ 0 | 4
+ 0 | 3
+ 0 | 2
+ 0 | 1
+ 0 | 0
+ 2 | 8
+ 2 | 7
+ 2 | 6
+ 2 | 5
+ 2 | 4
+ 2 | 3
+ 2 | 2
+ 2 | 1
+ 2 | 0
+ 6 | 8
+ 6 | 7
+ 6 | 6
+ 6 | 5
+ 6 | 4
+ 6 | 3
+ 6 | 2
+ 6 | 1
+ 6 | 0
+ 7 | 8
+ 7 | 7
+ 7 | 6
+ 7 | 5
+ 7 | 4
+ 7 | 3
+ 7 | 2
+ 7 | 1
+ 7 | 0
+ 1 | 8
+ 1 | 7
+ 1 | 6
+ 1 | 5
+ 1 | 4
+ 1 | 3
+ 1 | 2
+ 1 | 1
+ 1 | 0
+ 4 | 8
+ 4 | 7
+ 4 | 6
+ 4 | 5
+ 4 | 4
+ 4 | 3
+ 4 | 2
+ 4 | 1
+ 4 | 0
+ 8 | 8
+ 8 | 7
+ 8 | 6
+ 8 | 5
+ 8 | 4
+ 8 | 3
+ 8 | 2
+ 8 | 1
+ 8 | 0
+(81 rows)
+
+drop table tg_hash;
+-- 清理过程
+drop view check_truncate_results;
+drop materialized view pg_partition_before_truncate;

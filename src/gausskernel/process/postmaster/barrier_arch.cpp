@@ -85,6 +85,7 @@ static void WaitBarrierArch(XLogRecPtr barrierLsn, const char *slotName)
             (errmsg("WaitBarrierArch start: 0x%lx", barrierLsn)));
     
     int cnt = 0;
+    const int interval = 100;
     do {
         ArchiveTaskStatus *archive_task_status = NULL;
         archive_task_status = find_archive_task_status(slotName);
@@ -104,8 +105,17 @@ static void WaitBarrierArch(XLogRecPtr barrierLsn, const char *slotName)
                 " due to administrator command")));
         }
         pg_usleep(100000L);
-        cnt++;
-        
+        if (t_thrd.barrier_arch.lastArchiveLoc == pg_atomic_read_u64(&archive_task_status->archived_lsn)) {
+            cnt++;
+            if ((cnt % interval) == 0) {
+                ereport(WARNING, (errmsg("[WaitBarrierArch] arch thread now archived"
+                    " lsn: %08X/%08X, timeout count: %d", (uint32)(t_thrd.barrier_arch.lastArchiveLoc >> 32),
+                    (uint32)t_thrd.barrier_arch.lastArchiveLoc, cnt)));
+            }
+        } else {
+            cnt = 0;
+        }
+        t_thrd.barrier_arch.lastArchiveLoc = pg_atomic_read_u64(&archive_task_status->archived_lsn);
         if (cnt > WAIT_ARCHIVE_TIMEOUT) {
             ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), errmsg("Wait archived timeout.")));
         }
@@ -159,7 +169,6 @@ void ProcessBarrierQueryArchive(char* id)
 static void BarrierArchWakenStop(SIGNAL_ARGS)
 {
     t_thrd.barrier_arch.ready_to_stop = true;
-    ereport(LOG, (errmsg("[BarrierArch] barrier_arch thread shut down.")));
 }
 
 static void BarrierArchSighupHandler(SIGNAL_ARGS)
@@ -200,6 +209,9 @@ static PGXCNodeAllHandles* GetAllNodesHandles()
 
     conn_handles = get_handles(barrierDataNodeList, barrierCoordList, false);
 
+    list_free(barrierCoordList);
+    list_free(barrierDataNodeList);
+
     return conn_handles;
 }
 
@@ -210,6 +222,8 @@ static void SendBarrierArchRequest(const PGXCNodeAllHandles* handles, int count,
     int barrier_idlen;
     errno_t rc;
     char barrierInfo[BARRIER_ARCH_INFO_LEN];
+
+    ereport(LOG, (errmsg("Start to send barrier arch request to all nodes.")));
 
     for (conn = 0; conn < count; conn++) {
         PGXCNodeHandle* handle = NULL;
@@ -297,15 +311,17 @@ static void CheckBarrierArchCommandStatus(const PGXCNodeAllHandles* conn_handles
 static void QueryBarrierArch(PGXCNodeAllHandles* handles, ArchiveConfig *archive_obs)
 {
     int connCnt = handles->co_conn_count + handles->dn_conn_count;
-    if (connCnt >= g_instance.archive_obs_cxt.max_node_cnt) {
-        ereport(WARNING, (errmsg("current cn get connCnt: <%d> max than cluster connCnt: <%d>", 
-            connCnt,  g_instance.archive_obs_cxt.max_node_cnt)));
+    SpinLockAcquire(&g_instance.archive_obs_cxt.barrier_lock);
+    int archivMaxNodeCnt = g_instance.archive_obs_cxt.max_node_cnt;
+    if (connCnt >= archivMaxNodeCnt) {
+        SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
+        ereport(DEBUG2, (errmsg("current cn get connCnt: <%d> max than cluster connCnt: <%d>", 
+            connCnt, archivMaxNodeCnt)));
         return;
     }
     
     ArchiveBarrierLsnInfo barrierLsnInfo[g_instance.archive_obs_cxt.max_node_cnt];
 
-    SpinLockAcquire(&g_instance.archive_obs_cxt.barrier_lock);
     if (strncmp(t_thrd.barrier_arch.barrierName, g_instance.archive_obs_cxt.barrierName, 
         strlen(g_instance.archive_obs_cxt.barrierName)) == 0) {
         SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
@@ -326,9 +342,8 @@ static void QueryBarrierArch(PGXCNodeAllHandles* handles, ArchiveConfig *archive
     errorno = memcpy_s(&barrierLsnInfo, sizeof(ArchiveBarrierLsnInfo) * g_instance.archive_obs_cxt.max_node_cnt, 
                        g_instance.archive_obs_cxt.barrier_lsn_info, 
                        sizeof(ArchiveBarrierLsnInfo) * g_instance.archive_obs_cxt.max_node_cnt);
-    securec_check(errorno, "\0", "\0");
-    
     SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
+    securec_check(errorno, "\0", "\0");
     
     SendBarrierArchRequest(handles, connCnt, barrierLsnInfo);
 
@@ -383,6 +398,8 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
 
     ereport(LOG, (errmsg("[BarrierArch] barrier arch thread starts. slot name: %s", t_thrd.barrier_arch.slot_name)));
 
+    on_shmem_exit(PGXCNodeCleanAndRelease, 0);
+
     BarrierArchSetupSignalHook();
 
     BaseInit();
@@ -424,6 +441,9 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
         /* Report the error to the server log */
         EmitErrorReport();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
+
         /* release resource */
         LWLockReleaseAll();
 
@@ -457,7 +477,6 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
     (void)gs_signal_unblock_sigusr2();
 
     SetProcessingMode(NormalProcessing);
-    on_shmem_exit(PGXCNodeCleanAndRelease, 0);
 
     pg_usleep_retry(1000000L, 0);
     
@@ -476,18 +495,22 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
         
         ereport(DEBUG1, (errmsg("[BarrierArch] Current node is not first node: %s",
             g_instance.attr.attr_common.PGXCNodeName)));
-        if (u_sess->sig_cxt.got_PoolReload) {
+        if (IsGotPoolReload()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         }
         CHECK_FOR_INTERRUPTS();
         pg_usleep(10000000L);
     } while (1);
 
-    if (g_instance.archive_obs_cxt.barrier_lsn_info == NULL) {
+    SpinLockAcquire(&g_instance.archive_obs_cxt.barrier_lock);
+    if (g_instance.archive_obs_cxt.barrier_lsn_info == NULL ||
+        g_instance.archive_obs_cxt.max_node_cnt == 0) {
+        SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
         ereport(WARNING, (errmsg("[BarrierArch] barrier_lsn_info not alloc.")));
         return;
     }
+    SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
 #endif
     ereport(DEBUG1,
         (errmsg("[BarrierArch] Init connections with CN/DN, dn count : %d, cn count : %d",
@@ -502,14 +525,15 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
         }
 
 #ifdef ENABLE_MULTIPLE_NODES
-        if (u_sess->sig_cxt.got_PoolReload) {
+        if (IsGotPoolReload()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
             if (!IsFirstCn())
                 break;
         }
+
         PGXCNodeAllHandles* handles = GetAllNodesHandles();
-        
+
         QueryBarrierArch(handles, &obsArchiveSlot->archive_config);
         
         pfree_pgxc_all_handles(handles);

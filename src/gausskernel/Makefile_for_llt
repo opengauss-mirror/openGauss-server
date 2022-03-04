@@ -84,7 +84,7 @@ LIBS := $(filter-out -lreadline -ledit -ltermcap -lncurses -lcurses, $(LIBS))
 # libobs component
 ###############################################################################
 LIBS += -L$(LIBCURL_LIB_PATH) -L$(LIBOPENSSL_LIB_PATH)
-LIBS += -leSDKOBS -leSDKLogAPI -lssl -lcrypto -lpcre -liconv -lnghttp2 -llog4cpp -lsecurec -lcurl
+LIBS += -leSDKOBS -leSDKLogAPI -lssl -lcrypto -lpcre -liconv -lnghttp2 -llog4cpp -l$(SECURE_C_CHECK) -lcurl
 LDFLAGS += -L$(LIBOBS_LIB_PATH)
 CXXFLAGS += -I$(LIBOBS_INCLUDE_PATH)
 
@@ -94,6 +94,7 @@ CXXFLAGS += -I$(LIBOBS_INCLUDE_PATH)
 LIBS += -llz4
 LDFLAGS += -L$(LZ4_LIB_PATH)
 CXXFLAGS += -I$(LZ4_INCLUDE_PATH)
+
 
 ##############################################################################
 # libcjson component
@@ -116,6 +117,13 @@ JARPLJAVA = pljava.jar
 LIBS += -l$(JEMALLOC_LIB_NAME)
 LDFLAGS += -L$(JEMALLOC_LIB_PATH)
 CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
+
+##########################################################################
+# append xgboost for xgboost algorithm : xgboost.so
+############################################################################
+LIBS += -lxgboost
+LDFLAGS += -L$(XGBOOST_LIB_PATH)
+CXXFLAGS+= -I$(XGBOOST_INCLUDE_PATH)
 
 #############################################################################
 # cgroup library
@@ -475,6 +483,7 @@ endif
 	cp $(LIBOBS_LIB_PATH)/libnghttp* '$(DESTDIR)$(libdir)/'
 	cp -d $(ZLIB_LIB_PATH)/libz* '$(DESTDIR)$(libdir)/'
 	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
+	cp -d $(XGBOOST_LIB_PATH)/libxgboost* '$(DESTDIR)$(libdir)/'
 	cp -d $(CJSON_LIB_PATH)/libcjson* '$(DESTDIR)$(libdir)/'
 	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'

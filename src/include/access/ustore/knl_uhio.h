@@ -22,12 +22,15 @@
 #define UHEAP_INSERT_SKIP_WAL HEAP_INSERT_SKIP_WAL
 #define UHEAP_INSERT_SKIP_FSM HEAP_INSERT_SKIP_FSM
 #define UHEAP_INSERT_FROZEN HEAP_INSERT_FROZEN
+#define UHEAP_INSERT_EXTEND 0x0020
+
+#define GET_BUF_FOR_UTUPLE_LOOP_LIMIT 2
 
 extern BlockNumber RelationPruneOptional(Relation relation, Size requiredSize);
 extern BlockNumber RelationPruneBlockAndReturn(Relation relation, BlockNumber start_block,
     BlockNumber max_blocks_to_scan, Size required_size, BlockNumber *next_block);
 
 extern Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffer, int options,
-    BulkInsertState bistate, bool switch_buf = false);
+    BulkInsertState bistate);
 
 #endif

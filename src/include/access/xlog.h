@@ -231,7 +231,10 @@ struct WALInitSegLockPadded {
     0x0002                          /* Like shutdown checkpoint, \
                                      * but issued at end of WAL  \
                                      * recovery */
-#define CHECKPOINT_FILE_SYNC 0x0004 /* File sync */
+
+/* standby file repair, need wait all dirty page flush, can remove old bad file */
+#define CHECKPOINT_FLUSH_DIRTY 0x0004 /* only flush dirty page, don't update redo point */
+
 #define CHECKPOINT_IMMEDIATE 0x0008 /* Do it without delays */
 #define CHECKPOINT_FORCE 0x0010     /* Force even if no activity */
 /* These are important to RequestCheckpoint */
@@ -245,6 +248,7 @@ struct WALInitSegLockPadded {
 #define STRATEGY_BACKWRITE 0x0200   /* strategy backwrite */
 #define LAZY_BACKWRITE 0x0400       /* lazy backwrite */
 #define PAGERANGE_BACKWRITE 0x0800  /* PageRangeBackWrite */
+
 
 /* Checkpoint statistics */
 typedef struct CheckpointStatsData {
@@ -341,10 +345,296 @@ typedef struct TermFileData {
     bool finish_redo;
 } TermFileData;
 
+/*
+ * Inserting to WAL is protected by a small fixed number of WAL insertion
+ * locks. To insert to the WAL, you must hold one of the locks - it doesn't
+ * matter which one. To lock out other concurrent insertions, you must hold
+ * of them. Each WAL insertion lock consists of a lightweight lock, plus an
+ * indicator of how far the insertion has progressed (insertingAt).
+ *
+ * The insertingAt values are read when a process wants to flush WAL from
+ * the in-memory buffers to disk, to check that all the insertions to the
+ * region the process is about to write out have finished. You could simply
+ * wait for all currently in-progress insertions to finish, but the
+ * insertingAt indicator allows you to ignore insertions to later in the WAL,
+ * so that you only wait for the insertions that are modifying the buffers
+ * you're about to write out.
+ *
+ * This isn't just an optimization. If all the WAL buffers are dirty, an
+ * inserter that's holding a WAL insert lock might need to evict an old WAL
+ * buffer, which requires flushing the WAL. If it's possible for an inserter
+ * to block on another inserter unnecessarily, deadlock can arise when two
+ * inserters holding a WAL insert lock wait for each other to finish their
+ * insertion.
+ *
+ * Small WAL records that don't cross a page boundary never update the value,
+ * the WAL record is just copied to the page and the lock is released. But
+ * to avoid the deadlock-scenario explained above, the indicator is always
+ * updated before sleeping while holding an insertion lock.
+ */
+typedef struct {
+    LWLock lock;
+#ifdef __aarch64__
+    pg_atomic_uint32 xlogGroupFirst;
+#endif
+    XLogRecPtr insertingAt;
+} WALInsertLock;
+
+/*
+ * All the WAL insertion locks are allocated as an array in shared memory. We
+ * force the array stride to be a power of 2, which saves a few cycles in
+ * indexing, but more importantly also ensures that individual slots don't
+ * cross cache line boundaries. (Of course, we have to also ensure that the
+ * array start address is suitably aligned.)
+ */
+typedef union WALInsertLockPadded {
+    WALInsertLock l;
+    char pad[PG_CACHE_LINE_SIZE];
+} WALInsertLockPadded;
+
+/*
+ * Shared state data for WAL insertion.
+ */
+typedef struct XLogCtlInsert {
+    /*
+     * CurrBytePos is the end of reserved WAL. The next record will be inserted
+     * at that position. PrevBytePos is the start position of the previously
+     * inserted (or rather, reserved) record - it is copied to the the prev-
+     * link of the next record. These are stored as "usable byte positions"
+     * rather than XLogRecPtrs (see XLogBytePosToRecPtr()).
+     */
+    uint64 CurrBytePos;
+    uint32 PrevByteSize;
+    int32 CurrLRC;
+
+#if (!defined __x86_64__) && (!defined __aarch64__)
+    slock_t insertpos_lck; /* protects CurrBytePos and PrevBytePos */
+#endif
+    /*
+     * Make sure the above heavily-contended spinlock and byte positions are
+     * on their own cache line. In particular, the RedoRecPtr and full page
+     * write variables below should be on a different cache line. They are
+     * read on every WAL insertion, but updated rarely, and we don't want
+     * those reads to steal the cache line containing Curr/PrevBytePos.
+     */
+    char pad[PG_CACHE_LINE_SIZE];
+    /*
+     * WAL insertion locks.
+     */
+    WALInsertLockPadded **WALInsertLocks;
+
+    /*
+     * fullPageWrites is the master copy used by all backends to determine
+     * whether to write full-page to WAL, instead of using process-local one.
+     * This is required because, when full_page_writes is changed by SIGHUP,
+     * we must WAL-log it before it actually affects WAL-logging by backends.
+     * Checkpointer sets at startup or after SIGHUP.
+     * To read these fields, you must hold an insertion slot. To modify them,
+     * you must hold ALL the slots.
+     */
+    XLogRecPtr RedoRecPtr; /* current redo point for insertions */
+    bool forcePageWrites;  /* forcing full-page writes for PITR? */
+    bool fullPageWrites;
+
+    /*
+     * exclusiveBackup is true if a backup started with pg_start_backup() is
+     * in progress, and nonExclusiveBackups is a counter indicating the number
+     * of streaming base backups currently in progress. forcePageWrites is set
+     * to true when either of these is non-zero. lastBackupStart is the latest
+     * checkpoint redo location used as a starting point for an online backup.
+     */
+    bool exclusiveBackup;
+    int nonExclusiveBackups;
+    XLogRecPtr lastBackupStart;
+} XLogCtlInsert;
+
+/*
+ * Total shared-memory state for XLOG.
+ */
+typedef struct XLogCtlData {
+    /* Protected by WALInsertLock: */
+    XLogCtlInsert Insert;
+
+    /* Protected by info_lck: */
+    XLogwrtRqst LogwrtRqst;
+    XLogRecPtr RedoRecPtr; /* a recent copy of Insert->RedoRecPtr */
+    TransactionId ckptXid;
+    XLogRecPtr asyncXactLSN;          /* LSN of newest async commit/abort */
+    XLogRecPtr replicationSlotMinLSN; /* oldest LSN needed by any slot */
+    XLogRecPtr replicationSlotMaxLSN; /* latest LSN for dummy startpoint */
+    XLogSegNo lastRemovedSegNo;       /* latest removed/recycled XLOG segment */
+
+    /* Time of last xlog segment switch. Protected by WALWriteLock. */
+    pg_time_t lastSegSwitchTime;
+
+    /*
+     * Protected by info_lck and WALWriteLock (you must hold either lock to
+     * read it, but both to update)
+     */
+    XLogwrtResult LogwrtResult;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * Protected by info_lck and WALWritePaxosLock (you must hold either lock to
+     * read it, but both to update)
+     */
+    XLogwrtPaxos LogwrtPaxos;
+#endif
+
+    /*
+     * Latest initialized block index in cache.
+     *
+     * To change curridx and the identity of a buffer, you need to hold
+     * WALBufMappingLock.  To change the identity of a buffer that's still
+     * dirty, the old page needs to be written out first, and for that you
+     * need WALWriteLock, and you need to ensure that there are no in-progress
+     * insertions to the page by calling WaitXLogInsertionsToFinish().
+     */
+    XLogRecPtr InitializedUpTo;
+
+    /*
+     * These values do not change after startup, although the pointed-to pages
+     * and xlblocks values certainly do.  xlblock values are protected by
+     * WALBufMappingLock.
+     */
+    char *pages;          /* buffers for unwritten XLOG pages */
+    XLogRecPtr *xlblocks; /* 1st byte ptr-s + XLOG_BLCKSZ */
+    int XLogCacheBlck;    /* highest allocated xlog buffer index */
+    TimeLineID ThisTimeLineID;
+
+    /*
+     * archiveCleanupCommand is read from recovery.conf but needs to be in
+     * shared memory so that the checkpointer process can access it.
+     */
+    char archiveCleanupCommand[MAXPGPATH];
+
+    /*
+     * SharedRecoveryInProgress indicates if we're still in crash or archive
+     * recovery.  Protected by info_lck.
+     */
+    bool SharedRecoveryInProgress;
+
+    bool IsRecoveryDone;
+
+    /*
+     * SharedHotStandbyActive indicates if we're still in crash or archive
+     * recovery.  Protected by info_lck.
+     */
+    bool SharedHotStandbyActive;
+
+    /*
+     * WalWriterSleeping indicates whether the WAL writer is currently in
+     * low-power mode (and hence should be nudged if an async commit occurs).
+     * Protected by info_lck.
+     */
+    bool WalWriterSleeping;
+
+    /*
+     * recoveryWakeupLatch is used to wake up the startup process to continue
+     * WAL replay, if it is waiting for WAL to arrive or failover trigger file
+     * to appear.
+     */
+    Latch recoveryWakeupLatch;
+
+    Latch dataRecoveryLatch;
+
+    /*
+     * During recovery, we keep a copy of the latest checkpoint record here.
+     * Used by the background writer when it wants to create a restartpoint.
+     *
+     * Protected by info_lck.
+     */
+    XLogRecPtr lastCheckPointRecPtr;
+    CheckPoint lastCheckPoint;
+
+    /* lastReplayedReadRecPtr points to the header of last apply lsn. */
+    XLogRecPtr lastReplayedReadRecPtr;
+    /*
+     * lastReplayedEndRecPtr points to end+1 of the last record successfully
+     * replayed. When we're currently replaying a record, ie. in a redo
+     * function, replayEndRecPtr points to the end+1 of the record being
+     * replayed, otherwise it's equal to lastReplayedEndRecPtr.
+     */
+    XLogRecPtr lastReplayedEndRecPtr;
+    XLogRecPtr replayEndRecPtr;
+    /* timestamp of last COMMIT/ABORT record replayed (or being replayed) */
+    TimestampTz recoveryLastXTime;
+    /* current effective recovery target timeline */
+    TimeLineID RecoveryTargetTLI;
+
+    /*
+     * timestamp of when we started replaying the current chunk of WAL data,
+     * only relevant for replication or archive recovery
+     */
+    TimestampTz currentChunkStartTime;
+    /* Are we requested to pause recovery? */
+    bool recoveryPause;
+
+    /* Are we requested to suspend recovery? */
+    bool recoverySusPend;
+
+    /*
+     * lastFpwDisableRecPtr points to the start of the last replayed
+     * XLOG_FPW_CHANGE record that instructs full_page_writes is disabled.
+     */
+    XLogRecPtr lastFpwDisableRecPtr;
+
+    /*
+     * After started up, we need to make sure that
+     * it will do full page write before the first checkpoint.
+     */
+    bool FpwBeforeFirstCkpt;
+
+    /* LSN of xlogs already tracked by CBM, which checkpoint can now recycle. */
+    XLogRecPtr cbmTrackedLSN;
+    /* the bitmap file rotate lsn requested by outter */
+    volatile XLogRecPtr cbmMaxRequestRotateLsn;
+    /* curr cbm file name  like pg_xlog_xx_xxxx_xxxx.cbm */
+    XLogRecPtr currCbmFileStartLsn;
+
+    /* if true, stale xlog segments are not recycled during checkpoint, for backup purpose */
+    bool delayXlogRecycle;
+
+    /* start point from where dropped column relation files are delayed to do physical unlinking */
+    XLogRecPtr ddlDelayStartPtr;
+
+    /* start point for logging new remain segments or extents */
+    XLogRecPtr remain_segs_start_point;
+    bool is_need_log_remain_segs;
+    XLogRecPtr remainCommitLsn;
+
+    slock_t info_lck; /* locks shared variables shown above */
+} XLogCtlData;
+
+/* Xlog flush statistics*/
+struct XlogFlushStats{
+    bool statSwitch;
+    uint64 writeTimes;
+    uint64 syncTimes;
+    uint64 totalXlogSyncBytes;
+    uint64 totalActualXlogSyncBytes;
+    uint32 avgWriteBytes;
+    uint32 avgActualWriteBytes;
+    uint32 avgSyncBytes;
+    uint32 avgActualSyncBytes;
+    uint64 totalWriteTime;
+    uint64 totalSyncTime;
+    uint64 avgWriteTime;
+    uint64 avgSyncTime;
+    uint64 currOpenXlogSegNo;
+    TimestampTz lastRestTime;
+};
+
+extern XLogSegNo GetNewestXLOGSegNo(const char* workingPath);
+/*
+ * Hint bit for whether xlog contains CSN info, which is stored in xl_term.
+ */
+#define XLOG_CONTAIN_CSN 0x80000000
+#define XLOG_MASK_TERM 0x7FFFFFFF
 
 extern void XLogMultiFileInit(int advance_xlog_file_num);
 
-extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn, bool isupgrade = false);
+extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn);
 extern void XLogWaitFlush(XLogRecPtr recptr);
 extern void XLogWaitBufferInit(XLogRecPtr recptr);
 extern void UpdateMinRecoveryPoint(XLogRecPtr lsn, bool force);
@@ -365,6 +655,7 @@ extern XLogRecPtr XLogGetReplicationSlotMinimumLSNByOther(void);
 extern XLogSegNo XLogGetLastRemovedSegno(void);
 extern void xlog_redo(XLogReaderState* record);
 extern void xlog_desc(StringInfo buf, XLogReaderState* record);
+extern const char *xlog_type_name(uint8 subtype);
 
 extern void issue_xlog_fsync(int fd, XLogSegNo segno);
 
@@ -390,13 +681,14 @@ extern XLogRecPtr GetPaxosConsensusRecPtr(void);
 #endif
 extern bool RecoveryIsPaused(void);
 extern void SetRecoveryPause(bool recoveryPause);
+extern void SetRecoverySuspend(bool recoverySuspend);
 extern TimestampTz GetLatestXTime(void);
 extern TimestampTz GetCurrentChunkReplayStartTime(void);
 extern char* XLogFileNameP(TimeLineID tli, XLogSegNo segno);
 extern pg_crc32 GetXlogRecordCrc(XLogRecPtr RecPtr, bool& crcvalid, XLogPageReadCB pagereadfunc, Size bufAlignSize);
 extern bool IsCheckPoint(XLogReaderState* record);
 extern bool IsRestartPointSafe(const XLogRecPtr checkPoint);
-extern bool HasTimelineUpdate(XLogReaderState* record, bool bOld);
+extern bool HasTimelineUpdate(XLogReaderState* record);
 extern void UpdateTimeline(CheckPoint* checkPoint);
 
 extern void UpdateControlFile(void);
@@ -431,6 +723,7 @@ extern bool CheckFinishRedoSignal(void);
 extern bool CheckPromoteSignal(void);
 extern bool CheckPrimarySignal(void);
 extern bool CheckStandbySignal(void);
+extern bool CheckCascadeStandbySignal(void);
 extern bool CheckNormalSignal(void);
 extern int CheckSwitchoverSignal(void);
 
@@ -494,7 +787,6 @@ extern char* TrimStr(const char* str);
 
 extern void CloseXlogFilesAtThreadExit(void);
 extern void SetLatestXTime(TimestampTz xtime);
-extern CheckPoint update_checkpoint(XLogReaderState* record);
 XLogRecord* XLogParallelReadNextRecord(XLogReaderState* xlogreader);
 
 void ResourceManagerStartup(void);
@@ -533,10 +825,12 @@ void ShareStorageInit();
 void FindLastRecordCheckInfoOnShareStorage(XLogRecPtr *lastRecordPtr, pg_crc32 *lastRecordCrc,
     int *lastRecordLen);
 int SharedStorageXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, 
-    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI);
+    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char *xlog_path);
 void ShareStorageSetBuildErrorAndExit(HaRebuildReason reason, bool setRcvDone = true);
-void ReserveKeyForApp();
 void rename_recovery_conf_for_roach();
+bool CheckForFailoverTrigger(void);
+bool CheckForSwitchoverTrigger(void);
+void HandleCascadeStandbyPromote(XLogRecPtr *recptr);
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 
@@ -612,5 +906,7 @@ void WriteRemainSegsFile(int fd, const char* buffer, uint32 used_len);
 void InitXlogStatuEntryTblSize();
 void CheckShareStorageWriteLock();
 XLogRecPtr GetFlushMainStandby();
+extern bool RecoveryIsSuspend(void);
 
+extern void InitUndoCountThreshold();
 #endif /* XLOG_H */

@@ -310,7 +310,9 @@ unsigned long UpdateFusion::ExecUpdate(Relation rel, ResultRelInfo* result_rel_i
         bool modifyHist = false;
 
 lreplace:
+        t_thrd.xact_cxt.ActiveLobRelid = rel->rd_id;
         tup = tableam_tops_opfusion_modify_tuple(oldtup, m_global->m_tupDesc, m_local.m_values, m_local.m_isnull, this);
+        t_thrd.xact_cxt.ActiveLobRelid = InvalidOid;
         Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
         Relation parentRel = RELATION_IS_PARTITIONED(rel) ? rel : NULL;
 

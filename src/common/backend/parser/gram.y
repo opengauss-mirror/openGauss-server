@@ -9,6 +9,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -236,11 +237,15 @@ static Node *make_node_from_scanbuf(int start_pos, int end_pos, core_yyscan_t yy
 static int64 SequenceStrGetInt64(const char *str);
 static int GetLoadType(int load_type_f, int load_type_s);
 static Node *MakeSqlLoadNode(char *colname);
+
+/* start with .. connect by related utilities */
 static bool IsConnectByRootIdent(Node* node);
 static void ValidateTripleTuple(Node* node, core_yyscan_t yyscanner, int location, char* token);
 static Node* MakeConnectByRootNode(ColumnRef* cr, int location);
 static char* MakeConnectByRootColName(char* tabname, char* colname);
 static void FilterStartWithUseCases(SelectStmt* stmt, List* locking_clause, core_yyscan_t yyscanner, int location);
+static FuncCall* MakePriorAsFunc();
+
 #ifndef ENABLE_MULTIPLE_NODES
 static bool CheckWhetherInColList(char *colname, List *col_list);
 #endif
@@ -293,6 +298,7 @@ static int errstate;
 	ResTarget			*target;
 	struct PrivTarget	*privtarget;
 	AccessPriv			*accesspriv;
+	DbPriv				*dbpriv;
 	InsertStmt			*istmt;
 	VariableSetStmt		*vsetstmt;
 /* PGXC_BEGIN */
@@ -303,7 +309,7 @@ static int errstate;
 	MergeWhenClause		*mergewhen;
 	UpsertClause *upsert;
 	EncryptionType algtype;
-    LockClauseStrength lockstrength;
+	LockClauseStrength lockstrength;
 }
 
 %type <node>	stmt schema_stmt
@@ -329,10 +335,10 @@ static int errstate;
 		DropAssertStmt DropSynonymStmt DropTrigStmt DropRuleStmt DropCastStmt DropRoleStmt DropRlsPolicyStmt
 		DropUserStmt DropdbStmt DropTableSpaceStmt DropDataSourceStmt DropDirectoryStmt DropFdwStmt
 		DropForeignServerStmt DropUserMappingStmt ExplainStmt ExecDirectStmt FetchStmt
-		GrantStmt GrantRoleStmt IndexStmt InsertStmt ListenStmt LoadStmt
+		GrantStmt GrantRoleStmt GrantDbStmt IndexStmt InsertStmt ListenStmt LoadStmt
 		LockStmt NotifyStmt ExplainableStmt PreparableStmt
 		CreateFunctionStmt CreateProcedureStmt CreatePackageStmt CreatePackageBodyStmt AlterFunctionStmt AlterProcedureStmt ReindexStmt RemoveAggrStmt
-		RemoveFuncStmt RemoveOperStmt RemovePackageStmt RenameStmt RevokeStmt RevokeRoleStmt
+		RemoveFuncStmt RemoveOperStmt RemovePackageStmt RenameStmt RevokeStmt RevokeRoleStmt RevokeDbStmt
 		RuleActionStmt RuleActionStmtOrEmpty RuleStmt
 		SecLabelStmt SelectStmt TimeCapsuleStmt TransactionStmt TruncateStmt CallFuncStmt
 		UnlistenStmt UpdateStmt VacuumStmt
@@ -351,6 +357,7 @@ static int errstate;
 		CreateAppWorkloadGroupMappingStmt AlterAppWorkloadGroupMappingStmt DropAppWorkloadGroupMappingStmt
 		MergeStmt PurgeStmt CreateMatViewStmt RefreshMatViewStmt
 		CreateWeakPasswordDictionaryStmt DropWeakPasswordDictionaryStmt
+                AlterGlobalConfigStmt DropGlobalConfigStmt
 		CreatePublicationStmt AlterPublicationStmt
 		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
 
@@ -391,11 +398,11 @@ static int errstate;
 				transaction_mode_item
 				create_extension_opt_item alter_extension_opt_item
 
-%type <ival>	opt_lock lock_type cast_context
+%type <ival>	opt_lock lock_type cast_context opt_wait
 %type <ival>	vacuum_option_list vacuum_option_elem opt_verify_options
 %type <boolean>	opt_check opt_force opt_or_replace
 				opt_grant_grant_option opt_grant_admin_option
-				opt_nowait opt_if_exists opt_with_data opt_large_seq
+				opt_nowait opt_if_exists opt_with_data opt_large_seq opt_cancelable
 
 %type <list>	OptRoleList AlterOptRoleList
 %type <defelt>	CreateOptRoleElem AlterOptRoleElem
@@ -426,7 +433,7 @@ static int errstate;
 				opt_class opt_inline_handler opt_validator validator_clause
 				opt_collate
 
-%type <range>	qualified_name OptConstrFromTable opt_index_name
+%type <range>	qualified_name insert_target OptConstrFromTable opt_index_name insert_partition_clause update_delete_partition_clause
 
 %type <str>		all_Op MathOp
 
@@ -439,7 +446,8 @@ static int errstate;
 %type <node>	grantee
 %type <list>	grantee_list
 %type <accesspriv> privilege
-%type <list>	privileges privilege_list
+%type <list>	privileges privilege_list db_privileges db_privilege_list
+%type <dbpriv>  db_privilege
 %type <str>		privilege_str
 %type <privtarget> privilege_target
 %type <funwithargs> function_with_argtypes
@@ -657,7 +665,8 @@ static int errstate;
 				interval_expr maxValueItem list_partitioning_clause hash_partitioning_clause
 				range_start_end_item range_less_than_item list_partition_item hash_partition_item
 				subpartitioning_clause range_subpartitioning_clause hash_subpartitioning_clause
-				list_subpartitioning_clause subpartition_item
+				list_subpartitioning_clause subpartition_item opt_subpartition_index_def
+                range_subpartition_index_list range_subpartition_index_item
 %type <list>	range_partition_definition_list list_partition_definition_list hash_partition_definition_list maxValueList
 			column_item_list tablespaceList opt_interval_tablespaceList
 			split_dest_partition_define_list split_dest_listsubpartition_define_list split_dest_rangesubpartition_define_list
@@ -780,7 +789,7 @@ static int errstate;
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLANKS
 	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
-	CACHE CALL CALLED CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHAR_P
+	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHAR_P
 	CHARACTER CHARACTERISTICS CHARACTERSET CHECK CHECKPOINT CLASS CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
 	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COMMENT COMMENTS COMMIT
 	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPRESS CONCURRENTLY CONDITION CONFIGURATION CONNECTION CONSTANT CONSTRAINT CONSTRAINTS
@@ -829,7 +838,7 @@ static int errstate;
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
 	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER
 
-	PACKAGE PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
+	PACKAGE PACKAGES PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
 /* PGXC_BEGIN */
 	POOL PRECEDING PRECISION
 /* PGXC_END */
@@ -862,7 +871,7 @@ static int errstate;
 	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
 	VERBOSE VERIFY VERSION_P VIEW VOLATILE
 
-	WEAK WHEN WHERE WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
+	WAIT WEAK WHEN WHERE WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
 
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
@@ -879,19 +888,24 @@ static int errstate;
 %token		NULLS_FIRST NULLS_LAST WITH_TIME INCLUDING_ALL
 			RENAME_PARTITION
 			PARTITION_FOR
+			SUBPARTITION_FOR
 			ADD_PARTITION
 			DROP_PARTITION
 			REBUILD_PARTITION
 			MODIFY_PARTITION
+			ADD_SUBPARTITION
+			DROP_SUBPARTITION
 			NOT_ENFORCED
 			VALID_BEGIN
 			DECLARE_CURSOR
+			START_WITH CONNECT_BY
 
 /* Precedence: lowest to highest */
 %nonassoc   PARTIAL_EMPTY_PREC
 %nonassoc   CLUSTER
 %nonassoc	SET				/* see relation_expr_opt_alias */
-%right      FEATURES TARGET   // DB4AI
+%right      PRIOR
+%right      FEATURES TARGET // DB4AI
 %left		UNION EXCEPT MINUS_P
 %left		INTERSECT
 %left		OR
@@ -942,7 +956,7 @@ static int errstate;
 /* Unary Operators */
 %left		AT				/* sets precedence for AT TIME ZONE */
 %left		COLLATE
-%right		UMINUS
+%right		UMINUS BY NAME_P PASSING ROW TYPE_P VALUE_P
 %left		'[' ']'
 %left		'(' ')'
 %left		TYPECAST
@@ -1039,6 +1053,7 @@ stmt :
 			| AlterOwnerStmt
 			| AlterRlsPolicyStmt
 			| AlterResourcePoolStmt
+			| AlterGlobalConfigStmt
 			| AlterSeqStmt
 			| AlterSchemaStmt
 			| AlterSubscriptionStmt
@@ -1142,6 +1157,7 @@ stmt :
 			| DropRlsPolicyStmt
 			| DropPLangStmt
 			| DropResourcePoolStmt
+			| DropGlobalConfigStmt
 			| DropRuleStmt
 			| DropStmt
 			| DropSubscriptionStmt
@@ -1159,6 +1175,7 @@ stmt :
 			| FetchStmt
 			| GrantStmt
 			| GrantRoleStmt
+			| GrantDbStmt
 			| IndexStmt
 			| InsertStmt
 			| ListenStmt
@@ -1178,6 +1195,7 @@ stmt :
 			| RenameStmt
 			| RevokeStmt
 			| RevokeRoleStmt
+			| RevokeDbStmt
 			| RuleStmt
 			| SecLabelStmt
 			| SelectStmt
@@ -1977,7 +1995,7 @@ generic_set:
 					n->name = $1;
 					n->args = $3;
 					/* if we are setting role, we switch to the new syntax which check the password of role */
-					if(!strcmp("role", n->name) || !pg_strcasecmp("session_authorization", n->name))
+					if(!pg_strcasecmp("role", n->name) || !pg_strcasecmp("session_authorization", n->name))
 					{
             			const char* message = "SET TO rolename\" not yet supported";
             			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -1999,7 +2017,7 @@ generic_set:
 					n->name = $1;
 					n->args = $3;
 					/* if we are setting role, we switch to the new syntax which check the password of role */
-					if(!strcmp("role", n->name) || !pg_strcasecmp("session_authorization", n->name))
+					if(!pg_strcasecmp("role", n->name) || !pg_strcasecmp("session_authorization", n->name))
 					{
             			const char* message = "SET TO rolename\" not yet supported";
             			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -2942,6 +2960,151 @@ alter_partition_cmd:
 				n->def = (Node*)s;
 				$$ = (Node *)n;
 			}
+		| ADD_PARTITION name VALUES '(' DEFAULT ')' OptTableSpace
+			{
+				ListPartitionDefState *p = makeNode(ListPartitionDefState);
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				AddPartitionState *s = makeNode(AddPartitionState);
+				p->partitionName = $2;
+				Const *n_default = makeNode(Const);
+				n_default->ismaxvalue = true;
+				n_default->location = -1;
+				p->boundary = list_make1(n_default);
+				p->tablespacename = $7;
+				s->partitionList = list_make1(p);
+				s->isStartEnd = false;
+				n->subtype = AT_AddPartition;
+				n->def = (Node*)s;
+				$$ = (Node *)n;
+			}
+		| ADD_PARTITION name VALUES LESS THAN
+		'(' maxValueList ')' OptTableSpace '(' subpartition_definition_list ')'
+			{
+				RangePartitionDefState *p = makeNode(RangePartitionDefState);
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				AddPartitionState *s = makeNode(AddPartitionState);
+				p->partitionName = $2;
+				p->boundary = $7;
+				p->tablespacename = $9;
+				p->subPartitionDefState = $11;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = p->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
+				s->partitionList = list_make1(p);
+				s->isStartEnd = false;
+				n->subtype = AT_AddPartition;
+				n->def = (Node*)s;
+				$$ = (Node *)n;
+			}
+		| ADD_PARTITION name VALUES '(' expr_list ')' OptTableSpace '(' subpartition_definition_list ')'
+			{
+				ListPartitionDefState *p = makeNode(ListPartitionDefState);
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				AddPartitionState *s = makeNode(AddPartitionState);
+				p->partitionName = $2;
+				p->boundary = $5;
+				p->tablespacename = $7;
+				p->subPartitionDefState = $9;
+			    int i = 0;
+				ListCell *elem = NULL;
+				List *parts = p->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
+				s->partitionList = list_make1(p);
+				s->isStartEnd = false;
+				n->subtype = AT_AddPartition;
+				n->def = (Node*)s;
+				$$ = (Node *)n;
+			}
+		| ADD_PARTITION name VALUES '(' DEFAULT ')' OptTableSpace '(' subpartition_definition_list ')'
+			{
+				ListPartitionDefState *p = makeNode(ListPartitionDefState);
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				AddPartitionState *s = makeNode(AddPartitionState);
+				p->partitionName = $2;
+				Const *n_default = makeNode(Const);
+				n_default->ismaxvalue = true;
+				n_default->location = -1;
+				p->boundary = list_make1(n_default);
+				p->tablespacename = $7;
+				p->subPartitionDefState = $9;
+			    int i = 0;
+				ListCell *elem = NULL;
+				List *parts = p->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
+				s->partitionList = list_make1(p);
+				s->isStartEnd = false;
+				n->subtype = AT_AddPartition;
+				n->def = (Node*)s;
+				$$ = (Node *)n;
+			}
+		/* ALTER TABLE MODIFY PARTITION ADD SUBPARTITION */
+		| MODIFY_PARTITION name ADD_SUBPARTITION name VALUES LESS THAN '(' maxValueList ')' OptTableSpace
+			{
+				RangePartitionDefState *p = makeNode(RangePartitionDefState);
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				AddSubPartitionState *s = makeNode(AddSubPartitionState);
+				p->partitionName = $4;
+				p->boundary = $9;
+				p->tablespacename = $11;
+				s->subPartitionList = list_make1(p);
+				s->partitionName = $2;
+				n->subtype = AT_AddSubPartition;
+				n->def = (Node*)s;
+				$$ = (Node *)n;
+			}
+		| MODIFY_PARTITION name ADD_SUBPARTITION name VALUES '(' expr_list ')' OptTableSpace
+			{
+				ListPartitionDefState *p = makeNode(ListPartitionDefState);
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				AddSubPartitionState *s = makeNode(AddSubPartitionState);
+				p->partitionName = $4;
+				p->boundary = $7;
+				p->tablespacename = $9;
+				s->subPartitionList = list_make1(p);
+				s->partitionName = $2;
+				n->subtype = AT_AddSubPartition;
+				n->def = (Node*)s;
+				$$ = (Node *)n;
+			}
+		| MODIFY_PARTITION name ADD_SUBPARTITION name VALUES '(' DEFAULT ')' OptTableSpace
+			{
+				ListPartitionDefState *p = makeNode(ListPartitionDefState);
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				AddSubPartitionState *s = makeNode(AddSubPartitionState);
+				p->partitionName = $4;
+				Const *n_default = makeNode(Const);
+				n_default->ismaxvalue = true;
+				n_default->location = -1;
+				p->boundary = list_make1(n_default);
+				p->tablespacename = $9;
+				s->subPartitionList = list_make1(p);
+				s->partitionName = $2;
+				n->subtype = AT_AddSubPartition;
+				n->def = (Node*)s;
+				$$ = (Node *)n;
+			}
 		/* ALTER TABLE DROP PARTITION */
 		| DROP_PARTITION ColId OptGPI
 			{
@@ -2961,6 +3124,30 @@ alter_partition_cmd:
 
 				p->boundary = $4;
 				n->subtype = AT_DropPartition;
+				n->def = (Node*)p;
+				n->behavior = DROP_CASCADE;
+				n->missing_ok = FALSE;
+				n->alterGPI = $6;
+				$$ = (Node *)n;
+			}
+		/* ALTER TABLE DROP SUBPARTITION */
+		| DROP_SUBPARTITION ColId OptGPI
+			{
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+				n->subtype = AT_DropSubPartition;
+				n->name = $2;
+				n->behavior = DROP_CASCADE;
+				n->missing_ok = FALSE;
+				n->alterGPI = $3;
+				$$ = (Node *)n;
+			}
+		| DROP_SUBPARTITION FOR '(' expr_list ')' OptGPI
+			{
+				RangePartitionDefState *p = makeNode(RangePartitionDefState);
+				AlterTableCmd *n = makeNode(AlterTableCmd);
+
+				p->boundary = $4;
+				n->subtype = AT_DropSubPartition;
 				n->def = (Node*)p;
 				n->behavior = DROP_CASCADE;
 				n->missing_ok = FALSE;
@@ -4870,6 +5057,15 @@ range_partitioning_clause:
 							errmsg("Un-support feature"),
 							errdetail("The partition key's length should be 1.")));
 				}
+				if ($8 != NULL && $7 != NULL) {
+					const char* message = "Un-support feature";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Subpartitions do not support interval partition."),
+							errcause("System error."), erraction("Contact engineer to support.")));
+				}
 				n->partitionKey = $5;
 				n->intervalPartDef = (IntervalPartitionDefState *)$7;
 				n->partitionList = $10;
@@ -5023,7 +5219,7 @@ range_subpartitioning_clause:
 list_subpartitioning_clause:
 		SUBPARTITION BY LIST '(' column_item_list ')'
 			{
-#ifdef ENABLE_MULTIPLE_NODE
+#ifdef ENABLE_MULTIPLE_NODES
             	const char* message = "Un-support feature";
             	InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 				ereport(ERROR,
@@ -7556,9 +7752,14 @@ SeqOptElem: CACHE NumericOnly
 				{
 					$$ = makeDefElem("owned_by", (Node *)$3);
 				}
-			| START opt_with NumericOnly
+			| START_WITH NumericOnly
 				{
-					$$ = makeDefElem("start", (Node *)$3);
+					$$ = makeDefElem("start", (Node *)$2);
+				}
+
+			| START NumericOnly
+				{
+					$$ = makeDefElem("start", (Node *)$2);
 				}
 			| RESTART
 				{
@@ -10919,14 +11120,6 @@ privilege:	SELECT opt_column_list
 				n->cols = $2;
 				$$ = n;
 			}
-		| CONNECT opt_column_list
-			{
-				AccessPriv *n = makeNode(AccessPriv);
-				n->priv_name = pstrdup($1);
-				n->cols = $2;
-				$$ = n;
-			}
-
 		;
 
 
@@ -11102,6 +11295,14 @@ privilege_target:
 					n->objs = $5;
 					$$ = n;
 				}
+			| ALL PACKAGES IN_P SCHEMA name_list
+                {
+                    PrivTarget *n = (PrivTarget *)palloc(sizeof(PrivTarget));
+					n->targtype = ACL_TARGET_ALL_IN_SCHEMA;
+					n->objtype = ACL_OBJECT_PACKAGE;
+					n->objs = $5;
+					$$ = n;
+                }
 			| DATA_P SOURCE_P name_list
 				{
 					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
@@ -11242,6 +11443,138 @@ opt_granted_by: GRANTED BY RoleId						{ $$ = $3; }
 
 /*****************************************************************************
  *
+ * GRANT and REVOKE DATABASE PRIVILEGE statements
+ *
+ *****************************************************************************/
+
+GrantDbStmt:
+            GRANT db_privileges TO grantee_list opt_grant_admin_option
+                {
+                    GrantDbStmt *n = makeNode(GrantDbStmt);
+                    n->is_grant = true;
+                    n->privileges = $2;
+                    n->grantees = $4;
+                    n->admin_opt = $5;
+                    $$ = (Node*)n;
+                }
+            ;
+
+RevokeDbStmt:
+            REVOKE db_privileges FROM grantee_list
+                {
+                    GrantDbStmt *n = makeNode(GrantDbStmt);
+                    n->is_grant = false;
+                    n->privileges = $2;
+                    n->grantees = $4;
+                    n->admin_opt = false;
+                    $$ = (Node*)n;
+                }
+            | REVOKE ADMIN OPTION FOR db_privileges FROM grantee_list
+                {
+                    GrantDbStmt *n = makeNode(GrantDbStmt);
+                    n->is_grant = false;
+                    n->privileges = $5;
+                    n->grantees = $7;
+                    n->admin_opt = true;
+                    $$ = (Node*)n;
+                }
+        ;
+
+db_privileges: db_privilege_list                       { $$ = $1; }
+        ;
+
+db_privilege_list: db_privilege                        { $$ = list_make1($1); }
+            | db_privilege_list ',' db_privilege       { $$ = lappend($1, $3); }
+        ;
+
+db_privilege: CREATE ANY TABLE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("create any table");
+                $$ = n;
+            }
+            | ALTER ANY TABLE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("alter any table");
+                $$ = n;
+            }
+            | DROP ANY TABLE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("drop any table");
+                $$ = n;
+            }
+            | SELECT ANY TABLE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("select any table");
+                $$ = n;
+            }
+            | INSERT ANY TABLE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("insert any table");
+                $$ = n;
+            }
+            | UPDATE ANY TABLE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("update any table");
+                $$ = n;
+            }
+            | DELETE_P ANY TABLE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("delete any table");
+                $$ = n;
+            }
+            | CREATE ANY SEQUENCE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("create any sequence");
+                $$ = n;
+            }
+            | CREATE ANY INDEX
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("create any index");
+                $$ = n;
+            }
+            | CREATE ANY FUNCTION
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("create any function");
+                $$ = n;
+            }
+            | EXECUTE ANY FUNCTION
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("execute any function");
+                $$ = n;
+            }
+            | CREATE ANY PACKAGE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("create any package");
+                $$ = n;
+            }
+            | EXECUTE ANY PACKAGE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("execute any package");
+                $$ = n;
+            }
+            | CREATE ANY TYPE_P
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("create any type");
+                $$ = n;
+            }
+        ;
+
+/*****************************************************************************
+ *
  * ALTER DEFAULT PRIVILEGES statement
  *
  *****************************************************************************/
@@ -11331,6 +11664,7 @@ defacl_privilege_target:
 			| TYPES_P		{ $$ = ACL_OBJECT_TYPE; }
 			| CLIENT_MASTER_KEYS			{ $$ = ACL_OBJECT_GLOBAL_SETTING; }
 			| COLUMN_ENCRYPTION_KEYS		{ $$ = ACL_OBJECT_COLUMN_SETTING; }
+			| PACKAGES      { $$ = ACL_OBJECT_PACKAGE; }
 		;
 
 
@@ -11373,7 +11707,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 				}
 				| CREATE opt_unique INDEX opt_concurrently opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
-					LOCAL opt_partition_index_def opt_reloptions OptTableSpace
+					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace
 				{
 
 					IndexStmt *n = makeNode(IndexStmt);
@@ -11385,8 +11719,9 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->accessMethod = $8;
 					n->indexParams = $10;
 					n->partClause  = $13;
-					n->options = $14;
-					n->tableSpace = $15;
+					n->indexIncludingParams = $14;
+					n->options = $15;
+					n->tableSpace = $16;
 					n->isPartitioned = true;
 					n->isGlobal = false;
 					n->excludeOpNames = NIL;
@@ -11402,7 +11737,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 				}
 				| CREATE opt_unique INDEX opt_concurrently opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
-					GLOBAL opt_reloptions OptTableSpace
+					GLOBAL opt_include opt_reloptions OptTableSpace
 				{
 
 					IndexStmt *n = makeNode(IndexStmt);
@@ -11414,8 +11749,9 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->accessMethod = $8;
 					n->indexParams = $10;
 					n->partClause  = NULL;
-					n->options = $13;
-					n->tableSpace = $14;
+					n->indexIncludingParams = $13;
+					n->options = $14;
+					n->tableSpace = $15;
 					n->isPartitioned = true;
 					n->isGlobal = true;
 					n->excludeOpNames = NIL;
@@ -11577,7 +11913,43 @@ range_partition_index_item:
 							$$ = (Node*)def;
 
 						}
+                        | PARTITION index_name OptTableSpace opt_subpartition_index_def
+                        {
+                            RangePartitionindexDefState* def = makeNode(RangePartitionindexDefState);
+                            def->name = $2;
+                            def->tablespace = $3;
+                            def->sublist = (List *)$4;
+                            $$ = (Node*)def;
+                        }
 						;
+
+opt_subpartition_index_def:
+                        '(' range_subpartition_index_list  ')'
+                        {
+                            $$ = (Node *)$2;
+                        }
+                        ;
+
+range_subpartition_index_list:
+                        range_subpartition_index_item
+                        {
+                            $$ = (Node*)list_make1($1);
+                        }
+                        | range_subpartition_index_list ',' range_subpartition_index_item
+                        {
+                            $$ = (Node*)lappend((List*)$1, $3);
+                        }
+                        ;
+
+range_subpartition_index_item:
+                       SUBPARTITION index_name OptTableSpace
+                        {
+                            RangePartitionindexDefState* def = makeNode(RangePartitionindexDefState);
+                            def->name = $2;
+                            def->tablespace = $3;
+                            $$ = (Node*)def;
+                        }
+                        ;
 /*****************************************************************************
  *
  *		QUERY:
@@ -11661,9 +12033,9 @@ CreateFunctionStmt:
 					n->options = $8;
 					n->options = lappend(n->options, makeDefElem("as",
 										(Node *)list_make1(makeString(funSource->bodySrc))));
-
 					n->options = lappend(n->options, makeDefElem("language",
 										(Node *)makeString("plpgsql")));
+
 					n->withClause = NIL;
 					n->withClause = NIL;
 					n->isProcedure = false;
@@ -11673,11 +12045,19 @@ CreateFunctionStmt:
 		;
 CallFuncStmt:    CALL func_name '(' ')'
 					{
+#ifndef ENABLE_MULTIPLE_NODES
 						$$ = makeCallFuncStmt($2, NULL, enable_out_param_override());
+#else
+						$$ = makeCallFuncStmt($2, NULL, false);
+#endif
 					}
 				|	CALL func_name '(' callfunc_args ')'
 					{
+#ifndef ENABLE_MULTIPLE_NODES
 						$$ = makeCallFuncStmt($2, $4, enable_out_param_override());
+#else
+						$$ = makeCallFuncStmt($2, $4, false);
+#endif
 					}
 				;
 callfunc_args:   func_arg_expr
@@ -11737,11 +12117,12 @@ CreateProcedureStmt:
 CreatePackageStmt:
 			CREATE opt_or_replace PACKAGE pkg_name invoker_rights as_is {pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;}
 				{
-					pg_yyget_extra(yyscanner)->core_yy_extra.in_slash_proc_body = true;
                     u_sess->plsql_cxt.package_as_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @6);
 					char *pkgNameBegin = NULL;
 					char *pkgNameEnd = NULL;
                     char *pkgName = NULL;
+					base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+					yyextra->core_yy_extra.in_slash_proc_body = true;
 					switch (list_length($4)) {
 						case 1:
 							pkgName = strVal(linitial($4));
@@ -11762,7 +12143,6 @@ CreatePackageStmt:
 					pkgNameBegin = pg_strtolower(pkgNameBegin);
 
                     int tok = YYEMPTY;
-                    base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
                     if (yychar == YYEOF || yychar == YYEMPTY)
                         tok = YYLEX;
                     else
@@ -11790,7 +12170,7 @@ CreatePackageStmt:
                             // append pkgname into toks
                             toks = lappend_int(toks, tok);
                             positions = lappend_int(positions, yylloc);
-                            if (tok == IDENT) {
+                            if (tok != ';') {
                                 // append ; into toks
                                 tok = YYLEX;
                                 toks = lappend_int(toks, tok);
@@ -11811,11 +12191,14 @@ CreatePackageStmt:
                                 }
                                 pfree(name_info.data);
                                 pkg_name_temp = NULL;
-                            }
+                            } else {
+								parser_yyerror("package spec is not ended correctly");
+							}
                         }
                         tok = YYLEX;
                     }
-                 
+                	yyextra->core_yy_extra.query_string_locationlist = 
+                    	lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
                     if (toks == NULL || toks->length < 1) {
                         parser_yyerror("package spec is not ended correctly");
                     }
@@ -11826,10 +12209,6 @@ CreatePackageStmt:
 
                     if (toks->length < 2) {
                         parser_yyerror("package spec is not ended correctly");
-                    }
-                    last_tok = list_nth_int(toks, toks->length - 2);
-                    if (last_tok != IDENT) {
-                        parser_yyerror("variable/func/proc declare in package spec is not ended correctly");
                     }
 
                     // Package spec content.
@@ -11849,14 +12228,12 @@ CreatePackageStmt:
                     }
 
                     /* Reset the flag which mark whether we are in slash proc. */
-                    pg_yyget_extra(yyscanner)->core_yy_extra.in_slash_proc_body = false;
+                    yyextra->core_yy_extra.in_slash_proc_body = false;
                     yyextra->core_yy_extra.dolqstart = NULL;
                     /*
                      * Add the end location of slash proc to the locationlist for the multi-query 
                      * processed.
                      */
-                    yyextra->core_yy_extra.query_string_locationlist =
-                        lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
 
 					u_sess->plsql_cxt.package_as_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @6);
 #ifndef ENABLE_MULTIPLE_NODES
@@ -11908,11 +12285,11 @@ invoker_rights:	 AUTHID DEFINER
 				}
 			|
 				{
-                                    if (PLSQL_SECURITY_DEFINER) {
-					$$ = true;
-                                    } else {
-                                        $$ = false;
-                                    }
+                    if (PLSQL_SECURITY_DEFINER && u_sess->attr.attr_common.upgrade_mode == 0) {
+						$$ = true;
+                    } else {
+                        $$ = false;
+                    }
 				}
 			;
 
@@ -12038,10 +12415,6 @@ pkg_body_subprogram: {
                 }
 
                 if (toks->length < 2) {
-                    parser_yyerror("package is not ended correctly");
-                }
-                last_tok = list_nth_int(toks, toks->length - 2);
-                if (last_tok != IDENT) {
                     parser_yyerror("package is not ended correctly");
                 }
 
@@ -12530,7 +12903,7 @@ createfunc_opt_item:
 
 
 createproc_opt_item:
-			 common_func_opt_item
+			common_func_opt_item
 				{
 					$$ = $1;
 				}
@@ -13215,7 +13588,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
-			| ALTER DATA_P SOURCE_P name RENAME TO name
+            | ALTER DATA_P SOURCE_P name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_DATA_SOURCE;
@@ -14122,6 +14495,14 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 					n->objectType = OBJECT_FUNCTION;
 					n->object = $3->funcname;
 					n->objarg = $3->funcargs;
+					n->newowner = $6;
+					$$ = (Node *)n;
+				}
+			| ALTER PACKAGE pkg_name OWNER TO RoleId
+				{
+					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
+					n->objectType = OBJECT_PACKAGE;
+					n->object = $3;
 					n->newowner = $6;
 					$$ = (Node *)n;
 				}
@@ -15764,7 +16145,7 @@ VacuumStmt:
 					if ($5)
 					{
 						const char* message = "COMPACT can not be used with PARTITION";
-    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 						ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR),
 							errmsg("COMPACT can not be used with PARTITION")));
 					}
@@ -15773,6 +16154,28 @@ VacuumStmt:
 					n->relation = $6;
 					n->va_cols = NIL;
 					$6->partitionname = $9;
+					$$ = (Node *)n;
+				}
+			| VACUUM opt_full opt_freeze opt_verbose opt_compact qualified_name SUBPARTITION '('name')'
+				{
+					VacuumStmt *n = makeNode(VacuumStmt);
+					n->options = VACOPT_VACUUM;
+					if ($2)
+						n->options |= VACOPT_FULL;
+					if ($4)
+						n->options |= VACOPT_VERBOSE;
+					if ($5)
+					{
+						const char* message = "COMPACT can not be used with SUBPARTITION";
+    					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("COMPACT can not be used with SUBPARTITION")));
+					}
+					n->freeze_min_age = $3 ? 0 : -1;
+					n->freeze_table_age = $3 ? 0 : -1;
+					n->relation = $6;
+					n->va_cols = NIL;
+					$6->subpartitionname = $9;
 					$$ = (Node *)n;
 				}
 			| VACUUM opt_full opt_freeze opt_verbose opt_compact AnalyzeStmt
@@ -15833,6 +16236,21 @@ VacuumStmt:
 					if (n->va_cols != NIL)	/* implies analyze */
 						n->options |= VACOPT_ANALYZE;
 					$5->partitionname = $9;
+					$$ = (Node *) n;
+				}
+			| VACUUM '(' vacuum_option_list ')' qualified_name opt_name_list SUBPARTITION '('name')'
+				{
+					VacuumStmt *n = makeNode(VacuumStmt);
+					n->options = VACOPT_VACUUM | $3;
+					if (n->options & VACOPT_FREEZE)
+						n->freeze_min_age = n->freeze_table_age = 0;
+					else
+						n->freeze_min_age = n->freeze_table_age = -1;
+					n->relation = $5;
+					n->va_cols = $6;
+					if (n->va_cols != NIL)	/* implies analyze */
+						n->options |= VACOPT_ANALYZE;
+					$5->subpartitionname = $9;
 					$$ = (Node *) n;
 				}
 		;
@@ -17254,6 +17672,7 @@ CreateResourcePoolStmt: CREATE RESOURCE POOL resource_pool_name OptWith
 				}
 		;
 
+
  /*****************************************************************************
  *
  *		QUERY:
@@ -17271,6 +17690,14 @@ AlterResourcePoolStmt: ALTER RESOURCE POOL resource_pool_name OptWith
 					AlterResourcePoolStmt *n = makeNode(AlterResourcePoolStmt);
 					n->pool_name = $4;
 					n->options = $5;
+					$$ = (Node *)n;
+				}
+		;
+
+AlterGlobalConfigStmt:ALTER GLOBAL CONFIGURATION OptWith
+				{
+					AlterGlobalConfigStmt *n = makeNode(AlterGlobalConfigStmt);
+					n->options = $4;
 					$$ = (Node *)n;
 				}
 		;
@@ -17301,6 +17728,13 @@ DropResourcePoolStmt: DROP RESOURCE POOL resource_pool_name
 resource_pool_name:
 			ColId							{ $$ = $1; };
 
+DropGlobalConfigStmt:DROP GLOBAL CONFIGURATION name_list
+				{
+					DropGlobalConfigStmt *n = makeNode(DropGlobalConfigStmt);
+					n->options = $4;
+					$$ = (Node *)n;
+				}
+		;
 
 /*****************************************************************************
  *
@@ -17784,6 +18218,50 @@ DeallocateStmt: DEALLOCATE name
 					}
 		;
 
+insert_partition_clause: update_delete_partition_clause
+						{
+#ifdef ENABLE_MULTIPLE_NODES
+					    const char* message = "In distributed mode, insert/update/delete does not support specified partitions.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+							  errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							  errmsg("In distributed mode, insert/update/delete does not support specified partitions."),
+							  errdetail("N/A"),errcause("Feature is not supported this operation."),
+							  erraction("Contact engineer to support.")));
+#endif
+							$$ = $1;
+						}
+					| /* EMPTY */	{ $$ = NULL; }
+					;
+
+update_delete_partition_clause: PARTITION '(' name ')'
+						{
+							$$ = makeRangeVar(NULL, NULL, @3);
+							$$->partitionname = $3;
+							$$->ispartition = true;
+						}
+					| SUBPARTITION '(' name ')'
+						{
+							$$ = makeRangeVar(NULL, NULL, @3);
+							$$->subpartitionname = $3;
+							$$->issubpartition = true;
+						}
+					| PARTITION_FOR '(' expr_list ')'
+						{
+							$$ = makeRangeVar(NULL, NULL, @3);
+							$$->partitionKeyValuesList = $3;
+							$$->ispartition = true;
+						}
+					| SUBPARTITION_FOR '(' expr_list ')'
+						{
+							$$ = makeRangeVar(NULL, NULL, @3);
+							$$->partitionKeyValuesList = $3;
+							$$->issubpartition = true;
+						}
+					;
+
+
 /*****************************************************************************
  *
  *		QUERY:
@@ -17791,7 +18269,7 @@ DeallocateStmt: DEALLOCATE name
  *
  *****************************************************************************/
 
-InsertStmt: opt_with_clause INSERT hint_string INTO qualified_name insert_rest returning_clause
+InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest returning_clause
 			{
 				$6->relation = $5;
 				$6->returningList = $7;
@@ -17799,7 +18277,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO qualified_name insert_rest r
 				$6->hintState = create_hintstate($3);
 				$$ = (Node *) $6;
 			}
-			| opt_with_clause INSERT hint_string INTO qualified_name insert_rest upsert_clause returning_clause
+			| opt_with_clause INSERT hint_string INTO insert_target insert_rest upsert_clause returning_clause
 				{
 					if ($8 != NIL) {
 						const char* message = "RETURNING clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.";
@@ -17842,6 +18320,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO qualified_name insert_rest r
 								}
 							}
 						}
+
 
 						MergeStmt *m = makeNode(MergeStmt);
 						m->is_insert_update = true;
@@ -17898,6 +18377,40 @@ InsertStmt: opt_with_clause INSERT hint_string INTO qualified_name insert_rest r
 				}
 		;
 
+/*
+ * It is difficult to use relation_expr_opt_alias as update or delete statement,
+ * because VALUES in insert_rest would have a shift/reduce conflict with VALUES
+ * as alias if as is optional.
+ * We tried to fix such conflict by adding noassoc/left priority to VALUES, but
+ * it will make delete statement with VALUES as alias name unable to be resolved.
+ * So AS is required for now.
+ */
+insert_target:
+			qualified_name insert_partition_clause
+				{
+					if ($2 != NULL) {
+						$1->partitionname = $2->partitionname;
+						$1->ispartition = $2->ispartition;
+						$1->partitionKeyValuesList = $2->partitionKeyValuesList;
+						$1->subpartitionname = $2->subpartitionname;
+						$1->issubpartition = $2->issubpartition;
+					}
+					$$ = $1;
+				}
+			| qualified_name insert_partition_clause AS ColId
+				{
+					if ($2 != NULL) {
+						$1->partitionname = $2->partitionname;
+						$1->ispartition = $2->ispartition;
+						$1->partitionKeyValuesList = $2->partitionKeyValuesList;
+						$1->subpartitionname = $2->subpartitionname;
+						$1->issubpartition = $2->issubpartition;
+					}
+					$1->alias = makeAlias($4, NIL);
+					$$ = $1;
+				}
+		;
+
 insert_rest:
 			SelectStmt
 				{
@@ -17946,7 +18459,7 @@ returning_clause:
 		;
 
 upsert_clause:
-			ON DUPLICATE KEY UPDATE set_clause_list
+			ON DUPLICATE KEY UPDATE set_clause_list where_clause
 				{
 					if (u_sess->attr.attr_sql.enable_upsert_to_merge
 #ifdef ENABLE_MULTIPLE_NODES					
@@ -17970,14 +18483,16 @@ upsert_clause:
     								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 								ereport(errstate,
 									(errmodule(MOD_PARSER),
-									  errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									  errmsg("Update with subquery is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
+									errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									errmsg("Update with subquery is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
 							}
 						}
 #endif
+
 						UpsertClause *uc = makeNode(UpsertClause);
 						uc->targetList = $5;
 						uc->location = @1;
+						uc->whereClause = $6;
 						$$ = (Node *) uc;
 					}
 				}
@@ -18043,13 +18558,14 @@ using_clause:
  *
  *****************************************************************************/
 
-LockStmt:	LOCK_P opt_table relation_expr_list opt_lock opt_nowait
+LockStmt:	LOCK_P opt_table relation_expr_list opt_lock opt_nowait opt_cancelable
 				{
 					LockStmt *n = makeNode(LockStmt);
 
 					n->relations = $3;
 					n->mode = $4;
 					n->nowait = $5;
+					n->cancelable = $6;
 					$$ = (Node *)n;
 				}
 		;
@@ -18072,6 +18588,12 @@ opt_nowait:	NOWAIT							{ $$ = TRUE; }
 			| /*EMPTY*/						{ $$ = FALSE; }
 		;
 
+opt_cancelable: CANCELABLE                                              { $$ = TRUE; }
+                        | /*EMPTY*/                                             { $$ = FALSE; }
+                ;
+
+opt_wait:	WAIT Iconst						{ $$ = $2; }
+		;
 
 /*****************************************************************************
  *
@@ -18983,41 +19505,41 @@ having_clause:
 		;
 
 start_with_clause:
-            START WITH start_with_expr connect_by_expr
+            START_WITH start_with_expr connect_by_expr
                 {
                     StartWithClause *n = makeNode(StartWithClause);
-                    n->startWithExpr = $3;
-                    n->connectByExpr = $4;
+                    n->startWithExpr = $2;
+                    n->connectByExpr = $3;
                     n->siblingsOrderBy = NULL;
                     n->priorDirection = false;
                     n->nocycle = false;
                     $$ = (Node *) n;
                 }
-            | START WITH start_with_expr CONNECT BY NOCYCLE a_expr
+            | START_WITH start_with_expr CONNECT_BY NOCYCLE a_expr
                 {
                     StartWithClause *n = makeNode(StartWithClause);
-                    n->startWithExpr = $3;
-                    n->connectByExpr = $7;
+                    n->startWithExpr = $2;
+                    n->connectByExpr = $5;
                     n->siblingsOrderBy = NULL;
                     n->priorDirection = false;
                     n->nocycle = true;
                     $$ = (Node *) n;
                 }
-            | connect_by_expr START WITH start_with_expr
+            | connect_by_expr START_WITH start_with_expr
                 {
                     StartWithClause *n = makeNode(StartWithClause);
-                    n->startWithExpr = $4;
+                    n->startWithExpr = $3;
                     n->connectByExpr = $1;
                     n->siblingsOrderBy = NULL;
                     n->priorDirection = false;
                     n->nocycle = false;
                     $$ = (Node *) n;
                 }
-            | CONNECT BY NOCYCLE a_expr START WITH start_with_expr
+            | CONNECT_BY NOCYCLE a_expr START_WITH start_with_expr
                 {
                     StartWithClause *n = makeNode(StartWithClause);
-                    n->startWithExpr = $7;
-                    n->connectByExpr = $4;
+                    n->startWithExpr = $5;
+                    n->connectByExpr = $3;
                     n->siblingsOrderBy = NULL;
                     n->priorDirection = false;
                     n->nocycle = true;
@@ -19038,7 +19560,7 @@ start_with_expr:
         ;
 
 connect_by_expr:
-            CONNECT BY a_expr
+            CONNECT_BY a_expr
                 {
 #ifdef ENABLE_MULTIPLE_NODES
                       const char* message = "START WITH CONNECT BY is not yet supported.";
@@ -19046,7 +19568,7 @@ connect_by_expr:
                       ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                          errmsg("START WITH CONNECT BY is not yet supported.")));
 #endif
-                    $$ = $3;
+                    $$ = $2;
                 }
         ;
 
@@ -19073,6 +19595,22 @@ for_locking_item:
 					n->forUpdate = TRUE;
 					n->strength = LCS_FORUPDATE;
 					n->noWait = $5;
+					n->waitSec = 0;
+					$$ = (Node *) n;
+				}
+			| FOR UPDATE hint_string locked_rels_list opt_wait
+				{
+					LockingClause *n = makeNode(LockingClause);
+					n->lockedRels = $4;
+					n->forUpdate = TRUE;
+					n->strength = LCS_FORUPDATE;
+					n->waitSec = $5;
+					/* When the delay time is 0, the processing is based on the nowait logic. */
+					if (n->waitSec == 0) {
+						n->noWait = true;
+					} else {
+						n->noWait = false;
+					}
 					$$ = (Node *) n;
 				}
 			| for_locking_strength locked_rels_list opt_nowait
@@ -19085,6 +19623,7 @@ for_locking_item:
 						n->forUpdate = true;
 					}
 					n->noWait = $3;
+                    n->waitSec = 0;
 					$$ = (Node *) n;
 				}
 		;
@@ -19174,7 +19713,7 @@ table_ref:	relation_expr
 						if (catlist->n_members == 0 && rel == NULL) {
         					char message[MAXFNAMELEN];
         					int rc = sprintf_s(message, MAXFNAMELEN, "relation \"%s\" does not exist", r->relname);
-        					securec_check_ss_c(rc, "", "");
+        					securec_check_ss(rc, "", "");
 							ReleaseSysCacheList(catlist);
         					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
             				ereport(ERROR,
@@ -19237,13 +19776,18 @@ table_ref:	relation_expr
 					$1->isbucket = true;
 					$$ = (Node *)$1;
 				}
-			| relation_expr PARTITION_FOR '(' maxValueList ')'
+			| relation_expr PARTITION_FOR '(' expr_list ')'
 				{
 					$1->partitionKeyValuesList = $4;
 					$1->ispartition = true;
 					$$ = (Node *)$1;
 				}
-
+			| relation_expr SUBPARTITION_FOR '(' expr_list ')'
+				{
+					$1->partitionKeyValuesList = $4;
+					$1->issubpartition = true;
+					$$ = (Node *)$1;
+				}
 			| relation_expr PARTITION '(' name ')' alias_clause
 				{
 					$1->partitionname = $4;
@@ -19251,24 +19795,27 @@ table_ref:	relation_expr
 					$1->ispartition = true;
 					$$ = (Node *)$1;
 				}
-
-                        | relation_expr SUBPARTITION '(' name ')' alias_clause
-                                {
-                                        $1->subpartitionname = $4;
-                                        $1->alias = $6;
-                                        $1->issubpartition = true;
-                                        $$ = (Node *)$1;
-                                }
-
-
-			| relation_expr PARTITION_FOR '(' maxValueList ')' alias_clause
+			| relation_expr SUBPARTITION '(' name ')' alias_clause
+				{
+					$1->subpartitionname = $4;
+					$1->alias = $6;
+					$1->issubpartition = true;
+					$$ = (Node *)$1;
+				}
+			| relation_expr PARTITION_FOR '(' expr_list ')' alias_clause
 				{
 					$1->partitionKeyValuesList = $4;
 					$1->alias = $6;
 					$1->ispartition = true;
 					$$ = (Node *)$1;
 				}
-
+			| relation_expr SUBPARTITION_FOR '(' expr_list ')' alias_clause
+				{
+					$1->partitionKeyValuesList = $4;
+					$1->alias = $6;
+					$1->issubpartition = true;
+					$$ = (Node *)$1;
+				}
 			| func_table
 				{
 					RangeFunction *n = makeNode(RangeFunction);
@@ -19579,6 +20126,45 @@ relation_expr_opt_alias: relation_expr					%prec UMINUS
 				{
 					Alias *alias = makeNode(Alias);
 					alias->aliasname = $3;
+					$1->alias = alias;
+					$$ = $1;
+				}
+			| relation_expr  update_delete_partition_clause 			%prec UMINUS
+				{
+					if ($2 != NULL) {
+						$1->partitionname = $2->partitionname;
+						$1->ispartition = $2->ispartition;
+						$1->partitionKeyValuesList = $2->partitionKeyValuesList;
+						$1->subpartitionname = $2->subpartitionname;
+						$1->issubpartition = $2->issubpartition;
+					}
+					$$ = $1;
+				}
+			| relation_expr update_delete_partition_clause ColId
+				{
+					if ($2 != NULL) {
+						$1->partitionname = $2->partitionname;
+						$1->ispartition = $2->ispartition;
+						$1->partitionKeyValuesList = $2->partitionKeyValuesList;
+						$1->subpartitionname = $2->subpartitionname;
+						$1->issubpartition = $2->issubpartition;
+					}
+					Alias *alias = makeNode(Alias);
+					alias->aliasname = $3;
+					$1->alias = alias;
+					$$ = $1;
+				}
+			| relation_expr update_delete_partition_clause AS ColId
+				{
+					if ($2 != NULL) {
+						$1->partitionname = $2->partitionname;
+						$1->ispartition = $2->ispartition;
+						$1->partitionKeyValuesList = $2->partitionKeyValuesList;
+						$1->subpartitionname = $2->subpartitionname;
+						$1->issubpartition = $2->issubpartition;
+					}
+					Alias *alias = makeNode(Alias);
+					alias->aliasname = $4;
 					$1->alias = alias;
 					$$ = $1;
 				}
@@ -20085,7 +20671,7 @@ character:	CHARACTER opt_varying
 			| CHAR_P opt_varying
 										{ $$ = (char *)($2 ? "varchar": "bpchar"); }
 			| NVARCHAR
-                                                                                { $$ = "nvarchar2"; }
+										{ $$ = "nvarchar2"; }
 			| NVARCHAR2
 										{ $$ = "nvarchar2"; }
 			| VARCHAR
@@ -20340,6 +20926,13 @@ client_logic_type:
  * it's factored out just to eliminate redundant coding.
  */
 a_expr:		c_expr									{ $$ = $1; }
+			| PRIOR '(' a_expr ')'
+                                {
+                                    List *argList = list_make1($3);
+                                    FuncCall *funcNode = MakePriorAsFunc();
+                                    funcNode->args = argList;
+                                    $$ = (Node *)funcNode;
+                                }
 			| a_expr TYPECAST Typename
 					{ $$ = makeTypeCast($1, $3, @2); }
 			| a_expr COLLATE any_name
@@ -20897,17 +21490,20 @@ b_expr:		c_expr
  * inside parentheses, such as function arguments; that cannot introduce
  * ambiguity to the b_expr syntax.
  */
-c_expr:		columnref								{ $$ = $1; }
+c_expr:		columnref %prec UMINUS						        { $$ = $1; }
 			| AexprConst							{ $$ = $1; }
-                        | PRIOR '(' c_expr ')'
+                        | PRIOR '(' columnref ')'
                                 {
-                                    Node* n = $3;
-                                    AssertEreport(IsA(n, ColumnRef),
-                                                      MOD_OPT,
-                                                      "Inconsistent expression after PRIOR");
-		                    ColumnRef *col = (ColumnRef *)$3;
-		                    col->prior = true;
-		                    $$ = n;
+                                    ColumnRef *col = (ColumnRef *)$3;
+                                    col->prior = true;
+                                    $$ = (Node *)col;
+                                }
+                        | PRIOR '(' c_expr ',' func_arg_list ')'
+                                {
+                                    List* argList = list_concat(list_make1($3), $5);
+                                    FuncCall* funcNode = MakePriorAsFunc();
+                                    funcNode->args = argList;
+                                    $$ = (Node *)funcNode;
                                 }
 		        | PRIOR columnref
 		                {
@@ -22802,6 +23398,15 @@ target_el:	a_expr AS ColLabel
 					$$->indirection = NIL;
 					$$->val = (Node *)$1;
 					$$->location = @1;
+
+                                        ColumnRef* cr = (ColumnRef*) $1;
+                                        /* PRIOR(x) in target list implies func call */
+                                        if (IsA($1, ColumnRef) && cr->prior) {
+                                            FuncCall *fn = MakePriorAsFunc();
+                                            cr->prior = false;
+                                            fn->args = list_make1(cr);
+                                            $$->val = (Node *)fn;
+                                        }
                                 }
 			| '*'
 				{
@@ -23206,6 +23811,7 @@ unreserved_keyword:
 			| CACHE
 			| CALL
 			| CALLED
+			| CANCELABLE
 			| CASCADE
 			| CASCADED
 			| CATALOG_P
@@ -23232,6 +23838,7 @@ unreserved_keyword:
 			| COMPRESS
 			| CONDITION
 			| CONFIGURATION
+                        | CONNECT
 			| CONNECTION
 			| CONSTANT
 			| CONSTRAINTS
@@ -23427,6 +24034,7 @@ unreserved_keyword:
 			| OWNED
 			| OWNER
 			| PACKAGE
+			| PACKAGES
 			| PARSER
 			| PARTIAL %prec PARTIAL_EMPTY_PREC
 			| PARTITION
@@ -23450,6 +24058,7 @@ unreserved_keyword:
 			| PREPARE
 			| PREPARED
 			| PRESERVE
+			| PRIOR
                         | PRIVATE
 			| PRIVILEGE
 			| PRIVILEGES
@@ -23517,6 +24126,7 @@ unreserved_keyword:
 			| SHIPPABLE
 			| SHOW
 			| SHUTDOWN
+                        | SIBLINGS
 			| SIMPLE
 			| SIZE
 			| SKIP
@@ -23529,6 +24139,7 @@ unreserved_keyword:
 			| SPLIT
 			| STABLE
 			| STANDALONE_P
+                        | START
 			| STATEMENT
 			| STATEMENT_ID
 			| STATISTICS
@@ -23591,6 +24202,7 @@ unreserved_keyword:
 			| VERSION_P
 			| VIEW
 			| VOLATILE
+			| WAIT
 			| WEAK
 			| WHITESPACE_P
 			| WITHIN
@@ -23746,7 +24358,6 @@ reserved_keyword:
 			| COLLATE
 			| COLUMN
 			| CONSTRAINT
-                        | CONNECT
 			| CREATE
 			| CURRENT_CATALOG
 			| CURRENT_DATE
@@ -23796,7 +24407,6 @@ reserved_keyword:
 			| PERFORMANCE
 			| PLACING
 			| PRIMARY
-			| PRIOR
 			| PROCEDURE
 			| REFERENCES
 			| REJECT_P
@@ -23804,9 +24414,7 @@ reserved_keyword:
                         | ROWNUM
 			| SELECT
 			| SESSION_USER
-			| SIBLINGS
 			| SOME
-                        | START
 			| SYMMETRIC
 			| SYSDATE
 			| TABLE
@@ -24173,17 +24781,26 @@ check_indirection(List *indirection, core_yyscan_t yyscanner)
 static List *
 extractArgTypes(List *parameters)
 {
-	List	   *result = NIL;
-	ListCell   *i;
+    List *result = NIL;
+    ListCell *i;
 
-	foreach(i, parameters)
-	{
-		FunctionParameter *p = (FunctionParameter *) lfirst(i);
-
-		if (p->mode != FUNC_PARAM_OUT && p->mode != FUNC_PARAM_TABLE)
-			result = lappend(result, p->argType);
-	}
-	return result;
+    foreach(i, parameters)
+    {
+        FunctionParameter *p = (FunctionParameter *) lfirst(i);
+#ifndef ENABLE_MULTIPLE_NODES
+        if ((p->mode == FUNC_PARAM_OUT && enable_out_param_override())
+                || p->mode == FUNC_PARAM_IN
+                || p->mode == FUNC_PARAM_INOUT
+                || p->mode == FUNC_PARAM_VARIADIC) {
+#else
+        if (p->mode == FUNC_PARAM_IN
+                || p->mode == FUNC_PARAM_INOUT
+                || p->mode == FUNC_PARAM_VARIADIC) {
+#endif
+            result = lappend(result, p->argType);
+        }
+    }
+    return result;
 }
 
 /* insertSelectOptions()
@@ -25795,6 +26412,21 @@ static void RemoveFillerCol(List *filler_list, List *col_list)
 	return;
 }
 
+static FuncCall* MakePriorAsFunc()
+{
+    List *funcName = list_make1(makeString("prior"));
+    FuncCall *n = makeNode(FuncCall);
+    n->funcname = funcName;
+    n->args = NIL;
+    n->agg_order = NIL;
+    n->agg_star = FALSE;
+    n->agg_distinct = FALSE;
+    n->func_variadic = FALSE;
+    n->over = NULL;
+    n->call_func = false;
+    return n;
+}
+
 /*
  * Must undefine this stuff before including scan.c, since it has different
  * definitions for these macros.
@@ -25804,4 +26436,5 @@ static void RemoveFillerCol(List *filler_list, List *col_list)
 #undef yylloc
 #undef yylex
 
+#undef yylex
 #include "scan.inc"

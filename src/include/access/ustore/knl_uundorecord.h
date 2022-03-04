@@ -361,8 +361,8 @@ typedef bool (*SatisfyUndoRecordCallback)(_in_ UndoRecord *urec, _in_ BlockNumbe
  *
  * Returns the UNDO_RET_SUCC if found, otherwise, return UNDO_RET_FAIL.
  */
-int FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRecordCallback callback, 
-    _in_ BlockNumber blkno, _in_ OffsetNumber offset, _in_ TransactionId xid);
+UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRecordCallback callback,
+    _in_ BlockNumber blkno, _in_ OffsetNumber offset, _in_ TransactionId xid, bool isNeedByPass = false);
 
 /*
  * Example: satisfied callback function.

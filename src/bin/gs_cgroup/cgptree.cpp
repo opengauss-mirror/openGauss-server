@@ -337,23 +337,6 @@ void cgptree_get_group_info(struct group_info* curr_ginfo, const struct cgroup_m
         error = cgroup_get_value_uint64(cgc, CPU_SHARES, &(curr_ginfo->cpu_shares));
         ERROR_REPORT(error, CPU_SHARES, curr_ginfo->grpname);
     }
-    /* get values of blkio.weight */
-    if ((cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()) && (0 == strcmp(mount_info.name, MOUNT_BLKIO_NAME))) {
-        error = cgroup_get_value_uint64(cgc, BLKIO_WEIGHT, &(curr_ginfo->blkio_weight));
-        ERROR_REPORT(error, BLKIO_WEIGHT, curr_ginfo->grpname);
-
-        error = cgroup_get_value_string(cgc, BLKIO_BPSREAD, &(curr_ginfo->blkio_bpsread));
-        ERROR_REPORT(error, BLKIO_BPSREAD, curr_ginfo->grpname);
-
-        error = cgroup_get_value_string(cgc, BLKIO_IOPSREAD, &(curr_ginfo->blkio_iopsread));
-        ERROR_REPORT(error, BLKIO_IOPSREAD, curr_ginfo->grpname);
-
-        error = cgroup_get_value_string(cgc, BLKIO_BPSWRITE, &(curr_ginfo->blkio_bpswrite));
-        ERROR_REPORT(error, BLKIO_BPSWRITE, curr_ginfo->grpname);
-
-        error = cgroup_get_value_string(cgc, BLKIO_IOPSWRITE, &(curr_ginfo->blkio_iopswrite));
-        ERROR_REPORT(error, BLKIO_IOPSWRITE, curr_ginfo->grpname);
-    }
     /* get values of cpuset.cpus */
     if (0 == strcmp(mount_info.name, MOUNT_CPUSET_NAME)) {
         error = cgroup_get_value_string(cgc, CPUSET_CPUS, &(curr_ginfo->cpuset_cpus));
@@ -583,8 +566,8 @@ static struct group_info* cgptree_get_cgroup_new()
 
     while (error != ECGEOF) {
 
-        if (*info.name && strcmp(info.name, MOUNT_CPU_NAME) != 0 && strcmp(info.name, MOUNT_BLKIO_NAME) != 0 &&
-            strcmp(info.name, MOUNT_CPUSET_NAME) != 0 && strcmp(info.name, MOUNT_CPUACCT_NAME) != 0) {
+        if (*info.name && strcmp(info.name, MOUNT_CPU_NAME) != 0 && strcmp(info.name, MOUNT_CPUSET_NAME) != 0 &&
+            strcmp(info.name, MOUNT_CPUACCT_NAME) != 0) {
             error = cgroup_get_controller_next(&ctrl_handle, &info);
             if (error && error != ECGEOF) {
                 fprintf(stderr, "get next controller failed: %s\n", cgroup_strerror(error));
@@ -926,7 +909,7 @@ int cgptree_display_cgroups(void)
 
     /* print current all mount points */
     for (int i = 0; i < MOUNT_SUBSYS_KINDS; ++i) {
-        if (i == MOUNT_BLKIO_ID && !(cgutil_is_sles11_sp2 || cgexec_check_SLESSP2_version()))
+        if (i == MOUNT_BLKIO_ID)
             continue;
 
         if (i == 0)

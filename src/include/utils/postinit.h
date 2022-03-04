@@ -98,6 +98,8 @@ public:
 
     void InitWAL();
 
+    void InitParallelDecode();
+
     void InitSession();
 
     void InitStreamingBackend();
@@ -115,6 +117,8 @@ public:
     void InitBarrierCreator();
 
     void InitFencedSysCache();
+
+    void InitLoadLocalSysCache(Oid db_oid, const char *db_name);
 
     void InitApplyLauncher();
 

@@ -1,0 +1,1550 @@
+--1.create table 
+--list_list list_hash list_range range_list range_hash range_range
+--prepare
+DROP SCHEMA ustore_subpartition_createtable CASCADE;
+ERROR:  schema "ustore_subpartition_createtable" does not exist
+CREATE SCHEMA ustore_subpartition_createtable;
+SET CURRENT_SCHEMA TO ustore_subpartition_createtable;
+--1.1 normal table
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201902', '2', '1', 1);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+insert into list_list values('201903', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+select * from list_list;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+(6 rows)
+
+drop table list_list;
+CREATE TABLE list_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into list_hash values('201902', '1', '1', 1);
+insert into list_hash values('201902', '2', '1', 1);
+insert into list_hash values('201902', '3', '1', 1);
+insert into list_hash values('201903', '4', '1', 1);
+insert into list_hash values('201903', '5', '1', 1);
+insert into list_hash values('201903', '6', '1', 1);
+select * from list_hash;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 4         | 1       |         1
+ 201903     | 5         | 1       |         1
+ 201903     | 6         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+ 201902     | 1         | 1       |         1
+(6 rows)
+
+drop table list_hash;
+CREATE TABLE list_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a values less than ('4'),
+    SUBPARTITION p_201901_b values less than ('6')
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a values less than ('3'),
+    SUBPARTITION p_201902_b values less than ('6')
+  )
+);
+insert into list_range values('201902', '1', '1', 1);
+insert into list_range values('201902', '2', '1', 1);
+insert into list_range values('201902', '3', '1', 1);
+insert into list_range values('201903', '4', '1', 1);
+insert into list_range values('201903', '5', '1', 1);
+insert into list_range values('201903', '6', '1', 1);
+ERROR:  inserted partition key does not map to any table partition
+select * from list_range;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 4         | 1       |         1
+ 201903     | 5         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+(5 rows)
+
+drop table list_range;
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+);
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+select * from range_list;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+(6 rows)
+
+drop table range_list;
+CREATE TABLE range_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into range_hash values('201902', '1', '1', 1);
+insert into range_hash values('201902', '2', '1', 1);
+insert into range_hash values('201902', '1', '1', 1);
+insert into range_hash values('201903', '2', '1', 1);
+insert into range_hash values('201903', '1', '1', 1);
+insert into range_hash values('201903', '2', '1', 1);
+select * from range_hash;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+(6 rows)
+
+drop table range_hash;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( '3' )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+insert into range_range values('201902', '1', '1', 1);
+insert into range_range values('201902', '2', '1', 1);
+insert into range_range values('201902', '1', '1', 1);
+insert into range_range values('201903', '2', '1', 1);
+insert into range_range values('201903', '1', '1', 1);
+insert into range_range values('201903', '2', '1', 1);
+select * from range_range;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+(6 rows)
+
+drop table range_range;
+CREATE TABLE hash_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY hash (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into hash_list values('201901', '1', '1', 1);
+insert into hash_list values('201901', '2', '1', 1);
+insert into hash_list values('201901', '1', '1', 1);
+insert into hash_list values('201903', '2', '1', 1);
+insert into hash_list values('201903', '1', '1', 1);
+insert into hash_list values('201903', '2', '1', 1);
+select * from hash_list;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+ 201901     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
+(6 rows)
+
+drop table hash_list;
+CREATE TABLE hash_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY hash (month_code) SUBPARTITION BY hash (dept_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+insert into hash_hash values('201901', '1', '1', 1);
+insert into hash_hash values('201901', '2', '1', 1);
+insert into hash_hash values('201901', '1', '1', 1);
+insert into hash_hash values('201903', '2', '1', 1);
+insert into hash_hash values('201903', '1', '1', 1);
+insert into hash_hash values('201903', '2', '1', 1);
+select * from hash_hash;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+ 201901     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
+(6 rows)
+
+drop table hash_hash;
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY hash (month_code) SUBPARTITION BY range (dept_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN ( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN ( '3' )
+  ),
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN ( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN ( '3' )
+  )
+);
+insert into hash_range values('201901', '1', '1', 1);
+insert into hash_range values('201901', '2', '1', 1);
+insert into hash_range values('201901', '1', '1', 1);
+insert into hash_range values('201903', '2', '1', 1);
+insert into hash_range values('201903', '1', '1', 1);
+insert into hash_range values('201903', '2', '1', 1);
+select * from hash_range;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201901     | 1         | 1       |         1
+ 201901     | 1         | 1       |         1
+ 201901     | 2         | 1       |         1
+(6 rows)
+
+drop table hash_range;
+--1.2 table with default subpartition
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+drop table list_list;
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+);
+drop table list_list;
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' ),
+  PARTITION p_201902 VALUES ( '201903' )
+);
+drop table list_list;
+CREATE TABLE list_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+drop table list_hash;
+CREATE TABLE list_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+);
+drop table list_hash;
+CREATE TABLE list_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' ),
+  PARTITION p_201902 VALUES ( '201903' )
+);
+drop table list_hash;
+CREATE TABLE list_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a values less than ('3'),
+    SUBPARTITION p_201902_b values less than ('6')
+  )
+);
+drop table list_range;
+CREATE TABLE list_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a values less than ('4'),
+    SUBPARTITION p_201901_b values less than ('6')
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+);
+drop table list_range;
+CREATE TABLE list_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' ),
+  PARTITION p_201902 VALUES ( '201903' )
+);
+drop table list_range;
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+);
+drop table range_list;
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+);
+drop table range_list;
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+);
+drop table range_list;
+CREATE TABLE range_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+drop table range_hash;
+CREATE TABLE range_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+);
+drop table range_hash;
+CREATE TABLE range_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+);
+drop table range_hash;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+drop table range_range;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( '3' )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+);
+drop table range_range;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+);
+drop table range_range;
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901,
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+drop table hash_range;
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( '3' )
+  ),
+  PARTITION p_201902
+);
+drop table hash_range;
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901,
+  PARTITION p_201902
+);
+drop table hash_range;
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901,
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a VALUES( '2' ),
+    SUBPARTITION p_201902_b VALUES( '3' )
+  )
+);
+drop table hash_range;
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a VALUES( '2' ),
+    SUBPARTITION p_201901_b VALUES( '3' )
+  ),
+  PARTITION p_201902
+);
+drop table hash_range;
+CREATE TABLE hash_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901,
+  PARTITION p_201902
+);
+drop table hash_range;
+CREATE TABLE hash_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901,
+  PARTITION p_201902
+  (
+    SUBPARTITION p_201902_a,
+    SUBPARTITION p_201902_b
+  )
+);
+drop table hash_hash;
+CREATE TABLE hash_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901
+  (
+    SUBPARTITION p_201901_a,
+    SUBPARTITION p_201901_b
+  ),
+  PARTITION p_201902
+);
+drop table hash_hash;
+CREATE TABLE hash_hash
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (month_code) SUBPARTITION BY HASH (dept_code)
+(
+  PARTITION p_201901,
+  PARTITION p_201902
+);
+drop table hash_hash;
+--1.3 subpartition name check
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_a VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+ERROR:  duplicate subpartition name: "p_201901_a"
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+ERROR:  duplicate subpartition name: "p_201901_a"
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901 VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+ERROR:  duplicate subpartition name: "p_201901"
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201901_subpartdefault1 VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+drop table list_list;
+--1.4 subpartition key check
+-- 一级分区和二级分区分区键是同一列
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (month_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+ERROR:  The two partition keys of a subpartition partition table are the same.
+DETAIL:  N/A
+--二级分区的键值一样
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '1' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+ERROR:  list partition p_201901_a and p_201901_b has overlapped value
+--分区列不存在
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_codeXXX) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+ERROR:  undefined column"month_codexxx" is used as a partitioning column
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_codeXXX)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+ERROR:  undefined column"dept_codexxx" is used as a partitioning column
+CREATE TABLE list_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a values less than ('4'),
+    SUBPARTITION p_201901_b values less than ('4')
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a values less than ('3'),
+    SUBPARTITION p_201902_b values less than ('6')
+  )
+);
+ERROR:  partition bound of partition "p_201901_b" is too low
+drop table list_range;
+ERROR:  table "list_range" does not exist
+--1.5 list subpartition whith default 
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( '2' )
+  ),
+  PARTITION p_201902 VALUES ( default )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201902', '2', '1', 1);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+insert into list_list values('201903', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+select  * from list_list partition (p_201901);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+(3 rows)
+
+select  * from list_list partition (p_201902);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+(3 rows)
+
+drop table list_list;
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( default )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+drop table list_list;
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_b VALUES ( default )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+drop table list_list;
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( default )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( default )
+  )
+);
+drop table list_list;
+--1.6  declaration and definition of the subpatiiton type are same.
+--error
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY hash (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( default )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( default )
+  )
+);
+ERROR:  The syntax format of subpartition is incorrect, the declaration and definition of the subpartition do not match.
+DETAIL:  The syntax format of subpartition p_201901_a is incorrect.
+--1.7  add constraint
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '6' )
+  )
+);
+alter table range_range  add constraint constraint_check CHECK (sales_amt IS NOT NULL);
+insert into range_range values(1,1,1);
+ERROR:  new row for relation "range_range" violates check constraint "constraint_check"
+DETAIL:  N/A
+drop table range_range;
+-- drop partition column
+CREATE TABLE range_hash_02
+(
+	col_1 int ,
+	col_2 int,
+	col_3 VARCHAR2 ( 30 ) ,
+	col_4 int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (col_1) SUBPARTITION BY hash (col_2)
+(
+ PARTITION p_range_1 VALUES LESS THAN( -10 )
+ (
+	SUBPARTITION p_hash_1_1 ,
+	SUBPARTITION p_hash_1_2 ,
+	SUBPARTITION p_hash_1_3
+ ),
+ PARTITION p_range_2 VALUES LESS THAN( 20 ),
+ PARTITION p_range_3 VALUES LESS THAN( 30)
+ (
+	SUBPARTITION p_hash_3_1 ,
+	SUBPARTITION p_hash_3_2 ,
+	SUBPARTITION p_hash_3_3
+ ),
+   PARTITION p_range_4 VALUES LESS THAN( 50)
+ (
+	SUBPARTITION p_hash_4_1 ,
+	SUBPARTITION p_hash_4_2 ,
+	SUBPARTITION range_hash_02
+ ),
+  PARTITION p_range_5 VALUES LESS THAN( MAXVALUE )
+) ENABLE ROW MOVEMENT;
+alter table range_hash_02 drop column col_1;
+ERROR:  cannot drop partitioning column "col_1"
+alter table range_hash_02 drop column col_2;
+ERROR:  cannot drop partitioning column "col_2"
+drop table range_hash_02;
+--1.8 SET ROW MOVEMENT
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1', '2' ),
+    SUBPARTITION p_201901_b VALUES ( default )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1', '2' ),
+    SUBPARTITION p_201902_b VALUES ( default )
+  )
+);
+alter table list_list disable ROW MOVEMENT;
+insert into list_list values('201902', '1', '1', 1);
+update list_list set month_code = '201903';
+ERROR:  fail to update partitioned table "list_list"
+DETAIL:  disable row movement
+update list_list set dept_code = '3';
+ERROR:  fail to update partitioned table "list_list"
+DETAIL:  disable row movement
+alter table list_list enable ROW MOVEMENT;
+update list_list set month_code = '201903';
+update list_list set dept_code = '3';
+drop table list_list;
+--1.9 without subpartition declaration
+create table test(a int) WITH (STORAGE_TYPE=USTORE)
+partition by range(a)
+(
+partition p1 values less than(100)
+(
+subpartition subp1 values less than(50),
+subpartition subp2 values less than(100)
+),
+partition p2 values less than(200),
+partition p3 values less than(maxvalue)
+);
+ERROR:  The syntax format of subpartition is incorrect, missing declaration of subpartition.
+DETAIL:  N/A
+--1.10 create table like
+CREATE TABLE range_range
+(
+    col_1 int primary key,
+    col_2 int NOT NULL ,
+    col_3 VARCHAR2 ( 30 ) NOT NULL ,
+    col_4 int generated always as(2*col_2) stored ,
+	check (col_4 >= col_2)
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (col_1) SUBPARTITION BY RANGE (col_2)
+(
+  PARTITION p_range_1 VALUES LESS THAN( 10 )
+  (
+    SUBPARTITION p_range_1_1 VALUES LESS THAN( 5 ),
+    SUBPARTITION p_range_1_2 VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_range_2 VALUES LESS THAN( 20 )
+  (
+    SUBPARTITION p_range_2_1 VALUES LESS THAN( 5 ),
+    SUBPARTITION p_range_2_2 VALUES LESS THAN( 10 )
+  )
+) ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+CREATE TABLE range_range_02 (like range_range INCLUDING ALL );
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_02_pkey" for table "range_range_02"
+drop table range_range;
+--ROW LEVEL SECURITY POLICY
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int,
+	primary key(month_code, dept_code)
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+CREATE ROW LEVEL SECURITY POLICY range_range_rls ON range_range USING(user_no = CURRENT_USER);
+ERROR:  Un-support feature
+DETAIL:  Do not support row level security policy on subpartition table.
+drop table range_range;
+-- 账本数据库
+CREATE SCHEMA ledgernsp WITH BLOCKCHAIN;
+CREATE TABLE ledgernsp.range_range
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int,
+	primary key(month_code, dept_code)
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+ERROR:  Un-support feature
+DETAIL:  Subpartition table does not support ledger user table.
+DROP SCHEMA ledgernsp;
+-- create table as
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+) ENABLE ROW MOVEMENT;
+insert into range_range values(201902,1,1,1),(201902,1,1,1),(201902,3,1,1),(201903,1,1,1),(201903,2,1,1),(201903,2,1,1);
+select * from range_range subpartition(p_201901_a) where month_code in(201902,201903) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+(2 rows)
+
+create table range_range_copy WITH (STORAGE_TYPE=USTORE) as select * from range_range subpartition(p_201901_a) where month_code in(201902,201903);
+select * from range_range_copy order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+(2 rows)
+
+drop table range_range;
+drop table range_range_copy;
+--1.11 create index
+create table range_range_03
+(
+  c_int int,
+  c_char1 char(3000),
+  c_char2 char(5000),
+  c_char3 char(6000),
+  c_varchar1 varchar(3000),
+  c_varchar2 varchar(5000),
+  c_varchar3 varchar,
+  c_varchar4 varchar,
+  c_text1 text,
+  c_text2 text,
+  c_text3 text,
+  c int,
+  primary key(c,c_int)
+) with (parallel_workers=10, STORAGE_TYPE=USTORE)
+partition by range (c_int) subpartition by range (c_char1)
+(
+  partition p1 values less than(50)
+  (
+    subpartition p1_1 values less than('c'),
+    subpartition p1_2 values less than(maxvalue)
+  ),
+  partition p2 values less than(100)
+  (
+    subpartition p2_1 values less than('c'),
+    subpartition p2_2 values less than(maxvalue)
+  ),
+  partition p3 values less than(150)
+  (
+    subpartition p3_1 values less than('c'),
+    subpartition p3_2 values less than(maxvalue)
+  ),
+  partition p4 values less than(200)
+  (
+    subpartition p4_1 values less than('c'),
+    subpartition p4_2 values less than(maxvalue)
+  ),
+  partition p5 values less than(maxvalue)(
+    subpartition p5_1 values less than('c'),
+    subpartition p5_2 values less than(maxvalue)
+  )
+) enable row movement;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_03_pkey" for table "range_range_03"
+create index range_range_03_idx1 on range_range_03 (c_varchar1) local; --success
+create index range_range_03_idx2 on range_range_03 (c_varchar2) local (
+  partition cpt7_p1,
+  partition cpt7_p2,
+  partition cpt7_p3,
+  partition cpt7_p4,
+  partition cpt7_p5
+); --failed
+ERROR:  Cannot match subpartitions when create subpartition indexes.
+create index range_range_03_idx3 on range_range_03 (c_varchar3); --success, default global
+create index range_range_03_idx4 on range_range_03 (c_varchar4) global; --success
+create index range_range_03_idx5 on range_range_03 (c_varchar4) local; --failed, can not be same column with global index
+ERROR:  Global and local partition index should not be on same column
+\d+ range_range_03
+                  Table "ustore_subpartition_createtable.range_range_03"
+   Column   |          Type           | Modifiers | Storage  | Stats target | Description 
+------------+-------------------------+-----------+----------+--------------+-------------
+ c_int      | integer                 | not null  | plain    |              | 
+ c_char1    | character(3000)         |           | extended |              | 
+ c_char2    | character(5000)         |           | extended |              | 
+ c_char3    | character(6000)         |           | extended |              | 
+ c_varchar1 | character varying(3000) |           | extended |              | 
+ c_varchar2 | character varying(5000) |           | extended |              | 
+ c_varchar3 | character varying       |           | extended |              | 
+ c_varchar4 | character varying       |           | extended |              | 
+ c_text1    | text                    |           | extended |              | 
+ c_text2    | text                    |           | extended |              | 
+ c_text3    | text                    |           | extended |              | 
+ c          | integer                 | not null  | plain    |              | 
+Indexes:
+    "range_range_03_pkey" PRIMARY KEY, ubtree (c, c_int) WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_range_03_idx1" ubtree (c_varchar1) LOCAL WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_range_03_idx3" ubtree (c_varchar3) WITH (storage_type=USTORE) TABLESPACE pg_default
+    "range_range_03_idx4" ubtree (c_varchar4) WITH (storage_type=USTORE) TABLESPACE pg_default
+Partition By RANGE(c_int) Subpartition By RANGE(c_char1)
+Number of partitions: 5 (View pg_partition to check each partition range.)
+Number of subpartitions: 10 (View pg_partition to check each subpartition range.)
+Has OIDs: no
+Options: orientation=row, parallel_workers=10, storage_type=ustore, compression=no
+
+select pg_get_tabledef('range_range_03');
+                                                        pg_get_tabledef                                                         
+--------------------------------------------------------------------------------------------------------------------------------
+ SET search_path = ustore_subpartition_createtable;                                                                            +
+ CREATE TABLE range_range_03 (                                                                                                 +
+     c_int integer NOT NULL,                                                                                                   +
+     c_char1 character(3000),                                                                                                  +
+     c_char2 character(5000),                                                                                                  +
+     c_char3 character(6000),                                                                                                  +
+     c_varchar1 character varying(3000),                                                                                       +
+     c_varchar2 character varying(5000),                                                                                       +
+     c_varchar3 character varying,                                                                                             +
+     c_varchar4 character varying,                                                                                             +
+     c_text1 text,                                                                                                             +
+     c_text2 text,                                                                                                             +
+     c_text3 text,                                                                                                             +
+     c integer NOT NULL                                                                                                        +
+ )                                                                                                                             +
+ WITH (orientation=row, parallel_workers=10, storage_type=ustore, compression=no)                                              +
+ PARTITION BY RANGE (c_int) SUBPARTITION BY RANGE (c_char1)                                                                    +
+ (                                                                                                                             +
+     PARTITION p1 VALUES LESS THAN (50) TABLESPACE pg_default                                                                  +
+     (                                                                                                                         +
+         SUBPARTITION p1_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
+         SUBPARTITION p1_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+     ),                                                                                                                        +
+     PARTITION p2 VALUES LESS THAN (100) TABLESPACE pg_default                                                                 +
+     (                                                                                                                         +
+         SUBPARTITION p2_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
+         SUBPARTITION p2_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+     ),                                                                                                                        +
+     PARTITION p3 VALUES LESS THAN (150) TABLESPACE pg_default                                                                 +
+     (                                                                                                                         +
+         SUBPARTITION p3_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
+         SUBPARTITION p3_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+     ),                                                                                                                        +
+     PARTITION p4 VALUES LESS THAN (200) TABLESPACE pg_default                                                                 +
+     (                                                                                                                         +
+         SUBPARTITION p4_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
+         SUBPARTITION p4_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+     ),                                                                                                                        +
+     PARTITION p5 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                            +
+     (                                                                                                                         +
+         SUBPARTITION p5_1 VALUES LESS THAN ('c') TABLESPACE pg_default,                                                       +
+         SUBPARTITION p5_2 VALUES LESS THAN (MAXVALUE) TABLESPACE pg_default                                                   +
+     )                                                                                                                         +
+ )                                                                                                                             +
+ ENABLE ROW MOVEMENT;                                                                                                          +
+ CREATE INDEX range_range_03_idx4 ON range_range_03 USING ubtree (c_varchar4) WITH (storage_type=USTORE) TABLESPACE pg_default;+
+ CREATE INDEX range_range_03_idx3 ON range_range_03 USING ubtree (c_varchar3) WITH (storage_type=USTORE) TABLESPACE pg_default;+
+ CREATE INDEX range_range_03_idx1 ON range_range_03 USING ubtree (c_varchar1) LOCAL                                            +
+ (                                                                                                                             +
+     PARTITION p1_1_c_varchar1_idx,                                                                                            +
+     PARTITION p1_2_c_varchar1_idx,                                                                                            +
+     PARTITION p2_1_c_varchar1_idx,                                                                                            +
+     PARTITION p2_2_c_varchar1_idx,                                                                                            +
+     PARTITION p3_1_c_varchar1_idx,                                                                                            +
+     PARTITION p3_2_c_varchar1_idx,                                                                                            +
+     PARTITION p4_1_c_varchar1_idx,                                                                                            +
+     PARTITION p4_2_c_varchar1_idx,                                                                                            +
+     PARTITION p5_1_c_varchar1_idx,                                                                                            +
+     PARTITION p5_2_c_varchar1_idx                                                                                             +
+ )  WITH (storage_type=USTORE) TABLESPACE pg_default;                                                                          +
+ ALTER TABLE range_range_03 ADD CONSTRAINT range_range_03_pkey PRIMARY KEY (c, c_int) WITH (storage_type=USTORE);
+(1 row)
+
+drop table range_range_03;
+--unique local index columns must contain the partition key
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+) ENABLE ROW MOVEMENT;
+create unique index idx on range_range(month_code) local;
+ERROR:  unique local index columns must contain all the partition keys and collation must be default collation
+create unique index idx1 on range_range(month_code, user_no) local;
+ERROR:  unique local index columns must contain all the partition keys and collation must be default collation
+drop table range_range;
+-- partkey has timestampwithzone type
+drop table hash_range;
+ERROR:  table "hash_range" does not exist
+CREATE TABLE hash_range
+(
+    col_1 int PRIMARY KEY USING INDEX,
+    col_2 int  NOT NULL ,
+    col_3 int  NOT NULL ,
+    col_4 int,
+    col_19 TIMESTAMP WITH TIME ZONE
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (col_2) SUBPARTITION BY RANGE (col_19)
+(    partition p_hash_1
+  (
+    SUBPARTITION p_range_1_1 VALUES LESS THAN( 5 ),
+    SUBPARTITION p_range_1_2 VALUES LESS THAN( MAXVALUE )
+  ),
+  partition p_hash_2,
+    PARTITION p_hash_3,
+    PARTITION p_hash_4,
+    PARTITION p_hash_5,
+    PARTITION p_hash_7
+) ENABLE ROW MOVEMENT;
+ERROR:  partition key value must be const or const-evaluable expression
+CREATE TABLE hash_range
+(
+    col_1 int PRIMARY KEY USING INDEX,
+    col_2 int  NOT NULL ,
+    col_3 int  NOT NULL ,
+    col_4 int,
+    col_19 TIMESTAMP WITH TIME ZONE
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY HASH (col_19) SUBPARTITION BY RANGE (col_2)
+(    partition p_hash_1
+  (
+    SUBPARTITION p_range_1_1 VALUES LESS THAN( 5 ),
+    SUBPARTITION p_range_1_2 VALUES LESS THAN( MAXVALUE )
+  ),
+  partition p_hash_2,
+    PARTITION p_hash_3,
+    PARTITION p_hash_4,
+    PARTITION p_hash_5,
+    PARTITION p_hash_7
+) ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "hash_range_pkey" for table "hash_range"
+drop table hash_range;
+--clean
+DROP SCHEMA ustore_subpartition_createtable CASCADE;
+NOTICE:  drop cascades to table range_range_02
+RESET CURRENT_SCHEMA;

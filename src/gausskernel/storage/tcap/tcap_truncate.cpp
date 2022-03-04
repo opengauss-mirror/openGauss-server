@@ -64,10 +64,12 @@
 #include "catalog/pg_ts_template.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
+#include "catalog/pg_partition_fn.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/directory.h"
 #include "commands/extension.h"
+#include "commands/matview.h"
 #include "commands/proclang.h"
 #include "commands/schemacmds.h"
 #include "commands/seclabel.h"
@@ -100,7 +102,8 @@ void TrRelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, voi
     RelFileNodeBackend newrnode;
 
     /* Indexes, sequences must have Invalid frozenxid; other rels must not. */
-    Assert((((relation->rd_rel->relkind == RELKIND_INDEX) || (RELKIND_IS_SEQUENCE(relation->rd_rel->relkind))) ?
+    Assert((((relation->rd_rel->relkind == RELKIND_INDEX) || (relation->rd_rel->relkind == RELKIND_GLOBAL_INDEX) ||
+        (RELKIND_IS_SEQUENCE(relation->rd_rel->relkind))) ?
         (freezeXid == InvalidTransactionId) :
         TransactionIdIsNormal(freezeXid)) ||
         relation->rd_rel->relkind == RELKIND_RELATION);
@@ -108,7 +111,8 @@ void TrRelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, voi
     /* Record the old relfilenode to recyclebin. */
     desc = *trBaseDesc;
     if (!TR_IS_BASE_OBJ_EX(trBaseDesc, RelationGetRelid(relation))) {
-        TrDescInit(relation, &desc, RB_OPER_TRUNCATE, TrGetObjType(InvalidOid, RelationGetRelkind(relation)), false);
+        TrDescInit(relation, &desc, RB_OPER_TRUNCATE,
+            TrGetObjType(RelationGetNamespace(relation), RelationGetRelkind(relation)), false);
         TrDescWrite(&desc);
     }
 
@@ -148,6 +152,42 @@ void TrRelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, voi
     u_sess->relcache_cxt.need_eoxact_work = true;
 }
 
+void TrPartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid, void *baseDesc)
+{
+    RelFileNodeBackend newrnode;
+    TrObjDesc desc;
+    TrObjDesc *trBaseDesc = (TrObjDesc *)baseDesc;
+
+    Assert((parent->rd_rel->relkind == RELKIND_INDEX || RELKIND_IS_SEQUENCE(parent->rd_rel->relkind))
+               ? freezeXid == InvalidTransactionId
+               : TransactionIdIsNormal(freezeXid));
+
+    /* Record the old relfilenode to recyclebin. */
+    desc = *trBaseDesc;
+    if (!TR_IS_BASE_OBJ_EX(trBaseDesc, part->pd_id)) {
+        TrPartDescInit(parent, part, &desc, RB_OPER_TRUNCATE,
+            TrGetObjType(RelationGetNamespace(parent), RelationGetRelkind(parent)), false);
+        TrDescWrite(&desc);
+    }
+
+    /* Allocate a new relfilenode */
+    newrnode = CreateNewRelfilenodePart(parent,  part);
+
+    UpdatePartition(parent,  part, freezeXid, &newrnode);
+
+    CommandCounterIncrement();
+
+    /*
+     * Mark the part as having been given a new relfilenode in the current
+     * (sub) transaction.  This is a hint that can be used to optimize later
+     * operations on the rel in the same transaction.
+     */
+    part->pd_newRelfilenodeSubid = GetCurrentSubTransactionId();
+
+    /* ... and now we have eoxact cleanup work to do */
+    u_sess->cache_cxt.part_cache_need_eoxact_work = true;
+}
+
 bool TrCheckRecyclebinTruncate(const TruncateStmt *stmt)
 {
     RangeVar *rel = NULL;
@@ -173,6 +213,75 @@ bool TrCheckRecyclebinTruncate(const TruncateStmt *stmt)
     return NeedTrComm(relid);
 }
 
+void TrTruncateOnePart(Relation rel, HeapTuple tup, Oid insertBaseid)
+{
+    Oid toastOid = ((Form_pg_partition)GETSTRUCT(tup))->reltoastrelid;
+    Relation toastRel = NULL;
+    Oid partOid = HeapTupleGetOid(tup);
+    Partition p = partitionOpen(rel, partOid, AccessExclusiveLock);
+    TrObjDesc baseDesc;
+    TrPartDescInit(rel, p, &baseDesc, RB_OPER_TRUNCATE, RB_OBJ_PARTITION, false);
+    baseDesc.id = baseDesc.baseid = insertBaseid;
+    (void)TrDescWrite(&baseDesc);
+    TrUpdateBaseid(&baseDesc);
+
+    TrPartitionSetNewRelfilenode(rel, p, u_sess->utils_cxt.RecentXmin, &baseDesc);
+
+    /* process the toast table */
+    if (OidIsValid(toastOid)) {
+        Assert(rel->rd_rel->relpersistence != RELPERSISTENCE_UNLOGGED);
+        toastRel = heap_open(toastOid, AccessExclusiveLock);
+        TrRelationSetNewRelfilenode(toastRel, u_sess->utils_cxt.RecentXmin, &baseDesc);
+        heap_close(toastRel, AccessExclusiveLock);
+    }
+    partitionClose(rel, p, AccessExclusiveLock);
+
+    /* report truncate partition to PgStatCollector */
+    pgstat_report_truncate(partOid, rel->rd_id, rel->rd_rel->relisshared);
+}
+
+void TrPartitionTableProcess(Relation rel, Oid insertBaseid)
+{
+    /* truncate partitioned table */
+    List* partTupleList = NIL;
+    ListCell* partCell = NULL;
+    Oid heap_relid;
+    bool is_shared = rel->rd_rel->relisshared;
+
+    heap_relid = RelationGetRelid(rel);
+    /* partitioned table unspport the unlogged table */
+    Assert(rel->rd_rel->relpersistence != RELPERSISTENCE_UNLOGGED);
+
+    /* process all partition */
+    partTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, rel->rd_id);
+    foreach (partCell, partTupleList) {
+        if (RelationIsSubPartitioned(rel)) {
+            /* the "tup" just for get partOid, UHeapTup has no HEAP_HASOID flag, so here use HeapTuple */
+            HeapTuple tup = (HeapTuple)lfirst(partCell);
+            Oid partOid = HeapTupleGetOid(tup);
+            Partition p = partitionOpen(rel, partOid, AccessExclusiveLock);
+            Relation partRel = partitionGetRelation(rel, p);
+            List* subPartTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION, partOid);
+            ListCell* subPartCell = NULL;
+            foreach (subPartCell, subPartTupleList) {
+                HeapTuple tup = (HeapTuple)lfirst(subPartCell);
+                TrTruncateOnePart(partRel, tup, insertBaseid);
+            }
+            freePartList(subPartTupleList);
+
+            releaseDummyRelation(&partRel);
+            partitionClose(rel, p, AccessExclusiveLock);
+        } else {
+            HeapTuple tup = (HeapTuple)lfirst(partCell);
+            TrTruncateOnePart(rel, tup, insertBaseid);
+        }
+    }
+
+    freePartList(partTupleList);
+    /* report truncate partitioned table to PgStatCollector */
+    pgstat_report_truncate(heap_relid, InvalidOid, is_shared);
+}
+
 void TrTruncate(const TruncateStmt *stmt)
 {
     RangeVar *rv = (RangeVar*)linitial(stmt->relations);
@@ -187,6 +296,14 @@ void TrTruncate(const TruncateStmt *stmt)
 
     rel = heap_openrv(rv, AccessExclusiveLock);
     relid = RelationGetRelid(rel);
+
+    /* find matview exists or not. */
+    Oid mlogid = find_matview_mlog_table(relid);
+    if (OidIsValid(mlogid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Not support truncate table under materialized view.")));
+    }
 
     TrForbidAccessRbObject(RelationRelationId, relid, rv->relname);
 
@@ -204,10 +321,19 @@ void TrTruncate(const TruncateStmt *stmt)
      * 2. Create a new empty storage file for the relation, and assign it
      * as the relfilenode value, and record the old relfilenode to recyclebin.
      */
-
+     
     TrDescInit(rel, &baseDesc, RB_OPER_TRUNCATE, RB_OBJ_TABLE, true, true);
     baseDesc.id = baseDesc.baseid = TrDescWrite(&baseDesc);
     TrUpdateBaseid(&baseDesc);
+
+    /*
+     * step 2.1. If rel is partition table, find all partitions, and Create some new empty
+     * storage file for the all partitions of the relation, and assign them as the
+     * relfilenodes value, and record the old relfilenodes to recyclebin.
+     */
+    if (RELATION_IS_PARTITIONED(rel)) {
+        TrPartitionTableProcess(rel, baseDesc.baseid);
+    }
 
     TrRelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin, &baseDesc);
 
@@ -216,7 +342,7 @@ void TrTruncate(const TruncateStmt *stmt)
      */
 
     toastRelid = rel->rd_rel->reltoastrelid;
-    if (OidIsValid(toastRelid)) {
+    if (OidIsValid(toastRelid) && !RELATION_IS_PARTITIONED(rel)) {
         Relation relToast = relation_open(toastRelid, AccessExclusiveLock);
         TrRelationSetNewRelfilenode(relToast, u_sess->utils_cxt.RecentXmin, &baseDesc);
         heap_close(relToast, NoLock);
@@ -252,7 +378,7 @@ void TrDoPurgeObjectTruncate(TrObjDesc *desc)
     ScanKeyData skey[1];
     HeapTuple tup;
 
-    Assert (desc->type == RB_OBJ_TABLE && desc->canpurge);
+    Assert (((desc->type == RB_OBJ_TABLE) && desc->canpurge) || ((desc->type == RB_OBJ_PARTITION) && !desc->canpurge));
 
     rbRel = heap_open(RecyclebinRelationId, RowExclusiveLock);
 
@@ -303,7 +429,29 @@ void TrRestoreTruncate(const TimeCapsuleStmt *stmt)
     SysScanDesc sd;
     ScanKeyData skey[1];
     HeapTuple tup;
+    Relation rel;
+    Oid relid;
+    bool found = false;
+    TrObjDesc desc;
 
+    /* process restore truncate fail: TIMECAPSULE TABLE "BIN$3C534EBE021$4930808==$0" TO BEFORE TRUNCATE; */
+    found = TrFetchName(stmt->relation->relname, RB_OBJ_TABLE, &desc, RB_OPER_RESTORE_TRUNCATE);
+    if (found) {
+        stmt->relation->relname = desc.originname;
+    }
+
+    rel = heap_openrv(stmt->relation, AccessExclusiveLock);
+    relid = RelationGetRelid(rel);
+    if (rel->rd_tam_type == TAM_HEAP) {
+        heap_close(rel, NoLock);
+        elog(ERROR, "timecapsule does not support astore yet");
+        return;
+    }
+
+    if (found) {
+        stmt->relation->relname = desc.name;
+    }
+    
     /* 1. Fetch the latest available recycle object. */
     TrOperFetch(stmt->relation, RB_OBJ_TABLE, &baseDesc, RB_OPER_RESTORE_TRUNCATE);
 
@@ -322,11 +470,16 @@ void TrRestoreTruncate(const TimeCapsuleStmt *stmt)
 
     sd = systable_beginscan(rbRel, RecyclebinBaseidIndexId, true, NULL, 1, skey);
     while (HeapTupleIsValid(tup = systable_getnext(sd))) {
-        TrSwapRelfilenode(rbRel, tup);
+        if (!RELATION_IS_PARTITIONED(rel)) {
+            TrSwapRelfilenode(rbRel, tup, false);
+        } else {
+            TrSwapRelfilenode(rbRel, tup, true);
+        }
     }
 
     systable_endscan(sd);
     heap_close(rbRel, RowExclusiveLock);
+    heap_close(rel, NoLock);
 
     /*
      * CommandCounterIncrement here to ensure that preceding changes are all

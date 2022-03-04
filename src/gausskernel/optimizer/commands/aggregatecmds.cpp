@@ -264,12 +264,14 @@ void RenameAggregate(List* name, List* args, const char* newname)
 
 #ifndef ENABLE_MULTIPLE_NODES
     Datum allargtypes = ProcedureGetAllArgTypes(tup, &isNull);
+    Datum argmodes = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_proargmodes, &isNull);
     /* make sure the new name doesn't exist */
-    if (SearchSysCache4(PROCALLARGS,
+    if (SearchSysCacheForProcAllArgs(
             CStringGetDatum(newname),
             allargtypes,
             ObjectIdGetDatum(namespaceOid),
-            ObjectIdGetDatum(packageoid)))
+            ObjectIdGetDatum(packageoid),
+            argmodes))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
                 errmsg("function %s already exists in schema \"%s\"",

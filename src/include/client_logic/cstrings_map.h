@@ -43,7 +43,7 @@ public:
     CStringsMap &operator = (const CStringsMap &other);
     void init(const CStringsMap &other);
     ~CStringsMap();
-    void set(const char *key, const char *value, size_t valsize = 0);
+    void set(const char *key, const char *value, size_t valsize = SIZE_MAX);
     void clear();
     const char *find(const char *key) const;
     const char *find(const char *key, size_t *size) const;

@@ -18,12 +18,42 @@ CREATE FUNCTION select2() RETURNS accounts LANGUAGE SQL AS 'SELECT * from accoun
 CREATE FUNCTION select4() RETURNS SETOF accounts LANGUAGE SQL AS 'SELECT * from accounts;';
 CALL select2();
 CALL select4();
-SELECT select2();
-SELECT select4();
+
+DROP TABLE IF EXISTS fuc_creditcard_info;
+CREATE TABLE fuc_creditcard_info (id_number int, name text encrypted with (column_encryption_key = ret_cek1, encryption_type = DETERMINISTIC),
+credit_card varchar(19) encrypted with (column_encryption_key = ret_cek1, encryption_type = DETERMINISTIC));
+INSERT INTO fuc_creditcard_info VALUES (1,2,3);
+--函数定义的返回表字段类型与加密表字段类型一致，可以正常加解密
+DROP FUNCTION IF EXISTS select5();
+CREATE or replace FUNCTION select5() RETURNS TABLE (
+ name text ,
+ credit_card varchar(19)
+) LANGUAGE SQL
+AS 'SELECT name, credit_card from fuc_creditcard_info;';
+call select5();
+--函数定义的返回表字段类型为VARCHAR与加密表name的text类型不一致，可以正常加解密
+DROP FUNCTION IF EXISTS select6;
+CREATE or replace FUNCTION select6() RETURNS TABLE (
+name VARCHAR,
+credit_card VARCHAR
+) LANGUAGE SQL
+AS 'SELECT name, credit_card from fuc_creditcard_info;';
+call select6();
+--函数定义的返回表字段类型为INT与加密表字段类型varchar(19)不一致，报错
+DROP FUNCTION IF EXISTS select7;
+CREATE or replace FUNCTION select7() RETURNS TABLE (
+name text,
+credit_card INT
+) LANGUAGE SQL
+AS 'SELECT name, credit_card from fuc_creditcard_info;';
 
 DROP FUNCTION select2();
 DROP FUNCTION select4();
+DROP FUNCTION select5();
+DROP FUNCTION select6();
+DROP FUNCTION select7();
 DROP TABLE accounts;
+DROP TABLE fuc_creditcard_info;
 DROP COLUMN ENCRYPTION KEY ret_cek1;
 DROP CLIENT MASTER KEY ret_cmk1;
 \! gs_ktool -d all

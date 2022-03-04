@@ -33,7 +33,12 @@
 
 class ThreadPoolSessControl;
 
-enum CPUBindType { NO_CPU_BIND, ALL_CPU_BIND, NODE_BIND, CPU_BIND };
+enum CPUBindType { NO_CPU_BIND, ALL_CPU_BIND, NODE_BIND, CPU_BIND, NUMA_BIND };
+
+typedef struct {
+    int numaId;
+    int cpuId;
+}NumaCpuId;
 
 typedef struct CPUInfo {
     int totalCpuNum;
@@ -47,6 +52,7 @@ typedef struct CPUInfo {
     bool* isBindCpuArr;
     bool* isBindNumaArr;
     bool* isMcsCpuArr;
+    bool* isBindCpuNumaArr;
 } CPUInfo;
 
 typedef struct ThreadPoolAttr {
@@ -54,6 +60,14 @@ typedef struct ThreadPoolAttr {
     int groupNum;
     char* bindCpu;
 } ThreadPoolAttr;
+
+typedef struct ThreadPoolStreamAttr {
+    int threadNum;
+    float procRatio;
+    int groupNum;
+    char* bindCpu;
+} ThreadPoolStreamAttr;
+
 
 class ThreadPoolControler : public BaseObject {
 public:
@@ -92,24 +106,37 @@ public:
     {
         return m_threadPoolContext;
     }
+
+    inline int GetStreamThreadNum()
+    {
+        return m_maxStreamPoolSize;
+    }
+
+    inline float GetStreamProcRatio()
+    {
+        return m_streamProcRatio;
+    }
 	
 	void BindThreadToAllAvailCpu(ThreadId thread) const;
     void EnableAdjustPool();
-
+    static int ParseRangeStr(char* attr, bool* arr, int totalNum, char* bindtype);
+    static bool* GetMcsCpuInfo(int totalCpuNum);
+    static void GetCpuAndNumaNum(int32 *totalCpuNum, int32 *totalNumaNum);
+    static void GetActiveCpu(NumaCpuId *numaCpuIdList, int *num);
+    static void GetInstanceBind(cpu_set_t *cpuset);
 private:
     ThreadPoolGroup* FindThreadGroupWithLeastSession();
     void ParseAttr();
+    void ParseStreamAttr();
     void ParseBindCpu();
-    int ParseRangeStr(char* attr, bool* arr, int totalNum, char* bindtype);
-    void GetMcsCpuInfo();
     void GetSysCpuInfo();
     void InitCpuInfo();
-    void GetCpuAndNumaNum();
     bool IsActiveCpu(int cpuid, int numaid);
     void SetGroupAndThreadNum();
+    void SetStreamInfo();
     void ConstrainThreadNum();
-    void GetInstanceBind();
     bool CheckCpuBind() const;
+    bool CheckCpuNumaBind() const;
 
 private:
     MemoryContext m_threadPoolContext;
@@ -117,10 +144,13 @@ private:
     ThreadPoolScheduler* m_scheduler;
     CPUInfo m_cpuInfo;
     ThreadPoolAttr m_attr;
+    ThreadPoolStreamAttr m_stream_attr;
     cpu_set_t m_cpuset;
     int m_groupNum;
     int m_threadNum;
     int m_maxPoolSize;
+    int m_maxStreamPoolSize;
+    float m_streamProcRatio;
 };
 
 #endif /* THREAD_POOL_CONTROLER_H */

@@ -14,6 +14,8 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/build_query
     ${CMAKE_CURRENT_SOURCE_DIR}/config
     ${CMAKE_CURRENT_SOURCE_DIR}/pgcommon
+    ${CMAKE_CURRENT_SOURCE_DIR}/cm_common
+    ${CMAKE_CURRENT_SOURCE_DIR}/cm_communication
 )
 
 add_subdirectory(gstrace)
@@ -23,4 +25,6 @@ add_subdirectory(alarm)
 add_subdirectory(build_query)
 add_subdirectory(config)
 add_subdirectory(pgcommon)
+add_subdirectory(cm_common)
+add_subdirectory(cm_communication)
 

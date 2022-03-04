@@ -35,6 +35,15 @@ bool ItemPointerEquals(ItemPointer pointer1, ItemPointer pointer2)
         return false;
 }
 
+bool ItemPointerEqualsNoCheck(ItemPointer pointer1, ItemPointer pointer2)
+{
+    if ((ItemPointerGetBlockNumberNoCheck(pointer1) == ItemPointerGetBlockNumberNoCheck(pointer2)) &&
+        (ItemPointerGetOffsetNumberNoCheck(pointer1) == ItemPointerGetOffsetNumberNoCheck(pointer2)))
+        return true;
+    else
+        return false;
+}
+
 /*
  * ItemPointerCompare
  *		Generic btree-style comparison for item pointers.

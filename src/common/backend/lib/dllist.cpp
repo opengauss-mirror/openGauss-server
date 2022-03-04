@@ -235,15 +235,18 @@ DllistWithLock::~DllistWithLock()
     SpinLockFree(&m_lock);
 }
 
-void DllistWithLock::Remove(Dlelem* e)
+bool DllistWithLock::RemoveConfirm(Dlelem* e)
 {
+    bool found = false;
     START_CRIT_SECTION();
     SpinLockAcquire(&(m_lock));
 	if (e->dle_list == &m_list) {
+        found = true;
         DLRemove(e);
     }
     SpinLockRelease(&(m_lock));
     END_CRIT_SECTION();
+    return found;
 }
 
 void DllistWithLock::AddHead(Dlelem* e)
@@ -279,6 +282,17 @@ Dlelem* DllistWithLock::RemoveHead()
     return head;
 }
 
+Dlelem* DllistWithLock::RemoveTail()
+{
+    Dlelem* head = NULL;
+    START_CRIT_SECTION();
+    SpinLockAcquire(&(m_lock));
+    head = DLRemTail(&m_list);
+    SpinLockRelease(&(m_lock));
+    END_CRIT_SECTION();
+    return head;
+}
+
 bool DllistWithLock::IsEmpty()
 {
     START_CRIT_SECTION();
@@ -300,6 +314,12 @@ void DllistWithLock::GetLock()
 {
     START_CRIT_SECTION();
     SpinLockAcquire(&(m_lock));
+}
+
+Dlelem* DllistWithLock::RemoveHeadNoLock()
+{
+    Dlelem* head = DLRemHead(&m_list);
+    return head;
 }
 
 void DllistWithLock::ReleaseLock()

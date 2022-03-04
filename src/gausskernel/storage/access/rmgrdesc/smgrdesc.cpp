@@ -21,6 +21,18 @@
 #include "storage/custorage.h"
 #include "storage/smgr/relfilenode.h"
 
+const char* smgr_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_SMGR_CREATE) {
+        return "smgr_create";
+    } else if (info == XLOG_SMGR_TRUNCATE) {
+        return "truncate";
+    } else {
+        return "unkown_type";
+    }
+}
+
 void smgr_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

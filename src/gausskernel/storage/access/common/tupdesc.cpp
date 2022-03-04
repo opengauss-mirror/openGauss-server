@@ -96,6 +96,7 @@ TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, TableAmType tam)
     desc->tdhasoid = hasoid;
     desc->tdrefcount = -1;    /* assume not reference-counted */
     desc->initdefvals = NULL; /* initialize the attrinitdefvals */
+    desc->tdhasuids = false;
     desc->tdisredistable = false;
     desc->tdTableAmType = tam;
 
@@ -132,6 +133,7 @@ TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, Tabl
     desc->tdrefcount = -1;    /* assume not reference-counted */
     desc->initdefvals = NULL; /* initialize the attrinitdefvals */
     desc->tdisredistable = false;
+    desc->tdhasuids = false;
     desc->tdTableAmType = tam;
 
     return desc;
@@ -142,7 +144,7 @@ TupleDesc CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute* attrs, Tabl
  *		This function creates a new TupInitDefVal by copying from an existing
  *		TupInitDefVal.
  */
-static TupInitDefVal *tupInitDefValCopy(TupInitDefVal *pInitDefVal, int nAttr)
+TupInitDefVal *tupInitDefValCopy(TupInitDefVal *pInitDefVal, int nAttr)
 {
     TupInitDefVal *dvals = (TupInitDefVal *)palloc(nAttr * sizeof(TupInitDefVal));
     for (int i = 0; i < nAttr; ++i) {
@@ -184,6 +186,7 @@ TupleDesc CreateTupleDescCopy(TupleDesc tupdesc)
     desc->tdtypeid = tupdesc->tdtypeid;
     desc->tdtypmod = tupdesc->tdtypmod;
     desc->tdisredistable = tupdesc->tdisredistable;
+    desc->tdhasuids = tupdesc->tdhasuids;
 
     /* copy the attinitdefval */
     if (tupdesc->initdefvals) {
@@ -197,7 +200,7 @@ TupleDesc CreateTupleDescCopy(TupleDesc tupdesc)
  * TupleConstrCopy
  *    This function creates a new TupleConstr by copying from an existing TupleConstr.
  */
-static TupleConstr *TupleConstrCopy(const TupleDesc tupdesc)
+TupleConstr *TupleConstrCopy(const TupleDesc tupdesc)
 {
     TupleConstr *constr = tupdesc->constr;
     TupleConstr *cpy = (TupleConstr *)palloc0(sizeof(TupleConstr));
@@ -318,6 +321,7 @@ void FreeTupleDesc(TupleDesc tupdesc)
             }
             pfree(check);
         }
+        pfree_ext(tupdesc->constr->clusterKeys);
         pfree(tupdesc->constr);
         tupdesc->constr = NULL;
     }
@@ -914,7 +918,7 @@ static void BlockColumnRelOption(const char *tableFormat, const Oid atttypid, co
 {
     if (((pg_strcasecmp(ORIENTATION_COLUMN, tableFormat)) == 0 ||
         (pg_strcasecmp(ORIENTATION_TIMESERIES, tableFormat)) == 0) &&
-        !IsTypeSupportedByCStore(atttypid, atttypmod)) {
+        !IsTypeSupportedByCStore(atttypid)) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("type \"%s\" is not supported in column store", format_type_with_typemod(atttypid, atttypmod))));
     }

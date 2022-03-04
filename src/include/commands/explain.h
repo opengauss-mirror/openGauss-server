@@ -151,7 +151,7 @@ typedef struct PlanTableEntry {
 #define V_PLAN_TABLE "plan_table"
 
 /* plan_table column length for explain plan. */
-#define PLANTABLECOLNUM 11
+#define PLANTABLECOLNUM 13
 #define SESSIONIDLEN 32
 #define STMTIDLEN 31 /* the max statement_id length is 30 byte. */
 #define OPERATIONLEN 31
@@ -172,6 +172,8 @@ typedef struct PlanTableData {
     char object_type[OBJECTLEN];    /* object type. */
     char object_owner[NAMEDATALEN]; /* object schema */
     StringInfo projection;          /* output targetlist of the node */
+    double cost;                    /* cost of operation */
+    double cardinality;                    /* cost of operation */
 } PlanTableData;
 
 typedef enum PlanTableCol {
@@ -189,7 +191,9 @@ typedef enum PlanTableCol {
     PT_OBJECT_TYPE,
     PT_OBJECT_OWNER,
 
-    PT_PROJECTION
+    PT_PROJECTION,
+    PT_COST,
+    PT_CARDINALITY
 } PlanTableCol;
 
 /* Store all node tupls of one plan. */
@@ -259,6 +263,9 @@ public:
 
     /* Set projection for one paln node. */
     void set_plan_table_projection(int plan_node_id, List* tlist);
+
+    /* Set plan cost and cardinality. */
+    void set_plan_table_cost_card(int plan_node_id, double plan_cost, double plan_cardinality);
 
     /* Call heap_insert to insert all nodes tuples of the plan into table. */
     void insert_plan_table_tuple();
@@ -435,6 +442,7 @@ typedef struct DN_RunInfo {
 
 typedef struct ExplainState {
     StringInfo str; /* output buffer */
+    StringInfo post_str; /* output buffer after plan tree */
                     /* options */
     bool plan;      /* do not print plan */
     bool verbose;   /* be verbose */
@@ -496,6 +504,7 @@ extern void ExplainEndOutput(ExplainState* es);
 extern void ExplainSeparatePlans(ExplainState* es);
 
 extern void ExplainPropertyList(const char* qlabel, List* data, ExplainState* es);
+extern void ExplainPropertyListPostPlanTree(const char* qlabel, List* data, ExplainState* es);
 extern void ExplainPropertyText(const char* qlabel, const char* value, ExplainState* es);
 extern void ExplainPropertyInteger(const char* qlabel, int value, ExplainState* es);
 extern void ExplainPropertyLong(const char* qlabel, long value, ExplainState* es);

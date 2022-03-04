@@ -217,11 +217,12 @@ begin
     end ;
 end;
 /
-ERROR:  type name too long
---?.*
-CONTEXT:  compilation of PL/pgSQL function "joint_debug_cursor_func_procedure_012" near line 7
 call     JOINT_DEBUG_CURSOR_FUNC_PROCEDURE_012();
-ERROR:  function "joint_debug_cursor_func_procedure_012" doesn't exist 
+ joint_debug_cursor_func_procedure_012 
+---------------------------------------
+ 
+(1 row)
+
 drop table if exists cursor_vl_tb10;
 NOTICE:  table "cursor_vl_tb10" does not exist, skipping
 create unlogged table cursor_vl_tb10(c1 int,c2 varchar,c3 numeric,c4 date,c5 text);
@@ -516,10 +517,11 @@ ERROR:  relation "cursor_vl_tb10" does not exist on datanode1
 LINE 1: select * from cursor_vl_tb10;
                       ^
 DROP SCHEMA hw_cursor_part3 CASCADE;
-NOTICE:  drop cascades to 10 other objects
+NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to function sp_testsp_delete()
 drop cascades to table joint_debug_cursor_func_table_012
+drop cascades to function joint_debug_cursor_func_procedure_012()
 drop cascades to function i_refcursor10_1(integer)
 drop cascades to function i_refcursor10_2(integer)
 drop cascades to function i_refcursor10_3()

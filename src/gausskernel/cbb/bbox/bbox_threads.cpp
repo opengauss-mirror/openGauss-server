@@ -236,6 +236,7 @@ s32 BBOX_PtraceAttachPid(struct TASK_ATTACH_INFO* pstTaskInfo, s32 iPidCount, s3
         /* walk through all the threads and debug the trace. */
         pid = pstTaskInfo[i].pid;
         if (sys_ptrace(PTRACE_ATTACH, pid, (void*)0, (void*)0) < 0) {
+            bbox_print(PRINT_ERR, "ptrace failed, pid = %d, errno = %d\n", pid, errno);
             continue;
         }
 
@@ -254,10 +255,11 @@ s32 BBOX_PtraceAttachPid(struct TASK_ATTACH_INFO* pstTaskInfo, s32 iPidCount, s3
             ret = sys_ptrace(PTRACE_PEEKDATA, pid, &m, &n);
             /* check that if the trace is valid */
             if (ret || (m != n)) {
+                bbox_print(PRINT_ERR,
+                    "ptrace peek data failed, pid = %d, ret = %d,m = %lu, n = %lu, errno = %d\n",
+                    pid, ret, m, n, errno);
+
                 sys_ptrace(PTRACE_DETACH, pid, 0, 0);
-
-                bbox_print(PRINT_ERR, "ptrace peek data failed, pid = %d, ret = %d,m = %lu, n = %lu, errno = %d\n", pid, ret, m, n, errno);
-
                 continue;
             }
         }

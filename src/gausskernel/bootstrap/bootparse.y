@@ -234,7 +234,6 @@ Boot_CreateStmt:
 												   mapped_relation,
 												   true,
 												   REL_CMPRS_NOT_SUPPORT,
-												   (Datum)0,
 												   BOOTSTRAP_SUPERUSERID,
 												   false,
 												   TAM_HEAP,

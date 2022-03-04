@@ -23,7 +23,9 @@
 
 #ifndef JNI_UTIL_H_
 #define JNI_UTIL_H_
+#ifndef ENABLE_LITE_MODE
 #include <jni.h>
+#endif
 
 const int ARRAY_SIZE = 2; /* array size */
 void set_no_error(JNIEnv *env, jclass objectClass, jobjectArray arrayObject);

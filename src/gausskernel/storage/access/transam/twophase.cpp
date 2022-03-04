@@ -84,6 +84,7 @@
 #include "access/clog.h"
 #include "access/csnlog.h"
 #include "access/htup.h"
+#include "access/slru.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
 #include "access/twophase.h"
@@ -359,16 +360,6 @@ static int IsPrepXidValid(ValidPrepXid prepXid, TransactionId xid)
         }
     }
     return -1;
-}
-
-bool IsTransactionIdMarkedPrepared(TransactionId xid)
-{
-    /* Possible race condition here with SetNextPrepXid */
-    TwoPhaseStateData *currentStatePtr = TwoPhaseState(xid);
-    ValidPrepXid prepXid = GetCurrPrepXid(currentStatePtr);
-    bool result = IsPrepXidValid(prepXid, xid) != -1;
-    ReleasePrepXid(prepXid);
-    return result;
 }
 
 /* if the prepared xid list is overflow, we need copy the list from
@@ -731,6 +722,7 @@ static void MarkAsPreparingGuts(GTM_TransactionHandle handle, GlobalTransaction 
     pgxact->xid = xid;
     pgxact->xmin = InvalidTransactionId;
     pgxact->csn_min = InvalidCommitSeqNo;
+    pgxact->csn_dr = InvalidCommitSeqNo;
     pgxact->delayChkpt = false;
     pgxact->vacuumFlags = 0;
     proc->pid = 0;
@@ -2558,52 +2550,9 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
             ColFileNodeRel *colFileNodeRel = commitrels + i;
 
             ColFileNodeCopy(&colFileNode, colFileNodeRel);
-
-            if (IsValidPaxDfsForkNum(colFileNode.forknum)) {
-                /* drop dfs table */
-                if (IS_PGXC_COORDINATOR) {
-                    if (isCommit && !IsConnFromCoord()) {
-                        DropDfsDirectory(&colFileNode, false);
-                    }
-                } else {
-                    /* DN */
-                    DfsInsert::InvalidSpaceAllocCache(colFileNode.filenode.relNode);
-
-                    /* read dfs file list to get each file size */
-                    List *dfsfilelist = NIL;
-                    ReadDfsFilelist(colFileNode.filenode, colFileNode.ownerid, &dfsfilelist);
-
-                    /* calculate file size */
-                    uint64 size = GetDfsDelFileSize(dfsfilelist, isCommit);
-
-                    /* decrease the permanent space on users' record  */
-                    perm_space_decrease(colFileNode.ownerid, size,
-                                        find_tmptable_cache_key(colFileNode.filenode.relNode) ? SP_TEMP : SP_PERM);
-
-                    /* free list */
-                    list_free_deep(dfsfilelist);
-                    dfsfilelist = NIL;
-
-                    /* drop delete file list */
-                    DropDfsFilelist(colFileNode.filenode);
-                }
-
-                /* whatever commit or abort, it's always necessary to drop the mapper files. */
-                DropMapperFile(colFileNode.filenode);
-            }
-
-            if (IsTruncateDfsForkNum(colFileNode.forknum)) {
-                /* truncate dfs table */
-                if (!IS_PGXC_COORDINATOR) {
-                    if (isCommit) {
-                        ClearDfsDirectory(&colFileNode, false);
-                    }
-
-                    /* whatever commit or abort, it's always necessary to drop the mapper files. */
-                    DropMapperFile(colFileNode.filenode);
-                    DropDfsFilelist(colFileNode.filenode);
-                }
-            }
+            /* dfs table is not supported */
+            Assert(!IsValidPaxDfsForkNum(colFileNode.forknum));
+            Assert(!IsTruncateDfsForkNum(colFileNode.forknum));
         }
         /* second loop to handle abortrels */
         for (i = 0; i < hdr->nabortrels; i++) {
@@ -2611,20 +2560,7 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
             ColFileNodeRel *colFileNodeRel = abortrels + i;
 
             ColFileNodeCopy(&colFileNode, colFileNodeRel);
-
-            if (IsValidPaxDfsForkNum(colFileNode.forknum)) {
-                /* create dfs table */
-                if (IS_PGXC_COORDINATOR) {
-                    if (!isCommit && !IsConnFromCoord()) {
-                        DropDfsDirectory(&colFileNode, false);
-                    }
-                } else {
-                    DfsInsert::InvalidSpaceAllocCache(colFileNode.filenode.relNode);
-                }
-
-                /* whatever commit or abort, it's always necessary to drop the mapper files. */
-                DropMapperFile(colFileNode.filenode);
-            }
+            Assert(!IsValidPaxDfsForkNum(colFileNode.forknum));
         }
     }
     PG_CATCH();
@@ -2827,6 +2763,38 @@ static void ProcessRecords(char *bufptr, TransactionId xid, const TwoPhaseCallba
 
         bufptr += MAXALIGN(record->len);
     }
+}
+
+void DeleteObsoleteTwoPhaseFile(int64 pageno)
+{
+    DIR *cldir = NULL;
+    struct dirent *clde = NULL;
+    int i;
+    int64 cutoffPage = pageno;
+    cutoffPage -= cutoffPage % SLRU_PAGES_PER_SEGMENT;
+    TransactionId cutoffXid = (TransactionId)CLOG_XACTS_PER_PAGE * cutoffPage;
+    cldir = AllocateDir(TWOPHASE_DIR);
+    for (i = 0; i < NUM_TWOPHASE_PARTITIONS; i++) {
+        TWOPAHSE_LWLOCK_ACQUIRE(i, LW_EXCLUSIVE);
+    }
+    while ((clde = ReadDir(cldir, TWOPHASE_DIR)) != NULL) {
+        if (strlen(clde->d_name) == 16 && strspn(clde->d_name, "0123456789ABCDEF") == 16) {
+            TransactionId xid = (TransactionId)pg_strtouint64(clde->d_name, NULL, 16);
+            if (xid < cutoffXid) {
+#ifdef USE_ASSERT_CHECKING
+               int elevel = PANIC;
+#else
+               int elevel = WARNING;
+#endif
+               ereport(elevel, (errmsg("twophase file %lu is older than clog truncate xid :%lu", xid, cutoffXid)));
+               RemoveTwoPhaseFile(xid, true);
+            }
+        }
+    }
+    for (i = 0; i < NUM_TWOPHASE_PARTITIONS; i++) {
+        TWOPAHSE_LWLOCK_RELEASE(i);
+    }
+    FreeDir(cldir);
 }
 
 /*

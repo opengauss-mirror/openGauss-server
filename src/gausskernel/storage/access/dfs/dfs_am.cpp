@@ -550,6 +550,7 @@ void ReaderImpl::begin(dfs::DFSConnector *conn, FileType type)
 
     /* notice:  readerState should init ready before create file reader */
     switch (type) {
+#ifndef ENABLE_LITE_MODE
         case ORC: {
             reader = New(readerState->persistCtx) OrcReaderImpl(readerState, conn);
             reader->begin();
@@ -560,6 +561,7 @@ void ReaderImpl::begin(dfs::DFSConnector *conn, FileType type)
             reader->begin();
             break;
         }
+#endif
         case TEXT: {
             reader = New(readerState->persistCtx) CommonReader(readerState, conn, DFS_TEXT);
             reader->begin();
@@ -583,7 +585,11 @@ void ReaderImpl::begin(dfs::DFSConnector *conn, FileType type)
 #ifdef ENABLE_MULTIPLE_NODES
                                 "Only ORC/PARQUET/CARBONDATA/CSV/TEXT is supported for now."
 #else
+#ifndef ENABLE_LITE_MODE
                                 "Only ORC/PARQUET/CSV/TEXT is supported for now."
+#else
+                                "Only CSV/TEXT is supported for now."
+#endif
 #endif
             )));
         }
@@ -1919,6 +1925,7 @@ WriterImpl::~WriterImpl()
 
 void WriterImpl::init(IndexInsertInfo *indexInsertInfo)
 {
+#ifndef ENABLE_LITE_MODE
     /* Initialize the connector info. */
     Oid tbsOid = m_relation->rd_node.spcNode;
     DFSConnector *conn = createConnector(m_ctx, GetDfsSrvOptions(tbsOid), tbsOid);
@@ -1940,6 +1947,9 @@ void WriterImpl::init(IndexInsertInfo *indexInsertInfo)
     m_transformScalarFunc = (transformScalarVector *)palloc0(sizeof(transformScalarVector) * m_relation->rd_att->natts);
     m_isNull = (bool *)palloc0(sizeof(bool) * BatchMaxSize);
     bindTransformFunc();
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
 }
 
 const char *WriterImpl::getRelName()

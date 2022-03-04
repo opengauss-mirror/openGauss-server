@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -38,6 +39,11 @@
 #include "utils/builtins.h"
 
 #define PG_GETARG_TEXT_PP_IF_EXISTS(_n) ((PG_NARGS() > (_n)) ? PG_GETARG_TEXT_PP(_n) : NULL)
+
+#define REGEX_COMPAT_MODE   \
+    ((u_sess->attr.attr_sql.sql_compatibility == A_FORMAT ||    \
+        u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) && \
+        AFORMAT_REGEX_MATCH)
 
 /* all the options of interest for regex functions */
 typedef struct pg_re_flags {
@@ -84,8 +90,9 @@ typedef struct regexp_matches_ctx {
  */
 
 /* Local functions */
-static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern, text* flags, Oid collation,
-    bool force_glob, bool use_subpatterns, bool ignore_degenerate);
+static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern,
+    pg_re_flags *re_flags, Oid collation,
+    bool use_subpatterns, bool ignore_degenerate, int start_search);
 static void cleanup_regexp_matches(regexp_matches_ctx* matchctx);
 static ArrayType* build_regexp_matches_result(regexp_matches_ctx* matchctx);
 static Datum build_regexp_split_result(regexp_matches_ctx* splitctx);
@@ -299,6 +306,17 @@ static bool RE_compile_and_execute(
     return RE_execute(re, dat, dat_len, nmatch, pmatch);
 }
 
+static void parse_re_set_n_flag(pg_re_flags* flags)
+{
+    if (REGEX_COMPAT_MODE) {
+        /* \n doesn't match . or [^ ] */
+        flags->cflags &= ~REG_NLSTOP;
+    } else {
+        /* \n affects ^ $ . [^ */
+        flags->cflags |= REG_NEWLINE;
+    }
+}
+
 /*
  * parse_re_flags - parse the options argument of regexp_matches and friends
  *
@@ -313,6 +331,11 @@ static void parse_re_flags(pg_re_flags* flags, text* opts)
     /* regex flavor is always folded into the compile flags */
     flags->cflags = REG_ADVANCED;
     flags->glob = false;
+
+    if (REGEX_COMPAT_MODE) {
+        /* \n doesn't match . or [^ ] by default for compatible */
+        flags->cflags |= REG_NLSTOP;
+    }
 
     if (opts != NULL) {
         char* opt_p = VARDATA_ANY(opts);
@@ -338,8 +361,10 @@ static void parse_re_flags(pg_re_flags* flags, text* opts)
                     flags->cflags |= REG_ICASE;
                     break;
                 case 'm': /* Perloid synonym for n */
-                case 'n': /* \n affects ^ $ . [^ */
                     flags->cflags |= REG_NEWLINE;
+                    break;
+                case 'n':
+                    parse_re_set_n_flag(flags);
                     break;
                 case 'p': /* ~Perl, \n affects . [^ */
                     flags->cflags |= REG_NLSTOP;
@@ -504,6 +529,108 @@ Datum textregexsubstr(PG_FUNCTION_ARGS)
     CHECK_RETNULL_RETURN_DATUM(result);
 }
 
+static void regexp_check_args(FunctionCallInfo fcinfo, int* arg, int init_val, int n, bool* has_null)
+{
+    if (PG_NARGS() > n) {
+        if (PG_ARGISNULL(n))
+            *has_null = true;
+        else
+            *arg = PG_GETARG_INT32(n);
+    }
+
+    if (*arg < init_val) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("argument '%d' is out of range", *arg),
+            errhint("should start from %d", init_val)));
+    }
+}
+
+static void regexp_get_re_flags(FunctionCallInfo fcinfo, pg_re_flags* re_flags, int n)
+{
+    text* flags = NULL;
+
+    /* match params */
+    if (PG_NARGS() > n && !PG_ARGISNULL(n))
+        flags = PG_GETARG_TEXT_PP(n);
+
+    parse_re_flags(re_flags, flags);
+    if (re_flags->glob) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("invalid regexp option: \"%c\"", 'g')));
+    }
+}
+/*
+ * regexp_replace cluster's common function.
+ * regexp_replace(source, pattern [, replace_str [, position [, occurrence [, match_param]]]])
+ */
+Datum regexp_replace(PG_FUNCTION_ARGS)
+{
+    text* src = NULL;
+    text* pattern = NULL;
+    text* r = NULL;
+    int position = 1;
+    int occurrence = 0;
+    regex_t* re = NULL;
+    text* result = NULL;
+    pg_re_flags re_flags;
+    bool has_null = false;
+
+    /* source string */
+    if (!PG_ARGISNULL(ARG_0))
+        src = PG_GETARG_TEXT_PP(ARG_0);
+
+    /* pattern string */
+    if (!PG_ARGISNULL(1))
+        pattern = PG_GETARG_TEXT_PP(1);
+
+    /* replace string */
+    if (PG_NARGS() > ARG_2) {
+        if (!PG_ARGISNULL(ARG_2))
+            r = PG_GETARG_TEXT_PP(ARG_2);
+    }
+
+    regexp_check_args(fcinfo, &position, 1, ARG_3, &has_null);
+    regexp_check_args(fcinfo, &occurrence, 0, ARG_4, &has_null);
+    regexp_get_re_flags(fcinfo, &re_flags, ARG_5);
+
+    if (src == NULL || has_null)
+        PG_RETURN_NULL();
+
+    if (pattern == NULL)
+        PG_RETURN_TEXT_P(src);
+
+    re = RE_compile_and_cache(pattern, re_flags.cflags, PG_GET_COLLATION());
+    result = replace_text_regexp(src, (void*)re, r, position, occurrence);
+
+    if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+        PG_RETURN_NULL();
+    else
+        PG_RETURN_TEXT_P(result);
+}
+
+/* regexp_replace(source, pattern) */
+Datum regexp_replace_noopt(PG_FUNCTION_ARGS)
+{
+    return regexp_replace(fcinfo);
+}
+
+/* regexp_replace(source, pattern, replace_str, position) */
+Datum regexp_replace_position(PG_FUNCTION_ARGS)
+{
+    return regexp_replace(fcinfo);
+}
+
+/* regexp_replace(source, pattern, replace_str, position, occurrence) */
+Datum regexp_replace_occur(PG_FUNCTION_ARGS)
+{
+    return regexp_replace(fcinfo);
+}
+/* regexp_replace(source, pattern, replace_str, position, occurrence, flags) */
+Datum regexp_replace_matchopt(PG_FUNCTION_ARGS)
+{
+    return regexp_replace(fcinfo);
+}
+
 /*
  * textregexreplace_noopt()
  *		Return a string matched by a regular expression, with replacement.
@@ -518,6 +645,8 @@ Datum textregexreplace_noopt(PG_FUNCTION_ARGS)
     text* r = NULL;
     regex_t* re = NULL;
     text* result = NULL;
+    int occurrence = 1;
+    int cflags = REG_ADVANCED;
 
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
@@ -531,9 +660,17 @@ Datum textregexreplace_noopt(PG_FUNCTION_ARGS)
     if (!PG_ARGISNULL(2))
         r = PG_GETARG_TEXT_PP(2);
 
-    re = RE_compile_and_cache(p, REG_ADVANCED, PG_GET_COLLATION());
+    if (REGEX_COMPAT_MODE)
+        cflags |= REG_NLSTOP;
 
-    result = replace_text_regexp(s, (void*)re, r, false);
+    re = RE_compile_and_cache(p, cflags, PG_GET_COLLATION());
+
+    if (REGEX_COMPAT_MODE) {
+        /* replace all the occurrence matched in O/M compatible mode */
+        occurrence = 0;
+    }
+
+    result = replace_text_regexp(s, (void*)re, r, 1, occurrence);
 
     if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
@@ -554,31 +691,40 @@ Datum textregexreplace(PG_FUNCTION_ARGS)
     regex_t* re = NULL;
     pg_re_flags flags;
     text* result = NULL;
+    int occurrence = 1;
 
-    if (PG_ARGISNULL(0))
+    if (PG_ARGISNULL(ARG_0))
         PG_RETURN_NULL();
 
-    s = PG_GETARG_TEXT_PP(0);
+    s = PG_GETARG_TEXT_PP(ARG_0);
 
-    if (PG_ARGISNULL(1))
+    if (PG_ARGISNULL(ARG_1))
         PG_RETURN_TEXT_P(s);
 
-    p = PG_GETARG_TEXT_PP(1);
+    p = PG_GETARG_TEXT_PP(ARG_1);
 
-    if (!PG_ARGISNULL(2))
-        r = PG_GETARG_TEXT_PP(2);
+    if (!PG_ARGISNULL(ARG_2))
+        r = PG_GETARG_TEXT_PP(ARG_2);
 
-    if (!PG_ARGISNULL(3)) {
-        opt = PG_GETARG_TEXT_PP(3);
+    if (!PG_ARGISNULL(ARG_3)) {
+        opt = PG_GETARG_TEXT_PP(ARG_3);
         parse_re_flags(&flags, opt);
     } else {
+        if (REGEX_COMPAT_MODE) {
+            /* return null in O/M compatible mode */
+            PG_RETURN_NULL();
+        }
         flags.glob = false;
         flags.cflags = REG_ADVANCED;
     }
 
+    if (flags.glob) {
+        occurrence = 0;
+    }
+
     re = RE_compile_and_cache(p, flags.cflags, PG_GET_COLLATION());
 
-    result = replace_text_regexp(s, (void*)re, r, flags.glob);
+    result = replace_text_regexp(s, (void*)re, r, 1, occurrence);
 
     if (VARHDRSZ == VARSIZE(result) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();
@@ -707,6 +853,184 @@ Datum similar_escape(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(result);
 }
 
+/* function prototype:
+ * <int> regexp_count(src <text>, pattern <text> [, position <int> [, flags <text>])
+ */
+Datum regexp_count(PG_FUNCTION_ARGS)
+{
+    text* src = NULL;
+    text* pattern = NULL;
+    int position = 1;
+    int count = 0;
+    pg_re_flags re_flags;
+    bool has_null = false;
+
+    /* source string */
+    if (!PG_ARGISNULL(ARG_0))
+        src = PG_GETARG_TEXT_P_COPY(ARG_0);
+
+    /* pattern string */
+    if (!PG_ARGISNULL(ARG_1))
+        pattern = PG_GETARG_TEXT_PP(ARG_1);
+
+    regexp_check_args(fcinfo, &position, 1, ARG_2, &has_null);
+    regexp_get_re_flags(fcinfo, &re_flags, ARG_3);
+
+    if (src == NULL || pattern == NULL || has_null) {
+        PG_RETURN_NULL();
+    }
+
+    re_flags.glob = true;
+    regexp_matches_ctx* matchctx = setup_regexp_matches(src, pattern, &re_flags,
+                                                        PG_GET_COLLATION(), false, false, position - 1);
+    count = matchctx->nmatches;
+
+    /* release space to avoid intraquery memory leak */
+    cleanup_regexp_matches(matchctx);
+    PG_RETURN_INT32(count);
+}
+
+Datum regexp_count_noopt(PG_FUNCTION_ARGS)
+{
+    return regexp_count(fcinfo);
+}
+
+Datum regexp_count_position(PG_FUNCTION_ARGS)
+{
+    return regexp_count(fcinfo);
+}
+
+Datum regexp_count_matchopt(PG_FUNCTION_ARGS)
+{
+    return regexp_count(fcinfo);
+}
+
+Datum regexp_instr_core(text* src, text* pattern, int position,
+                        int occurrence, int return_opt,
+                        pg_re_flags* re_flags, Oid collation)
+{
+    int start = 0;
+    int end = 0;
+    int index = 0;
+    int start_search = position - 1;
+
+    /* convert string to pg_wchar form for matching */
+    int len = VARSIZE_ANY_EXHDR(src);
+
+    pg_wchar* wide_str = (pg_wchar*)palloc(sizeof(pg_wchar) * (len + 1));
+    int wide_len = pg_mb2wchar_with_len(VARDATA_ANY(src), wide_str, len);
+    if (position > wide_len) {
+        PG_RETURN_INT32(0);
+    }
+    /* set up the compiled pattern */
+    regex_t* cpattern = RE_compile_and_cache(pattern, re_flags->cflags, collation);
+
+    /* temporary output space for RE package */
+    regmatch_t* pmatch = (regmatch_t*)palloc(sizeof(regmatch_t));
+
+    /* search for the pattern, perhaps repeatedly */
+    while (index < occurrence && RE_wchar_execute(cpattern, wide_str, wide_len,
+                                                  start_search, 1, pmatch)) {
+        start = pmatch[0].rm_so;
+        end = pmatch[0].rm_eo;
+
+        /*
+         * Advance search position.  Normally we start the next search at the
+         * end of the previous match; but if the match was of zero length, we
+         * have to advance by one character, or we'd just find the same match
+         * again.
+         */
+        start_search = end;
+        index++;
+        if (pmatch[0].rm_so == pmatch[0].rm_eo)
+            start_search++;
+        if (start_search > wide_len)
+            break;
+    }
+
+    /* Clean up temp storage */
+    pfree_ext(wide_str);
+    pfree_ext(pmatch);
+
+    /* return 0 if we do not find the specified occurrence */
+    if (index < occurrence) {
+        PG_RETURN_INT32(0);
+    }
+    /* or we return the matched occurrence start or end index (start from 1)
+     * counting from the beginning of the origin string
+     */
+    if (return_opt == 0) {
+        PG_RETURN_INT32(start + 1);
+    } else {
+        PG_RETURN_INT32(end + 1);
+    }
+}
+
+/* function prototype:
+ * <int> regexp_instr(src<text>,
+                      pattern<text>
+                      [, position<int>
+                      [, occurrence<int>
+                      [, return_opt<int>
+                      [, match_opt<text>]]]])
+ */
+Datum regexp_instr(PG_FUNCTION_ARGS)
+{
+    text* src = NULL;
+    text* pattern = NULL;
+    int position = 1;
+    int occurrence = 1;
+    int return_opt = 0;
+    pg_re_flags re_flags;
+    bool has_null = false;
+
+    if (!PG_ARGISNULL(ARG_0))
+        src = PG_GETARG_TEXT_PP(ARG_0);
+
+    if (!PG_ARGISNULL(ARG_1))
+        pattern = PG_GETARG_TEXT_PP(ARG_1);
+
+    regexp_check_args(fcinfo, &position, 1, ARG_2, &has_null);
+    regexp_check_args(fcinfo, &occurrence, 1, ARG_3, &has_null);
+    /* return option:
+     * 0: returns the position of the first character of the occurrence. (default)
+     * non-0: returns the position of the character following the occurrence.
+     */
+    regexp_check_args(fcinfo, &return_opt, 0, ARG_4, &has_null);
+    regexp_get_re_flags(fcinfo, &re_flags, ARG_5);
+
+    if (pattern == NULL || src == NULL || VARSIZE_ANY_EXHDR(src) == 0 || has_null)
+        PG_RETURN_NULL();
+
+    return regexp_instr_core(src, pattern, position, occurrence, return_opt,
+                             &re_flags, PG_GET_COLLATION());
+}
+
+Datum regexp_instr_noopt(PG_FUNCTION_ARGS)
+{
+    return regexp_instr(fcinfo);
+}
+
+Datum regexp_instr_position(PG_FUNCTION_ARGS)
+{
+    return regexp_instr(fcinfo);
+}
+
+Datum regexp_instr_occurren(PG_FUNCTION_ARGS)
+{
+    return regexp_instr(fcinfo);
+}
+
+Datum regexp_instr_returnopt(PG_FUNCTION_ARGS)
+{
+    return regexp_instr(fcinfo);
+}
+
+Datum regexp_instr_matchopt(PG_FUNCTION_ARGS)
+{
+    return regexp_instr(fcinfo);
+}
+
 /*
  * regexp_matches()
  *		Return a table of matches of a pattern within a string.
@@ -719,14 +1043,19 @@ Datum regexp_matches(PG_FUNCTION_ARGS)
     if (SRF_IS_FIRSTCALL()) {
         text* pattern = PG_GETARG_TEXT_PP(1);
         text* flags = PG_GETARG_TEXT_PP_IF_EXISTS(2);
+        pg_re_flags re_flags;
         MemoryContext oldcontext;
 
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
+        /* Determine options */
+        parse_re_flags(&re_flags, flags);
+
         /* be sure to copy the input string into the multi-call ctx */
         matchctx =
-            setup_regexp_matches(PG_GETARG_TEXT_P_COPY(0), pattern, flags, PG_GET_COLLATION(), false, true, false);
+            setup_regexp_matches(PG_GETARG_TEXT_P_COPY(0), pattern, &re_flags,
+                                 PG_GET_COLLATION(), true, false, 0);
 
         /* Pre-create workspace that build_regexp_matches_result needs */
         matchctx->elems = (Datum*)palloc(sizeof(Datum) * matchctx->npatterns);
@@ -771,21 +1100,23 @@ Datum regexp_matches_no_flags(PG_FUNCTION_ARGS)
  * but it seems clearer to distinguish the functionality this way than to
  * key it all off one "is_split" flag.
  */
-static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern, text* flags, Oid collation,
-    bool force_glob, bool use_subpatterns, bool ignore_degenerate)
+static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern,
+                                                pg_re_flags *re_flags,
+                                                Oid collation,
+                                                bool use_subpatterns,
+                                                bool ignore_degenerate,
+                                                int start_search)
 {
     regexp_matches_ctx* matchctx = (regexp_matches_ctx*)palloc0(sizeof(regexp_matches_ctx));
     int orig_len;
     pg_wchar* wide_str = NULL;
     int wide_len;
-    pg_re_flags re_flags;
     regex_t* cpattern = NULL;
     regmatch_t* pmatch = NULL;
     int pmatch_len;
     int array_len;
     int array_idx;
     int prev_match_end;
-    int start_search;
 
     /* save original string --- we'll extract result substrings from it */
     matchctx->orig_str = orig_str;
@@ -795,19 +1126,8 @@ static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern, t
     wide_str = (pg_wchar*)palloc(sizeof(pg_wchar) * (orig_len + 1));
     wide_len = pg_mb2wchar_with_len(VARDATA_ANY(orig_str), wide_str, orig_len);
 
-    /* determine options */
-    parse_re_flags(&re_flags, flags);
-    if (force_glob) {
-        /* user mustn't specify 'g' for regexp_split */
-        if (re_flags.glob)
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("regexp_split does not support the global option")));
-        /* but we find all the matches anyway */
-        re_flags.glob = true;
-    }
-
     /* set up the compiled pattern */
-    cpattern = RE_compile_and_cache(pattern, re_flags.cflags, collation);
+    cpattern = RE_compile_and_cache(pattern, re_flags->cflags, collation);
 
     /* do we want to remember subpatterns? */
     if (use_subpatterns && cpattern->re_nsub > 0) {
@@ -823,13 +1143,12 @@ static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern, t
     pmatch = (regmatch_t*)palloc(sizeof(regmatch_t) * pmatch_len);
 
     /* the real output space (grown dynamically if needed) */
-    array_len = re_flags.glob ? 256 : 32;
+    array_len = re_flags->glob ? 256 : 32;
     matchctx->match_locs = (int*)palloc(sizeof(int) * array_len);
     array_idx = 0;
 
     /* search for the pattern, perhaps repeatedly */
     prev_match_end = 0;
-    start_search = 0;
     while (RE_wchar_execute(cpattern, wide_str, wide_len, start_search, pmatch_len, pmatch)) {
         /*
          * If requested, ignore degenerate matches, which are zero-length
@@ -860,7 +1179,7 @@ static regexp_matches_ctx* setup_regexp_matches(text* orig_str, text* pattern, t
         prev_match_end = pmatch[0].rm_eo;
 
         /* if not glob, stop after one match */
-        if (!re_flags.glob)
+        if (!re_flags->glob)
             break;
 
         /*
@@ -935,7 +1254,7 @@ static ArrayType* build_regexp_matches_result(regexp_matches_ctx* matchctx)
 /* return value datatype must be text */
 #define RESET_NULL_FLAG(_result)                                                   \
     do {                                                                           \
-        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) { \
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && !RETURN_NS) {   \
             if ((_result) == ((Datum)0)) {                                         \
                 fcinfo->isnull = true;                                             \
             } else {                                                               \
@@ -962,14 +1281,26 @@ Datum regexp_split_to_table(PG_FUNCTION_ARGS)
     if (SRF_IS_FIRSTCALL()) {
         text* pattern = PG_GETARG_TEXT_PP(1);
         text* flags = PG_GETARG_TEXT_PP_IF_EXISTS(2);
+        pg_re_flags re_flags;
         MemoryContext oldcontext;
 
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
+        /* Determine options */
+        parse_re_flags(&re_flags, flags);
+        /* User mustn't specify 'g' */
+        if (re_flags.glob) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("regexp_split does not support the global option")));
+        }
+        /* But we find all the matches anyway */
+        re_flags.glob = true;
+
         /* be sure to copy the input string into the multi-call ctx */
-        splitctx =
-            setup_regexp_matches(PG_GETARG_TEXT_P_COPY(0), pattern, flags, PG_GET_COLLATION(), true, false, true);
+        splitctx = setup_regexp_matches(PG_GETARG_TEXT_P_COPY(0), pattern, &re_flags,
+                                        PG_GET_COLLATION(), false, true, 0);
 
         MemoryContextSwitchTo(oldcontext);
         funcctx->user_fctx = (void*)splitctx;
@@ -1007,14 +1338,27 @@ Datum regexp_split_to_array(PG_FUNCTION_ARGS)
 {
     ArrayBuildState* astate = NULL;
     regexp_matches_ctx* splitctx = NULL;
+    text* flags = PG_GETARG_TEXT_PP_IF_EXISTS(2);
+    pg_re_flags re_flags;
+
+    /* Determine options */
+    parse_re_flags(&re_flags, flags);
+    /* User mustn't specify 'g' */
+    if (re_flags.glob) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("regexp_split does not support the global option")));
+    }
+    /* But we find all the matches anyway */
+    re_flags.glob = true;
 
     splitctx = setup_regexp_matches(PG_GETARG_TEXT_PP(0),
         PG_GETARG_TEXT_PP(1),
-        PG_GETARG_TEXT_PP_IF_EXISTS(2),
+        &re_flags,
         PG_GET_COLLATION(),
-        true,
         false,
-        true);
+        true,
+        0);
 
     while (splitctx->next_match <= splitctx->nmatches) {
         astate = accumArrayResult(astate, build_regexp_split_result(splitctx), false, TEXTOID, CurrentMemoryContext);
@@ -1034,14 +1378,19 @@ Datum regexp_match_to_array(PG_FUNCTION_ARGS)
 {
     regexp_matches_ctx* splitctx = NULL;
     ArrayType* rs = NULL;
+    text* flags = PG_GETARG_TEXT_PP_IF_EXISTS(2);
+    pg_re_flags re_flags;
+
+    /* Determine options */
+    parse_re_flags(&re_flags, flags);
 
     splitctx = setup_regexp_matches(PG_GETARG_TEXT_PP(0),
         PG_GETARG_TEXT_PP(1),
-        PG_GETARG_TEXT_PP_IF_EXISTS(2),
+        &re_flags,
         PG_GET_COLLATION(),
-        false,
         true,
-        false);
+        false,
+        0);
 
     if (splitctx->nmatches > 0) {
         splitctx->elems = (Datum*)palloc(sizeof(Datum) * splitctx->npatterns);
@@ -1156,17 +1505,36 @@ char* regexp_fixed_prefix(text* text_re, bool case_insensitive, Oid collation, b
 
     return result;
 }
+
+static void regexp_get_match_position(regmatch_t *pmatch, size_t nsize, regex_t* re,
+                                      int *so, int *eo)
+{
+    if (u_sess->attr.attr_sql.enforce_a_behavior || re->re_nsub <= 0) {
+        /* no parenthesized subexpression, use whole match */
+        *so = pmatch[0].rm_so;
+        *eo = pmatch[0].rm_eo;
+    } else {
+        /* has parenthesized subexpressions, use the first one */
+        *so = pmatch[1].rm_so;
+        *eo = pmatch[1].rm_eo;
+    }
+}
+
 Datum textregexsubstr_enforce_a(PG_FUNCTION_ARGS)
 {
     text* s = PG_GETARG_TEXT_PP(0);
     text* p = PG_GETARG_TEXT_PP(1);
+    int cflags = REG_ADVANCED;
     regex_t* re = NULL;
     regmatch_t pmatch[2];
     int so = 0;
     int eo = 0;
 
     /* Compile RE */
-    re = RE_compile_and_cache(p, REG_ADVANCED, PG_GET_COLLATION());
+    if (REGEX_COMPAT_MODE) {
+        cflags |= REG_NLSTOP;
+    }
+    re = RE_compile_and_cache(p, cflags, PG_GET_COLLATION());
 
     if (!RE_execute(re, VARDATA_ANY(s), VARSIZE_ANY_EXHDR(s), 2, pmatch))
         PG_RETURN_NULL(); /* definitely no match */
@@ -1174,20 +1542,7 @@ Datum textregexsubstr_enforce_a(PG_FUNCTION_ARGS)
     // for adaptting A db's match rules, enforce_a_behavior must be true,
     // and use all-subexpression matches default. but the POSIX match rules
     // reserved for extension.
-    if (true == u_sess->attr.attr_sql.enforce_a_behavior) {
-        so = pmatch[0].rm_so;
-        eo = pmatch[0].rm_eo;
-    } else {
-        if (re->re_nsub > 0) {
-            /* has parenthesized subexpressions, use the first one */
-            so = pmatch[1].rm_so;
-            eo = pmatch[1].rm_eo;
-        } else {
-            /* no parenthesized subexpression, use whole match */
-            so = pmatch[0].rm_so;
-            eo = pmatch[0].rm_eo;
-        }
-    }
+    regexp_get_match_position(pmatch, sizeof(pmatch) / sizeof(regmatch_t), re, &so, &eo);
 
     /*
      * It is possible to have a match to the whole pattern but no match
@@ -1200,4 +1555,129 @@ Datum textregexsubstr_enforce_a(PG_FUNCTION_ARGS)
     }
 
     return DirectFunctionCall3(text_substr, PointerGetDatum(s), Int32GetDatum(so + 1), Int32GetDatum(eo - so));
+}
+
+text* regexp_substr_get_occurrence(text* src, text* pattern,
+                                   pg_re_flags* re_flags,
+                                   int position,
+                                   int occurrence,
+                                   Oid collation)
+{
+    regex_t* re = NULL;
+    int so = 0;
+    int eo = 0;
+    pg_wchar* data = NULL;
+    int src_len = VARSIZE_ANY_EXHDR(src);
+    size_t data_len;
+    int search_start = position - 1;
+    int count = 0;
+    regmatch_t pmatch[2];
+    text* result = NULL;
+
+    /* Compile RE */
+    re = RE_compile_and_cache(pattern, re_flags->cflags, collation);
+
+    /* Convert data string to wide characters. */
+    data = (pg_wchar*)palloc((src_len + 1) * sizeof(pg_wchar));
+    data_len = pg_mb2wchar_with_len(VARDATA_ANY(src), data, src_len);
+
+    while ((unsigned int)(search_start) <= data_len) {
+        int regexec_result;
+
+        CHECK_FOR_INTERRUPTS();
+
+        regexec_result = pg_regexec(re,
+            data,
+            data_len,
+            search_start,
+            NULL, /* no details */
+            sizeof(pmatch) / sizeof(regmatch_t),
+            pmatch,
+            0);
+
+        if (regexec_result == REG_NOMATCH)
+            break;
+
+        if (regexec_result != REG_OKAY) {
+            char errMsg[100];
+
+            pg_regerror(regexec_result, re, errMsg, sizeof(errMsg));
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_REGULAR_EXPRESSION),
+                     errmsg("regular expression failed: %s", errMsg)));
+        }
+
+        count++;
+
+        regexp_get_match_position(pmatch, sizeof(pmatch) / sizeof(regmatch_t), re, &so, &eo);
+
+        if (so < 0 || eo < 0) {
+            break;
+        }
+
+        if (count == occurrence) {
+            result = text_substring(PointerGetDatum(src),
+                                    so + 1,
+                                    eo - so,
+                                    false);
+            break;
+        }
+
+        if (so == eo) {
+            search_start++;
+        } else {
+            search_start = eo;
+        }
+    }
+
+    pfree_ext(data);
+    return result;
+}
+
+Datum regexp_substr_core(PG_FUNCTION_ARGS)
+{
+    text* pattern = NULL;
+    int position = 1;
+    int occurrence = 1;
+    pg_re_flags re_flags;
+    text* src = NULL;
+    bool has_null = false;
+
+    if (!PG_ARGISNULL(ARG_0))
+        src = PG_GETARG_TEXT_PP(ARG_0);
+
+    if (!PG_ARGISNULL(ARG_1))
+        pattern = PG_GETARG_TEXT_PP(ARG_1);
+
+    regexp_check_args(fcinfo, &position, 1, ARG_2, &has_null);
+    regexp_check_args(fcinfo, &occurrence, 1, ARG_3, &has_null);
+    regexp_get_re_flags(fcinfo, &re_flags, ARG_4);
+
+    if (pattern == NULL || src == NULL || VARSIZE_ANY_EXHDR(src) == 0 || has_null)
+        PG_RETURN_NULL();
+
+    text* ret = regexp_substr_get_occurrence(src, pattern, &re_flags, position, occurrence,
+                                             PG_GET_COLLATION());
+
+    if (ret == NULL || (VARHDRSZ == VARSIZE(ret) &&
+        u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)) {
+        PG_RETURN_NULL();
+    } else {
+        PG_RETURN_TEXT_P(ret);
+    }
+}
+
+Datum regexp_substr_with_position(PG_FUNCTION_ARGS)
+{
+    return regexp_substr_core(fcinfo);
+}
+
+Datum regexp_substr_with_occur(PG_FUNCTION_ARGS)
+{
+    return regexp_substr_core(fcinfo);
+}
+
+Datum regexp_substr_with_opt(PG_FUNCTION_ARGS)
+{
+    return regexp_substr_core(fcinfo);
 }

@@ -137,10 +137,7 @@ static THR_LOCAL char original_query[256];
 static THR_LOCAL MngEventsVector *mng_events = NULL;
 
 using StrMap = gs_stl::gs_map<gs_stl::gs_string, masking_result>;
-static THR_LOCAL StrMap* masked_prepared_stmts = NULL;
-static THR_LOCAL StrMap* masked_cursor_stmts = NULL;
 
-static void process_masking(ParseState *pstate, Query *query, const policy_set *policy_ids, bool audit_exist);
 static void gsaudit_next_PostParseAnalyze_hook(ParseState *pstate, Query *query);
 static void destroy_local_parameter();
 static void destory_thread_variables()
@@ -285,10 +282,7 @@ static void destroy_local_parameter()
         mng_events = NULL; 
     }
 
-    if (masked_cursor_stmts != NULL) {
-        delete masked_cursor_stmts;
-        masked_cursor_stmts = NULL;
-    }
+    free_masked_cursor_stmts();
 }
 
 /* 
@@ -514,77 +508,6 @@ bool verify_copy_command_is_reparsed(List* parsetree_list, const char* query_str
     return false;
 }
 
-static void free_masked_prepared_stmts()
-{
-    if (masked_prepared_stmts) {
-        delete masked_prepared_stmts;
-        masked_prepared_stmts = NULL;
-    }
-}
-
-template< class T>
-static inline void flush_stmt_masking_result(const char* name, T* stmts)
-{
-    if (stmts) {
-        StrMap::const_iterator it = stmts->find(name);
-        if (it != stmts->end()) {
-            flush_masking_result(it->second);
-        }
-    }
-}
-
-static void flush_cursor_stmt_masking_result(const char* name)
-{
-    flush_stmt_masking_result(name, masked_cursor_stmts);
-}
-
-static void flush_prepare_stmt_masking_result(const char* name)
-{
-    flush_stmt_masking_result(name, masked_prepared_stmts);
-}
-
-static void close_cursor_stmt_as_masked(const char* name)
-{
-    if (masked_cursor_stmts == NULL) {
-        return;
-    }
-
-    masked_cursor_stmts->erase(name);
-    if (masked_cursor_stmts->empty() || (strcasecmp(name, "all") == 0)) {
-        delete masked_cursor_stmts;
-        masked_cursor_stmts = NULL;
-    }
-}
-
-static void unprepare_stmt_as_masked(const char* name)
-{
-    unprepare_stmt(name);
-    if (!masked_prepared_stmts) {
-        return;
-    }
-    masked_prepared_stmts->erase(name);
-    if (masked_prepared_stmts->empty() || !strcasecmp(name, "all")) {
-        delete masked_prepared_stmts;
-        masked_prepared_stmts = NULL;
-    }
-}
-
-static inline void set_prepare_stmt_as_masked(const char* name, const masking_result *result)
-{
-    if (!masked_prepared_stmts) {
-        masked_prepared_stmts = new StrMap;
-    }
-    (*masked_prepared_stmts)[name] = (*result);
-}
-
-static inline void set_cursor_stmt_as_masked(const char* name, const masking_result *result)
-{
-    if (!masked_cursor_stmts) {
-        masked_cursor_stmts = new StrMap;
-    }
-    (*masked_cursor_stmts)[name] = (*result);
-}
-
 void set_result_set_function(const PolicyLabelItem &func)
 {
     if (result_set_functions == NULL) {
@@ -592,129 +515,6 @@ void set_result_set_function(const PolicyLabelItem &func)
     }
     if (result_set_functions) {
         result_set_functions->insert(func);
-    }
-}
-
-/*
- * Do masking for given target list
- * this function will parse each RTE of the list
- * and then will check wether each node need to do mask.
- */
-static bool handle_masking(List* targetList, ParseState *pstate,
-    const policy_set *policy_ids, List* rtable, Node* utilityNode)
-{
-    if (targetList == NIL || policy_ids->empty()) {
-        return false;
-    }
-    ListCell* temp = NULL;
-    masking_result masking_result;
-    foreach(temp, targetList) {
-        TargetEntry *old_tle = (TargetEntry *) lfirst(temp);
-        /* Shuffle masking columns can only select directly with out other operations */
-        parser_target_entry(pstate, old_tle, policy_ids, &masking_result, rtable, true);
-    }
-    if (masking_result.size() > 0) {
-        if (strlen(t_thrd.security_policy_cxt.prepare_stmt_name) > 0) {
-            /* prepare statement was masked */
-            set_prepare_stmt_as_masked(t_thrd.security_policy_cxt.prepare_stmt_name, 
-                                       &masking_result); /* save masking event for executing case */
-        } else if (utilityNode != NULL) {
-            switch (nodeTag(utilityNode)) {
-                case T_DeclareCursorStmt:
-                {
-                    DeclareCursorStmt* stmt =  (DeclareCursorStmt *)utilityNode;
-                    /* save masking event for fetching case */
-                    set_cursor_stmt_as_masked(stmt->portalname, &masking_result);
-                }
-                break;
-                default:
-                    flush_masking_result(&masking_result); /* invoke masking event */
-            }
-        } else {
-            flush_masking_result(&masking_result); /* invoke masking event */
-        }
-        return true;
-    }
-    return false;
-}
-
-static void select_PostParseAnalyze(ParseState *pstate, Query *&query, const policy_set *policy_ids, bool audit_exist)
-{
-    Assert(query != NULL);
-    List *targetList = NIL;
-    targetList = (query->targetList != NIL) ? query->targetList : pstate->p_target_list;
-    handle_masking(targetList, pstate, policy_ids, query->rtable, query->utilityStmt);
-
-    /* deal with function type label */
-    load_function_label(query, audit_exist);
-}
-
-static bool process_union_masking(Node *union_node,
-    ParseState *pstate, const Query *query, const policy_set *policy_ids, bool audit_exist)
-{
-    if (union_node == NULL) {
-        return false;
-    }
-    switch (nodeTag(union_node)) {
-        /* For each union, we get its query recursively for masking until it doesn't have any union query */
-        case T_SetOperationStmt:
-        {
-            SetOperationStmt *stmt = (SetOperationStmt *)union_node;
-            if (stmt->op != SETOP_UNION) {
-                return false;
-            }
-            process_union_masking((Node *)(stmt->larg), pstate, query, policy_ids, audit_exist);
-            process_union_masking((Node *)(stmt->rarg), pstate, query, policy_ids, audit_exist);
-        }
-        break;
-        case T_RangeTblRef:
-        {
-            RangeTblRef *ref = (RangeTblRef *)union_node;
-            if (ref->rtindex <= 0 || ref->rtindex > list_length(query->rtable)) {
-                return false;
-            }
-            Query* mostQuery = rt_fetch(ref->rtindex, query->rtable)->subquery;
-            process_masking(pstate, mostQuery, policy_ids, audit_exist);
-        }
-        break;
-        default:
-        break;
-    }
-    return true;
-}
-
-/*
- * Main entrance for masking
- * Identify components in query tree that need to do masking.
- * This function will find all parts which need masking of select query,
- * mainly includes CTE / setOperation / normal select columns.
- */
-static void process_masking(ParseState *pstate, Query *query, const policy_set *policy_ids, bool audit_exist)
-{
-    if (query == NULL) {
-        return;
-    }
-
-    /* set-operation tree UNION query */
-    if (!process_union_masking(query->setOperations, pstate, query, policy_ids, audit_exist)) {
-        ListCell *lc = NULL;
-        /* For each Cte, we get its query recursively for masking, and then handle this query in normal way */
-        if (query->cteList != NIL) {
-            foreach(lc, query->cteList) {
-                CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
-                Query *cte_query = (Query *)cte->ctequery;
-                process_masking(pstate, cte_query, policy_ids, audit_exist);
-            }
-        }
-        /* find subquery and process each subquery node */
-        if (query->rtable != NULL) {
-            foreach(lc, query->rtable) {
-                RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
-                Query *subquery = (Query *)rte->subquery;
-                process_masking(pstate, subquery, policy_ids, audit_exist);
-            }
-        }
-        select_PostParseAnalyze(pstate, query, policy_ids, audit_exist);
     }
 }
 
@@ -960,44 +760,6 @@ static void verify_drop_user(const char *rolename)
     }
 }
 
-static void verify_drop_column(AlterTableStmt *stmt)
-{
-    ListCell *lcmd = NULL;
-    foreach (lcmd, stmt->cmds) {
-        AlterTableCmd *cmd = (AlterTableCmd *)lfirst(lcmd);
-        switch (cmd->subtype) {
-            case AT_DropColumn: {
-                /* check by column */
-                PolicyLabelItem find_obj(stmt->relation->schemaname, stmt->relation->relname, cmd->name, O_COLUMN);
-                if (check_label_has_object(&find_obj, is_masking_has_object)) {
-                    char buff[512] = {0};
-                    int rc = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
-                        "Column: %s is part of some resource label, can not be renamed.", find_obj.m_column);
-                    securec_check_ss(rc, "\0", "\0");
-                    gs_audit_issue_syslog_message("PGAUDIT", buff, AUDIT_POLICY_EVENT, AUDIT_FAILED);
-                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\"", buff)));
-                }
-                break;
-            }
-            case AT_AlterColumnType: {
-                PolicyLabelItem find_obj(stmt->relation->schemaname, stmt->relation->relname, cmd->name, O_COLUMN);
-                if (check_label_has_object(&find_obj, is_masking_has_object, true))
-                {
-                    char buff[512] = {0};
-                    int ret = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
-                        "Column: %s is part of some masking policy, can not be changed.", find_obj.m_column);
-                    securec_check_ss(ret, "\0", "\0");
-                    gs_audit_issue_syslog_message("PGAUDIT", buff, AUDIT_POLICY_EVENT, AUDIT_FAILED);
-                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\"", buff)));
-                }
-                break;
-            }
-            default:
-                break;
-        }
-    }
-}
-
 /*
  * Hook ProcessUtility to do session auditing for DDL and utility commands.
  */
@@ -1077,13 +839,13 @@ static void gsaudit_ProcessUtility_hook(Node *parsetree, const char *queryString
     if (parsetree != NULL) {
         switch (nodeTag(parsetree)) {
             case T_PlannedStmt: {
-                if (!check_audited_privilige(T_OPEN) && !SECURITY_CHECK_ACL_PRIV(T_OPEN)) {
+                if (!check_audited_privilige(T_CURSOR) && !SECURITY_CHECK_ACL_PRIV(T_CURSOR)) {
                     break;
                 }
                 char buff[POLICY_STR_BUFF_LEN] = {0};
                 PlannedStmt *stmt = (PlannedStmt *)parsetree;
                 get_open_cursor_info(stmt, buff, sizeof(buff));
-                internal_audit_str(&security_policy_ids, &audit_policy_ids, buff, T_OPEN, "OPEN", O_CURSOR);
+                internal_audit_str(&security_policy_ids, &audit_policy_ids, buff, T_CURSOR, "OPEN", O_CURSOR);
                 break;
             }
             case T_FetchStmt: {
@@ -1097,12 +859,12 @@ static void gsaudit_ProcessUtility_hook(Node *parsetree, const char *queryString
                     gs_stl::gs_vector<PolicyLabelItem> cursor_objects;
                     if (portal && portal->queryDesc && portal->queryDesc->plannedstmt &&
                         portal->queryDesc->plannedstmt->rtable) {
-                        get_cursor_tables(portal->queryDesc->plannedstmt->rtable, buff, sizeof(buff),
-                            printed_size, &cursor_objects);
+                        get_cursor_tables(portal->queryDesc->plannedstmt->rtable, buff, sizeof(buff), printed_size,
+                            &cursor_objects);
                     }
                     for (const PolicyLabelItem item : cursor_objects) {
-                        internal_audit_object_str(&security_policy_ids, &audit_policy_ids, &item, T_FETCH,
-                            "FETCH", stmt->portalname);
+                        internal_audit_object_str(&security_policy_ids, &audit_policy_ids, &item, T_FETCH, "FETCH",
+                            stmt->portalname);
                     }
                     flush_cursor_stmt_masking_result(stmt->portalname); /* invoke masking event in this case */
                 }
@@ -1186,14 +948,8 @@ static void gsaudit_ProcessUtility_hook(Node *parsetree, const char *queryString
             case T_DeallocateStmt: {
                 DeallocateStmt *stmt = (DeallocateStmt *)parsetree;
                 char tmp[POLICY_TMP_BUFF_LEN] = {0};
-                int rc;
-                if (stmt->name == NULL) {
-                    rc = snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "ALL");
-                    securec_check_ss(rc, "\0", "\0");
-                } else {
-                    rc = snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "%s", stmt->name);
-                    securec_check_ss(rc, "\0", "\0");
-                }
+                int rc = snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "%s", stmt->name == NULL ? "ALL" : stmt->name);
+                securec_check_ss(rc, "\0", "\0");
                 check_access_table(&audit_policy_ids, tmp, CMD_DEALLOCATE, O_UNKNOWN, tmp);
                 unprepare_stmt_as_masked(tmp);
                 break;
@@ -1325,7 +1081,7 @@ static void gsaudit_ProcessUtility_hook(Node *parsetree, const char *queryString
                                 names_pair(granted_name,
                                     rte1->rolname ? rte1->rolname : "ALL" /* grantee_name */),
                                 stmt->is_grant ? T_GRANT : T_REVOKE, stmt->is_grant ? "GRANT" : "REVOKE",
-                                stmt->objtype);
+                                stmt->objtype, stmt->targtype);
                         }
                     }
                 }
@@ -1348,7 +1104,29 @@ static void gsaudit_ProcessUtility_hook(Node *parsetree, const char *queryString
                         internal_audit_object_str(&security_policy_ids, &audit_policy_ids, NULL,
                             names_pair(rte2->rolname /* granted_name */, rte1->rolname /* grantee_name */),
                             grantrolestmt->is_grant ? T_GRANT : T_REVOKE, grantrolestmt->is_grant ? "GRANT" : "REVOKE",
-                            O_ROLE, true, true);
+                            O_ROLE, ACL_TARGET_OBJECT, true, true);
+                    }
+                }
+                break;
+            }
+            case T_GrantDbStmt: {
+                if (!check_audited_privilige(T_GRANT) && !check_audited_privilige(T_REVOKE) &&
+                    !SECURITY_CHECK_ACL_PRIV(T_GRANT) && !SECURITY_CHECK_ACL_PRIV(T_REVOKE)) {
+                    break;
+                }
+                GrantDbStmt *grantdbstmt = (GrantDbStmt *)(parsetree);
+                ListCell *lc1 = NULL;
+                ListCell *lc2 = NULL;
+                if (grantdbstmt && grantdbstmt->grantees && grantdbstmt->privileges) {
+                    forboth(lc1, grantdbstmt->grantees, lc2, grantdbstmt->privileges)
+                    {
+                        PrivGrantee *rte1 = (PrivGrantee *)lfirst(lc1);
+                        DbPriv *rte2 = (DbPriv*)lfirst(lc2);
+
+                        internal_audit_object_str(&security_policy_ids, &audit_policy_ids, NULL,
+                            names_pair(rte2->db_priv_name, rte1->rolname /* grantee_name */),
+                            grantdbstmt->is_grant ? T_GRANT : T_REVOKE, grantdbstmt->is_grant ? "GRANT" : "REVOKE",
+                            O_UNKNOWN, ACL_TARGET_OBJECT, true, false);
                     }
                 }
                 break;
@@ -1718,11 +1496,9 @@ static void gsaudit_ProcessUtility_hook(Node *parsetree, const char *queryString
                     break;
                 }
                 CreateTableAsStmt *createtablestmt = (CreateTableAsStmt *)(parsetree);
-                if (createtablestmt != NULL) {
-                    IntoClause *intoclause = createtablestmt->into;
-                    if (intoclause != NULL)
-                        audit_table(&security_policy_ids, &audit_policy_ids, intoclause->rel, T_CREATE,
-                            "CREATE", O_TABLE);
+                if (createtablestmt != NULL && createtablestmt->into != NULL) {
+                    audit_table(&security_policy_ids, &audit_policy_ids, createtablestmt->into->rel, T_CREATE, "CREATE",
+                        O_TABLE);
                 }
                 break;
             }
@@ -1913,19 +1689,6 @@ static const char *ACL_get_object_name(int targetype, int objtype, ListCell *obj
     return NULL;
 }
 
-CmdType get_rte_commandtype(RangeTblEntry *rte) 
-{
-    if (rte->selectedCols) {
-        return CMD_SELECT;
-    } else if (rte->insertedCols) {
-        return CMD_INSERT;
-    } else if (rte->updatedCols) {
-        return CMD_UPDATE;
-    } else {
-        return CMD_UNKNOWN;
-    }
-}
-
 static void gs_audit_executor_start_hook(QueryDesc *queryDesc, int eflags)
 {
     /* verify parameter and audit policy */
@@ -2090,17 +1853,9 @@ void _PG_init(void)
 /*
  * Uninstall hooks and release local memory context
  * NOTE: Now the uninstall hooks process is disabled referring funciton internal_unload_library
- * we just put the release function pointers here to adapt the uninstall process in the feature.
+ * we just put the release function here to adapt the uninstall process in the feature.
  */
 void _PG_fini(void)
 {
-    user_login_hook = NULL;
-    ExecutorStart_hook  = next_ExecutorStart_hook;
-    ProcessUtility_hook = next_ProcessUtility_hook;
-    post_parse_analyze_hook  = next_post_parse_analyze_hook;
-    copy_need_to_be_reparse = NULL;
-    light_unified_audit_executor_hook = NULL;
-    opfusion_unified_audit_executor_hook = NULL;
-    opfusion_unified_audit_flush_logs_hook = NULL;
     ereport(LOG, (errmsg("Gsaudit extension finished")));
 }

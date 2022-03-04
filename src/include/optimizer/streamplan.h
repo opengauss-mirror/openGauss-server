@@ -130,6 +130,7 @@ extern ExecNodes* stream_merge_exec_nodes(Plan* lefttree, Plan* righttree, bool 
 extern ExecNodes* get_all_data_nodes(char locatortype);
 extern void pushdown_execnodes(Plan* plan, ExecNodes* exec_nodes, bool add_node = false, bool only_nodelist = false);
 extern void stream_join_plan(PlannerInfo* root, Plan* join_plan, JoinPath* join_path);
+extern void disaster_read_array_init();
 extern NodeDefinition* get_all_datanodes_def();
 extern List* distributeKeyIndex(PlannerInfo* root, List* distributed_keys, List* targetlist);
 extern List* make_groupcl_for_append(PlannerInfo* root, List* targetlist);

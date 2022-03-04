@@ -92,6 +92,14 @@ function real_regresscheck_old()
     $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG --seprate_unix_socket_dir $MAXCONNOPT --regconf=$REGCONF
 }
 
+function real_upgradecheck_single()
+{
+    set_hotpatch_env
+    set_common_env $1 $2
+    echo "regresscheck_single: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --data_base_dir=$DATA_BASE_DIR  --platform=$PLATFORM --upgrade_script_dir=$UPGRADE_SCRIPT_DIR --old_bin_dir=\'$OLD_BIN_DIR\' --grayscale_full_mode --upgrade_schedule=$UPGRADE_SCHEDULE --upgrade_from=$UPGRADE_FROM"
+    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --data_base_dir=$DATA_BASE_DIR  --platform=$PLATFORM --upgrade_script_dir=$UPGRADE_SCRIPT_DIR --old_bin_dir=\'$OLD_BIN_DIR\' --grayscale_full_mode --upgrade_schedule=$UPGRADE_SCHEDULE --upgrade_from=$UPGRADE_FROM
+}
+
 function real_regresscheck_single()
 {
     set_hotpatch_env
@@ -99,6 +107,15 @@ function real_regresscheck_single()
     echo "regresscheck_single: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF"
     $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF
 }
+
+function real_regresscheck_single_audit()
+{
+    set_hotpatch_env
+    set_common_env $1 $2
+    echo "regresscheck_single: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF"
+    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF
+}
+
 
 function real_regresscheck_single_mot()
 {
@@ -110,16 +127,24 @@ function real_regresscheck_single_mot()
 function real_regresscheck_ledger()
 {
     set_common_env $1 $2
-    echo "regresscheck_ledger: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $PARALLEL_INITDB $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG --seprate_unix_socket_dir $MAXCONNOPT --regconf=$REGCONF"
-    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $PARALLEL_INITDB $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG --seprate_unix_socket_dir $MAXCONNOPT --regconf=$REGCONF
+    echo "regresscheck_ledger: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG --seprate_unix_socket_dir $MAXCONNOPT --regconf=$REGCONF"
+    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG --seprate_unix_socket_dir $MAXCONNOPT --regconf=$REGCONF
 }
 
 function real_regresscheck_ce()
 {
     set_hotpatch_env
     set_common_env $1 $2
-    echo "regresscheck_ce: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $PARALLEL_INITDB $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG --seprate_unix_socket_dir $MAXCONNOPT --regconf=$REGCONF"
-    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $PARALLEL_INITDB $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG --seprate_unix_socket_dir $MAXCONNOPT --regconf=$REGCONF
+    echo "regresscheck_ce: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG  $MAXCONNOPT --regconf=$REGCONF"
+    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF
+}
+
+function real_regresscheck_ce_jdbc()
+{
+    set_hotpatch_env
+    set_common_env $1 $2
+    echo "regresscheck_ce_jdbc: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF"
+    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data  --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --jdbc
 }
 
 function real_regresscheck_policy_plugin()
@@ -240,6 +265,7 @@ function set_common_env()
     export PLATFORM=$(sh $CODE_BASE/src/get_PlatForm_str.sh)
     export GAUSSHOME=$PREFIX_HOME
     REGRESS_PATH=$ROOT_CODE_PATH/${OPENGS}/src/test/regress
+    REGRESS_PATH=$(cd ${REGRESS_PATH}/; pwd)
     PGREGRESS_BIN=./${OPENGS}/src/test/regress/pg_regress_single
     if [ "${ENABLE_MEMORY_CHECK}" = "ON" ];then
         export ASAN_OPTIONS="unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=/home/$(whoami)/memchk/asan/runlog"
@@ -258,6 +284,7 @@ function set_common_env()
     cp -r $REGRESS_PATH/jdbc_ce_test .
     cp -r $REGRESS_PATH/jdbc_client .
     cp -r $REGRESS_PATH/jdbc_client_lib .
+    cp -r $REGRESS_PATH/jdbc_client_lib ./opengauss/src/test/regress/
     cp -r $REGRESS_PATH/security_scripts .
     cp ./lib/regress.so $PREFIX_HOME/lib
     cp ./lib/refint.so $PREFIX_HOME/lib
@@ -272,7 +299,7 @@ function set_common_env()
     SCHEDULE=$INPUT_DIR/$1
     TEMP_CONFIG=$INPUT_DIR/$2
 
-    DATA_BASE_DIR=$INPUT_DIR/../grayscale_upgrade
+    DATA_BASE_DIR=$INPUT_DIR/../../../../privategauss/test/grayscale_upgrade
     UPGRADE_SCRIPT_DIR=$INPUT_DIR/../grayscale_upgrade
     OLD_BIN_DIR=$TEMP_INSTALL/bin
     UPGRADE_SCHEDULE=$INPUT_DIR/upgrade_schedule
@@ -291,13 +318,7 @@ function set_common_env()
     echo "--------------------LD_LIBRARY_PATH----------------------------------------------------"
     echo $LD_LIBRARY_PATH
     export
-    if [ "X$PLATFORM" = "Xeuleros2.0_sp2_x86_64" ]; then
-        UPGRADE_FROM=92202
-    elif [ "X$PLATFORM" = "Xeuleros2.0_sp5_x86_64" ]; then
-        UPGRADE_FROM=92202
-    else
-        UPGRADE_FROM=92023
-    fi
+    UPGRADE_FROM=92497
 }
 
 function parse_args()
@@ -349,6 +370,17 @@ case $DO_CMD in
     --fastcheck_single|fastcheck_single)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_single parallel_schedule0$part make_fastcheck_postgresql.conf "${args_val}" ;;
+   --fastcheck_single_audit|fastcheck_single_audit)
+        args_val="-d 1 -c 0 -p $p -r 1 "
+        real_regresscheck_single_audit security_audit_schedule0$part make_fastcheck_postgresql.conf "${args_val}" ;;
+    --fastcheck_lite|fastcheck_lite)
+        args_val="-d 1 -c 0 -p $p -r 1 "
+        real_regresscheck_single parallel_schedule.lite$part make_fastcheck_postgresql.conf "${args_val}" ;;
+
+    --upgradecheck_single|upgradecheck_single)
+            args_val="-d 1 -c 0 -p $p -r 1 "
+            real_upgradecheck_single parallel_schedule0$part make_fastcheck_postgresql.conf "${args_val}" ;;
+
     --fastcheck_single_mot|fastcheck_single_mot)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_single_mot parallel_schedule20 make_fastcheck_single_mot_postgresql.conf "${args_val}" ;;
@@ -368,8 +400,11 @@ case $DO_CMD in
         args_val="-d 6 -c 3 -p $p -r ${runtest} -n 2002"
         real_regresscheck_ledger ledger_schedule make_fastcheck_postgresql.conf "${args_val}" ;;
     --fastcheck_ce_single|fastcheck_ce_single)
-        args_val="-d 6 -c 3 -p $p -r ${runtest} -n 2002"
+        args_val="-d 1 -c 0 -p $p -r ${runtest} -n 2002"
         real_regresscheck_ce ce_sched make_fastcheck_postgresql.conf "${args_val}" ;;
+    --execute_fastcheck_ce_single_jdbc|execute_fastcheck_ce_single_jdbc)
+        args_val="-d 1 -c 0 -p $p -r ${runtest} -n 2002"
+        real_regresscheck_ce_jdbc ce_sched_jdbc make_fastcheck_postgresql.conf "${args_val}" ;;
     --fastcheck_policy_plugin_single|fastcheck_policy_plugin_single)
         args_val="-d 6 -c 3 -p $p -r ${runtest} -n 2002"
         real_regresscheck_policy_plugin security_plugin_schedule make_fastcheck_postgresql.conf "${args_val}" ;;

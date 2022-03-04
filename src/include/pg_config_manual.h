@@ -6,9 +6,9 @@
  * for developers.	If you edit any of these, be sure to do a *full*
  * rebuild (and an initdb if noted).
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/pg_config_manual.h
  * ------------------------------------------------------------------------
@@ -269,6 +269,23 @@
 #endif
 
 /*
+ * Define this to track memory allocation info.
+ * MEMORY_CONTEXT_CHECKING macro is a debug macro uniformly used by memcontext. It only takes effect in the debug 
+ * version. MEMORY_CONTEXT_TRACK takes effect in both debug and release versions.
+ * In release version, if ENABLE_LITE_MODE macro or __USE_NUMA macro open, MEMORY_CONTEXT_TRACK will be closed.
+ */
+#ifndef MEMORY_CONTEXT_CHECKING
+#ifndef ENABLE_LITE_MODE
+#ifndef __USE_NUMA
+#define MEMORY_CONTEXT_TRACK
+#endif
+#endif
+#else
+#define MEMORY_CONTEXT_TRACK
+#endif
+
+
+/*
  * Define this to cause palloc()'d memory to be filled with random data, to
  * facilitate catching code that depends on the contents of uninitialized
  * memory.	Caution: this is horrendously expensive.
@@ -303,6 +320,14 @@
  * see also the trace_sort GUC var.  For 8.1 this is enabled by default.
  */
 #define TRACE_SORT 1
+
+/*
+ *  Max iterations to traces at the beginning / end of a
+ *  start-with-connect-by recursive query
+ */
+#define SW_LOG_ROWS_HALF 10
+/* Full Size = First SW_LOG_ROWS_HALF + Last SW_LOG_ROWS_HALF */
+#define SW_LOG_ROWS_FULL (SW_LOG_ROWS_HALF + SW_LOG_ROWS_HALF)
 
 /*
  * Enable tracing of syncscan operations (see also the trace_syncscan GUC var).

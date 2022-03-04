@@ -143,14 +143,14 @@ create unique index ip_index_local2 on hw_partition_index_ip (c1) local
 	partition sip2_index_local tablespace PG_DEFAULT,
 	partition sip3_index_local tablespace PG_DEFAULT
 );
-ERROR:  unique index columns must contain the partition key and collation must be default collation
+ERROR:  unique local index columns must contain all the partition keys and collation must be default collation
 create unique index ip_index_local3 on hw_partition_index_ip (c2, c1) local
 (
 	partition sip1_index_local tablespace PG_DEFAULT,
 	partition sip2_index_local tablespace PG_DEFAULT,
 	partition sip3_index_local tablespace PG_DEFAULT
 );
-ERROR:  unique index columns must contain the partition key and collation must be default collation
+ERROR:  unique local index columns must contain all the partition keys and collation must be default collation
 --insert into table 
 insert into hw_partition_index_ip values(7,2,'2020-03-01');
 insert into hw_partition_index_ip values(3,1,'2020-04-01');
@@ -260,8 +260,11 @@ INTERVAL ('1 month')
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_partition_table_003_pkey" for table "interval_partition_table_003"
 create index interval_partition_table_003_1 ON interval_partition_table_003 USING HASH (logdate) LOCAL;
+ERROR:  access method "hash" does not support row store
 create index interval_partition_table_003_2 ON interval_partition_table_003 USING HASH (c2) LOCAL;
+ERROR:  access method "hash" does not support row store
 create index interval_partition_table_003_3 ON interval_partition_table_003 USING HASH (c1) LOCAL;
+ERROR:  access method "hash" does not support row store
 select relname from pg_partition where INDEXTBLID=(select RELFILENODE from pg_partition where relname='interval_partition_table_003_1') order by 1;
  relname 
 ---------
@@ -391,7 +394,7 @@ INTERVAL('1 MONTH')
 ( PARTITION p0 VALUES LESS THAN (TO_DATE('1-1-2008', 'DD-MM-YYYY')),
   PARTITION p1 VALUES LESS THAN (TO_DATE('6-5-2008', 'DD-MM-YYYY'))
 );
-select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition;
+select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition order by relname;
     relname     | has_toastrelid |          boundaries          
 ----------------+----------------+------------------------------
  interval_sales | FALSE          | 
@@ -400,7 +403,7 @@ select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_
 (3 rows)
 
 insert into interval_sales values (generate_series(1,10), generate_series(1,10), generate_series(TO_DATE('2020-01-01', 'YYYY-MM-DD'),TO_DATE('2020-07-01', 'YYYY-MM-DD'),'1 day'), 1, 1, 1, 1);
-select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition;
+select relname, case when reltoastrelid > 0 then 'TRUE' else 'FALSE' end as has_toastrelid, boundaries from pg_partition order by relname;
     relname     | has_toastrelid |          boundaries          
 ----------------+----------------+------------------------------
  interval_sales | FALSE          | 

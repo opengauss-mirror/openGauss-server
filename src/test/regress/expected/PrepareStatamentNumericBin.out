@@ -1,0 +1,65 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_numeric(key int,_real_ real ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_decimal_ decimal ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_doubleprecision_ double precision ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_numeric_ numeric ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+*******inserting data to the serial table
+INSERT INTO t_numeric (key, _real_, _decimal_, _numeric_, _doubleprecision_) VALUES (?,?,?,?,?);
+1,1234.1234,5678.5678,91011.91011,12131415.12131415
+INSERT INTO t_numeric (key, _real_, _decimal_, _numeric_, _doubleprecision_) VALUES (?,?,?,?,?);
+2,111213.111213,141516.141516,17181920.17181920,2122232425.2122232425
+*************inserting data verification
+select * from t_numeric where (_real_ = ? and _decimal_ =?) or (_numeric_ =?  and _doubleprecision_= ?) order by key;
+1234.1234,5678.5678,17181920.17181920,2122232425.2122232425
+ key | _real_  |   _decimal_   | _doubleprecision_ |     _numeric_     
+-----+---------+---------------+-------------------+-------------------
+   1 | 1234.12 |     5678.5678 | 12131415.1213141  |       91011.91011
+   2 | 111213  | 141516.141516 | 2122232425.21222  | 17181920.17181920
+(2 rows)
+
+***************updating data
+Update t_numeric set _real_= ? , _decimal_= ? where  _numeric_ = ? or key = ?
+212223.212223,24252627.24252627,17181920.17181920,2
+**************updating data verification
+select * from t_numeric where _real_ = ? and _decimal_ =?
+212223.212223,24252627.24252627
+ key | _real_ |     _decimal_     | _doubleprecision_ |     _numeric_     
+-----+--------+-------------------+-------------------+-------------------
+   2 | 212223 | 24252627.24252627 | 2122232425.21222  | 17181920.17181920
+(1 row)
+
+*************deleting data
+delete from  t_numeric where _real_= ? and _numeric_= ? and _decimal_ = ? and  _doubleprecision_ =?
+212223.212223,17181920.17181920,24252627.24252627,2122232425.2122232425
+*******************deleting data verification
+select * from t_numeric where _real_= ? and _numeric_= ? and _decimal_ = ? and  _doubleprecision_ =?
+212223.212223,17181920.17181920,24252627.24252627,2122232425.2122232425
+ key | _real_ | _decimal_ | _doubleprecision_ | _numeric_ 
+-----+--------+-----------+-------------------+-----------
+(0 rows)
+
+select * from t_numeric;
+
+ key | _real_  | _decimal_ | _doubleprecision_ |  _numeric_  
+-----+---------+-----------+-------------------+-------------
+   1 | 1234.12 | 5678.5678 | 12131415.1213141  | 91011.91011
+(1 row)
+
+*************deleting all data
+delete  from t_numeric;
+
+No results were returned by the query.
+**************deleting all data verification
+select * from t_numeric;
+
+ key | _real_ | _decimal_ | _doubleprecision_ | _numeric_ 
+-----+--------+-----------+-------------------+-----------
+(0 rows)
+
+drop table t_numeric;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;

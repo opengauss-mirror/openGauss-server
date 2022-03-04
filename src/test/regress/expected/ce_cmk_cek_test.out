@@ -29,23 +29,31 @@ select  count(*), 'count' from gs_column_keys;
 CREATE CLIENT MASTER KEY ImgCMK WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 -- fail  duplicate key
 CREATE CLIENT MASTER KEY ImgCMK WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2" , ALGORITHM = AES_256_CBC);
-ERROR:  duplicate key value violates unique constraint "gs_client_global_keys_name_index"
-DETAIL:  Key (global_key_name, key_namespace)=(imgcmk, 2200) already exists.
+ERROR:  client master key "imgcmk" already exists
 -- fail   didn't support RSA_2048 algorithm
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2" , ALGORITHM = RSA_2048);
-ERROR(CLIENT): unsupported client master key algorithm
+ERROR(CLIENT): unpported algorithm 'rsa_2048', gs_ktool only support: AES_256_CBC  SM4  
+-- fail   invalid  algorithm
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2" , ALGORITHM = AES_256_CBC_1);
+ERROR(CLIENT): unpported algorithm 'aes_256_cbc_1', gs_ktool only support: AES_256_CBC  SM4  
 -- fail  ALGORITHM is missing or invalid
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2");
-ERROR(CLIENT): unsupported client master key algorithm
+ERROR(CLIENT): failed to create client master key, failed to find arg: ALGORITHM.
 -- fail  KEY_PATHis missing or invalid
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, ALGORITHM = AES_256_CBC);
-ERROR(CLIENT): invalid key path
+ERROR(CLIENT): failed to create client master key, failed to find arg: KEY_PATH.
+-- fail  KEY_PATHis  invalid
+CREATE CLIENT MASTER KEY ImgCMK WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/" , ALGORITHM = AES_256_CBC);
+ERROR(CLIENT): invalid key path: 'gs_ktool/', it should be like "gs_ktool/1".
 -- fail  KEY_STORE is missing or invalid
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_PATH = "gs_ktool/2", ALGORITHM = AES_256_CBC);
-ERROR(CLIENT): invalid key store
+ERROR(CLIENT): failed to create client master key, failed to find arg: KEY_STORE.
 -- fail duplicate KEY_PATHargs
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2", KEY_PATH = "gs_ktool/3", ALGORITHM = AES_256_CBC);
 ERROR(CLIENT): duplicate keyPath args
+-- fail invalid KEY_STORE
+CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktoolgs_ktoolgs_ktool,  KEY_PATH = "gs_ktool/3", ALGORITHM = AES_256_CBC);
+ERROR(CLIENT): key store type 'gs_ktoolgs_ktoolgs_ktool' is not supported.
 -- fail duplicate KEY_STORE args
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_STORE = kmc, KEY_PATH = "gs_ktool/2", ALGORITHM = AES_256_CBC);
 ERROR(CLIENT): duplicate keyStore args
@@ -54,27 +62,41 @@ CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktoo
 ERROR(CLIENT): duplicate algorithm args
 -- case create CEK - success
 CREATE COLUMN ENCRYPTION KEY ImgCEK WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+-- case create CEK - success
+CREATE COLUMN ENCRYPTION KEY ImgCEK128 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_128_CBC_HMAC_SHA256);
+-- case create CEK - fail
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256_1);
+ERROR(CLIENT): invalid column encryption key algorithm.
+-- case create CEK - fail
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_128_CBC_HMAC_SHA256_1);
+ERROR(CLIENT): invalid column encryption key algorithm.
 CREATE COLUMN ENCRYPTION KEY ImgCEK1 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE='abcdefghijklmnopqrstuvwxyz12');
 --fail  encryption key too short
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE='abcdefghijklmnopqrstuvwxyz1');
 ERROR(CLIENT): encryption key too short
+--sucess
+CREATE COLUMN ENCRYPTION KEY ImgCEK_256 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256,
+ENCRYPTED_VALUE='1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111');
+--fail  encryption key too long
+CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256,
+ENCRYPTED_VALUE='1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111');
+ERROR(CLIENT): encryption key too long
 --fail object does not exist
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK2, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
 ERROR(CLIENT): failed to get client master key imgcmk2 from cache
 -- fail   duplicate key value
 CREATE COLUMN ENCRYPTION KEY ImgCEK WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
-ERROR:  duplicate key value violates unique constraint "gs_column_keys_name_index"
-DETAIL:  Key (column_key_name, key_namespace)=(imgcek, 2200) already exists.
+ERROR:  column encryption key "imgcek" already exists
 --fail    ImgCMK1 dose not exist
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK1, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
 ERROR(CLIENT): failed to get client master key imgcmk1 from cache
 -- fail  didn't support AES_128_CBC algorithm
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AES_128_CBC);
 ERROR(CLIENT): invalid column encryption key algorithm.
--- fail   syntax error parsing cek creation query
+-- fail   invalid algorithm
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK);
 ERROR(CLIENT): invalid column encryption key algorithm.
--- fail   syntax error parsing cek creation query
+-- fail   invalid algorithm
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
 ERROR(CLIENT): failed to get client master key from cache
 select  count(*), 'count' from gs_client_global_keys;
@@ -86,7 +108,7 @@ select  count(*), 'count' from gs_client_global_keys;
 select  count(*), 'count' from gs_column_keys;
  count | ?column? 
 -------+----------
-     2 | count
+     4 | count
 (1 row)
 
 --cek dose not exist
@@ -94,14 +116,16 @@ CREATE TABLE account(user_id INT, username VARCHAR (50)  ENCRYPTED WITH (COLUMN_
 );
 ERROR(CLIENT):error while trying to retrieve column encryption key from cache
 DROP CLIENT MASTER KEY ImgCMK CASCADE;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to column encryption key: imgcek
+drop cascades to column encryption key: imgcek128
 drop cascades to column encryption key: imgcek1
+drop cascades to column encryption key: imgcek_256
 --failed
 CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM3);
-ERROR(CLIENT): unsupported client master key algorithm
+ERROR(CLIENT): unpported algorithm 'sm3', gs_ktool only support: AES_256_CBC  SM4  
 CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM2);
-ERROR(CLIENT): unsupported client master key algorithm
+ERROR(CLIENT): unpported algorithm 'sm2', gs_ktool only support: AES_256_CBC  SM4  
 --success
 CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM4);
 CREATE COLUMN ENCRYPTION KEY sm4_cek WITH VALUES (CLIENT_MASTER_KEY = test_sm2_cmk, ALGORITHM  = sm4_sm34);

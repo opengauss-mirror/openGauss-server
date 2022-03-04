@@ -870,7 +870,7 @@ static void execute_extension_script(Oid extensionOid, ExtensionControlFile* con
             t_sql,
             CStringGetTextDatum("^\\\\echo.*$"),
             CStringGetTextDatum(""),
-            CStringGetTextDatum("ng"));
+            CStringGetTextDatum("mg"));
 
         /*
          * If it's not relocatable, substitute the target schema name for

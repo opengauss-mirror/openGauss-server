@@ -2073,19 +2073,21 @@ llvm::Value* WrapmakeNumeric64CodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::
 
     DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CGVAR_INT64(int64_0, 0);
 
     llvm::Function* jitted_make64num = llvmCodeGen->module()->getFunction("LLVMWrapMakeNumeric64");
     if (jitted_make64num == NULL) {
         GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "LLVMWrapMakeNumeric64", int64Type);
         fn_prototype.addArgument(GsCodeGen::NamedVariable("value", int64Type));
         fn_prototype.addArgument(GsCodeGen::NamedVariable("scale", int8Type));
+        fn_prototype.addArgument(GsCodeGen::NamedVariable("arr", int64Type));
         jitted_make64num = fn_prototype.generatePrototype(NULL, NULL);
         llvm::sys::DynamicLibrary::AddSymbol("LLVMWrapMakeNumeric64", (void*)makeNumeric64);
     }
 
     llvmCodeGen->FinalizeFunction(jitted_make64num);
 
-    result = ptrbuilder->CreateCall(jitted_make64num, {data, scale});
+    result = ptrbuilder->CreateCall(jitted_make64num, {data, scale, int64_0});
     return result;
 }
 
@@ -2103,19 +2105,21 @@ llvm::Value* WrapmakeNumeric128CodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm:
     DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_NINTTYP(int128Type, 128);
+    DEFINE_CGVAR_INT64(int64_0, 0);
 
     llvm::Function* jitted_make128num = llvmCodeGen->module()->getFunction("LLVMWrapMakeNumeric128");
     if (jitted_make128num == NULL) {
         GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "LLVMWrapMakeNumeric128", int64Type);
         fn_prototype.addArgument(GsCodeGen::NamedVariable("value", int128Type));
         fn_prototype.addArgument(GsCodeGen::NamedVariable("scale", int8Type));
+        fn_prototype.addArgument(GsCodeGen::NamedVariable("arr", int64Type));
         jitted_make128num = fn_prototype.generatePrototype(NULL, NULL);
         llvm::sys::DynamicLibrary::AddSymbol("LLVMWrapMakeNumeric128", (void*)makeNumeric128);
     }
 
     llvmCodeGen->FinalizeFunction(jitted_make128num);
 
-    result = ptrbuilder->CreateCall(jitted_make128num, {data, scale});
+    result = ptrbuilder->CreateCall(jitted_make128num, {data, scale, int64_0});
     return result;
 }
 

@@ -74,10 +74,15 @@ Datum current_database(PG_FUNCTION_ARGS)
 Datum current_query(PG_FUNCTION_ARGS)
 {
     /* there is no easy way to access the more concise 'query_string' */
-    if (t_thrd.postgres_cxt.debug_query_string)
-        PG_RETURN_TEXT_P(cstring_to_text(t_thrd.postgres_cxt.debug_query_string));
-    else
+    if (t_thrd.postgres_cxt.debug_query_string) {
+        char *mask_string = maskPassword(t_thrd.postgres_cxt.debug_query_string);
+        if (mask_string == NULL) {
+            mask_string = (char *)t_thrd.postgres_cxt.debug_query_string;
+        }
+        PG_RETURN_TEXT_P(cstring_to_text(mask_string));
+    } else {
         PG_RETURN_NULL();
+    }
 }
 
 /*
@@ -274,11 +279,7 @@ Datum pg_cancel_invalid_query(PG_FUNCTION_ARGS)
                 (errmsg("must be system admin to cancel invalid queries running in all server processes"))));
         PG_RETURN_BOOL(false);
     } else {
-        if (GTM_LITE_MODE) {
-            proc_cancel_invalid_gtm_lite_conn();
-        } else {
-            pgstat_cancel_invalid_gtm_conn();
-        }
+        proc_cancel_invalid_gtm_lite_conn();
         PG_RETURN_BOOL(true);
     }
 #endif

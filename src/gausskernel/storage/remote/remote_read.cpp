@@ -68,6 +68,9 @@ const char* RemoteReadErrMsg(int error_code)
         case REMOTE_READ_MEMCPY_ERROR:
             error_msg = "memcpy_s error";
             break;
+        case REMOTE_READ_CONN_ERROR:
+            error_msg = "remote connect status not ok";
+            break;
         default:
             error_msg = "error code unknown";
             break;
@@ -93,7 +96,7 @@ void GetPrimaryServiceAddress(char *address, size_t address_len)
         return;
 
     SpinLockAcquire(&walrcv->mutex);
-    rc = snprintf_s(address, address_len, (address_len - 1), "%s:%d", walrcv->conn_channel.remotehost,
+    rc = snprintf_s(address, address_len, (address_len - 1), "%s@%d", walrcv->conn_channel.remotehost,
                     walrcv->conn_channel.remoteport);
     securec_check_ss(rc, "\0", "\0");
     SpinLockRelease(&walrcv->mutex);
@@ -125,7 +128,7 @@ void GetRemoteReadAddress(char* firstAddress, char* secondAddress, size_t addres
 
         if (t_thrd.postmaster_cxt.ReplConnArray[1]) {
             rc = snprintf_s(firstAddress, addressLen, (addressLen - 1),
-                            "%s:%d", t_thrd.postmaster_cxt.ReplConnArray[1]->remotehost,
+                            "%s@%d", t_thrd.postmaster_cxt.ReplConnArray[1]->remotehost,
                             t_thrd.postmaster_cxt.ReplConnArray[1]->remoteport);
             securec_check_ss(rc, "", "");
         }
@@ -134,20 +137,20 @@ void GetRemoteReadAddress(char* firstAddress, char* secondAddress, size_t addres
             GetFastestReplayStandByServiceAddress(firstAddress, secondAddress, addressLen);
             if (firstAddress[0] != '\0') {
                 GetIPAndPort(firstAddress, ip, port, MAX_IPADDR_LEN);
-                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s:%s", ip, port);
+                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s@%s", ip, port);
                 securec_check_ss(rc, "", "");
             }
 
             if (secondAddress[0] != '\0') {
                 GetIPAndPort(secondAddress, ip, port, MAX_IPADDR_LEN);
-                rc = snprintf_s(secondAddress, addressLen, (addressLen - 1), "%s:%s", ip, port);
+                rc = snprintf_s(secondAddress, addressLen, (addressLen - 1), "%s@%s", ip, port);
                 securec_check_ss(rc, "", "");
             }
         } else if (serverMode == STANDBY_MODE) {
             GetPrimaryServiceAddress(firstAddress, addressLen);
             if (firstAddress[0] != '\0') {
                 GetIPAndPort(firstAddress, ip, port, MAX_IPADDR_LEN);
-                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s:%s", ip, port);
+                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s@%s", ip, port);
                 securec_check_ss(rc, "", "");
             }
         }
@@ -163,8 +166,8 @@ void GetIPAndPort(char* address, char* ip, char* port, size_t len)
     char* tmpIp;
     char* tempPort;
 
-    tmpIp = strtok_r(address, ":", &outerPtr);
-    tempPort = strtok_r(NULL, ":", &outerPtr);
+    tmpIp = strtok_r(address, "@", &outerPtr);
+    tempPort = strtok_r(NULL, "@", &outerPtr);
     if (tmpIp != NULL && tmpIp[0] != '\0' && tempPort != NULL && tempPort[0] != '\0' &&
         strlen(tmpIp) + strlen(tempPort) + 1 < len) {
         rc = strcpy_s(ip, MAX_IPADDR_LEN, tmpIp);
@@ -185,7 +188,7 @@ bool CanRemoteRead()
     ServerMode serveMode = hashmdata->current_mode;
 
     if (IsRemoteReadModeOn() && !IS_DN_WITHOUT_STANDBYS_MODE() && IS_PGXC_DATANODE && serveMode != NORMAL_MODE &&
-        serveMode != PENDING_MODE) {
+        serveMode != PENDING_MODE && serveMode != STANDBY_MODE) {
         return true;
     }
     return false;

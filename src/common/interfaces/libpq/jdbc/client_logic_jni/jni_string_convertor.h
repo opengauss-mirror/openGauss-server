@@ -23,8 +23,9 @@
 
 #ifndef JNI_STRING_CONVERTOR_H_
 #define JNI_STRING_CONVERTOR_H_
-
+#ifndef ENABLE_LITE_MODE
 #include <jni.h>
+#endif
 
 class JNIStringConvertor {
 public:

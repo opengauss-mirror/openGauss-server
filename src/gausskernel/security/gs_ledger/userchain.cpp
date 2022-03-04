@@ -405,10 +405,6 @@ uint64 get_user_tupleid_hash(Relation relation, ItemPointer tupleid)
 
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
-    if (PageIs4BXidVersion(page)) {
-        heap_page_upgrade(relation, buffer);
-    }
-
     lp = PageGetItemId(page, ItemPointerGetOffsetNumber(tupleid));
     tp.t_tableOid = RelationGetRelid(relation);
     tp.t_data = (HeapTupleHeader) PageGetItem(page, lp);

@@ -30,15 +30,18 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "replication/replicainternal.h"
+#include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "replication/syncrep.h"
+#include "replication/archive_walreceiver.h"
 
 #define AllSlotInUse(a, b) ((a) == (b))
 extern void *internal_load_library(const char *libname);
 extern bool PMstateIsRun(void);
 static void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_content = NULL);
 static XLogRecPtr create_physical_replication_slot_for_backup(const char* slot_name, bool is_dummy, char* extra);
-static XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, bool is_dummy, char* extra);
+static XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, bool is_dummy, char* extra,
+    XLogRecPtr currFlushPtr = InvalidXLogRecPtr);
 static void slot_advance(const char* slotname, XLogRecPtr &moveto, NameData &database, char *EndLsn, bool for_backup = false);
 
 
@@ -76,9 +79,9 @@ void log_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_
     }
 }
 
-void log_slot_advance(const ReplicationSlotPersistentData *slotInfo)
+void log_slot_advance(const ReplicationSlotPersistentData *slotInfo, char* extra_content)
 {
-    if (!u_sess->attr.attr_sql.enable_slot_log || !PMstateIsRun()) {
+    if ((!u_sess->attr.attr_sql.enable_slot_log && t_thrd.role != ARCH) || !PMstateIsRun()) {
         return;
     }
 
@@ -91,7 +94,9 @@ void log_slot_advance(const ReplicationSlotPersistentData *slotInfo)
 
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec, ReplicationSlotPersistentDataConstSize);
-
+    if (extra_content != NULL && strlen(extra_content) != 0) {
+        XLogRegisterData(extra_content, strlen(extra_content) + 1);
+    }
     Ptr = XLogInsert(RM_SLOT_ID, XLOG_SLOT_ADVANCE);
     XLogWaitFlush(Ptr);
     if (g_instance.attr.attr_storage.max_wal_senders > 0)
@@ -256,6 +261,8 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
 {
     Name name = PG_GETARG_NAME(0);
     bool isDummyStandby = PG_GETARG_BOOL(1);
+    XLogRecPtr currFlushPtr = InvalidXLogRecPtr;
+    bool isNeedRecycleXlog = false;
     text* extra_content_text = NULL;
     char* extra_content = NULL;
     const int TUPLE_FIELDS = 2;
@@ -277,6 +284,9 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
         extra_content_text = PG_GETARG_TEXT_P(2);
         extra_content = text_to_cstring(extra_content_text);
     }
+    if (!PG_ARGISNULL(3)) {
+        isNeedRecycleXlog = PG_GETARG_BOOL(3);
+    }
 
     t_thrd.slot_cxt.MyReplicationSlot = NULL;
 
@@ -289,7 +299,28 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
     if (for_backup) {
         restart_lsn = create_physical_replication_slot_for_backup(NameStr(*name), isDummyStandby, extra_content);
     } else {
-        restart_lsn = create_physical_replication_slot_for_archive(NameStr(*name), isDummyStandby, extra_content);
+#ifndef ENABLE_LITE_MODE
+        if (isNeedRecycleXlog) {
+            ArchiveConfig* archive_config = formArchiveConfigFromStr(extra_content, false);
+            XLogRecPtr switchPtr = InvalidXLogRecPtr;
+            XLogRecPtr waitPtr = InvalidXLogRecPtr;
+            switchPtr = waitPtr = RequestXLogSwitch();
+            waitPtr += XLogSegSize - 1;
+            waitPtr -= waitPtr % XLogSegSize;
+            XLogWaitFlush(waitPtr);
+            currFlushPtr = GetFlushRecPtr();
+            ereport(LOG, (errmsg("push slot to switch point %lu, wait point %lu, flush point %lu",
+                switchPtr, waitPtr, currFlushPtr)));
+            (void)archive_replication_cleanup(currFlushPtr, archive_config, true);
+            pfree_ext(archive_config);
+        } else {
+            currFlushPtr = GetFlushRecPtr();
+        }
+        currFlushPtr -= currFlushPtr % XLogSegSize;
+        ereport(LOG, (errmsg("create archive slot, start point %lu", currFlushPtr)));
+#endif
+        restart_lsn = create_physical_replication_slot_for_archive(NameStr(*name), isDummyStandby, extra_content,
+            currFlushPtr);
     }
 
     values[0] = CStringGetTextDatum(NameStr(*name));
@@ -421,10 +452,16 @@ Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
     ValidateName(NameStr(*plugin));
     str_tmp_lsn = (char *)palloc0(128);
 
-    check_permissions();
+    Oid userId = GetUserId();
+    CheckLogicalPremissions(userId);
     if (RecoveryInProgress())
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Standby mode doesn't support create logical slot")));
+    /* we are about to start streaming switch over, stop any xlog insert. */
+    if (t_thrd.xlog_cxt.LocalXLogInsertAllowed == 0 && g_instance.streaming_dr_cxt.isInSwitchover == true) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot create logical slot during streaming disaster recovery")));
+    }
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("return type must be a row type")));
 
@@ -462,9 +499,19 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
     check_permissions(for_backup);
 
     isLogical = IsLogicalReplicationSlot(NameStr(*name));
+    if (isLogical) {
+        Oid userId = GetUserId();
+        CheckLogicalPremissions(userId);
+    }
     if (isLogical && RecoveryInProgress())
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("Standby mode doesn't support drop logical slot.")));
+
+    /* we are about to start streaming switch over, stop any xlog insert. */
+    if (t_thrd.xlog_cxt.LocalXLogInsertAllowed == 0 && g_instance.streaming_dr_cxt.isInSwitchover == true) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot drop logical slot during streaming disaster recovery")));
+    }
 
     CheckSlotRequirements();
 
@@ -832,6 +879,13 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
     if (RecoveryInProgress()) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("couldn't advance in recovery")));
     }
+
+    /* we are about to start streaming switch over, stop any xlog insert. */
+    if (t_thrd.xlog_cxt.LocalXLogInsertAllowed == 0 && g_instance.streaming_dr_cxt.isInSwitchover == true) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("cannot advance slot during streaming disaster recovery")));
+    }
+
     if (PG_ARGISNULL(1)) {
         if (!RecoveryInProgress())
             moveto = GetFlushRecPtr();
@@ -853,6 +907,8 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
 
     check_permissions(for_backup);
     if (!for_backup) {
+        Oid userId = GetUserId();
+        CheckLogicalPremissions(userId);
         CheckLogicalDecodingRequirements(u_sess->proc_cxt.MyDatabaseId);
     }
     slot_advance(NameStr(*slotname), moveto, database, EndLsn, for_backup);
@@ -878,11 +934,9 @@ void redo_slot_advance(const ReplicationSlotPersistentData *slotInfo)
      * standby notify the primary to advance the logical replication slot.
      * Thus, we do not redo the slot_advance log.
      */
-#ifndef ENABLE_MULTIPLE_NODES
     if (IsReplicationSlotActive(NameStr(slotInfo->name))) {
         return;
     }
-#endif
 
     /* Acquire the slot so we "own" it */
     ReplicationSlotAcquire(NameStr(slotInfo->name), false);
@@ -958,12 +1012,23 @@ int get_in_use_slot_number()
 
 void slot_redo(XLogReaderState *record)
 {
+    char* extra_content = NULL;
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     ReplicationSlotPersistentData *xlrec = (ReplicationSlotPersistentData *)XLogRecGetData(record);
     LogicalPersistentData *LogicalSlot = (LogicalPersistentData *)XLogRecGetData(record);
 
+    if ((IS_DISASTER_RECOVER_MODE && (info == XLOG_SLOT_CREATE || info == XLOG_SLOT_ADVANCE)) ||
+        IsRoachRestore() || t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME_OBS) {
+        return;
+    }
+
+
     /* Backup blocks are not used in xlog records */
     Assert(!XLogRecHasAnyBlockRefs(record));
+    if (GET_SLOT_EXTRA_DATA_LENGTH(*xlrec) != 0) {
+        extra_content = (char*)XLogRecGetData(record) + ReplicationSlotPersistentDataConstSize;
+        Assert(strlen(extra_content) == (uint32)(GET_SLOT_EXTRA_DATA_LENGTH(*xlrec)));
+    }
     switch (info) {
         /*
          * Rmgrs we care about for logical decoding. Add new rmgrs in
@@ -981,11 +1046,6 @@ void slot_redo(XLogReaderState *record)
                 if (AllSlotInUse(SlotCount, g_instance.attr.attr_storage.max_replication_slots)) {
                     break;
                 } else {
-                    char* extra_content = NULL;
-                    if (GET_SLOT_EXTRA_DATA_LENGTH(*xlrec) != 0) {
-                        extra_content = (char*)XLogRecGetData(record) + ReplicationSlotPersistentDataConstSize;
-                        Assert(strlen(extra_content) == (uint32)(GET_SLOT_EXTRA_DATA_LENGTH(*xlrec)));
-                    }
                     redo_slot_create(xlrec, extra_content);
                 }
             } else {
@@ -993,8 +1053,13 @@ void slot_redo(XLogReaderState *record)
             }
             break;
         case XLOG_SLOT_ADVANCE:
-            if (ReplicationSlotFind(xlrec->name.data))
+            if (!ReplicationSlotFind(xlrec->name.data) && extra_content != NULL &&
+                GET_SLOT_PERSISTENCY(*xlrec) != RS_BACKUP) {
+                return;
+            }
+            if (ReplicationSlotFind(xlrec->name.data)) {
                 redo_slot_advance(xlrec);
+            }
             else
                 redo_slot_create(xlrec);
             break;
@@ -1038,7 +1103,8 @@ bool is_archive_slot(ReplicationSlotPersistentData data)
     return GET_SLOT_EXTRA_DATA_LENGTH(data) != 0;
 }
 
-XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, bool is_dummy, char* extra_content)
+XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, bool is_dummy, char* extra_content,
+    XLogRecPtr currFlushPtr)
 {
     /* before upgrade commit, we can not use new slot extra field */
     if (t_thrd.proc->workingVersionNum < EXTRA_SLOT_VERSION_NUM) {
@@ -1048,7 +1114,7 @@ XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, b
     check_permissions();
 
     /* create persistent replication slot with extra archive configuration */
-    ReplicationSlotCreate(slot_name, RS_PERSISTENT, is_dummy, InvalidOid, InvalidXLogRecPtr, extra_content);
+    ReplicationSlotCreate(slot_name, RS_PERSISTENT, is_dummy, InvalidOid, currFlushPtr, extra_content);
     /* log slot creation */
     log_slot_create(&t_thrd.slot_cxt.MyReplicationSlot->data, t_thrd.slot_cxt.MyReplicationSlot->extra_content);
     MarkArchiveSlotOperate();
@@ -1074,6 +1140,12 @@ XLogRecPtr create_physical_replication_slot_for_backup(const char* slot_name, bo
     if (backup_started_in_recovery) {
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
                        errhint("roach backup cannot be executed during recovery.")));
+    }
+
+    /* we are about to start streaming switch over, stop any xlog insert. */
+    if (t_thrd.xlog_cxt.LocalXLogInsertAllowed == 0 && g_instance.streaming_dr_cxt.isInSwitchover == true) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("cannot create physical replication slot during streaming disaster recovery")));
     }
 
     (void)LWLockAcquire(ControlFileLock, LW_SHARED);
@@ -1190,9 +1262,14 @@ void add_archive_slot_to_instance(ReplicationSlot *slot)
                 if (slot->archive_config->conn_config != NULL) {
                     archive_config->archive_config.conn_config =
                         (ArchiveConnConfig *)palloc0(sizeof(ArchiveConnConfig));
-                    rc = memcpy_s(archive_config->archive_config.conn_config, sizeof(ArchiveConnConfig),
-                        slot->archive_config->conn_config, sizeof(ArchiveConnConfig));
-                    securec_check(rc, "\0", "\0");
+                    archive_config->archive_config.conn_config->obs_address =
+                        pstrdup(slot->archive_config->conn_config->obs_address);
+                    archive_config->archive_config.conn_config->obs_bucket =
+                        pstrdup(slot->archive_config->conn_config->obs_bucket);
+                    archive_config->archive_config.conn_config->obs_ak =
+                        pstrdup(slot->archive_config->conn_config->obs_ak);
+                    archive_config->archive_config.conn_config->obs_sk =
+                        pstrdup(slot->archive_config->conn_config->obs_sk);
                 }
                 archive_config->archive_config.archive_prefix = pstrdup(slot->archive_config->archive_prefix);
                 archive_config->archive_config.is_recovery = slot->archive_config->is_recovery;
@@ -1351,3 +1428,48 @@ ArchiveTaskStatus* walreceiver_find_archive_task_status(unsigned int expected_pi
     }
     return NULL;
 }
+
+Datum gs_get_parallel_decode_status(PG_FUNCTION_ARGS)
+{
+    FuncCallContext* funcctx = NULL;
+    MemoryContext oldcontext = NULL;
+    ParallelStatusData *entry = NULL;
+    const int columnNum = 4;
+
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        TupleDesc tupdesc = CreateTemplateTupleDesc(columnNum, false);
+
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARR_1, "slot_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARR_2, "parallel_decode_num", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARR_3, "read_change_queue_length", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARR_4, "decode_change_queue_length", TEXTOID, -1, 0);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->user_fctx = (void *)GetParallelDecodeStatus(&(funcctx->max_calls));
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    entry = (ParallelStatusData *)funcctx->user_fctx;
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        Datum values[columnNum];
+        bool nulls[columnNum] = {false};
+        HeapTuple tuple = NULL;
+        errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+
+        entry += funcctx->call_cntr;
+        values[ARG_0] = CStringGetTextDatum(entry->slotName);
+        values[ARG_1] = Int32GetDatum(entry->parallelDecodeNum);
+        values[ARG_2] = CStringGetTextDatum(entry->readQueueLen);
+        values[ARG_3] = CStringGetTextDatum(entry->decodeQueueLen);
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    SRF_RETURN_DONE(funcctx);
+}
+

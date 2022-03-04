@@ -1,0 +1,88 @@
+#
+# @copyright Copyright (c) Huawei Technologies Co., Ltd. 2011-2020. All rights reserved.
+# 
+#
+#
+# cm_errcodes.txt
+#      CM error codes
+#
+# The files generated from this one are:
+#
+#   src/include/utils/cm_errcodes.h
+#      macros defining errcode constants to be used in the rest of the source
+#
+# The format of this file is one error code per line, with the following
+# whitespace-separated fields:
+#
+#      sqlstate    E/W/S    errcode_macro_name    spec_name
+#
+# where sqlstate is a five-character string following the SQLSTATE conventions,
+# the second field indicates if the code means an error, a warning or success,
+# errcode_macro_name is the C macro name starting with ERRCODE that will be put
+# in errcodes.h, and spec_name is a lowercase, underscore-separated name that
+# will be used as the PL/pgSQL condition name and will also be included in the
+# SGML list. The last field is optional, if not present the PL/pgSQL condition
+# and the SGML entry will not be generated.
+#
+# Empty lines and lines starting with a hash are comments.
+#
+# There are also special lines in the format of:
+#
+#      Section: section description
+#
+# that is, lines starting with the string "Section:". They are used to delimit
+# error classes as defined in the SQL spec, and are necessary for SGML output.
+#
+#
+#      SQLSTATE codes for errors.
+#
+# The SQL99 code set is rather impoverished, especially in the area of
+# syntactical and semantic errors.  We have borrowed codes from IBM's DB2
+# and invented our own codes to develop a useful code set.
+#
+# When adding a new code, make sure it is placed in the most appropriate
+# class (the first two characters of the code value identify the class).
+# The listing is organized by class to make this prominent.
+#
+# Each class should have a generic '000' subclass.  However,
+# the generic '000' subclass code should be used for an error only
+# when there is not a more-specific subclass code defined.
+#
+# The SQL spec requires that all the elements of a SQLSTATE code be
+# either digits or upper-case ASCII characters.
+#
+# Classes that begin with 0-4 or A-H are defined by the
+# standard. Within such a class, subclass values defined by the
+# standard must begin with 0-4 or A-H. To define a new error code,
+# ensure that it is either in an "implementation-defined class" (it
+# begins with 5-9 or I-Z), or its subclass falls outside the range of
+# error codes that could be present in future versions of the
+# standard (i.e. the subclass value begins with 5-9 or I-Z).
+#
+# The convention is that new error codes defined by PostgreSQL in a
+# class defined by the standard have a subclass value that begins
+# with 'P'. In addition, error codes defined by PostgreSQL clients
+# (such as ecpg) have a class value that begins with 'Y'.
+
+Section: Class c0 - Connection Exception
+c0000    E    ERRCODE_CONNECTION_EXCEPTION                                   connection_exception
+c0001    E    ERRCODE_CONNECTION_DOES_NOT_EXIST                              connection_does_not_exist
+c0002    E    ERRCODE_CONNECTION_FAILURE                                     connection_failure
+
+Section: Class c1 - Environment Exception
+c1000    E    ERRCODE_OUT_OF_MEMORY                                          out_of_memory
+
+Section: Class c2 - File Exception
+c3000    E    ERRCODE_OPEN_FILE_FAILURE                                      open_file_failure
+c3001    E    ERRCODE_READ_FILE_FAILURE                                      read_file_failure
+c3002    E    ERRCODE_CONFIG_FILE_FAILURE                                    config_file_failure
+
+Section: Class c3 - Parameter Exception
+c3000    E    ERRCODE_PARAMETER_FAILURE                                      parameter_failure
+c3001    E    ERRCODE_ENVIRONMENT_VARIABLE_FAILURE                           environment_variable_failure
+
+Section: Class c4 - Etcd Exception
+c4000    E    ERRCODE_ETCD_OPEN_FAILURE                                      etcd_open_failure
+
+Section: Class c5 - Internal Exception
+c5000    E    ERRCODE_INTERNAL_ERROR                                         internal_error

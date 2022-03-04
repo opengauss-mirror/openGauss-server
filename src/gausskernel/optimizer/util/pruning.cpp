@@ -84,6 +84,28 @@ static PartitionMap* GetRelPartitionMap(Relation relation)
     return relation->partMap;
 }
 
+static void CollectSubpartitionPruningResults(PruningResult* resPartition, Relation current_relation)
+{
+    if (!RelationIsSubPartitioned(current_relation)) {
+        return;
+    }
+
+    int partSeq;
+    ListCell *cell = NULL;
+    Oid partitionOid = InvalidOid;
+    foreach (cell, resPartition->ls_rangeSelectedPartitions) {
+        partSeq = lfirst_int(cell);
+        partitionOid = getPartitionOidFromSequence(current_relation, partSeq);
+        SubPartitionPruningResult *subPartPruningRes =
+            PreGetSubPartitionFullPruningResult(current_relation, partitionOid);
+        if (subPartPruningRes == NULL) {
+            continue;
+        }
+        subPartPruningRes->partSeq = partSeq;
+        resPartition->ls_selectedSubPartitions = lappend(resPartition->ls_selectedSubPartitions, subPartPruningRes);
+    }
+}
+
  /*
  * @@GaussDB@@
  * Brief
@@ -112,26 +134,14 @@ PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation 
         (resPartition->bm_rangeSelectedPartitions == NULL && PruningResultIsSubset(resPartition))) {
         destroyPruningResult(resPartition);
         resPartition = getFullPruningResult(current_relation);
+        CollectSubpartitionPruningResults(resPartition, current_relation);
         return resPartition;
     }
     if (PointerIsValid(resPartition) && !PruningResultIsFull(resPartition))
         generateListFromPruningBM(resPartition);
-    if (RelationIsSubPartitioned(current_relation)) {
-        int partSeq = 0;
-        ListCell *cell = NULL;
-        Oid partitionOid = InvalidOid;
-        foreach (cell, resPartition->ls_rangeSelectedPartitions) {
-            partSeq = lfirst_int(cell);
-            partitionOid = getPartitionOidFromSequence(current_relation, partSeq);
-            SubPartitionPruningResult *subPartPruningRes =
-                PreGetSubPartitionFullPruningResult(current_relation, partitionOid);
-            if (subPartPruningRes == NULL) {
-                continue;
-            }
-            subPartPruningRes->partSeq = partSeq;
-            resPartition->ls_selectedSubPartitions = lappend(resPartition->ls_selectedSubPartitions, subPartPruningRes);
-        }
-    }
+
+    CollectSubpartitionPruningResults(resPartition, current_relation);
+
     return resPartition;
 }
 

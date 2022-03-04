@@ -220,6 +220,8 @@ TupleTableSlot *IndexOnlyScanFusion::getTupleSlotInternal()
     Relation rel = m_index;
     bool isUStore = RelationIsUstoreFormat(m_rel);
     bool bucket_changed = false;
+    TupleTableSlot* tmpreslot = NULL;
+    tmpreslot = MakeSingleTupleTableSlot(RelationGetDescr(m_scandesc->heapRelation), false, rel->rd_tam_type);
 
     while ((tid = scan_handler_idx_getnext_tid(m_scandesc, *m_direction, &bucket_changed)) != NULL) {
         HeapTuple tuple = NULL;
@@ -245,10 +247,10 @@ TupleTableSlot *IndexOnlyScanFusion::getTupleSlotInternal()
         if (isUStore) {
             /* ustore with multi-version ubtree only recheck IndexTuple when xs_recheck_itup is set */
             if (indexdesc->xs_recheck_itup) {
-                if (!IndexFetchUHeap(indexdesc, m_reslot)) {
+                if (!IndexFetchUHeap(indexdesc, tmpreslot)) {
                     continue; /* this TID indicate no visible tuple */
                 }
-                if (!RecheckIndexTuple(indexdesc, m_reslot)) {
+                if (!RecheckIndexTuple(indexdesc, tmpreslot)) {
                     continue; /* the visible version not match the IndexTuple */
                 }
             }
@@ -302,8 +304,10 @@ TupleTableSlot *IndexOnlyScanFusion::getTupleSlotInternal()
         StoreIndexTuple(m_reslot, tmptup, m_tupDesc);
 
         tableam_tslot_getsomeattrs(m_reslot, m_tupDesc->natts);
+        ExecDropSingleTupleTableSlot(tmpreslot);
         return m_reslot;
     }
+    ExecDropSingleTupleTableSlot(tmpreslot);
     return NULL;
 }
 

@@ -93,6 +93,7 @@ extern char* CheckReferencedObject(Oid relOid, RangeVar *objVar, const char *syn
 extern Oid GetSynonymOid(const char *synName, Oid synNamespace, bool missing);
 extern char* GetQualifiedSynonymName(Oid synOid, bool qualified = true);
 extern void GetSynonymAndSchemaName(Oid synOid, char **synName_p, char **synSchema_p);
+extern void AlterSynonymOwnerByOid(Oid synonymOid, Oid newOwnerId);
 
 #endif   /* PG_SYNONYM_H */
 

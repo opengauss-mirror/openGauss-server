@@ -906,8 +906,12 @@ static SpecialJoinInfo* make_outerjoininfo(
             ereport(ERROR,
                 (errmodule(MOD_OPT),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+#ifndef ENABLE_MULTIPLE_NODES
                     errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be applied to the nullable side "
                            "of an outer join")));
+#else
+                    errmsg("SELECT FOR UPDATE/SHARE cannot be applied to the nullable side of an outer join")));
+#endif
         }
     }
 

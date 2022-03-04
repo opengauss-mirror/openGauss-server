@@ -78,13 +78,13 @@
  */
 extern struct varlena* pg_detoast_datum(struct varlena* datum);
 extern struct varlena* pg_detoast_datum_copy(struct varlena* datum);
-extern struct varlena* pg_detoast_datum_slice(struct varlena* datum, int32 first, int32 count);
+extern struct varlena* pg_detoast_datum_slice(struct varlena* datum, int64 first, int32 count);
 extern struct varlena* pg_detoast_datum_packed(struct varlena* datum);
 
 #define PG_DETOAST_DATUM(datum) pg_detoast_datum((struct varlena*)DatumGetPointer(datum))
 #define PG_DETOAST_DATUM_COPY(datum) pg_detoast_datum_copy((struct varlena*)DatumGetPointer(datum))
 #define PG_DETOAST_DATUM_SLICE(datum, f, c) \
-    pg_detoast_datum_slice((struct varlena*)DatumGetPointer(datum), (int32)(f), (int32)(c))
+    pg_detoast_datum_slice((struct varlena*)DatumGetPointer(datum), (int64)(f), (int32)(c))
 /* WARNING -- unaligned pointer */
 #define PG_DETOAST_DATUM_PACKED(datum) pg_detoast_datum_packed((struct varlena*)DatumGetPointer(datum))
 

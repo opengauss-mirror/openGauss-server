@@ -33,7 +33,7 @@ int pg_mbcharcliplen_orig(const char *mbstr, int len, int limit);
  * char_bin -
  * converts char style to binary array
  */
-unsigned char *char_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, const char *err_msg)
+unsigned char *char_bin(const char *text, size_t *binary_size, const char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(1);
     if (binary == NULL) {
@@ -48,7 +48,7 @@ unsigned char *char_bin(const char *text, Oid typelem, int atttypmod, size_t *bi
  * char_bout -
  * converts binary array to char style
  */
-char *char_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *char_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     if (size != 1) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %zu", size)));
@@ -67,7 +67,7 @@ char *char_bout(const unsigned char *binary, size_t size, Oid typelem, int attty
  * bytea_bin -
  * converts hex format/escaped style byte array to binary array
  */
-unsigned char *bytea_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg)
+unsigned char *bytea_bin(const char *text, size_t *binary_size, char *err_msg)
 {
     return byteain(text, binary_size, err_msg);
 }
@@ -76,12 +76,12 @@ unsigned char *bytea_bin(const char *text, Oid typelem, int atttypmod, size_t *b
  * bytea_bout -
  * converts binary array to hex format/escaped style byte array
  */
-char *bytea_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *bytea_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     return byteaout(binary, size, result_size);
 }
 
-unsigned char *fallback_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size)
+unsigned char *fallback_bin(const char *text, size_t *binary_size)
 {
     size_t text_size = strlen(text);
     unsigned char *binary = (unsigned char *)malloc(text_size + 1);
@@ -96,7 +96,7 @@ unsigned char *fallback_bin(const char *text, Oid typelem, int atttypmod, size_t
     return binary;
 }
 
-char *fallback_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *fallback_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     char *text = (char *)malloc(size + 1);
     if (text == NULL) {
@@ -108,8 +108,7 @@ char *fallback_bout(const unsigned char *binary, size_t size, Oid typelem, int a
     return text;
 }
 
-unsigned char *fallback_brestore(const unsigned char *binary, size_t size, Oid typelem, int atttypmod,
-    size_t *result_size, const char *err_msg)
+unsigned char *fallback_brestore(const unsigned char *binary, size_t size, size_t *result_size, const char *err_msg)
 {
     unsigned char *result = (unsigned char *)malloc(size + 1);
     if (result == NULL) {
@@ -121,7 +120,7 @@ unsigned char *fallback_brestore(const unsigned char *binary, size_t size, Oid t
     return result;
 }
 
-unsigned char *varchar_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, char *err_msg)
+unsigned char *varchar_badjust(unsigned char *binary, size_t *binary_size, int atttypmod, char *err_msg)
 {
     size_t maxlen;
     size_t len = *binary_size;
@@ -149,7 +148,7 @@ unsigned char *varchar_badjust(unsigned char *binary, size_t *binary_size, Oid t
     return binary;
 }
 
-unsigned char *nvarchar2_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, char *err_msg)
+unsigned char *nvarchar2_badjust(unsigned char *binary, size_t *binary_size, int atttypmod, char *err_msg)
 {
     size_t maxlen;
     size_t len = *binary_size;
@@ -177,7 +176,7 @@ unsigned char *nvarchar2_badjust(unsigned char *binary, size_t *binary_size, Oid
     return binary;
 }
 
-unsigned char *bpchar_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, char *err_msg)
+unsigned char *bpchar_badjust(unsigned char *binary, size_t *binary_size, int atttypmod, char *err_msg)
 {
     size_t maxlen;
     size_t len = *binary_size;

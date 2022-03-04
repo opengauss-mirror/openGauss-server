@@ -44,6 +44,10 @@
 #include "utils/array.h"
 #include "utils/acl.h"
 
+static void ConnectPublisher(char *conninfo, char* slotname);
+static void CreateSlotInPublisher(char *slotname);
+static void ValidateReplicationSlot(char *slotname, List *publications);
+
 /*
  * Common option parsing function for CREATE and ALTER SUBSCRIPTION commands.
  *
@@ -155,6 +159,11 @@ static Datum publicationListToArray(List *publist)
     MemoryContext memcxt;
     MemoryContext oldcxt;
 
+    if (list_length(publist) <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("LogicDecode[Publication]: null publication name list")));
+    }
+
     /* Create memory context for temporary allocations. */
     memcxt = AllocSetContextCreate(CurrentMemoryContext, "publicationListToArray to array", ALLOCSET_DEFAULT_SIZES);
     oldcxt = MemoryContextSwitchTo(memcxt);
@@ -188,20 +197,34 @@ static Datum publicationListToArray(List *publist)
 }
 
 /*
- * connect publisher and create slot
+ * connect publisher and create slot.
+ * the input conninfo should be encrypt, we will decrypt password inside
  */
-static void ConnectAndCreateSlot(char *conninfo, char *slotname)
+static void ConnectPublisher(char *conninfo, char *slotname)
 {
     /* Try to connect to the publisher. */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockAcquire(&walrcv->mutex);
     walrcv->conn_target = REPCONNTARGET_PUBLICATION;
     SpinLockRelease(&walrcv->mutex);
-    bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(conninfo, NULL, slotname, -1);
+
+    char *decryptConninfo = DecryptConninfo(conninfo);
+    bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(decryptConninfo, NULL, slotname, -1);
+    int rc = memset_s(decryptConninfo, strlen(decryptConninfo), 0, strlen(decryptConninfo));
+    securec_check(rc, "", "");
+    pfree_ext(decryptConninfo);
+
     if (!connectSuccess) {
         ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("could not connect to the publisher")));
     }
+}
 
+/*
+ * Create replication slot in publisher side.
+ * Please make sure you have already connect to publisher before calling this func.
+ */
+static void CreateSlotInPublisher(char *slotname)
+{
     LibpqrcvConnectParam options;
     int rc = memset_s(&options, sizeof(LibpqrcvConnectParam), 0, sizeof(LibpqrcvConnectParam));
     securec_check(rc, "", "");
@@ -219,9 +242,35 @@ static void ConnectAndCreateSlot(char *conninfo, char *slotname)
         PG_RE_THROW();
     }
     PG_END_TRY();
+}
 
-    /* And we are done with the remote side. */
-    (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+/* Validate the replication slot by start streaming */
+static void ValidateReplicationSlot(char *slotname, List *publications)
+{
+    /*
+     * We just want to validate the replication slot, so the start point is not important.
+     * so we use InvalidXLogRecPtr as the start point, then the replication slot won't advance.
+     * and we won't decode any data here.
+     */
+    LibpqrcvConnectParam options;
+    int rc = memset_s(&options, sizeof(LibpqrcvConnectParam), 0, sizeof(LibpqrcvConnectParam));
+    securec_check(rc, "", "");
+    options.logical = true;
+    options.startpoint = InvalidXLogRecPtr;
+    options.slotname = slotname;
+    options.protoVersion = 1;
+    options.publicationNames = publications;
+    PG_TRY();
+    {
+        (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_startstreaming(&options);
+    }
+    PG_CATCH();
+    {
+        /* Close the connection in case of failure. */
+        (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 }
 
 /*
@@ -312,7 +361,6 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     values[Anum_pg_subscription_subconninfo - 1] = CStringGetTextDatum(encryptConninfo);
 
     pfree_ext(conninfoList);
-    pfree_ext(encryptConninfo);
     if (enabled) {
         if (!slotname_given) {
             slotname = stmt->subname;
@@ -348,9 +396,15 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
      */
     if (enabled) {
         Assert(slotname);
-        ConnectAndCreateSlot(conninfo, slotname);
+        ConnectPublisher(encryptConninfo, slotname);
+        CreateSlotInPublisher(slotname);
+        (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
     }
+
+    pfree_ext(encryptConninfo);
     heap_close(rel, RowExclusiveLock);
+    rc = memset_s(stmt->conninfo, strlen(stmt->conninfo), 0, strlen(stmt->conninfo));
+    securec_check(rc, "", "");
 
     /* Don't wake up logical replication launcher unnecessarily */
     if (enabled) {
@@ -392,6 +446,12 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
     List *publications;
     Subscription *sub;
     int rc;
+    bool checkConn = false;
+    bool validateSlot = false;
+    bool createSlot = false;
+    bool needFreeConninfo = false;
+    char *finalSlotName = NULL;
+    char *encryptConninfo = NULL;
 
     rel = heap_open(SubscriptionRelationId, RowExclusiveLock);
 
@@ -408,6 +468,8 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
     subid = HeapTupleGetOid(tup);
     sub = GetSubscription(subid, false);
     enabled = sub->enabled;
+    finalSlotName = sub->name;
+    encryptConninfo = sub->conninfo;
 
     /* Parse options. */
     parse_subscription_options(stmt->options, &conninfo, &publications, &enabled_given, &enabled, &slotname_given,
@@ -435,28 +497,17 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
         const char* sensitiveOptionsArray[] = {"password"};
         const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
         EncryptGenericOptions(conninfoList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
-        char *encryptConninfo = DefListToString(conninfoList);
+        encryptConninfo = DefListToString(conninfoList);
+        needFreeConninfo = true;
 
         values[Anum_pg_subscription_subconninfo - 1] = CStringGetTextDatum(encryptConninfo);
         replaces[Anum_pg_subscription_subconninfo - 1] = true;
 
         pfree_ext(conninfoList);
-        pfree_ext(encryptConninfo);
 
-        /* check whether new conninfo can be used to connect to new publisher */
         if (sub->enabled || (enabled_given && enabled)) {
-            /* Try to connect to the publisher. */
-            volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-            SpinLockAcquire(&walrcv->mutex);
-            walrcv->conn_target = REPCONNTARGET_PUBLICATION;
-            SpinLockRelease(&walrcv->mutex);
-            bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(conninfo, NULL, sub->slotname, -1);
-            if (!connectSuccess) {
-                ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("The new conninfo cannot connect to new publisher.")));
-            }
-
-            /* And we are done with the remote side. */
-            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+            /* we need to check whether new conninfo can be used to connect to new publisher */
+            checkConn = true;
         }
     }
     if (slotname_given) {
@@ -469,6 +520,9 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
         if (slot_name) {
             if (sub->enabled || (enabled_given && enabled)) {
                 values[Anum_pg_subscription_subslotname - 1] = DirectFunctionCall1(namein, CStringGetDatum(slot_name));
+                /* if old slotname is null or same as new slot name, then we need to validate the new slot name */
+                validateSlot = sub->slotname == NULL || strcmp(slot_name, sub->slotname) != 0;
+                finalSlotName = slot_name;
             } else {
                 ereport(ERROR, (errmsg("Currently enabled=false, cannot change slot_name to a non-null value.")));
             }
@@ -518,34 +572,35 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
     }
     /* enable subscription */
     if (!sub->enabled && enabled) {
-        /*
-         * If slot_name is not specified or is empty, the default value is used;
-         * otherwise, the user-specified slot_name is used.
-         */
-        char *temp_slotname = sub->name;
-        if (slotname_given && slot_name && *slot_name) {
-            temp_slotname = slot_name;
-        }
-
         /* if slot hasn't been created, then create it */
         if (!sub->slotname || !*(sub->slotname)) {
-            if (conninfo) {
-                ConnectAndCreateSlot(conninfo, temp_slotname);
-            } else {
-                /* Sensitive options for subscription, will be encrypted when saved to catalog. */
-                const char* sensitiveOptionsArray[] = {"password"};
-                const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
-                List *defList = ConninfoToDefList(sub->conninfo);
-                DecryptOptions(defList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
-                char *decryptConnInfo = DefListToString(defList);
-
-                ConnectAndCreateSlot(decryptConnInfo, temp_slotname);
-
-                pfree_ext(defList);
-                pfree_ext(decryptConnInfo);
-            }
+            createSlot = true;
         }
+    }
+
+    if (checkConn || createSlot || validateSlot) {
+        ConnectPublisher(encryptConninfo, finalSlotName);
+
+        if (createSlot) {
+            CreateSlotInPublisher(finalSlotName);
+        }
+
+        /* no need to validate replication slot if the slot is created just by ourself */
+        if (!createSlot && validateSlot) {
+            ValidateReplicationSlot(finalSlotName, sub->publications);
+        }
+
+        (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
         ApplyLauncherWakeupAtCommit();
+    }
+
+    if (needFreeConninfo) {
+        pfree_ext(encryptConninfo);
+    }
+
+    if (conninfo) {
+        rc = memset_s(conninfo, strlen(conninfo), 0, strlen(conninfo));
+        securec_check(rc, "", "");
     }
 
     return myself;
@@ -698,34 +753,16 @@ void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
     initStringInfo(&cmd);
     appendStringInfo(&cmd, "DROP_REPLICATION_SLOT %s", quote_identifier(slotname));
 
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    SpinLockAcquire(&walrcv->mutex);
-    walrcv->conn_target = REPCONNTARGET_PUBLICATION;
-    SpinLockRelease(&walrcv->mutex);
-
-    /* Sensitive options for subscription, will be encrypted when saved to catalog. */
-    const char* sensitiveOptionsArray[] = {"password"};
-    const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
-    List *defList = ConninfoToDefList(conninfo);
-    DecryptOptions(defList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
-    conninfo = DefListToString(defList);
-
-    bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(conninfo, NULL, subname, -1);
-    pfree_ext(defList);
-    pfree_ext(conninfo);
-    if (!connectSuccess) {
-        ereport(ERROR,
-            (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("could not connect to publisher when attempting to drop "
-            "the replication slot \"%s\". Use ALTER SUBSCRIPTION "
-            "... SET (slot_name = NONE) to disassociate the "
-            "subscription from the slot.",
-            slotname)));
-    }
-
+    ConnectPublisher(conninfo, slotname);
     PG_TRY();
     {
-        if (!(WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_command(cmd.data, &err)) {
-            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+        int sqlstate = 0;
+        bool res = WalReceiverFuncTable[GET_FUNC_IDX].walrcv_command(cmd.data, &err, &sqlstate);
+        if (!res && sqlstate == ERRCODE_UNDEFINED_OBJECT) {
+            /* drop replication slot failed cause it doesn't exist on publisher, give a warning and continue */
+            ereport(WARNING, (errmsg("could not drop the replication slot \"%s\" on publisher", slotname),
+                errdetail("The error was: %s", err)));
+        } else if (!res) {
             ereport(ERROR, (errmsg("could not drop the replication slot \"%s\" on publisher", slotname),
                 errdetail("The error was: %s", err)));
         } else {

@@ -24,13 +24,17 @@
 #ifndef ORC_RW_H
 #define ORC_RW_H
 
+#include "pg_config.h"
+
 #include <string>
 #include "sstream"
 
+#ifndef ENABLE_LITE_MODE
 #include "orc/orc-config.hh"
 #include "orc_proto.pb.h"
 #include "orc/OrcFile.hh"
 #include "orc/Writer.hh"
+#endif
 #include "../dfs_reader.h"
 #include "../dfs_writer.h"
 #include "access/dfs/dfs_stream.h"
@@ -65,6 +69,7 @@ namespace dfs {
 
 const int64_t PG_EPOCH_OFFSET_DEFAULT = ORC_EPOCH_IN_SECONDS - POSTGRESQL_EPOCH_IN_SECONDS;
 
+#ifndef ENABLE_LITE_MODE
 typedef orc::TypeKind FieldKind;
 
 typedef void (*appendDatum)(orc::ColumnVectorBatch *colBatch, Datum *val, bool *isNull, uint32 length,
@@ -1011,6 +1016,7 @@ private:
     bool m_indexInfoReady;
 };
 }  // namespace writer
+#endif
 
 extern uint64 EstimateBufferRows(TupleDesc desc);
 }  // namespace dfs

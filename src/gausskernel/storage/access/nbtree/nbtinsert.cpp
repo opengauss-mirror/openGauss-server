@@ -44,6 +44,9 @@
         }                                                     \
     } while (0)
 
+/* Minimum tree height for application of fastpath optimization */
+#define BTREE_FASTPATH_MIN_LEVEL  2
+
 typedef struct {
     /* context data for _bt_checksplitloc */
     Size newitemsz;          /* size of new item to be inserted */
@@ -79,6 +82,7 @@ static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int key
 static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel);
 static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapshot, bool* all_dead,
                              CUDescScan* cudescScan);
+static bool CheckPartitionIsInvisible(GPIScanDesc gpiScan);
 
 /*
  *	_bt_doinsert() -- Handle insertion of a single index tuple in the tree.
@@ -103,10 +107,13 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     bool is_unique = false;
     int indnkeyatts;
     ScanKey itup_scankey;
-    BTStack stack;
+    BTStack stack = NULL;
     Buffer buf;
     OffsetNumber offset;
     Oid indexHeapRelOid = InvalidOid;
+    Relation indexHeapRel = NULL;
+    Partition part = NULL;
+    Relation partRel = NULL;
 
     GPIScanDesc gpiScan = NULL;
     CBIScanDesc cbiScan = NULL;
@@ -115,12 +122,13 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     if (RelationIsGlobalIndex(rel)) {
         GPIScanInit(&gpiScan);
         indexHeapRelOid = IndexGetRelation(rel->rd_id, false);
-        if (indexHeapRelOid != heapRel->parentId) {
-            Relation indexHeapRel = relation_open(indexHeapRelOid, AccessShareLock);
-            Partition part = partitionOpen(indexHeapRel, heapRel->parentId, AccessShareLock);
-            gpiScan->parentRelation = partitionGetRelation(indexHeapRel, part);
+        if (indexHeapRelOid == heapRel->grandparentId) { // For subpartitiontable
+            indexHeapRel = relation_open(indexHeapRelOid, AccessShareLock);
+            Assert(RelationIsSubPartitioned(indexHeapRel));
+            part = partitionOpen(indexHeapRel, heapRel->parentId, AccessShareLock);
+            partRel = partitionGetRelation(indexHeapRel, part);
+            gpiScan->parentRelation = partRel;
             partitionClose(indexHeapRel, part, AccessShareLock);
-            relation_close(indexHeapRel, AccessShareLock);
         } else {
             gpiScan->parentRelation = relation_open(heapRel->parentId, AccessShareLock);
         }
@@ -144,7 +152,8 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     offset = element.offset;
     indnkeyatts = element.indnkeyatts;
 
-    if (checkUnique != UNIQUE_CHECK_EXISTING) {
+    /* skip insertion when we just want to check existing or find a conflict when executing upsert */
+    if (checkUnique != UNIQUE_CHECK_EXISTING && !(checkUnique == UNIQUE_CHECK_UPSERT && !is_unique)) {
         /*
          * The only conflict predicate locking cares about for indexes is when
          * an index tuple insert conflicts with an existing lock.  Since the
@@ -163,12 +172,15 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
         _bt_relbuf(rel, buf);
     }
     /* be tidy */
-    _bt_freestack(stack);
+    if (stack) {
+        _bt_freestack(stack);
+    }
     _bt_freeskey(itup_scankey);
 
     if (gpiScan != NULL) { // means rel switch happened
-        if (indexHeapRelOid != heapRel->parentId) {
-            releaseDummyRelation(&(gpiScan->parentRelation));
+        if (indexHeapRelOid == heapRel->grandparentId) { // For subpartitiontable
+            releaseDummyRelation(&partRel);
+            relation_close(indexHeapRel, AccessShareLock);
         } else {
             relation_close(gpiScan->parentRelation, AccessShareLock);
         }
@@ -194,34 +206,120 @@ bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck 
     bool is_unique = false;
     int indnkeyatts;
     ScanKey itup_scankey;
-    BTStack stack;
+    BTStack stack = NULL;
     Buffer buf;
     OffsetNumber offset;
+    bool fastpath = false;
 
     indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
     Assert(indnkeyatts != 0);
     /* we need an insertion scan key to do our search, so build one */
     itup_scankey = _bt_mkscankey(rel, itup);
 
+    /*
+     * It's very common to have an index on an auto-incremented or
+     * monotonically increasing value. In such cases, every insertion happens
+     * towards the end of the index. We try to optimise that case by caching
+     * the right-most leaf of the index. If our cached block is still the
+     * rightmost leaf, has enough free space to accommodate a new entry and
+     * the insertion key is strictly greater than the first key in this page,
+     * then we can safely conclude that the new key will be inserted in the
+     * cached block. So we simply search within the cached block and insert the
+     * key at the appropriate location. We call it a fastpath.
+     *
+     * Testing has revealed, though, that the fastpath can result in increased
+     * contention on the exclusive-lock on the rightmost leaf page. So we
+     * conditionally check if the lock is available. If it's not available then
+     * we simply abandon the fastpath and take the regular path. This makes
+     * sense because unavailability of the lock also signals that some other
+     * backend might be concurrently inserting into the page, thus reducing our
+     * chances to finding an insertion place in this page.
+     */
 top:
-    /* find the first page containing this key */
-    stack = _bt_search(rel, indnkeyatts, itup_scankey, false, &buf, BT_WRITE);
+    fastpath = false;
 
     offset = InvalidOffsetNumber;
+    if (RelationGetTargetBlock(rel) != InvalidBlockNumber) {
+        Size            itemsz;
+        Page            page;
+        BTPageOpaqueInternal    lpageop;
 
-    /* trade in our read lock for a write lock */
-    LockBuffer(buf, BUFFER_LOCK_UNLOCK);
-    LockBuffer(buf, BT_WRITE);
+        /*
+         * Conditionally acquire exclusive lock on the buffer before doing any
+         * checks. If we don't get the lock, we simply follow slowpath. If we
+         * do get the lock, this ensures that the index state cannot change, as
+         * far as the rightmost part of the index is concerned.
+         */
+        buf = ReadBuffer(rel, RelationGetTargetBlock(rel));
 
-    /*
-     * If the page was split between the time that we surrendered our read
-     * lock and acquired our write lock, then this page may no longer be the
-     * right place for the key we want to insert.  In this case, we need to
-     * move right in the tree.	See Lehman and Yao for an excruciatingly
-     * precise description.
-     */
-    buf = _bt_moveright(rel, buf, indnkeyatts, itup_scankey, false, true, stack, BT_WRITE);
+        if (ConditionalLockBuffer(buf)) {
+            _bt_checkpage(rel, buf);
 
+            page = BufferGetPage(buf);
+
+            lpageop = (BTPageOpaqueInternal) PageGetSpecialPointer(page);
+            itemsz = IndexTupleSize(itup);
+            itemsz = MAXALIGN(itemsz);  /* be safe, PageAddItem will do this
+                                         * but we need to be consistent */
+
+            /*
+             * Check if the page is still the rightmost leaf page, has enough
+             * free space to accommodate the new tuple, no split is in progress
+             * and the scankey is greater than or equal to the first key on the
+             * page.
+             */
+            if (P_ISLEAF(lpageop) && P_RIGHTMOST(lpageop) &&
+                    !P_IGNORE(lpageop) &&
+                    (PageGetFreeSpace(page) > itemsz) &&
+                    PageGetMaxOffsetNumber(page) >= P_FIRSTDATAKEY(lpageop) &&
+                    _bt_compare(rel, indnkeyatts, itup_scankey, page,
+                        P_FIRSTDATAKEY(lpageop)) > 0) {
+                /*
+                 * The right-most block should never have incomplete split. But
+                 * be paranoid and check for it anyway.
+                 */
+                Assert(!P_INCOMPLETE_SPLIT(lpageop));
+                fastpath = true;
+            } else {
+                _bt_relbuf(rel, buf);
+
+                /*
+                 * Something did not workout. Just forget about the cached
+                 * block and follow the normal path. It might be set again if
+                 * the conditions are favourble.
+                 */
+                RelationSetTargetBlock(rel, InvalidBlockNumber);
+            }
+        } else {
+            ReleaseBuffer(buf);
+
+            /*
+             * If someone's holding a lock, it's likely to change anyway,
+             * so don't try again until we get an updated rightmost leaf.
+             */
+            RelationSetTargetBlock(rel, InvalidBlockNumber);
+        }
+    }
+    if (!fastpath) {
+        /*
+         * Find the first page containing this key.  Buffer returned by
+         * _bt_search() is locked in exclusive mode.
+         */
+        stack = _bt_search(rel, indnkeyatts, itup_scankey, false, &buf, BT_WRITE);
+
+        /* trade in our read lock for a write lock */
+        LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+        LockBuffer(buf, BT_WRITE);
+
+        /*
+         * If the page was split between the time that we surrendered our read
+         * lock and acquired our write lock, then this page may no longer be the
+         * right place for the key we want to insert.  In this case, we need to
+         * move right in the tree.	See Lehman and Yao for an excruciatingly
+         * precise description.
+        */
+        buf = _bt_moveright(rel, buf, indnkeyatts, itup_scankey, false, true, stack, BT_WRITE);
+    }
     /*
      * If we're not allowing duplicates, make sure the key isn't already in
      * the index.
@@ -255,7 +353,9 @@ top:
             _bt_relbuf(rel, buf);
             XactLockTableWait(xwait);
             /* start over... */
-            _bt_freestack(stack);
+            if (stack) {
+                _bt_freestack(stack);
+            }
             goto top;
         }
     }
@@ -365,7 +465,9 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
                     if (curPartOid != gpiScan->currPartOid) {
                         GPISetCurrPartOid(gpiScan, curPartOid);
                         if (!GPIGetNextPartRelation(gpiScan, CurrentMemoryContext, AccessShareLock)) {
-                            MarkItemDeadAndDirtyBuffer(curitemid, opaque, buf, nbuf);
+                            if (CheckPartitionIsInvisible(gpiScan)) {
+                                MarkItemDeadAndDirtyBuffer(curitemid, opaque, buf, nbuf);
+                            }
                             goto next;
                         } else {
                             hbktParentHeapRel = tarRel = gpiScan->fakePartRelation;
@@ -417,7 +519,7 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
                      * that it is a potential conflict and leave the full
                      * check till later.
                      */
-                    if (checkUnique == UNIQUE_CHECK_PARTIAL) {
+                    if (IndexUniqueCheckNoError(checkUnique)) {
                         if (nbuf != InvalidBuffer)
                             _bt_relbuf(rel, nbuf);
                         *is_unique = false;
@@ -803,6 +905,24 @@ static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack,
         bool newitemonleft = false;
         Buffer rbuf;
 
+        /*
+         * If we're here then a pagesplit is needed. We should never reach here
+         * if we're using the fastpath since we should have checked for all the
+         * required conditions, including the fact that this page has enough
+         * freespace. Note that this routine can in theory deal with the
+         * situation where a NULL stack pointer is passed (that's what would
+         * happen if the fastpath is taken), like it does during crash
+         * recovery. But that path is much slower, defeating the very purpose
+         * of the optimization.  The following assertion should protect us from
+         * any future code changes that invalidate those assumptions.
+         *
+         * Note that whenever we fail to take the fastpath, we clear the
+         * cached block. Checking for a valid cached block at this point is
+         * enough to decide whether we're in a fastpath or not.
+         */
+        Assert(!(P_ISLEAF(lpageop) &&
+            BlockNumberIsValid(RelationGetTargetBlock(rel))));
+
         /* Choose the split point */
         firstright = _bt_findsplitloc(rel, page, newitemoff, itemsz, &newitemonleft);
 
@@ -833,6 +953,7 @@ static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack,
         BTMetaPageData *metad = NULL;
         OffsetNumber itup_off;
         BlockNumber itup_blkno;
+        BlockNumber cachedBlock = InvalidBlockNumber;
 
         itup_off = newitemoff;
         itup_blkno = BufferGetBlockNumber(buf);
@@ -883,6 +1004,15 @@ static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack,
                 MarkBufferDirty(cbuf);
             }
         }
+
+        /*
+         * Cache the block information if we just inserted into the rightmost
+         * leaf page of the index and it's not the root page.  For very small
+         * index where root is also the leaf, there is no point trying for any
+         * optimization.
+         */
+        if (P_RIGHTMOST(lpageop) && P_ISLEAF(lpageop) && !P_ISROOT(lpageop))
+            cachedBlock = BufferGetBlockNumber(buf);
 
         /* XLOG stuff */
         if (RelationNeedsWAL(rel)) {
@@ -968,6 +1098,22 @@ static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack,
             }
         }
         _bt_relbuf(rel, buf);
+
+        /*
+         * If we decided to cache the insertion target block, then set it now.
+         * But before that, check for the height of the tree and don't go for
+         * the optimization for small indexes. We defer that check to this
+         * point to ensure that we don't call _bt_getrootheight while holding
+         * lock on any other block.
+         *
+         * We do this after dropping locks on all buffers. So the information
+         * about whether the insertion block is still the rightmost block or
+         * not may have changed in between. But we will deal with that during
+         * next insert operation. No special care is required while setting it.
+         */
+        if (BlockNumberIsValid(cachedBlock) &&
+            _bt_getrootheight(rel) >= BTREE_FASTPATH_MIN_LEVEL)
+            RelationSetTargetBlock(rel, cachedBlock);
     }
 }
 
@@ -2252,4 +2398,20 @@ static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapsh
     } else {
         return cudescScan->CheckItemIsAlive(tid);
     }
+}
+
+static bool CheckPartitionIsInvisible(GPIScanDesc gpiScan)
+{
+    if (OidRBTreeMemberOid(gpiScan->invisiblePartTreeForVacuum, gpiScan->currPartOid)) {
+        return true;
+    }
+
+    PartStatus currStatus = PartitionGetMetadataStatus(gpiScan->currPartOid, true);
+
+    if (currStatus == PART_METADATA_INVISIBLE) {
+        (void)OidRBTreeInsertOid(gpiScan->invisiblePartTreeForVacuum, gpiScan->currPartOid);
+        return true;
+    }
+
+    return false;
 }

@@ -141,12 +141,21 @@ static void CheckPlanOutput(Plan* subPlan, Relation resultRel)
     /*
      * Compared to pgxc, we have increased the stream plan,
      * this destroy the logic of the function ExecCheckPlanOutput.
-     * Modify to use targetlist of stream(VecToRow/RowToVec)->subplan as
+     * Modify to use targetlist of stream(VecToRow/RowToVec/PartIterator)->subplan as
      * parameter of ExecCheckPlanOutput.
      */
-    if (IsA(subPlan, Stream) || IsA(subPlan, VecStream) || IsA(subPlan, VecToRow) || IsA(subPlan, RowToVec)) {
-
-        if (IS_PGXC_COORDINATOR) {
+    switch (nodeTag(subPlan)) {
+        case T_Stream:
+        case T_VecStream:
+        case T_VecToRow:
+        case T_RowToVec:
+        case T_PartIterator:
+        case T_VecPartIterator: {
+#ifdef ENABLE_MULTIPLE_NODES
+            if (!IS_PGXC_COORDINATOR) {
+                break;
+            }
+#endif
             /*
              * dummy target list cannot pass ExecCheckPlanOutput,
              * so we desend until we found a non-dummy plan
@@ -158,11 +167,14 @@ static void CheckPlanOutput(Plan* subPlan, Relation resultRel)
                 subPlan = subPlan->lefttree;
             } while (has_dummy_targetlist(subPlan));
 
-            /* now the plan is not dummy */
-            ExecCheckPlanOutput(resultRel, subPlan->targetlist);
+            CheckPlanOutput(subPlan, resultRel);
+
+            break;
         }
-    } else {
-        ExecCheckPlanOutput(resultRel, subPlan->targetlist);
+        default: {
+            ExecCheckPlanOutput(resultRel, subPlan->targetlist);
+            break;
+        }
     }
 }
 
@@ -513,10 +525,14 @@ checktest:
     econtext->ecxt_outertuple = NULL;
 
     ExecProject(resultRelInfo->ri_updateProj, NULL);
-
-    *returning = ExecUpdate(conflictTid, oldPartitionOid, bucketid, NULL,
-                            upsertState->us_updateproj, planSlot, &mtstate->mt_epqstate,
-                            mtstate, canSetTag, ((ModifyTable*)mtstate->ps.plan)->partKeyUpdated);
+    /* Evaluate where qual if exists, add to count if filtered */
+    if (ExecQual(upsertState->us_updateWhere, econtext, false)) {
+        *returning = ExecUpdate(conflictTid, oldPartitionOid, bucketid, NULL,
+            upsertState->us_updateproj, planSlot, &mtstate->mt_epqstate,
+            mtstate, canSetTag, ((ModifyTable*)mtstate->ps.plan)->partKeyUpdated);
+    } else {
+        InstrCountFiltered1(&mtstate->ps, 1);
+    }
     tableam_tops_destroy_tuple(relation, tuple);
     ReleaseBuffer(buffer);
     return true;
@@ -535,8 +551,85 @@ static inline void ReleaseResourcesForUpsertGPI(bool isgpi, Relation parentRel, 
     }
 }
 
+void CheckPartitionOidForSpecifiedPartition(RangeTblEntry *rte, Oid partitionid)
+{
+    if (rte->isContainPartition && rte->partitionOid != partitionid) {
+        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+                        (errmsg("inserted partition key does not map to the table partition"), errdetail("N/A."),
+                         errcause("The value is incorrect."), erraction("Use the correct value."))));
+    }
+}
+
+void CheckSubpartitionOidForSpecifiedSubpartition(RangeTblEntry *rte, Oid partitionid, Oid subPartitionId)
+{
+    if (rte->isContainSubPartition && (rte->partitionOid != partitionid || rte->subpartitionOid != subPartitionId)) {
+        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+                        (errmsg("inserted subpartition key does not map to the table subpartition"), errdetail("N/A."),
+                         errcause("The value is incorrect."), erraction("Use the correct value."))));
+    }
+}
+
+static void ReportErrorForSpecifiedPartitionOfUpsert(char *partition, char *table)
+{
+    ereport(ERROR,
+            (errcode(ERRCODE_NO_DATA_FOUND),
+             (errmsg("The update target %s of upsert is inconsistent with the specified %s in "
+                     "%s table.",
+                     partition, partition, table),
+              errdetail("N/A."),
+              errcause("Specifies that the %s syntax does not allow updating inconsistent %s.", partition, partition),
+              erraction("Modify the SQL statement."))));
+}
+
+static void CheckPartitionOidForUpsertSpecifiedPartition(RangeTblEntry *rte, Relation resultRelationDesc,
+                                                         Oid targetPartOid)
+{
+    if (RelationIsSubPartitioned(resultRelationDesc)) {
+        Oid parentOid = partid_get_parentid(targetPartOid);
+        if (rte->isContainPartition && rte->partitionOid != parentOid) {
+            char *partition = "partition";
+            char *table = "subpartition";
+            ReportErrorForSpecifiedPartitionOfUpsert(partition, table);
+        }
+        if (rte->isContainSubPartition && (rte->partitionOid != parentOid || rte->subpartitionOid != targetPartOid)) {
+            char *partition = "subpartition";
+            char *table = "subpartition";
+            ReportErrorForSpecifiedPartitionOfUpsert(partition, table);
+        }
+    } else {
+        if (rte->isContainPartition && rte->partitionOid != targetPartOid) {
+            char *partition = "partition";
+            char *table = "partition";
+            ReportErrorForSpecifiedPartitionOfUpsert(partition, table);
+        }
+    }
+}
+
+static void ConstraintsForExecUpsert(Relation resultRelationDesc)
+{
+    if (resultRelationDesc == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        (errmsg("The result relation is null"), errdetail("N/A."), errcause("System error."),
+                         erraction("Contact engineer to support."))));
+    }
+    if (unlikely(RelationIsCUFormat(resultRelationDesc))) {
+        ereport(ERROR,
+                (errmodule(MOD_EXECUTOR),
+                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                  errmsg("ON DUPLICATE KEY UPDATE is not supported on column orientated table"), errdetail("N/A."),
+                  errcause("The function is not supported."), erraction("Contact engineer to support."))));
+    }
+
+    if (unlikely(RelationIsPAXFormat(resultRelationDesc))) {
+        ereport(ERROR, (errmodule(MOD_EXECUTOR),
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                         errmsg("ON DUPLICATE KEY UPDATE is not supported on DFS table"), errdetail("N/A."),
+                         errcause("The function is not supported."), erraction("Contact engineer to support."))));
+    }
+}
+
 static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableSlot* planSlot, EState* estate,
-    bool canSetTag, Tuple tuple, TupleTableSlot** returning, bool* updated)
+    bool canSetTag, Tuple tuple, TupleTableSlot** returning, bool* updated, Oid* targetPartOid)
 {
     Oid newid = InvalidOid;
     bool        specConflict = false;
@@ -545,8 +638,11 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     Relation    resultRelationDesc = NULL;
     Relation    heaprel = NULL; /* actual relation to upsert index */
     Relation    targetrel = NULL; /* actual relation to upsert tuple */
-    Oid         partitionid = InvalidOid; /* bucket id for bucket hash table */
+    Oid         partitionid = InvalidOid;
     Partition   partition = NULL; /* partition info for partition table */
+    Oid subPartitionId = InvalidOid;
+    Relation subPartRel = NULL;
+    Partition subPart = NULL;
     int2 bucketid = InvalidBktId;
     ConflictInfoData conflictInfo;
     UpsertState* upsertState = state->mt_upsert;
@@ -558,23 +654,10 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     resultRelInfo = estate->es_result_relation_info;
     resultRelationDesc = resultRelInfo->ri_RelationDesc;
     heaprel = resultRelationDesc;
-    if (heaprel == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("The result relation is null")));
-    }
-    if (unlikely(RelationIsCUFormat(resultRelationDesc))) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("ON DUPLICATE KEY UPDATE is not supported on column orientated table"))));
-    }
 
-    if (unlikely(RelationIsPAXFormat(resultRelationDesc))) {
-        ereport(ERROR,
-           (errmodule(MOD_EXECUTOR),
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("ON DUPLICATE KEY UPDATE is not supported on DFS table"))));
-    }
+    ConstraintsForExecUpsert(resultRelationDesc);
 
+    RangeTblEntry *rte = exec_rt_fetch(resultRelInfo->ri_RangeTableIndex, estate);
     if (RelationIsPartitioned(resultRelationDesc)) {
         partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple);
         searchFakeReationForPartitionOid(estate->esfRelations,
@@ -584,8 +667,28 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
             heaprel,
             partition,
             RowExclusiveLock);
+        CheckPartitionOidForSpecifiedPartition(rte, partitionid);
+
+        if (RelationIsSubPartitioned(resultRelationDesc)) {
+            subPartitionId = heapTupleGetPartitionId(heaprel, tuple);
+            searchFakeReationForPartitionOid(estate->esfRelations,
+                estate->es_query_cxt,
+                heaprel,
+                subPartitionId,
+                subPartRel,
+                subPart,
+                RowExclusiveLock);
+            CheckSubpartitionOidForSpecifiedSubpartition(rte, partitionid, subPartitionId);
+
+            partitionid = subPartitionId;
+            heaprel = subPartRel;
+            partition = subPart;
+        }
+
+        *targetPartOid = partitionid;
     }
 
+    vlock:
     targetrel = heaprel;
     if (RELATION_OWN_BUCKET(resultRelationDesc)) {
         bucketid = computeTupleBucketId(resultRelationDesc, (HeapTuple)tuple);
@@ -594,8 +697,6 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
         }
     }
 
-
-    vlock:
     specConflict = false;
     bool isgpi = false;
     Oid conflictPartOid = InvalidOid;
@@ -614,11 +715,12 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
                 partition_relation = partitionGetRelation(resultRelationDesc, part);
                 targetrel = partition_relation;
             }
-            partitionid = conflictPartOid;
+            *targetPartOid = conflictPartOid;
             bucketid = conflictBucketid;
         }
         /* committed conflict tuple found */
         if (upsertState->us_action == UPSERT_UPDATE) {
+            CheckPartitionOidForUpsertSpecifiedPartition(rte, resultRelationDesc, *targetPartOid);
             /*
              * In case of DUPLICATE KEY UPDATE, execute the UPDATE part.
              * Be prepared to retry if the UPDATE fails because
@@ -627,7 +729,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
             *returning = NULL;
 
             if (ExecConflictUpdate(state, resultRelInfo, &conflictInfo, planSlot, slot,
-                    estate, targetrel, partitionid, bucketid, canSetTag, returning)) {
+                    estate, targetrel, *targetPartOid, bucketid, canSetTag, returning)) {
                 InstrCountFiltered2(&state->ps, 1);
                 *updated = true;
                 ReleaseResourcesForUpsertGPI(isgpi, resultRelationDesc, bucketRel, &partition_relation, part);
@@ -938,13 +1040,12 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
                                 errmsg("The tuple to be inserted into the table cannot be NULL")));
                 }
-                new_id = ExecUpsert(state, slot, planSlot, estate, canSetTag, tuple, &returning, &updated);
+                new_id =
+                    ExecUpsert(state, slot, planSlot, estate, canSetTag, tuple, &returning, &updated, &partition_id);
                 if (updated) {
                     return returning;
                 }
-                if (result_relation_desc->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION) {
-                    partition_id = heapTupleGetPartitionId(result_relation_desc, tuple);
-                }
+
                 if (rel_isblockchain) {
                     is_record = hist_table_record_insert(result_relation_desc, (HeapTuple)tuple, &res_hash);
                 }
@@ -956,6 +1057,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                  * the t_self field.
                  */
                 new_id = InvalidOid;
+                RangeTblEntry *rte = exec_rt_fetch(result_rel_info->ri_RangeTableIndex, estate);
                 switch (result_relation_desc->rd_rel->parttype) {
                     case PARTTYPE_NON_PARTITIONED_RELATION:
                     case PARTTYPE_VALUE_PARTITIONED_RELATION: {
@@ -990,6 +1092,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                     case PARTTYPE_PARTITIONED_RELATION: {
                         /* get partititon oid for insert the record */
                         partition_id = heapTupleGetPartitionId(result_relation_desc, tuple);
+                        CheckPartitionOidForSpecifiedPartition(rte, partition_id);
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
                             result_relation_desc, partition_id, heap_rel, partition, RowExclusiveLock);
@@ -1026,6 +1129,7 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
                         /* get partititon oid for insert the record */
                         partitionId = heapTupleGetPartitionId(result_relation_desc, tuple);
+                        CheckPartitionOidForSpecifiedPartition(rte, partitionId);
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
                                                          result_relation_desc, partitionId, partRel, part,
@@ -1033,10 +1137,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
                         /* get subpartititon oid for insert the record */
                         subPartitionId = heapTupleGetPartitionId(partRel, tuple);
+                        CheckSubpartitionOidForSpecifiedSubpartition(rte, partitionId, subPartitionId);
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, partRel,
                                                          subPartitionId, subPartRel, subPart, RowExclusiveLock);
-
 
                         partition_id = subPartitionId;
                         heap_rel = subPartRel;
@@ -2757,9 +2861,9 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
          * to rethink this later.
          */
         ResetPerTupleExprContext(estate);
-
+        t_thrd.xact_cxt.ActiveLobRelid = result_rel_info->ri_RelationDesc->rd_id;
         plan_slot = ExecProcNode(subPlanState);
-
+        t_thrd.xact_cxt.ActiveLobRelid = InvalidOid;
         if (TupIsNull(plan_slot)) {
             record_first_time();
             // Flush error recored if need
@@ -2997,7 +3101,7 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
     node->mt_done = true;
 
     ResetTrigShipFlag();
-    
+
     return NULL;
 }
 
@@ -3085,6 +3189,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     upsertState->us_existing = NULL;
     upsertState->us_excludedtlist = NIL;
     upsertState->us_updateproj = NULL;
+    upsertState->us_updateWhere = NIL;
     mt_state->mt_upsert = upsertState;
 
     /* set up epqstate with dummy subplan data for the moment */
@@ -3314,6 +3419,11 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         result_rel_info->ri_updateProj =
         ExecBuildProjectionInfo((List*)setexpr, econtext,
             upsertState->us_updateproj, result_rel_info->ri_RelationDesc->rd_att);
+
+        /* initialize expression state to evaluate update where clause if exists */
+        if (node->upsertWhere) {
+            upsertState->us_updateWhere = (List*)ExecInitExpr((Expr*)node->upsertWhere, &mt_state->ps);
+        }
     }
 
     /*

@@ -23,15 +23,18 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/genam.h"
-
+#include "catalog/index.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/indexfsm.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
+#include "storage/smgr/smgr.h"
 #include "storage/proc.h"
+#include "storage/procarray.h"
 #include "utils/inval.h"
 #include "utils/snapmgr.h"
+#include "pgstat.h"
 
 static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
     OffsetNumber offset, BTScanInsert itup_key, IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiScan);
@@ -66,7 +69,7 @@ bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete)
 {
     Page page = BufferGetPage(buf);
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
-    TransactionId oldestXmin;
+    TransactionId oldestXmin = InvalidTransactionId;
 
     WHITEBOX_TEST_STUB("UBTreePagePruneOpt", WhiteboxDefaultErrorEmit);
 
@@ -94,7 +97,7 @@ bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete)
         return false;
     }
 
-    oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    GetOldestXminForUndo(&oldestXmin);
 
     Assert(TransactionIdIsValid(oldestXmin));
 
@@ -152,8 +155,7 @@ bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete)
  *
  *      Note: we won't delete the high key (if any).
  */
-bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, IndexBulkDeleteCallback callback,
-                 void *callbackState)
+bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTree *invisibleParts)
 {
     int npreviousDead = 0;
     int16 activeTupleCount = 0;
@@ -188,19 +190,17 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, IndexBu
             continue;
         }
 
-        if (callback && RelationIsGlobalIndex(rel)) {
-            bool isnull = false;
-            Oid partOid = InvalidOid;
+        if (RelationIsGlobalIndex(rel) && invisibleParts != NULL) {
             AttrNumber partitionOidAttr = IndexRelationGetNumberOfAttributes(rel);
             TupleDesc tupdesc = RelationGetDescr(rel);
 
             IndexTuple itup = (IndexTuple)PageGetItem(page, itemid);
-            ItemPointer htup = &(itup->t_tid);
 
-            partOid = DatumGetUInt32(index_getattr(itup, partitionOidAttr, tupdesc, &isnull));
+            bool isnull = false;
+            Oid partOid = DatumGetUInt32(index_getattr(itup, partitionOidAttr, tupdesc, &isnull));
             Assert(!isnull);
 
-            if (callback(htup, callbackState, partOid, InvalidBktId)) {
+            if (OidRBTreeMemberOid(invisibleParts, partOid)) {
                 /* record dead */
                 prstate.nowdead[prstate.ndead] = offnum;
                 prstate.ndead++;
@@ -221,6 +221,7 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, IndexBu
     /* Have we found any prunable items? */
     if (npreviousDead > 0 || prstate.ndead > 0) {
         /* Set up flags and try to repair page  fragmentation */
+        WaitState oldStatus = pgstat_report_waitstatus(STATE_PRUNE_INDEX);
         UBTreePagePruneExecute(page, prstate.previousdead, npreviousDead, &prstate);
         UBTreePagePruneExecute(page, prstate.nowdead, prstate.ndead, &prstate);
 
@@ -256,6 +257,7 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, IndexBu
 
             PageSetLSN(page, recptr);
         }
+        pgstat_report_waitstatus(oldStatus);
     } else {
         /*
          * If we didn't prune anything, but have found a new value for the
@@ -447,9 +449,14 @@ bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique,
 {
     bool is_unique = false;
     BTScanInsert itupKey;
-    BTStack stack;
+    BTStack stack = NULL;
     Buffer buf;
     OffsetNumber offset;
+    Oid indexHeapRelOid = InvalidOid;
+    Relation indexHeapRel = NULL;
+    Partition part = NULL;
+    Relation partRel = NULL;
+
     bool checkingunique = (checkUnique != UNIQUE_CHECK_NO);
 
     WHITEBOX_TEST_STUB("UBTreeDoInsert-begin", WhiteboxDefaultErrorEmit);
@@ -462,8 +469,21 @@ bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique,
     GPIScanDesc gpiScan = NULL;
 
     if (RelationIsGlobalIndex(rel)) {
+        Assert(RelationIsPartition(heapRel));
         GPIScanInit(&gpiScan);
-        gpiScan->parentRelation = relation_open(heapRel->parentId, AccessShareLock);
+        indexHeapRelOid = IndexGetRelation(rel->rd_id, false);
+        Assert(OidIsValid(indexHeapRelOid));
+
+        if (indexHeapRelOid == heapRel->grandparentId) {  // For subpartitiontable
+            indexHeapRel = relation_open(indexHeapRelOid, AccessShareLock);
+            Assert(RelationIsSubPartitioned(indexHeapRel));
+            part = partitionOpen(indexHeapRel, heapRel->parentId, AccessShareLock);
+            partRel = partitionGetRelation(indexHeapRel, part);
+            gpiScan->parentRelation = partRel;
+            partitionClose(indexHeapRel, part, AccessShareLock);
+        } else { /* gpi of patitioned table */
+            gpiScan->parentRelation = relation_open(heapRel->parentId, AccessShareLock);
+        }
     }
 
     if (checkingunique) {
@@ -487,13 +507,79 @@ bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique,
         }
     }
 
-    top:
     /*
-     * Find the first page containing this key.  Buffer returned by
-     * _bt_search() is locked in exclusive mode
+     * It's very common to have an index on an auto-incremented or
+     * monotonically increasing value. In such cases, every insertion happens
+     * towards the end of the index. We try to optimise that case by caching
+     * the right-most leaf of the index. If our cached block is still the
+     * rightmost leaf, has enough free space to accommodate a new entry and
+     * the insertion key is strictly greater than the first key in this page,
+     * then we can safely conclude that the new key will be inserted in the
+     * cached block. So we simply search within the cached block and insert the
+     * key at the appropriate location. We call it a fastpath.
+     *
+     * Testing has revealed, though, that the fastpath can result in increased
+     * contention on the exclusive-lock on the rightmost leaf page. So we
+     * conditionally check if the lock is available. If it's not available then
+     * we simply abandon the fastpath and take the regular path. This makes
+     * sense because unavailability of the lock also signals that some other
+     * backend might be concurrently inserting into the page, thus reducing our
+     * chances to finding an insertion place in this page.
      */
-    stack = UBTreeSearch(rel, itupKey, &buf, BT_WRITE);
+top:
+    bool fastpath = false;
     offset = InvalidOffsetNumber;
+
+    if (RelationGetTargetBlock(rel) != InvalidBlockNumber) {
+        /*
+         * Conditionally acquire exclusive lock on the buffer before doing any
+         * checks. If we don't get the lock, we simply follow slowpath. If we
+         * do get the lock, this ensures that the index state cannot change, as
+         * far as the rightmost part of the index is concerned.
+         */
+        buf = ReadBuffer(rel, RelationGetTargetBlock(rel));
+        if (ConditionalLockBuffer(buf)) {
+            _bt_checkpage(rel, buf);
+
+            Page page = BufferGetPage(buf);
+            UBTPageOpaqueInternal lpageop = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+            Size itemsz = MAXALIGN(IndexTupleSize(itup));
+
+            /*
+             * Check if the page is still the rightmost leaf page, has enough
+             * free space to accommodate the new tuple, no split is in progress
+             * and the scankey is greater than or equal to the first key on the
+             * page.
+             */
+            if (P_ISLEAF(lpageop) && P_RIGHTMOST(lpageop) && !P_INCOMPLETE_SPLIT(lpageop) && !P_IGNORE(lpageop) &&
+                (PageGetFreeSpace(page) > itemsz) && PageGetMaxOffsetNumber(page) >= P_FIRSTDATAKEY(lpageop) &&
+                UBTreeCompare(rel, itupKey, page, P_FIRSTDATAKEY(lpageop), InvalidBuffer) > 0) {
+                fastpath = true;
+            } else {
+                _bt_relbuf(rel, buf);
+
+                /*
+                 * Something did not workout. Just forget about the cached
+                 * block and follow the normal path. It might be set again if
+                 * the conditions are favourble.
+                 */
+                RelationSetTargetBlock(rel, InvalidBlockNumber);
+            }
+        } else {
+            ReleaseBuffer(buf);
+
+            /*
+             * If someone's holding a lock, it's likely to change anyway,
+             * so don't try again until we get an updated rightmost leaf.
+             */
+            RelationSetTargetBlock(rel, InvalidBlockNumber);
+        }
+    }
+
+    if (!fastpath) {
+        /* find the first page containing this key, buffer returned by _bt_search() is locked in exclusive mode */
+        stack = UBTreeSearch(rel, itupKey, &buf, BT_WRITE);
+    }
 
     WHITEBOX_TEST_STUB("UBTreeDoInsert-found", WhiteboxDefaultErrorEmit);
 
@@ -530,7 +616,9 @@ bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique,
             buf = InvalidBuffer;
             XactLockTableWait(xwait);
             /* start over... */
-            _bt_freestack(stack);
+            if (stack) {
+                _bt_freestack(stack);
+            }
             goto top;
         }
 
@@ -540,7 +628,8 @@ bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique,
         }
     }
 
-    if (checkUnique != UNIQUE_CHECK_EXISTING) {
+    /* skip insertion when we just want to check existing or find a conflict when executing upsert */
+    if (checkUnique != UNIQUE_CHECK_EXISTING && !(checkUnique == UNIQUE_CHECK_UPSERT && !is_unique)) {
         /*
          * The only conflict predicate locking cares about for indexes is when
          * an index tuple insert conflicts with an existing lock.  We don't
@@ -560,11 +649,18 @@ bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique,
 
 
     /* be tidy */
-    _bt_freestack(stack);
+    if (stack) {
+        _bt_freestack(stack);
+    }
     pfree(itupKey);
 
     if (gpiScan != NULL) { // means rel switch happened
-        relation_close(gpiScan->parentRelation, AccessShareLock);
+        if (indexHeapRelOid == heapRel->grandparentId) {  // For subpartitiontable
+            releaseDummyRelation(&partRel);
+            relation_close(indexHeapRel, AccessShareLock);
+        } else {
+            relation_close(gpiScan->parentRelation, AccessShareLock);
+        }
         GPIScanEnd(gpiScan);
     }
 
@@ -713,7 +809,7 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                                                    &xmin, &xmax, &xminCommitted, &xmaxCommitted);
 
                     /* here we guarantee the same semantics as UNIQUE_CHECK_PARTIAL */
-                    if (checkUnique == UNIQUE_CHECK_PARTIAL) {
+                    if (IndexUniqueCheckNoError(checkUnique)) {
                         if (TransactionIdIsValid(xmin) && !TransactionIdIsValid(xmax)) {
                             if (nbuf != InvalidBuffer)
                                 _bt_relbuf(rel, nbuf);
@@ -1159,9 +1255,17 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
             XLogBeginInsert();
             XLogRegisterData((char *)&xlrec, SizeOfBtreeInsert);
 
-            if (P_ISLEAF(lpageop))
+            if (P_ISLEAF(lpageop)) {
                 xlinfo = XLOG_UBTREE_INSERT_LEAF;
-            else {
+
+                /*
+                 * Cache the block information if we just inserted into the
+                 * rightmost leaf page of the index.
+                */
+                if (P_RIGHTMOST(lpageop)) {
+                    RelationSetTargetBlock(rel, BufferGetBlockNumber(buf));
+                }
+            } else {
                 /*
                  * Register the left child whose INCOMPLETE_SPLIT flag was
                  * cleared.

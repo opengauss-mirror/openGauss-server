@@ -1,0 +1,215 @@
+DROP SCHEMA subpartition_alter_table CASCADE;
+ERROR:  schema "subpartition_alter_table" does not exist
+CREATE SCHEMA subpartition_alter_table;
+SET CURRENT_SCHEMA TO subpartition_alter_table;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int,
+	primary key(month_code, dept_code)
+)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+--change column type
+alter table range_range alter column user_no set data type char(30);
+alter table range_range alter column sales_amt set data type varchar;
+\d+ range_range
+                      Table "subpartition_alter_table.range_range"
+   Column   |         Type          | Modifiers | Storage  | Stats target | Description 
+------------+-----------------------+-----------+----------+--------------+-------------
+ month_code | character varying(30) | not null  | extended |              | 
+ dept_code  | character varying(30) | not null  | extended |              | 
+ user_no    | character(30)         |           | extended |              | 
+ sales_amt  | character varying     |           | extended |              | 
+Indexes:
+    "range_range_pkey" PRIMARY KEY, btree (month_code, dept_code) LOCAL TABLESPACE pg_default
+Partition By RANGE(month_code) Subpartition By RANGE(dept_code)
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Number of subpartitions: 4 (View pg_partition to check each subpartition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+-- rename
+alter table range_range rename to hahahahahah;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, ALTER TABLE ... RENAME is not yet supported.
+alter table range_range rename partition p_201901 to hahahahahah;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, ALTER TABLE ... RENAME PARTITION/SUBPARTITION is not yet supported.
+alter table range_range rename partition p_201901_a to hahahahahah;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, ALTER TABLE ... RENAME PARTITION/SUBPARTITION is not yet supported.
+--cluster
+create index idx_range_range on range_range(month_code,user_no);
+alter table range_range cluster on idx_range_range;
+ERROR:  cannot cluster a subpartition table
+-- move tablespace
+CREATE TABLESPACE example1 RELATIVE LOCATION 'tablespace1/tablespace_1';
+alter table range_range move PARTITION p_201901 tablespace  example1;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, modifying tablespace is not yet supported.
+alter table range_range move PARTITION p_201901_a tablespace  example1;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, modifying tablespace is not yet supported.
+DROP TABLESPACE example1;
+-- merge
+alter table range_range merge  PARTITIONS p_201901 , p_201902 into PARTITION p_range_3;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, merge partitions is not yet supported.
+alter table range_range merge  SUBPARTITIONS p_201901 , p_201902 into PARTITION p_range_3;
+ERROR:  syntax error at or near "SUBPARTITIONS"
+LINE 1: alter table range_range merge  SUBPARTITIONS p_201901 , p_20...
+                                       ^
+-- exchange
+CREATE TABLE ori
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int,
+	primary key(month_code, dept_code)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ori_pkey" for table "ori"
+ALTER TABLE range_range EXCHANGE PARTITION (p_201901) WITH TABLE ori;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, exchange partition is not yet supported.
+ALTER TABLE range_range EXCHANGE SUBPARTITION (p_201901) WITH TABLE ori;
+ERROR:  syntax error at or near "SUBPARTITION ("
+LINE 1: ALTER TABLE range_range EXCHANGE SUBPARTITION (p_201901) WIT...
+                                         ^
+-- drop
+alter table range_range drop partition p_201901;
+alter table range_range drop partition p_201901_a;
+ERROR:  partition "p_201901_a" does not exist
+alter table range_range drop subpartition p_201901_a;
+ERROR:  subpartition "p_201901_a" does not exist
+-- add
+alter table range_range add partition p_range_4 VALUES LESS THAN('201904');
+ERROR:  upper boundary of adding partition MUST overtop last existing partition
+-- split
+alter table range_range split PARTITION p_201901 at (8) into ( PARTITION add_p_01 , PARTITION add_p_02 );
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, split partition is not supported yet.
+drop table ori;
+drop table range_range;
+CREATE TABLE IF NOT EXISTS range_range_02
+(
+    col_1 int ,
+    col_2 int ,
+	col_3 VARCHAR2 ( 30 ) NOT NULL ,
+    col_4 int
+)
+PARTITION BY RANGE (col_1) SUBPARTITION BY RANGE (col_2)
+(
+  PARTITION p_range_1 VALUES LESS THAN( 10 )
+  (
+    SUBPARTITION p_range_1_1 VALUES LESS THAN( 5 ),
+    SUBPARTITION p_range_1_2 VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_range_2 VALUES LESS THAN( 20 )
+  (
+    SUBPARTITION p_range_2_1 VALUES LESS THAN( 5 ),
+    SUBPARTITION p_range_2_2 VALUES LESS THAN( 10 )
+  )
+) ENABLE ROW MOVEMENT;
+create index on range_range_02(col_2) local;
+alter table range_range_02 MODIFY PARTITION p_range_2 UNUSABLE LOCAL INDEXES;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, UNUSABLE LOCAL INDEXES is not yet supported.
+alter table range_range_02 MODIFY PARTITION p_range_2 REBUILD UNUSABLE LOCAL INDEXES;
+ERROR:  Un-support feature
+DETAIL:  For subpartition table, REBUILD UNUSABLE LOCAL INDEXES is not yet supported.
+alter table range_range_02 alter col_1 type char;
+ERROR:  cannot alter data type of partitioning column "col_1"
+alter table range_range_02 alter col_2 type char;
+ERROR:  cannot alter data type of subpartitioning column "col_2"
+drop table range_range_02;
+--validate constraint
+CREATE TABLE hash_hash
+(
+    col_1 int ,
+    col_2 int NOT NULL ,
+    col_3 VARCHAR2 ( 30 ) ,
+    col_4 int
+)
+PARTITION BY hash (col_3) SUBPARTITION BY hash (col_2)
+(
+    PARTITION p_hash_1
+    (
+        SUBPARTITION p_hash_1_1 ,
+        SUBPARTITION p_hash_1_2 ,
+        SUBPARTITION p_hash_1_3 ,
+        SUBPARTITION p_hash_1_4
+    ),
+    PARTITION p_hash_2
+    (
+        SUBPARTITION p_hash_2_1 ,
+        SUBPARTITION p_hash_2_2
+    ),
+    PARTITION p_hash_3,
+    PARTITION p_hash_4
+    (
+        SUBPARTITION p_hash_4_1
+    ),
+    PARTITION p_hash_5
+);
+INSERT INTO hash_hash VALUES(null,1,1,1);
+alter table hash_hash add constraint con_hash_hash check(col_1 is not null) NOT VALID ;
+INSERT INTO hash_hash VALUES(null,2,1,1); --error
+ERROR:  new row for relation "hash_hash" violates check constraint "con_hash_hash"
+DETAIL:  N/A
+INSERT INTO hash_hash VALUES(1,3,1,1); --success
+alter table hash_hash VALIDATE CONSTRAINT con_hash_hash; --error
+ERROR:  check constraint "con_hash_hash" is violated by some row
+delete from hash_hash where col_1 is null;
+alter table hash_hash VALIDATE CONSTRAINT con_hash_hash; --success
+drop table hash_hash cascade;
+-- clean
+DROP SCHEMA subpartition_alter_table CASCADE;
+\h ALTER TABLE SUBPARTITION
+Command:     ALTER TABLE SUBPARTITION
+Description: change the definition of a subpartition
+Syntax:
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    action [, ... ];
+
+where action can be:
+    add_clause    |
+    drop_clause   |
+    split_clause  |
+    truncate_clause
+where add_clause can be:
+ADD { partition_less_than_item | partition_list_item } [ ( subpartition_definition_list ) ]
+MODIFY PARTITION partition_name ADD subpartition_definition
+where partition_less_than_item can be:
+PARTITION partition_name VALUES LESS THAN ( partition_value | MAXVALUE ) [ TABLESPACE tablespacename ]
+where partition_list_item can be:
+PARTITION partition_name VALUES ( partition_value [, ...] | DEFAULT ) [ TABLESPACE tablespacename ]
+where subpartition_definition_list can be:
+SUBPARTITION subpartition_name [ VALUES LESS THAN ( partition_value | MAXVALUE ) | VALUES ( partition_value [, ...] | DEFAULT )]  [ TABLESPACE tablespace ]
+where drop_clause can be:
+DROP PARTITION  { partition_name | FOR (  partition_value )  } [ UPDATE GLOBAL INDEX ]
+DROP SUBPARTITION  { subpartition_name | FOR (  partition_value, subpartition_value )  } [ UPDATE GLOBAL INDEX ]
+where split_clause can be:
+SPLIT SUBPARTITION { subpartition_name } { split_point_clause } [ UPDATE GLOBAL INDEX ]
+where split_point_clause can be:
+AT ( subpartition_value ) INTO ( SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] , SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] ) |
+VALUES ( subpartition_value ) INTO ( SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] , SUBPARTITION subpartition_name [ TABLESPACE tablespacename ] )
+where truncate_clause can be:
+TRUNCATE SUBPARTITION { subpartition_name } [ UPDATE GLOBAL INDEX ]
+NOTICE: 'ALTER TABLE SUBPARTITION' is only avaliable in CENTRALIZED mode!
+

@@ -1,0 +1,67 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_not_cl(id INT, name varchar(50));
+INSERT INTO t_not_cl (id, name) VALUES (?, ?);
+1,MyName
+INSERT INTO t_not_cl (id) VALUES (2);
+INSERT INTO t_not_cl (id, name) VALUES (?, ?);
+3,
+INSERT INTO t_not_cl (id, name) VALUES (?, ?);
+4,
+select id is null, name is null from t_not_cl order by id;
+ ?column? | ?column? 
+----------+----------
+ f        | f
+ f        | t
+ f        | t
+ f        | t
+(4 rows)
+
+select * from t_not_cl order by id;
+ id |  name  
+----+--------
+  1 | MyName
+  2 | 
+  3 | 
+  4 | 
+(4 rows)
+
+CREATE TABLE IF NOT EXISTS t_with_cl(id INT, name varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+INSERT INTO t_with_cl (id, name) VALUES (?, ?);
+1,MyName
+INSERT INTO t_with_cl (id) VALUES (2);
+INSERT INTO t_with_cl (id, name) VALUES (?, ?);
+3,
+INSERT INTO t_with_cl (id, name) VALUES (?, ?);
+4,
+select id is null, name is null from t_with_cl order by id;
+ ?column? | ?column? 
+----------+----------
+ f        | f
+ f        | t
+ f        | t
+ f        | t
+(4 rows)
+
+select * from t_with_cl order by id;
+ id |  name  
+----+--------
+  1 | MyName
+  2 | 
+  3 | 
+  4 | 
+(4 rows)
+
+DROP TABLE t_not_cl;
+DROP TABLE t_with_cl;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1

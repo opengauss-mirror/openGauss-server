@@ -75,9 +75,6 @@ INSERT INTO t_default VALUES(91, 0.91, '2020-05-17') ON DUPLICATE KEY UPDATE c2 
 INSERT INTO t_default VALUES(92, DEFAULT, '2020-05-17') ON DUPLICATE KEY UPDATE c2 = 10, c3 = DEFAULT;
 -- unsupport alias
 INSERT INTO t_grammer AS alias VALUES (91) ON DUPLICATE KEY UPDATE c2 = VALUES(c1);
-ERROR:  syntax error at or near "AS"
-LINE 1: INSERT INTO t_grammer AS alias VALUES (91) ON DUPLICATE KEY ...
-                              ^
 -- unsupport VALUES with expr
 INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = sqrt(VALUES(c2));
 ERROR:  syntax error at or near "("
@@ -163,12 +160,13 @@ SELECT * FROM t_grammer ORDER BY 1;
   82 |  881 | {881,882}     |           | {881,882}
   83 | -100 | {81,82,83}    | (810,820) | 
   84 | -100 | {81,82,83}    | (850,83)  | 
-  91 |    1 | {91,92,93}    | (94,95)   | 
+  91 |   91 | {91,92,93}    | (94,95)   | 
   92 | -100 |               | (910,920) | {91,92}
  101 |   10 | {107,108,104} | (101,106) | {107,108}
  102 |   20 | {107,108,104} | (102,106) | {107,108}
  103 |   30 | {107,108,104} | (103,106) | {107,108}
-(35 rows)
+ 991 |    3 |               |           | 
+(36 rows)
 
 SELECT * FROM t_default ORDER BY 1;
 --? c1 |        c2        |               c3                

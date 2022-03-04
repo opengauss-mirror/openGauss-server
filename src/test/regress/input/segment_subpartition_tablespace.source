@@ -1,0 +1,896 @@
+DROP SCHEMA segment_subpartition_tablespace CASCADE;
+CREATE SCHEMA segment_subpartition_tablespace;
+SET CURRENT_SCHEMA TO segment_subpartition_tablespace;
+
+--prepare
+\! rm -fr '@testtablespace@/segment_subpartition_tablespace_ts1'
+\! mkdir '@testtablespace@/segment_subpartition_tablespace_ts1'
+\! rm -fr '@testtablespace@/segment_subpartition_tablespace_ts2'
+\! mkdir '@testtablespace@/segment_subpartition_tablespace_ts2'
+\! rm -fr '@testtablespace@/segment_subpartition_tablespace_ts3'
+\! mkdir '@testtablespace@/segment_subpartition_tablespace_ts3'
+CREATE TABLESPACE segment_subpartition_tablespace_ts1 LOCATION '@testtablespace@/segment_subpartition_tablespace_ts1';
+CREATE TABLESPACE segment_subpartition_tablespace_ts2 LOCATION '@testtablespace@/segment_subpartition_tablespace_ts2';
+CREATE TABLESPACE segment_subpartition_tablespace_ts3 LOCATION '@testtablespace@/segment_subpartition_tablespace_ts3';
+
+--
+----test create subpartition with tablespace----
+--
+--range-range
+CREATE TABLE t_range_range1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY RANGE (c1) SUBPARTITION BY RANGE (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_RANGE3 VALUES LESS THAN (15)
+    (
+        SUBPARTITION P_RANGE3_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_RANGE4 VALUES LESS THAN (20) TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_RANGE5 VALUES LESS THAN (25)
+);
+SELECT pg_get_tabledef('t_range_range1');
+DROP TABLE t_range_range1;
+
+CREATE TABLE t_range_range2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY RANGE (c1) SUBPARTITION BY RANGE (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE1_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE2_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_RANGE3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_RANGE3_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE3_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_RANGE4 VALUES LESS THAN (20)
+    (
+        SUBPARTITION P_RANGE4_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE4_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE4_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE4_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_RANGE5 VALUES LESS THAN (25) TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_RANGE6 VALUES LESS THAN (30)
+);
+SELECT pg_get_tabledef('t_range_range2');
+DROP TABLE t_range_range2;
+
+--range-list
+CREATE TABLE t_range_list1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY RANGE (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_RANGE3 VALUES LESS THAN (15)
+    (
+        SUBPARTITION P_RANGE3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_RANGE4 VALUES LESS THAN (20) TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_RANGE5 VALUES LESS THAN (25)
+);
+SELECT pg_get_tabledef('t_range_list1');
+DROP TABLE t_range_list1;
+
+CREATE TABLE t_range_list2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY RANGE (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE1_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE2_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_RANGE3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_RANGE3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE3_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_RANGE4 VALUES LESS THAN (20)
+    (
+        SUBPARTITION P_RANGE4_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE4_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE4_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE4_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_RANGE5 VALUES LESS THAN (25) TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_RANGE6 VALUES LESS THAN (30)
+);
+SELECT pg_get_tabledef('t_range_list2');
+DROP TABLE t_range_list2;
+
+--range-hash
+CREATE TABLE t_range_hash1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY RANGE (c1) SUBPARTITION BY HASH (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3
+    ),
+    PARTITION P_RANGE3 VALUES LESS THAN (15)
+    (
+        SUBPARTITION P_RANGE3_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3
+    ),
+    PARTITION P_RANGE4 VALUES LESS THAN (20) TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_RANGE5 VALUES LESS THAN (25)
+);
+SELECT pg_get_tabledef('t_range_hash1');
+DROP TABLE t_range_hash1;
+
+CREATE TABLE t_range_hash2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY RANGE (c1) SUBPARTITION BY HASH (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE1_4
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE2_4
+    ),
+    PARTITION P_RANGE3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_RANGE3_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE3_4
+    ),
+    PARTITION P_RANGE4 VALUES LESS THAN (20)
+    (
+        SUBPARTITION P_RANGE4_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE4_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE4_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE4_4
+    ),
+    PARTITION P_RANGE5 VALUES LESS THAN (25) TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_RANGE6 VALUES LESS THAN (30)
+);
+SELECT pg_get_tabledef('t_range_hash2');
+DROP TABLE t_range_hash2;
+
+--list-range
+CREATE TABLE t_list_range1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY LIST (c1) SUBPARTITION BY RANGE (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_LIST3 VALUES (11,12,13,14,15)
+    (
+        SUBPARTITION P_LIST3_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_LIST4 VALUES (16,17,18,19,20) TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_LIST5 VALUES (21,22,23,24,25)
+);
+SELECT pg_get_tabledef('t_list_range1');
+DROP TABLE t_list_range1;
+
+CREATE TABLE t_list_range2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY LIST (c1) SUBPARTITION BY RANGE (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST1_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST2_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_LIST3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_LIST3_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST3_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_LIST4 VALUES (16,17,18,19,20)
+    (
+        SUBPARTITION P_LIST4_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST4_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST4_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST4_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_LIST5 VALUES (21,22,23,24,25) TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_LIST6 VALUES (26,27,28,29,30)
+);
+SELECT pg_get_tabledef('t_list_range2');
+DROP TABLE t_list_range2;
+
+--list-list
+CREATE TABLE t_list_list1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY LIST (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_LIST3 VALUES (11,12,13,14,15)
+    (
+        SUBPARTITION P_LIST3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_LIST4 VALUES (16,17,18,19,20) TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_LIST5 VALUES (21,22,23,24,25)
+);
+SELECT pg_get_tabledef('t_list_list1');
+DROP TABLE t_list_list1;
+
+CREATE TABLE t_list_list2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY LIST (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST1_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST2_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_LIST3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_LIST3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST3_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_LIST4 VALUES (16,17,18,19,20)
+    (
+        SUBPARTITION P_LIST4_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST4_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST4_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST4_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_LIST5 VALUES (21,22,23,24,25) TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_LIST6 VALUES (26,27,28,29,30)
+);
+SELECT pg_get_tabledef('t_list_list2');
+DROP TABLE t_list_list2;
+
+--list-hash
+CREATE TABLE t_list_hash1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY LIST (c1) SUBPARTITION BY HASH (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3
+    ),
+    PARTITION P_LIST3 VALUES (11,12,13,14,15)
+    (
+        SUBPARTITION P_LIST3_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3
+    ),
+    PARTITION P_LIST4 VALUES (16,17,18,19,20) TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_LIST5 VALUES (21,22,23,24,25)
+);
+SELECT pg_get_tabledef('t_list_hash1');
+DROP TABLE t_list_hash1;
+
+CREATE TABLE t_list_hash2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY LIST (c1) SUBPARTITION BY HASH (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST1_4
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST2_4
+    ),
+    PARTITION P_LIST3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_LIST3_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST3_4
+    ),
+    PARTITION P_LIST4 VALUES (16,17,18,19,20)
+    (
+        SUBPARTITION P_LIST4_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST4_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST4_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST4_4
+    ),
+    PARTITION P_LIST5 VALUES (21,22,23,24,25) TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_LIST6 VALUES (26,27,28,29,30)
+);
+SELECT pg_get_tabledef('t_list_hash2');
+DROP TABLE t_list_hash2;
+
+--hash-range
+CREATE TABLE t_hash_range1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY HASH (c1) SUBPARTITION BY RANGE (c2)
+(
+    PARTITION P_HASH1 TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_HASH1_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH1_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH1_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_HASH2 TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_HASH2_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH2_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH2_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_HASH3
+    (
+        SUBPARTITION P_HASH3_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH3_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH3_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_HASH4 TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_HASH5
+);
+SELECT pg_get_tabledef('t_hash_range1');
+DROP TABLE t_hash_range1;
+
+CREATE TABLE t_hash_range2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY HASH (c1) SUBPARTITION BY RANGE (c2)
+(
+    PARTITION P_HASH1 TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_HASH1_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH1_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH1_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH1_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_HASH2 TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_HASH2_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH2_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH2_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH2_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_HASH3 TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_HASH3_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH3_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH3_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH3_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_HASH4
+    (
+        SUBPARTITION P_HASH4_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH4_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH4_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH4_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_HASH5 TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_HASH6
+);
+SELECT pg_get_tabledef('t_hash_range2');
+DROP TABLE t_hash_range2;
+
+--hash-list
+CREATE TABLE t_hash_list1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY HASH (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_HASH1 TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_HASH1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH1_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_HASH2 TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_HASH2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH2_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_HASH3
+    (
+        SUBPARTITION P_HASH3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH3_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_HASH4 TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_HASH5
+);
+SELECT pg_get_tabledef('t_hash_list1');
+DROP TABLE t_hash_list1;
+
+CREATE TABLE t_hash_list2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY HASH (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_HASH1 TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_HASH1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH1_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH1_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_HASH2 TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_HASH2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH2_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH2_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_HASH3 TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_HASH3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH3_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH3_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_HASH4
+    (
+        SUBPARTITION P_HASH4_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH4_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH4_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH4_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_HASH5 TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_HASH6
+);
+SELECT pg_get_tabledef('t_hash_list2');
+DROP TABLE t_hash_list2;
+
+--hash-hash
+CREATE TABLE t_hash_hash1(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY HASH (c1) SUBPARTITION BY HASH (c2)
+(
+    PARTITION P_HASH1 TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_HASH1_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH1_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH1_3
+    ),
+    PARTITION P_HASH2 TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_HASH2_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH2_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH2_3
+    ),
+    PARTITION P_HASH3
+    (
+        SUBPARTITION P_HASH3_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH3_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH3_3
+    ),
+    PARTITION P_HASH4 TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_HASH5
+);
+SELECT pg_get_tabledef('t_hash_hash1');
+DROP TABLE t_hash_hash1;
+
+CREATE TABLE t_hash_hash2(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY HASH (c1) SUBPARTITION BY HASH (c2)
+(
+    PARTITION P_HASH1 TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_HASH1_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH1_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH1_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH1_4
+    ),
+    PARTITION P_HASH2 TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_HASH2_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH2_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH2_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH2_4
+    ),
+    PARTITION P_HASH3 TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_HASH3_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH3_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH3_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH3_4
+    ),
+    PARTITION P_HASH4
+    (
+        SUBPARTITION P_HASH4_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH4_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH4_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH4_4
+    ),
+    PARTITION P_HASH5 TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_HASH6
+);
+SELECT pg_get_tabledef('t_hash_hash2');
+DROP TABLE t_hash_hash2;
+
+--
+----test add partition with tablespace----
+--
+--since the add subpartition define use the same code, we only test different partition type: range/list
+--range-list
+CREATE TABLE t_range_list3(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY RANGE (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3 VALUES (11,12,13,14,15)
+    )
+);
+ALTER TABLE t_range_list3 ADD PARTITION P_RANGE3 VALUES LESS THAN (15)
+    (
+        SUBPARTITION P_RANGE3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3 VALUES (11,12,13,14,15)
+    );
+ALTER TABLE t_range_list3 ADD PARTITION P_RANGE4 VALUES LESS THAN (20) TABLESPACE segment_subpartition_tablespace_ts1;
+ALTER TABLE t_range_list3 ADD PARTITION P_RANGE5 VALUES LESS THAN (25);
+SELECT pg_get_tabledef('t_range_list3');
+DROP TABLE t_range_list3;
+
+
+CREATE TABLE t_range_list4(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY RANGE (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE1_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE2_4 VALUES (16,17,18,19,20)
+    )
+);
+ALTER TABLE t_range_list4 ADD PARTITION P_RANGE3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_RANGE3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE3_4 VALUES (16,17,18,19,20)
+    );
+ALTER TABLE t_range_list4 ADD PARTITION P_RANGE4 VALUES LESS THAN (20)
+    (
+        SUBPARTITION P_RANGE4_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE4_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE4_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE4_4 VALUES (16,17,18,19,20)
+    );
+ALTER TABLE t_range_list4 ADD PARTITION P_RANGE5 VALUES LESS THAN (25) TABLESPACE segment_subpartition_tablespace_ts3;
+ALTER TABLE t_range_list4 ADD PARTITION P_RANGE6 VALUES LESS THAN (30);
+SELECT pg_get_tabledef('t_range_list4');
+DROP TABLE t_range_list4;
+
+--list-hash
+CREATE TABLE t_list_hash3(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY LIST (c1) SUBPARTITION BY HASH (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3
+    )
+);
+
+ALTER TABLE t_list_hash3 ADD PARTITION P_LIST3 VALUES (11,12,13,14,15)
+    (
+        SUBPARTITION P_LIST3_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3
+    );
+ALTER TABLE t_list_hash3 ADD PARTITION P_LIST4 VALUES (16,17,18,19,20) TABLESPACE segment_subpartition_tablespace_ts1;
+ALTER TABLE t_list_hash3 ADD PARTITION P_LIST5 VALUES (21,22,23,24,25);
+SELECT pg_get_tabledef('t_list_hash3');
+DROP TABLE t_list_hash3;
+
+CREATE TABLE t_list_hash4(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY LIST (c1) SUBPARTITION BY HASH (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST1_4
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST2_4
+    )
+);
+ALTER TABLE t_list_hash4 ADD PARTITION P_LIST3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_LIST3_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST3_4
+    );
+ALTER TABLE t_list_hash4 ADD PARTITION P_LIST4 VALUES (16,17,18,19,20)
+    (
+        SUBPARTITION P_LIST4_1 TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST4_2 TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST4_3 TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST4_4
+    );
+ALTER TABLE t_list_hash4 ADD PARTITION P_LIST5 VALUES (21,22,23,24,25) TABLESPACE segment_subpartition_tablespace_ts3;
+ALTER TABLE t_list_hash4 ADD PARTITION P_LIST6 VALUES (26,27,28,29,30);
+SELECT pg_get_tabledef('t_list_hash4');
+DROP TABLE t_list_hash4;
+
+--
+----test add subpartition with tablespace----
+--
+--list-range
+CREATE TABLE t_list_range3(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY LIST (c1) SUBPARTITION BY RANGE (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_LIST3 VALUES (11,12,13,14,15)
+    (
+        SUBPARTITION P_LIST3_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3 VALUES LESS THAN (15)
+    ),
+    PARTITION P_LIST4 VALUES (16,17,18,19,20) TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_LIST5 VALUES (21,22,23,24,25)
+);
+ALTER TABLE t_list_range3 MODIFY PARTITION P_LIST1 ADD SUBPARTITION P_LIST1_4 VALUES LESS THAN (20) TABLESPACE segment_subpartition_tablespace_ts3;
+ALTER TABLE t_list_range3 MODIFY PARTITION P_LIST2 ADD SUBPARTITION P_LIST2_4 VALUES LESS THAN (20);
+ALTER TABLE t_list_range3 MODIFY PARTITION P_LIST3 ADD SUBPARTITION P_LIST3_4 VALUES LESS THAN (20);
+SELECT pg_get_tabledef('t_list_range3');
+DROP TABLE t_list_range3;
+
+CREATE TABLE t_list_range4(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY LIST (c1) SUBPARTITION BY RANGE (c2)
+(
+    PARTITION P_LIST1 VALUES (1,2,3,4,5) TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_LIST1_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST1_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST1_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST1_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_LIST2 VALUES (6,7,8,9,10) TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_LIST2_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST2_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST2_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST2_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_LIST3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_LIST3_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST3_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST3_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST3_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_LIST4 VALUES (16,17,18,19,20)
+    (
+        SUBPARTITION P_LIST4_1 VALUES LESS THAN (5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_LIST4_2 VALUES LESS THAN (10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_LIST4_3 VALUES LESS THAN (15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_LIST4_4 VALUES LESS THAN (20)
+    ),
+    PARTITION P_LIST5 VALUES (21,22,23,24,25) TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_LIST6 VALUES (26,27,28,29,30)
+);
+ALTER TABLE t_list_range4 MODIFY PARTITION P_LIST1 ADD SUBPARTITION P_LIST1_5 VALUES LESS THAN (25) TABLESPACE segment_subpartition_tablespace_ts3;
+ALTER TABLE t_list_range4 MODIFY PARTITION P_LIST2 ADD SUBPARTITION P_LIST2_5 VALUES LESS THAN (25) TABLESPACE segment_subpartition_tablespace_ts2;
+ALTER TABLE t_list_range4 MODIFY PARTITION P_LIST3 ADD SUBPARTITION P_LIST3_5 VALUES LESS THAN (25);
+ALTER TABLE t_list_range4 MODIFY PARTITION P_LIST4 ADD SUBPARTITION P_LIST4_5 VALUES LESS THAN (25);
+SELECT pg_get_tabledef('t_list_range4');
+DROP TABLE t_list_range4;
+
+--hash-list
+CREATE TABLE t_hash_list3(c1 int, c2 int, c3 int) WITH (SEGMENT=ON)
+PARTITION BY HASH (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_HASH1 TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_HASH1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH1_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_HASH2 TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_HASH2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH2_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_HASH3
+    (
+        SUBPARTITION P_HASH3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH3_3 VALUES (11,12,13,14,15)
+    ),
+    PARTITION P_HASH4 TABLESPACE segment_subpartition_tablespace_ts1,
+    PARTITION P_HASH5
+);
+ALTER TABLE t_hash_list3 MODIFY PARTITION P_HASH1 ADD SUBPARTITION P_HASH1_4 VALUES (16,17,18,19,20) TABLESPACE segment_subpartition_tablespace_ts3;
+ALTER TABLE t_hash_list3 MODIFY PARTITION P_HASH2 ADD SUBPARTITION P_HASH2_4 VALUES (16,17,18,19,20);
+ALTER TABLE t_hash_list3 MODIFY PARTITION P_HASH3 ADD SUBPARTITION P_HASH3_4 VALUES (16,17,18,19,20);
+SELECT pg_get_tabledef('t_hash_list3');
+DROP TABLE t_hash_list3;
+
+CREATE TABLE t_hash_list4(c1 int, c2 int, c3 int) WITH (SEGMENT=ON) TABLESPACE segment_subpartition_tablespace_ts1
+PARTITION BY HASH (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_HASH1 TABLESPACE segment_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_HASH1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH1_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH1_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_HASH2 TABLESPACE segment_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_HASH2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH2_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH2_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_HASH3 TABLESPACE segment_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_HASH3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH3_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH3_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_HASH4
+    (
+        SUBPARTITION P_HASH4_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE segment_subpartition_tablespace_ts1,
+        SUBPARTITION P_HASH4_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE segment_subpartition_tablespace_ts2,
+        SUBPARTITION P_HASH4_3 VALUES (11,12,13,14,15) TABLESPACE segment_subpartition_tablespace_ts3,
+        SUBPARTITION P_HASH4_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_HASH5 TABLESPACE segment_subpartition_tablespace_ts3,
+    PARTITION P_HASH6
+);
+ALTER TABLE t_hash_list4 MODIFY PARTITION P_HASH1 ADD SUBPARTITION P_HASH1_5 VALUES(21,22,23,24,25) TABLESPACE segment_subpartition_tablespace_ts3;
+ALTER TABLE t_hash_list4 MODIFY PARTITION P_HASH2 ADD SUBPARTITION P_HASH2_5 VALUES(21,22,23,24,25) TABLESPACE segment_subpartition_tablespace_ts2;
+ALTER TABLE t_hash_list4 MODIFY PARTITION P_HASH3 ADD SUBPARTITION P_HASH3_5 VALUES(21,22,23,24,25);
+ALTER TABLE t_hash_list4 MODIFY PARTITION P_HASH4 ADD SUBPARTITION P_HASH4_5 VALUES(21,22,23,24,25);
+SELECT pg_get_tabledef('t_hash_list4');
+DROP TABLE t_hash_list4;
+
+--finish
+drop tablespace segment_subpartition_tablespace_ts1;
+drop tablespace segment_subpartition_tablespace_ts2;
+drop tablespace segment_subpartition_tablespace_ts3;
+\! rm -fr '@testtablespace@/segment_subpartition_tablespace_ts1'
+\! rm -fr '@testtablespace@/segment_subpartition_tablespace_ts2'
+\! rm -fr '@testtablespace@/segment_subpartition_tablespace_ts3'
+
+DROP SCHEMA segment_subpartition_tablespace CASCADE;
+RESET CURRENT_SCHEMA;

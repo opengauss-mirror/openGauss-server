@@ -31,17 +31,16 @@ typedef struct pg_conn PGconn;
 
 class Format {
 public:
-    static unsigned char *text_to_binary(const PGconn* conn, const char *text, Oid type, Oid typelem, int atttypmod,
+    static unsigned char *text_to_binary(const PGconn* conn, const char *text, Oid type, int atttypmod,
         size_t *binary_size, char *err_msg);
-    static char *binary_to_text(const unsigned char *binary, size_t size, Oid type, Oid typelem, int atttypmod,
-        size_t *result_size);
-    static unsigned char *verify_and_adjust_binary(unsigned char *binary, size_t *binary_size, Oid type, Oid typelem,
+    static char *binary_to_text(const unsigned char *binary, size_t size, Oid type, size_t *result_size);
+    static unsigned char *verify_and_adjust_binary(unsigned char *binary, size_t *binary_size, Oid type,
         int atttypmod, char *err_msg);
-    static unsigned char *restore_binary(const unsigned char *binary, size_t size, Oid type, Oid typelem, int atttypmod,
-        size_t *binary_size, const char *err_msg);
+    static unsigned char *restore_binary(const unsigned char *binary, size_t size, Oid type, size_t *binary_size,
+        const char *err_msg);
 
 private:
-    static unsigned char *type_char_bin(const char *text, Oid type, Oid typelem, int atttypmod, size_t *binary_size,
+    static unsigned char *type_char_bin(const char *text, Oid type, int atttypmod, size_t *binary_size,
         char *err_msg);
 };
 

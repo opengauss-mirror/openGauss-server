@@ -1,0 +1,127 @@
+select * from gs_stat_undo();
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select * from gs_stat_wal_entrytable(-1) limit 1;
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select * from gs_stat_wal_entrytable(1);
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select * from gs_stat_wal_entrytable(-2);
+ERROR:  The idx out of range.
+select * from gs_walwriter_flush_position();
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select * from gs_walwriter_flush_stat(1);
+--?.*
+--?.*
+--?.*
+(1 row)
+
+select * from gs_walwriter_flush_stat(2);
+--?.*
+--?.*
+--?.*
+(1 row)
+
+DROP TABLE IF EXISTS test_ustore;
+--?.*
+DROP INDEX IF EXISTS test_ustore_idx;
+--?.*
+DROP INDEX IF EXISTS test_ustore_idx2;
+--?.*
+START TRANSACTION;
+CREATE TABLE test_ustore (a int, b int ,c int) with(storage_type=ustore);
+CREATE INDEX test_ustore_idx ON test_ustore(a);
+CREATE INDEX test_ustore_idx2 ON test_ustore(b,c);
+INSERT INTO test_ustore values(generate_series(1,1000000),generate_series(1,1000000), generate_series(1,1000000));
+CHECKPOINT;
+CREATE OR REPLACE FUNCTION proc_gs_index_verify(tablename in varchar2)
+RETURNS SETOF varchar 
+LANGUAGE plpgsql
+AS
+$$
+DECLARE
+    relationOid  oid;
+	stat varchar;
+BEGIN
+	SELECT relfilenode into relationOid from pg_class where relname=tablename;
+	for stat in ( select status from gs_index_verify(relationOid, 0) ) loop
+	RETURN NEXT stat;
+    end loop;
+	for stat in ( select status from gs_index_verify(relationOid, 1) ) loop
+	RETURN NEXT stat;
+    end loop;
+    return;
+END;
+$$
+;
+SELECT proc_gs_index_verify('test_ustore_idx');
+ proc_gs_index_verify 
+----------------------
+ normal
+ normal
+(2 rows)
+
+SELECT proc_gs_index_verify('test_ustore_idx2');
+ proc_gs_index_verify 
+----------------------
+ normal
+ normal
+(2 rows)
+
+DROP TABLE IF EXISTS test_ustore;
+COMMIT;
+START TRANSACTION;
+CREATE TABLE test_ustore (a int, b int ,c int) with(storage_type=ustore);
+CREATE INDEX test_ustore_idx ON test_ustore(a);
+CREATE INDEX test_ustore_idx2 ON test_ustore(b,c);
+INSERT INTO test_ustore values(generate_series(1,1000000),generate_series(1,1000000), generate_series(1,1000000));
+CHECKPOINT;
+CREATE OR REPLACE FUNCTION proc_gs_index_recycle_queue(tablename in varchar2)
+RETURNS SETOF varchar 
+LANGUAGE plpgsql
+AS
+$$
+DECLARE
+    relationOid  oid;
+	stat varchar;
+BEGIN
+	SELECT relfilenode into relationOid from pg_class where relname=tablename;
+	for stat in ( select rblkno from gs_index_recycle_queue(relationOid, 0, 0) ) loop
+	RETURN NEXT stat;
+    end loop;
+	for stat in ( select rblkno from gs_index_recycle_queue(relationOid, 1, 0) ) loop
+	RETURN NEXT stat;
+    end loop;
+	for stat in ( select rblkno from gs_index_recycle_queue(relationOid, 2, 1) ) loop
+	RETURN NEXT stat;
+    end loop;
+    return;
+END;
+$$
+;
+SELECT proc_gs_index_recycle_queue('test_ustore_idx');
+ proc_gs_index_recycle_queue 
+-----------------------------
+(0 rows)
+
+SELECT proc_gs_index_recycle_queue('test_ustore_idx2');
+ proc_gs_index_recycle_queue 
+-----------------------------
+(0 rows)
+
+DROP TABLE IF EXISTS test_ustore;
+COMMIT;

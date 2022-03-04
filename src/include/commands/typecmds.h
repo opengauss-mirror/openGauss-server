@@ -47,5 +47,7 @@ extern void AlterTypeNamespace(List* names, const char* newschema, ObjectType ob
 extern Oid AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses* objsMoved);
 extern Oid AlterTypeNamespaceInternal(
     Oid typeOid, Oid nspOid, bool isImplicitArray, bool errorOnTableType, ObjectAddresses* objsMoved);
+extern void AlterTypeOwnerByPkg(Oid pkgOid, Oid newOwnerId);
+extern void AlterTypeOwnerByFunc(Oid funcOid, Oid newOwnerId);
 
 #endif /* TYPECMDS_H */

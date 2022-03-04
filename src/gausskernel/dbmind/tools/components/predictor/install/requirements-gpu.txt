@@ -1,0 +1,7 @@
+configparser
+Flask
+Keras==2.3.1
+numpy
+pandas
+scikit-learn
+tensorflow-gpu==1.15.5
