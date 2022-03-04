@@ -593,7 +593,6 @@ void LocalSysDBCache::LocalSysDBCacheClearMyDB(Oid db_id, const char *db_name)
     MemoryContextResetAndDeleteChildren(lsc_mydb_memcxt);
 
     is_inited = false;
-    other_space = ((AllocSet)lsc_top_memcxt)->totalSpace + ((AllocSet)lsc_share_memcxt)->totalSpace;
     rel_index_rule_space = 0;
 }
 
@@ -622,27 +621,24 @@ void LocalSysDBCache::LocalSysDBCacheReSet()
     UnRegisterRelCacheCallBack(&inval_cxt, RelfilenodeMapInvalidateCallback);
     UnRegisterSysCacheCallBack(&inval_cxt, TABLESPACEOID, InvalidateTableSpaceCacheCallback);
 
-    MemoryContextResetAndDeleteChildren(lsc_mydb_memcxt);
-    MemoryContextResetAndDeleteChildren(lsc_share_memcxt);
+    MemoryContextDelete(lsc_mydb_memcxt);
+    MemoryContextDelete(lsc_share_memcxt);
+    lsc_share_memcxt =
+        AllocSetContextCreate(lsc_top_memcxt, "LocalSysCacheShareMemoryContext", ALLOCSET_DEFAULT_MINSIZE,
+                              ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, STANDARD_CONTEXT);
+
+    lsc_mydb_memcxt =
+        AllocSetContextCreate(lsc_top_memcxt, "LocalSysCacheMyDBMemoryContext", ALLOCSET_DEFAULT_MINSIZE,
+                              ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, STANDARD_CONTEXT);
 
     MemoryContext old = MemoryContextSwitchTo(lsc_share_memcxt);
     knl_u_relmap_init(&relmap_cxt);
     MemoryContextSwitchTo(old);
 
-    other_space = ((AllocSet)lsc_top_memcxt)->totalSpace + ((AllocSet)lsc_share_memcxt)->totalSpace;
     rel_index_rule_space = 0;
     is_inited = false;
     is_closed = false;
     is_lsc_catbucket_created = false;
-}
-
-static bool LSCMemroyOverflow(uint64 total_space)
-{
-    const uint32 kb_bit_double = 10;
-    if (unlikely(total_space < ((uint64)g_instance.attr.attr_memory.local_syscache_threshold << kb_bit_double))) {
-        return false;
-    }
-    return true;
 }
 
 bool LocalSysDBCache::LocalSysDBCacheNeedReBuild()
@@ -655,15 +651,21 @@ bool LocalSysDBCache::LocalSysDBCacheNeedReBuild()
         return true;
     }
 
-    /* it seems only fmgr_info_cxt has no resowner to avoid mem leak.
-     * we assum 1kb memory leaked once */
+    /* we assum 1kb memory leaked once */
     if (unlikely(abort_count > (uint64)g_instance.attr.attr_memory.local_syscache_threshold)) {
         return true;
     }
 
-    uint64 total_space = other_space +  AllocSetContextUsedSpace((AllocSet)lsc_mydb_memcxt) +
-        AllocSetContextUsedSpace((AllocSet)u_sess->cache_mem_cxt) + rel_index_rule_space;
-    return LSCMemroyOverflow(total_space);
+    uint64 total_space =
+        ((AllocSet)lsc_top_memcxt)->totalSpace +
+        ((AllocSet)lsc_share_memcxt)->totalSpace +
+        ((AllocSet)lsc_mydb_memcxt)->totalSpace +
+        ((AllocSet)u_sess->cache_mem_cxt)->totalSpace +
+        rel_index_rule_space;
+
+    uint64 memory_upper_limit = ((uint64)g_instance.attr.attr_memory.local_syscache_threshold) << 10;
+
+    return total_space * (1 - MAX_LSC_FREESIZE_RATIO) > memory_upper_limit;
 }
 
 /* rebuild cache on memcxt of mydb or share, call it only before initsyscache */
@@ -693,8 +695,23 @@ void LocalSysDBCache::LocalSysDBCacheReBuild()
 
 bool LocalSysDBCache::LocalSysDBCacheNeedSwapOut()
 {
-    uint64 total_space = other_space + rel_index_rule_space + ((AllocSet)lsc_mydb_memcxt)->totalSpace;
-    return LSCMemroyOverflow(total_space);
+    uint64 used_space =
+        AllocSetContextUsedSpace((AllocSet)lsc_top_memcxt) +
+        AllocSetContextUsedSpace((AllocSet)lsc_share_memcxt) +
+        AllocSetContextUsedSpace((AllocSet)lsc_mydb_memcxt) +
+        AllocSetContextUsedSpace((AllocSet)u_sess->cache_mem_cxt) +
+        rel_index_rule_space;
+    uint64 memory_upper_limit =
+        (((uint64)g_instance.attr.attr_memory.local_syscache_threshold) << 10) * cur_swapout_ratio;
+    bool need_swapout = used_space > memory_upper_limit;
+
+    /* swapout until memory used space is from MAX_LSC_SWAPOUT_RATIO=90% to MIN_LSC_SWAPOUT_RATIO=70% */
+    if (unlikely(need_swapout && cur_swapout_ratio == MAX_LSC_SWAPOUT_RATIO)) {
+        cur_swapout_ratio = MIN_LSC_SWAPOUT_RATIO;
+    } else if (unlikely(!need_swapout && cur_swapout_ratio == MIN_LSC_SWAPOUT_RATIO)) {
+        cur_swapout_ratio = MAX_LSC_SWAPOUT_RATIO;
+    }
+    return need_swapout;
 }
 
 void LocalSysDBCache::CloseLocalSysDBCache()
@@ -717,7 +734,6 @@ void LocalSysDBCache::ClearSysCacheIfNecessary(Oid db_id, const char *db_name)
     if (unlikely(!is_inited)) {
         return;
     }
-    other_space = ((AllocSet)lsc_top_memcxt)->totalSpace + ((AllocSet)lsc_share_memcxt)->totalSpace;
     /* rebuild if memory gt double of threshold */
     if (unlikely(LocalSysDBCacheNeedReBuild())) {
         recovery_finished = g_instance.global_sysdbcache.recovery_finished;
@@ -769,7 +785,6 @@ void LocalSysDBCache::CreateDBObject()
     knl_u_relmap_init(&relmap_cxt);
     MemoryContextSwitchTo(old);
     m_shared_global_db = g_instance.global_sysdbcache.GetSharedGSCEntry();
-    other_space = ((AllocSet)lsc_top_memcxt)->totalSpace + ((AllocSet)lsc_share_memcxt)->totalSpace;
     rel_index_rule_space = 0;
     is_lsc_catbucket_created = false;
 }
@@ -782,9 +797,9 @@ void LocalSysDBCache::CreateCatBucket()
     MemoryContext old = MemoryContextSwitchTo(lsc_share_memcxt);
     systabcache.CreateCatBuckets();
     MemoryContextSwitchTo(old);
-    other_space = ((AllocSet)lsc_top_memcxt)->totalSpace + ((AllocSet)lsc_share_memcxt)->totalSpace;
     rel_index_rule_space = 0;
     is_lsc_catbucket_created = true;
+    cur_swapout_ratio = MAX_LSC_SWAPOUT_RATIO;
 }
 
 void LocalSysDBCache::SetDatabaseName(const char *db_name)
@@ -952,6 +967,8 @@ LocalSysDBCache::LocalSysDBCache()
     rdlock_info.count = 0;
     got_pool_reload = false;
     m_shared_global_db = NULL;
+
+    cur_swapout_ratio = MAX_LSC_SWAPOUT_RATIO;
 
     is_lsc_catbucket_created = false;
     is_closed = false;

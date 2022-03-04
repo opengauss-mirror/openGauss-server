@@ -136,4 +136,14 @@ struct InvalidBaseEntry {
 void StreamTxnContextSaveInvalidMsg(void *stc);
 void StreamTxnContextRestoreInvalidMsg(void *stc);
 #define EnableLocalSysCache() t_thrd.lsc_cxt.enable_lsc
+
+/*
+ * if MAX_LSC_SWAPOUT_RATIO is 0.9, MAX_LSC_FREESIZE_RATIO is 0.8
+ * used_space <= threshold * 0.9 < threshold ==> max_used_space = threshold * 0.8
+ * total_space > threshold >= total_space * 0.9 ==> max_total_space = threshold / 0.8
+ * so max_used_space = max_total_space * 0.72
+ * this means 72% memory can be used at the worst sence */
+const double MAX_LSC_FREESIZE_RATIO = 0.2;
+const double MAX_LSC_SWAPOUT_RATIO = 0.9;
+const double MIN_LSC_SWAPOUT_RATIO = 0.7;
 #endif
