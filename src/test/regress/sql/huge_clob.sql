@@ -7,12 +7,29 @@ drop schema if exists huge_clob;
 create schema huge_clob;
 set current_schema = huge_clob;
 
-create table bigclobtbl031(c1 int,c2 clob,c3 clob,c4 blob,c5 date,c6 timestamp,c7 varchar2);
-insert into bigclobtbl031 values(generate_series(1,5),repeat('AAAA11111aaaaaaaaaaaaaaaaa',1000000),repeat('abdededfj12345679ujik',1000000),hextoraw(repeat('12345678990abcdef',1000)),sysdate,to_timestamp('','yyyy-mm-dd hh24:mi:ss.ff6'),7000);
-update bigclobtbl031 set c2=c2||c2||c2||c2||c2;
-update bigclobtbl031 set c2=c2||c2||c2||c2||c2;
-update bigclobtbl031 set c2=c2||c2;
-update bigclobtbl031 set c3='clobclob3';
+drop table if exists cloblongtbl;
+create table cloblongtbl (a int, b clob, c clob);
+-- insert data less than 1G
+insert into cloblongtbl values (generate_series(1,4),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',5000000),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',5000000));
+update cloblongtbl set b = b||b;
+update cloblongtbl set c = c||c;
+-- b > 1G && c < 1G when a = 2
+update cloblongtbl set b = b||b where a = 2;
+-- b < 1G && c > 1G when a = 3
+update cloblongtbl set c = c||c where a = 3;
+-- b > 1G && c > 1G when a = 4
+update cloblongtbl set b = b||b where a = 4;
+update cloblongtbl set c = c||c where a = 4;
+select a, length(b || c) from cloblongtbl order by 1;
+
+-- reset data for other test
+update cloblongtbl set b = b || b where a = 1;
+update cloblongtbl set b = b || b where a = 3;
+update cloblongtbl set c='cloblessthan1G' where a = 1;
+update cloblongtbl set c='cloblessthan1G' where a = 2;
+update cloblongtbl set c='cloblessthan1G' where a = 3;
+update cloblongtbl set c='cloblessthan1G' where a = 4;
+
 
 --I1.clob in
 create or replace procedure pro_cb4_031(c1 clob,c2 clob)
@@ -31,8 +48,8 @@ create or replace procedure pro_cb4_031_1 is
 v1 clob;
 v2 clob;
 begin
-execute immediate 'select c2 from bigclobtbl031 where c1=1' into v1;
-execute immediate 'select c3 from bigclobtbl031 where c1=1' into v2;
+execute immediate 'select b from cloblongtbl where a=1' into v1;
+execute immediate 'select c from cloblongtbl where a=1' into v2;
 pro_cb4_031(v1,v2);
 end;
 /
@@ -45,8 +62,8 @@ is
 v1 clob;
 v2 clob;
 begin
-execute immediate 'select c2 from bigclobtbl031 where c1=1' into v1;
-execute immediate 'select c3 from bigclobtbl031 where c1=1' into v2;
+execute immediate 'select b from cloblongtbl where a=1' into v1;
+execute immediate 'select c from cloblongtbl where a=1' into v2;
 c1:=v1;
 c2:=v2;
 end;
@@ -74,8 +91,8 @@ is
 v1 clob;
 v2 clob;
 begin
-execute immediate 'select c3 from bigclobtbl031 where c1=1' into v1;
-execute immediate 'select c3 from bigclobtbl031 where c1=2' into v2;
+execute immediate 'select c from cloblongtbl where a=1' into v1;
+execute immediate 'select c from cloblongtbl where a=2' into v2;
 c1:=v1;
 c2:=v2;
 end;
@@ -89,8 +106,8 @@ is
 v1 clob;
 v2 clob;
 begin
-execute immediate 'select c2 from bigclobtbl031 where c1=1' into v1;
-execute immediate 'select c3 from bigclobtbl031 where c1=1' into v2;
+execute immediate 'select b from cloblongtbl where a=1' into v1;
+execute immediate 'select c from cloblongtbl where a=1' into v2;
 c1:=v1;
 c2:=v2;
 end;
@@ -119,12 +136,12 @@ v1 clob;
 v2 clob;
 v3 clob;
 begin
-execute immediate 'select c3 from bigclobtbl031 where c1=1' into v1;
-execute immediate 'select c3 from bigclobtbl031 where c1=2' into v2;
-execute immediate 'select c3 from bigclobtbl031 where c1=3' into v3;
+execute immediate 'select c from cloblongtbl where a=1' into v1;
+execute immediate 'select c from cloblongtbl where a=2' into v2;
+execute immediate 'select c from cloblongtbl where a=3' into v3;
 c1:=v1;
 c2:=v2;
-c3:=v3||'clob3clob3clob3clob3';
+c3:=v3||'clobclobclobclob';
 end;
 /
 
@@ -153,8 +170,8 @@ type ty1 is table of clob;
 v1 ty1;
 begin
 for i in 1..10 loop
-execute immediate 'select c2 from bigclobtbl031 where c1='||i into v1(i);
-update bigclobtbl030 set c3=v1(i)||v1(i) where c1=i;
+execute immediate 'select b from cloblongtbl where a='||i into v1(i);
+update cloblongtbl set c=v1(i)||v1(i) where a=i;
 end loop;
 end;
 /
@@ -167,21 +184,21 @@ type ty1 is varray(10) of clob;
 v1 ty1;
 begin
 for i in 1..10 loop
-execute immediate 'select c2 from bigclobtbl031 where c1='||i into v1(i);
-update bigclobtbl030 set c3=v1(i)||v1(i) where c1=i;
+execute immediate 'select b from cloblongtbl where a='||i into v1(i);
+update cloblongtbl set c=v1(i)||v1(i) where a=i;
 end loop;
 end;
 /
 
 call pro_cb4_031();
-select c1,c2,length(c2),c3,length(c3) from bigclobtbl031 where c1>5 and c1<10 order by 1,2,3,4,5;
-update bigclobtbl031 set c3='clob3clob3';
+select a,b,length(b),c,length(c) from cloblongtbl where a>5 and a<10 order by 1,2,3,4,5;
+update cloblongtbl set c='cloblessthan1G';
 --I6.record 
 create or replace procedure pro_cb4_031 is
 type ty1 is record(c1 int,c2 clob);
 v1 ty1;
 begin
-execute immediate 'select c2 from bigclobtbl031 where c1=1' into v1.c2;
+execute immediate 'select b from cloblongtbl where a=1' into v1.c2;
 end;
 /
 
@@ -193,7 +210,7 @@ v1 clob;
 v2 clob;
 v3 clob;
 v4 int;
-cursor cor1 is select c2 from bigclobtbl031 where c1=1;
+cursor cor1 is select b from cloblongtbl where a=1;
 begin
 open cor1;
 loop
@@ -210,16 +227,20 @@ end;
 
 call pro_cb4_037();
 
-drop table if exists cloblongtbl;
-create table cloblongtbl (a int, b clob, c clob);
-insert into cloblongtbl values (generate_series(1,4),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',5000000),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',5000000));
-update cloblongtbl set b = b||b;
-update cloblongtbl set c = c||c;
-update cloblongtbl set b = b||b where a = 2;
-update cloblongtbl set c = c||c where a = 3;
-update cloblongtbl set b = b||b where a = 4;
-update cloblongtbl set c = c||c where a = 4;
-select a, length(b || c) from cloblongtbl order by 1;
+create or replace procedure test_self_update is
+v1 clob;
+begin
+execute immediate 'select b from cloblongtbl where a=1' into v1;
+update cloblongtbl set b=v1 where a=1;
+savepoint aaa;
+update cloblongtbl set b=v1 where a=2;
+rollback to aaa;
+commit;
+end;
+/
+
+call test_self_update();
+
 drop table if exists cloblongtbl;
 -- clean
 drop schema if exists huge_clob cascade;

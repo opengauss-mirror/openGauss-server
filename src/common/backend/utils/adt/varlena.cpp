@@ -746,7 +746,7 @@ static Datum text_length_huge(Datum str)
  */
 Datum textlen(PG_FUNCTION_ARGS)
 {
-    Datum str = PG_GETARG_DATUM(0);
+    Datum str = fetch_real_lob_if_need(PG_GETARG_DATUM(0));
 
     if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)DatumGetTextPP(str))) {
         return text_length_huge(str);

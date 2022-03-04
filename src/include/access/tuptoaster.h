@@ -275,12 +275,27 @@ extern Size toast_datum_size(Datum value);
 
 extern bool toastrel_valueid_exists(Relation toastrel, Oid valueid);
 
+extern bool create_toast_by_sid(Oid *toastOid);
+extern Oid get_toast_oid();
 extern varlena* toast_huge_write_datum_slice(struct varlena* attr1, struct varlena* attr2, int64 sliceoffset, int32 length);
 extern varlena* toast_pointer_fetch_data(TupleTableSlot* varSlot, Form_pg_attribute attr, int varNumber);
 extern Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid,
                                         bool* is_null, bool* is_huge_clob = NULL);
-extern bool create_toast_by_sid(Oid *toastOid);
-extern Oid get_toast_oid();
+
+inline Datum fetch_real_lob_if_need(Datum toast_pointer)
+{
+    Datum ret = toast_pointer;
+    if (VARATT_IS_EXTERNAL_LOB(toast_pointer)) {
+        bool isNull = false;
+        struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(toast_pointer));
+        ret = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &isNull, NULL);
+        if (unlikely(isNull)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid lob pointer.")));
+        }
+    }
+    return ret;
+}
 
 #endif /* TUPTOASTER_H */
 
