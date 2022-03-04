@@ -232,9 +232,9 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty);
 static void decompile_column_index_array(Datum column_index_array, Oid relId, StringInfo buf);
 static char* pg_get_ruledef_worker(Oid ruleoid, int prettyFlags);
 static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *excludeOps, bool attrsOnly, bool showTblSpc,
-                                    int prettyFlags, bool dumpSchemaOnly = false, bool showSubpartitionLocal = true);
+    int prettyFlags, bool dumpSchemaOnly = false, bool showPartitionLocal = true, bool showSubpartitionLocal = true);
 static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, StringInfoData *buf,
-                                       bool dumpSchemaOnly, bool showSubpartitionLocal);
+    bool dumpSchemaOnly, bool showPartitionLocal, bool showSubpartitionLocal);
 static char* pg_get_constraintdef_worker(Oid constraintId, bool fullCommand, int prettyFlags);
 static text* pg_get_expr_worker(text* expr, Oid relid, const char* relname, int prettyFlags);
 static int print_function_arguments(StringInfo buf, HeapTuple proctup, bool print_table_args, bool print_defaults);
@@ -2960,7 +2960,7 @@ Datum pg_get_indexdef_for_dump(PG_FUNCTION_ARGS)
     bool dumpSchemaOnly = PG_GETARG_BOOL(1);
 
     PG_RETURN_TEXT_P(string_to_text(pg_get_indexdef_worker(indexrelid, 0, NULL, false, true, 0, dumpSchemaOnly,
-                                                           false)));
+                                                           true, false)));
 }
 
 Datum pg_get_indexdef_ext(PG_FUNCTION_ARGS)
@@ -2972,7 +2972,7 @@ Datum pg_get_indexdef_ext(PG_FUNCTION_ARGS)
 
     prettyFlags = pretty ? (PRETTYFLAG_PAREN | PRETTYFLAG_INDENT) : 0;
     PG_RETURN_TEXT_P(string_to_text(pg_get_indexdef_worker(indexrelid, colno, NULL, colno != 0, true, prettyFlags,
-                                                           false, false)));
+                                                           false, false, false)));
 }
 
 /**
@@ -3051,7 +3051,7 @@ static void GetIndexdefForIntervalPartTabDumpSchemaOnly(Oid indexrelid, RangePar
 }
 
 static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, bool showTblSpc, StringInfoData *buf,
-                                       bool dumpSchemaOnly, bool showSubpartitionLocal)
+                                       bool dumpSchemaOnly, bool showPartitionLocal, bool showSubpartitionLocal)
 {
     Oid relid = idxrec->indrelid;
     /*
@@ -3067,12 +3067,12 @@ static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, boo
 
     appendStringInfo(buf, " LOCAL");
     /*
-     * The LOCAL index information of the subpartition table is more.
+     * The LOCAL index information of the partition and subpartition table is more.
      * And the meta-statements (e.g. \d \d+ \dS) are used more.
-     * Therefore, when the meta-statement is called, the subpartition LOCAL index information is not displayed.
+     * Therefore, when the meta-statement is called, the LOCAL index information is not displayed.
      */
     bool isSub = RelationIsSubPartitioned(rel);
-    if (isSub && !showSubpartitionLocal) {
+    if ((!isSub && !showPartitionLocal) || (isSub && !showSubpartitionLocal)) {
         heap_close(rel, NoLock);
         return;
     }
@@ -3112,7 +3112,7 @@ static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, boo
  * NULL then it points to an array of exclusion operator OIDs.
  */
 static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *excludeOps, bool attrsOnly, bool showTblSpc,
-                                    int prettyFlags, bool dumpSchemaOnly, bool showSubpartitionLocal)
+    int prettyFlags, bool dumpSchemaOnly, bool showPartitionLocal, bool showSubpartitionLocal)
 {
     /* might want a separate isConstraint parameter later */
     bool isConstraint = (excludeOps != NULL);
@@ -3316,7 +3316,8 @@ static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *exclud
 
         if (idxrelrec->parttype == PARTTYPE_PARTITIONED_RELATION &&
             idxrelrec->relkind != RELKIND_GLOBAL_INDEX) {
-            pg_get_indexdef_partitions(indexrelid, idxrec, showTblSpc, &buf, dumpSchemaOnly, showSubpartitionLocal);
+            pg_get_indexdef_partitions(indexrelid, idxrec, showTblSpc, &buf, dumpSchemaOnly,
+                showPartitionLocal, showSubpartitionLocal);
         }
 
         /*

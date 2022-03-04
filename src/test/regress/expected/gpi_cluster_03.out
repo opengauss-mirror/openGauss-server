@@ -51,8 +51,8 @@ create index global_inventory_table_index2 on inventory_table(INV_ITEM_SK) globa
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -70,8 +70,8 @@ cluster inventory_table using global_inventory_table_index1;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default CLUSTER
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -89,8 +89,8 @@ cluster inventory_table PARTITION(P3) USING inventory_table_index1;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default CLUSTER
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default CLUSTER
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -108,8 +108,8 @@ cluster inventory_table using global_inventory_table_index1;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default CLUSTER
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -127,8 +127,8 @@ alter table inventory_table cluster on inventory_table_index1;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default CLUSTER
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default CLUSTER
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -146,8 +146,8 @@ alter table inventory_table cluster on global_inventory_table_index1;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default CLUSTER
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -165,8 +165,8 @@ alter table inventory_table cluster on global_inventory_table_index2;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default CLUSTER
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -184,8 +184,8 @@ cluster inventory_table;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default CLUSTER
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -203,8 +203,8 @@ cluster inventory_table using global_inventory_table_index1;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default CLUSTER
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -222,8 +222,8 @@ cluster inventory_table;
 Indexes:
     "global_inventory_table_index1" btree (inv_item_sk) TABLESPACE pg_default CLUSTER
     "global_inventory_table_index2" btree (inv_item_sk) TABLESPACE pg_default
-    "inventory_table_index1" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
-    "inventory_table_index2" btree (inv_date_sk) LOCAL(PARTITION p1_inv_date_sk_idx, PARTITION p2_inv_date_sk_idx, PARTITION p3_inv_date_sk_idx, PARTITION p4_inv_date_sk_idx, PARTITION p5_inv_date_sk_idx, PARTITION p6_inv_date_sk_idx, PARTITION p7_inv_date_sk_idx)  TABLESPACE pg_default
+    "inventory_table_index1" btree (inv_date_sk) LOCAL TABLESPACE pg_default
+    "inventory_table_index2" btree (inv_date_sk) LOCAL TABLESPACE pg_default
 Partition By RANGE(inv_date_sk)
 Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no

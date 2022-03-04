@@ -105,7 +105,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "range_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
-    "range_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2009_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION time_2011_product_id_idx, PARTITION time_2012_product_id_idx, PARTITION time_end_product_id_idx)  TABLESPACE pg_default
+    "range_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By RANGE(time_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -177,7 +177,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "range_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default UNUSABLE
-    "range_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION time_end_product_id_idx)  TABLESPACE pg_default
+    "range_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By RANGE(time_id)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -286,7 +286,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "range2_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
-    "range2_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2009_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION time_2011_product_id_idx, PARTITION time_2012_product_id_idx, PARTITION time_end_product_id_idx)  TABLESPACE pg_default
+    "range2_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By RANGE(time_id, product_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -358,7 +358,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "range2_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default UNUSABLE
-    "range2_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION time_end_product_id_idx)  TABLESPACE pg_default
+    "range2_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By RANGE(time_id, product_id)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -451,7 +451,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "interval_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
-    "interval_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2009_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION sys_p1_product_id_idx)  TABLESPACE pg_default
+    "interval_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By RANGE(time_id) INTERVAL('1 year')
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -513,7 +513,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "interval_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default UNUSABLE
-    "interval_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2010_product_id_idx)  TABLESPACE pg_default
+    "interval_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By RANGE(time_id) INTERVAL('1 year')
 Number of partitions: 2 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -625,7 +625,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "list_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
-    "list_sales_idx" btree (product_id) LOCAL(PARTITION channel_default_product_id_idx, PARTITION channel5_product_id_idx, PARTITION channel4_product_id_idx, PARTITION channel3_product_id_idx, PARTITION channel2_product_id_idx, PARTITION channel1_product_id_idx)  TABLESPACE pg_default
+    "list_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By LIST(channel_id)
 Number of partitions: 6 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -697,7 +697,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "list_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default UNUSABLE
-    "list_sales_idx" btree (product_id) LOCAL(PARTITION channel5_product_id_idx, PARTITION channel4_product_id_idx, PARTITION channel1_product_id_idx)  TABLESPACE pg_default
+    "list_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By LIST(channel_id)
 Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -798,7 +798,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "hash_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
-    "hash_sales_idx" btree (product_id) LOCAL(PARTITION product4_product_id_idx, PARTITION product3_product_id_idx, PARTITION product2_product_id_idx, PARTITION product1_product_id_idx)  TABLESPACE pg_default
+    "hash_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By HASH(product_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Has OIDs: no
@@ -873,7 +873,7 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
  amount_sold   | numeric(10,2)                  |           | main     |              | 
 Indexes:
     "hash_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
-    "hash_sales_idx" btree (product_id) LOCAL(PARTITION product4_product_id_idx, PARTITION product3_product_id_idx, PARTITION product2_product_id_idx, PARTITION product1_product_id_idx)  TABLESPACE pg_default
+    "hash_sales_idx" btree (product_id) LOCAL TABLESPACE pg_default
 Partition By HASH(product_id)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 Has OIDs: no
