@@ -5967,7 +5967,7 @@ int ExecCleanTargetListLength(List* targetlist)
     return len;
 }
 
-HeapTuple get_tuple(Relation relation, ItemPointer tid)
+HeapTuple get_tuple(Relation relation, ItemPointer tid, bool update_check)
 {
     Buffer user_buf = InvalidBuffer;
     HeapTuple tuple = NULL;
@@ -5981,7 +5981,7 @@ HeapTuple get_tuple(Relation relation, ItemPointer tid)
     tuple->t_self = *tid;
     
     if (heap_fetch(relation, SnapshotAny, tuple, &user_buf, false, NULL)) {
-        result = HeapTupleSatisfiesUpdate(tuple, GetCurrentCommandId(true), user_buf, false);
+        result = update_check ? HeapTupleSatisfiesUpdate(tuple, GetCurrentCommandId(true), user_buf, false) : TM_Ok;
         if (result != TM_Ok) {
             ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("Failed to get tuple")));
         }
@@ -6013,7 +6013,7 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
     tuple_ctid.ip_blkid.bi_lo = lob_pointer->bi_lo;
     tuple_ctid.ip_posid = lob_pointer->ip_posid;
     Relation relation = heap_open(lob_pointer->relid, RowExclusiveLock);
-    HeapTuple origin_tuple = get_tuple(relation, &tuple_ctid);
+    HeapTuple origin_tuple = get_tuple(relation, &tuple_ctid, false);
     if (!HeapTupleIsValid(origin_tuple)) {
         ereport(ERROR,
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
@@ -6113,20 +6113,9 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
             if (VARATT_IS_EXTERNAL_LOB(values[resind])) {
                 struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(values[resind]));
                 bool is_null = false;
-                if (econtext->ecxt_scantuple != NULL) {
-                    Oid update_oid = ((HeapTuple)(econtext->ecxt_scantuple->tts_tuple))->t_tableOid;
-                    values[resind] = fetch_lob_value_from_tuple(lob_pointer, update_oid, &is_null, NULL);
-                } else {
-                    ItemPointerData tuple_ctid;
-                    tuple_ctid.ip_blkid.bi_hi = lob_pointer->bi_hi;
-                    tuple_ctid.ip_blkid.bi_lo = lob_pointer->bi_lo;
-                    tuple_ctid.ip_posid = lob_pointer->ip_posid;
-                    Relation relation = heap_open(lob_pointer->relid, RowExclusiveLock);
-                    HeapTuple origin_tuple = get_tuple(relation, &tuple_ctid);
-                    Datum attr = fastgetattr(origin_tuple, lob_pointer->columid, relation->rd_att, &is_null);
-                    values[resind] = attr;
-                    heap_close(relation, NoLock);
-                }
+                Oid update_oid = econtext->ecxt_scantuple != NULL ?
+                    ((HeapTuple)(econtext->ecxt_scantuple->tts_tuple))->t_tableOid : InvalidOid;
+                values[resind] = fetch_lob_value_from_tuple(lob_pointer, update_oid, &is_null, NULL);
                 isnull[resind] = is_null;
             }
         }
