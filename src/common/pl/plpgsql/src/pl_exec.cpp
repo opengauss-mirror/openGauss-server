@@ -7986,11 +7986,6 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
                 bool is_have_huge_clob = false;
                 struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
                 value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-                if (is_have_huge_clob) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("huge clob do not support as record element.")));
-                }
             }
             PLpgSQL_assignlist* assignvar = (PLpgSQL_assignlist*)target;
             List* assignlist = assignvar->assignlist;
@@ -10664,12 +10659,6 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                          * about the type of a source NULL
                          */
                         valtype = InvalidOid;
-                    }
-
-                    if (valtype == CLOBOID && !isnull && VARATT_IS_HUGE_TOAST_POINTER(value)) {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("huge clob do not support as record element.")));
                     }
 
                     /* accept function's return value for cursor */

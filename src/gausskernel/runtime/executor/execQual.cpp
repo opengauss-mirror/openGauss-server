@@ -2274,7 +2274,6 @@ static Datum ExecMakeFunctionResultNoSets(
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
     bool proIsProcedure = false;
     bool supportTranaction = false;
-    bool is_have_huge_clob = false;
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && (t_thrd.proc->workingVersionNum  >= STP_SUPPORT_COMMIT_ROLLBACK)) {
@@ -2401,11 +2400,6 @@ static Datum ExecMakeFunctionResultNoSets(
         if (has_refcursor && fcinfo->argTypes[i] == REFCURSOROID)
             econtext->is_cursor = true;
         fcinfo->arg[i] = ExecEvalExpr(argstate, econtext, &fcinfo->argnull[i], NULL);
-        if (is_external_clob(fcinfo->argTypes[i], fcinfo->argnull[i], fcinfo->arg[i])) {
-            bool is_null = false;
-            struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[i]));
-            fcinfo->arg[i] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-        }
         ExecTableOfIndexInfo execTableOfIndexInfo;
         initExecTableOfIndexInfo(&execTableOfIndexInfo, econtext);
         ExecEvalParamExternTableOfIndex((Node*)argstate->expr, &execTableOfIndexInfo);
@@ -2457,11 +2451,6 @@ static Datum ExecMakeFunctionResultNoSets(
 
     pgstat_init_function_usage(fcinfo, &fcusage);
 
-    if (fcinfo->flinfo->fn_addr != textcat && is_have_huge_clob) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("huge clob do not support as function in parameter")));
-    }
     fcinfo->isnull = false;
     if (u_sess->instr_cxt.global_instr != NULL && fcinfo->flinfo->fn_addr == plpgsql_call_handler) {
         StreamInstrumentation* save_global_instr = u_sess->instr_cxt.global_instr;
@@ -2469,6 +2458,17 @@ static Datum ExecMakeFunctionResultNoSets(
         result = FunctionCallInvoke(fcinfo);   // node will be free at here or else;
         u_sess->instr_cxt.global_instr = save_global_instr;
     } else {
+        if (fcinfo->argTypes[0] == CLOBOID && fcinfo->argTypes[1] == CLOBOID && fcinfo->flinfo->fn_addr == textcat) {
+            bool is_null = false;
+            if (fcinfo->arg[0] != 0 && VARATT_IS_EXTERNAL_LOB(fcinfo->arg[0])) {
+                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[0]));
+                fcinfo->arg[0] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
+            }
+            if (fcinfo->arg[1] != 0 && VARATT_IS_EXTERNAL_LOB(fcinfo->arg[1])) {
+                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[1]));
+                fcinfo->arg[1] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
+            }
+        }    
         result = FunctionCallInvoke(fcinfo);
     }
     *isNull = fcinfo->isnull;
@@ -6027,7 +6027,7 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
     if (*is_null) {
         new_attr = (Datum)0;
     } else {
-        if (VARATT_IS_SHORT(attr) || VARATT_IS_EXTERNAL(attr)) {
+        if (VARATT_IS_SHORT(attr) || VARATT_IS_EXTERNAL(attr) || VARATT_IS_4B(attr)) {
             new_attr = PointerGetDatum(attr);
         } else if (VARATT_IS_HUGE_TOAST_POINTER(attr)) {
             if (unlikely(origin_tuple->tupTableType == UHEAP_TUPLE)) {
