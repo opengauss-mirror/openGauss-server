@@ -19,7 +19,6 @@ DBMIND_PATH = os.path.dirname(os.path.abspath(__file__))
 MISC_PATH = os.path.join(DBMIND_PATH, 'misc')
 
 CONFILE_NAME = 'dbmind.conf'  # the name of configuration file
-CONFILE_HEADER_NAME = 'dbmind.conf.header'
 PIDFILE_NAME = 'dbmind.pid'
 LOGFILE_NAME = 'dbmind.log'
 METRIC_MAP_CONFIG = 'metric_map.conf'
