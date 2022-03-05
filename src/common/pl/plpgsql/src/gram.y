@@ -2963,6 +2963,10 @@ for_control		: for_variable K_IN
                                         check_assignable((PLpgSQL_datum *)newp->rec ?
                                             (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
                                     } else {
+                                        /* check the sql */
+                                        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK) {
+                                            (void)getCursorTupleDesc(expr1, false, true);
+                                        }
                                         newp->rec = $1.rec;
                                         check_assignable((PLpgSQL_datum *) newp->rec, @1);
                                     }
@@ -2979,6 +2983,10 @@ for_control		: for_variable K_IN
                                         check_assignable((PLpgSQL_datum *)newp->rec ?
                                             (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
                                     } else {
+                                        /* check the sql */
+                                        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK) {
+                                            (void)getCursorTupleDesc(expr1, false, true);
+                                        }
                                         newp->row = $1.row;
                                         check_assignable((PLpgSQL_datum *) newp->row, @1);
                                     }
@@ -2995,6 +3003,10 @@ for_control		: for_variable K_IN
                                         check_assignable((PLpgSQL_datum *)newp->rec ?
                                             (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
                                     } else {
+                                        /* check the sql */
+                                        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK) {
+                                            (void)getCursorTupleDesc(expr1, false, true);
+                                        }
                                         /* convert single scalar to list */
                                         newp->row = make_scalar_list1($1.name, $1.scalar, $1.dno, $1.lineno, @1);
                                         /* no need for check_assignable */
@@ -4342,6 +4354,7 @@ stmt_open		: K_OPEN cursor_variable
                                         yyerror("syntax error");
                                 }
                             }
+#ifndef ENABLE_MULTIPLE_NODES
 			    if (newp->query != NULL && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK) {
                                 (void)getCursorTupleDesc(newp->query, false, true);
 			    }
@@ -4349,6 +4362,7 @@ stmt_open		: K_OPEN cursor_variable
 			    {
                                 (void)getCursorTupleDesc(newp->dynquery, false, true);
 			    }
+#endif
                         }
                         else
                         {
@@ -8773,9 +8787,11 @@ make_execsql_stmt(int firsttoken, int location)
     pfree_ext(ds.data);
 
     check_sql_expr(expr->query, location, 0);
+#ifndef ENABLE_MULTIPLE_NODES
     if (firsttoken == K_SELECT && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK) {
         (void)getCursorTupleDesc(expr, false, true);
     }
+#endif
     execsql = (PLpgSQL_stmt_execsql *)palloc(sizeof(PLpgSQL_stmt_execsql));
     execsql->cmd_type = PLPGSQL_STMT_EXECSQL;
     execsql->lineno  = plpgsql_location_to_lineno(location);

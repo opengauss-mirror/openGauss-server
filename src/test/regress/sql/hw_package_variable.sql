@@ -2139,6 +2139,60 @@ end pck1;
 DROP PACKAGE pck1;
 DROP PACKAGE pck2;
 DROP TABLE t1;
+
+-- test check sql in for rec in query loop
+create or replace function check_f04 return int as
+declare
+v_2 number(10,2):=-213.989;
+v_3 float:=22.34;
+v_4 char(1):='q';
+v_6 date:='1999-09-09';
+v_7 clob:='dddd';
+v_8 blob:='ad';
+begin
+raise info '1-0 %', v_6;
+for v_6 in select c3 from check_tab1 order by c3 limit 6
+loop
+raise info '1-1 %', v_6;
+end loop;
+raise info '1-2 %', v_6;
+
+return 1;
+exception
+when others then
+raise info 'error is %',sqlerrm;
+return 0;
+end;
+/
+
+create table check_tab1(a int);
+
+create or replace function check_f04 return int as
+declare
+v_2 number(10,2):=-213.989;
+v_3 float:=22.34;
+v_4 char(1):='q';
+v_6 date:='1999-09-09';
+v_7 clob:='dddd';
+v_8 blob:='ad';
+begin
+raise info '1-0 %', v_6;
+for v_6 in select c3 from check_tab1 order by c3 limit 6
+loop
+raise info '1-1 %', v_6;
+end loop;
+raise info '1-2 %', v_6;
+
+return 1;
+exception
+when others then
+raise info 'error is %',sqlerrm;
+return 0;
+end;
+/
+
+drop table check_tab1;
+
 reset behavior_compat_options;
 
 -- ref package cursor attr at first
