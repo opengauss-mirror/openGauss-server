@@ -188,7 +188,7 @@ function install_gaussdb()
 
     export GAUSSHOME=${BUILD_DIR}
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:${BUILD_DIR}/lib/postgresql:${LD_LIBRARY_PATH}
-    make -sj 8>> "$LOG_FILE" 2>&1
+    make -sj 20 >> "$LOG_FILE" 2>&1
     make install -sj 8>> "$LOG_FILE" 2>&1
     if [ $? -ne 0 ]; then
         make install -sj 8>> "$LOG_FILE" 2>&1

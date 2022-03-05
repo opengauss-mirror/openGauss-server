@@ -833,7 +833,7 @@ test: pg_compatibility
 # autonomous transaction Test
 
 #test jdbc pbe for bypass
-test: bypass_pbe
+#test: bypass_pbe
 #test: partition for hash list
 test: pbe_hash_list_partition 
 test: hw_partition_list_insert
@@ -898,11 +898,12 @@ test: procedure_privilege_test
 test: toomanyparams
 
 test: test_astore_multixact
-test: component_view_enhancements single_node_user_mapping
+test: component_view_enhancements 
+#test: single_node_user_mapping
 
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
-test: publication
-test: subscription
+#test: publication
+#test: subscription
 test: fdw_audit
 test: gs_global_config_audit
 test: detail
