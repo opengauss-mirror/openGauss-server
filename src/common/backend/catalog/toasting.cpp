@@ -745,9 +745,11 @@ static void InitTempToastNamespace(void)
 
     /* Advance command counter to make namespace visible */
     CommandCounterIncrement();
-
-    Assert(OidIsValid(u_sess->catalog_cxt.myTempNamespace) && OidIsValid(u_sess->catalog_cxt.myTempToastNamespace));
-
+    if (!OidIsValid(u_sess->catalog_cxt.myTempToastNamespace)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Temp toast namespace create failed")));
+    }
     u_sess->catalog_cxt.baseSearchPathValid = false;
 }
 

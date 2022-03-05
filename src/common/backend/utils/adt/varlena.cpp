@@ -1899,7 +1899,7 @@ Datum textne(PG_FUNCTION_ARGS)
 {
     Datum arg1 = PG_GETARG_DATUM(0);
     Datum arg2 = PG_GETARG_DATUM(1);
-    if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg1)) || VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg2))) {
+    if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg1)) && VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg2))) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("textne could not support more than 1GB clob/blob data")));
     }
@@ -2063,7 +2063,7 @@ Datum text_ge(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
-    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) && VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("text_ge could not support more than 1GB clob/blob data")));
     }
