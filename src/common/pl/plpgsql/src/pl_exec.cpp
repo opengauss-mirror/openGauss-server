@@ -4596,16 +4596,10 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
             case PLPGSQL_DTYPE_VAR: {
                 PLpgSQL_var* var = (PLpgSQL_var*)retvar;
                 Datum value = var->value;
-                if (is_external_clob(var->datatype->typoid, var->isnull, value)) {
-                    bool is_null = false;
-                    bool is_have_huge_clob = false;
-                    struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
-                    value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-                    if (is_have_huge_clob) {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("huge clob do not support as return parameter")));
-                    }
+                if (is_huge_clob(var->datatype->typoid, var->isnull, value)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("huge clob do not support as return parameter")));
                 }
                 if (need_param_seperation) {
                     estate->paramval = value;
@@ -7423,16 +7417,10 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
             MemoryContext oldcontext = NULL;
             AttrNumber attrno = ((PLpgSQL_arrayelem*)target)->assignattrno;
 
-            if (is_external_clob(valtype, *isNull, value)) {
-                bool is_null = false;
-                bool is_have_huge_clob = false;
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
-                value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-                if (is_have_huge_clob) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("huge clob do not support as array element.")));
-                }
+            if (is_huge_clob(valtype, *isNull, value)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("huge clob do not support as array element.")));
             }
             /*
              * We need to do subscript evaluation, which might require
@@ -7711,16 +7699,10 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
             MemoryContext oldcontext = NULL;
             AttrNumber attrno = ((PLpgSQL_tableelem*)target)->assignattrno;
 
-            if (is_external_clob(valtype, *isNull, value)) {
-                bool is_null = false;
-                bool is_have_huge_clob = false;
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
-                value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-                if (is_have_huge_clob) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("huge clob do not support as table of element.")));
-                }
+            if (is_huge_clob(valtype, *isNull, value)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("huge clob do not support as table of element.")));
             }
 
             /*
@@ -7993,12 +7975,6 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
             /*
              * Target has a assign list
              */
-            if (is_external_clob(valtype, *isNull, value)) {
-                bool is_null = false;
-                bool is_have_huge_clob = false;
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
-                value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-            }
             PLpgSQL_assignlist* assignvar = (PLpgSQL_assignlist*)target;
             List* assignlist = assignvar->assignlist;
             PLpgSQL_datum* assigntarget = estate->datums[assignvar->targetno];
@@ -10794,17 +10770,10 @@ HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, Tuple
             exec_eval_datum(estate, estate->datums[row->varnos[i]], &fieldtypeid, &fieldtypmod, &dvalues[i], &nulls[i]);
         }
 
-        if (is_external_clob(fieldtypeid, nulls[i], dvalues[i])) {
-            bool is_null = false;
-            bool is_have_huge_clob = false;
-            struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(dvalues[i]));
-            dvalues[i] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-            if (is_have_huge_clob) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("huge clob do not support concat a row")));
-            }
-            nulls[i] = is_null;
+        if (is_huge_clob(fieldtypeid, nulls[i], dvalues[i])) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("huge clob do not support concat a row")));
         }
 
         if (estate->is_exception && fieldtypeid == REFCURSOROID) {

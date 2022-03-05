@@ -67,6 +67,22 @@ ERROR:  huge clob do not support as function in parameter
 CONTEXT:  PL/pgSQL function pro_cb4_031(clob,clob) line 5 at assignment
 SQL statement "CALL pro_cb4_031(v1,v2)"
 PL/pgSQL function pro_cb4_031_1() line 7 at PERFORM
+create or replace procedure pro_cb4_005 is
+v1 clob;
+v2 clob;
+v3 clob;
+v4 integer;
+begin
+execute immediate 'select b from cloblongtbl where a=1' into v1;
+dbe_lob.read(v1,10,2,v2);
+end;
+/
+call pro_cb4_005();
+ pro_cb4_005 
+-------------
+ 
+(1 row)
+
 --I2.clob > 1G out
 create or replace procedure pro_cb4_031(c1 out clob,c2 out clob)
 is
@@ -215,7 +231,6 @@ select a,b,length(b),c,length(c) from cloblongtbl where a>5 and a<10 order by 1,
 (0 rows)
 
 update cloblongtbl set c='cloblessthan1G';
-ERROR:  tuple concurrently updated
 --I6.record 
 create or replace procedure pro_cb4_031 is
 type ty1 is record(c1 int,c2 clob);
@@ -251,8 +266,11 @@ close cor1;
 end;
 /
 call pro_cb4_037();
-ERROR:  huge clob do not support as record element.
-CONTEXT:  PL/pgSQL function pro_cb4_037() line 10 at FETCH
+ pro_cb4_037 
+-------------
+ 
+(1 row)
+
 create or replace procedure test_self_update is
 v1 clob;
 begin
@@ -270,11 +288,36 @@ call test_self_update();
  
 (1 row)
 
+create or replace procedure test_update_delete is
+v1 clob;
+begin
+execute immediate 'select b from cloblongtbl where a=1' into v1;
+update cloblongtbl set b=v1 where a=1;
+rollback;
+update cloblongtbl set b=v1 where a=2;
+commit;
+end;
+/
+call test_update_delete();
+ test_update_delete 
+--------------------
+ 
+(1 row)
+
+begin;
+delete from cloblongtbl where a < 3;
+rollback;
+begin;
+delete from cloblongtbl where a = 1;
+delete from cloblongtbl where a = 2;
+rollback;
 drop table if exists cloblongtbl;
 -- clean
 drop schema if exists huge_clob cascade;
-NOTICE:  drop cascades to 4 other objects
-DETAIL:  drop cascades to function pro_cb4_031_1()
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to function pro_cb4_005()
+drop cascades to function pro_cb4_031_1()
 drop cascades to function pro_cb4_031()
 drop cascades to function pro_cb4_037()
 drop cascades to function test_self_update()
+drop cascades to function test_update_delete()

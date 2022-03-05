@@ -56,6 +56,19 @@ end;
 
 call pro_cb4_031_1();
 
+create or replace procedure pro_cb4_005 is
+v1 clob;
+v2 clob;
+v3 clob;
+v4 integer;
+begin
+execute immediate 'select b from cloblongtbl where a=1' into v1;
+dbe_lob.read(v1,10,2,v2);
+end;
+/
+
+call pro_cb4_005();
+
 --I2.clob > 1G out
 create or replace procedure pro_cb4_031(c1 out clob,c2 out clob)
 is

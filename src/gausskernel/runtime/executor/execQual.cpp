@@ -152,6 +152,7 @@ static Datum ExecEvalGroupingIdExpr(
     GroupingIdExprState* gstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
 extern struct varlena *heap_tuple_fetch_and_copy(Relation rel, struct varlena *attr, bool needcheck);
+static void check_huge_clob_paramter(FunctionCallInfoData* fcinfo, bool is_have_huge_clob);
 
 THR_LOCAL PLpgSQL_execstate* plpgsql_estate = NULL;
 
@@ -1692,6 +1693,7 @@ static ExprDoneCond ExecEvalFuncArgs(
     i = 0;
     econtext->is_cursor = false;
     u_sess->plsql_cxt.func_tableof_index = NIL;
+    bool is_have_huge_clob = false;
     foreach (arg, argList) {
         ExprState* argstate = (ExprState*)lfirst(arg);
         ExprDoneCond thisArgIsDone;
@@ -1719,6 +1721,9 @@ static ExprDoneCond ExecEvalFuncArgs(
         }
         fcinfo->argTypes[i] = argstate->resultType;
         econtext->is_cursor = false;
+        if (is_huge_clob(fcinfo->argTypes[i], fcinfo->argnull[i], fcinfo->arg[i])) {
+            is_have_huge_clob = true;
+        }
 
         if (thisArgIsDone != ExprSingleResult) {
             /*
@@ -1734,6 +1739,7 @@ static ExprDoneCond ExecEvalFuncArgs(
         }
         i++;
     }
+    check_huge_clob_paramter(fcinfo, is_have_huge_clob);
 
     Assert(i == fcinfo->nargs);
 
@@ -2274,6 +2280,7 @@ static Datum ExecMakeFunctionResultNoSets(
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
     bool proIsProcedure = false;
     bool supportTranaction = false;
+    bool is_have_huge_clob = false;
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && (t_thrd.proc->workingVersionNum  >= STP_SUPPORT_COMMIT_ROLLBACK)) {
@@ -2400,6 +2407,9 @@ static Datum ExecMakeFunctionResultNoSets(
         if (has_refcursor && fcinfo->argTypes[i] == REFCURSOROID)
             econtext->is_cursor = true;
         fcinfo->arg[i] = ExecEvalExpr(argstate, econtext, &fcinfo->argnull[i], NULL);
+        if (is_huge_clob(fcinfo->argTypes[i], fcinfo->argnull[i], fcinfo->arg[i])) {
+            is_have_huge_clob = true;
+        }
         ExecTableOfIndexInfo execTableOfIndexInfo;
         initExecTableOfIndexInfo(&execTableOfIndexInfo, econtext);
         ExecEvalParamExternTableOfIndex((Node*)argstate->expr, &execTableOfIndexInfo);
@@ -2452,6 +2462,7 @@ static Datum ExecMakeFunctionResultNoSets(
     pgstat_init_function_usage(fcinfo, &fcusage);
 
     fcinfo->isnull = false;
+    check_huge_clob_paramter(fcinfo, is_have_huge_clob);
     if (u_sess->instr_cxt.global_instr != NULL && fcinfo->flinfo->fn_addr == plpgsql_call_handler) {
         StreamInstrumentation* save_global_instr = u_sess->instr_cxt.global_instr;
         u_sess->instr_cxt.global_instr = NULL;
@@ -5991,6 +6002,21 @@ static HeapTuple get_tuple(Relation relation, ItemPointer tid)
     return new_tuple;
 }
 
+static void check_huge_clob_paramter(FunctionCallInfoData* fcinfo, bool is_have_huge_clob)
+{
+    if (!is_have_huge_clob || IsSystemObjOid(fcinfo->flinfo->fn_oid)) {
+        return;
+    }
+    Oid schema_oid = get_func_namespace(fcinfo->flinfo->fn_oid);
+    if (IsPackageSchemaOid(schema_oid)) {
+        return;
+    }
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("huge clob do not support as function in parameter")));
+}
+
+
 bool is_external_clob(Oid type_oid, bool is_null, Datum value)
 {
     if (type_oid == CLOBOID && !is_null && VARATT_IS_EXTERNAL_LOB(value)) {
@@ -5999,7 +6025,37 @@ bool is_external_clob(Oid type_oid, bool is_null, Datum value)
     return false;
 }
 
-Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid, bool* is_null, bool* is_huge_clob)
+bool is_huge_clob(Oid type_oid, bool is_null, Datum value)
+{
+    if (!is_external_clob(type_oid, is_null, value)) {
+        return false;
+    }
+
+    struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
+    bool is_huge_clob = false;
+    /* get relation by relid */
+    ItemPointerData tuple_ctid;
+    tuple_ctid.ip_blkid.bi_hi = lob_pointer->bi_hi;
+    tuple_ctid.ip_blkid.bi_lo = lob_pointer->bi_lo;
+    tuple_ctid.ip_posid = lob_pointer->ip_posid;
+    Relation relation = heap_open(lob_pointer->relid, RowExclusiveLock);
+    HeapTuple origin_tuple = get_tuple(relation, &tuple_ctid);
+    if (!HeapTupleIsValid(origin_tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("cache lookup failed for tuple from relation %u", lob_pointer->relid)));
+    }
+    bool attr_is_null = false;
+    Datum attr = fastgetattr(origin_tuple, lob_pointer->columid, relation->rd_att, &attr_is_null);
+    if (!attr_is_null && VARATT_IS_HUGE_TOAST_POINTER(attr)) {
+        is_huge_clob = true;
+    }
+    heap_close(relation, NoLock);
+    heap_freetuple(origin_tuple);
+    return is_huge_clob;
+}
+
+Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid, bool* is_null)
 {
     /* get relation by relid */
     ItemPointerData tuple_ctid;
@@ -6015,9 +6071,7 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
     }
 
     Datum attr = fastgetattr(origin_tuple, lob_pointer->columid, relation->rd_att, is_null);
-    if (!*is_null && VARATT_IS_HUGE_TOAST_POINTER(attr) && is_huge_clob != NULL) {
-        *is_huge_clob = true;
-    }
+
 
     if (!OidIsValid(update_oid)) {
         heap_close(relation, NoLock);
@@ -6109,7 +6163,7 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
                 bool is_null = false;
                 Oid update_oid = econtext->ecxt_scantuple != NULL ?
                     ((HeapTuple)(econtext->ecxt_scantuple->tts_tuple))->t_tableOid : InvalidOid;
-                values[resind] = fetch_lob_value_from_tuple(lob_pointer, update_oid, &is_null, NULL);
+                values[resind] = fetch_lob_value_from_tuple(lob_pointer, update_oid, &is_null);
                 isnull[resind] = is_null;
             }
         }
