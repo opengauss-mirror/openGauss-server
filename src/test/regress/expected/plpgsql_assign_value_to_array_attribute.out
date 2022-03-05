@@ -1,28 +1,23 @@
 -- FOR PL/pgSQL VARRAY Assign Value to Attribute scenarios --
-
 -- check compatibility --
 -- create new schema --
 drop schema if exists plpgsql_arrayassign;
 NOTICE:  schema "plpgsql_arrayassign" does not exist, skipping
 create schema plpgsql_arrayassign;
 set current_schema = plpgsql_arrayassign;
-
 -- initialize table and type--
 create type info as (name varchar2(50), age int, address varchar2(20), salary float(2));
 create type customer as (id number(10), c_info info);
 create table customers (id number(10), c_info info);
-
 insert into customers (id, c_info) values (1, ('Vera' ,32, 'Paris', 22999.00));
 insert into customers (id, c_info) values (2, ('Zera' ,25, 'London', 5999.00));
 insert into customers (id, c_info) values (3, ('Alice' ,22, 'Bangkok', 9800.98));
 insert into customers (id, c_info) values (4, ('Jim' ,26, 'Dubai', 18700.00));
 insert into customers (id, c_info) values (5, ('Kevin' ,28, 'Singapore', 18999.00));
 insert into customers (id, c_info) values (6, ('Gauss' ,42, 'Beijing', 32999.00));
-
 ----------------------------------------------------
 ------------------ START OF TESTS ------------------
 ----------------------------------------------------
-
 -- test assign value by :=
 create or replace function get_customers RETURNS customer[] as $$ 
 declare
@@ -44,7 +39,6 @@ select get_customers();
  {"(1,\"(Vera,32,Paris,22999)\")","(3,\"(Alice,22,Bangkok,9800.98)\")","(4,\"(Jim,26,Dubai,18700)\")"}
 (1 row)
 
-
 -- test assign value by select into
 create or replace function get_customers RETURNS customer[] as $$ 
 declare
@@ -65,7 +59,6 @@ select get_customers();
 -------------------------------------------------------------------------------------------------------
  {"(1,\"(Vera,32,Paris,22999)\")","(3,\"(Alice,22,Bangkok,9800.98)\")","(4,\"(Jim,26,Dubai,18700)\")"}
 (1 row)
-
 
 -- test assign value by fetch into
 create or replace function get_customers RETURNS customer[] as $$ 
@@ -93,7 +86,6 @@ select get_customers();
 ---------------------------------------------------------------------------------------------------
  {"(1,\"(Vera,32,Paris,22999)\")","(1,\"(Vera,32,Paris,22999)\")","(2,\"(Zera,25,London,5999)\")"}
 (1 row)
-
 
 -- test assign value by EXECUTE IMMEDIATE into
 create or replace function get_customers RETURNS customer[] as $$ 
@@ -124,7 +116,6 @@ select get_customers();
  {"(1,\"(Vera,32,Paris,22999)\")","(3,\"(Alice,22,Bangkok,9800.98)\")","(4,\"(Jim,26,Dubai,18700)\")"}
 (1 row)
 
-
 -- test assign value in two-dimensional arrays 
 -- (only := support assign value in two-dimensional arrays)
 create or replace function get_customers RETURNS customer[] as $$ 
@@ -149,7 +140,6 @@ select get_customers();
 ---------------------------------------------------------------------------------------------------------------------------------------------------
  {{"(5,\"(Kevin,28,Singapore,18999)\")","(6,\"(Gauss,42,Beijing,32999)\")"},{"(7,\"(Bob,24,Shanghai,28999)\")","(8,\"(Jack,56,Hongkong,8999)\")"}}
 (1 row)
-
 
 -- test assign value with loop, if, case 
 create or replace function get_customers RETURNS customer[] as $$ 
@@ -195,7 +185,6 @@ select get_customers();
  {"(1,\"(Vera,32,Paris,22999)\")","(2,\"(Zera,25,London,5999)\")","(3,\"(Alice,22,Bangkok,9800.98)\")","(4,\"(Jim,26,Dubai,18700)\")","(5,\"(Kevin,28,Singapore,18999)\")","(6,\"(Gauss,42,Beijing,32999)\")","(1,\"(Vera,32,Paris,22999)\")","(9,\"(Bob,24,Shanghai,28999)\")"}
 (1 row)
 
-
 --ERROR: assign value to deep level attribute is not supported yet
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -209,7 +198,6 @@ $$ language plpgsql;
 ERROR:  assign value to deep level attribute is not supported in SELECT/FETCH INTO method at or near "."
 LINE 6:     select 'bob' into customer_list(1).c_info.name;
                                                      ^
-
 --ERROR: test incorrect attribute name with T_CWORD type
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -223,7 +211,6 @@ $$ language plpgsql;
 ERROR:  attribute "a" does not exist
 DETAIL:  attribute "a" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test incorrect attribute name with T_CWORD type
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -237,7 +224,6 @@ $$ language plpgsql;
 ERROR:  attribute "a" does not exist
 DETAIL:  attribute "a" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test incorrect attribute name with T_DATUM type
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -251,7 +237,6 @@ $$ language plpgsql;
 ERROR:  attribute "customer_list" does not exist
 DETAIL:  attribute "customer_list" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test incorrect attribute name with T_DATUM type
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -265,7 +250,6 @@ $$ language plpgsql;
 ERROR:  attribute "customer_list" does not exist
 DETAIL:  attribute "customer_list" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test incorrect attribute name with T_DATUM type
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -279,7 +263,6 @@ $$ language plpgsql;
 ERROR:  attribute "customer_list" does not exist
 DETAIL:  attribute "customer_list" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test incorrect attribute name with type name
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -293,7 +276,6 @@ $$ language plpgsql;
 ERROR:  attribute "c_list" does not exist
 DETAIL:  attribute "c_list" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test incorrect attribute name with T_WORD type
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -307,7 +289,6 @@ $$ language plpgsql;
 ERROR:  attribute "a" does not exist
 DETAIL:  attribute "a" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test incorrect attribute name with keyword
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -321,7 +302,6 @@ $$ language plpgsql;
 ERROR:  attribute "if" does not exist
 DETAIL:  attribute "if" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test incorrect attribute name with keyword
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -335,7 +315,6 @@ $$ language plpgsql;
 ERROR:  attribute "end" does not exist
 DETAIL:  attribute "end" does not exist in array variable "customer_list"
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 6
-
 --ERROR: test missing attribute name
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -349,7 +328,6 @@ $$ language plpgsql;
 ERROR:  missing or illegal attribute name at or near ";"
 LINE 6:     select 'bob' into customer_list(1). ;
                                                 ^
-
 --ERROR: test missing attribute name
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -363,7 +341,6 @@ $$ language plpgsql;
 ERROR:  missing or illegal attribute name at or near ":="
 LINE 6:     customer_list(1). := 'bob';
                               ^
-
 --ERROR: test illegal attribute name
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -377,7 +354,6 @@ $$ language plpgsql;
 ERROR:  syntax error at or near ".6"
 LINE 6:     customer_list(1).6a := 'bob';
                             ^
-
 --ERROR: test illegal attribute name
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -391,7 +367,6 @@ $$ language plpgsql;
 ERROR:  missing or illegal attribute name at or near "%#"
 LINE 6:     customer_list(1).%# := 'bob';
                              ^
-
 --ERROR: test incorrect array name : spelling error
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -404,7 +379,6 @@ end;
 $$ language plpgsql;
 ERROR:  function "customer_lis" doesn't exist 
 CONTEXT:  compilation of PL/pgSQL function "get_customers" near line 4
-
 --ERROR: test incorrect array name : scalar variable
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -419,7 +393,6 @@ $$ language plpgsql;
 call get_customers();
 ERROR:  subscripted object in assignment is not an array
 CONTEXT:  PL/pgSQL function get_customers() line 7 at assignment
-
 --ERROR: test incorrect array name : array type name
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -434,7 +407,6 @@ $$ language plpgsql;
 ERROR:  syntax error at or near "c_list"
 LINE 7:     c_list(1).id := 3;
             ^
-
 --ERROR: test incorrect array name : array element type is not composite
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -451,7 +423,6 @@ call get_customers();
 ERROR:  array element type is not composite in assignment
 DETAIL:  array variable "id" must be composite when assign value to attibute
 CONTEXT:  PL/pgSQL function get_customers() line 8 at assignment
-
 --ERROR: test incorrect array name : array element type is record/row
 create or replace function get_customers RETURNS customer[] as $$
 declare
@@ -466,7 +437,6 @@ $$ language plpgsql;
 call get_customers();
 ERROR:  subscripted object in assignment is not an array
 CONTEXT:  PL/pgSQL function get_customers() line 7 at assignment
-
 --ERROR: test array dimensions exceeds the maximum.
 create or replace function get_customers RETURNS customer[] as $$ 
 declare
@@ -482,7 +452,6 @@ $$ language plpgsql;
 call get_customers();
 ERROR:  number of array dimensions (7) exceeds the maximum allowed (6) in assignment.
 CONTEXT:  PL/pgSQL function get_customers() line 8 at assignment
-
 -- Test PLPGSQL ARRAY defined with type from different schema
 drop schema if exists test_pl_array_schema;
 NOTICE:  schema "test_pl_array_schema" does not exist, skipping
@@ -503,7 +472,6 @@ create TYPE test_pl_array_schema.varchar2_table as (str VARCHAR2(2000));
 create TYPE test_pl_array_schema.number_table as (num NUMBER);
 create TYPE test_pl_array_schema.date_table as (dat DATE);
 create TYPE test_pl_array_schema.comp_table as (a int, b VARCHAR2(10));
-
 create or replace function get_table_array RETURNS void as $$ 
 declare
     type num_arr is VARRAY(10) of test_pl_array_schema.number_table;
@@ -537,11 +505,9 @@ NOTICE:  1 aaa Sat Apr 12 04:05:06 2003 22 11 haha
  
 (1 row)
 
-
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------
-
 drop function if exists get_table_array;
 drop type if exists test_pl_array_schema.comp_table;
 drop type if exists test_pl_array_schema.date_table;
@@ -552,7 +518,6 @@ drop function if exists get_customers;
 drop table if exists customers;
 drop type if exists customer;
 drop type if exists info;
-
 -- clean up --
 drop schema if exists test_pl_array_schema cascade;
 drop schema if exists plpgsql_arrayassign cascade;

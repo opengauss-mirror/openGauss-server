@@ -1,5 +1,4 @@
 -- FOR VARRAY INTERFACE --
-
 -- check compatibility --
 show sql_compatibility;
  sql_compatibility 
@@ -12,7 +11,6 @@ drop schema if exists plpgsql_array_interface_ted;
 NOTICE:  schema "plpgsql_array_interface_ted" does not exist, skipping
 create schema plpgsql_array_interface_ted;
 set current_schema = plpgsql_array_interface_ted;
-
 -- test array interface extend trim and delete --
 create or replace procedure array_interface_p1()
 as
@@ -33,7 +31,6 @@ begin
     raise NOTICE'%',colors1;
 end;
 /
-
 call array_interface_p1();
 NOTICE:  {red,orange,NULL,blue}
 NOTICE:  {red,orange,NULL,blue,NULL,NULL}
@@ -44,7 +41,6 @@ NOTICE:  {}
 --------------------
  
 (1 row)
-
 
 -- test array interface extend trim and delete --
 create or replace procedure array_interface_p1()
@@ -66,7 +62,6 @@ begin
     raise NOTICE'%',colors1;
 end;
 /
-
 call array_interface_p1();
 NOTICE:  {red}
 NOTICE:  {red,NULL,NULL,NULL,NULL}
@@ -77,7 +72,6 @@ NOTICE:  {}
 --------------------
  
 (1 row)
-
 
 -- test array interface extend mistake format --
 create or replace procedure array_interface_p1()
@@ -105,9 +99,7 @@ begin
     colors.extend[-1];
     raise NOTICE'%',colors;
 end
-
 --call array_interface_p1();
-
 -- test array interface trim mistake format --
 create or replace procedure array_interface_p1()
 as
@@ -134,9 +126,7 @@ begin
     colors.trim[-1];
     raise NOTICE'%',colors;
 end
-
 --call array_interface_p1();
-
 -- test array interface delete mistake format --
 create or replace procedure array_interface_p1()
 as
@@ -183,9 +173,7 @@ begin
     colors4.delete[-1];
     raise NOTICE'%',colors4;
 end
-
 --call array_interface_p1();
-
 -- test array name use special character --
 create or replace procedure array_interface_p1()
 as
@@ -202,7 +190,6 @@ begin
     raise NOTICE '%',"@*ar&";
 end;
 /
-
 call array_interface_p1();
 NOTICE:  {red,orange,green,blue,indigo}
 NOTICE:  {red,orange,green,blue,indigo,NULL,NULL,NULL}
@@ -212,7 +199,6 @@ NOTICE:  {}
 --------------------
  
 (1 row)
-
 
 -- test array name use special character mistake --
 create or replace procedure array_interface_p1()
@@ -236,9 +222,7 @@ begin
     @*ar&.extend(3);
     raise NOTICE'%',@*ar&;
 end
-
 -- call array_interface_p1();
-
 -- test array interface extend with large parameter --
 create or replace procedure array_interface_p1()
 as
@@ -250,7 +234,6 @@ begin
     raise NOTICE'%',arr.count;
 end;
 /
-
 call array_interface_p1();
 NOTICE:  {1,0,5,6,8,3,9}
 NOTICE:  10007
@@ -258,7 +241,6 @@ NOTICE:  10007
 --------------------
  
 (1 row)
-
 
 -- test array interface trim --
 create or replace procedure array_interface_p1()
@@ -271,7 +253,6 @@ begin
     raise NOTICE'%',arr;
     end;
 /
-
 call array_interface_p1();
 NOTICE:  {1,0,5}
 NOTICE:  {}
@@ -279,7 +260,6 @@ NOTICE:  {}
 --------------------
  
 (1 row)
-
 
 -- test array interface delete with empty array --
 create or replace procedure array_interface_p1()
@@ -292,7 +272,6 @@ begin
     raise NOTICE'%',arr;
 end;
 /
-
 call array_interface_p1();
 NOTICE:  {}
 NOTICE:  {}
@@ -300,7 +279,6 @@ NOTICE:  {}
 --------------------
  
 (1 row)
-
 
 -- test array interface delete missing ; --
 create or replace procedure array_interface_p1()
@@ -324,19 +302,16 @@ begin
     colors.delete
     raise NOTICE'%',colors;
 end
-
 -- test call array interface of another package
 create or replace package pck1 is
     type ta is varray(10) of varchar(100);
     tb ta := ta('1','2','3', '4', '5');
 end pck1;
 /
-
 create or replace package pck2 is
     procedure proc1;
     end pck2;
 /
-
 create or replace package body pck2 is
 procedure proc1() is
 begin
@@ -376,7 +351,6 @@ begin
 end;
 end pck2;
 /
-
 call pck2.proc1();
 NOTICE:  {1,2,3,4,5}
 NOTICE:  5
@@ -403,7 +377,6 @@ NOTICE:  {}
 -------
  
 (1 row)
-
 
 -- test array interface delete with index --
 create or replace procedure array_interface_p1() as
@@ -436,7 +409,6 @@ begin
     raise NOTICE '%', array1.last;
 end;
 /
-
 call array_interface_p1();
 NOTICE:  {1,2,3,4,5}
 NOTICE:  5
@@ -458,7 +430,6 @@ NOTICE:  4
 --------------------
  
 (1 row)
-
 
 -- clean up --
 drop package if exists pck2;

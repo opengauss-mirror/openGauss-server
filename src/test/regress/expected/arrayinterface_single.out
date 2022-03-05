@@ -1,5 +1,4 @@
 -- FOR VARRAY INTERFACE --
-
 -- check compatibility --
 show sql_compatibility;  -- expect A --
  sql_compatibility 
@@ -7,13 +6,11 @@ show sql_compatibility;  -- expect A --
  A
 (1 row)
 
-
 -- create new schema --
 drop schema if exists plpgsql_array_interface;
 NOTICE:  schema "plpgsql_array_interface" does not exist, skipping
 create schema plpgsql_array_interface;
 set current_schema = plpgsql_array_interface;
-
 -- test array interface count --
 create or replace procedure array_interface_p1()
 as
@@ -30,7 +27,6 @@ begin
     raise NOTICE '%', colors1.count;
 end;
 /
-
 call array_interface_p1();
 NOTICE:  {red,orange,NULL,NULL,green,blue,indigo,violet}
 NOTICE:  8
@@ -42,7 +38,6 @@ NOTICE:  13
 --------------------
  
 (1 row)
-
 
 -- test array interface count --
 create or replace procedure array_interface_p2()
@@ -63,7 +58,6 @@ begin
     raise NOTICE '%', colors1;
 end;
 /
-
 call array_interface_p2();
 NOTICE:  {red,orange,green,blue,indigo,violet}
 NOTICE:  {NULL,orange,green,NULL,indigo,NULL}
@@ -73,7 +67,6 @@ NOTICE:  {NULL,2,3,NULL,5,NULL,7,8}
 --------------------
  
 (1 row)
-
 
 -- test array interface exists --
 create or replace procedure array_interface_p3()
@@ -112,7 +105,6 @@ begin
     end loop;
 end;
 /
-
 call array_interface_p3();
 NOTICE:  --------------------colors--------------------------
 NOTICE:  {NULL,red,orange,NULL,green,NULL,blue,NULL,indigo,violet,NULL}
@@ -207,7 +199,6 @@ NOTICE:  ----------------
  
 (1 row)
 
-
 -- test array interface exists --
 create or replace procedure array_interface_p4()
 as
@@ -245,7 +236,6 @@ begin
     end loop;
 end;
 /
-
 call array_interface_p4();
 NOTICE:  --------------------colors--------------------------
 NOTICE:  {1,2,NULL,3,4,NULL,5,6,7,8}
@@ -344,7 +334,6 @@ NOTICE:  ----------------
  
 (1 row)
 
-
 -- test array interface first and last --
 create or replace procedure array_interface_p5()
 as
@@ -383,7 +372,6 @@ begin
     raise NOTICE 'colors4 last: %', colors4[colors4.last];
 end;
 /
-
 call array_interface_p5();
 NOTICE:  ---------colors1---------
 NOTICE:  {red,orange,NULL,green,NULL,blue}
@@ -413,7 +401,6 @@ NOTICE:  colors4 last: <NULL>
 --------------------
  
 (1 row)
-
 
 -- next&prior
 create or replace procedure array_interface_p6()
@@ -460,7 +447,6 @@ begin
     end loop;
 end;
 /
-
 call array_interface_p6();
 NOTICE:  --------------------colors1---------------------
 NOTICE:  {red,orange,NULL,green,blue,NULL,indigo,violet}
@@ -653,7 +639,6 @@ NOTICE:  -------
  
 (1 row)
 
-
 -- test empty array exists interface return
 create or replace procedure array_interface_p7()
 as
@@ -674,7 +659,6 @@ begin
     raise NOTICE 'colors2["%"] exists return %', vi, colors2.exists(vi);
 end;
 /
-
 call array_interface_p7();
 NOTICE:  colors1 is {}
 NOTICE:  colors2 is {}
@@ -686,7 +670,6 @@ NOTICE:  colors2["43243442"] exists return f
 --------------------
  
 (1 row)
-
 
 -- test array exists interface string input parameter
 create or replace procedure array_interface_p8()
@@ -703,9 +686,7 @@ end;
 /
 ERROR:  schema "colors" does not exist
 CONTEXT:  compilation of PL/pgSQL function "array_interface_p8" near line 7
-
 --call array_interface_p8();
-
 -- test array exists interface A.B input parameter
 create or replace procedure array_interface_p9()
 as
@@ -734,7 +715,6 @@ begin
     end loop;
 end;
 /
-
 call array_interface_p9();
 NOTICE:  v_a is {}
 NOTICE:  v_a[1] is not exist
@@ -763,7 +743,6 @@ NOTICE:  v_a[10] is exist
  
 (1 row)
 
-
 create or replace procedure array_interface_p10() as
 declare
     colors varchar2[];
@@ -781,7 +760,6 @@ begin
     end if;
 end;
 /
-
 call array_interface_p10();
 NOTICE:  array exist, element is orange
 NOTICE:  array exist, element is c12
@@ -789,7 +767,6 @@ NOTICE:  array exist, element is c12
 ---------------------
  
 (1 row)
-
 
 create or replace procedure array_interface_p11() as
 declare
@@ -808,7 +785,6 @@ begin
     end if;
 end;
 /
-
 call array_interface_p11();
 NOTICE:  array exist, element is orange
 NOTICE:  array exist, element is c12
@@ -816,7 +792,6 @@ NOTICE:  array exist, element is c12
 ---------------------
  
 (1 row)
-
 
 create or replace procedure array_interface_p12() as
 declare
@@ -856,7 +831,6 @@ begin
     raise NOTICE '%', colors;
 end;
 /
-
 call array_interface_p12();
 NOTICE:  {red,orange,yellow,green,blue,indigo,violet}
 NOTICE:  7
@@ -903,8 +877,6 @@ NOTICE:  {}
 ---------------------
  
 (1 row)
-
-
 
 -- clean up --
 drop schema if exists plpgsql_array_interface cascade;

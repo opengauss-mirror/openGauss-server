@@ -85,6 +85,11 @@ chmod a+x build_opengauss.sh
 if [ "${wrap_binaries}"X = "YES"X ]
 then
     chmod a+x package_opengauss.sh
-    ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file}
+    if [ X$config_file = "X" ];then
+        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode}
+    else
+        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file}
+    fi
+
 fi
 exit 0
