@@ -4365,10 +4365,11 @@ static char* mask_Password_internal(const char* query_string)
                         if (subQueryLen < childStmtLen) {
                             /* Need more space, enlarge length is (childStmtLen - subQueryLen) */
                             maskStringLen += (childStmtLen - subQueryLen) + 1;
-                            char* maskStrNew = (char*)selfpalloc0(maskStringLen);
+                            char* maskStrNew = (char*)MemoryContextAllocZero(
+                                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), maskStringLen);
                             rc = memcpy_s(maskStrNew, maskStringLen, mask_string, strlen(mask_string));
                             securec_check(rc, "\0", "\0");
-                            selfpfree(mask_string);
+                            pfree_ext(mask_string);
                             mask_string = maskStrNew;
                         }
 
@@ -4463,10 +4464,11 @@ static char* mask_Password_internal(const char* query_string)
                         if (length[i] < maskLen) {
                             /* need more space. */
                             int plen = strlen(mask_string) + maskLen - length[i] + 1;
-                            char* maskStrNew = (char*)selfpalloc0(plen);
+                            char* maskStrNew = (char*)MemoryContextAllocZero(
+                                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), plen);
                             rc = memcpy_s(maskStrNew, plen, mask_string, strlen(mask_string));
                             securec_check(rc, "\0", "\0");
-                            selfpfree(mask_string);
+                            pfree_ext(mask_string);
                             mask_string = maskStrNew;
                         }
 
