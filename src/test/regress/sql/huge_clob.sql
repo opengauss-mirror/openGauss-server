@@ -241,6 +241,28 @@ end;
 
 call test_self_update();
 
+create or replace procedure test_update_delete is
+v1 clob;
+begin
+execute immediate 'select b from cloblongtbl where a=1' into v1;
+update cloblongtbl set b=v1 where a=1;
+rollback;
+update cloblongtbl set b=v1 where a=2;
+commit;
+end;
+/
+
+call test_update_delete();
+
+begin;
+delete from cloblongtbl where a < 3;
+rollback;
+
+begin;
+delete from cloblongtbl where a = 1;
+delete from cloblongtbl where a = 2;
+rollback;
+
 drop table if exists cloblongtbl;
 -- clean
 drop schema if exists huge_clob cascade;

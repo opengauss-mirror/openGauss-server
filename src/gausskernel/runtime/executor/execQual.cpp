@@ -6027,9 +6027,7 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
     if (*is_null) {
         new_attr = (Datum)0;
     } else {
-        if (VARATT_IS_SHORT(attr) || VARATT_IS_EXTERNAL(attr) || VARATT_IS_4B(attr)) {
-            new_attr = PointerGetDatum(attr);
-        } else if (VARATT_IS_HUGE_TOAST_POINTER(attr)) {
+        if (VARATT_IS_HUGE_TOAST_POINTER(attr)) {
             if (unlikely(origin_tuple->tupTableType == UHEAP_TUPLE)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_NAME),
@@ -6040,6 +6038,8 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
             struct varlena *new_value = heap_tuple_fetch_and_copy(update_rel, old_value, false);
             new_attr = PointerGetDatum(new_value);
             heap_close(update_rel, NoLock);
+        } else if (VARATT_IS_SHORT(attr) || VARATT_IS_EXTERNAL(attr) || VARATT_IS_4B(attr)) {
+            new_attr = PointerGetDatum(attr);
         } else {
             ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR),
                     errmsg("lob value which fetch from tuple type is not recognized."), 
