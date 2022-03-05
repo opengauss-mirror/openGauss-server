@@ -280,6 +280,7 @@ static void knl_u_parser_init(knl_u_parser_context* parser_cxt)
     parser_cxt->ddl_pbe_context = NULL;
     parser_cxt->in_package_function_compile = false;
     parser_cxt->isCreateFuncOrProc = false;
+    parser_cxt->isTimeCapsule = false;
 }
 
 static void knl_u_advisor_init(knl_u_advisor_context* adv_cxt) 

@@ -417,6 +417,8 @@ typedef struct knl_u_parser_context {
 
     /* this is used in parser.gram.y not in plpgsql */
     bool isCreateFuncOrProc;
+    
+    bool isTimeCapsule;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {
