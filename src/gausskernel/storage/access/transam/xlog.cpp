@@ -12658,18 +12658,24 @@ static XLogSegNo CalcRecycleSegNo(XLogRecPtr curInsert, XLogRecPtr quorumMinRequ
         XLByteToSeg(curInsert - maxKeepSize, SegNoCanRecycled);
     }
 
-    if (!XLByteEQ(quorumMinRequired, InvalidXLogRecPtr)) {
-        XLogSegNo quorumMinSegNo;
-        XLByteToSeg(quorumMinRequired, quorumMinSegNo);
-        if (quorumMinSegNo < SegNoCanRecycled) {
-            SegNoCanRecycled = quorumMinSegNo;
+    /*
+     * For asynchronous replication, we do not care connected sync standbys,
+     * since standby build won't block xact commit on master.
+     */
+    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        if (!XLByteEQ(quorumMinRequired, InvalidXLogRecPtr)) {
+            XLogSegNo quorumMinSegNo;
+            XLByteToSeg(quorumMinRequired, quorumMinSegNo);
+            if (quorumMinSegNo < SegNoCanRecycled) {
+                SegNoCanRecycled = quorumMinSegNo;
+            }
         }
     }
 
     if (!XLByteEQ(minToolsRequired, InvalidXLogRecPtr)) {
         XLogSegNo minToolsSegNo;
         XLByteToSeg(minToolsRequired, minToolsSegNo);
-        if (minToolsSegNo < SegNoCanRecycled) {
+        if (minToolsSegNo < SegNoCanRecycled && minToolsSegNo > 0) {
             SegNoCanRecycled = minToolsSegNo;
         }
     }
@@ -12791,6 +12797,7 @@ static XLogSegNo CalculateCNRecycleSegNoForStreamingHadr(XLogRecPtr curInsert, X
 static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curInsert)
 {
     XLogSegNo segno;
+    XLogSegNo wal_keep_segno;
     XLogRecPtr keep;
     XLogRecPtr xlogcopystartptr;
     ReplicationSlotState repl_slot_state;
@@ -12807,6 +12814,8 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
     } else {
         segno = segno - (uint32)u_sess->attr.attr_storage.wal_keep_segments;
     }
+
+    wal_keep_segno = segno;
 
     ReplicationSlotsComputeRequiredLSN(&repl_slot_state);
     keep = repl_slot_state.min_required;
@@ -12866,9 +12875,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
      * 3.When standby is not alive in dummy standby mode, just keep log.
      * 4.Notice the users if slot is invalid
      */
-    if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE &&
-        u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH &&
-        t_thrd.syncrep_cxt.SyncRepConfig != NULL) {
+    if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) {
         if (WalSndInProgress(SNDROLE_PRIMARY_BUILDSTANDBY) ||
             pg_atomic_read_u32(&g_instance.comm_cxt.current_gsrewind_count) > 0) {
             /* segno = 1 show all file should be keep */
@@ -12904,12 +12911,18 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
                     "is bigger than max keep size: %lu", maxKeepSize)));
             }
         }
+
         if (XLByteEQ(keep, InvalidXLogRecPtr) && repl_slot_state.exist_in_use &&
             !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
             /* there are slots and lsn is invalid, we keep it */
             segno = 1;
             ereport(WARNING, (errmsg("invalid replication slot recptr"),
                               errhint("Check slot configuration or setup standby/secondary")));
+        }
+
+        /* take wal_keep_segments into consideration */
+        if (wal_keep_segno < segno) {
+            segno = wal_keep_segno;
         }
     }
 
