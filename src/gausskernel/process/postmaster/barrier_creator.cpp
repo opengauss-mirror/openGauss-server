@@ -403,6 +403,7 @@ void barrier_creator_main(void)
             long time_diff = last_barrier_time - current_time;
             ereport(LOG, (errmsg("[BarrierCreator] current time %ld is smaller than barrier time %ld, and sleep %ld ms",
                                  current_time, last_barrier_time, time_diff)));
+            CHECK_FOR_INTERRUPTS();
             pg_usleep(time_diff * 1000L);
         } while (1);
         if (t_thrd.barrier_creator_cxt.is_first_barrier) {
@@ -411,6 +412,7 @@ void barrier_creator_main(void)
         }
 #ifdef ENABLE_MULTIPLE_NODES
         while (!START_AUTO_CSN_BARRIER) {
+            CHECK_FOR_INTERRUPTS();
             pg_usleep(1000000L);
         }
 #endif
