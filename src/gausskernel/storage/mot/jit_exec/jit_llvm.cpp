@@ -33,9 +33,11 @@
 #include "storage/mot/jit_exec.h"
 #include "jit_llvm.h"
 
+#ifdef ENABLE_LLVM_COMPILE
 // for checking if LLVM_ENABLE_DUMP is defined and for using LLVM_VERSION_STRING
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Host.h"
+#endif
 
 extern bool GlobalCodeGenEnvironmentSuccess;
 

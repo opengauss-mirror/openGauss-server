@@ -33,8 +33,12 @@ ifneq "$(MAKECMDGOALS)" "clean"
 endif
 OBJS = autovacuum.o bgwriter.o fork_process.o pgarch.o pgstat.o postmaster.o gaussdb_version.o\
 	startup.o syslogger.o walwriter.o walwriterauxiliary.o checkpointer.o pgaudit.o alarmchecker.o \
-	twophasecleaner.o aiocompleter.o fencedudf.o lwlockmonitor.o cbmwriter.o pagewriter.o snapcapturer.o rbcleaner.o globalstats.o \
-	barrier_creator.o bgworker.o barrier_arch.o $(top_builddir)/src/lib/config/libconfig.a
+	twophasecleaner.o fencedudf.o lwlockmonitor.o cbmwriter.o pagewriter.o pagerepair.o snapcapturer.o rbcleaner.o globalstats.o \
+	bgworker.o $(top_builddir)/src/lib/config/libconfig.a
+
+ifeq ($(enable_lite_mode), no)
+OBJS += barrier_creator.o barrier_preparse.o barrier_arch.o aiocompleter.o
+endif
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

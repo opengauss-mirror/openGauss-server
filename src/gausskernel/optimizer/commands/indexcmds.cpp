@@ -32,6 +32,9 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
+#include "catalog/gs_db_privilege.h"
+#include "catalog/namespace.h"
+#include "catalog/pg_namespace.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/defrem.h"
@@ -99,6 +102,7 @@ static void AddIndexColumnForGpi(IndexStmt* stmt);
 static void AddIndexColumnForCbi(IndexStmt* stmt);
 static void CheckIndexParamsNumber(IndexStmt* stmt);
 static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams);
+static bool CheckWhetherForbiddenFunctionalIdx(Oid relationId, Oid namespaceId, List* indexParams);
 
 /*
  * CheckIndexCompatible
@@ -302,7 +306,7 @@ static void CheckPartitionUniqueKey(Relation rel, int2vector *partKey, IndexStmt
 
     if (partKey->dim1 > numberOfAttributes) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                        errmsg("unique index columns must contain the partition key")));
+                        errmsg("unique local index columns must contain all the partition keys")));
     }
 
     for (j = 0; j < partKey->dim1; j++) {
@@ -310,11 +314,100 @@ static void CheckPartitionUniqueKey(Relation rel, int2vector *partKey, IndexStmt
         Form_pg_attribute att_tup = rel->rd_att->attrs[attNum - 1];
 
         if (!columnIsExist(rel, att_tup, stmt->indexParams)) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                            errmsg("unique index columns must contain the partition key and collation must be default "
-                                   "collation")));
+            ereport(
+                ERROR,
+                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                 errmsg("unique local index columns must contain all the partition keys and collation must be default "
+                        "collation")));
         }
     }
+}
+
+static void CheckPartitionIndexDef(IndexStmt* stmt, List *partitionTableList)
+{
+    List *partitionIndexdef = (List*)stmt->partClause;
+
+    int partitionLens = list_length(partitionTableList);
+    int idfLens = list_length(partitionIndexdef);
+
+    if (partitionLens > idfLens) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("Not enough index partition defined")));
+    } else if (partitionLens < idfLens) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("number of partitions of LOCAL index must equal that of the "
+                       "underlying table")));
+    }
+
+    return;
+}
+
+/*
+ * Extract SubPartitionIdfs when CREATE INDEX with subpartitions.
+ */
+static List *ExtractSubPartitionIdf(IndexStmt* stmt, List *partitionList,
+                                    List *subPartitionList, List *partitionIndexdef)
+{
+    ListCell *lc1 = NULL;
+    ListCell *lc2 = NULL;
+    int subpartitionLens = 0;
+    int expectedSubLens = 0;
+    List *subPartitionIdf = NIL;
+
+    partitionIndexdef = (List*)stmt->partClause;
+    List *backupIdxdef = (List *)copyObject(partitionIndexdef);
+    int partitionLen = list_length(partitionIndexdef);
+
+    /* Fast check partition length */
+    if (partitionLen != partitionList->length) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("Wrong number of partitions when create index specify subpartition.")));
+    }
+
+    /* Next check specify subpartition with metadata in pg_partition */
+    foreach(lc1, subPartitionList) {
+        List *subPartitions = (List *)lfirst(lc1);
+        int subLens = list_length(subPartitions);
+
+        foreach(lc2, partitionIndexdef) {
+            RangePartitionindexDefState *idxDef = (RangePartitionindexDefState*)lfirst(lc2);
+            int idfLens = list_length(idxDef->sublist);
+
+            if (subLens == idfLens) {
+                subPartitionIdf = lappend(subPartitionIdf, copyObject(idxDef->sublist));
+                partitionIndexdef = list_delete(partitionIndexdef, lfirst(lc2));
+                break;
+            }
+        }
+
+        expectedSubLens += subPartitions->length;
+    }
+
+    /* Fail exactly match if partitionIndexdef */
+    if (partitionIndexdef != NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("Cannot match subpartitions when create subpartition indexes.")));
+    }
+
+    /* Count sum of subpartitions */
+    foreach(lc1, backupIdxdef) {
+        RangePartitionindexDefState *def = (RangePartitionindexDefState*)lfirst(lc1);
+        subpartitionLens += list_length(def->sublist);
+    }
+
+    /* Check total subpartition number */
+    if (subpartitionLens != expectedSubLens) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("Wrong number of subpartitions when create index specify subpartition.")));
+    }
+
+    list_free_ext(backupIdxdef);
+    return subPartitionIdf;
 }
 
 /*
@@ -429,6 +522,15 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         if (strcmp(stmt->accessMethod, "ubtree") != 0) {
             elog(ERROR, "%s index is not supported for ustore", (stmt->accessMethod));
         }
+        if (stmt->deferrable == true) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmodule(MOD_EXECUTOR),
+                    errmsg("Ustore table does not support to set deferrable."),
+                    errdetail("N/A"),
+                    errcause("feature not supported"),
+                    erraction("check constraints of columns")));
+        }
     }
 
     if (strcmp(stmt->accessMethod, "ubtree") == 0 &&
@@ -448,6 +550,12 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
+    if (CheckWhetherForbiddenFunctionalIdx(relationId, namespaceId, stmt->indexParams)) {
+        ereport(ERROR,
+            (errmodule(MOD_EXECUTOR),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("not supported to create a functional index on this table.")));
+    }
 
     if (RELATION_IS_PARTITIONED(rel)) {
         if (stmt->unique && (!stmt->isPartitioned || is_alter_table)) {
@@ -542,9 +650,10 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
-    if (list_length(stmt->indexIncludingParams) > 0 && !skip_build) {
+    if (list_length(stmt->indexIncludingParams) > 0 && strcmp(stmt->accessMethod, "ubtree") != 0) {
         ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("create index does not support have include parameter")));
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("create a index with include columns is only supported in ubtree")));
     }
 
     /*
@@ -619,11 +728,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * bootstrapping, since permissions machinery may not be working yet.
      */
     if (check_rights && !IsBootstrapProcessingMode()) {
-        AclResult aclresult;
-
-        aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
-        if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+        (void)CheckCreatePrivilegeInNamespace(namespaceId, GetUserId(), CREATE_ANY_INDEX);
     }
 
     /*
@@ -663,17 +768,39 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
 
         if (PointerIsValid(stmt->partClause)) {
-            partitionIndexdef = (List*)stmt->partClause;
+            if (RelationIsSubPartitioned(rel)) {
+                ListCell* lc1 = NULL;
+                ListCell* lc2 = NULL;
+                List* subPartitions = NIL;
 
-            /* index partition's number must no less than table partition's number */
-            if (partitionTableList->length > ((List*)stmt->partClause)->length) {
-                ereport(
-                    ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("Not enough index partition defined")));
-            } else if (partitionTableList->length < ((List*)stmt->partClause)->length) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                        errmsg("number of partitions of LOCAL index must equal that of the "
-                               "underlying table")));
+                partitionIndexdef = (List*)stmt->partClause;
+                subPartitionIndexDef = ExtractSubPartitionIdf(stmt,
+                                            partitionTableList,
+                                            subPartitionTupleList,
+                                            partitionIndexdef);
+
+                /* Fill partitionOidList */
+                foreach (lc1, partitionTableList) {
+                    HeapTuple tuple = (HeapTuple)lfirst(lc1);
+                    partitionOidList = lappend_oid(partitionOidList, HeapTupleGetOid(tuple));
+                }
+
+                /* Fill subPartitionOidList */
+                foreach (lc1, subPartitionTupleList) {
+                    subPartitions = (List*)lfirst(lc1);
+
+                    List* subPartitionOids = NIL;
+                    foreach (lc2, subPartitions) {
+                        HeapTuple tuple = (HeapTuple)lfirst(lc2);
+                        subPartitionOids = lappend_oid(subPartitionOids, HeapTupleGetOid(tuple));
+                    }
+                    subPartitionOidList = lappend(subPartitionOidList, subPartitionOids);
+                }
+            } else {
+                partitionIndexdef = (List*)stmt->partClause;
+
+                /* index partition's number must no less than table partition's number */
+                CheckPartitionIndexDef(stmt, partitionTableList);
             }
         } else {
             if (!RelationIsSubPartitioned(rel)) {
@@ -927,14 +1054,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
-    TableCreateSupport indexCreateSupport{false,false,false,false,false,false};
-    ListCell* cell = NULL;
-    foreach (cell, stmt->options) {
-        DefElem* defElem = (DefElem*)lfirst(cell);
-        SetOneOfCompressOption(defElem->defname, &indexCreateSupport);
-    }
-    
-    CheckCompressOption(&indexCreateSupport);
     /*
      * Parse AM-specific options, convert to text array form, validate.
      */
@@ -1697,6 +1816,15 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
 
         if (VirtualTransactionIdIsValid(old_snapshots[i]))
             (void)VirtualXactLock(old_snapshots[i], true);
+    }
+
+    if (IS_PGXC_COORDINATOR) {
+        /*
+        * Last thing to do is release the session-level lock on the parent table.
+        */
+        UnlockRelationIdForSession(&heaprelid, ShareUpdateExclusiveLock);
+
+        return indexRelationId;
     }
 
     /*
@@ -3668,6 +3796,8 @@ static void CheckIndexParamsNumber(IndexStmt* stmt) {
                 errmsg("cannot use more than %d columns in a cross-bucket index", INDEX_MAX_KEYS - 1)));
     }
 }
+
+
 static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams)
 {
     int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
@@ -3680,3 +3810,131 @@ static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams)
     }
     return true;
 }
+
+
+static bool
+CheckWhetherForbiddenFunctionalIdx(Oid relationId, Oid namespaceId, List* indexParams)
+{
+    ListCell* lc = NULL;
+    bool isFunctionalIdx = false;
+
+    foreach (lc, indexParams) {
+        IndexElem* elem = (IndexElem*)lfirst(lc);
+        if (PointerIsValid(elem) && PointerIsValid(elem->expr) 
+            && nodeTag(elem->expr) == T_FuncExpr) {
+            isFunctionalIdx = true;
+            break;
+        }
+    }
+    /* 
+     * If the index is not a functional index, the function will return false directly.
+     * */
+    if (likely((!isFunctionalIdx))) {
+        return false;
+    }
+
+    /* Currently, there is only one element in the forbidden list. 
+     * Hence we can determine it using the following method briefly.
+     * */
+    if (unlikely(namespaceId == PG_DB4AI_NAMESPACE)) {
+        return true;
+    }
+
+    return false;
+}
+
+
+#ifdef ENABLE_MULTIPLE_NODES
+/*
+ * @Description : Mark index indisvalid.
+ * @in         	: schemaname, idxname
+ * @out         : None
+ */
+Datum gs_mark_indisvalid(PG_FUNCTION_ARGS)
+{
+    if ((IS_PGXC_COORDINATOR && !IsConnFromCoord()) || IS_PGXC_DATANODE) {
+        ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Unsupported function for users."),
+            errdetail("This is an inner function used for CIC."),
+            errcause("This function is not supported for users to execute directly."),
+            erraction("Please do not execute this function.")));
+    } else {
+        char* schname = PG_GETARG_CSTRING(0);
+        char* idxname = PG_GETARG_CSTRING(1);
+        if (idxname == NULL || strlen(idxname) == 0) {
+            ereport(ERROR, (errmodule(MOD_INDEX), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Invalid input index name."),
+                errdetail("The input index name is null."),
+                errcause("Input empty or less parameters."),
+                erraction("Please input the correct index name.")));
+            PG_RETURN_VOID();
+        }
+        mark_indisvalid_all_cns(schname, idxname);
+    }
+    PG_RETURN_VOID();
+}
+
+/* Mark the given index indisvalid, used for create index concurrently */
+void mark_indisvalid_local(char* schname, char* idxname)
+{
+    Oid idx_oid = InvalidOid;
+    if (schname == NULL || strlen(schname) == 0) {
+        idx_oid = RangeVarGetRelid(makeRangeVar(NULL, idxname, -1), NoLock, false);
+    } else {
+        idx_oid = RangeVarGetRelid(makeRangeVar(schname, idxname, -1), NoLock, false);
+    }
+
+    if (!OidIsValid(idx_oid)) {
+        ereport(ERROR, (errmodule(MOD_INDEX), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("The given schema or index name cannot find."),
+            errdetail("Cannot find valid oid from the given index name."),
+            errcause("Input error schema or index name."),
+            erraction("Check the input schema and index name.")));
+    }
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && GetTopTransactionIdIfAny() != InvalidTransactionId) {
+        CommitTransactionCommand();
+        StartTransactionCommand();
+    }
+
+    Relation rel = heap_open(IndexGetRelation(idx_oid, false), ShareUpdateExclusiveLock);
+    LockRelId heaprelid = rel->rd_lockInfo.lockRelId;
+    heap_close(rel, NoLock);
+
+    LockRelationIdForSession(&heaprelid, ShareUpdateExclusiveLock);
+    index_set_state_flags(idx_oid, INDEX_CREATE_SET_VALID);
+    /*
+     * The pg_index update will cause backends (including this one) to update
+     * relcache entries for the index itself, but we should also send a
+     * relcache inval on the parent table to force replanning of cached plans.
+     * Otherwise existing sessions might fail to use the new index where it
+     * would be useful.  (Note that our earlier commits did not create reasons
+     * to replan; so relcache flush on the index itself was sufficient.)
+     */
+    CacheInvalidateRelcacheByRelid(heaprelid.relId);
+
+    UnlockRelationIdForSession(&heaprelid, ShareUpdateExclusiveLock);
+}
+
+void mark_indisvalid_all_cns(char* schname, char* idxname)
+{
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        ParallelFunctionState* state = NULL;
+        StringInfoData buf;
+        initStringInfo(&buf);
+        appendStringInfo(&buf, "select gs_mark_indisvalid(");
+        if (schname == NULL || strlen(schname) == 0) {
+            appendStringInfo(&buf, "'', %s)", quote_literal_cstr(idxname));
+        } else {
+            appendStringInfo(&buf, "%s, %s)", quote_literal_cstr(schname), quote_literal_cstr(idxname));
+        }
+
+        state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_COORDS, true);
+        FreeParallelFunctionState(state);
+        pfree_ext(buf.data);
+    }
+
+    mark_indisvalid_local(schname, idxname);
+}
+
+#endif

@@ -65,6 +65,7 @@
 #include "storage/shmem.h"
 #include "utils/palloc.h"
 #include "utils/memgroup.h"
+#include "storage/lock/lock.h"
 
 
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
@@ -190,7 +191,7 @@ typedef struct knl_u_sig_context {
      * like got_PoolReload, but just for the compute pool.
      * see CPmonitor_MainLoop for more details.
      */
-    volatile sig_atomic_t got_PoolReload;
+    volatile sig_atomic_t got_pool_reload;
     volatile sig_atomic_t cp_PoolReload;
 } knl_u_sig_context;
 
@@ -199,6 +200,8 @@ class AutonomousSession;
 typedef struct TableOfIndexPass {
     Oid tableOfIndexType = InvalidOid;
     HTAB* tableOfIndex = NULL;
+    int tableOfNestLayer = -1; /* number of layers of this tablevar */
+    int tableOfGetNestLayer = -1; /* number of layers of this tablevar needs to be get */
 } TableOfIndexPass;
 
 typedef struct knl_u_SPI_context {
@@ -249,6 +252,8 @@ typedef struct knl_u_SPI_context {
     struct CachedPlan* cur_spi_cplan;
     /* save table's index into session, for pass into function */
     struct TableOfIndexPass* cur_tableof_index;
+
+    bool has_stream_in_cursor_or_forloop_sql;
 } knl_u_SPI_context;
 
 typedef struct knl_u_index_context {
@@ -566,6 +571,8 @@ typedef struct knl_u_utils_context {
 
     TransactionId RecentXmin;
 
+    TransactionId RecentDataXmin;
+
     TransactionId RecentGlobalXmin;
 
     TransactionId RecentGlobalDataXmin;
@@ -623,10 +630,6 @@ typedef struct knl_u_utils_context {
     bool enable_memory_context_control;
 
     syscalllock deleMemContextMutex;
-
-    struct _DestReceiver* donothingDR;
-    struct _DestReceiver* debugtupDR;
-    struct _DestReceiver* spi_printtupDR;
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {
@@ -1398,6 +1401,7 @@ typedef struct knl_u_xact_context {
     List *sendSeqSchmaName;
     List *sendSeqName;
     List *send_result;
+    Oid ActiveLobRelid;
 } knl_u_xact_context;
 
 typedef struct PLpgSQL_compile_context {
@@ -1415,6 +1419,7 @@ typedef struct PLpgSQL_compile_context {
     struct PLpgSQL_datum** plpgsql_Datums;
     struct PLpgSQL_function* plpgsql_curr_compile;
 
+    bool* datum_need_free; /* need free datum when free function/package memory? */
     bool plpgsql_DumpExecTree;
     bool plpgsql_pkg_DumpExecTree;
 
@@ -1498,6 +1503,7 @@ typedef struct knl_u_plpgsql_context {
 
     /* pl_exec.cpp */
     struct EState* simple_eval_estate;
+    struct ResourceOwnerData* shared_simple_eval_resowner;
     struct SimpleEcontextStackEntry* simple_econtext_stack;
     struct PLpgSQL_pkg_execstate* pkg_execstate;
 
@@ -1544,6 +1550,10 @@ typedef struct knl_u_plpgsql_context {
 
     /* xact context still attached by SPI while transaction is terminated. */
     void *spi_xact_context;
+
+    /* store reseverd subxact resowner's scope temporay during finshing. */
+    int64 minSubxactStackId;
+
     int package_as_line;
     int package_first_line;
     int procedure_start_line;
@@ -1555,9 +1565,27 @@ typedef struct knl_u_plpgsql_context {
     bool isCreateFunction;
     bool need_pkg_dependencies;
     List* pkg_dependencies;
-    struct SessionPackageRuntime* auto_parent_session_pkgs;
-    bool not_found_parent_session_pkgs;
-    char* sourceText;
+    List* func_tableof_index;
+    TupleDesc pass_func_tupdesc; /* save tupdesc for inner function pass out param to outter function's value */
+
+    int portal_depth; /* portal depth of current thread */
+
+    /* ----------
+     * variables for autonomous procedure out ref cursor param and reference package variables
+     * ----------
+     */
+    struct SessionPackageRuntime* auto_parent_session_pkgs; /* package values from parent session */
+    bool not_found_parent_session_pkgs; /* flag of found parent session package values? */
+    List* storedPortals; /* returned portal date from auto session */
+    List* portalContext; /* portal context from parent session */
+    bool call_after_auto; /* call after a autonomous transaction procedure? */
+    uint64 parent_session_id;
+    ThreadId parent_thread_id;
+    MemoryContext parent_context; /* parent_context from parent session */
+    Oid ActiveLobToastOid;
+    struct ExceptionContext* cur_exception_cxt;
+    bool pragma_autonomous; /* save autonomous flag */
+    char* debug_query_string;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
@@ -2084,6 +2112,14 @@ typedef struct knl_u_unique_sql_context {
     bool is_top_unique_sql;
     bool need_update_calls;
 
+    /*
+     * For example, the execute direct on statement enters the unique SQL hook
+     * for multiple times in the parse_analyze function.
+     * The sub-statements of the statement do not need to invoke the hook.
+     * Instead, the complete statement needs to generate the unique SQL ID.
+     */
+    uint64 skipUniqueSQLCount;
+
     /* sort and hash instrment states */
     struct unique_sql_sorthash_instr* unique_sql_sort_instr;
     struct unique_sql_sorthash_instr* unique_sql_hash_instr;
@@ -2170,7 +2206,7 @@ typedef struct knl_u_user_login_context {
 
 #define MAXINVALMSGS 32
 typedef struct knl_u_inval_context {
-    int32 deepthInAcceptInvalidationMessage;
+    int32 DeepthInAcceptInvalidationMessage;
 
     struct TransInvalidationInfo* transInvalInfo;
 
@@ -2192,7 +2228,9 @@ typedef struct knl_u_inval_context {
 
     int partcache_callback_count;
 
-    uint64 SharedInvalidMessageCounter;
+    uint64 SIMCounter; /* SharedInvalidMessageCounter, there are two counter, both on sess and thrd, 
+        u_sess->inval_cxt.SIMCounter;
+        if (EnableLocalSysCache()) {t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;} */
 
     volatile sig_atomic_t catchupInterruptPending;
 
@@ -2362,6 +2400,7 @@ typedef struct knl_u_pgxc_context {
     /* Current size of dn_handles and co_handles */
     int NumDataNodes;
     int NumCoords;
+    int NumTotalDataNodes; /* includes all DN in disaster cluster*/
     int NumStandbyDataNodes;
 
     /* Number of connections held */
@@ -2375,6 +2414,9 @@ typedef struct knl_u_pgxc_context {
     Oid primary_data_node;
     int num_preferred_data_nodes;
     Oid preferred_data_node[MAX_PREFERRED_NODES];
+    int* disasterReadArray; /* array to save dn node index for disaster read */
+    bool DisasterReadArrayInit;
+
     /*
      * Datanode handles saved in session memory context
      * when PostgresMain is launched.
@@ -2387,6 +2429,9 @@ typedef struct knl_u_pgxc_context {
      * Those handles are used inside a transaction by Coordinator to Coordinators
      */
     struct pgxc_node_handle* co_handles;
+
+    uint32 num_skipnodes;
+    void* skipnodes;
 
     struct RemoteXactState* remoteXactState;
 
@@ -2412,6 +2457,7 @@ typedef struct knl_u_pgxc_context {
     bool PoolerResendParams;
     struct PGXCNodeConnectionInfo* PoolerConnectionInfo;
     struct PoolAgent* poolHandle;
+    bool ConsistencyPointUpdating;
 
     List* connection_cache;
     List* connection_cache_handle;
@@ -2543,16 +2589,11 @@ typedef struct sess_orient{
 }sess_orient;
 
 struct SessionInfo;
-typedef struct GlobalSessionId {
-    uint64 sessionId;  /* Increasing sequence num */
-    uint32 nodeId;     /* the number of the send node */
-    /* Used to identify the latest global sessionid during pooler reuse */
-    uint64 seq;
-} GlobalSessionId;
 
-typedef struct knl_u_hook_context {
-    void *analyzerRoutineHook;
-} knl_u_hook_context;
+#define MAX_TRACE_ID_SIZE 33
+typedef struct knl_u_trace_context {
+    char trace_id[MAX_TRACE_ID_SIZE];
+} knl_u_trace_context;
 
 struct ReplicationState;
 struct ReplicationStateShmStruct;
@@ -2571,15 +2612,33 @@ typedef struct knl_u_rep_origin_context {
     ReplicationStateShmStruct *repStatesShm;
 } knl_u_rep_origin_context;
 
+/* Record start time and end time in session initialize for client connection */
+typedef struct knl_u_clientConnTime_context {
+    instr_time connStartTime;
+    instr_time connEndTime;
+
+    /* Flag to indicate that this session is in initial process(client connect) or not */
+    bool checkOnlyInConnProcess;
+} knl_u_clientConnTime_context;
+
+typedef struct knl_u_hook_context {
+    void *analyzerRoutineHook;
+} knl_u_hook_context;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
+    /* used for threadworker, elem in m_readySessionList */
     Dlelem elem;
+     /* used for threadworker && gsc, elems in m_session_bucket
+      * this variable is used for syscache hit */
+    Dlelem elem2;
 
     ThreadId attachPid;
 
     MemoryContext top_mem_cxt;
     MemoryContext cache_mem_cxt;
     MemoryContext top_transaction_mem_cxt;
+    MemoryContext dbesql_mem_cxt;
     MemoryContext self_mem_cxt;
     MemoryContext top_portal_cxt;
     MemoryContext probackup_context;
@@ -2589,6 +2648,7 @@ typedef struct knl_session_context {
     int session_ctr_index;
     uint64 session_id;
     GlobalSessionId globalSessionId;
+    knl_u_trace_context trace_cxt;
     uint64 debug_query_id;
     List* ts_cached_queryid;
 
@@ -2685,8 +2745,16 @@ typedef struct knl_session_context {
 
     instr_time last_access_time;
 
-    knl_u_hook_context hook_cxt;
     knl_u_rep_origin_context reporigin_cxt;
+
+    /*
+     * Initialize context which records time for client connection establish.
+     * This time records start on incommining resuest arrives e.g. poll() invoked to accept() and
+     * end on returning message by server side clientfd.
+     */
+    struct knl_u_clientConnTime_context clientConnTime_cxt;
+
+    knl_u_hook_context hook_cxt;
 } knl_session_context;
 
 enum stp_xact_err_type {
@@ -2697,10 +2765,13 @@ enum stp_xact_err_type {
     STP_XACT_AFTER_TRIGGER_BEGIN,
     STP_XACT_PACKAGE_INSTANTIATION,
     STP_XACT_IN_TRIGGER,
-    STP_XACT_COMPL_SQL
+    STP_XACT_IMMUTABLE,
+    STP_XACT_COMPL_SQL,
+    STP_XACT_TOO_MANY_PORTAL
 };
 
-
+extern void knl_u_inval_init(knl_u_inval_context* inval_cxt);
+extern void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt);
 extern void knl_session_init(knl_session_context* sess_cxt);
 extern void knl_u_executor_init(knl_u_executor_context* exec_cxt);
 extern knl_session_context* create_session_context(MemoryContext parent, uint64 id);
@@ -2743,7 +2814,6 @@ inline void stp_reset_opt_values()
     u_sess->SPI_cxt.is_proconfig_set = false;
     u_sess->SPI_cxt.portal_stp_exception_counter = 0;
     u_sess->plsql_cxt.stp_savepoint_cnt = 0;
-    u_sess->plsql_cxt.nextStackEntryId = 0;
 }
 
 inline void stp_reset_xact_state_and_err_msg(bool savedisAllowCommitRollback, bool needResetErrMsg)

@@ -25,7 +25,7 @@ typedef struct SPIDescColumns {
 } SPIDescColumns;
 
 extern void SpiDescribeColumnsCallback(CommandDest dest, const char *src, ArrayType** resDescribe,
-    MemoryContext memctx);
+    MemoryContext memctx, ParserSetupHook parserSetup = NULL, void *parserSetupArg = NULL);
 extern void spi_exec_bind_with_callback(CommandDest dest, const char *src, bool read_only, long tcount,
     bool direct_call, void (*callbackFn)(void *), void *clientData, int nargs, Oid *argtypes, Datum *Values,
     ParserSetupHook parserSetup, void *parserSetupArg, const char *nulls = NULL);

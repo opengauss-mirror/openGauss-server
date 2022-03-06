@@ -102,6 +102,9 @@ StreamProducer::StreamProducer(
     m_uniqueSQLId = 0;
     m_uniqueSQLUserId = 0;
     m_uniqueSQLCNId = 0;
+    m_globalSessionId.sessionId = 0;
+    m_globalSessionId.nodeId = 0;
+    m_globalSessionId.seq = 0;
     /* Initialize the origin nodelsit */
     m_originConsumerNodeList = NIL;
     m_originProducerExecNodeList = NIL;
@@ -520,6 +523,16 @@ void StreamProducer::getUniqueSQLKey(uint64* unique_id, Oid* user_id, uint32* cn
     *unique_id = m_uniqueSQLId;
     *user_id = m_uniqueSQLUserId;
     *cn_id = m_uniqueSQLCNId;
+}
+
+void StreamProducer::setGlobalSessionId(GlobalSessionId* globalSessionId)
+{
+    m_globalSessionId = *globalSessionId;
+}
+
+void StreamProducer::getGlobalSessionId(GlobalSessionId* globalSessionId)
+{
+    *globalSessionId = m_globalSessionId;
 }
 
 /*

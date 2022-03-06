@@ -595,7 +595,7 @@ void create_audit_policy(CreateAuditPolicyStmt *stmt)
         } else {
             send_manage_message(AUDIT_FAILED);
             ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    (errcode(ERRCODE_DUPLICATE_POLICY),
                      errmsg("%s policy already exists, create failed", policy_name)));
         }
         return;

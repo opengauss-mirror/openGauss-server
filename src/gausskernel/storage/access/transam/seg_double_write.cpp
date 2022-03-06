@@ -153,7 +153,7 @@ bool dw_single_file_recycle_old(bool trunc_file)
         securec_check(rc, "\0", "\0");
     }
 
-    CheckPointSyncForDw();
+    PageWriterSync();
 
     if (trunc_file) {
         if (!LWLockConditionalAcquire(single_cxt->second_flush_lock, LW_EXCLUSIVE)) {

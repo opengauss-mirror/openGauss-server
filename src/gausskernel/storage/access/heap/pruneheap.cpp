@@ -204,7 +204,7 @@ int heap_page_prune(Relation relation, Buffer buffer, TransactionId oldest_xmin,
             continue;
 
         /* Nothing to do if slot is empty or already dead */
-        itemid = PageGetItemId(page, offnum);
+        itemid = HeapPageGetItemId(page, offnum);
         if (!ItemIdIsUsed(itemid) || ItemIdIsDead(itemid))
             continue;
 

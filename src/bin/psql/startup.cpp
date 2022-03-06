@@ -37,6 +37,7 @@
 #ifndef WIN32
 #include "libpq/libpq-int.h"
 #endif
+#include "nodes/pg_list.h"
 
 /*
  * Global psql options
@@ -123,6 +124,150 @@ static void set_aes_key(const char* dencrypt_key);
 #define PARAMS_ARRAY_SIZE 12
 #else
 #define PARAMS_ARRAY_SIZE 11
+#endif
+
+#ifdef ENABLE_LITE_MODE
+void pg_free(void* ptr)
+{
+    if (ptr != NULL) {
+        free(ptr);
+        ptr = NULL;
+    }
+}
+
+static void list_free_private(List* list, bool deep)
+{
+    ListCell* cell = NULL;
+
+    cell = list_head(list);
+    while (cell != NULL) {
+        ListCell* tmp = cell;
+
+        cell = lnext(cell);
+        if (deep) {
+            pg_free(lfirst(tmp));
+        }
+        pg_free(tmp);
+    }
+
+    if (list != NULL) {
+        pg_free(list);
+    }
+}
+
+
+void list_free(List* list)
+{
+    list_free_private(list, false);
+}
+
+static List* new_list(NodeTag type)
+{
+    List* new_list_val = NULL;
+    ListCell* new_head = NULL;
+
+    new_head = (ListCell*)pg_malloc(sizeof(*new_head));
+    new_head->next = NULL;
+    /* new_head->data is left undefined! */
+
+    new_list_val = (List*)pg_malloc(sizeof(*new_list_val));
+    new_list_val->type = type;
+    new_list_val->length = 1;
+    new_list_val->head = new_head;
+    new_list_val->tail = new_head;
+
+    return new_list_val;
+}
+
+static void new_tail_cell(List* list)
+{
+    ListCell* new_tail = NULL;
+
+    new_tail = (ListCell*)pg_malloc(sizeof(*new_tail));
+    new_tail->next = NULL;
+
+    list->tail->next = new_tail;
+    list->tail = new_tail;
+    list->length++;
+}
+
+List* lappend(List* list, void* datum)
+{
+    if (list == NIL)
+        list = new_list(T_List);
+    else
+        new_tail_cell(list);
+
+    lfirst(list->tail) = datum;
+    return list;
+}
+
+static void new_head_cell(List* list)
+{
+    ListCell* new_head = NULL;
+
+    new_head = (ListCell*)pg_malloc(sizeof(*new_head));
+    new_head->next = list->head;
+
+    list->head = new_head;
+    list->length++;
+}
+
+List* lcons(void* datum, List* list)
+{
+    if (list == NIL) {
+        list = new_list(T_List);
+    } else {
+        new_head_cell(list);
+    }
+
+    lfirst(list->head) = datum;
+    return list;
+}
+
+List* list_delete_cell(List* list, ListCell* cell, ListCell* prev)
+{
+    Assert(prev != NULL ? lnext(prev) == cell : list_head(list) == cell);
+
+    /*
+     * If we're about to delete the last node from the list, free the whole
+     * list instead and return NIL, which is the only valid representation of
+     * a zero-length list.
+     */
+    if (list->length == 1) {
+        list_free(list);
+        return NIL;
+    }
+
+    /*
+     * Otherwise, adjust the necessary list links, deallocate the particular
+     * node we have just removed, and return the list we were given.
+     */
+    list->length--;
+
+    if (prev != NULL) {
+        prev->next = cell->next;
+    } else {
+        list->head = cell->next;
+    }
+
+    if (list->tail == cell) {
+        list->tail = prev;
+    }
+
+    cell->next = NULL;
+    pg_free(cell);
+    return list;
+}
+
+List* list_delete_first(List* list)
+{
+    if (list == NIL) {
+        return NIL; /* would an error be better? */
+    }
+
+    return list_delete_cell(list, list_head(list), NULL);
+}
 #endif
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -308,6 +453,7 @@ int main(int argc, char* argv[])
 #endif
     /* We rely on unmentioned fields of pset.popt to start out 0/false/NULL */
     pset.popt.topt.format = PRINT_ALIGNED;
+    pset.popt.topt.feedback = true;
     pset.popt.topt.border = 1;
     pset.popt.topt.pager = 1;
     pset.popt.topt.start_table = true;
@@ -756,32 +902,32 @@ static void get_password_pipeline(struct adhoc_opts* options)
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
-static void TrimHost(char *src)
+static char* TrimHost(char* src)
 {
-    char *begin = src;
-    char *end   = src + strlen(src);
-    if (begin == end) {
-        return;
+    char* s = 0;
+    char* e = 0;
+    char* c = 0;
+
+    for (c = src; (c != NULL) && (*c != '\0'); ++c) {
+        if (isspace(*c)) {
+            if (e == NULL) {
+                e = c;
+            }
+        } else {
+            if (s == NULL) {
+                s = c;
+            }
+            e = 0;
+        }
     }
-    while (isspace(*begin)) {
-        ++begin;
+    if (s == NULL) {
+        s = src;
     }
-    while (isspace(*end)) {
-        --end;
+    if (e != NULL) {
+        *e = 0;
     }
-    if (begin > end) {
-        *src =  0;
-        return;
-    }
-    while (begin != end) {
-        *src = *begin;
-        src++;
-        begin++;
-    }
-    *src = *end;
-    src++;
-    *src =  '\0';
-    return;
+
+    return s;
 }
 
 static void ParseHostArg(const char *arg, struct adhoc_opts *options)
@@ -796,8 +942,7 @@ static void ParseHostArg(const char *arg, struct adhoc_opts *options)
     char *inputStr = pg_strdup(arg);
     char *host = NULL;
     for (char *subStr = strtok(inputStr, sep); subStr != NULL; subStr = strtok(NULL, sep)) {
-        host = pg_strdup(subStr);
-        TrimHost(host);
+        host = pg_strdup(TrimHost(subStr));
         if (strlen(host) == 0) {
             free(host);
             continue;
@@ -869,6 +1014,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     bool is_action_file = false;
     /* Database Security: Data importing/dumping support AES128. */
     char* dencrypt_key = NULL;
+    char* needmask = NULL;
     errno_t rc = EOK;
 #ifdef USE_READLINE
     useReadline = false;
@@ -908,7 +1054,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 }
                 break;
             case 'd':
-                options->dbname = optarg;
+                options->dbname = pg_strdup(optarg);
+                dbname_alloced = true;
+                needmask = optarg;
                 break;
             case 'e':
                 if (!SetVariable(pset.vars, "ECHO", "queries")) {
@@ -957,6 +1105,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
                 check_memset_s(rc);
                 set_aes_key(dencrypt_key);
+                free(dencrypt_key);
                 break;
             }
             case 'L':
@@ -1115,27 +1264,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
      */
     while (argc - optind >= 1) {
         if (options->dbname == NULL) {
-            char *temp = NULL;
-            options->dbname = argv[optind];
-            if ((temp = strstr(argv[optind], "password")) != NULL) {
-                options->dbname = pg_strdup(argv[optind]);
-                rc = memset_s(temp + PASSWORD_STR_LEN, strlen(argv[optind]),
-                              0, strlen(temp + PASSWORD_STR_LEN));
-                check_memset_s(rc);
-                dbname_alloced = true;
-            }
-            /* mask informations in URI string. */
-            if (strncmp(options->dbname, "postgresql://", strlen("postgresql://")) == 0) {
-                options->dbname = pg_strdup(argv[optind]);
-                char *off_argv = argv[optind] + strlen("postgresql://");
-                rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
-                check_memset_s(rc);
-            } else if (strncmp(options->dbname, "postgres://", strlen("postgres://")) == 0) {
-                options->dbname = pg_strdup(argv[optind]);
-                char *off_argv = argv[optind] + strlen("postgres://");
-                rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
-                check_memset_s(rc);
-            }
+            options->dbname = pg_strdup(argv[optind]);
+            dbname_alloced = true;
+            needmask = argv[optind];
         } else if (options->username == NULL) {
             options->username = argv[optind];
         } else if (!pset.quiet) {
@@ -1143,6 +1274,26 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 stderr, _("%s: warning: extra command-line argument \"%s\" ignored\n"), pset.progname, argv[optind]);
         }
         optind++;
+    }
+
+    if (needmask != NULL) {
+        /* mask informations in URI string. */
+        if (strncmp(options->dbname, "postgresql://", strlen("postgresql://")) == 0) {
+            char *off_argv = needmask + strlen("postgresql://");
+            rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+            check_memset_s(rc);
+        } else if (strncmp(options->dbname, "postgres://", strlen("postgres://")) == 0) {
+            char *off_argv = needmask + strlen("postgres://");
+            rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+            check_memset_s(rc);
+        }
+        /* mask password */
+        char *temp = NULL;
+        if ((temp = strstr(needmask, "password")) != NULL) {
+            char *off_argv = temp + PASSWORD_STR_LEN;
+            rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
+            check_memset_s(rc);
+        }
     }
 }
 

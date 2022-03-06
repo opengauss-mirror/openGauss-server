@@ -47,10 +47,14 @@ typedef enum {
 #define REMOTE_READ_RPC_TIMEOUT 6
 #define REMOTE_READ_BLCKSZ_NOT_SAME 7
 #define REMOTE_READ_MEMCPY_ERROR 8
+#define REMOTE_READ_IP_NOT_EXIST 9
+#define REMOTE_READ_CONN_ERROR 10
+
 
 #define MAX_PATH_LEN 1024
+#define MAX_IPADDR_LEN 64
 
-#define MAX_IPADDR_LEN 32
+const int MAX_BATCH_READ_BLOCKNUM = 16 * 1024 * 1024 / BLCKSZ;  /* 16MB file */
 
 extern const char* RemoteReadErrMsg(int error_code);
 

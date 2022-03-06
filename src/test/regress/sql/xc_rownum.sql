@@ -5,6 +5,20 @@
 select oid rownum from pg_class;
 select oid as rownum from pg_class;
 
+--test compat
+drop table if exists tb_test;
+create table tb_test(c1 int,c2 varchar2,c3 varchar2);
+insert into tb_test values(1,'a','b');
+create or replace view v_test as select rownum from tb_test;
+\d+ v_test
+set behavior_compat_options = 'rownum_type_compat';
+create or replace view v_test1 as select rownum from tb_test;
+\d+ v_test1
+set behavior_compat_options = '';
+
+drop view v_test;
+drop view v_test1;
+drop table tb_test;
 ------------------------------------
 --test the basic function of rownum
 ------------------------------------
@@ -417,8 +431,36 @@ explain select * from student where rownum != 6.5;
 explain select * from student where rownum > 6.5;
 explain select * from student where rownum >= 6.5;
 
-explain delete from student where 3 > rownum;
-explain delete from student where 3 < rownum;
+-- optimize rownum to limit
+-- rownum bigint to numeric
+select rownum from student where rownum < 6.4;
+select rownum from student where rownum < 6.5;
+select rownum from student where rownum <= 6.4;
+select rownum from student where rownum <= 6.5;
+select rownum from student where rownum > 0.5;
+select rownum from student where rownum > 1.5;
+select rownum from student where rownum >= 0.5;
+select rownum from student where rownum >= 1.5;
+set behavior_compat_options = 'rownum_type_compat';
+explain (costs off) select * from student where rownum < 6.5;
+explain (costs off) select * from student where rownum <= 6.5;
+select rownum from student where rownum < 6.4;
+select rownum from student where rownum < 6.5;
+select rownum from student where rownum <= 6.4;
+select rownum from student where rownum <= 6.5;
+explain (costs off) select * from student where rownum > 6.5;
+explain (costs off) select * from student where rownum >= 6.5;
+select rownum from student where rownum > 0.5;
+select rownum from student where rownum > 1.5;
+select rownum from student where rownum >= 0.5;
+select rownum from student where rownum >= 1.5;
+explain (costs off) select * from student where rownum = 6.5;
+explain (costs off) select * from student where rownum != 6.5;
+-- reset
+set behavior_compat_options = '';
+
+explain (costs off) delete from student where 3 > rownum;
+explain (costs off) delete from student where 3 < rownum;
 
 explain delete from student where rownum < 5 or rownum < 6;
 explain delete from student where rownum > 5 or rownum > 6;
@@ -460,6 +502,28 @@ explain select id from test where rownum < 5 group by id;
 explain select id from student where rownum < 3 union select id from (select id from student order by 1)  where rownum < 5;
 select * from test where id < 2 union select * from (select * from test order by id desc) where rownum < 5;
 
+-- ROWNUM for Column-Oriented
+create table student_cstore1(id int, stuname varchar(10) ) WITH (orientation=column) ;
+create table student_cstore2(id int, stuname varchar(10) ) WITH (orientation=column) ;
+insert  into student_cstore1 select * from student;
+-- test rownum for cstorescan 
+select * from student_cstore1 where rownum < 5;
+select rownum, * from student_cstore1 where rownum < 1;
+select rownum, * from student_cstore1 where rownum <= 1;
+select rownum, * from student_cstore1 where rownum <= 10;
+select rownum, * from student_cstore1 where stuname = 'stu5' and rownum < 4;
+select rownum, stuname from student_cstore1 where stuname = 'stu5' or rownum < 8;
+-- test rownum for join 
+insert  into student_cstore2 select * from student;
+select * from student_cstore2 where rownum > 2;
+select * from student_cstore2 where rownum = 2;
+select rownum, sc1.stuname, sc2.id from  student_cstore2 as sc1, student_cstore2 as sc2 where sc1.id = sc2.id;
+
+-- test rownum for agg
+select * from (select rownum, max(id) as max_id from student_cstore1 group by rownum) as t order by max_id;
+
+drop table student_cstore1;
+drop table student_cstore2;
 drop table student;
 drop table test;
 
@@ -530,3 +594,5 @@ select rownum,* from partition_hash;
 select * from partition_hash where rownum < 5;
 
 drop table partition_hash;
+
+

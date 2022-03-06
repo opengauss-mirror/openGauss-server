@@ -152,8 +152,9 @@ static bool cbi_lazy_tid_reaped(ItemPointer itemptr, void* state, Oid partOid = 
 static bool lazy_tid_reaped(ItemPointer itemptr, void* state, Oid partOid = InvalidOid, int2 bktId = InvalidBktId);
 static int cbi_vac_cmp_itemptr(const void* left, const void* right);
 static int vac_cmp_itemptr(const void* left, const void* right);
-extern bool ShouldAttemptTruncation(const LVRelStats *vacrelstats);
 extern void vacuum_log_cleanup_info(Relation rel, LVRelStats* vacrelstats);
+static bool HeapPageCheckForUsedLinePointer(Page page);
+static bool UHeapPageCheckForUsedLinePointer(Page page, Relation relation);
 
 /*
  *	lazy_vacuum_rel() -- perform LAZY VACUUM for one heap relation
@@ -227,7 +228,9 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
             ResultRelInfo *resultRelInfo = NULL;
             if (onerel->rd_rel->relhasindex) {
                 resultRelInfo = makeNode(ResultRelInfo);
-                if (vacstmt->onepartrel != NULL) {
+                if (vacstmt->issubpartition) {
+                    InitResultRelInfo(resultRelInfo, vacstmt->parentpartrel, 1, 0);
+                } else if (vacstmt->onepartrel != NULL) {
                     InitResultRelInfo(resultRelInfo, vacstmt->onepartrel, 1, 0);
                 } else {
                     InitResultRelInfo(resultRelInfo, onerel, 1, 0);
@@ -485,7 +488,11 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         new_rel_pages = vacrelstats->old_rel_pages;
         new_rel_tuples = vacrelstats->old_rel_tuples;
     }
-    if (RelationIsPartition(onerel)) {
+    if (vacstmt->issubpartition) {
+        Assert(vacstmt->parentpartrel != NULL);
+        Assert(vacstmt->parentpart != NULL);
+        new_rel_allvisible = visibilitymap_count(vacstmt->parentpartrel, vacstmt->parentpart);
+    } else if (RelationIsPartition(onerel)) {
         Assert(vacstmt->onepartrel != NULL);
         Assert(vacstmt->onepart != NULL);
         new_rel_allvisible = visibilitymap_count(vacstmt->onepartrel, vacstmt->onepart);
@@ -510,12 +517,12 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
          * will lead to misbehave when update other index usable partitions ---the horrible
          * misdguge as hot update even if update indexes columns.
          */
-        if (!vacstmt->parentpartrel) {
-            vac_update_pgclass_partitioned_table(
-                vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex, new_frozen_xid, new_min_multi);
-        } else {
+        if (vacstmt->issubpartition) {
             vac_update_pgclass_partitioned_table(
                 vacstmt->parentpartrel, vacstmt->parentpartrel->rd_rel->relhasindex, new_frozen_xid, new_min_multi);
+        } else {
+            vac_update_pgclass_partitioned_table(
+                vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex, new_frozen_xid, new_min_multi);
         }
 
         // update stats of local partition indexes
@@ -634,6 +641,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                     pg_rusage_show(&ru0))));
         }
     }
+    pfree_ext(vacrelstats);
     gstrace_exit(GS_TRC_ID_lazy_vacuum_rel);
 }
 
@@ -1464,8 +1472,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                 PageSetLSN(page, recptr);
             }
             END_CRIT_SECTION();
-            if (PageIs8BXidHeapVersion(page) &&
-                TransactionIdPrecedes(((HeapPageHeader)page)->pd_xid_base, u_sess->utils_cxt.RecentXmin)) {
+            if (TransactionIdPrecedes(((HeapPageHeader)page)->pd_xid_base, u_sess->utils_cxt.RecentXmin)) {
                 if (u_sess->utils_cxt.RecentXmin - ((HeapPageHeader)page)->pd_xid_base > CHANGE_XID_BASE)
                     (void)heap_change_xidbase_after_freeze(onerel, buf);
             }
@@ -1835,6 +1842,7 @@ void lazy_vacuum_index(Relation indrel, IndexBulkDeleteResult **stats, const LVR
     ivinfo.message_level = elevel;
     ivinfo.num_heap_tuples = vacrelstats->old_rel_tuples;
     ivinfo.strategy = vacStrategy;
+    ivinfo.invisibleParts = NULL;
 
     /* Do bulk deletion */
     if (RelationIsCrossBucketIndex(indrel)) {
@@ -1870,6 +1878,7 @@ extern IndexBulkDeleteResult *lazy_cleanup_index(Relation indrel, IndexBulkDelet
     ivinfo.message_level = elevel;
     ivinfo.num_heap_tuples = vacrelstats->new_rel_tuples;
     ivinfo.strategy = vac_strategy;
+    ivinfo.invisibleParts = NULL;
     stats = index_vacuum_cleanup(&ivinfo, stats);
     if (stats != NULL) {
         ereport(elevel,
@@ -2067,8 +2076,6 @@ count_nondeletable_pages(Relation onerel, LVRelStats *vacrelstats)
     while (blkno > vacrelstats->nonempty_pages) {
         Buffer          buf;
         Page            page;
-        OffsetNumber    offnum,
-                        maxoff;
         bool            hastup = NULL;
 
         /*
@@ -2084,13 +2091,24 @@ count_nondeletable_pages(Relation onerel, LVRelStats *vacrelstats)
             elapsed = currenttime;
             INSTR_TIME_SUBTRACT(elapsed, starttime);
             if ((INSTR_TIME_GET_MICROSEC(elapsed) / 1000) >= AUTOVACUUM_TRUNCATE_LOCK_CHECK_INTERVAL) {
-                if (LockHasWaitersRelation(onerel, AccessExclusiveLock)) {
-                    ereport(elevel,
-                            (errmsg("\"%s\": suspending truncate due to conflicting lock request",
-                            RelationGetRelationName(onerel))));
+                if (RelationIsPartition(onerel)) {
+                    if (LockHasWaitersPartition(onerel, AccessExclusiveLock)) {
+                        ereport(elevel,
+                                (errmsg("\"%s\": suspending truncate due to conflicting lock request",
+                                RelationGetRelationName(onerel))));
 
-                    vacrelstats->lock_waiter_detected = true;
-                    return blkno;
+                        vacrelstats->lock_waiter_detected = true;
+                        return blkno;
+                    }
+                } else {
+                    if (LockHasWaitersRelation(onerel, AccessExclusiveLock)) {
+                        ereport(elevel,
+                                (errmsg("\"%s\": suspending truncate due to conflicting lock request",
+                                RelationGetRelationName(onerel))));
+
+                        vacrelstats->lock_waiter_detected = true;
+                        return blkno;
+                    }
                 }
                 starttime = currenttime;
             }
@@ -2112,28 +2130,8 @@ count_nondeletable_pages(Relation onerel, LVRelStats *vacrelstats)
 
         page = BufferGetPage(buf);
 
-        if (PageIsNew(page) || PageIsEmpty(page)) {
-            /* PageIsNew probably shouldn't happen... */
-            UnlockReleaseBuffer(buf);
-            continue;
-        }
-
-        hastup = false;
-        maxoff = PageGetMaxOffsetNumber(page);
-        for (offnum = FirstOffsetNumber; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
-            ItemId itemid = PageGetItemId(page, offnum);
-
-            /*
-             * Note: any non-unused item should be taken as a reason to keep
-             * this page.  We formerly thought that DEAD tuples could be
-             * thrown away, but that's not so, because we'd not have cleaned
-             * out their index entries.
-             */
-            if (ItemIdIsUsed(itemid)) {
-                hastup = true;
-                break;      /* can stop scanning */
-            }
-        }                   /* scan along page */
+        hastup = RelationIsUstoreFormat(onerel) ? UHeapPageCheckForUsedLinePointer(page, onerel) :
+                                                          HeapPageCheckForUsedLinePointer(page);
 
         UnlockReleaseBuffer(buf);
 
@@ -2352,44 +2350,12 @@ void elogVacuumInfo(Relation rel, HeapTuple tuple, char* funcName, TransactionId
 }
 
 /*
- * ShouldAttemptTruncation - should we attempt to truncate the heap?
- *
- * Don't even think about it unless we have a shot at releasing a goodly
- * number of pages.  Otherwise, the time taken isn't worth it.
- *
- * Also don't attempt it if we are doing early pruning/vacuuming, because a
- * scan which cannot find a truncated heap page cannot determine that the
- * snapshot is too old to read that page.  We might be able to get away with
- * truncating all except one of the pages, setting its LSN to (at least) the
- * maximum of the truncated range if we also treated an index leaf tuple
- * pointing to a missing heap page as something to trigger the "snapshot too
- * old" error, but that seems fragile and seems like it deserves its own patch
- * if we consider it.
- *
- * This is split out so that we can test whether truncation is going to be
- * called for before we actually do it.  If you change the logic here, be
- * careful to depend only on fields that lazy_scan_heap updates on-the-fly.
- */
-
-bool ShouldAttemptTruncation(const LVRelStats *vacrelstats)
-{
-    BlockNumber possiblyFreeable;
-
-    possiblyFreeable = vacrelstats->rel_pages - vacrelstats->nonempty_pages;
-    if (possiblyFreeable > 0 && (possiblyFreeable >= REL_TRUNCATE_MINIMUM ||
-        possiblyFreeable >= vacrelstats->rel_pages / REL_TRUNCATE_FRACTION))
-        return true;
-    else
-        return false;
-}
-
-/*
  * Return true if there is any used line pointer on the page.
  * Assume the caller has atleast a shared lock
  */
 static bool UHeapPageCheckForUsedLinePointer(Page page, Relation relation)
 {
-    if (PageIsNew(page) || UPageIsEmpty((UHeapPageHeaderData *)page, RelationGetInitTd(relation))) {
+    if (PageIsNew(page) || UPageIsEmpty((UHeapPageHeaderData *)page)) {
         return false;
     }
 
@@ -2422,92 +2388,4 @@ static bool HeapPageCheckForUsedLinePointer(Page page)
     }
 
     return false;
-}
-
-/*
- * Rescan end pages to verify that they are (still) empty of tuples.
- *
- * Returns number of nondeletable pages (last nonempty page + 1).
- */
-// static BlockNumber
-BlockNumber CountNondeletablePages(Relation onerel, LVRelStats *vacrelstats)
-{
-    BlockNumber blkno;
-    instr_time starttime;
-    instr_time currenttime;
-    instr_time elapsed;
-
-    /* Initialize the starttime if we check for conflicting lock requests */
-    INSTR_TIME_SET_CURRENT(starttime);
-
-    /* Strange coding of loop control is needed because blkno is unsigned */
-    blkno = vacrelstats->rel_pages;
-    while (blkno > vacrelstats->nonempty_pages) {
-        Buffer buf;
-        Page page;
-        bool hastup = NULL;
-
-        /*
-         * Check if another process requests a lock on our relation. We are
-         * holding an AccessExclusiveLock here, so they will be waiting. We
-         * only do this in autovacuum_truncate_lock_check millisecond
-         * intervals, and we only check if that interval has elapsed once
-         * every 32 blocks to keep the number of system calls and actual
-         * shared lock table lookups to a minimum.
-         */
-        if ((blkno % 32) == 0) {
-            INSTR_TIME_SET_CURRENT(currenttime);
-            elapsed = currenttime;
-            INSTR_TIME_SUBTRACT(elapsed, starttime);
-            if ((INSTR_TIME_GET_MICROSEC(elapsed) / 1000) >= AUTOVACUUM_TRUNCATE_LOCK_CHECK_INTERVAL) {
-                if (LockHasWaitersRelation(onerel, AccessExclusiveLock)) {
-                    ereport(elevel, (errmsg("\"%s\": suspending truncate "
-                        "due to conflicting lock request",
-                        RelationGetRelationName(onerel))));
-
-                    vacrelstats->lock_waiter_detected = true;
-                    return blkno;
-                }
-                starttime = currenttime;
-            }
-        }
-
-        /*
-         * We don't insert a vacuum delay point here, because we have an
-         * exclusive lock on the table which we want to hold for as short a
-         * time as possible.  We still need to check for interrupts however.
-         */
-        CHECK_FOR_INTERRUPTS();
-
-        blkno--;
-
-        buf = ReadBufferExtended(onerel, MAIN_FORKNUM, blkno, RBM_NORMAL, vac_strategy);
-
-        /* In this phase we only need shared access to the buffer */
-        LockBuffer(buf, BUFFER_LOCK_SHARE);
-
-        page = BufferGetPage(buf);
-
-        /*
-         * Note: any non-unused item should be taken as a reason to keep
-         * this page.  We formerly thought that DEAD tuples could be
-         * thrown away, but that's not so, because we'd not have cleaned
-         * out their index entries.
-         */
-        hastup = RelationIsUstoreFormat(onerel) ? UHeapPageCheckForUsedLinePointer(page, onerel) :
-                                                  HeapPageCheckForUsedLinePointer(page);
-
-        UnlockReleaseBuffer(buf);
-
-        /* Done scanning if we found a tuple here */
-        if (hastup)
-            return blkno + 1;
-    }
-
-    /*
-     * If we fall out of the loop, all the previously-thought-to-be-empty
-     * pages still are; we need not bother to look at the last known-nonempty
-     * page.
-     */
-    return vacrelstats->nonempty_pages;
 }

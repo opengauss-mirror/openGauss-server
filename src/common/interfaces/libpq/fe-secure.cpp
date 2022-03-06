@@ -113,6 +113,10 @@ static int SSL_CTX_set_cipher_list_ex(SSL_CTX* ctx, const char* ciphers[], const
 
 static THR_LOCAL bool pq_init_ssl_lib = true;
 static THR_LOCAL bool pq_init_crypto_lib = true;
+#ifdef ENABLE_UT
+#define static
+#endif
+static THR_LOCAL bool g_client_crl_err = false;
 #ifndef ENABLE_UT
 static bool set_client_ssl_ciphers(); /* set client security cipherslist*/
 #else
@@ -141,14 +145,13 @@ static long win32_ssl_create_mutex = 0;
 
 /* security ciphers suites in SSL connection */
 static const char* ssl_ciphers_map[] = {
-    TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,   /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256 */
-    TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,   /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
-    TLS1_TXT_DHE_RSA_WITH_AES_128_CCM,          /* TLS_DHE_RSA_WITH_AES_128_CCM */
-    TLS1_TXT_DHE_RSA_WITH_AES_256_CCM,          /* TLS_DHE_RSA_WITH_AES_256_CCM */
-    TLS1_TXT_ECDHE_RSA_WITH_AES_256_GCM_SHA384,     /* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 */
     TLS1_TXT_ECDHE_RSA_WITH_AES_128_GCM_SHA256,     /* TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 */
-    TLS1_TXT_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,   /* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 */
+    TLS1_TXT_ECDHE_RSA_WITH_AES_256_GCM_SHA384,     /* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 */
     TLS1_TXT_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,   /* TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 */
+    TLS1_TXT_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,   /* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 */
+    /* The following are compatible with earlier versions of the server. */
+    TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,       /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, */
+    TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,       /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
     NULL};
 
 #endif /* SSL */
@@ -895,51 +898,49 @@ static
 #endif
  int verify_cb(int ok, X509_STORE_CTX* ctx)
 {
-    int cert_error = X509_STORE_CTX_get_error(ctx);
+    if (ok) {
+        return ok;
+    }
 
-    if (!ok)
-    {
-        switch (cert_error)
-        {
-            case X509_V_ERR_CRL_HAS_EXPIRED:
-                ok = 1;
+    /* 
+    * When the CRL is abnormal, it won't be used to check whether the certificate is revoked,
+    * and the services shouldn't be affected due to the CRL exception.
+    */
+    const int crl_err_scenarios[] = {
+        X509_V_ERR_CRL_HAS_EXPIRED,
+        X509_V_ERR_UNABLE_TO_GET_CRL,
+        X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE,
+        X509_V_ERR_CRL_SIGNATURE_FAILURE,
+        X509_V_ERR_CRL_NOT_YET_VALID,
+        X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD,
+        X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD,
+        X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER,
+        X509_V_ERR_KEYUSAGE_NO_CRL_SIGN,
+        X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION,
+        X509_V_ERR_DIFFERENT_CRL_SCOPE,
+        X509_V_ERR_CRL_PATH_VALIDATION_ERROR
+    };
+    bool ignore_crl_err = false;
+    int err_code = X509_STORE_CTX_get_error(ctx);
+
+    if (!g_client_crl_err) {
+        for (size_t i = 0; i < sizeof(crl_err_scenarios) / sizeof(crl_err_scenarios[0]); i++) {
+            if (err_code == crl_err_scenarios[i]) {
+                g_client_crl_err = true;
+                ignore_crl_err = true;
                 break;
-            case X509_V_ERR_UNABLE_TO_GET_CRL:
-                ok = 1;
-                break;  
-            case X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE:
-                ok = 1;
-                break;  
-            case X509_V_ERR_CRL_SIGNATURE_FAILURE:
-                ok = 1;
-                break;
-            case X509_V_ERR_CRL_NOT_YET_VALID:
-                ok = 1;
-                break;  
-            case X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD:
-                ok = 1;
-                break;
-            case X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD:
-                ok = 1;
-                break;
-            case X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER:
-                ok = 1;
-                break;
-            case X509_V_ERR_KEYUSAGE_NO_CRL_SIGN:
-                ok = 1;
-                break;
-            case X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION:
-                ok = 1;
-                break;
-            case X509_V_ERR_DIFFERENT_CRL_SCOPE:
-                ok = 1;
-                break;
-            case X509_V_ERR_CRL_PATH_VALIDATION_ERROR:
-                ok = 1;
-                break;
-            default:
-                break;
+            }
         }
+    } else {
+        if (err_code == X509_V_ERR_CERT_REVOKED) {
+            g_client_crl_err = false; /* reset */
+            ignore_crl_err = true;
+        }
+    }
+
+    if (ignore_crl_err) {
+        X509_STORE_CTX_set_error(ctx, X509_V_OK);
+        ok = 1;
     }
 
     return ok;
@@ -1007,6 +1008,7 @@ static bool verify_peer_name_matches_certificate(PGconn* conn)
     int r;
     int len;
     bool result = false;
+    char* host = conn->connhost[conn->whichhost].host;
 
     /*
      * If told not to verify the peer name, don't do it. Return true
@@ -1050,22 +1052,22 @@ static bool verify_peer_name_matches_certificate(PGconn* conn)
      * We got the peer's common name. Now compare it against the originally
      * given hostname.
      */
-    if (!((conn->pghost != NULL) && conn->pghost[0] != '\0')) {
+    if (!((host != NULL) && host[0] != '\0')) {
         printfPQExpBuffer(
             &conn->errorMessage, libpq_gettext("host name must be specified for a verified SSL connection\n"));
         result = false;
     } else {
-        if (pg_strcasecmp(peer_cn, conn->pghost) == 0)
+        if (pg_strcasecmp(peer_cn, host) == 0)
             /* Exact name match */
             result = true;
-        else if (wildcard_certificate_match(peer_cn, conn->pghost))
+        else if (wildcard_certificate_match(peer_cn, host))
             /* Matched wildcard certificate */
             result = true;
         else {
             printfPQExpBuffer(&conn->errorMessage,
                 libpq_gettext("server common name \"%s\" does not match host name \"%s\"\n"),
                 peer_cn,
-                conn->pghost);
+                host);
             result = false;
         }
     }
@@ -1438,6 +1440,44 @@ int LoadSslKeyFile(PGconn* conn, bool have_homedir, const PathData *homedir, boo
     return 0;
 }
 
+void LoadSslCrlFile(PGconn* conn, bool have_homedir, const PathData *homedir)
+{
+    struct stat buf;
+    char fnbuf[MAXPGPATH] = {0};
+    errno_t rc = 0;
+    int nRet = 0;
+    bool userSetSslCrl = false;
+    X509_STORE* cvstore = SSL_CTX_get_cert_store(SSL_context);
+    if (cvstore == NULL) {
+        return;
+    }
+
+    if ((conn->sslcrl != NULL) && strlen(conn->sslcrl) > 0) {
+        rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslcrl, strlen(conn->sslcrl));
+        securec_check_c(rc, "\0", "\0");
+        fnbuf[MAXPGPATH - 1] = '\0';
+        userSetSslCrl = true;
+    } else if (have_homedir) {
+        nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, ROOT_CRL_FILE);
+        securec_check_ss_c(nRet, "\0", "\0");
+    } else {
+        fnbuf[0] = '\0';
+    }
+
+    if (fnbuf[0] == '\0') {
+        return;
+    }
+
+    /* Set the flags to check against the complete CRL chain */
+    if (stat(fnbuf, &buf) == 0 && X509_STORE_load_locations(cvstore, fnbuf, NULL) == 1) {
+        (void)X509_STORE_set_flags(cvstore, X509_V_FLAG_CRL_CHECK);
+    } else if (userSetSslCrl) {
+        printfPQExpBuffer(&conn->errorMessage,
+            libpq_gettext("could not load SSL certificate revocation list (file \"%s\")\n"), fnbuf);
+        fprintf(stdout, "Warning: could not load SSL certificate revocation list (file \"%s\")\n", fnbuf);
+    }
+}
+
 #define MAX_CERTIFICATE_DEPTH_SUPPORTED 20 /* The max certificate depth supported. */
 int LoadRootCertFile(PGconn* conn, bool have_homedir, const PathData *homedir)
 {
@@ -1476,31 +1516,7 @@ int LoadRootCertFile(PGconn* conn, bool have_homedir, const PathData *homedir)
             return -1;
         }
 #endif
-        if (SSL_CTX_get_cert_store(SSL_context) != NULL) {
-            if ((conn->sslcrl != NULL) && strlen(conn->sslcrl) > 0) {
-                rc = strncpy_s(fnbuf, MAXPGPATH, conn->sslcrl, strlen(conn->sslcrl));
-                securec_check_c(rc, "\0", "\0");
-                fnbuf[MAXPGPATH - 1] = '\0';
-            } else if (have_homedir) {
-                nRet = snprintf_s(fnbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", homedir->data, ROOT_CRL_FILE);
-                securec_check_ss_c(nRet, "\0", "\0");
-            } else
-                fnbuf[0] = '\0';
-
-            /* Set the flags to check against the complete CRL chain */
-            if (fnbuf[0] != '\0' && stat(fnbuf, &buf) == 0) {
-                if (X509_STORE_load_locations(SSL_CTX_get_cert_store(SSL_context), fnbuf, NULL) == 1) {
-                    (void)X509_STORE_set_flags(
-                        SSL_CTX_get_cert_store(SSL_context), X509_V_FLAG_CRL_CHECK);
-                } else {
-                    printfPQExpBuffer(&conn->errorMessage,
-                        libpq_gettext("could not load SSL certificate revocation list (file \"%s\")\n"),
-                        fnbuf);
-                    return -1;
-                }
-            }
-        }
-
+        LoadSslCrlFile(conn, have_homedir, homedir);
         /* Check the DH length to make sure it's at least 2048. */
         SSL_set_security_callback(conn->ssl, ssl_security_DH_ECDH_cb);
 
@@ -1547,6 +1563,7 @@ int initialize_SSL(PGconn* conn)
     errno_t rc = 0;
     int retval = 0;
 
+    g_client_crl_err = false;
     /*
      * We'll need the home directory if any of the relevant parameters are
      * defaulted.  If pqGetHomeDirectory fails, act as though none of the

@@ -97,12 +97,11 @@ typedef struct ContextUpdateOp {
 } ContextUpdateOp;
 
 typedef struct RedoItem {
-    /* Old version. */
-    bool oldVersion;
     bool sharewithtrxn; /* if ture when designatedWorker is trxn or all and need sync with pageworker */
     bool blockbytrxn;   /* if ture when designatedWorker is pagerworker and need sync with trxn */
     bool imcheckpoint;
     bool replay_undo;  /* if ture replay undo, otherwise replay data page */
+    bool need_free;     /* bad block repair finish, need call pfree to free memory */
     /* Number of workers sharing this item. */
     uint32 shareCount;
     /* Number of page workers holding reference to this item + undo redo worker */
@@ -132,6 +131,7 @@ typedef struct RedoItem {
     TransactionId RecentXmin;
     ServerMode syncServerMode;
     pg_atomic_uint32 freed;
+    RedoItem *remoteNext;
 } RedoItem;
 
 static const int32 ANY_BLOCK_ID = -1;
@@ -145,8 +145,6 @@ RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 desi
 RedoItem* CreateLSNMarker(XLogReaderState* record, List* expectedTLIs, bool buseoriginal = false);
 
 bool IsLSNMarker(const RedoItem* item);
-
-void ApplyRedoRecord(XLogReaderState* record, bool bOld);
 
 static inline RedoItem* GetRedoItemPtr(XLogReaderState* record)
 {

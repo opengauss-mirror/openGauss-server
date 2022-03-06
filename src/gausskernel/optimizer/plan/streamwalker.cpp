@@ -137,17 +137,27 @@ static void stream_walker_query_insertinto_rep(Query* query, shipping_context *c
             continue;
         }
         RangeTblEntry *rte = rt_fetch(index, query->rtable);
-        if (rte->rtekind != RTE_SUBQUERY || rte->subquery == NULL || !rte->subquery->hasWindowFuncs) {
+        if (rte->rtekind != RTE_SUBQUERY || rte->subquery == NULL) {
             continue;
         }
-        if (!containReplicatedTable(rte->subquery->rtable)) {
-            continue;
+
+        if (rte->subquery->hasWindowFuncs && containReplicatedTable(rte->subquery->rtable)) {
+            cxt->current_shippable = false;
+            break;
         }
+
+        /* Cannot shipping if there are junk tlists in replicated subquery */
+        if (check_replicated_junktlist(rte->subquery)) {
+            cxt->current_shippable = false;
+            break;
+        }
+    }
+
+    if (!cxt->current_shippable) {
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
             "\"insert into replicated table with select rep table with winfunc\" can not be shipped");
         securec_check_ss_c(sprintf_rc, "\0", "\0");
-        cxt->current_shippable = false;
     }
 }
 
@@ -589,66 +599,86 @@ static bool contains_unsupport_tables(List* rtable, Query* query, shipping_conte
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(item);
         rIdx++;
 
-        if (rte->rtekind == RTE_RELATION) {
-            if (table_contain_unsupport_feature(rte->relid, query) && !u_sess->attr.attr_sql.enable_cluster_resize) {
-                context->current_shippable = false;
-                return true;
+        switch (rte->rtekind) {
+            case RTE_RELATION: {
+                if (table_contain_unsupport_feature(rte->relid, query) &&
+                    !u_sess->attr.attr_sql.enable_cluster_resize) {
+                    context->current_shippable = false;
+                    return true;
+                }
+
+                rte->locator_type = GetLocatorType(rte->relid);
+                /* SQLONHADOOP has to support RROBIN MODULO distribution mode */
+                if (((rte->locator_type == LOCATOR_TYPE_RROBIN || rte->locator_type == LOCATOR_TYPE_MODULO) &&
+                    rte->relkind != RELKIND_FOREIGN_TABLE && rte->relkind != RELKIND_STREAM)) {
+                    sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                        NOTPLANSHIPPING_LENGTH,
+                        "Table %s can not be shipped",
+                        get_rel_name(rte->relid));
+                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    context->current_shippable = false;
+                    return true;
+                }
+                if (rte->inh && has_subclass(rte->relid)) {
+                    sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                        NOTPLANSHIPPING_LENGTH,
+                        "Table %s inherited can not be shipped",
+                        get_rel_name(rte->relid));
+                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    context->current_shippable = false;
+                    return true;
+                }
+
+                if (query->commandType == CMD_INSERT && list_length(rtable) == 2 && rIdx == 1)
+                    target_table_loctype = rte->locator_type;
+
+                break;
             }
+            case RTE_SUBQUERY: {
+                /*
+                 * We allow to push the nextval and uuid_generate_v1 to DN for the following query:
+                 * 	  insert into t1 select nextval('seq1'),* from t2;
+                 * 	  insert into t1 select uuid_generate_v1, * from t2;
+                 * It fullfill the following conditions:
+                 * 1. Top level query is Insert.
+                 * 2. There are two RTE in rtable, the first one is the target table,
+                 *    which should be hash/range/list distributed.
+                 *    The second one is a subquery
+                 * We allow the the nextval and uuid_generate_v1 in the target list of the subquery.
+                 */
+                bool supportLoctype = (target_table_loctype == LOCATOR_TYPE_HASH ||
+                                      IsLocatorDistributedBySlice(target_table_loctype) ||
+                                      target_table_loctype == LOCATOR_TYPE_NONE);
+                if (query->commandType == CMD_INSERT && list_length(rtable) == 2 && rIdx == 2 &&
+                    supportLoctype) {
+                    scontext.allow_func_in_targetlist = true;
+                }
 
-            rte->locator_type = GetLocatorType(rte->relid);
-            /* SQLONHADOOP has to support RROBIN MODULO distribution mode */
-            if (((rte->locator_type == LOCATOR_TYPE_RROBIN || rte->locator_type == LOCATOR_TYPE_MODULO) &&
-                rte->relkind != RELKIND_FOREIGN_TABLE && rte->relkind != RELKIND_STREAM)) {
-                sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                    NOTPLANSHIPPING_LENGTH,
-                    "Table %s can not be shipped",
-                    get_rel_name(rte->relid));
-                securec_check_ss_c(sprintf_rc, "\0", "\0");
-                context->current_shippable = false;
-                return true;
+                (void)stream_walker((Node*)rte->subquery, (void*)(&scontext));
+
+                inh_shipping_context(context, &scontext);
+
+                scontext.allow_func_in_targetlist = false;
+
+                break;
             }
-            if (rte->inh && has_subclass(rte->relid)) {
-                sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                    NOTPLANSHIPPING_LENGTH,
-                    "Table %s inherited can not be shipped",
-                    get_rel_name(rte->relid));
-                securec_check_ss_c(sprintf_rc, "\0", "\0");
-                context->current_shippable = false;
-                return true;
+            case RTE_FUNCTION: {
+                (void)stream_walker((Node*)rte->funcexpr, (void*)(&scontext));
+
+                inh_shipping_context(context, &scontext);
+
+                break;
             }
+            case RTE_VALUES: {
+                (void)stream_walker((Node*)rte->values_lists, (void*)(&scontext));
 
-            if (query->commandType == CMD_INSERT && list_length(rtable) == 2 && rIdx == 1)
-                target_table_loctype = rte->locator_type;
-        } else if (rte->rtekind == RTE_SUBQUERY) {
-            /*
-             * We allow to push the nextval and uuid_generate_v1 to DN for the following query:
-             * 	  insert into t1 select nextval('seq1'),* from t2;
-             * 	  insert into t1 select uuid_generate_v1, * from t2;
-             * It fullfill the following conditions:
-             * 1. Top level query is Insert.
-             * 2. There are two RTE in rtable, the first one is the target table,
-             *    which should be hash/range/list distributed.
-             *    The second one is a subquery
-             * We allow the the nextval and uuid_generate_v1 in the target list of the subquery.
-             */
-            if (query->commandType == CMD_INSERT && list_length(rtable) == 2 && rIdx == 2 &&
-                (target_table_loctype == LOCATOR_TYPE_HASH || IsLocatorDistributedBySlice(target_table_loctype))) {
-                scontext.allow_func_in_targetlist = true;
+                inh_shipping_context(context, &scontext);
+
+                break;
             }
-
-            (void)stream_walker((Node*)rte->subquery, (void*)(&scontext));
-
-            inh_shipping_context(context, &scontext);
-
-            scontext.allow_func_in_targetlist = false;
-        } else if (rte->rtekind == RTE_FUNCTION) {
-            (void)stream_walker((Node*)rte->funcexpr, (void*)(&scontext));
-
-            inh_shipping_context(context, &scontext);
-        } else if (rte->rtekind == RTE_VALUES) {
-            (void)stream_walker((Node*)rte->values_lists, (void*)(&scontext));
-
-            inh_shipping_context(context, &scontext);
+            default: {
+                break;
+            }
         }
     }
 
@@ -680,7 +710,8 @@ static bool rel_contain_unshippable_feature(RangeTblEntry* rte, shipping_context
              * if 1. the target table is hash/range/list distributed table
              *  2. the nextval and uuid_generate_v1 function existed in the target list of the result table
              */
-            if (rte->locator_type == LOCATOR_TYPE_HASH || IsLocatorDistributedBySlice(rte->locator_type)) {
+            if (rte->locator_type == LOCATOR_TYPE_HASH || IsLocatorDistributedBySlice(rte->locator_type) ||
+                rte->locator_type == LOCATOR_TYPE_NONE) {
                 context->allow_func_in_targetlist = true;
             }
         }

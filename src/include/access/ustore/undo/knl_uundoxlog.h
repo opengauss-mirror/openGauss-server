@@ -115,8 +115,10 @@ typedef struct XlogRollbackFinish {
 
 extern void UndoXlogRedo(XLogReaderState *record);
 extern void UndoXlogDesc(StringInfo buf, XLogReaderState *record);
+extern const char* undo_xlog_type_name(uint8 subtype);
 extern void UndoXlogRollbackFinishRedo(XLogReaderState *record);
 extern void UndoXlogRollbackFinishDesc(StringInfo buf, XLogReaderState *record);
+extern const char* undo_xlog_roll_back_finish_type_name(uint8 subtype);
 XLogRecPtr WriteUndoXlog(void *xlrec, uint8 type);
 void LogUndoMeta(const XlogUndoMeta *xlum);
 }

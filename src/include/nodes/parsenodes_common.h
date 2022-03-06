@@ -98,10 +98,10 @@ typedef enum ObjectType {
     OBJECT_DIRECTORY,
     OBJECT_GLOBAL_SETTING,
     OBJECT_COLUMN_SETTING,
-	OBJECT_PUBLICATION,
-	OBJECT_PUBLICATION_NAMESPACE,
-	OBJECT_PUBLICATION_REL,
-	OBJECT_SUBSCRIPTION
+    OBJECT_PUBLICATION,
+    OBJECT_PUBLICATION_NAMESPACE,
+    OBJECT_PUBLICATION_REL,
+    OBJECT_SUBSCRIPTION
 } ObjectType;
 
 #define OBJECT_IS_SEQUENCE(obj) \
@@ -416,7 +416,8 @@ typedef struct HintState {
     List* skew_hint;       /* skew hint list */
     List* hint_warning;    /* hint warning list */
     bool  multi_node_hint; /* multinode hint */
-    List* predpush_hint;
+    List* predpush_hint;   /* predpush hint */
+    List* predpush_same_level_hint; /* predpush same level hint */
     List* rewrite_hint;    /* rewrite hint list */
     List* gather_hint;     /* gather hint */
     List* set_hint;        /* query-level guc hint */
@@ -437,6 +438,7 @@ typedef struct HintState {
 typedef struct UpsertClause {
     NodeTag type;
     List *targetList;
+    Node *whereClause;
     int location;
 } UpsertClause;
 
@@ -596,7 +598,7 @@ typedef struct StartWithClause {
     bool  priorDirection;
     bool  nocycle;
 
-    /* extension opetions */
+    /* extension options */
     bool  opt;
 } StartWithClause;
 
@@ -732,6 +734,7 @@ typedef enum AlterTableType {
     AT_AddColumnRecurse, /* internal to commands/tablecmds.c */
     AT_AddColumnToView,  /* implicitly via CREATE OR REPLACE VIEW */
     AT_AddPartition,
+    AT_AddSubPartition,
     AT_ColumnDefault,     /* alter column default */
     AT_DropNotNull,       /* alter column drop not null */
     AT_SetNotNull,        /* alter column set not null */
@@ -744,6 +747,7 @@ typedef enum AlterTableType {
     AT_DropColumn,        /* drop column */
     AT_DropColumnRecurse, /* internal to commands/tablecmds.c */
     AT_DropPartition,
+    AT_DropSubPartition,
     AT_AddIndex,                  /* add index */
     AT_ReAddIndex,                /* internal to commands/tablecmds.c */
     AT_AddConstraint,             /* add constraint */
@@ -1049,6 +1053,7 @@ typedef struct RangePartitionindexDefState {
     NodeTag type;
     char* name;
     char* tablespace;
+    List *sublist;
 } RangePartitionindexDefState;
 
 /* *
@@ -1086,6 +1091,7 @@ typedef struct PartitionState {
     List *partitionList;                        /* list of partition definition */
     RowMovementValue rowMovement; /* default: for colum-stored table means true, for row-stored means false */
     PartitionState *subPartitionState;
+    List *partitionNameList; /* existing partitionNameList for add partition */
 } PartitionState;
 
 typedef struct AddPartitionState { /* ALTER TABLE ADD PARTITION */
@@ -1093,6 +1099,12 @@ typedef struct AddPartitionState { /* ALTER TABLE ADD PARTITION */
     List *partitionList;
     bool isStartEnd;
 } AddPartitionState;
+
+typedef struct AddSubPartitionState { /* ALTER TABLE MODIFY PARTITION ADD SUBPARTITION */
+    NodeTag type;
+    const char* partitionName;
+    List *subPartitionList;
+} AddSubPartitionState;
 
 typedef enum SplitPartitionType {
     RANGEPARTITIION, /* not used */
@@ -1625,6 +1637,7 @@ typedef struct LockingClause {
     bool forUpdate;   /* for compatibility, we reserve this field but don't use it */
     bool noWait;      /* NOWAIT option */
     LockClauseStrength strength;
+    int waitSec;      /* WAIT time Sec */
 } LockingClause;
 
 /*
@@ -1920,6 +1933,7 @@ typedef struct Query {
                                      * do some expression processing.
                                      * Please refer to subquery_planner.
                                      */
+    bool is_from_inlist2join_rewrite; /* true if the query is created when applying inlist2join optimization */
     uint64 uniqueSQLId;             /* used by unique sql id */
 #ifndef ENABLE_MULTIPLE_NODES
     char* unique_sql_text;            /* used by unique sql plain text */
@@ -2152,55 +2166,46 @@ typedef struct PredictByFunction{ // DB4AI
     int model_args_location; // Only for parser
 } PredictByFunction;
 
-
-typedef struct CreatePublicationStmt
-{
-	NodeTag		type;
-	char	   *pubname;		/* Name of of the publication */
-	List	   *options;		/* List of DefElem nodes */
-	List	   *tables;			/* Optional list of tables to add */
-	bool		for_all_tables;	/* Special publication for all tables in db */
+typedef struct CreatePublicationStmt {
+    NodeTag type;
+    char *pubname;       /* Name of of the publication */
+    List *options;       /* List of DefElem nodes */
+    List *tables;        /* Optional list of tables to add */
+    bool for_all_tables; /* Special publication for all tables in db */
 } CreatePublicationStmt;
 
-typedef struct AlterPublicationStmt
-{
-	NodeTag		type;
-	char	   *pubname;		/* Name of of the publication */
+typedef struct AlterPublicationStmt {
+    NodeTag type;
+    char *pubname; /* Name of of the publication */
 
-	/* parameters used for ALTER PUBLICATION ... WITH */
-	List	   *options;		/* List of DefElem nodes */
+    /* parameters used for ALTER PUBLICATION ... WITH */
+    List *options; /* List of DefElem nodes */
 
-	/* parameters used for ALTER PUBLICATION ... ADD/DROP TABLE */
-	List	   *tables;			/* List of tables to add/drop */
-	bool		for_all_tables;	/* Special publication for all tables in db */
-	DefElemAction	tableAction; /* What action to perform with the tables */
+    /* parameters used for ALTER PUBLICATION ... ADD/DROP TABLE */
+    List *tables;              /* List of tables to add/drop */
+    bool for_all_tables;       /* Special publication for all tables in db */
+    DefElemAction tableAction; /* What action to perform with the tables */
 } AlterPublicationStmt;
 
-typedef struct CreateSubscriptionStmt
-{
-	NodeTag		type;
-	char	   *subname;		/* Name of of the subscription */
-	char	   *conninfo;		/* Connection string to publisher */
-	List	   *publication;	/* One or more publication to subscribe to */
-	List	   *options;		/* List of DefElem nodes */
+typedef struct CreateSubscriptionStmt {
+    NodeTag type;
+    char *subname;     /* Name of of the subscription */
+    char *conninfo;    /* Connection string to publisher */
+    List *publication; /* One or more publication to subscribe to */
+    List *options;     /* List of DefElem nodes */
 } CreateSubscriptionStmt;
 
-typedef struct AlterSubscriptionStmt
-{
-	NodeTag		type;
-	char	   *subname;		/* Name of of the subscription */
-	List	   *options;		/* List of DefElem nodes */
+typedef struct AlterSubscriptionStmt {
+    NodeTag type;
+    char *subname; /* Name of of the subscription */
+    List *options; /* List of DefElem nodes */
 } AlterSubscriptionStmt;
 
-typedef struct DropSubscriptionStmt
-{
-	NodeTag		type;
-	char	   *subname;		/* Name of of the subscription */
-	bool		missing_ok;		/* Skip error if missing? */
-    DropBehavior behavior;		/* RESTRICT or CASCADE behavior */
+typedef struct DropSubscriptionStmt {
+    NodeTag type;
+    char *subname;         /* Name of of the subscription */
+    bool missing_ok;       /* Skip error if missing? */
+    DropBehavior behavior; /* RESTRICT or CASCADE behavior */
 } DropSubscriptionStmt;
-
-
-
 
 #endif /* PARSENODES_COMMONH */

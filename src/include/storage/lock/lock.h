@@ -18,7 +18,6 @@
 #include "storage/lock/lwlock.h"
 #include "storage/shmem.h"
 #include "gs_thread.h"
-#include "knl/knl_session.h"
 
 typedef struct PROC_QUEUE {
     SHM_QUEUE links; /* head of list of PGPROC objects */
@@ -179,6 +178,7 @@ typedef enum LockTagType {
     LOCKTAG_RELFILENODE, /* relfilenode */
     LOCKTAG_SUBTRANSACTION, /* subtransaction (for waiting for subxact done) */
     /* ID info for a transaction is its TransactionId + SubTransactionId */
+    LOCKTAG_UID,
     LOCK_EVENT_NUM
 } LockTagType;
 
@@ -251,6 +251,15 @@ typedef struct LOCKTAG {
         (locktag).locktag_field4 = (offnum),                        \
         (locktag).locktag_field5 = (bucketid),                      \
         (locktag).locktag_type = LOCKTAG_TUPLE,                     \
+        (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
+
+#define SET_LOCKTAG_UID(locktag, dboid, reloid, uidHighBits, uidLowBits) \
+    ((locktag).locktag_field1 = (dboid),                    \
+        (locktag).locktag_field2 = (reloid),                \
+        (locktag).locktag_field3 = (uidHighBits),                   \
+        (locktag).locktag_field4 = (uidLowBits),                       \
+        (locktag).locktag_field5 = 0,                       \
+        (locktag).locktag_type = LOCKTAG_UID,               \
         (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
 
 #define SET_LOCKTAG_TRANSACTION(locktag, xid)               \
@@ -470,6 +479,12 @@ typedef struct LOCALLOCK {
 
 #define LOCALLOCK_LOCKMETHOD(llock) ((llock).tag.lock.locktag_lockmethodid)
 
+typedef struct GlobalSessionId {
+    uint64 sessionId;  /* Increasing sequence num */
+    uint32 nodeId;     /* the number of the send node */
+    /* Used to identify the latest global sessionid during pooler reuse */
+    uint64 seq;
+} GlobalSessionId;
 /*
  * These structures hold information passed from lmgr internals to the lock
  * listing user-level functions (in lockfuncs.c).
@@ -547,6 +562,90 @@ typedef enum LockWaitPolicy {
 #define LockHashPartitionLockByProc(leader_pgproc) \
     LockHashPartitionLock((leader_pgproc)->pgprocno)
 
+/* Macros for manipulating proc->fpLockBits */
+#define FAST_PATH_BITS_PER_SLOT 3
+#define FAST_PATH_LOCKNUMBER_OFFSET 1
+#define FAST_PATH_MASK ((1 << FAST_PATH_BITS_PER_SLOT) - 1)
+#define FAST_PATH_GET_BITS(proc, n) (((proc)->fpLockBits[n / FP_LOCK_SLOTS_PER_LOCKBIT] \
+    >> (FAST_PATH_BITS_PER_SLOT * (n % FP_LOCK_SLOTS_PER_LOCKBIT))) & FAST_PATH_MASK)
+#define FAST_PATH_BIT_POSITION(n, l)                                              \
+    (AssertMacro((l) >= FAST_PATH_LOCKNUMBER_OFFSET),                             \
+     AssertMacro((l) < FAST_PATH_BITS_PER_SLOT + FAST_PATH_LOCKNUMBER_OFFSET), \
+     AssertMacro((n) < FP_LOCK_SLOTS_PER_LOCKBIT),                             \
+     ((l) - FAST_PATH_LOCKNUMBER_OFFSET + FAST_PATH_BITS_PER_SLOT * (n)))
+
+#define FAST_PATH_SET_LOCKMODE(proc, n, l) \
+    (proc)->fpLockBits[n / FP_LOCK_SLOTS_PER_LOCKBIT] |= \
+    UINT64CONST(UINT64CONST(1) << FAST_PATH_BIT_POSITION((n % FP_LOCK_SLOTS_PER_LOCKBIT), l))
+#define FAST_PATH_CLEAR_LOCKMODE(proc, n, l) \
+    (proc)->fpLockBits[n / FP_LOCK_SLOTS_PER_LOCKBIT] &= \
+    ~(UINT64CONST(UINT64CONST(1) << FAST_PATH_BIT_POSITION((n % FP_LOCK_SLOTS_PER_LOCKBIT), l)))
+#define FAST_PATH_CHECK_LOCKMODE(proc, n, l) \
+    ((proc)->fpLockBits[n / FP_LOCK_SLOTS_PER_LOCKBIT] & \
+    (UINT64CONST(UINT64CONST(1) << FAST_PATH_BIT_POSITION((n % FP_LOCK_SLOTS_PER_LOCKBIT), l))))
+
+#define PRINT_WAIT_LENTH (8 + 1)
+#define CHECK_LOCKMETHODID(lockMethodId)                                             \
+    do {                                                 \
+        if (unlikely((lockMethodId) == 0 || (lockMethodId) >= lengthof(LockMethods))) {  \
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),              \
+                            errmsg("unrecognized lock method: %hu", (lockMethodId))));               \
+        }                                                    \
+    } while (0)
+#define CHECK_LOCKMODE(lockMode, lockMethodTable)                                    \
+    do {                                                 \
+        if (unlikely((lockMode) <= 0 || (lockMode) > (lockMethodTable)->numLockModes)) { \
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),                          \
+                            errmsg("unrecognized lock mode: %d", (lockMode))));                      \
+        }                                                    \
+    } while (0)
+
+/*
+ * The fast-path lock mechanism is concerned only with relation locks on
+ * unshared relations by backends bound to a database.	The fast-path
+ * mechanism exists mostly to accelerate acquisition and release of locks
+ * that rarely conflict.  Because ShareUpdateExclusiveLock is
+ * self-conflicting, it can't use the fast-path mechanism; but it also does
+ * not conflict with any of the locks that do, so we can ignore it completely.
+ */
+#define EligibleForRelationFastPath(locktag, mode)                                                    \
+    ((locktag)->locktag_lockmethodid == DEFAULT_LOCKMETHOD &&                                         \
+     ((locktag)->locktag_type == LOCKTAG_RELATION || (locktag)->locktag_type == LOCKTAG_PARTITION) && \
+     (mode) < ShareUpdateExclusiveLock)
+#define ConflictsWithRelationFastPath(locktag, mode)                                                  \
+    ((locktag)->locktag_lockmethodid == DEFAULT_LOCKMETHOD &&                                         \
+     ((locktag)->locktag_type == LOCKTAG_RELATION || (locktag)->locktag_type == LOCKTAG_PARTITION) && \
+     (mode) > ShareUpdateExclusiveLock)
+
+/*
+ * To make the fast-path lock mechanism work, we must have some way of
+ * preventing the use of the fast-path when a conflicting lock might be
+ * present.  We partition* the locktag space into FAST_PATH_HASH_BUCKETS
+ * partitions, and maintain an integer count of the number of "strong" lockers
+ * in each partition.  When any "strong" lockers are present (which is
+ * hopefully not very often), the fast-path mechanism can't be used, and we
+ * must fall back to the slower method of pushing matching locks directly
+ * into the main lock tables.
+ *
+ * The deadlock detector does not know anything about the fast path mechanism,
+ * so any locks that might be involved in a deadlock must be transferred from
+ * the fast-path queues to the main lock table.
+ */
+#define FAST_PATH_STRONG_LOCK_HASH_BITS 10
+#define FAST_PATH_STRONG_LOCK_HASH_PARTITIONS (1 << FAST_PATH_STRONG_LOCK_HASH_BITS)
+#define FastPathStrongLockHashPartition(hashcode) ((hashcode) % FAST_PATH_STRONG_LOCK_HASH_PARTITIONS)
+
+typedef struct FastPathStrongRelationLockData {
+    slock_t mutex;
+    uint32 count[FAST_PATH_STRONG_LOCK_HASH_PARTITIONS];
+} FastPathStrongRelationLockData;
+
+/* Record that's written to 2PC state file when a lock is persisted */
+typedef struct TwoPhaseLockRecord {
+    LOCKTAG locktag;
+    LOCKMODE lockmode;
+} TwoPhaseLockRecord;
+
 /*
  * function prototypes
  */
@@ -555,10 +654,10 @@ extern LockMethod GetLocksMethodTable(const LOCK *lock);
 extern uint32 LockTagHashCode(const LOCKTAG *locktag);
 extern bool DoLockModesConflict(LOCKMODE mode1, LOCKMODE mode2);
 extern LockAcquireResult LockAcquire(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock, bool dontWait,
-                                     bool allow_con_update = false);
+                                     bool allow_con_update = false, int waitSec = 0);
 extern bool LockIncrementIfExists(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock);
 extern LockAcquireResult LockAcquireExtended(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock, bool dontWait,
-                                             bool report_memory_error, bool allow_con_update = false);
+                                             bool report_memory_error, bool allow_con_update = false, int waitSec = 0);
 extern void AbortStrongLockAcquire(void);
 extern bool LockRelease(const LOCKTAG* locktag, LOCKMODE lockmode, bool sessionLock);
 extern void LockReleaseAll(LOCKMETHODID lockmethodid, bool allLocks);

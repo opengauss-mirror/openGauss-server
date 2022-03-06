@@ -1728,3 +1728,282 @@ DROP PROCEDURE p1;
 DROP PROCEDURE p2;
 DROP PROCEDURE p3;
 DROP PACKAGE pck2;
+-- 8. multi auto procedure (session will reuse)
+create or replace package pck1 as
+type r1 is record(a int, b int);
+va int;
+procedure p1;
+procedure p2;
+procedure p3;
+end pck1;
+/
+create or replace package body pck1 as
+procedure p1 as
+begin
+va := 1;
+raise info 'before p2: %', va;
+p2();
+raise info 'after p2: %', va;
+va := 123;
+p3();
+raise info 'after p3: %', va;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'in p2: %', va;
+va := 11;
+end;
+procedure p3 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'in p3: %', va;
+end;
+end pck1;
+/
+call pck1.p1();
+INFO:  before p2: 1
+INFO:  in p2: 1
+CONTEXT:  referenced column: p2
+
+INFO:  after p2: 11
+INFO:  in p3: 123
+CONTEXT:  referenced column: p3
+
+INFO:  after p3: 123
+ p1 
+----
+ 
+(1 row)
+
+drop package pck1;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to function public.p1()
+drop cascades to function public.p2()
+drop cascades to function public.p3()
+-- 9. autosesion call another auto procedure
+create or replace package pkg1 IS
+va int:=1;
+function f1(num1 int) return int;
+end pkg1;
+/
+create or replace package body pkg1 as
+function f1(num1 int) return int
+is
+declare
+PRAGMA AUTONOMOUS_TRANSACTION;
+re_int int;
+begin
+raise notice 'just in f1, pkg.va:%',va;
+va:=va+num1;
+raise notice 'in f1, pkg.va:%',va;
+re_int = 1;
+return re_int;
+end;
+end pkg1;
+/
+create or replace function f2(num1 int) return int
+is
+declare PRAGMA AUTONOMOUS_TRANSACTION;
+re_int int;
+begin
+pkg1.va = 111;
+raise notice 'before f1: pkg.va: %',pkg1.va;
+re_int = pkg1.f1(num1);
+raise notice 'after f1: pkg.va: %', pkg1.va;
+return re_int;
+end;
+/
+select f2(10);
+NOTICE:  before f1: pkg.va: 111
+CONTEXT:  referenced column: f2
+
+NOTICE:  just in f1, pkg.va:111
+CONTEXT:  referenced column: f1
+
+
+NOTICE:  in f1, pkg.va:121
+CONTEXT:  referenced column: f1
+
+
+NOTICE:  after f1: pkg.va: 121
+CONTEXT:  referenced column: f2
+
+ f2 
+----
+  1
+(1 row)
+
+drop function f2;
+drop package pkg1;
+NOTICE:  drop cascades to function public.f1(integer)
+-- 9. autosesion call another nomarl procedure
+create or replace package pkg1 IS
+va int:=1;
+function f1(num1 int) return int;
+end pkg1;
+/
+create or replace package body pkg1 as
+function f1(num1 int) return int
+is
+declare
+re_int int;
+begin
+raise notice 'just in f1, pkg.va:%',va;
+va:=va+num1;
+raise notice 'in f1, pkg.va:%',va;
+re_int = 1;
+return re_int;
+end;
+end pkg1;
+/
+create or replace function f2(num1 int) return int
+is
+declare PRAGMA AUTONOMOUS_TRANSACTION;
+re_int int;
+begin
+pkg1.va = 111;
+raise notice 'before f1: pkg.va: %',pkg1.va;
+re_int = pkg1.f1(num1);
+raise notice 'after f1: pkg.va: %', pkg1.va;
+return re_int;
+end;
+/
+select f2(10);
+NOTICE:  before f1: pkg.va: 111
+CONTEXT:  referenced column: f2
+
+NOTICE:  just in f1, pkg.va:111
+CONTEXT:  PL/pgSQL function f2(integer) line 7 at assignment
+referenced column: f2
+
+NOTICE:  in f1, pkg.va:121
+CONTEXT:  PL/pgSQL function f2(integer) line 7 at assignment
+referenced column: f2
+
+NOTICE:  after f1: pkg.va: 121
+CONTEXT:  referenced column: f2
+
+ f2 
+----
+  1
+(1 row)
+
+drop function f2;
+drop package pkg1;
+NOTICE:  drop cascades to function public.f1(integer)
+-- auto procedure call normal procedure (auto procedure without package)
+create or replace package autonomous_pkg_setup IS
+count_public int:=1;
+end autonomous_pkg_setup;
+/
+create or replace package body autonomous_pkg_setup as
+  count_private int :=1;
+end autonomous_pkg_setup;
+/
+create or replace procedure out_015(num1 int)
+is
+declare
+va int:=30;
+re_int int;
+begin
+autonomous_pkg_setup.count_public = autonomous_pkg_setup.count_public + va;
+raise info 'in out_015,autonomous_pkg_setup.count_public:%', autonomous_pkg_setup.count_public;
+end;
+/
+create or replace procedure app015_1()
+is
+declare PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+out_015(1);
+end;
+/
+call app015_1();
+INFO:  in out_015,autonomous_pkg_setup.count_public:31
+CONTEXT:  SQL statement "CALL out_015(1)"
+PL/pgSQL function app015_1() line 4 at PERFORM
+referenced column: app015_1
+
+ app015_1 
+----------
+ 
+(1 row)
+
+call app015_1();
+INFO:  in out_015,autonomous_pkg_setup.count_public:61
+CONTEXT:  SQL statement "CALL out_015(1)"
+PL/pgSQL function app015_1() line 4 at PERFORM
+referenced column: app015_1
+
+ app015_1 
+----------
+ 
+(1 row)
+
+drop procedure app015_1;
+drop procedure out_015;
+drop package autonomous_pkg_setup;
+-- 10. package var same name with function param
+create or replace package pck1 IS
+va int:=1;
+procedure p1(va int,vb int);
+end pck1;
+/
+create or replace package body pck1 as
+vb int :=1;
+procedure p1(va int,vb int)
+is
+declare 
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+va:=pck1.va+va;
+pck1.vb:=pck1.vb+vb;
+raise info 'in p1, va : %', va;
+raise info 'in p1, vb : %', vb;
+raise info 'in p1, pck1.va : %', pck1.va;
+raise info 'in p1, pck1.vb : %', pck1.vb;
+end;
+begin
+va := 2;
+vb := 2;
+end pck1;
+/
+call pck1.p1(10,20);
+INFO:  in p1, va : 12
+CONTEXT:  referenced column: p1
+
+INFO:  in p1, vb : 20
+CONTEXT:  referenced column: p1
+
+INFO:  in p1, pck1.va : 2
+CONTEXT:  referenced column: p1
+
+INFO:  in p1, pck1.vb : 22
+CONTEXT:  referenced column: p1
+
+ p1 
+----
+ 
+(1 row)
+
+call pck1.p1(10,20);
+INFO:  in p1, va : 12
+CONTEXT:  referenced column: p1
+
+INFO:  in p1, vb : 20
+CONTEXT:  referenced column: p1
+
+INFO:  in p1, pck1.va : 2
+CONTEXT:  referenced column: p1
+
+INFO:  in p1, pck1.vb : 42
+CONTEXT:  referenced column: p1
+
+ p1 
+----
+ 
+(1 row)
+
+drop package pck1;
+NOTICE:  drop cascades to function public.p1(integer,integer)

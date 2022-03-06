@@ -1,0 +1,247 @@
+# ----------
+# src/test/regress/parallel_schedule0B
+#
+# By convention, we put no more than twenty tests in any one parallel group;
+# this limits the number of connections needed to run the tests.
+# ----------
+
+###split from parallel_schedule0###
+
+# ----------
+# single_node_commit/rollback tests
+# ----------
+#test: pldeveloper_gs_source
+test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud
+test: single_node_produce_commit_rollback
+
+test: instr_unique_sql
+test: shutdown
+
+# List/Hash table exchange
+test: hw_partition_list_exchange
+# test: hw_partition_hash_exchange
+
+# interval partition 
+test: hw_partition_interval
+test: hw_partition_interval_exchange
+test: hw_partition_interval_unusable_index psql_desc_unusable_index
+test: hw_partition_interval_reindex
+test: hw_partition_interval_movement
+# To check create interval partition parallel
+test: hw_partition_interval_parallel_prepare
+test: hw_partition_interval_parallel_insert hw_partition_interval_parallel_insert_01 hw_partition_interval_parallel_insert_02
+test: hw_partition_interval_parallel_end
+test: hw_partition_interval_check_syntax
+test: hw_partition_interval_split
+test: hw_partition_interval_merge
+test: hw_partition_interval_dump_restore
+
+# Global Partition Index feature testcase
+# gpi create
+test: gpi_build_index
+
+# gpi check
+test: gpi_create_constraint
+test: gpi_unique_check
+
+# gpi index scan
+test: gpi_index
+
+# gpi index only scan
+test: gpi_index_only
+
+# gpi bitmap
+test: gpi_bitmapscan
+
+# gpi pwj
+test: gpi_pwj
+
+# gpi set unusable
+test: gpi_set_index_unusable
+
+# gpi rebuild
+#test: gpi_rebuild_index
+
+# gpi cluster
+test: gpi_cluster_01 gpi_cluster_02 gpi_cluster_03
+
+# gpi interval
+test: gpi_interval
+
+# gpi range
+test: gpi_range
+
+# gpi invliad part
+test: gpi_invalid_part
+test: gpi_clean_wait
+
+# gpi vacuum
+test: gpi_vacuum_lazy
+test: gpi_hw_partition_vacuum_full
+test: gpi_hw_partition_vacuum_full_01
+
+# gpi alter
+test: gpi_alter_partition
+test: gpi_alter_partition_with_update
+# test: gpi_merge_partitions
+
+# global temporary table tests
+test: gtt_stats
+test: gtt_function
+test: gtt_prepare
+test: gtt_parallel_1 gtt_parallel_2
+test: gtt_clean
+
+# ---------------------------
+# test cases for CStore
+# ---------------------------
+#test: hw_cstore_alter cstore_alter_table2 cstore_alter_table3 cstore_alter_table4 cstore_alter_table5 cstore_alter_table6 cstore_alter_table8 cstore_alter_table9 cstore_alter_table10 hw_cstore_copy hw_alter_table_instant hw_cstore_copy1
+#test: cstore_alter_table cstore_alter_table1 cstore_alter_table7 
+
+test: hw_cstore_tablespace hw_cstore_truncate hw_cstore_update
+#test: hw_cstore_roughcheck
+test: hw_cstore_partition_update hw_cstore_partition_update1 hw_cstore_partition_update2
+
+#------------------------------
+# CStore compression test cases
+#-----------------------------
+test: cstore_cmpr_delta cstore_cmpr_date cstore_cmpr_timestamp_with_timezone cstore_cmpr_time_with_timezone cstore_cmpr_delta_nbits cstore_cmpr_delta_int cstore_cmpr_str cstore_cmpr_dict_00 cstore_cmpr_rle_2byte_runs
+test: cstore_cmpr_every_datatype cstore_cmpr_zlib cstore_unsupported_feature cstore_unsupported_feature1 cstore_cmpr_rle_bound cstore_cmpr_rle_bound1 cstore_nan cstore_infinity cstore_log2_error cstore_create_clause cstore_create_clause1 cstore_nulls_00 cstore_partial_cluster_info
+test: cstore_replication_table_delete
+
+test: hw_cstore_index hw_cstore_index1 hw_cstore_index2
+test: hw_cstore_vacuum
+test: hw_cstore_insert hw_cstore_delete hw_cstore_unsupport
+
+# test on extended statistics
+test: hw_es_multi_column_stats_prepare
+test: hw_es_multi_column_stats_1 hw_es_multi_column_stats_1_1 hw_es_multi_column_stats_1_2 hw_es_multi_column_stats_1_3 hw_es_multi_column_stats_1_4 hw_es_multi_column_stats_1_5 hw_es_multi_column_stats_1_6 hw_es_multi_column_stats_2_1 hw_es_multi_column_stats_2_2 hw_es_multi_column_stats_2_3 hw_es_multi_column_stats_3 hw_es_multi_column_stats_3_1 hw_es_multi_column_stats_3_2
+test: hw_es_multi_column_stats_end
+
+test: limit1 setop setop_1 setop_2
+#test: checksum
+test: distinct prepare1
+test: unsupported_features statistic statistic_2
+
+test: hw_setop_writefile
+
+test: vec_nestloop_pre vec_mergejoin_prepare vec_result vec_limit vec_mergejoin_1 vec_mergejoin_2 vec_stream
+test: vec_mergejoin_inner vec_mergejoin_left vec_mergejoin_semi vec_mergejoin_anti llvm_vecexpr1 llvm_vecexpr2 llvm_vecexpr3 llvm_target_expr llvm_target_expr2 llvm_target_expr3 llvm_vecexpr_td
+#test: vec_nestloop1
+test: vec_mergejoin_aggregation llvm_vecagg llvm_vecagg2 llvm_vecagg3 llvm_vechashjoin
+#test: vec_nestloop_end
+
+# ----------$
+# The first group of parallel tests$
+# ----------$
+test: boolean name oid bit txid uuid
+#test: float8 numeric char varchar text int2 int4 float4 numeric_2 money
+
+# Depends on things setup during char, varchar and text
+# Depends on int2, int4, int8, float4, float8
+#test: strings numerology
+
+# ----------
+# The second group of parallel tests
+# ----------
+#test: lseg box path polygon circle date time timetz timestamptz abstime reltime inet
+test: interval tinterval macaddr tstypes comments
+#test: point timestamp
+
+# ----------
+# Another group of parallel tests
+# geometry depends on point, lseg, box, path, polygon and circle
+# horology depends on interval, timetz, timestamp, timestamptz, reltime and abstime
+# ----------
+#test: geometry horology
+
+# ----------
+# Load huge amounts of data
+# We should split the data files into single files and then
+# execute two copy tests parallel, to check that copy itself
+# is concurrent safe.(duplicate)
+# ----------
+test: copyselect copy_error_log copy_support_transform
+#test: copy_eol
+
+# ----------
+# More groups of parallel tests
+# ----------
+#test: create_index
+
+###split from parallel_schedule2###
+#test: hw_sec_account_lock_unlock rowlevelsecurity
+test: resolve_unknown
+test: query_rewrite
+test: create_schema 
+#test: view_dump
+test: hw_function_p_3 hw_function_p_4
+#test: hw_function_p_2
+#test: hw_function_p_1
+test: create_c_function
+test: cstore_replication_table_delete
+
+#test: hw_cursor_part1 hw_cursor_part2 hw_cursor_part3 hw_cursor_part4 hw_cursor_part5 hw_cursor_part6 hw_cursor_part7 hw_cursor_part8
+test: vec_append_part1 vec_append_part2 vec_append_part3
+test: vec_cursor_part1 vec_cursor_part2
+test: vec_delete_part1 vec_delete_part2
+test: vec_name
+
+test: alter_schema_db_rename_seq
+
+test: a_outerjoin_conversion
+
+# test on plan_table
+#test: plan_table04
+
+test: setrefs
+test: agg
+
+# test sql by pass
+#test: bypass_simplequery_support
+test: bypass_preparedexecute_support
+test: sqlbypass_partition
+#test: sqlbypass_partition_prepare
+
+test: string_digit_to_numeric
+# Another group of parallel tests
+# ----------
+#test: collate tablesample tablesample_1 tablesample_2 matview
+test: matview_single
+
+# ----------
+# Another group of parallel tests
+# ----------
+test: hw_order
+
+# ----------
+# Another group of parallel tests
+# ----------
+test: timeout
+
+# procedure, Function Test
+#test: create_procedure postgres_fdw
+test: create_function
+test: pg_compatibility
+# gs_basebackup
+# test: gs_basebackup
+
+# autonomous transaction Test
+#test: autonomous_transaction
+
+#test: partition for hash list
+test: pbe_hash_list_partition 
+test: hw_partition_list_insert
+test: hw_partition_list_ddl
+test: hw_partition_hash_insert
+test: hw_partition_hash_ddl
+test: hw_partition_hash_dml
+test: hw_partition_hash_dql
+test: hw_partition_list_dml
+test: hw_partition_list_dql
+test: hw_cipher_sm4
+test: hw_cipher_aes128
+test: hw_pwd_encryption_sm3
+test: cstore_unique_index
+test: rule_test
+test: plpgsql_savepoint

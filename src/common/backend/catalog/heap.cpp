@@ -65,9 +65,11 @@
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
+#include "catalog/pg_uid_fn.h"
 #include "catalog/storage.h"
 #include "catalog/storage_xlog.h"
 #include "catalog/storage_gtt.h"
+#include "commands/matview.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
 #include "commands/typecmds.h"
@@ -85,7 +87,6 @@
 #include "pgxc/groupmgr.h"
 #include "storage/buf/buf.h"
 #include "storage/predicate.h"
-#include "storage/page_compression.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/smgr/smgr.h"
@@ -179,6 +180,16 @@ extern void make_tmptable_cache_key(Oid relNode);
 
 #define RELKIND_IN_RTM (relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE || relkind == RELKIND_MATVIEW)
 
+static RangePartitionDefState *MakeRangeDefaultSubpartition(PartitionState *partitionState, char *partitionName,
+    char *tablespacename);
+static ListPartitionDefState *MakeListDefaultSubpartition(PartitionState *partitionState, char *partitionName,
+    char *tablespacename);
+static HashPartitionDefState *MakeHashDefaultSubpartition(PartitionState *partitionState, char *partitionName,
+    char *tablespacename);
+static void MakeDefaultSubpartitionName(PartitionState *partitionState, char **subPartitionName,
+    const char *partitionName);
+static void getSubPartitionInfo(char partitionStrategy, Node *partitionDefState, List **subPartitionDefState,
+    char **partitionName, char **tablespacename);
 /* ----------------------------------------------------------------
  *				XXX UGLY HARD CODED BADNESS FOLLOWS XXX
  *
@@ -375,7 +386,26 @@ static FormData_pg_attribute a9 = {0,
     false,
     true,
     0};
-static const Form_pg_attribute SysAtt[] = {&a1, &a2, &a3, &a4, &a5, &a6, &a7, &a8, &a9};
+
+static FormData_pg_attribute a10 = {0,
+    {"gs_tuple_uid"},
+    INT8OID,
+    0,
+    sizeof(int64),
+    UidAttributeNumber,
+    0,
+    -1,
+    -1,
+    true,
+    'p',
+    'd',
+    true,
+    false,
+    false,
+    true,
+    0};
+
+static const Form_pg_attribute SysAtt[] = {&a1, &a2, &a3, &a4, &a5, &a6, &a7, &a8, &a9, &a10};
 #else
 static const Form_pg_attribute SysAtt[] = {&a1, &a2, &a3, &a4, &a5, &a6, &a7};
 #endif
@@ -385,7 +415,7 @@ static const Form_pg_attribute SysAtt[] = {&a1, &a2, &a3, &a4, &a5, &a6, &a7};
  * Note that we elog if the presented attno is invalid, which would only
  * happen if there's a problem upstream.
  */
-Form_pg_attribute SystemAttributeDefinition(AttrNumber attno, bool relhasoids, bool relhasbucket)
+Form_pg_attribute SystemAttributeDefinition(AttrNumber attno, bool relhasoids, bool relhasbucket, bool relhasuids)
 {
     if (attno >= 0 || attno < -(int)lengthof(SysAtt))
         ereport(
@@ -396,6 +426,10 @@ Form_pg_attribute SystemAttributeDefinition(AttrNumber attno, bool relhasoids, b
     if (attno == BucketIdAttributeNumber && !relhasbucket)
         ereport(
             ERROR, (errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errmsg("invalid system attribute number %d", attno)));
+    if (attno == UidAttributeNumber && !relhasuids) {
+        ereport(
+            ERROR, (errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errmsg("invalid system attribute number %d", attno)));
+    }
     return SysAtt[-attno - 1];
 }
 
@@ -480,9 +514,8 @@ static void InitSubPartitionDef(Partition newPartition, Oid partOid, char strate
  */
 Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, Oid relid, Oid relfilenode,
     Oid bucketOid, TupleDesc tupDesc, char relkind, char relpersistence, bool partitioned_relation, bool rowMovement,
-    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Datum reloptions,
-    Oid ownerid, bool skip_create_storage, TableAmType tam_type, int8 relindexsplit, StorageType storage_type,
-    bool newcbi, Oid accessMethodObjectId)
+    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Oid ownerid,
+    bool skip_create_storage, TableAmType tam_type, int8 relindexsplit, StorageType storage_type, bool newcbi)
 {
     bool create_storage = false;
     Relation rel;
@@ -593,11 +626,9 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
         relpersistence,
         relkind,
         row_compress,
-        reloptions,
         tam_type,
         relindexsplit,
-        storage_type,
-        accessMethodObjectId
+        storage_type
     );
 
     if (partitioned_relation) {
@@ -947,7 +978,7 @@ void InsertPgAttributeTuple(Relation pg_attribute_rel, Form_pg_attribute new_att
  *		tuples to pg_attribute.
  * --------------------------------
  */
-static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relkind, bool oidislocal, int oidinhcount, bool hasbucket)
+static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relkind, bool oidislocal, int oidinhcount, bool hasbucket, bool hasuids)
 {
     Form_pg_attribute attr;
     int i;
@@ -1015,6 +1046,8 @@ static void AddNewAttributeTuples(Oid new_rel_oid, TupleDesc tupdesc, char relki
             if (!tupdesc->tdhasoid && SysAtt[i]->attnum == ObjectIdAttributeNumber)
                 continue;
             if (!hasbucket && SysAtt[i]->attnum == BucketIdAttributeNumber)
+                continue;
+            if (!hasuids && SysAtt[i]->attnum == UidAttributeNumber)
                 continue;
             rc = memcpy_s(&attStruct, sizeof(FormData_pg_attribute), (char*)SysAtt[i], sizeof(FormData_pg_attribute));
             securec_check(rc, "\0", "\0");
@@ -2492,6 +2525,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
     Oid relbucketOid = InvalidOid;
     int2vector* bucketcol = NULL;
     bool relhasbucket = false;
+    bool relhasuids = false;
 
     pg_class_desc = heap_open(RelationRelationId, RowExclusiveLock);
 
@@ -2654,6 +2688,9 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
     TableAmType tam = get_tableam_from_reloptions(hreloptions, relkind, InvalidOid);
     int8 indexsplit = get_indexsplit_from_reloptions(hreloptions, InvalidOid);
 
+    /* Get uids info from reloptions */
+    relhasuids = StdRdOptionsHasUids(hreloptions, relkind);
+
     /*
      * Create the relcache entry (mostly dummy at this point) and the physical
      * disk file.  (If we fail further down, it's the smgr's responsibility to
@@ -2675,7 +2712,6 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
         mapped_relation,
         allow_system_table_mods,
         row_compress,
-        reloptions,
         ownerid,
         false,
         tam,
@@ -2837,7 +2873,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
      * now add tuples to pg_attribute for the attributes in our new relation.
      */
     AddNewAttributeTuples(
-        relid, new_rel_desc->rd_att, relkind, oidislocal, oidinhcount, relhasbucket);
+        relid, new_rel_desc->rd_att, relkind, oidislocal, oidinhcount, relhasbucket, relhasuids);
     if (ceLst != NULL) {
         AddNewGsSecEncryptedColumnsTuples(relid, ceLst);
     }
@@ -3524,6 +3560,13 @@ void heap_drop_with_catalog(Oid relid)
      * until transaction commit.  This ensures no one else will try to do
      * something with the doomed relation.
      */
+    if (ISMLOG(RelationGetForm(rel)->relname.data)) {
+        char *base_relid_str = RelationGetForm(rel)->relname.data + MLOGLEN;
+        Oid base_relid = atoi(base_relid_str);
+        if (OidIsValid(base_relid)) {
+            CacheInvalidateRelcacheByRelid(base_relid);
+        }
+    }
     relation_close(rel, NoLock);
 
     /*
@@ -5205,7 +5248,7 @@ void dropDeltaTableOnPartition(Oid partId)
  *
  */
 Partition heapCreatePartition(const char* part_name, bool for_partitioned_table, Oid part_tablespace, Oid part_id,
-    Oid partFileNode, Oid bucketOid, Oid ownerid, StorageType storage_type, bool newcbi, Datum reloptions)
+    Oid partFileNode, Oid bucketOid, Oid ownerid, StorageType storage_type, bool newcbi)
 {
     Partition new_part_desc = NULL;
     bool createStorage = false;
@@ -5258,8 +5301,7 @@ Partition heapCreatePartition(const char* part_name, bool for_partitioned_table,
         part_id,      /* partition oid */
         partFileNode, /* partition's file node, same as partition oid*/
         part_tablespace,
-        for_partitioned_table ? HEAP_DISK : storage_type,
-        reloptions);
+        for_partitioned_table ? HEAP_DISK : storage_type);
 
     /*
      * Save newcbi as a context indicator to 
@@ -5722,7 +5764,7 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partTablespa
     /* transform boundary value */
     boundaryValue = transformPartitionBoundary(newPartDef->boundary, isTimestamptz);
 
-    /*get partition tablespace*/
+    /* get partition tablespace oid */
     if (newPartDef->tablespacename) {
         newPartitionTableSpaceOid = get_tablespace_oid(newPartDef->tablespacename, false);
     }
@@ -5763,9 +5805,7 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partTablespa
         newPartrelfileOid,
         bucketOid,
         ownerid,
-        storage_type,
-        false,
-        reloptions);
+        storage_type);
 
     Assert(newPartitionOid == PartitionGetPartid(newPartition));
     if (isSubpartition) {
@@ -5876,7 +5916,7 @@ char* GenIntervalPartitionName(Relation rel)
         rc = snprintf_s(partName, NAMEDATALEN, NAMEDATALEN - 1, INTERVAL_PARTITION_NAME_PREFIX_FMT, suffix);
         securec_check_ss(rc, "\0", "\0");
         existingPartOid = partitionNameGetPartitionOid(
-            rel->rd_id, partName, PART_OBJ_TYPE_TABLE_PARTITION, AccessExclusiveLock, true, false, NULL, NULL, NoLock);
+            rel->rd_id, partName, PART_OBJ_TYPE_TABLE_PARTITION, AccessShareLock, true, false, NULL, NULL, NoLock);
         if (!OidIsValid(existingPartOid)) {
             return partName;
         }
@@ -5972,9 +6012,7 @@ Oid HeapAddIntervalPartition(Relation pgPartRel, Relation rel, Oid partTableOid,
         partrelfileOid,
         bucketOid,
         ownerid,
-        storage_type,
-        false,
-        reloptions);
+        storage_type);
     pfree(partName);
 
     Assert(newPartitionOid == PartitionGetPartid(newPartition));
@@ -6008,7 +6046,6 @@ Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
     Oid partrelfileOid = InvalidOid;
     Relation relation;
     Partition newListPartition;
-    int maxLength = 64;
     /*missing partition definition structure*/
     if (!PointerIsValid(newListPartDef)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("missing definition for new partition")));
@@ -6017,10 +6054,10 @@ Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
     if (!PointerIsValid(newListPartDef->boundary)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("boundary not defined for new partition")));
     }
-    if (newListPartDef->boundary->length > maxLength) {
+    if (newListPartDef->boundary->length > PARTKEY_VALUE_MAXNUM) {
         ereport(ERROR,
             (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                errmsg("too many partition keys, allowed is %d", maxLength)));
+                errmsg("too many partition keys, allowed is %d", PARTKEY_VALUE_MAXNUM)));
     }
 
     /*new partition name check*/
@@ -6031,7 +6068,7 @@ Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
     /* transform boundary value */
     boundaryValue = transformListBoundary(newListPartDef->boundary, isTimestamptz);
 
-    /*get partition tablespace*/
+    /* get partition tablespace oid */
     if (newListPartDef->tablespacename) {
         newPartitionTableSpaceOid = get_tablespace_oid(newListPartDef->tablespacename, false);
     }
@@ -6294,10 +6331,10 @@ Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
     if (!PointerIsValid(newHashPartDef->boundary)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("boundary not defined for new partition")));
     }
-    if (newHashPartDef->boundary->length > MAX_PARTITIONKEY_NUM) {
+    if (newHashPartDef->boundary->length != 1) {
         ereport(ERROR,
             (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                errmsg("too many partition keys, allowed is %d", MAX_PARTITIONKEY_NUM)));
+                errmsg("too many partition keys, allowed is 1")));
     }
 
     /*new partition name check*/
@@ -6309,7 +6346,7 @@ Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
     bool isTime = false;
     boundaryValue = transformPartitionBoundary(newHashPartDef->boundary, &isTime);
 
-    /*get partition tablespace*/
+    /* get partition tablespace oid */
     if (newHashPartDef->tablespacename) {
         newPartitionTableSpaceOid = get_tablespace_oid(newHashPartDef->tablespacename, false);
     }
@@ -6349,9 +6386,7 @@ Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
                                            partrelfileOid,
                                            bucketOid,
                                            ownerid,
-                                           storage_type,
-                                           false,
-                                           reloptions);
+                                           storage_type);
 
     Assert(newHashPartitionOid == PartitionGetPartid(newHashPartition));
     if (isSubpartition) {
@@ -6526,9 +6561,7 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
         new_partition_rfoid,
         InvalidOid,
         ownerid,
-        HEAP_DISK,
-        false,
-        reloptions);
+        HEAP_DISK);
 
     Assert(new_partition_oid == PartitionGetPartid(new_partition));
     new_partition->pd_part->parttype = PART_OBJ_TYPE_PARTED_TABLE;
@@ -6586,11 +6619,18 @@ bool IsExistDefaultSubpartitionName(List *partitionNameList, char *defaultPartit
     return false;
 }
 
-void MakeDefaultSubpartitionName(PartitionState *partitionState, char** subPartitionName, const char* partitionName)
+static void MakeDefaultSubpartitionName(PartitionState *partitionState, char **subPartitionName,
+    const char *partitionName)
 {
     int numLen = 0;
     int subPartitionNameLen = 0;
-    List *partitionNameList = GetPartitionNameList(partitionState->partitionList);
+    List *partitionNameList = NIL;
+    if (PointerIsValid(partitionState->partitionList)) {
+        partitionNameList = GetPartitionNameList(partitionState->partitionList);
+    } else if (PointerIsValid(partitionState->partitionNameList)) {
+        partitionNameList = partitionState->partitionNameList;
+    }
+
 
     for (int i = 1; i < INT32_MAX_VALUE; i++) {
         numLen = (int)log10(i) + 1;
@@ -6615,10 +6655,13 @@ void MakeDefaultSubpartitionName(PartitionState *partitionState, char** subParti
             break;
         }
     }
-    list_free_ext(partitionNameList);
+
+    if (PointerIsValid(partitionState->partitionList)) {
+        list_free_ext(partitionNameList);
+    }
 }
 
-ListPartitionDefState *MakeListDefaultSubpartition(PartitionState *partitionState, char *partitionName,
+static ListPartitionDefState *MakeListDefaultSubpartition(PartitionState *partitionState, char *partitionName,
                                                    char *tablespacename)
 {
     ListPartitionDefState *subPartitionDefState = makeNode(ListPartitionDefState);
@@ -6632,7 +6675,7 @@ ListPartitionDefState *MakeListDefaultSubpartition(PartitionState *partitionStat
     return subPartitionDefState;
 }
 
-HashPartitionDefState *MakeHashDefaultSubpartition(PartitionState *partitionState, char *partitionName,
+static HashPartitionDefState *MakeHashDefaultSubpartition(PartitionState *partitionState, char *partitionName,
                                                    char *tablespacename)
 {
     HashPartitionDefState *subPartitionDefState = makeNode(HashPartitionDefState);
@@ -6644,7 +6687,7 @@ HashPartitionDefState *MakeHashDefaultSubpartition(PartitionState *partitionStat
     return subPartitionDefState;
 }
 
-RangePartitionDefState *MakeRangeDefaultSubpartition(PartitionState *partitionState, char *partitionName,
+static RangePartitionDefState *MakeRangeDefaultSubpartition(PartitionState *partitionState, char *partitionName,
                                                      char *tablespacename)
 {
     RangePartitionDefState *subPartitionDefState = makeNode(RangePartitionDefState);
@@ -6657,7 +6700,7 @@ RangePartitionDefState *MakeRangeDefaultSubpartition(PartitionState *partitionSt
     return subPartitionDefState;
 }
 
-void getSubPartitionInfo(char partitionStrategy, Node *partitionDefState,
+static void getSubPartitionInfo(char partitionStrategy, Node *partitionDefState,
                          List **subPartitionDefState, char **partitionName, char **tablespacename)
 {
     if (partitionStrategy == PART_STRATEGY_LIST) {
@@ -6702,42 +6745,93 @@ Node *MakeDefaultSubpartition(PartitionState *partitionState, Node *partitionDef
     return NULL;
 }
 
-static void addNewSubPartitionTuplesForPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespace,
+List *addNewSubPartitionTuplesForPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespace,
                                                  Oid bucketOid, Oid ownerid, Datum reloptions,
                                                  const bool *isTimestamptz, StorageType storage_type,
                                                  PartitionState *partitionState, Node *partitionDefState,
                                                  LOCKMODE partLockMode)
 {
-    if (partitionState->subPartitionState != NULL) {
-        PartitionState *subPartitionState = partitionState->subPartitionState;
-        List *subPartitionDefStateList = NIL;
-        char *partitionName = NULL;
-        char *tablespacename = NULL;
-        ListCell *lc = NULL;
-        char partitionStrategy = partitionState->partitionStrategy;
-        char subPartitionStrategy = subPartitionState->partitionStrategy;
-        getSubPartitionInfo(partitionStrategy, partitionDefState, &subPartitionDefStateList, &partitionName,
-                            &tablespacename);
+    List *subpartOidList = NIL;
+    if (partitionState->subPartitionState == NULL) {
+        return NIL;
+    }
+
+    PartitionState *subPartitionState = partitionState->subPartitionState;
+    List *subPartitionDefStateList = NIL;
+    char *partitionName = NULL;
+    char *tablespacename = NULL;
+    ListCell *lc = NULL;
+    Oid subpartOid = InvalidOid;
+    char partitionStrategy = partitionState->partitionStrategy;
+    char subPartitionStrategy = subPartitionState->partitionStrategy;
+    getSubPartitionInfo(partitionStrategy, partitionDefState, &subPartitionDefStateList, &partitionName,
+                        &tablespacename);
+    foreach (lc, subPartitionDefStateList) {
         if (subPartitionStrategy == PART_STRATEGY_LIST) {
-            foreach (lc, subPartitionDefStateList) {
-                ListPartitionDefState *subPartitionDefState = (ListPartitionDefState *)lfirst(lc);
-                (void)HeapAddListPartition(pgPartRel, partTableOid, partTablespace, bucketOid, subPartitionDefState,
-                                           ownerid, reloptions, isTimestamptz, storage_type, NULL, true);
-            }
+            ListPartitionDefState *subPartitionDefState = (ListPartitionDefState *)lfirst(lc);
+            subpartOid = HeapAddListPartition(pgPartRel, partTableOid, partTablespace, bucketOid,
+                subPartitionDefState, ownerid, reloptions, isTimestamptz, storage_type, NULL, true);
         } else if (subPartitionStrategy == PART_STRATEGY_HASH) {
-            foreach (lc, subPartitionDefStateList) {
-                HashPartitionDefState *subPartitionDefState = (HashPartitionDefState *)lfirst(lc);
-                (void)HeapAddHashPartition(pgPartRel, partTableOid, partTablespace, bucketOid, subPartitionDefState,
-                                           ownerid, reloptions, isTimestamptz, storage_type, NULL, true);
-            }
+            HashPartitionDefState *subPartitionDefState = (HashPartitionDefState *)lfirst(lc);
+            subpartOid = HeapAddHashPartition(pgPartRel, partTableOid, partTablespace, bucketOid,
+                subPartitionDefState, ownerid, reloptions, isTimestamptz, storage_type, NULL, true);
         } else {
-            foreach (lc, subPartitionDefStateList) {
-                RangePartitionDefState *subPartitionDefState = (RangePartitionDefState *)lfirst(lc);
-                (void)heapAddRangePartition(pgPartRel, partTableOid, partTablespace, bucketOid, subPartitionDefState,
-                                           ownerid, reloptions, isTimestamptz, storage_type, partLockMode, NULL, true);
-            }
+            RangePartitionDefState *subPartitionDefState = (RangePartitionDefState *)lfirst(lc);
+            subpartOid = heapAddRangePartition(pgPartRel, partTableOid, partTablespace, bucketOid,
+                subPartitionDefState, ownerid, reloptions, isTimestamptz, storage_type, partLockMode, NULL, true);
+        }
+        if (OidIsValid(subpartOid)) {
+            subpartOidList = lappend_oid(subpartOidList, subpartOid);
         }
     }
+
+    return subpartOidList;
+}
+
+/*
+ * check whether the partion key has timestampwithzone type.
+ */
+static void IsPartitionKeyContainTimestampwithzoneType(const PartitionState *partTableState, const TupleDesc tupledesc,
+                                                       bool *isTimestamptz, int partKeyNum)
+{
+    ListCell *partKeyCell = NULL;
+    ColumnRef *col = NULL;
+    char *columName = NULL;
+    int partKeyIdx = 0;
+    int attnum = tupledesc->natts;
+    Form_pg_attribute *attrs = tupledesc->attrs;
+
+    foreach (partKeyCell, partTableState->partitionKey) {
+        col = (ColumnRef *)lfirst(partKeyCell);
+        columName = ((Value *)linitial(col->fields))->val.str;
+
+        isTimestamptz[partKeyIdx] = false;
+        for (int i = 0; i < attnum; i++) {
+            if (TIMESTAMPTZOID == attrs[i]->atttypid && 0 == strcmp(columName, attrs[i]->attname.data)) {
+                isTimestamptz[partKeyIdx] = true;
+                break;
+            }
+        }
+        partKeyIdx++;
+    }
+
+    Assert(partKeyIdx == partKeyNum);
+}
+
+/* if partition's tablespace is not provided, it will inherit from parent partitioned
+ * so for a subpartition, the tablespace itself is used, if not exist, inherit from the partition, and if
+ * still not exist, inherit from the table */
+Oid GetPartTablespaceOidForSubpartition(Oid reltablespace, const char* partTablespacename)
+{
+    Oid partTablespaceOid = InvalidOid;
+    /* get partition tablespace oid */
+    if (PointerIsValid(partTablespacename)) {
+        partTablespaceOid = get_tablespace_oid(partTablespacename, false);
+    }
+    if (!OidIsValid(partTablespaceOid)) {
+        partTablespaceOid = reltablespace;
+    }
+    return partTablespaceOid;
 }
 
 /*
@@ -6758,37 +6852,18 @@ static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid rel
     Oid reltablespace, Oid bucketOid, PartitionState* partTableState, Oid ownerid, Datum reloptions,
     const TupleDesc tupledesc, char strategy, StorageType storage_type, LOCKMODE partLockMode)
 {
-    /*
-     *check whether the partion key has timestampwithzone type.
-     */
-    ListCell* partKeyCell = NULL;
-    ColumnRef* col = NULL;
-    char* columName = NULL;
     int partKeyNum = list_length(partTableState->partitionKey);
+    bool isTimestamptzForPartKey[partKeyNum];
+    memset_s(isTimestamptzForPartKey, sizeof(isTimestamptzForPartKey), 0, sizeof(isTimestamptzForPartKey));
+    IsPartitionKeyContainTimestampwithzoneType(partTableState, tupledesc, isTimestamptzForPartKey, partKeyNum);
 
-    int attnum = tupledesc->natts;
-    Form_pg_attribute* attrs = tupledesc->attrs;
-
-    int partKeyIdx = 0;
-    bool isTimestamptz[partKeyNum];
-
-    memset_s(isTimestamptz, sizeof(isTimestamptz), 0, sizeof(isTimestamptz));
-
-    foreach (partKeyCell, partTableState->partitionKey) {
-        col = (ColumnRef*)lfirst(partKeyCell);
-        columName = ((Value*)linitial(col->fields))->val.str;
-
-        isTimestamptz[partKeyIdx] = false;
-        for (int i = 0; i < attnum; i++) {
-            if (TIMESTAMPTZOID == attrs[i]->atttypid && 0 == strcmp(columName, attrs[i]->attname.data)) {
-                isTimestamptz[partKeyIdx] = true;
-                break;
-            }
-        }
-        partKeyIdx++;
+    bool *isTimestamptzForSubPartKey = NULL;
+    if (partTableState->subPartitionState != NULL) {
+        int subPartKeyNum = list_length(partTableState->subPartitionState->partitionKey);
+        isTimestamptzForSubPartKey = (bool*)palloc0(sizeof(bool) * subPartKeyNum);
+        IsPartitionKeyContainTimestampwithzoneType(partTableState->subPartitionState, tupledesc,
+                                                   isTimestamptzForSubPartKey, subPartKeyNum);
     }
-
-    Assert(partKeyIdx == partKeyNum);
 
     ListCell* cell = NULL;
 
@@ -6817,12 +6892,18 @@ static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid rel
                 partitionDefState,
                 ownerid,
                 reloptions,
-                isTimestamptz,
+                isTimestamptzForPartKey,
                 storage_type,
                 subpartition_key_attr_no);
-            addNewSubPartitionTuplesForPartition(
-                pg_partition_rel, partitionOid, reltablespace, bucketOid, ownerid, reloptions, isTimestamptz,
-                storage_type, partTableState, (Node*)partitionDefState, partLockMode);
+
+            Oid partTablespaceOid =
+                GetPartTablespaceOidForSubpartition(reltablespace, partitionDefState->tablespacename);
+            List *subpartitionOidList = addNewSubPartitionTuplesForPartition(pg_partition_rel, partitionOid,
+                partTablespaceOid, bucketOid, ownerid, reloptions, isTimestamptzForSubPartKey, storage_type,
+                partTableState, (Node *)partitionDefState, partLockMode);
+            if (subpartitionOidList != NIL) {
+                list_free_ext(subpartitionOidList);
+            }
         } else if (strategy == PART_STRATEGY_HASH) {
             HashPartitionDefState* partitionDefState = (HashPartitionDefState*)lfirst(cell);
             if (partTableState->subPartitionState != NULL && partitionDefState->subPartitionDefState == NULL) {
@@ -6837,12 +6918,18 @@ static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid rel
                 partitionDefState,
                 ownerid,
                 reloptions,
-                isTimestamptz,
+                isTimestamptzForPartKey,
                 storage_type,
                 subpartition_key_attr_no);
-            addNewSubPartitionTuplesForPartition(
-                pg_partition_rel, partitionOid, reltablespace, bucketOid, ownerid, reloptions, isTimestamptz,
-                storage_type, partTableState, (Node*)partitionDefState, partLockMode);
+
+            Oid partTablespaceOid =
+                GetPartTablespaceOidForSubpartition(reltablespace, partitionDefState->tablespacename);
+            List *subpartitionOidList = addNewSubPartitionTuplesForPartition(pg_partition_rel, partitionOid,
+                partTablespaceOid, bucketOid, ownerid, reloptions, isTimestamptzForSubPartKey, storage_type,
+                partTableState, (Node *)partitionDefState, partLockMode);
+            if (subpartitionOidList != NIL) {
+                list_free_ext(subpartitionOidList);
+            }
         } else {
             RangePartitionDefState* partitionDefState = (RangePartitionDefState*)lfirst(cell);
             if (partTableState->subPartitionState != NULL && partitionDefState->subPartitionDefState == NULL) {
@@ -6857,14 +6944,23 @@ static void addNewPartitionTuplesForPartition(Relation pg_partition_rel, Oid rel
                 (RangePartitionDefState*)lfirst(cell),
                 ownerid,
                 reloptions,
-                isTimestamptz,
+                isTimestamptzForPartKey,
                 storage_type,
                 partLockMode,
                 subpartition_key_attr_no);
-            addNewSubPartitionTuplesForPartition(
-                pg_partition_rel, partitionOid, reltablespace, bucketOid, ownerid, reloptions, isTimestamptz,
-                storage_type, partTableState, (Node*)partitionDefState, partLockMode);
+
+            Oid partTablespaceOid =
+                GetPartTablespaceOidForSubpartition(reltablespace, partitionDefState->tablespacename);
+            List *subpartitionOidList = addNewSubPartitionTuplesForPartition(pg_partition_rel, partitionOid,
+                partTablespaceOid, bucketOid, ownerid, reloptions, isTimestamptzForSubPartKey, storage_type,
+                partTableState, (Node *)partitionDefState, partLockMode);
+            if (subpartitionOidList != NIL) {
+                list_free_ext(subpartitionOidList);
+            }
         }
+    }
+    if (isTimestamptzForSubPartKey != NULL) {
+        pfree_ext(isTimestamptzForSubPartKey);
     }
 }
 
@@ -7428,7 +7524,7 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
 
     pgPartRel = relation_open(PartitionRelationId, AccessShareLock);
 
-    if (isForSubPartition) {
+    if (isForSubPartition || RelationIsPartitionOfSubPartitionTable(partTableRel)) {
         partitionTableTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partTableRel->rd_id));
     } else {
         partitionTableTuple =
@@ -7493,7 +7589,7 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
         }
     }
 
-    if (isForSubPartition)
+    if (isForSubPartition || RelationIsPartitionOfSubPartitionTable(partTableRel))
         ReleaseSysCache(partitionTableTuple);
     else
         heap_freetuple_ext(partitionTableTuple);
@@ -7607,3 +7703,37 @@ int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple)
 
     return DatumGetInt16(indkeyDatum);
 }
+
+void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids)
+{
+    /* reloption uids don't change, do nothing */
+    if (oldRelHasUids == newRelHasUids) {
+        return;
+    }
+    /* insert uid attr if new reloption has uid */
+    if (newRelHasUids) {
+        Relation rel = heap_open(AttributeRelationId, RowExclusiveLock);
+        CatalogIndexState indstate = CatalogOpenIndexes(rel);
+        FormData_pg_attribute attStruct;
+        errno_t rc;
+        int uidAttrNum = -UidAttributeNumber;
+        rc = memcpy_s(&attStruct, sizeof(FormData_pg_attribute),
+            (char*)SysAtt[uidAttrNum - 1], sizeof(FormData_pg_attribute));
+        securec_check(rc, "\0", "\0");
+        /* Fill in the correct relation OID in the copied tuple */
+        attStruct.attrelid = relOid;
+        InsertPgAttributeTuple(rel, &attStruct, indstate);
+        CatalogCloseIndexes(indstate);
+        heap_close(rel, RowExclusiveLock);
+
+        /* Also insert uid backup table */
+        InsertUidEntry(relOid);
+    } else { /* delete attr if new reloption does not has uid */
+        ObjectAddress object;
+        object.classId = RelationRelationId;
+        object.objectId = relOid;
+        object.objectSubId = UidAttributeNumber;
+        performDeletion(&object, DROP_RESTRICT, 0);
+    }
+}
+

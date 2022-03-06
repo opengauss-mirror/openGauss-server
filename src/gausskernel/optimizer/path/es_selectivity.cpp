@@ -20,6 +20,7 @@
 #include "catalog/pg_statistic.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
+#include "optimizer/var.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "nodes/print.h"
@@ -857,6 +858,43 @@ static inline bool IsUnsupportedCases(const EquivalenceClass* ec)
 }
 
 /*
+ * @brief       pre-check the es candidate item is or not in current equivalence class.
+ * @return      bool, true or false.
+ */
+bool ES_SELECTIVITY::IsEsCandidateInEqClass(es_candidate *es, EquivalenceClass *ec)
+{
+    if (es == NULL || ec == NULL) {
+        return false;
+    }
+
+    /* Quickly ignore any that don't cover the join */
+    if (!bms_is_subset(es->relids, ec->ec_relids)) {
+        return false;
+    }
+
+    foreach_cell (lc, ec->ec_members) {
+        EquivalenceMember *em = (EquivalenceMember *)lfirst(lc);
+        Var *emVar = (Var *)LocateOpExprLeafVar((Node *)em->em_expr);
+
+        if (emVar == NULL) {
+            continue;
+        }
+
+        if (emVar->varattno <= 0) {
+            continue;
+        }
+
+        /* left or right branch of join es occurs in the current equivalencen member, so the ec is valid. */
+        if ((bms_equal(es->left_relids, em->em_relids) && bms_is_member(emVar->varattno, es->left_attnums)) ||
+            (bms_equal(es->right_relids, em->em_relids) && bms_is_member(emVar->varattno, es->right_attnums))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
  * @brief       try to find a substitude clause building from equivalence classes
  * @return    true when find a substitude clause; false when find nothing
  */
@@ -876,8 +914,8 @@ bool ES_SELECTIVITY::try_equivalence_class(es_candidate* es)
         if (IsUnsupportedCases(ec))
             continue;
 
-        /* We can quickly ignore any that don't cover the join, too */
-        if (!bms_is_subset(es->relids, ec->ec_relids))
+        /* ignore ec which does not contain the es info. */
+        if (!IsEsCandidateInEqClass(es, ec))
             continue;
 
         Bitmapset* tmpset = bms_copy(ec->ec_relids);

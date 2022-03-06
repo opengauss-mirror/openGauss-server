@@ -7856,6 +7856,8 @@ int WLMProcessThreadMain(void)
             AbortCurrentTransaction();
             t_thrd.wlm_cxt.wlm_xact_start = false;
         }
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         /*
          *   Notice: at the most time it isn't necessary to call because
@@ -8033,6 +8035,10 @@ int WLMProcessThreadMain(void)
 
     const int SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
     TimestampTz get_thread_status_last_time = GetCurrentTimestamp();
+#ifdef ENABLE_MULTIPLE_NODES
+    const int ONE_HOURS = 60 * 60;
+    TimestampTz cgroupCheckLast = GetCurrentTimestamp();
+#endif
     while (g_instance.wlm_cxt->stat_manager.stop == 0) {
         if (!t_thrd.wlm_cxt.wlm_xact_start) {
             StartTransactionCommand();
@@ -8044,9 +8050,9 @@ int WLMProcessThreadMain(void)
             ProcessConfigFile(PGC_SIGHUP);
         }
 
-        if (u_sess->sig_cxt.got_PoolReload) {
+        if (IsGotPoolReload()) {
             processPoolerReload();
-            u_sess->sig_cxt.got_PoolReload = false;
+            ResetGotPoolReload(false);
         }
 
         /* timer is triggerred, start to get session info from the database. */
@@ -8054,6 +8060,17 @@ int WLMProcessThreadMain(void)
             WLMStartToGetStatistics();
             t_thrd.wlm_cxt.wlmalarm_dump_active = false;
         }
+
+#ifdef ENABLE_MULTIPLE_NODES
+        /* if cgroup not init, retry init it */
+        if (!g_instance.wlm_cxt->gscgroup_config_parsed) {
+            TimestampTz cgroupCheckNow = GetCurrentTimestamp();
+            if (cgroupCheckNow > cgroupCheckLast + ONE_HOURS * USECS_PER_SEC) {
+                gscgroup_init();
+                cgroupCheckLast = cgroupCheckNow;
+            }
+        }
+#endif
 
         /* Fetch collect info from each data nodes. */
         WLMCollectInfoScanner();

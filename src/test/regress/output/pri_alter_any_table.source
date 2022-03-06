@@ -1,0 +1,325 @@
+CREATE USER user1 PASSWORD 'Gauss@1234';
+CREATE USER test_alter_any_table_role PASSWORD 'Gauss@1234';
+GRANT alter any table to test_alter_any_table_role;
+CREATE TABLESPACE pri_al_tsp LOCATION '@testtablespace@/pri_tsp';
+CREATE SCHEMA pri_al_schema_test;
+CREATE SCHEMA pri_al_schema;
+set search_path=pri_al_schema;
+CREATE table pri_al_schema.tb_pri (id int, name VARCHAR(10));
+  --create table
+CREATE TABLE pri_al_schema.TBL_DOMAIN_PRI
+(
+  IDOMAINID   NUMBER(10) NOT NULL,
+  SDOMAINNAME VARCHAR2(30) NOT NULL,
+  b int
+);
+CREATE TABLE pri_al_schema.pri_al_test_hash (a int, b int);
+CREATE TYPE pri_al_schema.pri_al_person_type1 AS (id int, name text);
+CREATE TYPE pri_al_schema.pri_al_person_type2 AS (id int, name text);
+CREATE TABLE pri_al_schema.pri_al_persons OF pri_al_schema.pri_al_person_type1;
+CREATE TABLE IF NOT EXISTS pri_al_schema.pri_al_persons OF pri_al_schema.pri_al_persons;
+NOTICE:  relation "pri_al_persons" already exists, skipping
+CREATE TABLE pri_al_schema.pri_al_stuff (id int);
+--trigger
+create table pri_al_trigtest (i serial primary key);
+NOTICE:  CREATE TABLE will create implicit sequence "pri_al_trigtest_i_seq" for serial column "pri_al_trigtest.i"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pri_al_trigtest_pkey" for table "pri_al_trigtest"
+create function pri_al_schema.pri_al_trigtest() returns trigger as $$
+begin
+	raise notice '% % % %', TG_RELNAME, TG_OP, TG_WHEN, TG_LEVEL;
+	return new;
+end;$$ language plpgsql;
+create trigger pri_al_trigtest_b_row_tg before insert or update or delete on pri_al_trigtest
+for each row execute procedure pri_al_trigtest();
+CREATE SEQUENCE pri_al_schema.serial START 101;
+CREATE TABLE pri_al_schema.T1(C1 bigint default nextval('serial'));
+ --alter
+SET ROLE test_alter_any_table_role PASSWORD 'Gauss@1234';
+CREATE UNIQUE INDEX pri_al_schema.ds_ship_mode_t1_index1 ON pri_al_schema.T1(C1);--应该报权限不足
+ERROR:  permission denied for relation t1
+DETAIL:  N/A
+ALTER SEQUENCE pri_al_schema.serial OWNED BY T1.C1;
+ERROR:  permission denied for relation serial
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.pri_al_persons OF pri_al_schema.pri_al_person_type2;
+ALTER TABLE pri_al_schema.pri_al_persons INHERIT pri_al_schema.pri_al_stuff;
+ERROR:  cannot change inheritance of typed table
+ALTER TABLE pri_al_schema.pri_al_persons NOT OF;
+--trigger
+alter table pri_al_schema.pri_al_trigtest disable trigger pri_al_trigtest_b_row_tg;
+alter table pri_al_schema.pri_al_trigtest enable trigger pri_al_trigtest_b_row_tg;
+alter table pri_al_schema.pri_al_test_hash DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pri_al_schema.pri_al_test_hash REPLICA IDENTITY FULL;
+ALTER TABLE pri_al_schema.pri_al_test_hash alter COLUMN b SET STATISTICS 1000;
+ALTER TABLE pri_al_schema.tb_pri add column age int;
+ALTER TABLE pri_al_schema.tb_pri modify name VARCHAR(60);
+ALTER TABLE pri_al_schema.tb_pri ALTER COLUMN name TYPE text;
+ALTER TABLE  pri_al_schema.tb_pri ALTER name SET STORAGE EXTERNAL;
+ALTER TABLE pri_al_schema.tb_pri add check (age>10);
+ALTER TABLE pri_al_schema.tb_pri alter name set not null;
+ALTER TABLE pri_al_schema.tb_pri ALTER COLUMN name DROP NOT NULL;
+ALTER TABLE pri_al_schema.tb_pri rename age to age_1;
+ALTER TABLE pri_al_schema.tb_pri drop column age_1;
+ALTER TABLE pri_al_schema.tb_pri SET TABLESPACE pri_al_tsp;
+ERROR:  permission denied for tablespace pri_al_tsp
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.tb_pri SET SCHEMA pri_al_schema_test; --error must be owner of relation tb_pri
+ERROR:  must be owner of relation tb_pri
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.tb_pri owner to user1; --error must be owner of relation tb_pri
+ERROR:  must be owner of relation tb_pri
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.tb_pri RENAME TO test_table; --failed
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.tb_pri SET WITHOUT CLUSTER; --success
+ALTER TABLE pri_al_schema.tb_pri SET NOCOMPRESS;--success
+ALTER TABLE pri_al_schema.tb_pri SET WITHOUT OIDS;-- Un-support feature
+ERROR:  Un-support feature
+DETAIL:  ALTER TABLE ... SET WITHOUT OIDS is not yet supported.
+ALTER TABLE pri_al_schema.pri_al_test_hash add column c serial; --not supported
+ERROR:  It's not supported to alter table add serial column
+ALTER TABLE pri_al_schema.pri_al_test_hash add column d int default 10; --success
+ALTER TABLE pri_al_schema.TBL_DOMAIN_PRI ADD CONSTRAINT b_le_20 CHECK (b <= 20) NOT VALID;
+ALTER TABLE pri_al_schema.TBL_DOMAIN_PRI ADD CONSTRAINT PK_TBL_DOMAIN PRIMARY KEY (IDOMAINID) USING INDEX;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.TBL_DOMAIN_PRI ADD CONSTRAINT IX_TBL_DOMAIN UNIQUE (SDOMAINNAME) USING INDEX;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+reset role;
+grant create any index to test_alter_any_table_role;
+SET ROLE test_alter_any_table_role PASSWORD 'Gauss@1234';
+ALTER TABLE pri_al_schema.TBL_DOMAIN_PRI ADD CONSTRAINT PK_TBL_DOMAIN PRIMARY KEY (IDOMAINID) USING INDEX;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "pk_tbl_domain" for table "tbl_domain_pri"
+ALTER TABLE pri_al_schema.TBL_DOMAIN_PRI ADD CONSTRAINT IX_TBL_DOMAIN UNIQUE (SDOMAINNAME) USING INDEX;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "ix_tbl_domain" for table "tbl_domain_pri"
+\d pri_al_schema.TBL_DOMAIN_PRI
+      Table "pri_al_schema.tbl_domain_pri"
+   Column    |         Type          | Modifiers 
+-------------+-----------------------+-----------
+ idomainid   | numeric(10,0)         | not null
+ sdomainname | character varying(30) | not null
+ b           | integer               | 
+Indexes:
+    "pk_tbl_domain" PRIMARY KEY, btree (idomainid) TABLESPACE pg_default
+    "ix_tbl_domain" UNIQUE CONSTRAINT, btree (sdomainname) TABLESPACE pg_default
+Check constraints:
+    "b_le_20" CHECK (b <= 20) NOT VALID
+
+ALTER TABLE pri_al_schema.TBL_DOMAIN_PRI RENAME CONSTRAINT PK_TBL_DOMAIN TO MY_PK_TBL_DOMAIN;
+ALTER TABLE pri_al_schema.TBL_DOMAIN_PRI DROP CONSTRAINT MY_PK_TBL_DOMAIN;
+reset role;
+revoke create any index from test_alter_any_table_role;
+SET ROLE test_alter_any_table_role PASSWORD 'Gauss@1234';
+\d pri_al_schema.TBL_DOMAIN_PRI
+      Table "pri_al_schema.tbl_domain_pri"
+   Column    |         Type          | Modifiers 
+-------------+-----------------------+-----------
+ idomainid   | numeric(10,0)         | not null
+ sdomainname | character varying(30) | not null
+ b           | integer               | 
+Indexes:
+    "ix_tbl_domain" UNIQUE CONSTRAINT, btree (sdomainname) TABLESPACE pg_default
+Check constraints:
+    "b_le_20" CHECK (b <= 20) NOT VALID
+
+ALTER TABLE pri_al_schema.tb_pri DISTRIBUTE BY HASH(id);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+DROP TABLE pri_al_schema.tb_pri; --应该失败
+ERROR:  permission denied for relation tb_pri
+DETAIL:  N/A
+reset role;
+SET ROLE user1 PASSWORD 'Gauss@1234';
+create table user1.pri_al_storage_para_t1 (a int4, b text)
+WITH 
+(
+	fillfactor =85, 
+	autovacuum_enabled = ON,
+	toast.autovacuum_enabled = ON, 
+	autovacuum_vacuum_threshold = 100,
+	toast.autovacuum_vacuum_threshold = 100,
+	autovacuum_vacuum_scale_factor = 10, 
+	toast.autovacuum_vacuum_scale_factor = 10,
+	autovacuum_analyze_threshold = 8,
+	autovacuum_analyze_scale_factor = 9,
+--  autovacuum_vacuum_cost_delay: Valid values are between "0" and "100".
+	autovacuum_vacuum_cost_delay = 90, 
+	toast.autovacuum_vacuum_cost_delay = 92,
+--	autovacuum_vacuum_cost_limit: Valid values are between "1" and "10000".
+	autovacuum_vacuum_cost_limit = 567, 
+	toast.autovacuum_vacuum_cost_limit = 789,
+	autovacuum_freeze_min_age = 5000, 
+	toast.autovacuum_freeze_min_age = 6000,
+--	autovacuum_freeze_max_age: Valid values are between "100000000" and "2000000000".
+	autovacuum_freeze_max_age = 300000000, 
+	toast.autovacuum_freeze_max_age = 250000000,
+	autovacuum_freeze_table_age = 170000000, 
+	toast.autovacuum_freeze_table_age = 180000000
+)
+partition by range (a)
+(
+	partition pri_al_storage_para_t1_p1 values less than (10),
+	partition pri_al_storage_para_t1_p2 values less than (20),
+	partition pri_al_storage_para_t1_p3 values less than (100)
+);
+SET ROLE test_alter_any_table_role PASSWORD 'Gauss@1234';
+alter table user1.pri_al_storage_para_t1 add partition p4_rtest_t1 values less than (200);
+alter table  user1.pri_al_storage_para_t1
+RESET 
+(
+	fillfactor,
+	autovacuum_enabled,
+	autovacuum_vacuum_threshold,
+	autovacuum_vacuum_scale_factor,
+	autovacuum_analyze_threshold,
+	autovacuum_analyze_scale_factor,
+	autovacuum_vacuum_cost_delay,
+	autovacuum_vacuum_cost_limit,
+	autovacuum_freeze_min_age,
+	autovacuum_freeze_max_age,
+	autovacuum_freeze_table_age
+);
+-- step 2.1: alter table: storage parameters
+alter table user1.pri_al_storage_para_t1
+SET 
+(
+	fillfactor =86, 
+	autovacuum_enabled = OFF,
+	toast.autovacuum_enabled = ON, 
+	autovacuum_vacuum_threshold = 1000,
+	toast.autovacuum_vacuum_threshold = 1000,
+	--"0.000000" and "100.000000"
+	autovacuum_vacuum_scale_factor = 15, 
+	toast.autovacuum_vacuum_scale_factor = 89,
+	autovacuum_analyze_threshold = 800,
+	--"0.000000" and "100.000000"
+	autovacuum_analyze_scale_factor = 55,
+--  autovacuum_vacuum_cost_delay: Valid values are between "0" and "100".
+	autovacuum_vacuum_cost_delay = 99, 
+	toast.autovacuum_vacuum_cost_delay = 98,
+--	autovacuum_vacuum_cost_limit: Valid values are between "1" and "10000".
+	autovacuum_vacuum_cost_limit = 555, 
+	toast.autovacuum_vacuum_cost_limit = 798,
+	autovacuum_freeze_min_age = 6000, 
+	toast.autovacuum_freeze_min_age = 4000,
+--	autovacuum_freeze_max_age: Valid values are between "100000000" and "2000000000".
+	autovacuum_freeze_max_age = 400000000, 
+	toast.autovacuum_freeze_max_age = 280000000,
+	autovacuum_freeze_table_age = 150000000, 
+	toast.autovacuum_freeze_table_age = 160000000
+);
+drop table user1.pri_al_storage_para_t1; --应该失败
+ERROR:  permission denied for relation pri_al_storage_para_t1
+DETAIL:  N/A
+reset role;
+REVOKE alter any table from test_alter_any_table_role;
+SET ROLE test_alter_any_table_role PASSWORD 'Gauss@1234';
+ALTER TABLE pri_al_schema.pri_al_persons OF pri_al_schema.pri_al_person_type2;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.pri_al_persons INHERIT pri_al_schema.pri_al_stuff;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.pri_al_persons NOT OF;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+--trigger
+alter table pri_al_schema.pri_al_trigtest disable trigger pri_al_trigtest_b_row_tg;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+alter table pri_al_schema.pri_al_trigtest enable trigger pri_al_trigtest_b_row_tg;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+alter table pri_al_schema.pri_al_test_hash DISABLE ROW LEVEL SECURITY;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.pri_al_test_hash REPLICA IDENTITY FULL;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.tb_pri add column age int;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+ALTER TABLE pri_al_schema.tb_pri modify name VARCHAR(60);
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+reset role;
+set search_path=pri_al_schema,user1;
+drop table  pri_al_persons,pri_al_stuff,pri_al_test_hash,pri_al_trigtest,t1,tb_pri,tbl_domain_pri;
+drop table user1.pri_al_storage_para_t1;
+reset role;
+--view
+CREATE USER user2 password 'Gauss@1234';
+GRANT alter any table to test_alter_any_table_role;
+set search_path=pri_al_schema;
+CREATE TABLE pri_al_schema.customer (
+       cid      int primary key,
+       name     text not null,
+       tel      text,
+       passwd    text
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "customer_pkey" for table "customer"
+INSERT INTO pri_al_schema.customer
+       VALUES (101, 'regress_alice', '+81-12-3456-7890', 'passwd123'),
+              (102, 'regress_bob',   '+01-234-567-8901', 'beafsteak'),
+              (103, 'regress_eve',   '+49-8765-43210',   'hamburger');
+  --create view
+CREATE VIEW pri_al_schema.my_property_normal AS
+       SELECT * FROM pri_al_schema.customer WHERE name = current_user;
+--create materialized view
+create table pri_al_schema.pri_al_t1(c1 int,c2 int);
+insert into pri_al_schema.pri_al_t1 values(1,1),(2,2);
+create incremental materialized view pri_al_schema.mv1 as select * from pri_al_schema.pri_al_t1;
+SET ROLE test_alter_any_table_role PASSWORD 'Gauss@1234';
+ALTER VIEW pri_al_schema.my_property_normal SET (security_barrier=true);
+alter view pri_al_schema.my_property_normal rename to pri_al_property_normal; --failed
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+drop view pri_al_schema.my_property_normal;
+ERROR:  permission denied for relation my_property_normal
+DETAIL:  N/A
+--materialized view
+--alter user mat_pri1 poladmin;
+alter materialized view pri_al_schema.mv1 enable row level security; -- no support ALTER MATERIALIZED VIEW is not yet supported.
+ERROR:  ALTER MATERIALIZED VIEW is not yet supported.
+alter materialized view pri_al_schema.mv1 set SCHEMA user2;
+ERROR:  ALTER MATERIALIZED VIEW is not yet supported.
+create table pri_al_schema.test_create_pri (id int);
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+reset role;
+--收回权限
+REVOKE alter any table from test_alter_any_table_role;
+SET ROLE test_alter_any_table_role PASSWORD 'Gauss@1234';
+ALTER VIEW pri_al_schema.my_property_normal SET (security_barrier=true);
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+alter view pri_al_schema.my_property_normal rename to pri_al_property_normal;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+drop view pri_al_schema.pri_al_property_normal;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+--materialized view
+--alter user mat_pri1 poladmin;
+alter materialized view pri_al_schema.mv1 enable row level security;
+ERROR:  permission denied for schema pri_al_schema
+DETAIL:  N/A
+reset role;
+drop type pri_al_schema.pri_al_person_type1;
+drop type pri_al_schema.pri_al_person_type2;
+drop function pri_al_schema.pri_al_trigtest();
+DROP materialized view pri_al_schema.mv1;
+drop sequence pri_al_schema.serial;
+drop view pri_al_schema.my_property_normal;
+drop table pri_al_schema.customer;
+drop table pri_al_schema.pri_al_t1;
+DROP SCHEMA pri_al_schema CASCADE;
+DROP SCHEMA pri_al_schema_test CASCADE;
+DROP TABLESPACE pri_al_tsp;
+\! rm -rf @testtablespace@/pri_tsp
+DROP USER user1 cascade;
+DROP USER test_alter_any_table_role cascade;
+DROP USER user2 cascade;
+ 

@@ -35,7 +35,7 @@ SET(TGT_xlogdump_INC
 SET(xlogdump_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND)
 SET(xlogdump_COMPILE_OPTIONS ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${CHECK_OPTIONS} ${BIN_SECURE_OPTIONS} ${OPTIMIZE_OPTIONS})
 SET(xlogdump_LINK_OPTIONS ${BIN_LINK_OPTIONS})
-SET(xlogdump_LINK_LIBS libpgcommon.a -lpgport -lcrypt -ldl -lm -ledit -lssl -lcrypto -lsecurec -lrt -lz -lminiunz)
+SET(xlogdump_LINK_LIBS libpgcommon.a -lpgport -lcrypt -ldl -lm -ledit -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz)
 add_bintarget(pg_xlogdump TGT_xlogdump_SRC TGT_xlogdump_INC "${xlogdump_DEF_OPTIONS}" "${xlogdump_COMPILE_OPTIONS}" "${xlogdump_LINK_OPTIONS}" "${xlogdump_LINK_LIBS}")
 add_dependencies(pg_xlogdump pgport_static pgcommon_static)
 target_link_directories(pg_xlogdump PUBLIC

@@ -2561,6 +2561,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4506 | listagg
  4507 | interval_list_agg_noarg2_transfn
  4508 | listagg
+ 4579 | gs_get_active_archiving_standby
+ 4580 | gs_pitr_archive_slot_force_advance
+ 4581 | gs_pitr_clean_history_global_barriers
+ 4582 | gs_pitr_get_warning_for_xlog_force_recycle
  4600 | checksum
  4601 | checksumtext_agg_transfn
  4651 | pg_cbm_tracked_location
@@ -2618,6 +2622,9 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5034 | gs_io_wait_status
  5077 | gs_hadr_local_rto_and_rpo_stat
  5078 | gs_hadr_remote_rto_and_rpo_stat
+ 5254 | gs_get_session_memctx_detail
+ 5255 | gs_get_shared_memctx_detail
+ 5256 | gs_get_thread_memctx_detail
  5345 | pv_builtin_functions
  5519 | int1cmp
  5520 | hashint1
@@ -2695,7 +2702,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6204 | pg_stop_backup
  6224 | gs_get_next_xid_csn
  6321 | pg_stat_file_recursive
- 7000 | pg_stat_segment_space_info
  7001 | pg_stat_segment_extent_usage
  7002 | gs_space_shrink
  7777 | sysdate

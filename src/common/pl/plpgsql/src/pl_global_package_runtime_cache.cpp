@@ -38,45 +38,43 @@ static int getPartition(uint32 hashCode)
     return hashCode % NUM_GPRC_PARTITIONS;
 }
 
-static uint32 gprcHash(const void* key, Size keysize)
+static uint32 GprcHash(const void* key, Size keysize)
 {
     return DatumGetUInt32(DirectFunctionCall1(hashint8, Int64GetDatumFast(*((uint64*)key))));
 }
 
-static int gprcMatch(const void *left, const void *right, Size keysize)
+static int GprcMatch(const void *left, const void *right, Size keysize)
 {
     uint64 *leftItem = (uint64*)left;
     uint64 *rightItem = (uint64*)right;
-    return *leftItem == *rightItem;
+    if (*leftItem == *rightItem) {
+        return 0;
+    } else {
+        return 1;
+    }
 }
 
-PLGlobalPackageRuntimeCache::PLGlobalPackageRuntimeCache()
-{
-    init();
-}
+volatile bool PLGlobalPackageRuntimeCache::inited = false;
 
-PLGlobalPackageRuntimeCache::~PLGlobalPackageRuntimeCache()
+void PLGlobalPackageRuntimeCache::Init()
 {
-}
-
-void PLGlobalPackageRuntimeCache::init()
-{
+    inited = true;
     HASHCTL ctl;
     errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
     securec_check(rc, "\0", "\0");
     ctl.keysize = sizeof(uint64);
     ctl.entrysize = sizeof(GPRCValue);
-    ctl.hash = gprcHash;
-    ctl.match = gprcMatch;
+    ctl.hash = GprcHash;
+    ctl.match = GprcMatch;
     const int hashSize = 1024;
 
     int flags = HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE | HASH_EXTERN_CONTEXT | HASH_NOEXCEPT;
     hashArray = (GPRCHashCtl*)
-        MemoryContextAllocZero(GLOBAL_PLANCACHE_MEMCONTEXT, sizeof(GPRCHashCtl) * NUM_GPRC_PARTITIONS);
+        MemoryContextAllocZero(GLOBAL_PRC_MEMCONTEXT, sizeof(GPRCHashCtl) * NUM_GPRC_PARTITIONS);
     for (uint32 i = 0; i < NUM_GPRC_PARTITIONS; i++) {
         hashArray[i].lockId = FirstGPRCMappingLock + i;
         hashArray[i].context = AllocSetContextCreate(
-            GLOBAL_PLANCACHE_MEMCONTEXT,
+            GLOBAL_PRC_MEMCONTEXT,
             "GPRC_Bucket_Context",
             ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE,
@@ -87,7 +85,7 @@ void PLGlobalPackageRuntimeCache::init()
     }
 }
 
-static List* copyPackageRuntimeStates(SessionPackageRuntime *runtime)
+static List* CopyPackageRuntimeStates(SessionPackageRuntime *runtime)
 {
     ListCell* cell = NULL;
     List* result = NULL;
@@ -107,35 +105,98 @@ static List* copyPackageRuntimeStates(SessionPackageRuntime *runtime)
         }
         result = lappend(result, newRuntimeState);
     }
+
     return result;
 }
 
-static SessionPackageRuntime* copySessionPackageRuntime(SessionPackageRuntime *runtime)
+List* CopyPortalDatas(SessionPackageRuntime *runtime)
+{
+    ListCell* cell = NULL;
+    List* result = NIL;
+    foreach(cell, runtime->portalData) {
+        AutoSessionPortalData* portalData = (AutoSessionPortalData*)lfirst(cell);
+        AutoSessionPortalData* newportalData = (AutoSessionPortalData*)palloc0(sizeof(AutoSessionPortalData));
+        newportalData->outParamIndex = portalData->outParamIndex;
+        newportalData->strategy = portalData->strategy;
+        newportalData->cursorOptions = portalData->cursorOptions;
+        newportalData->commandTag = portalData->commandTag;
+        newportalData->atEnd = portalData->atEnd;
+        newportalData->atStart = portalData->atStart;
+        newportalData->portalPos = portalData->portalPos;
+        newportalData->holdStore = portalData->holdStore;
+        newportalData->holdContext = portalData->holdContext;
+        newportalData->tupDesc = portalData->tupDesc;
+        newportalData->is_open = portalData->is_open;
+        newportalData->found = portalData->found;
+        newportalData->not_found = portalData->not_found;
+        newportalData->row_count = portalData->row_count;
+        newportalData->null_open = portalData->null_open;
+        newportalData->null_fetch = portalData->null_fetch;
+        result = lappend(result, newportalData);
+    }
+    return result;
+}
+
+List* CopyFuncInfoDatas(SessionPackageRuntime *runtime)
+{
+    ListCell* cell = NULL;
+    List* result = NIL;
+    foreach(cell, runtime->funcValInfo) {
+        AutoSessionFuncValInfo* funcInfo = (AutoSessionFuncValInfo*)lfirst(cell);
+        AutoSessionFuncValInfo *newfuncInfo = (AutoSessionFuncValInfo*)palloc0(sizeof(AutoSessionFuncValInfo));
+        newfuncInfo->found = funcInfo->found;
+        newfuncInfo->sql_cursor_found = funcInfo->sql_cursor_found;
+        newfuncInfo->sql_notfound = funcInfo->sql_notfound;
+        newfuncInfo->sql_isopen = funcInfo->sql_isopen;
+        newfuncInfo->sql_rowcount = funcInfo->sql_rowcount;
+        newfuncInfo->sqlcode = funcInfo->sqlcode;
+        newfuncInfo->sqlcode_isnull = funcInfo->sqlcode_isnull;
+        result = lappend(result, newfuncInfo);
+    }
+    return result;
+}
+
+List* CopyPortalContexts(List *portalContexts)
+{
+    ListCell* cell = NULL;
+    List* result = NIL;
+    foreach(cell, portalContexts) {
+        AutoSessionPortalContextData* portalContext = (AutoSessionPortalContextData*)lfirst(cell);
+        AutoSessionPortalContextData* newPortalContext =
+            (AutoSessionPortalContextData*)palloc0(sizeof(AutoSessionPortalContextData));
+        newPortalContext->status = portalContext->status;
+        newPortalContext->portalHoldContext = portalContext->portalHoldContext;
+        result = lappend(result, newPortalContext);
+    }
+    return result;
+}
+
+static SessionPackageRuntime* CopySessionPackageRuntime(SessionPackageRuntime *runtime, bool isShare)
 {
     MemoryContext pkgRuntimeCtx = AllocSetContextCreate(CurrentMemoryContext,
                                                         "SessionPackageRuntime",
                                                         ALLOCSET_SMALL_MINSIZE,
                                                         ALLOCSET_SMALL_INITSIZE,
-                                                        ALLOCSET_DEFAULT_MAXSIZE);
+                                                        ALLOCSET_DEFAULT_MAXSIZE,
+                                                        isShare? SHARED_CONTEXT : STANDARD_CONTEXT);
     MemoryContext oldCtx = MemoryContextSwitchTo(pkgRuntimeCtx);
     SessionPackageRuntime *sessPkgRuntime = (SessionPackageRuntime*)palloc0(sizeof(SessionPackageRuntime));
-    sessPkgRuntime->runtimes = copyPackageRuntimeStates(runtime);
+    sessPkgRuntime->runtimes = CopyPackageRuntimeStates(runtime);
     sessPkgRuntime->context = pkgRuntimeCtx;
+    sessPkgRuntime->portalContext = CopyPortalContexts(runtime->portalContext);
+    sessPkgRuntime->portalData = CopyPortalDatas(runtime);
+    sessPkgRuntime->funcValInfo = CopyFuncInfoDatas(runtime);
     MemoryContextSwitchTo(oldCtx);
     return sessPkgRuntime;
 }
 
-bool PLGlobalPackageRuntimeCache::add(uint64 sessionId, SessionPackageRuntime* runtime)
+bool PLGlobalPackageRuntimeCache::Add(uint64 sessionId, SessionPackageRuntime* runtime)
 {
     if (runtime == NULL) {
         ereport(WARNING,
             (errmsg("SessionPackageRuntime can't be null.")));
         return false;
     }
-
-    ereport(DEBUG3, (errmodule(MOD_PLSQL), errcode(ERRCODE_LOG),
-            errmsg("PLGlobalPackageRuntimeCache LOG: current session id: %lu , add session id: %lu",
-                IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid, sessionId)));
 
     uint32 hashCode = DirectFunctionCall1(hashint8, Int64GetDatumFast(sessionId));
     int partitionIndex = getPartition(hashCode);
@@ -148,7 +209,22 @@ bool PLGlobalPackageRuntimeCache::add(uint64 sessionId, SessionPackageRuntime* r
     GPRCValue *entry = (GPRCValue*)hash_search_with_hash_value(
         hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_FIND, &found);
     if (found) {
-        MemoryContextDelete(entry->sessPkgRuntime->context);
+        /* should not happen */
+        if (sessionId != entry->sessionId) {
+            MemoryContextSwitchTo(oldcontext);
+            LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
+            ereport(ERROR, (errmodule(MOD_GPRC), errcode(ERRCODE_LOG),
+                errmsg("session id not match when remove PLGlobalPackageRuntimeCache"),
+                errdetail("romove PLGlobalPackageRuntimeCache failed, current session id does not match")));
+        }
+
+        if (entry->sessPkgRuntime != NULL) {
+            ereport(DEBUG3, (errmodule(MOD_GPRC), errcode(ERRCODE_LOG),
+                errmsg("PLGlobalPackageRuntimeCache: remove context(%p) when add, context(%s), parent(%s), shared(%d)",
+                    entry->sessPkgRuntime->context, entry->sessPkgRuntime->context->name,
+                    entry->sessPkgRuntime->context->parent->name, entry->sessPkgRuntime->context->is_shared)));
+            MemoryContextDelete(entry->sessPkgRuntime->context);
+        }
         entry->sessPkgRuntime = NULL;
         hash_search_with_hash_value(
             hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_REMOVE, &found);
@@ -157,61 +233,74 @@ bool PLGlobalPackageRuntimeCache::add(uint64 sessionId, SessionPackageRuntime* r
     entry = (GPRCValue*)hash_search_with_hash_value(
         hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_ENTER, &found);
     if (entry == NULL) {
-        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+        ereport(ERROR, (errmodule(MOD_GPRC), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
             errmsg("palloc hash element GPRCValue failed"),
             errdetail("failed to add hash element for PLGlobalPackageRuntimeCache"),
             errcause("out of memory"),
             erraction("set more memory")));
     }
-    entry->sessPkgRuntime = copySessionPackageRuntime(runtime);
+    entry->sessPkgRuntime = CopySessionPackageRuntime(runtime, true);
+    entry->sessionId = sessionId;
 
     MemoryContextSwitchTo(oldcontext);
     LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
     return true;
 }
 
-SessionPackageRuntime* PLGlobalPackageRuntimeCache::fetch(uint64 sessionId)
+SessionPackageRuntime* PLGlobalPackageRuntimeCache::Fetch(uint64 sessionId)
 {
-    ereport(DEBUG3, (errmodule(MOD_PLSQL), errcode(ERRCODE_LOG),
-            errmsg("PLGlobalPackageRuntimeCache LOG: current session id: %lu , fetch session id: %lu",
-                IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid, sessionId)));
-
     uint32 hashCode = DirectFunctionCall1(hashint8, Int64GetDatumFast(sessionId));
     int partitionIndex = getPartition(hashCode);
     GPRCHashCtl hashTblCtl = hashArray[partitionIndex];
     (void)LWLockAcquire(GetMainLWLockByIndex(hashTblCtl.lockId), LW_EXCLUSIVE);
+    MemoryContext oldcontext = MemoryContextSwitchTo(hashTblCtl.context);
 
     bool found = false;
     GPRCValue *entry = (GPRCValue*)hash_search_with_hash_value(
         hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_FIND, &found);
     if (!found) {
+        MemoryContextSwitchTo(oldcontext);
         LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
         return NULL;
     }
 
-    SessionPackageRuntime *sessPkgRuntime = copySessionPackageRuntime(entry->sessPkgRuntime);
+    MemoryContextSwitchTo(oldcontext);
+    SessionPackageRuntime *sessPkgRuntime = CopySessionPackageRuntime(entry->sessPkgRuntime, false);
     LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
     return sessPkgRuntime;
 }
 
-bool PLGlobalPackageRuntimeCache::remove(uint64 sessionId)
+bool PLGlobalPackageRuntimeCache::Remove(uint64 sessionId)
 {
-    ereport(DEBUG3, (errmodule(MOD_PLSQL), errcode(ERRCODE_LOG),
-            errmsg("PLGlobalPackageRuntimeCache LOG: current session id: %lu , remove session id: %lu",
-                IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid, sessionId)));
     uint32 hashCode = DirectFunctionCall1(hashint8, Int64GetDatumFast(sessionId));
     int partitionIndex = getPartition(hashCode);
     GPRCHashCtl hashTblCtl = hashArray[partitionIndex];
     (void)LWLockAcquire(GetMainLWLockByIndex(hashTblCtl.lockId), LW_EXCLUSIVE);
+    MemoryContext oldcontext = MemoryContextSwitchTo(hashTblCtl.context);
 
     bool found = false;
-    hash_search_with_hash_value(
-        hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_REMOVE, &found);
-    if (!found) {
+    GPRCValue *entry = (GPRCValue*)hash_search_with_hash_value(
+        hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_FIND, &found);
+    if (found) {
+        if (sessionId != entry->sessionId) {
+            /* should not happen */
+            MemoryContextSwitchTo(oldcontext);
+            LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
+            ereport(ERROR, (errmodule(MOD_GPRC), errcode(ERRCODE_LOG),
+                errmsg("session id not match when remove PLGlobalPackageRuntimeCache"),
+                errdetail("romove PLGlobalPackageRuntimeCache failed, current session id does not match")));
+        }
+        MemoryContextDelete(entry->sessPkgRuntime->context);
+        entry->sessPkgRuntime = NULL;
+        hash_search_with_hash_value(
+            hashTblCtl.hashTbl, (const void*)&sessionId, hashCode, HASH_REMOVE, &found);
+        MemoryContextSwitchTo(oldcontext);
         LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
-        return false;
+        return true;
     }
 
+    MemoryContextSwitchTo(oldcontext);
     LWLockRelease(GetMainLWLockByIndex(hashTblCtl.lockId));
-    return true;
+
+    return false;
 }

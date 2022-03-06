@@ -19,7 +19,7 @@ typedef uint8 RmgrId;
  * Note: RM_MAX_ID must fit in RmgrId; widening that type will affect the XLOG
  * file format.
  */
-#define PG_RMGR(symname, name, redo, parse, startup, cleanup, restartpoint, undo, undo_desc) symname,
+#define PG_RMGR(symname, name, redo, parse, startup, cleanup, restartpoint, undo, undo_desc, type_name) symname,
 
 typedef enum RmgrIds {
 #include "access/rmgrlist.h"
@@ -28,4 +28,5 @@ typedef enum RmgrIds {
 
 #undef PG_RMGR
 #define RM_MAX_ID (RM_NEXT_ID - 1)
+#define MAX_XLOG_INFO_NUM 16
 #endif /* RMGR_H */

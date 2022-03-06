@@ -30,13 +30,11 @@
 
 static const uint32 RTO_VIEW_NAME_SIZE = 32;
 static const uint32 RTO_VIEW_COL_SIZE = 2;
-static const uint32 MAX_WAL_SENDER = 100;
 static const int32 DCF_MAX_NODE_NUM = 10;
-static const uint32 RTO_INFO_BUFFER_SIZE = 2048 * (1 + MAX_WAL_SENDER);
 static const uint32 DCF_RTO_INFO_BUFFER_SIZE = 2048 * (1 + DCF_MAX_NODE_NUM);
 static const uint32 STANDBY_NAME_SIZE = 1024;
 static const uint32 RECOVERY_RTO_VIEW_COL = 9;
-static const uint32 HADR_RTO_RPO_VIEW_COL = 11;
+static const uint32 HADR_RTO_RPO_VIEW_COL = 12;
 
 typedef Datum (*GetViewDataFunc)();
 
@@ -68,11 +66,12 @@ typedef struct HadrRTOAndRPOData {
     int target_rto;
     int64 current_rpo;
     int target_rpo;
-    int64 current_sleep_time;
+    int64 rto_sleep_time;
+    int64 rpo_sleep_time;
 } HadrRTOAndRPOData;
 
 typedef struct knl_g_rto_context {
-    RTOStandbyData rto_standby_data[MAX_WAL_SENDER];
+    RTOStandbyData* rto_standby_data;
 #ifndef ENABLE_MULTIPLE_NODES
     RTOStandbyData dcf_rto_standby_data[DCF_MAX_NODE_NUM];
 #endif

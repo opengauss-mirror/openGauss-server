@@ -118,7 +118,7 @@ void UHeapFillDiskTuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, 
     int numberOfAttributes = tupleDesc->natts;
 
     Assert(NAttrsReserveSpace(numberOfAttributes) == enableReverseBitmap);
-    Assert(!enableReserve || (enableReserve && enableReverseBitmap));
+    Assert(!enableReserve || enableReverseBitmap);
     Assert(enableReverseBitmap || (enableReverseBitmap == false && enableReserve == false));
 
     Form_pg_attribute *att = tupleDesc->attrs;
@@ -242,6 +242,11 @@ void UHeapFillDiskTuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, 
     Assert((size_t)(data - begin) == dataSize);
 }
 
+template void UHeapFillDiskTuple<true>(TupleDesc tupleDesc, Datum *values, const bool *isnull,
+    UHeapDiskTupleData *diskTuple, uint32 dataSize, bool enableReverseBitmap, bool enableReserve);
+template void UHeapFillDiskTuple<false>(TupleDesc tupleDesc, Datum *values, const bool *isnull,
+    UHeapDiskTupleData *diskTuple, uint32 dataSize, bool enableReverseBitmap, bool enableReserve);
+	
 /*
  * Copy a varlena column from source disk tuple (val) to destination (data)
  * Param names match UHeapCopyDiskTupleNoNull and UHeapCopyDiskTupleWithNulls
@@ -1025,13 +1030,14 @@ Bitmapset *UHeapTupleAttrEquals(TupleDesc tupdesc, Bitmapset *att_list, UHeapTup
  */
 UHeapTuple UHeapCopyTuple(UHeapTuple uhtup)
 {
-    Assert(uhtup->tupTableType == UHEAP_TUPLE);
-
     UHeapTuple newTuple;
     errno_t rc = EOK;
 
-    if (!UHeapTupleIsValid(uhtup) || uhtup->disk_tuple == NULL)
+    if (!UHeapTupleIsValid(uhtup) || uhtup->disk_tuple == NULL) {
         return NULL;
+    }
+
+    Assert(uhtup->tupTableType == UHEAP_TUPLE);
 
     newTuple = (UHeapTuple)uheaptup_alloc(UHeapTupleDataSize + uhtup->disk_tuple_size);
     newTuple->ctid = uhtup->ctid;
@@ -1373,6 +1379,91 @@ void UHeapSlotGetSomeAttrs(TupleTableSlot *slot, int attnum)
         attnum);
 }
 
+void UHeapSlotFormBatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows, int attnum)
+{
+    Assert(slot->tts_tupslotTableAm == TAM_USTORE);
+
+    /* Quick out if we have all already */
+    if (slot->tts_nvalid >= attnum) {
+        return;
+    }
+
+    UHeapTuple utuple = (UHeapTuple)slot->tts_tuple;
+    TupleDesc rowDesc = slot->tts_tupleDescriptor;
+    bool isNull = slot->tts_isnull;
+    UHeapDiskTuple diskTuple = utuple->disk_tuple;
+    bool hasNull = UHeapDiskTupHasNulls(diskTuple);
+    Form_pg_attribute* att = rowDesc->attrs;
+    int attno;
+    bits8* bp = diskTuple->data;
+    long off = diskTuple->t_hoff;
+    char* tupPtr = (char*)diskTuple;
+    int nullcount = 0;
+    int tupleAttrs = UHeapTupleHeaderGetNatts(diskTuple);
+    bool enableReverseBitmap = NAttrsReserveSpace(tupleAttrs);
+
+    WHITEBOX_TEST_STUB(UHEAP_DEFORM_TUPLE_FAILED, WhiteboxDefaultErrorEmit);
+
+    int natts = Min(tupleAttrs, attnum);
+    for (attno = 0; attno < natts; attno++) {
+        Form_pg_attribute thisatt = att[attno];
+        ScalarVector* pVector = &batch->m_arr[attno];
+
+        if (hasNull && att_isnull(attno, bp)) {
+            /* Skip attribute length in case the tuple was stored with
+               space reserved for null attributes */
+            if (enableReverseBitmap && !att_isnull(tupleAttrs + nullcount, bp)) {
+                off += thisatt->attlen;
+            }
+
+            nullcount++;
+
+            pVector->m_vals[cur_rows] = (Datum)0;
+            SET_NULL(pVector->m_flag[cur_rows]);
+            /* stole the flag for perf */
+            pVector->m_const = true;
+            continue;
+        }
+
+        SET_NOTNULL(pVector->m_flag[cur_rows]);
+
+        /*
+         * If this is a varlena, there might be alignment padding, if it has a
+         * 4-byte header.  Otherwise, there will only be padding if it's not
+         * pass-by-value.
+         */
+        if (thisatt->attlen == -1) {
+            off = att_align_pointer(off, thisatt->attalign, -1, tupPtr + off);
+        } else if (!thisatt->attbyval) {
+            off = att_align_nominal(off, thisatt->attalign);
+        }
+
+        pVector->m_vals[cur_rows] = fetchatt(thisatt, tupPtr + off);
+
+        off = att_addlength_pointer(off, thisatt->attlen, tupPtr + off);
+    }
+
+    /*
+     * If tuple doesn't have all the atts indicated by tupleDesc, read the
+     * rest as null
+     */
+    for (; attno < attnum; attno++) {
+        ScalarVector* pVector = &batch->m_arr[attno];
+        /* get init default value from tupleDesc.
+         * The original Code is:
+         * example code: values[attnum] = (Datum) 0;
+         * example code: isNulls[attnum] = true;
+         */
+        pVector->m_vals[cur_rows] = heapGetInitDefVal(attno + 1, rowDesc, &isNull);
+        if (isNull) {
+            SET_NULL(pVector->m_flag[cur_rows]);
+            pVector->m_const = true;
+        } else {
+            SET_NOTNULL(pVector->m_flag[cur_rows]);
+        }
+    }
+}
+
 /*
  * UHeapSlotAttIsNull
  * Detect whether an attribute of the slot is null, without
@@ -1699,7 +1790,7 @@ void UHeapSlotStoreMinimalTuple(MinimalTuple mtup, TupleTableSlot *slot, bool sh
  * @param slot: slot inwhich tuple needs to be stored.
  * @param should_free: whether slot assumes responsibility of freeing up the tuple.
  */
-void UHeapSlotStoreUHeapTuple(UHeapTuple utuple, TupleTableSlot *slot, bool shouldFree)
+void UHeapSlotStoreUHeapTuple(UHeapTuple utuple, TupleTableSlot *slot, bool shouldFree, bool batchMode)
 {
     /*
      * sanity checks

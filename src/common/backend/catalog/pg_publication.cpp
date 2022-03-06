@@ -107,6 +107,16 @@ static Publication *GetPublication(Oid pubid)
  */
 static bool is_publishable_class(Oid relid, Form_pg_class reltuple)
 {
+    /* internal namespace, doesn't need to publish */
+    if (reltuple->relnamespace == CSTORE_NAMESPACE || reltuple->relnamespace == PG_PKG_SERVICE_NAMESPACE ||
+#ifndef ENABLE_MULTIPLE_NODES
+        reltuple->relnamespace == DBE_PLDEVELOPER_NAMESPACE ||
+#endif
+        reltuple->relnamespace == PG_SNAPSHOT_NAMESPACE || reltuple->relnamespace == PG_SQLADVISOR_NAMESPACE ||
+        reltuple->relnamespace == PG_BLOCKCHAIN_NAMESPACE || reltuple->relnamespace == PG_DB4AI_NAMESPACE ||
+        reltuple->relnamespace == PG_PLDEBUG_NAMESPACE) {
+        return false;
+    }
     return reltuple->relkind == RELKIND_RELATION && !IsCatalogClass(relid, reltuple) &&
         reltuple->relpersistence == RELPERSISTENCE_PERMANENT &&
         /*
@@ -210,7 +220,7 @@ List *GetRelationPublications(Oid relid)
     /* Find all publications associated with the relation. */
     pubrellist = SearchSysCacheList1(PUBLICATIONRELMAP, ObjectIdGetDatum(relid));
     for (i = 0; i < pubrellist->n_members; i++) {
-        HeapTuple tup = &pubrellist->members[i]->tuple;
+        HeapTuple tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(pubrellist, i);
         Oid pubid = ((Form_pg_publication_rel)GETSTRUCT(tup))->prpubid;
 
         result = lappend_oid(result, pubid);

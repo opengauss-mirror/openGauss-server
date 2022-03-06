@@ -2178,6 +2178,109 @@ static bool rowtype_field_matches(
     return true;
 }
 
+static Node *GetNullExprFromRowExpr(RowExpr *rarg, NullTest *ntest)
+{
+    List *newargs = NIL;
+    ListCell *l = NULL;
+    NullTest* newntest = NULL;
+
+    foreach (l, rarg->args) {
+        Node *relem = (Node *)lfirst(l);
+
+        /*
+         * A constant field refutes the whole NullTest if it's
+         * of the wrong nullness; else we can discard it.
+         */
+        if (relem && IsA(relem, Const)) {
+            Const *carg = (Const *)relem;
+
+            if (carg->constisnull ? (ntest->nulltesttype == IS_NOT_NULL) : (ntest->nulltesttype == IS_NULL)) {
+                return makeBoolConst(false, false);
+            }
+            continue;
+        }
+        /*
+         * Else, make a scalar (argisrow == false) NullTest
+         * for this field.  Scalar semantics are required
+         * because IS [NOT] NULL doesn't recurse; see comments
+         * in ExecEvalNullTest().
+         */
+        newntest = makeNode(NullTest);
+        newntest->arg = (Expr *)relem;
+        newntest->nulltesttype = ntest->nulltesttype;
+        newntest->argisrow = false;
+        newargs = lappend(newargs, newntest);
+    }
+    /* If all the inputs were constants, result is TRUE */
+    if (newargs == NIL) {
+        return makeBoolConst(true, false);
+    }
+    /* If only one nonconst input, it's the result */
+    if (list_length(newargs) == 1) {
+        return (Node *)linitial(newargs);
+    }
+    /* Else we need an AND node */
+    return (Node *)make_andclause(newargs);
+}
+
+static Node *GetNullExprFromRowExprForAFormat(RowExpr *rarg, NullTest *ntest)
+{
+    List *newargs = NIL;
+    ListCell *l = NULL;
+    NullTest* newntest = NULL;
+
+    foreach (l, rarg->args) {
+        Node *relem = (Node *)lfirst(l);
+
+        /*
+         * A constant field refutes the whole NullTest if it's
+         * of the wrong nullness; else we can discard it.
+         */
+        if (relem && IsA(relem, Const)) {
+            Const *carg = (Const *)relem;
+
+            if (!(carg->constisnull)) {
+                if (ntest->nulltesttype == IS_NOT_NULL) {
+                    return makeBoolConst(true, false);
+                }
+                if (ntest->nulltesttype == IS_NULL) {
+                    return makeBoolConst(false, false);
+                }
+            }
+            continue;
+        }
+        /*
+         * Else, make a scalar (argisrow == false) NullTest
+         * for this field.  Scalar semantics are required
+         * because IS [NOT] NULL doesn't recurse; see comments
+         * in ExecEvalNullTest().
+         */
+        newntest = makeNode(NullTest);
+        newntest->arg = (Expr *)relem;
+        newntest->nulltesttype = IS_NULL;
+        newntest->argisrow = false;
+        newargs = lappend(newargs, newntest);
+    }
+    /* If all the inputs were constants, result is TRUE */
+    if (newargs == NIL) {
+        if (ntest->nulltesttype == IS_NOT_NULL) {
+            return makeBoolConst(false, false);
+        }
+        if (ntest->nulltesttype == IS_NULL) {
+            return makeBoolConst(true, false);
+        }
+    }
+    /* If only one nonconst input, it's the result */
+    if (list_length(newargs) == 1)
+        return (Node *)linitial(newargs);
+    if (ntest->nulltesttype == IS_NULL) {
+        /* Else we need an AND node */
+        return (Node *)make_andclause(newargs);
+    } else {
+        return (Node *)make_notclause((Expr *)make_andclause(newargs));
+    }
+}
+
 /* --------------------
  * eval_const_expressions
  *
@@ -3081,44 +3184,11 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
                  * efficient to evaluate, as well as being more amenable
                  * to optimization.
                  */
-                RowExpr* rarg = (RowExpr*)arg;
-                List* newargs = NIL;
-                ListCell* l = NULL;
-
-                foreach (l, rarg->args) {
-                    Node* relem = (Node*)lfirst(l);
-
-                    /*
-                     * A constant field refutes the whole NullTest if it's
-                     * of the wrong nullness; else we can discard it.
-                     */
-                    if (relem && IsA(relem, Const)) {
-                        Const* carg = (Const*)relem;
-
-                        if (carg->constisnull ? (ntest->nulltesttype == IS_NOT_NULL) : (ntest->nulltesttype == IS_NULL))
-                            return makeBoolConst(false, false);
-                        continue;
-                    }
-                    /*
-                     * Else, make a scalar (argisrow == false) NullTest
-                     * for this field.  Scalar semantics are required
-                     * because IS [NOT] NULL doesn't recurse; see comments
-                     * in ExecEvalNullTest().
-                     */
-                    newntest = makeNode(NullTest);
-                    newntest->arg = (Expr*)relem;
-                    newntest->nulltesttype = ntest->nulltesttype;
-                    newntest->argisrow = false;
-                    newargs = lappend(newargs, newntest);
+                if (AFORMAT_NULL_TEST_MODE) {
+                    return GetNullExprFromRowExprForAFormat((RowExpr *)arg, ntest);
+                } else {
+                    return GetNullExprFromRowExpr((RowExpr *)arg, ntest);
                 }
-                /* If all the inputs were constants, result is TRUE */
-                if (newargs == NIL)
-                    return makeBoolConst(true, false);
-                /* If only one nonconst input, it's the result */
-                if (list_length(newargs) == 1)
-                    return (Node*)linitial(newargs);
-                /* Else we need an AND node */
-                return (Node*)make_andclause(newargs);
             }
             if (!ntest->argisrow && arg && IsA(arg, Const)) {
                 Const* carg = (Const*)arg;
@@ -3945,6 +4015,14 @@ static void recheck_cast_function_args(List* args, Oid result_type, HeapTuple fu
             arr = DatumGetArrayTypeP(proallargtypes); /* ensure not toasted */
             proc_arg = ARR_DIMS(arr)[0];
             proargtypes = (Oid*)ARR_DATA_PTR(arr);
+        }
+    }
+
+    /* if argtype is table of, change its element type */
+    for (int i = 0; i < nargs; i++) {
+        Oid baseOid = InvalidOid;
+        if (isTableofType(proargtypes[i], &baseOid, NULL)) {
+            proargtypes[i] = baseOid;
         }
     }
 

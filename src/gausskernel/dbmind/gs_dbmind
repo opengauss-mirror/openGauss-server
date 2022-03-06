@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Copyright (c) 2022 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
+# ------------Utils------------
+function die() {
+    echo -e $1
+    exit 1
+}
+
+function extract_libname() {
+    # Split real library name.
+    line=$1
+    tmparr=(${line//==/ })
+    libname=${tmparr[0]}
+    tmparr=(${libname//>=/ })
+    libname=${tmparr[0]}
+    tmparr=(${libname//<=/ })
+    libname=${tmparr[0]}
+    tmparr=(${libname//~=/ })
+    libname=${tmparr[0]}
+    # trim
+    libname=$(echo $libname | sed 's/ *$//g')
+    echo $libname
+}
+
+# ------------Main Process------------
+ABSPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+DBMIND_PATH=${ABSPATH}/dbmind
+
+# Check whether Python has been installed onto the OS.
+PYTHON=$(which python)
+if [[ "$?" != "0" ]]; then
+    die "Not found the Python environment."
+fi
+
+# Check for the Python version.
+$PYTHON -c 'import sys; exit(sys.version_info[:2] >= (3, 6))'
+if [[ "$?" != "1" ]]; then
+    die "Not supported Python (${PYTHON}) version: at least Python 3.6."
+fi
+
+# Check for dependencies
+## Firstly, get the machine architecture so that determine different requirement files.
+if [[ -f "${DBMIND_PATH}/requirements-x86.txt" ]]; then
+    REQUIREMENT_PATH=$DBMIND_PATH
+else
+    REQUIREMENT_PATH=$DBMIND_PATH/..
+fi
+
+machine=$(uname -m)
+if [[ "$machine" =~ "x86" ]]; then
+    requirements=$REQUIREMENT_PATH/"requirements-x86.txt"
+else
+    requirements=$REQUIREMENT_PATH/"requirements-aarch64.txt"
+fi
+
+## Secondly, check whether each library has been installed.
+installed_list=$($PYTHON -m pip list --disable-pip-version-check)
+while read line; do
+    libname=$(extract_libname $line)
+    # skip comment
+    if [[ $libname == "#"* ]] || [[ $libname == "" ]] ; then
+        continue
+    fi
+
+    found=$(echo $installed_list | grep -i "$libname")
+    if [[ $found == "" ]]; then
+        die "Need dependency ${libname}. You should use pip to install it, following:\n
+        ${PYTHON} -m pip install -r ${requirements}"
+    fi
+done < $requirements
+
+# Furthermore, if users want to use several components, he should install optional dependencies.
+## e.g., gs_dbmind component sqldiag ...
+optional_reqs=$REQUIREMENT_PATH/"requirements-optional.txt"
+if [[ "$1" == "component" ]] && [[ "$2" == "sqldiag" || "$2" == "xtuner" ]]; then
+    while read line; do
+        libname=$(extract_libname $line)
+        # skip comment
+        if [[ $libname == "#"* ]] || [[ $libname == "" ]] ; then
+            continue
+        fi
+
+        found=$(echo $installed_list | grep -i "$libname")
+        if [[ $found == "" ]]; then
+            die "Need dependency ${libname} while using this component. You should use pip to install it, following:\n
+            ${PYTHON} -m pip install -r ${optional_reqs}"
+        fi
+    done < $optional_reqs
+fi
+
+set -f
+for arg in "${@}" ; do
+    arg=`echo $arg |sed 's/"""/\\\\\\"\\\\\\"\\\\\\"/g'`
+    arg=`${PYTHON} -c "import shlex;print(shlex.quote(\"\"\"$arg\"\"\"))"`
+    _args=$_args" "$arg
+done
+
+eval $PYTHON $DBMIND_PATH/ $_args

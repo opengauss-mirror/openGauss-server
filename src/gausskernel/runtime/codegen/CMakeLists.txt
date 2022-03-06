@@ -3,7 +3,9 @@ set(TGT_codegen_SRC ${CMAKE_CURRENT_SOURCE_DIR}/gscodegen.cpp)
 
 set(TGT_codegen_INC 
     ${PROJECT_SRC_DIR}/include
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")    
     ${LIBLLVM_INCLUDE_PATH}
+endif()    
 )
 
 set(codegen_DEF_OPTIONS ${MACRO_OPTIONS} -D_DEBUG -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS)

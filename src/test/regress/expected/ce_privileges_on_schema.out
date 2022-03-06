@@ -37,6 +37,7 @@ SET search_path to testns;
 -- SHOULD FAIL - check CANNOT drop existing objects
 DROP COLUMN ENCRYPTION KEY MyCEK1;
 ERROR:  permission denied for column encryption key mycek1
+DETAIL:  N/A
 DROP CLIENT MASTER KEY MyCMK1;
 ERROR:  cannot drop client master key: mycmk1 because other objects depend on it
 DETAIL:  column encryption key: mycek1 depends on client master key: mycmk1
@@ -44,6 +45,7 @@ HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 -- SHOULD FAIL - create TABLE using existing MyCEK1 (missing permissions to both MyCEK1 and MyCMK1)
 CREATE TABLE acltest1 (x int, x2 varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK1, ENCRYPTION_TYPE = DETERMINISTIC));
 ERROR:  permission denied for column encryption key mycek1
+DETAIL:  N/A
 -- add speciifc permission to MyCEK1 and retry (should still fail - missing permission to MyCMK1)
 RESET SESSION AUTHORIZATION;
 GRANT USAGE ON COLUMN_ENCRYPTION_KEY MyCEK1 to newuser;
@@ -51,6 +53,7 @@ SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
 SET search_path to testns;
 CREATE TABLE acltest1 (x int, x2 varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK1, ENCRYPTION_TYPE = DETERMINISTIC));
 ERROR:  permission denied for client master key mycmk1
+DETAIL:  N/A
 -- SUCCEED - - create TABLE using existing MyCEK1 (now has permission on SCHEMA, CEK and CMK)
 RESET SESSION AUTHORIZATION;
 GRANT USAGE ON CLIENT_MASTER_KEY MyCMK1 to newuser;
@@ -135,6 +138,7 @@ drop cascades to client master key: mycmk2
 drop cascades to column encryption key: mycek3
 drop cascades to table acltest3
 ERROR:  permission denied for column encryption key mycek1
+DETAIL:  N/A
 DROP ROLE IF EXISTS newuser;
 ERROR:  Permission denied to drop role.
 RESET SESSION AUTHORIZATION;

@@ -64,7 +64,7 @@ SELECT f_processed_out();
 SELECT f_processed_out_b();
  f_processed_out_b 
 -------------------
- ("\x74657374",2)
+ ("\\x74657374",2)
 (1 row)
 
 SELECT f_processed_out_plpgsql();

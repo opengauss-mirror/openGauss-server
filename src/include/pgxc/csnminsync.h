@@ -27,5 +27,5 @@
 
 extern void csnminsync_main(void);
 extern void csnminsync_thread_shutdown(void);
-
+extern bool csnminsync_is_first_cn_or_ccn(const char *node_name);
 #endif /* CSNMINSYNC_H */

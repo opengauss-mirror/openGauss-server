@@ -31,7 +31,7 @@ BEGIN
     RETURN c;
 END; $$
 LANGUAGE plpgsql;
-\df
+\df f_processed_in_plpgsql
 SELECT COUNT(*) FROM gs_encrypted_proc where func_id NOT in (SELECT Oid FROM pg_proc);
 CREATE OR REPLACE FUNCTION f_processed_out_plpgsql(out1 OUT varchar(100), out2 OUT dec(15,2)) 
 AS $$
@@ -39,7 +39,7 @@ BEGIN
 SELECT INTO out1, out2 name, balance from accounts LIMIT 1;
 END; $$
 LANGUAGE plpgsql;
-\df
+\df f_processed_out_plpgsql
 -- FAILED
 CREATE OR REPLACE FUNCTION f_processed_out_plpgsql(out1 OUT varchar(100), out2 OUT dec(15,2)) 
 AS $$
@@ -48,9 +48,16 @@ SELECT INTO out1, out2 name, balance from accounts LIMIT 1;
 END; $$
 LANGUAGE plpgsql;
 SELECT f_processed_out_plpgsql();
-\df
+\df f_processed_out_plpgsql
 DROP FUNCTION f_processed_in_plpgsql;
 DROP FUNCTION f_processed_out_plpgsql;
+CREATE OR REPLACE FUNCTION select1() RETURNS varchar(100) LANGUAGE SQL AS 'SELECT name from accounts;';
+select proname, pronargs, prorettype, proargtypes, proallargtypes, proargnames, prorettype_orig, proargcachedcol, proallargtypes_orig
+from pg_proc join gs_encrypted_proc on pg_proc.oid = func_id where proname = 'select1';
+CREATE OR REPLACE FUNCTION select1() RETURNS varchar(100) LANGUAGE SQL AS 'SELECT ''aaa'';';
+select proname, pronargs, prorettype, proargtypes, proallargtypes, proargnames, prorettype_orig, proargcachedcol, proallargtypes_orig
+from pg_proc join gs_encrypted_proc on pg_proc.oid = func_id where proname = 'select1';
+DROP FUNCTION select1();
 DROP TABLE accounts;
 DROP COLUMN ENCRYPTION KEY create_replace_cek;
 DROP CLIENT MASTER KEY create_replace_cmk;

@@ -52,6 +52,7 @@
 #include "utils/sec_rls_utils.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "utils/knl_relcache.h"
 
 /*
  * The row level security policies for one relation should be
@@ -795,7 +796,7 @@ void RelationBuildRlsPolicies(Relation relation)
      * Set up memory context, always set up some kind of policy here.
      * If no explicit policies are found then an implicit default-deny policy is created.
      */
-    MemoryContext rlscxt = AllocSetContextCreate(u_sess->cache_mem_cxt,
+    MemoryContext rlscxt = AllocSetContextCreate(LocalMyDBCacheMemCxt(),
         "Row-level-security policy descriptor",
         ALLOCSET_SMALL_MINSIZE,
         ALLOCSET_SMALL_INITSIZE,

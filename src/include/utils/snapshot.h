@@ -168,6 +168,11 @@ typedef enum SnapshotSatisfiesMethod {
      * contents in the context of logical decoding).
      */
     SNAPSHOT_HISTORIC_MVCC,
+    /*
+     * Whether a tuple is visible is decided by CSN,
+     * which is used in parallel decoding.
+     */
+    SNAPSHOT_DECODE_MVCC
 } SnapshotSatisfiesMethod;
 
 typedef struct SnapshotData* Snapshot;

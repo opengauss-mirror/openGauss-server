@@ -247,6 +247,7 @@ void MetaCacheMgr::NewSingletonInstance(void)
     ereport(LOG, (errmodule(MOD_CACHE), errmsg("set metadata cache  size(%ld)", cache_size)));
 }
 
+#ifndef ENABLE_LITE_MODE
 /*
  * @Description: must get pin first before used
  * @IN fileFooter: file footer
@@ -265,6 +266,7 @@ void OrcMetaCacheSetBlock(CacheSlotId_t slotId, uint64 footerStart, const orc::p
         slotId, footerStart, postScript, fileFooter, stripeFooter, rowIndex, fileName, dataDNA);
     MetaCache->MetaBlockCompleteIO(slotId);
 }
+#endif
 
 void CarbonMetaCacheSetBlock(CacheSlotId_t slotId, uint64 headerSize, uint64 footerSize, unsigned char* fileHeader,
                              unsigned char* fileFooter, const char* fileName, const char* dataDNA)
@@ -623,6 +625,7 @@ int MetaCacheMgr::CalcCarbonMetaBlockSize(CarbonMetadataValue* nvalue) const
     return size;
 }
 
+#ifndef ENABLE_LITE_MODE
 /*
  * @Description: must get pin first before used
  * @IN fileFooter: file footer
@@ -723,6 +726,7 @@ out_of_memory:
     ereport(ERROR, (errcode(ERRCODE_FDW_OUT_OF_MEMORY), errmodule(MOD_CACHE), errmsg("malloc fails, out of memory")));
     return;
 }
+#endif
 
 void MetaCacheMgr::SetCarbonMetaBlockValue(CacheSlotId_t slotId, uint64 headerSize, uint64 footerSize,
                                            unsigned char* fileHeader, unsigned char* fileFooter, const char* fileName, const char* dataDNA)

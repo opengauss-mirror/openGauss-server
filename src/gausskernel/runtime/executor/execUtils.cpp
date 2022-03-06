@@ -89,7 +89,7 @@ static bool check_violation(Relation heap, Relation index, IndexInfo *indexInfo,
  * CurrentMemoryContext.
  * ----------------
  */
-EState* CreateExecutorState(void)
+EState* CreateExecutorState(MemoryContext saveCxt)
 {
     EState* estate = NULL;
     MemoryContext qcontext;
@@ -98,11 +98,15 @@ EState* CreateExecutorState(void)
     /*
      * Create the per-query context for this Executor run.
      */
-    qcontext = AllocSetContextCreate(CurrentMemoryContext,
-        "ExecutorState",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    if (saveCxt != NULL) {
+        qcontext = saveCxt;
+    } else {
+        qcontext = AllocSetContextCreate(CurrentMemoryContext,
+            "ExecutorState",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+    }
 
     /*
      * Make the EState node within the per-query context.  This way, we don't
@@ -1494,6 +1498,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
     bool isnull[INDEX_MAX_KEYS];
     ItemPointerData invalidItemPtr;
     bool isPartitioned = false;
+    bool containGPI;
     List* partitionIndexOidList = NIL;
     Oid partoid;
     int2 bktid;
@@ -1510,8 +1515,9 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
     relationDescs = resultRelInfo->ri_IndexRelationDescs;
     indexInfoArray = resultRelInfo->ri_IndexRelationInfo;
     heapRelationDesc = resultRelInfo->ri_RelationDesc;
+    containGPI = resultRelInfo->ri_ContainGPI;
     actualHeap = targetRel;
-    
+
     rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
     securec_check(rc, "", "");
 
@@ -1519,7 +1525,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
         Assert(p != NULL && p->pd_part != NULL);
         isPartitioned = true;
 
-        if (!p->pd_part->indisusable) {
+        if (!p->pd_part->indisusable && !containGPI) {
             return true;
         }
     }
@@ -1819,7 +1825,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
         if (!indexRelation->rd_index->indisunique) {
             checkUnique = UNIQUE_CHECK_NO;
         } else if (conflict != NULL) {
-            checkUnique = UNIQUE_CHECK_PARTIAL;
+            checkUnique = UNIQUE_CHECK_UPSERT;
         } else if (indexRelation->rd_index->indimmediate) {
             checkUnique = UNIQUE_CHECK_YES;
         } else {
@@ -1851,7 +1857,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 actualheap, actualindex, indexInfo, tupleid, values, isnull, estate, false, errorOK);
         }
 
-        if ((checkUnique == UNIQUE_CHECK_PARTIAL || indexInfo->ii_ExclusionOps != NULL) && !satisfiesConstraint) {
+        if ((IndexUniqueCheckNoError(checkUnique) || indexInfo->ii_ExclusionOps != NULL) && !satisfiesConstraint) {
             /*
              * The tuple potentially violates the uniqueness or exclusion
              * constraint, so make a note of the index so that we can re-check
@@ -2035,7 +2041,7 @@ retry:
         /* If lossy indexscan, must recheck the condition */
         if (is_scan) {
             /* tuple doesn't actually match, so no conflict */
-            continue; 
+            continue;
         }
 
         /*
@@ -2062,8 +2068,8 @@ retry:
             goto retry;
         }
 
-        /* Determine whether the index column of the scanned tuple is the same 
-         * as that of the tuple to be inserted. If not, the tuple pointed to by 
+        /* Determine whether the index column of the scanned tuple is the same
+         * as that of the tuple to be inserted. If not, the tuple pointed to by
          * the item has been modified by other transactions. Check again for any conflicts.
          */
         for (int i=0; i < indnkeyatts; i++) {
@@ -2072,8 +2078,8 @@ retry:
                 scan_handler_idx_endscan(index_scan);
                 goto retry;
             }
-            if (!existing_isnull[i] && 
-                !DatumGetBool(FunctionCall2Coll(&scankeys[i].sk_func, scankeys[i].sk_collation, 
+            if (!existing_isnull[i] &&
+                !DatumGetBool(FunctionCall2Coll(&scankeys[i].sk_func, scankeys[i].sk_collation,
                                 existing_values[i], values[i]))) {
                 conflict = false;
                 scan_handler_idx_endscan(index_scan);
@@ -2103,7 +2109,7 @@ retry:
          */
         error_new = BuildIndexValueDescription(index, values, isnull);
         error_existing = BuildIndexValueDescription(index, existing_values, existing_isnull);
-        newIndex ? 
+        newIndex ?
             ereport(ERROR,
                 (errcode(ERRCODE_EXCLUSION_VIOLATION),
                     errmsg("could not create exclusion constraint \"%s\" when trying to build a new index",
@@ -2282,6 +2288,7 @@ static void ShutdownExprContext(ExprContext* econtext, bool isCommit)
     MemoryContextSwitchTo(oldcontext);
 }
 
+
 int PthreadMutexLock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace)
 {
     HOLD_INTERRUPTS();
@@ -2319,4 +2326,107 @@ int PthreadMutexUnlock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace)
     RESUME_INTERRUPTS();
 
     return ret;
+}
+
+int PthreadRWlockTryRdlock(ResourceOwner owner, pthread_rwlock_t* rwlock)
+{
+    if (owner) {
+        ResourceOwnerEnlargePthreadRWlock(owner);
+    }
+    bool ret;
+    HOLD_INTERRUPTS();
+    ret = pthread_rwlock_tryrdlock(rwlock);
+    if (ret == 0) {
+        if (owner) {
+            ResourceOwnerRememberPthreadRWlock(owner, rwlock);
+        } else {
+            START_CRIT_SECTION();
+        }
+    }
+    RESUME_INTERRUPTS();
+    return ret;
+}
+
+void PthreadRWlockRdlock(ResourceOwner owner, pthread_rwlock_t* rwlock)
+{
+    if (owner) {
+        ResourceOwnerEnlargePthreadRWlock(owner);
+    }
+    HOLD_INTERRUPTS();
+    int ret = pthread_rwlock_rdlock(rwlock);
+    Assert(ret == 0);
+    if (ret != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("aquire rdlock failed")));
+    }
+    if (owner) {
+        ResourceOwnerRememberPthreadRWlock(owner, rwlock);
+    } else {
+        START_CRIT_SECTION();
+    }
+    RESUME_INTERRUPTS();
+}
+
+int PthreadRWlockTryWrlock(ResourceOwner owner, pthread_rwlock_t* rwlock)
+{
+    if (owner) {
+        ResourceOwnerEnlargePthreadRWlock(owner);
+    }
+    HOLD_INTERRUPTS();
+    int ret = pthread_rwlock_trywrlock(rwlock);
+    if (ret == 0) {
+        if (owner) {
+            ResourceOwnerRememberPthreadRWlock(owner, rwlock);
+        } else {
+            START_CRIT_SECTION();
+        }
+    }
+    RESUME_INTERRUPTS();
+    return ret;
+}
+
+void PthreadRWlockWrlock(ResourceOwner owner, pthread_rwlock_t* rwlock)
+{
+    if (owner) {
+        ResourceOwnerEnlargePthreadRWlock(owner);
+    }
+    HOLD_INTERRUPTS();
+    int ret = pthread_rwlock_wrlock(rwlock);
+    Assert(ret == 0);
+    if (ret != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("aquire wrlock failed")));
+    }
+    if (owner) {
+        ResourceOwnerRememberPthreadRWlock(owner, rwlock);
+    } else {
+        START_CRIT_SECTION();
+    }
+    RESUME_INTERRUPTS();
+}
+void PthreadRWlockUnlock(ResourceOwner owner, pthread_rwlock_t* rwlock)
+{
+    HOLD_INTERRUPTS();
+    int ret = pthread_rwlock_unlock(rwlock);
+    Assert(ret == 0);
+    if (ret != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("release rwlock failed")));
+    }
+    if (owner) {
+        ResourceOwnerForgetPthreadRWlock(owner, rwlock);
+    } else {
+        END_CRIT_SECTION();
+    }
+    RESUME_INTERRUPTS();
+}
+
+void PthreadRwLockInit(pthread_rwlock_t* rwlock, pthread_rwlockattr_t *attr)
+{
+    int ret = pthread_rwlock_init(rwlock, attr);
+    Assert(ret == 0);
+    if (ret != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INITIALIZE_FAILED), errmsg("init rwlock failed")));
+    }
 }

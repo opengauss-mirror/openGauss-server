@@ -804,8 +804,8 @@ bool permissionsList(const char* pattern)
         "c.relname",
         NULL,
         "n.nspname !~ '^pg_'"
-        " AND c.relname not like 'matviewmap_%%'"
-        " AND c.relname not like 'mlog_%%'"
+        " AND c.relname not like 'matviewmap\\_%%'"
+        " AND c.relname not like 'mlog\\_%%'"
         " AND pg_catalog.pg_table_is_visible(c.oid)");
 
     appendPQExpBuffer(&buf, "ORDER BY 1, 2;");
@@ -1322,6 +1322,36 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     initPQExpBuffer(&tmpbuf);
     initPQExpBuffer(&tmp_part_buf);
     initPQExpBuffer(&fullEncryptBuffer);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * In describeOneTableDetails(), PQfnumber() is matched according to the lowercase column name.
+     * However, when uppercase_attribute_name is on, the column names in the result set will be converted to uppercase.
+     * So we need to turn off it temporarily, and turn on it at the end.
+     */
+    bool uppercaseIsOn = false;
+    printfPQExpBuffer(&buf, "show uppercase_attribute_name;");
+    res = PSQLexec(buf.data, false);
+    if (NULL == res) {
+        goto error_return;
+    }
+
+    uppercaseIsOn = strcmp(PQgetvalue(res, 0, 0), "on") == 0;
+
+    PQclear(res);
+    res = NULL;
+
+    if (unlikely(uppercaseIsOn)) {
+        printfPQExpBuffer(&buf, "set uppercase_attribute_name=off;");
+        res = PSQLexec(buf.data, false);
+        if (NULL == res) {
+            goto error_return;
+        }
+
+        PQclear(res);
+        res = NULL;
+    }
+#endif
 
     /* Get general table info */
     if (pset.sversion >= 90100) {
@@ -2915,6 +2945,16 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
 error_return:
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * If uppercase_attribute_name was originally on, restore it.
+     */
+    if (unlikely(uppercaseIsOn)) {
+        printfPQExpBuffer(&buf, "set uppercase_attribute_name=on;");
+        res = PSQLexec(buf.data, false);
+    }
+#endif
+
     /* clean up */
     if (printTableInitialized) {
         printTableCleanup(&cont);
@@ -3424,8 +3464,8 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
      */
     appendPQExpBuffer(&buf, "      AND n.nspname !~ '^pg_toast'\n");
 
-    appendPQExpBuffer(&buf, "      AND c.relname not like 'matviewmap_%%'\n");
-    appendPQExpBuffer(&buf, "      AND c.relname not like 'mlog_%%'\n");
+    appendPQExpBuffer(&buf, "      AND c.relname not like 'matviewmap\\_%%'\n");
+    appendPQExpBuffer(&buf, "      AND c.relname not like 'mlog\\_%%'\n");
 
     (void)processSQLNamePattern(
         pset.db, &buf, pattern, true, false, "n.nspname", "c.relname", NULL, "pg_catalog.pg_table_is_visible(c.oid)");

@@ -458,8 +458,8 @@ typedef struct BackupPageHeader2
     XLByteToSeg(xlrp, logSegNo, wal_segsz_bytes)
 #define GetXLogRecPtr(segno, offset, wal_segsz_bytes, dest) \
     XLogSegNoOffsetToRecPtr(segno, offset, wal_segsz_bytes, dest)
-#define GetXLogFileName(fname, tli, logSegNo, wal_segsz_bytes) \
-    XLogFileName(fname, tli, logSegNo, wal_segsz_bytes)
+#define GetXLogFileName(fname, len, tli, logSegNo, wal_segsz_bytes) \
+    XLogFileName(fname, len, tli, logSegNo, wal_segsz_bytes)
 #define IsInXLogSeg(xlrp, logSegNo, wal_segsz_bytes) \
     XLByteInSeg(xlrp, logSegNo, wal_segsz_bytes)
 
@@ -473,8 +473,8 @@ typedef struct BackupPageHeader2
     XLByteToSeg(xlrp, logSegNo)
 #define GetXLogRecPtr(segno, offset, wal_segsz_bytes, dest) \
     XLogSegNoOffsetToRecPtr(segno, offset, dest)
-#define GetXLogFileName(fname, tli, logSegNo, wal_segsz_bytes) \
-    XLogFileName(fname, tli, logSegNo)
+#define GetXLogFileName(fname, len, tli, logSegNo, wal_segsz_bytes) \
+    XLogFileName(fname, len, tli, logSegNo )
 #define IsInXLogSeg(xlrp, logSegNo, wal_segsz_bytes) \
     XLByteInSeg(xlrp, logSegNo)
 

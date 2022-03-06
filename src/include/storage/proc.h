@@ -74,7 +74,17 @@ struct XidCache {
  * rather than the main lock table.  This eases contention on the lock
  * manager LWLocks.  See storage/lmgr/README for additional details.
  */
-#define FP_LOCK_SLOTS_PER_BACKEND 20
+#define FP_LOCK_SLOTS_PER_BACKEND ((uint32)g_instance.attr.attr_storage.num_internal_lock_partitions[FASTPATH_PART])
+#define FP_LOCK_SLOTS_PER_LOCKBIT 20
+#define FP_LOCKBIT_NUM (((FP_LOCK_SLOTS_PER_BACKEND - 1) / FP_LOCK_SLOTS_PER_LOCKBIT) + 1)
+#define FAST_PATH_SET_LOCKBITS_ZERO(proc)                       \
+    do {                                                        \
+        for (uint32 _idx = 0; _idx < FP_LOCKBIT_NUM; _idx++) {  \
+            (proc)->fpLockBits[_idx] = 0;                       \
+        }                                                       \
+    } while (0)
+
+
 
 typedef struct FastPathTag {
     uint32 dbid;
@@ -241,8 +251,8 @@ struct PGPROC {
     LWLock* backendLock; /* protects the fields below */
 
     /* Lock manager data, recording fast-path locks taken by this backend. */
-    uint64 fpLockBits;                              /* lock modes held for each fast-path slot */
-    FastPathTag fpRelId[FP_LOCK_SLOTS_PER_BACKEND]; /* slots for rel oids */
+    uint64 *fpLockBits;                             /* lock modes held for each fast-path slot */
+    FastPathTag *fpRelId;                           /* slots for rel oids */
     bool fpVXIDLock;                                /* are we holding a fast-path VXID lock? */
     LocalTransactionId fpLocalTransactionId;        /* lxid for fast-path VXID
                                                      * lock */
@@ -305,6 +315,7 @@ typedef struct PGXACT {
                              * vacuum must not remove tuples deleted by
                              * xid >= xmin ! */
     CommitSeqNo csn_min;    /* local csn min */
+    CommitSeqNo csn_dr;
     TransactionId next_xid; /* xid sent down from CN */
     int nxids;              /* use int replace uint8, avoid overflow when sub xids >= 256 */
     uint8 vacuumFlags;      /* vacuum-related flags, see above */
@@ -357,9 +368,12 @@ typedef struct PROC_HDR {
     Latch* walwriterauxiliaryLatch;
     /* Checkpointer process's latch */
     Latch* checkpointerLatch;
+    /* pagewriter main process's latch */
+    Latch* pgwrMainThreadLatch;
     /* BCMWriter process's latch */
     Latch* cbmwriterLatch;
     volatile Latch* ShareStoragexlogCopyerLatch;
+    volatile Latch* BarrierPreParseLatch;
     /* Current shared estimate of appropriate spins_per_delay value */
     int spins_per_delay;
     /* The proc of the Startup process, since not in ProcArray */
@@ -370,8 +384,6 @@ typedef struct PROC_HDR {
 #ifdef __aarch64__
     char pad[PG_CACHE_LINE_SIZE - PROC_HDR_PAD_OFFSET];
 #endif
-    /* Oldest transaction id which is having undo. */
-    pg_atomic_uint64 oldestXidInUndo;
 } PROC_HDR;
 
 /*
@@ -385,7 +397,12 @@ typedef struct PROC_HDR {
  * PGXC needs another slot for the pool manager process
  */
 const int MAX_PAGE_WRITER_THREAD_NUM = 16;
+
+#ifndef ENABLE_LITE_MODE
 const int MAX_COMPACTION_THREAD_NUM = 100;
+#else
+const int MAX_COMPACTION_THREAD_NUM = 10;
+#endif
 
 /* number of multi auxiliary threads. */
 #define NUM_MULTI_AUX_PROC \
@@ -399,6 +416,8 @@ const int MAX_COMPACTION_THREAD_NUM = 100;
 
 /* max number of CMA's connections */
 #define NUM_CMAGENT_PROCS (10)
+/* buffer length of information when no free proc available for cm_agent */
+#define CONNINFOLEN (64)
 
 /* max number of DCF call back threads */
 #define NUM_DCF_CALLBACK_PROCS \
@@ -418,6 +437,8 @@ const int MAX_COMPACTION_THREAD_NUM = 100;
 #define MAX_SESSION_TIMEOUT 24 * 60 * 60 /* max session timeout value. */
 
 #define BackendStatusArray_size (MAX_BACKEND_SLOT + NUM_AUXILIARY_PROCS)
+
+#define GSC_MAX_BACKEND_SLOT (g_instance.shmem_cxt.MaxBackends + MAX_SESSION_SLOT_COUNT)
 
 extern AlarmCheckResult ConnectionOverloadChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam);
 
@@ -441,7 +462,7 @@ extern int GetUsedConnectionCount(void);
 extern int GetUsedInnerToolConnCount(void);
 
 extern void ProcQueueInit(PROC_QUEUE* queue);
-extern int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_update);
+extern int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_update, int waitSec);
 extern PGPROC* ProcWakeup(PGPROC* proc, int waitStatus);
 extern void ProcLockWakeup(LockMethod lockMethodTable, LOCK* lock, const PROCLOCK* proclock = NULL);
 extern void ProcBlockerUpdate(PGPROC *waiterProc, PROCLOCK *blockerProcLock, const char* lockMode, bool isLockHolder);
@@ -471,14 +492,24 @@ extern ThreadId getThreadIdFromLogicThreadId(int logictid);
 extern int getLogicThreadIdFromThreadId(ThreadId tid);
 
 extern bool IsRedistributionWorkerProcess(void);
+extern void PgStatCMAThreadStatus();
 
 void CancelBlockedRedistWorker(LOCK* lock, LOCKMODE lockmode);
 
 extern void BecomeLockGroupLeader(void);
 extern void BecomeLockGroupMember(PGPROC *leader);
+
 static inline bool TransactionIdOlderThanAllUndo(TransactionId xid)
 {
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
     return xid < cutoff;
 }
+static inline bool TransactionIdOlderThanFrozenXid(TransactionId xid)
+{
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.oldestFrozenXid);
+    return xid < cutoff;
+}
+
+extern int GetThreadPoolStreamProcNum(void);
+
 #endif /* PROC_H */

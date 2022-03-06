@@ -36,6 +36,7 @@ namespace dorado {
 /*
  * VecHashAggCodeGen class implements specific optimization by using LLVM
  */
+#ifdef ENABLE_LLVM_COMPILE
 class VecHashAggCodeGen : public BaseObject {
 public:
     /*
@@ -225,6 +226,7 @@ public:
      */
     static void WrapResetEContextCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value* econtext);
 };
+#endif
 
 }  // namespace dorado
 #endif

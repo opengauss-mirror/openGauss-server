@@ -70,7 +70,7 @@ public:
     ThreadPoolListener* m_listener;
 
     ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum, int maxStreamNum,
-                    int groupId, int numaId, int cpuNum, int* cpuArr);
+                    int groupId, int numaId, int cpuNum, int* cpuArr, bool enableBindCpuNuma);
     ~ThreadPoolGroup();
     void Init(bool enableNumaDistribute);
     void InitWorkerSentry();
@@ -134,6 +134,7 @@ public:
 private:
     void AttachThreadToCPU(ThreadId thread, int cpu);
     void AttachThreadToNodeLevel(ThreadId thread) const;
+    void AttachThreadToCpuNuma(ThreadId thread);
 
 private:
     int m_maxWorkerNum;
@@ -156,7 +157,9 @@ private:
     int m_groupCpuNum;
     int* m_groupCpuArr;
     bool m_enableNumaDistribute;
+    bool m_enableBindCpuNuma;
     cpu_set_t m_nodeCpuSet; /* for numa node distribution only */
+    cpu_set_t m_CpuNumaSet; /* for numa node distribution only */
 
     ThreadWorkerSentry* m_workers;
     MemoryContext m_context;

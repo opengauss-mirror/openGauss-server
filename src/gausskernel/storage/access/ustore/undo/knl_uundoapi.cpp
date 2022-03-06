@@ -26,9 +26,11 @@
 #include "knl/knl_session.h"
 #include "knl/knl_thread.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
 #include "threadpool/threadpool.h"
+#include "utils/builtins.h"
 
 namespace undo {
 static uint64 g_maxUndoSizePerTrans = 0;
@@ -55,7 +57,7 @@ bool CheckNeedSwitch(UndoPersistence upersistence, uint64 size, UndoRecPtr undoP
         zid = t_thrd.undo_cxt.zids[upersistence];
     }
     Assert(zid != INVALID_ZONE_ID);
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, true, upersistence);
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("CheckNeedSwitch: uzone is NULL")));
     }
@@ -75,9 +77,13 @@ void RollbackIfUndoExceeds(TransactionId xid, uint64 size)
 UndoRecPtr AllocateUndoSpace(TransactionId xid, UndoPersistence upersistence, uint64 size,
     bool needSwitch, XlogUndoMeta *xlundometa)
 {
+    if (!g_instance.attr.attr_storage.enable_ustore) {
+        ereport(ERROR, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("Ustore is disabled, "
+            "please set GUC enable_ustore=on and restart database."))));
+    }
     int zid = t_thrd.undo_cxt.zids[upersistence];
     Assert(zid != INVALID_ZONE_ID);
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, false, upersistence);
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("AllocateUndoSpace: uzone is NULL")));
     }
@@ -119,7 +125,7 @@ UndoRecPtr AdvanceUndoPtr(UndoRecPtr undoPtr, uint64 size)
 void PrepareUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence, UndoRecPtr lastRecord, UndoRecPtr lastRecordSize)
 {
     int zid = t_thrd.undo_cxt.zids[upersistence];
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, false, upersistence);
     uzone->LockUndoZone();
 
     WHITEBOX_TEST_STUB(UNDO_PREPAR_ZONE_FAILED, WhiteboxDefaultErrorEmit);
@@ -144,7 +150,7 @@ void PrepareUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence, UndoRecPt
 void FinishUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence)
 {
     int zid = t_thrd.undo_cxt.zids[upersistence];
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, false, upersistence);
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("FinishUndoMeta: uzone is NULL")));
     }
@@ -159,7 +165,7 @@ void UpdateTransactionSlot(TransactionId xid, XlogUndoMeta *meta, UndoRecPtr sta
     int zid = t_thrd.undo_cxt.zids[upersistence];
     Assert(zid != INVALID_ZONE_ID);
     bool allocateTranslot = false;
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, false, upersistence);
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("UpdateTransactionSlot: uzone is NULL")));
     }
@@ -198,7 +204,7 @@ void UpdateTransactionSlot(TransactionId xid, XlogUndoMeta *meta, UndoRecPtr sta
 void SetUndoMetaLSN(XlogUndoMeta *meta, XLogRecPtr lsn)
 {
     int zid = t_thrd.undo_cxt.zids[UNDO_PERMANENT];
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, false, UNDO_PERMANENT);
     if (uzone == NULL) {
         ereport(PANIC, (errmsg("SetUndoMetaLSN: uzone is NULL")));
     }
@@ -250,48 +256,19 @@ void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startU
 }
 
 /* Check undo record valid.. */
-bool CheckUndoRecordValid(UndoRecPtr urp, bool checkForceRecycle)
+UndoRecordState CheckUndoRecordValid(UndoRecPtr urp, bool checkForceRecycle)
 {
     if (!IS_VALID_UNDO_REC_PTR(urp)) {
-        return false;
+        return UNDO_RECORD_INVALID;
     }
     int zid = UNDO_PTR_GET_ZONE_ID(urp);
     Assert(IS_VALID_ZONE_ID(zid));
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, false);
     if (uzone == NULL) {
-        return false;
+        return UNDO_RECORD_INVALID;
     } else {
         return uzone->CheckUndoRecordValid(UNDO_PTR_GET_OFFSET(urp), checkForceRecycle);
     }
-}
-
-/* Check undo record recovery status for ROS */
-UndoRecoveryStatus CheckUndoRecordRecoveryStatus(UndoRecPtr urp)
-{
-    if (!IS_VALID_UNDO_REC_PTR(urp)) {
-        return UNDO_NOT_VALID;
-    }
-
-    UndoRecoveryStatus rc;
-    int zid = UNDO_PTR_GET_ZONE_ID(urp);
-    Assert(IS_VALID_ZONE_ID(zid));
-
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
-    if (uzone == NULL) {
-        return UNDO_DISCARD;
-    }
-    UndoRecPtr insert = uzone->GetInsert();
-    UndoRecPtr discard = uzone->GetDiscard();
-
-    if (urp < discard) {
-        rc = UNDO_DISCARD; // urp discarded
-    } else if (urp >= insert) {
-        rc = UNDO_NOT_RECOVERY;          // nor recovery yet
-    } else {
-        rc = UNDO_RECOVERY;
-    }
-
-    return rc;
 }
 
 /*
@@ -321,7 +298,7 @@ bool IsSkipInsertSlot(UndoSlotPtr slotPtr)
 {
     Assert(IS_VALID_UNDO_REC_PTR(slotPtr));
     int zid = UNDO_PTR_GET_ZONE_ID(slotPtr);
-    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid);
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, true);
     if (uzone == NULL) {
         return true;
     }
@@ -348,9 +325,12 @@ bool IsSkipInsertSlot(UndoSlotPtr slotPtr)
 void CheckPointUndoSystemMeta(XLogRecPtr checkPointRedo)
 {
 #ifndef ENABLE_MULTIPLE_NODES
+    if (g_instance.undo_cxt.uZoneCount == 0) {
+        return;
+    }
     /* Open undo meta file. */
     if (t_thrd.role == CHECKPOINT_THREAD) {
-        TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+        TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
         ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
             "undo metadata checkPointRedo = %lu, oldestXidInUndo = %lu."),
             checkPointRedo, oldestXidInUndo)));
@@ -366,10 +346,34 @@ void CheckPointUndoSystemMeta(XLogRecPtr checkPointRedo)
         UndoSpace::CheckPointUndoSpace(fd, UNDO_SLOT_SPACE);
 
         /* Flush buffer data and close fd. */
+        pgstat_report_waitevent(WAIT_EVENT_UNDO_META_SYNC);
+        PGSTAT_INIT_TIME_RECORD();
+        PGSTAT_START_TIME_RECORD();
         fsync(fd);
+        PGSTAT_END_TIME_RECORD(DATA_IO_TIME);
+        pgstat_report_waitevent(WAIT_EVENT_END);
         close(fd);
     }
 #endif
+}
+
+void InitUndoCountThreshold()
+{
+    uint32 undoMemFactor = 4;
+    uint32 undoCountThreshold = 0;
+    uint32 maxConn = g_instance.attr.attr_network.MaxConnections;
+    uint32 maxThreadNum = 0;
+    
+
+    if (g_instance.attr.attr_common.enable_thread_pool) {
+        maxThreadNum = g_threadPoolControler->GetThreadNum();
+    }
+
+    undoCountThreshold = (maxConn >= maxThreadNum) ? undoMemFactor * maxConn : undoMemFactor * maxThreadNum;
+    g_instance.undo_cxt.undoCountThreshold = (g_instance.undo_cxt.uZoneCount >= undoCountThreshold) ?
+        undoMemFactor * g_instance.undo_cxt.uZoneCount : undoCountThreshold;
+    g_instance.undo_cxt.undoCountThreshold = (g_instance.undo_cxt.undoCountThreshold > UNDO_ZONE_COUNT) ?
+        g_instance.undo_cxt.undoCountThreshold : UNDO_ZONE_COUNT;
 }
 
 static bool InitZoneMeta(int fd)
@@ -568,7 +572,7 @@ void RecoveryUndoSystemMeta(void)
         g_instance.undo_cxt.undoTotalSize = 0;
         g_instance.undo_cxt.undoMetaSize = 0;
         g_maxUndoSizePerTrans =
-            (uint64)g_instance.attr.attr_storage.undo_limit_size_transaction * BLCKSZ;
+            (uint64)u_sess->attr.attr_storage.undo_limit_size_transaction * BLCKSZ;
         /* Recover undospace meta. */
         undo::UndoZone::RecoveryUndoZone(fd);
         /* Recover undospace meta. */
@@ -618,7 +622,7 @@ void UpdateRollbackFinish(UndoSlotPtr slotPtr)
     undo::TransactionSlot *slot = buf.FetchTransactionSlot(slotPtr);
     Assert(slot->XactId() != InvalidTransactionId);
     Assert(slot->DbId() != InvalidOid);
-    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
 
     if (TransactionIdPrecedes(slot->XactId(), oldestXidInUndo)) {
         ereport(WARNING, (errmsg(UNDOFORMAT("curr xid having undo %lu < oldestXidInUndo %lu."),
@@ -628,7 +632,7 @@ void UpdateRollbackFinish(UndoSlotPtr slotPtr)
     /* only persist level space need update transaction slot. */
     START_CRIT_SECTION();
     slot->UpdateRollbackProgress();
-    ereport(LOG, (errmsg(UNDOFORMAT(
+    ereport(DEBUG1, (errmsg(UNDOFORMAT(
         "update zone %d slot %lu xid %lu dbid %u rollback progress from start %lu to end %lu, oldestXidInUndo %lu."),
         zid, slotPtr, slot->XactId(), slot->DbId(), slot->StartUndoPtr(), slot->EndUndoPtr(),
         oldestXidInUndo)));
@@ -680,6 +684,9 @@ UndoRecPtr GetPrevUrp(UndoRecPtr currUrp)
 
 void ReleaseSlotBuffer()
 {
+    if (g_instance.undo_cxt.uZoneCount == 0) {
+        return;
+    }
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
         int zid = t_thrd.undo_cxt.zids[upersistence];
@@ -688,7 +695,7 @@ void ReleaseSlotBuffer()
         }
         UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zid];
         if (uzone == NULL) {
-            return;
+            continue;
         }
         uzone->ReleaseSlotBuffer();
     }

@@ -60,6 +60,10 @@ extern List* untransformPartitionBoundary(Datum options);
  */
 extern void CheckValuePartitionKeyType(Form_pg_attribute* attrs, List* pos);
 
+extern Oid getPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
+extern Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel,
+                                    Oid *partOid);
+
 #define partitonKeyCompareForRouting(value1, value2, len, compare)                                               \
     do {                                                                                                         \
         uint32 i = 0;                                                                                            \

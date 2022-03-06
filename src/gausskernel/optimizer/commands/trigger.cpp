@@ -72,6 +72,7 @@
 #include "pgxc/pgxc.h"
 #include "optimizer/pgxcship.h"
 #endif
+#include "utils/knl_relcache.h"
 
 /*
  * Note that similar macros also exist in executor/execMain.c.  There does not
@@ -1495,7 +1496,7 @@ void RelationBuildTriggers(Relation relation)
         SetTriggerFlags(trigdesc, &(triggers[i]));
 
     /* Copy completed trigdesc into cache storage */
-    oldContext = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    oldContext = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
     relation->trigdesc = CopyTriggerDesc(trigdesc);
     (void)MemoryContextSwitchTo(oldContext);
 

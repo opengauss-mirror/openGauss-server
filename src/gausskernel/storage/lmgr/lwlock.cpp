@@ -97,6 +97,10 @@
 #include "instruments/instr_statement.h"
 #include "tsan_annotation.h"
 
+#ifndef MAX
+#define MAX(A, B) ((B) > (A) ? (B) : (A))
+#endif
+
 #define LW_FLAG_HAS_WAITERS ((uint32)1 << 30)
 #define LW_FLAG_RELEASE_OK ((uint32)1 << 29)
 #define LW_FLAG_LOCKED ((uint32)1 << 28)
@@ -140,7 +144,7 @@ static const char *BuiltinTrancheNames[] = {
     "UniqueSQLMappingLock",
     "InstrUserLockId",
     "GPCMappingLock",
-    "UspagrpMappingLock",
+    "UspagrpMappingLock", 
     "ProcXactMappingLock",
     "ASPMappingLock",
     "GlobalSeqLock",
@@ -184,7 +188,12 @@ static const char *BuiltinTrancheNames[] = {
     "SegmentHeadPartitionLock",
     "TwoPhaseStatePartLock",
     "RoleIdPartLock",
-    "ReplicationOriginLock"
+    "PgwrSyncQueueLock",
+    "BarrierHashTblLock",
+    "PageRepairHashTblLock",
+    "FileRepairHashTblLock",
+    "ReplicationOriginLock",
+    "AuditIndextblLock"
 };
 
 static void RegisterLWLockTranches(void);
@@ -340,6 +349,12 @@ static lwlock_stats *get_lwlock_stats_entry(LWLock *lock)
 int NumLWLocks(void)
 {
     int numLocks;
+    uint32 maxConn = g_instance.attr.attr_network.MaxConnections;
+    uint32 maxThreadNum = 0;
+    if (ENABLE_THREAD_POOL) {
+        maxThreadNum = g_threadPoolControler->GetThreadNum();
+    }
+    uint32 numLockFactor = 4;
 
     /*
      * Possibly this logic should be spread out among the affected modules,
@@ -354,7 +369,7 @@ int NumLWLocks(void)
     numLocks += 2 * TOTAL_BUFFER_NUM;
 
     /* each zone owns undo space lock */
-    numLocks += g_instance.attr.attr_storage.undo_zone_count * UNDO_ZONE_LOCK;
+    numLocks += MAX(maxConn, maxThreadNum) * numLockFactor * UNDO_ZONE_LOCK;
 
     /* cucache_mgr.cpp CU Cache calculates its own requirements */
     numLocks += DataCacheMgrNumLocks();
@@ -405,6 +420,14 @@ int NumLWLocks(void)
 
     /* for unlink rel hashtbl, one is for all fork relation hashtable, one is for one fork relation hash table */
     numLocks += 2;
+
+    /* for incre ckpt sync request queue lock */
+    numLocks +=1;
+    /* for page repair hash table and file repair hash table */
+    numLocks += 2;
+
+    /* for barrier preparse hashtbl */
+    numLocks += 1;
 
     /*
      * Add any requested by loadable modules; for backwards-compatibility
@@ -1844,9 +1867,19 @@ void LWLockReleaseClearVar(LWLock *lock, uint64 *valptr, uint64 val)
  */
 void LWLockReleaseAll(void)
 {
-    while (t_thrd.storage_cxt.num_held_lwlocks > 0) {
+    int index = t_thrd.storage_cxt.num_held_lwlocks - 1;
+    while (index >= 0) {
+        // SwitchoverLockHolder never release switchover lock in LWLockReleaseAll
+        if (t_thrd.storage_cxt.isSwitchoverLockHolder && (g_instance.archive_obs_cxt.in_switchover ||
+                g_instance.streaming_dr_cxt.isInSwitchover) &&
+                (t_thrd.storage_cxt.held_lwlocks[index].lock == HadrSwitchoverLock)) {
+            index--;
+            continue;
+        }
         HOLD_INTERRUPTS(); /* match the upcoming RESUME_INTERRUPTS */
-        LWLockRelease(t_thrd.storage_cxt.held_lwlocks[t_thrd.storage_cxt.num_held_lwlocks - 1].lock);
+
+        LWLockRelease(t_thrd.storage_cxt.held_lwlocks[index].lock);
+        index--;
     }
 }
 

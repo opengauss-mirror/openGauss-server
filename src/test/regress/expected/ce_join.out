@@ -341,8 +341,8 @@ INSERT INTO join_t2 VALUES (2, 2, 25);
 SELECT * FROM join_t1 JOIN join_t2 ON (join_t1.customer_id1=join_t2.customer_id2) JOIN join_t3 ON (join_t2.customer_id2=join_t3.customer_id3 AND join_t1.customer_id1=join_t3.customer_id3);
  id | customer_id1 | age1 | id | customer_id2 | age2 | id | customer_id3 | age3 
 ----+--------------+------+----+--------------+------+----+--------------+------
-  1 |            1 | 15   |  1 |            1 | 30   |  1 |            1 | 20
   2 |            1 | 20   |  1 |            1 | 30   |  1 |            1 | 20
+  1 |            1 | 15   |  1 |            1 | 30   |  1 |            1 | 20
 (2 rows)
 
 SELECT * FROM join_t1 JOIN join_t2 ON (join_t1.age1=join_t2.age2);
@@ -402,8 +402,8 @@ select * from join_t1 t1 left join
 where t2.customer_id2 = 1;
  id | customer_id1 | age1 | id | customer_id2 | age2 | id | customer_id3 | age3 
 ----+--------------+------+----+--------------+------+----+--------------+------
-  1 |            1 | 15   |  1 |            1 | 30   |  1 |            1 | 20
   2 |            1 | 20   |  1 |            1 | 30   |  1 |            1 | 20
+  1 |            1 | 15   |  1 |            1 | 30   |  1 |            1 | 20
 (2 rows)
 
 DROP TABLE join_t1;

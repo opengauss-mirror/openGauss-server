@@ -80,6 +80,8 @@ ThreadPoolControler::ThreadPoolControler()
     m_groupNum = 1;
     m_threadNum = 0;
     m_maxPoolSize = 0;
+    m_maxStreamPoolSize = 0;
+    m_streamProcRatio = 0;
 }
 
 ThreadPoolControler::~ThreadPoolControler()
@@ -108,6 +110,7 @@ void ThreadPoolControler::Init(bool enableNumaDistribute)
     m_sessCtrl = New(CurrentMemoryContext) ThreadPoolSessControl(CurrentMemoryContext);
 
     bool bindCpu = CheckCpuBind();
+    bool bindCpuNuma = CheckCpuNumaBind();
     int maxThreadNum = 0;
     int expectThreadNum = 0;
     int maxStreamNum = 0;
@@ -149,7 +152,7 @@ void ThreadPoolControler::Init(bool enableNumaDistribute)
         }
 
         m_groups[i] = New(CurrentMemoryContext)ThreadPoolGroup(maxThreadNum, expectThreadNum,
-                                                    maxStreamNum, i, numaId, cpuNum, cpuArr);
+                                                    maxStreamNum, i, numaId, cpuNum, cpuArr, bindCpuNuma);
         m_groups[i]->Init(enableNumaDistribute);
     }
 
@@ -172,25 +175,56 @@ void ThreadPoolControler::SetThreadPoolInfo()
 {
     InitCpuInfo();
 
-    GetInstanceBind();
+    GetInstanceBind(&m_cpuset);
 
-    GetCpuAndNumaNum();
+    GetCpuAndNumaNum(&m_cpuInfo.totalCpuNum, &m_cpuInfo.totalNumaNum);
 
     ParseAttr();
+
+    ParseStreamAttr();
 
     GetSysCpuInfo();
 
     SetGroupAndThreadNum();
+
+    SetStreamInfo();
 }
 
-void ThreadPoolControler::GetInstanceBind()
-{
+void AdjustThreadAffinity(void) {
+    cpu_set_t m_cpuset;
+    CPU_ZERO(&m_cpuset);
+
     /* Check if the instance has been attch to some specific CPUs. */
     int ret = pthread_getaffinity_np(PostmasterPid, sizeof(cpu_set_t), &m_cpuset);
     if (ret == 0) {
+        if ((CPU_ISSET(0, &m_cpuset)) && (!CPU_ISSET(1, &m_cpuset))) {
+            int num_processors = sysconf(_SC_NPROCESSORS_CONF);
+            CPU_ZERO(&m_cpuset);
+            for (int j = 0; j < num_processors; j++) {
+                CPU_SET(j, &m_cpuset);
+            }
+
+            // set CPU affinity of a thread
+            int s = pthread_setaffinity_np(PostmasterPid, sizeof(cpu_set_t), &m_cpuset);
+            if (s != 0) {
+                ereport(WARNING, (errmsg("AdjustThreadAffinity fail to bind thread %lu, errno: %d", PostmasterPid, ret)));
+            }
+        }
+    }
+}
+
+
+void ThreadPoolControler::GetInstanceBind(cpu_set_t *cpuset)
+{
+    /* this function is used to avoid the libgomp bug on some specified OS */
+    AdjustThreadAffinity();
+
+    /* Check if the instance has been attch to some specific CPUs. */
+    int ret = pthread_getaffinity_np(PostmasterPid, sizeof(cpu_set_t), cpuset);
+    if (ret == 0) {
         return;
     } else {
-        errno_t rc = memset_s(&m_cpuset, sizeof(m_cpuset), 0, sizeof(m_cpuset));
+        errno_t rc = memset_s(cpuset, sizeof(cpu_set_t), 0, sizeof(cpu_set_t));
         securec_check(rc, "\0", "\0");
     }
 }
@@ -214,11 +248,13 @@ void ThreadPoolControler::ParseAttr()
     ptoken = TrimStr(strtok_r(attr, pdelimiter, &psave));
     if (!IS_NULL_STR(ptoken))
         m_attr.threadNum = pg_strtoint32(ptoken);
+    pfree_ext(ptoken);
 
     /* Ger group num */
     ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
     if (!IS_NULL_STR(ptoken))
         m_attr.groupNum = pg_strtoint32(ptoken);
+    pfree_ext(ptoken);
 
     if (m_attr.threadNum < 0 || m_attr.threadNum > MAX_THREAD_POOL_SIZE)
         INVALID_ATTR_ERROR(
@@ -230,6 +266,56 @@ void ThreadPoolControler::ParseAttr()
     /* Get attach cpu */
     m_attr.bindCpu = TrimStr(psave);
     ParseBindCpu();
+    
+    pfree_ext(attr);
+}
+
+void ThreadPoolControler::ParseStreamAttr()
+{
+    m_stream_attr.threadNum = DEFAULT_THREAD_POOL_SIZE;
+    m_stream_attr.procRatio = DEFAULT_THREAD_POOL_STREAM_PROC_RATIO;
+    m_stream_attr.groupNum = DEFAULT_THREAD_POOL_GROUPS;
+    m_stream_attr.bindCpu = NULL;
+    
+    char* attr = TrimStr(g_instance.attr.attr_common.thread_pool_stream_attr);
+    if (IS_NULL_STR(attr)) {
+        return;
+    }
+
+    char* ptoken = NULL;
+    char* psave = NULL;
+    const char* pdelimiter = ",";
+    
+    /* Get stream_thread_pool_stream max thread num */
+    ptoken = TrimStr(strtok_r(attr, pdelimiter, &psave));
+    if (IS_NULL_STR(ptoken) || !isdigit((unsigned char)*ptoken)) {
+        INVALID_ATTR_ERROR(
+            errdetail("Current thread_pool_stream_attr format is error, stream_thread_num must be digital."));
+    }
+    m_stream_attr.threadNum = pg_strtoint32(ptoken);
+    pfree_ext(ptoken);
+    if (m_stream_attr.threadNum < 0 || m_stream_attr.threadNum > MAX_THREAD_POOL_SIZE) {
+        INVALID_ATTR_ERROR(
+            errdetail("Current stream_thread_num %d is out of range [%d, %d].",
+            m_stream_attr.threadNum, 0, MAX_THREAD_POOL_SIZE));
+    }
+    
+    /* Get proc ratio of stream threads */
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
+    if (IS_NULL_STR(ptoken) || !isdigit((unsigned char)*ptoken)) {
+        INVALID_ATTR_ERROR(
+            errdetail("Current thread_pool_stream_attr format is error, stream_proc_ratio must be digital."));
+    }
+    m_stream_attr.procRatio = atof(ptoken);
+    pfree_ext(ptoken);
+    if (m_stream_attr.procRatio <= 0 || m_stream_attr.procRatio > MAX_THREAD_POOL_STREAM_PROC_RATIO) {
+        INVALID_ATTR_ERROR(
+            errdetail("Current stream_proc_ratio %f is out of range (%d, %d].",
+            m_stream_attr.procRatio, 0, MAX_THREAD_POOL_STREAM_PROC_RATIO));
+    }
+    pfree_ext(attr);
+    
+    return;
 }
 
 void ThreadPoolControler::ParseBindCpu()
@@ -239,7 +325,8 @@ void ThreadPoolControler::ParseBindCpu()
         return;
     }
 
-    char* scpu = pstrdup(m_attr.bindCpu);
+    char* pattr = pstrdup(m_attr.bindCpu);
+    char* scpu = pattr;
     char* ptoken = NULL;
     char* psave = NULL;
     const char* pdelimiter = ":";
@@ -268,8 +355,13 @@ void ThreadPoolControler::ParseBindCpu()
         m_cpuInfo.bindType = NODE_BIND;
         m_cpuInfo.isBindNumaArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalNumaNum);
         bindNum = ParseRangeStr(psave, m_cpuInfo.isBindNumaArr, m_cpuInfo.totalNumaNum, "nodebind");
+    } else if (strncmp("numabind", ptoken, strlen("numabind")) == 0) {
+        m_cpuInfo.bindType = NUMA_BIND;
+        m_cpuInfo.isBindCpuNumaArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalCpuNum);
+        bindNum = ParseRangeStr(psave, m_cpuInfo.isBindCpuNumaArr, m_cpuInfo.totalCpuNum, "numabind");
     } else {
-        INVALID_ATTR_ERROR(errdetail("Only 'nobind', 'allbind', 'cpubind', and 'nodebind' are valid attribute."));
+        INVALID_ATTR_ERROR(errdetail("Only 'nobind', 'allbind', 'cpubind', 'nodebind' and 'numabind' "
+            "are valid attribute."));
     }
 
     if (bindNum == 0)
@@ -278,6 +370,8 @@ void ThreadPoolControler::ParseBindCpu()
                          "1. These CPUs are not active, use lscpu to check On-line CPU(s) list.\n"
                          "2. The process has been bind to other CPUs and there is no intersection,"
                          "use taskset -pc to check process CPU bind info.\n"));
+    pfree_ext(ptoken);
+    pfree_ext(pattr);
 }
 
 int ThreadPoolControler::ParseRangeStr(char* attr, bool* arr, int totalNum, char* bindtype)
@@ -322,23 +416,26 @@ int ThreadPoolControler::ParseRangeStr(char* attr, bool* arr, int totalNum, char
             }
 
             for (int i = startid; i <= endid; i++) {
-                retNum += arr[startid] ? 0 : 1;
+                retNum += arr[i] ? 0 : 1;
                 arr[i] = true;
             }
         }
 
+        /* Don't need to free when error ocurrs, errors here are FATAL level! */
+        pfree_ext(pt);
+        pfree_ext(ptoken);
         ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
     }
 
     return retNum;
 }
 
-void ThreadPoolControler::GetMcsCpuInfo()
+bool* ThreadPoolControler::GetMcsCpuInfo(int totalCpuNum)
 {
     FILE* fp = NULL;
     char buf[BUFSIZE];
 
-    m_cpuInfo.isMcsCpuArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalCpuNum);
+    bool* isMcsCpuArr = (bool*)palloc0(sizeof(bool) * totalCpuNum);
 
     /*
      * When the database is deplyed on MCS, we need to read cpuset.cpus to find
@@ -349,51 +446,36 @@ void ThreadPoolControler::GetMcsCpuInfo()
     if (fp == NULL) {
         ereport(WARNING, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
                         errmsg("Failed to open file /sys/fs/cgroup/cpuset/cpuset.cpus")));
-        errno_t rc = memset_s(m_cpuInfo.isMcsCpuArr, m_cpuInfo.totalCpuNum, 1, m_cpuInfo.totalCpuNum);
+        errno_t rc = memset_s(isMcsCpuArr, totalCpuNum, 1, totalCpuNum);
         securec_check(rc, "", "");
-        return;
+        return isMcsCpuArr;
     }
 
     if (fgets(buf, BUFSIZE, fp) == NULL) {
         ereport(WARNING, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
                         errmsg("Failed to read file /sys/fs/cgroup/cpuset/cpuset.cpus")));
-        errno_t rc = memset_s(m_cpuInfo.isMcsCpuArr, m_cpuInfo.totalCpuNum, 1, m_cpuInfo.totalCpuNum);
+        errno_t rc = memset_s(isMcsCpuArr, totalCpuNum, 1, totalCpuNum);
         securec_check(rc, "", "");
         fclose(fp);
-        return;
+        return isMcsCpuArr;
     }
 
-    int mcsNum = ParseRangeStr(buf, m_cpuInfo.isMcsCpuArr, m_cpuInfo.totalCpuNum, "Mcs Cpu set");
+    int mcsNum = ParseRangeStr(buf, isMcsCpuArr, totalCpuNum, "Mcs Cpu set");
     if (mcsNum == 0) {
         ereport(WARNING, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
                         errmsg("No available CPUs in /sys/fs/cgroup/cpuset/cpuset.cpus")));
-        errno_t rc = memset_s(m_cpuInfo.isMcsCpuArr, m_cpuInfo.totalCpuNum, 1, m_cpuInfo.totalCpuNum);
+        errno_t rc = memset_s(isMcsCpuArr, totalCpuNum, 1, totalCpuNum);
         securec_check(rc, "", "");
     }
     fclose(fp);
+    return isMcsCpuArr;
 }
 
-void ThreadPoolControler::GetSysCpuInfo()
+void ThreadPoolControler::GetActiveCpu(NumaCpuId *numaCpuIdList, int *num)
 {
-    FILE* fp = NULL;
+    *num = 0;
     char buf[BUFSIZE];
-
-    if (m_cpuInfo.totalNumaNum == 0 || m_cpuInfo.totalCpuNum == 0) {
-        ereport(WARNING, (errmsg("Fail to read cpu num or numa num.")));
-        return;
-    }
-
-    GetMcsCpuInfo();
-
-    m_cpuInfo.cpuArr = (int**)palloc0(sizeof(int*) * m_cpuInfo.totalNumaNum);
-    m_cpuInfo.cpuArrSize = (int*)palloc0(sizeof(int) * m_cpuInfo.totalNumaNum);
-    int cpu_per_numa = m_cpuInfo.totalCpuNum / m_cpuInfo.totalNumaNum;
-    for (int i = 0; i < m_cpuInfo.totalNumaNum; i++)
-        m_cpuInfo.cpuArr[i] = (int*)palloc0(sizeof(int) * cpu_per_numa);
-
-    /* use lscpu to get active cpu info */
-    fp = popen("lscpu -b -e=cpu,node", "r");
-
+    FILE* fp = popen("lscpu -b -e=cpu,node", "r");
     if (fp == NULL) {
         ereport(WARNING, (errmsg("Unable to use 'lscpu' to read CPU info.")));
         return;
@@ -406,30 +488,65 @@ void ThreadPoolControler::GetSysCpuInfo()
     int numaid = 0;
     /* try to read the header. */
     if (fgets(buf, sizeof(buf), fp) != NULL) {
-        m_cpuInfo.activeCpuNum = 0;
         while (fgets(buf, sizeof(buf), fp) != NULL) {
             ptoken = strtok_r(buf, pdelimiter, &psave);
-            if (!IS_NULL_STR(ptoken))
+            if (!IS_NULL_STR(ptoken)) {
                 cpuid = pg_strtoint32(ptoken);
-
-            ptoken = strtok_r(NULL, pdelimiter, &psave);
-            if (!IS_NULL_STR(ptoken))
-                numaid = pg_strtoint32(ptoken);
-
-            if (IsActiveCpu(cpuid, numaid)) {
-                m_cpuInfo.cpuArr[numaid][m_cpuInfo.cpuArrSize[numaid]] = cpuid;
-                m_cpuInfo.cpuArrSize[numaid]++;
-                m_cpuInfo.activeCpuNum++;
             }
+            ptoken = strtok_r(NULL, pdelimiter, &psave);
+            if (!IS_NULL_STR(ptoken)) {
+                numaid = pg_strtoint32(ptoken);
+            }
+            numaCpuIdList[*num].cpuId = cpuid;
+            numaCpuIdList[*num].numaId = numaid;
+            (*num)++;
         }
     }
+
+    pclose(fp);
+}
+
+void ThreadPoolControler::GetSysCpuInfo()
+{
+    if (m_cpuInfo.totalNumaNum == 0 || m_cpuInfo.totalCpuNum == 0) {
+        ereport(WARNING, (errmsg("Fail to read cpu num or numa num.")));
+        return;
+    }
+
+    m_cpuInfo.isMcsCpuArr = GetMcsCpuInfo(m_cpuInfo.totalCpuNum);
+
+    m_cpuInfo.cpuArr = (int**)palloc0(sizeof(int*) * m_cpuInfo.totalNumaNum);
+    m_cpuInfo.cpuArrSize = (int*)palloc0(sizeof(int) * m_cpuInfo.totalNumaNum);
+    int cpu_per_numa = m_cpuInfo.totalCpuNum / m_cpuInfo.totalNumaNum;
+    for (int i = 0; i < m_cpuInfo.totalNumaNum; i++) {
+        m_cpuInfo.cpuArr[i] = (int*)palloc0(sizeof(int) * cpu_per_numa);
+    }
+    m_cpuInfo.activeCpuNum = 0;
+    NumaCpuId *sysNumaCpuIdList = (NumaCpuId*)palloc0(sizeof(NumaCpuId) * m_cpuInfo.totalCpuNum);
+    int sysNumaCpuIdNum = 0;
+    GetActiveCpu(sysNumaCpuIdList, &sysNumaCpuIdNum);
+
+    if (sysNumaCpuIdNum == 0) {
+        return;
+    }
+
+    for (int i = 0; i < sysNumaCpuIdNum; ++i) {
+        int cpuid = sysNumaCpuIdList[i].cpuId;
+        int numaid = sysNumaCpuIdList[i].numaId;
+        if (IsActiveCpu(cpuid, numaid)) {
+            m_cpuInfo.cpuArr[numaid][m_cpuInfo.cpuArrSize[numaid]] = cpuid;
+            m_cpuInfo.cpuArrSize[numaid]++;
+            m_cpuInfo.activeCpuNum++;
+        }
+ 
+    }
+
+    pfree_ext(sysNumaCpuIdList);
 
     for (int i = 0; i < m_cpuInfo.totalNumaNum; i++) {
         if (m_cpuInfo.cpuArrSize[i] > 0)
             m_cpuInfo.activeNumaNum++;
     }
-
-    pclose(fp);
 }
 
 void ThreadPoolControler::InitCpuInfo()
@@ -447,7 +564,7 @@ void ThreadPoolControler::InitCpuInfo()
     m_cpuInfo.isMcsCpuArr = NULL;
 }
 
-void ThreadPoolControler::GetCpuAndNumaNum()
+void ThreadPoolControler::GetCpuAndNumaNum(int32 *totalCpuNum, int32 *totalNumaNum)
 {
     char buf[BUFSIZE];
 
@@ -459,10 +576,10 @@ void ThreadPoolControler::GetCpuAndNumaNum()
                 strncmp("On-line CPU(s) list", buf, strlen("On-line CPU(s) list")) != 0 &&
                 strncmp("NUMA node", buf, strlen("NUMA node")) != 0) {
                 char* loc = strchr(buf, ':');
-                m_cpuInfo.totalCpuNum = pg_strtoint32(loc + 1);
+                *totalCpuNum = pg_strtoint32(loc + 1);
             } else if (strncmp("NUMA node(s)", buf, strlen("NUMA node(s)")) == 0) {
                 char* loc = strchr(buf, ':');
-                m_cpuInfo.totalNumaNum = pg_strtoint32(loc + 1);
+                *totalNumaNum = pg_strtoint32(loc + 1);
             }
         }
         pclose(fp);
@@ -479,6 +596,8 @@ bool ThreadPoolControler::IsActiveCpu(int cpuid, int numaid)
             return (m_cpuInfo.isBindNumaArr[numaid] && m_cpuInfo.isMcsCpuArr[cpuid] && CPU_ISSET(cpuid, &m_cpuset));
         case CPU_BIND:
             return (m_cpuInfo.isBindCpuArr[cpuid] && m_cpuInfo.isMcsCpuArr[cpuid] && CPU_ISSET(cpuid, &m_cpuset));
+        case NUMA_BIND:
+            return (m_cpuInfo.isBindCpuNumaArr[cpuid] && m_cpuInfo.isMcsCpuArr[cpuid] && CPU_ISSET(cpuid, &m_cpuset));
     }
     return false;
 }
@@ -499,6 +618,11 @@ bool ThreadPoolControler::CheckCpuBind() const
     }
 
     return true;
+}
+
+bool ThreadPoolControler::CheckCpuNumaBind() const
+{
+    return m_cpuInfo.bindType == NUMA_BIND;
 }
 
 bool ThreadPoolControler::CheckNumaDistribute(int numaNodeNum) const
@@ -533,6 +657,12 @@ bool ThreadPoolControler::CheckNumaDistribute(int numaNodeNum) const
 CPUBindType ThreadPoolControler::GetCpuBindType() const
 {
     return m_cpuInfo.bindType;
+}
+
+void ThreadPoolControler::SetStreamInfo()
+{
+    m_streamProcRatio = m_stream_attr.procRatio;
+    m_maxStreamPoolSize = Min(m_stream_attr.threadNum, m_threadNum);
 }
 
 void ThreadPoolControler::SetGroupAndThreadNum()

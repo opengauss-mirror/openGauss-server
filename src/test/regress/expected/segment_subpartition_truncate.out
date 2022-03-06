@@ -1,0 +1,140 @@
+--prepare
+DROP SCHEMA segment_subpartition_truncate CASCADE;
+ERROR:  schema "segment_subpartition_truncate" does not exist
+CREATE SCHEMA segment_subpartition_truncate;
+SET CURRENT_SCHEMA TO segment_subpartition_truncate;
+--truncate partition/subpartition
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (SEGMENT=ON)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1' ),
+    SUBPARTITION p_201901_b VALUES ( default )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1' ),
+    SUBPARTITION p_201902_b VALUES ( '2' )
+  )
+);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201902', '2', '1', 1);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+insert into list_list values('201903', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+select * from list_list;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+(6 rows)
+
+select * from list_list partition (p_201901);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+(3 rows)
+
+alter table list_list truncate partition p_201901;
+select * from list_list partition (p_201901);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from list_list partition (p_201902);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+(3 rows)
+
+alter table list_list truncate partition p_201902;
+select * from list_list partition (p_201902);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from list_list;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201902', '2', '1', 1);
+insert into list_list values('201902', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+insert into list_list values('201903', '1', '1', 1);
+insert into list_list values('201903', '2', '1', 1);
+select * from list_list subpartition (p_201901_a);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+(2 rows)
+
+alter table list_list truncate subpartition p_201901_a;
+select * from list_list subpartition (p_201901_a);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from list_list subpartition (p_201901_b);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+(1 row)
+
+alter table list_list truncate subpartition p_201901_b;
+select * from list_list subpartition (p_201901_b);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from list_list subpartition (p_201902_a);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+(1 row)
+
+alter table list_list truncate subpartition p_201902_a;
+select * from list_list subpartition (p_201902_a);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from list_list subpartition (p_201902_b);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+(2 rows)
+
+alter table list_list truncate subpartition p_201902_b;
+select * from list_list subpartition (p_201902_b);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from list_list;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+drop table list_list;
+DROP SCHEMA segment_subpartition_truncate CASCADE;
+RESET CURRENT_SCHEMA;

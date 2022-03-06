@@ -361,6 +361,27 @@ Buffer UBTreeGetRoot(Relation rel, int access)
     return rootbuf;
 }
 
+bool UBTreePageRecyclable(Page page)
+{
+    /*
+     * It's possible to find an all-zeroes page in an index --- for example, a
+     * backend might successfully extend the relation one page and then crash
+     * before it is able to make a WAL entry for adding the page. If we find a
+     * zeroed page then reclaim it.
+     */
+    TransactionId frozenXmin = g_instance.undo_cxt.oldestFrozenXid;
+    if (PageIsNew(page)) {
+        return true;
+    }
+
+    /*
+     * Otherwise, recycle if deleted and too old to have any processes
+     * interested in it.
+     */
+    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    return P_ISDELETED(opaque) && TransactionIdPrecedes(((UBTPageOpaque)opaque)->xact, frozenXmin);
+}
+
 /*
  * UBTreeIsPageHalfDead() -- Returns true, if the given block has the half-dead flag set.
  */
@@ -1446,5 +1467,5 @@ static void UBTreeLogReusePage(Relation rel, BlockNumber blkno, TransactionId la
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec, SizeOfBtreeReusePage);
 
-    (void)XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_REUSE_PAGE, false, rel->rd_node.bucketNode);
+    (void)XLogInsert(RM_UBTREE_ID, XLOG_UBTREE_REUSE_PAGE, rel->rd_node.bucketNode);
 }

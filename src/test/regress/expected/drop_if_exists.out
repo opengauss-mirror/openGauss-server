@@ -58,7 +58,9 @@ ERROR:  type "test_domain_exists" does not exist
 DROP DOMAIN IF EXISTS test_domain_exists;
 NOTICE:  type "test_domain_exists" does not exist, skipping
 CREATE domain test_domain_exists as int not null check (value > 0);
+ERROR:  domain is not yet supported.
 DROP DOMAIN IF EXISTS test_domain_exists;
+NOTICE:  type "test_domain_exists" does not exist, skipping
 DROP DOMAIN test_domain_exists;
 ERROR:  type "test_domain_exists" does not exist
 ---

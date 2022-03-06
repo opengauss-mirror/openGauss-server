@@ -252,7 +252,7 @@ void get_catalog_name(const RangeVar * const rel)
     Oid existing_relid;
     RangeVar *relation = const_cast<RangeVar *>(rel);
     relation->catalogname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    namespace_id = RangeVarGetAndCheckCreationNamespace(relation, NoLock, &existing_relid);
+    namespace_id = RangeVarGetAndCheckCreationNamespace(relation, NoLock, &existing_relid, '\0');
     if (relation->schemaname == NULL) {
         relation->schemaname = get_namespace_name(namespace_id);
     }

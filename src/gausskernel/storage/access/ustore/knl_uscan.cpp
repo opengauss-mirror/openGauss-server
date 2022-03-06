@@ -21,10 +21,13 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/freespace.h"
 #include "storage/predicate.h"
+#include "storage/procarray.h"
 #include "access/tableam.h"
+#include "access/transam.h"
 #include "access/ustore/knl_uscan.h"
 #include "access/ustore/knl_uvisibility.h"
 #include "access/ustore/knl_uheap.h"
+#include "access/ustore/knl_undorequest.h"
 #include "access/ustore/knl_whitebox_test.h"
 #include "pgstat.h"
 #include <stdlib.h>
@@ -76,6 +79,46 @@ static inline AttrNumber UHeapCheckScanDesc(const TableScanDesc sscan)
         return UHEAP_SCAN_FALLBACK;
     }
     return sscan->lastVar;
+}
+
+FORCE_INLINE
+bool NextUpage(UHeapScanDesc scan, ScanDirection dir, BlockNumber& page)
+{
+    bool finished = false;
+    /*
+     * advance to next/prior page and detect end of scan
+     */
+    if (BackwardScanDirection == dir) {
+        finished = (page == scan->rs_base.rs_startblock);
+        if (page == 0) {
+            page = scan->rs_base.rs_nblocks;
+        }
+        page--;
+    } else {
+        page++;
+        if (page >= scan->rs_base.rs_nblocks) {
+            page = 0;
+        }
+        finished = (page == scan->rs_base.rs_startblock);
+
+        /*
+         * Report our new scan position for synchronization purposes. We
+         * don't do that when moving backwards, however. That would just
+         * mess up any other forward-moving scanners.
+         *
+         * Note: we do this before checking for end of scan so that the
+         * final state of the position hint is back at the start of the
+         * rel.  That's not strictly necessary, but otherwise when you run
+         * the same query multiple times the starting position would shift
+         * a little bit backwards on every invocation, which is confusing.
+         * We don't guarantee any specific ordering in general, though.
+         */
+        if (scan->rs_allow_sync) {
+            ss_report_location(scan->rs_base.rs_rd, page);
+        }
+    }
+
+    return finished;
 }
 
 /*
@@ -294,14 +337,26 @@ static UHeapTuple UHeapScanGetTuple(UHeapScanDesc scan, ScanDirection dir)
 
         linesleft = lineoff;
     } else {
-        /*
-         * In executor it seems NoMovementScanDirection is nothing but
-         * do-nothing flag so we should not be here. The else part is still
-         * here to keep the code as in heapgettup_pagemode.
-         */
-        Assert(false);
+        if (!scan->rs_base.rs_inited || (tuple == NULL)) {
+            Assert(!BufferIsValid(scan->rs_base.rs_cbuf));
+            tuple = NULL;
+            return tuple;
+        }
 
-        return NULL;
+        page = ItemPointerGetBlockNumber(&(tuple->ctid));
+        valid = UHeapGetPage(&scan->rs_base, page);
+        if (!valid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("Can not refetch prior page")));
+            tuple = NULL;
+            return tuple;
+        }
+
+        lineoff = ItemPointerGetOffsetNumber(&(tuple->ctid));
+        /* Since the tuple was previously fetched, needn't lock page here */
+        tuple = scan->rs_visutuples[lineoff];
+        return tuple;
     }
 
     /*
@@ -357,40 +412,8 @@ get_next_tuple:
 
 get_next_page:
     for (;;) {
-        /*
-         * advance to next/prior page and detect end of scan
-         */
-        if (backward) {
-            finished = (page == scan->rs_base.rs_startblock);
-            if (page == 0)
-                page = scan->rs_base.rs_nblocks;
-            page--;
-        } else {
-            page++;
-            if (page >= scan->rs_base.rs_nblocks)
-                page = 0;
-
-            finished = (page == scan->rs_base.rs_startblock);
-
-            /*
-             * Report our new scan position for synchronization purposes. We
-             * don't do that when moving backwards, however. That would just
-             * mess up any other forward-moving scanners.
-             *
-             * Note: we do this before checking for end of scan so that the
-             * final state of the position hint is back at the start of the
-             * rel.  That's not strictly necessary, but otherwise when you run
-             * the same query multiple times the starting position would shift
-             * a little bit backwards on every invocation, which is confusing.
-             * We don't guarantee any specific ordering in general, though.
-             */
-            if (scan->rs_allow_sync)
-                ss_report_location(scan->rs_base.rs_rd, page);
-        }
-
-        /*
-         * return NULL if we've exhausted all the pages
-         */
+        finished = NextUpage(scan, dir, page);
+        /* return NULL if we've exhausted all the pages */
         if (finished) {
             if (BufferIsValid(scan->rs_base.rs_cbuf))
                 ReleaseBuffer(scan->rs_base.rs_cbuf);
@@ -523,13 +546,26 @@ UHeapTuple UHeapGetTupleFromPage(UHeapScanDesc scan, ScanDirection dir)
 
         linesleft = lineindex + 1;
     } else {
-        /*
-         * In executor it seems NoMovementScanDirection is nothing but
-         * do-nothing flag so we should not be here. The else part is still
-         * here to keep the code as in heapgettup_pagemode.
-         */
-        Assert(false);
-        return NULL;
+        /* ''no movement'' scan direction: refetch prior tuple */
+        if (!scan->rs_base.rs_inited || (tuple == NULL)) {
+            Assert(!BufferIsValid(scan->rs_base.rs_cbuf));
+            tuple = NULL;
+            return tuple;
+        }
+
+        page = ItemPointerGetBlockNumber(&(tuple->ctid));
+        valid = UHeapGetPage(&scan->rs_base, page);
+        if (!valid) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("Can not refetch prior page")));
+            tuple = NULL;
+            return tuple;
+        }
+
+        /* Since the tuple was previously fetched, needn't lock page here */
+        tuple = scan->rs_visutuples[scan->rs_base.rs_cindex];
+        return tuple;
     }
 
 get_next_tuple:
@@ -558,36 +594,8 @@ get_next_tuple:
 
 get_next_page:
     for (;;) {
-        if (backward) {
-            finished = (page == scan->rs_base.rs_startblock);
-            if (page == 0)
-                page = scan->rs_base.rs_nblocks;
-            page--;
-        } else {
-            page++;
-            if (page >= scan->rs_base.rs_nblocks)
-                page = 0;
-
-            finished = (page == scan->rs_base.rs_startblock);
-
-            /*
-             *
-             * Report our new scan position for synchronization purposes. We
-             * don't do that when moving backwards, however. That would just
-             * mess up any other forward-moving scanners.
-             *
-             * Note: we do this before checking for end of scan so that the
-             * final state of the position hint is back at the start of the
-             * rel.  That's not strictly necessary, but otherwise when you run
-             * the same query multiple times the starting position would shift
-             * a little bit backwards on every invocation, which is confusing.
-             * We don't guarantee any specific ordering in general, though.
-             */
-        }
-
-        /*
-         * return NULL if we've exhausted all the pages
-         */
+        finished = NextUpage(scan, dir, page);
+        /* return NULL if we've exhausted all the pages */
         if (finished) {
             if (BufferIsValid(scan->rs_base.rs_cbuf))
                 ReleaseBuffer(scan->rs_base.rs_cbuf);
@@ -630,9 +638,8 @@ TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys)
         RelationIncrementReferenceCount(relation);
     }
 
-    uscan = (UHeapScanDesc)palloc(sizeof(UHeapScanDescData));
+    uscan = (UHeapScanDesc)palloc0(sizeof(UHeapScanDescData));
 
-    uscan->rs_base.rs_rd = relation;
     uscan->rs_tupdesc = RelationGetDescr(relation);
     uscan->rs_base.rs_rd = relation;
     uscan->rs_base.rs_snapshot = snapshot;
@@ -640,10 +647,11 @@ TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys)
     uscan->rs_base.rs_startblock = 0;
     uscan->rs_base.rs_ntuples = 0;
     uscan->rs_cutup = NULL;
-    if (nkeys > 0)
-        uscan->rs_base.rs_key = (ScanKey)palloc(sizeof(ScanKeyData) * nkeys);
-    else
+    if (nkeys > 0) {
+        uscan->rs_base.rs_key = (ScanKey)palloc0(sizeof(ScanKeyData) * nkeys);
+    } else {
         uscan->rs_base.rs_key = NULL;
+    }
 
     uscan->rs_base.rs_nblocks =
         RelationIsPartitioned(uscan->rs_base.rs_rd) ? 0 : RelationGetNumberOfBlocks(uscan->rs_base.rs_rd);
@@ -655,6 +663,7 @@ TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys)
     uscan->rs_base.rs_pageatatime = IsMVCCSnapshot(snapshot);
     uscan->rs_base.rs_strategy = NULL;
     uscan->rs_base.rs_ss_accessor = NULL;
+    uscan->rs_ctupBatch = NULL;
 
     return (TableScanDesc)uscan;
 }
@@ -782,6 +791,10 @@ void UHeapEndScan(TableScanDesc scan)
 
     if (uscan->rs_base.rs_key)
         pfree(uscan->rs_base.rs_key);
+
+    if (uscan->rs_ctupBatch != NULL) {
+        pfree_ext(uscan->rs_ctupBatch);
+    }
 
     pfree(uscan);
 }
@@ -1072,6 +1085,72 @@ bool UHeapScanBitmapNextTuple(TableScanDesc sscan, TBMIterateResult *tbmres, Tup
     return true;
 }
 
+void UHeapMarkPos(TableScanDesc uscan)
+{
+    UHeapScanDesc scan = (UHeapScanDesc) uscan;
+
+    /* Note: no locking manipulations needed */
+    if (scan->rs_cutup->disk_tuple != NULL) {
+        scan->rs_mctid = scan->rs_cutup->ctid;
+        if (scan->rs_base.rs_pageatatime) {
+            scan->rs_mindex = scan->rs_base.rs_cindex;
+        }
+    } else
+        ItemPointerSetInvalid(&scan->rs_mctid);
+}
+
+void UHeapRestRpos(TableScanDesc sscan)
+{
+    UHeapScanDesc scan = (UHeapScanDesc) sscan;
+    /* XXX no amrestrpos checking that ammarkpos called */
+    if (!ItemPointerIsValid(&scan->rs_mctid) && (scan->rs_cutup != NULL)) {
+        scan->rs_cutup->disk_tuple = NULL;
+
+        /*
+         * unpin scan buffers
+         */
+        if (BufferIsValid(scan->rs_base.rs_cbuf)) {
+            ReleaseBuffer(scan->rs_base.rs_cbuf);
+        }
+        scan->rs_base.rs_cbuf = InvalidBuffer;
+        scan->rs_base.rs_cblock = InvalidBlockNumber;
+        scan->rs_base.rs_inited = false;
+    } else {
+        /*
+         * If we reached end of scan, rs_inited will now be false.	We must
+         * reset it to true to keep heapgettup from doing the wrong thing.
+         */
+        scan->rs_base.rs_inited = true;
+        
+        UHeapTuple utuple;
+        UHeapTupleData uheaptupdata;
+        utuple = &uheaptupdata;
+        struct {
+            UHeapDiskTupleData hdr;
+            char data[MaxPossibleUHeapTupleSize];
+        } tbuf;
+
+        errno_t errorNo = EOK;
+        errorNo = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
+        securec_check(errorNo, "\0", "\0");
+
+        utuple->disk_tuple = &tbuf.hdr;
+        utuple->ctid = scan->rs_mctid;
+        if (scan->rs_cutup == NULL) {
+            scan->rs_cutup = utuple;
+        } else {
+            scan->rs_cutup->ctid = scan->rs_mctid;
+        }
+
+        if (scan->rs_base.rs_pageatatime) {
+            scan->rs_base.rs_cindex = scan->rs_mindex;
+            UHeapGetTupleFromPage(scan, NoMovementScanDirection);
+        } else {
+            UHeapScanGetTuple(scan, NoMovementScanDirection);
+        }
+    }
+}
+
 UHeapTuple UHeapGetNext(TableScanDesc sscan, ScanDirection dir)
 {
     UHeapScanDesc scan = (UHeapScanDesc)sscan;
@@ -1098,44 +1177,205 @@ UHeapTuple UHeapGetNext(TableScanDesc sscan, ScanDirection dir)
     return scan->rs_cutup;
 }
 
-FORCE_INLINE
-bool NextUpage(UHeapScanDesc scan, ScanDirection dir, BlockNumber& page)
+Buffer UHeapIndexBuildNextBlock(UHeapScanDesc scan)
 {
-    bool finished = false;
-    /*
-     * advance to next/prior page and detect end of scan
-     */
-    if (BackwardScanDirection == dir) {
-        finished = (page == scan->rs_base.rs_startblock);
-        if (page == 0) {
-            page = scan->rs_base.rs_nblocks;
-        }
-        page--;
+    BlockNumber blkno = InvalidBlockNumber;
+    if (scan->rs_base.rs_cblock == InvalidBlockNumber) {
+        /* first page, init rs_visutuples array and other information */
+        blkno = 0;
+        scan->rs_base.rs_ntuples = 0;
     } else {
-        page++;
-        if (page >= scan->rs_base.rs_nblocks) {
-            page = 0;
-        }
-        finished = (page == scan->rs_base.rs_startblock);
+        blkno = scan->rs_base.rs_cblock + 1;
+    }
+    /* cleanup the workspace */
+    for (int i = 0; i < scan->rs_base.rs_ntuples; i++) {
+        pfree(scan->rs_visutuples[i]);
+    }
+    scan->rs_base.rs_ntuples = 0;
+    scan->rs_cutup = NULL;
 
-        /*
-         * Report our new scan position for synchronization purposes. We
-         * don't do that when moving backwards, however. That would just
-         * mess up any other forward-moving scanners.
-         *
-         * Note: we do this before checking for end of scan so that the
-         * final state of the position hint is back at the start of the
-         * rel.  That's not strictly necessary, but otherwise when you run
-         * the same query multiple times the starting position would shift
-         * a little bit backwards on every invocation, which is confusing.
-         * We don't guarantee any specific ordering in general, though.
-         */
-        if (scan->rs_allow_sync) {
-            ss_report_location(scan->rs_base.rs_rd, page);
+    if (blkno >= scan->rs_base.rs_nblocks) {
+        return InvalidBuffer; /* we are done */
+    }
+    scan->rs_base.rs_cblock = blkno;
+
+    /* read the next page, and lock with exclusive mode */
+    Buffer buf = ReadBufferExtended(scan->rs_base.rs_rd, MAIN_FORKNUM, blkno, RBM_NORMAL, scan->rs_base.rs_strategy);
+    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    return buf;
+}
+
+bool UHeapIndexBuildNextPage(UHeapScanDesc scan)
+{
+    Buffer buf = UHeapIndexBuildNextBlock(scan);
+    if (!BufferIsValid(buf)) {
+        return false;
+    }
+
+    Page page = BufferGetPage(buf);
+
+    /* step 1: rollback all abort transactions */
+    int numSlots = GetTDCount((UHeapPageHeaderData *)page);
+    TD *tdSlots = (TD *)PageGetTDPointer(page);
+    UndoRecPtr *urecptr = (UndoRecPtr *)palloc(numSlots * sizeof(UndoRecPtr));
+    TransactionId *fxid = (TransactionId *)palloc(numSlots * sizeof(TransactionId));
+
+    int nAborted = 0;
+    for (int slotNo = 0; slotNo < numSlots; slotNo++) {
+        TransactionId xid = tdSlots[slotNo].xactid;
+        if (!TransactionIdIsValid(xid) || TransactionIdIsCurrentTransactionId(xid) || TransactionIdDidCommit(xid)) {
+            continue; /* xid visible in SnapshotNow */
+        }
+        /* xid is abort, record and rollback later */
+        urecptr[nAborted] = tdSlots[slotNo].undo_record_ptr;
+        fxid[nAborted] = xid;
+        nAborted++;
+    }
+    if (nAborted > 0) {
+        LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+        for (int i = 0; i < nAborted; i++) {
+            ExecuteUndoActionsPage(urecptr[i], scan->rs_base.rs_rd, buf, fxid[i]);
+        }
+        LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    }
+    pfree(urecptr);
+    pfree(fxid);
+
+    /* step 2: try prune this page */
+    TransactionId xid = GetCurrentTransactionId();
+    UHeapPagePruneFSM(scan->rs_base.rs_rd, buf, xid, page, BufferGetBlockNumber(buf));
+
+    /* step 3: scan over all tuples and cache visible tuples */
+    int ntup = 0;
+    OffsetNumber maxoff = UHeapPageGetMaxOffsetNumber(page);
+    for (OffsetNumber offnum = FirstOffsetNumber; offnum <= maxoff; offnum++) {
+        RowPtr *rp = UPageGetRowPtr(page, offnum);
+        if (!RowPtrIsNormal(rp)) {
+            continue; /* deleted or unused is not visible here */
+        }
+        /* get the tuple without copy */
+        UHeapTuple tuple = (UHeapTuple)uheaptup_alloc(UHeapTupleDataSize);
+        tuple->disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, rp);
+
+        uint16 infomask = tuple->disk_tuple->flag;
+        if ((infomask & (UHEAP_UPDATED | UHEAP_DELETED)) != 0) {
+            pfree(tuple);
+            continue; /* the last operation removed this tuple */
+        }
+        /* set up other fields */
+        tuple->table_oid = RelationGetRelid(scan->rs_base.rs_rd);
+        tuple->xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
+        tuple->disk_tuple_size = RowPtrGetLen(rp);
+        ItemPointerSet(&tuple->ctid, BufferGetBlockNumber(buf), offnum);
+
+        /* save this tuple */
+        scan->rs_visutuples[ntup++] = tuple;
+    }
+    scan->rs_base.rs_ntuples = ntup;
+    scan->rs_base.rs_cindex = 0;
+
+    UnlockReleaseBuffer(buf);
+    return true;
+}
+
+UHeapTuple UHeapIndexBuildGetNextTuple(UHeapScanDesc scan, TupleTableSlot *slot)
+{
+    if (scan->rs_base.rs_snapshot->satisfies != SNAPSHOT_NOW) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("We must use SnapshotNow to build a ustore index.")));
+    }
+    /* get the next page after all cached tuples of the current page are returned */
+    while (scan->rs_base.rs_cblock == InvalidBlockNumber || scan->rs_base.rs_cindex >= scan->rs_base.rs_ntuples) {
+        if (!UHeapIndexBuildNextPage(scan)) {
+            ExecClearTuple(slot);
+            return NULL;
+        }
+    }
+    int lineindex = scan->rs_base.rs_cindex;
+    UHeapTuple tuple = scan->rs_visutuples[lineindex];
+    scan->rs_base.rs_cindex++; /* now rs_cindex indicate the next tuple's index */
+    scan->rs_cutup = tuple;
+
+    ExecStoreTuple(tuple, slot, InvalidBuffer, false);
+    return tuple;
+}
+
+/*
+ * Scan one page for batch scan mode.
+ * Return true if all the pages are exhausted.
+ */
+static void UHeapScanPagesForBatchMode(UHeapScanDesc scan, int lineIndex)
+{
+    int lines, rows = 0;
+    UHeapScanDesc uScan = (UHeapScanDesc)scan;
+    lines = scan->rs_base.rs_ntuples;
+
+    while (lineIndex < lines) {
+        scan->rs_ctupBatch[rows++] = uScan->rs_visutuples[lineIndex];
+        if (rows == scan->rs_base.rs_maxScanRows) {
+            break;
+        }
+        lineIndex++;
+    }
+
+    scan->rs_base.rs_cindex = lineIndex;
+    scan->rs_base.rs_ctupRows = rows;
+}
+
+bool UHeapGetTupPageBatchmode(UHeapScanDesc scan, ScanDirection dir)
+{
+    BlockNumber page;
+
+    int lineIndex;
+    bool finished = false;
+
+    scan->rs_base.rs_ctupRows = 0;
+
+    /* IO collector and IO scheduler for seqsan */
+    if (ENABLE_WORKLOAD_CONTROL) {
+        IOSchedulerAndUpdate(IO_TYPE_READ, 1, IO_TYPE_ROW);
+    }
+
+    /* calculate next starting lineindex, given scan direction */
+    if (!scan->rs_base.rs_inited) {
+        /* return null immediately if relation is empty */
+        if (scan->rs_base.rs_nblocks == 0) {
+            Assert(!BufferIsValid(scan->rs_base.rs_cbuf));
+            scan->rs_base.rs_ctupRows = 0;
+            return true;
+        }
+        page = scan->rs_base.rs_startblock;
+        UHeapGetPage((TableScanDesc)scan, page);
+        lineIndex = 0;
+        scan->rs_base.rs_inited = true;
+    } else {
+        /* continue from previously returned page/tuple */
+        page = scan->rs_base.rs_cblock;
+        lineIndex = scan->rs_base.rs_cindex + 1;
+    }
+
+    for (;;) {
+        if (lineIndex < scan->rs_base.rs_ntuples) {
+            UHeapScanPagesForBatchMode(scan, lineIndex);
+            break;
+        }
+
+        finished = NextUpage(scan, dir, page);
+        /* return NULL if we've exhausted all the pages */
+        if (finished) {
+            scan->rs_base.rs_cbuf = InvalidBuffer;
+            scan->rs_base.rs_cblock = InvalidBlockNumber;
+            scan->rs_base.rs_inited = false;
+            scan->rs_base.rs_ctupRows = 0;
+            return true;
+        } else {
+            if (unlikely(!UHeapGetPage((TableScanDesc)scan, page))) {
+                continue;
+            }
+            lineIndex = 0;
         }
     }
 
-    return finished;
+    return false;
 }
 
 static void SkipToNewUPage(UHeapScanDesc scan, ScanDirection dir, BlockNumber page,

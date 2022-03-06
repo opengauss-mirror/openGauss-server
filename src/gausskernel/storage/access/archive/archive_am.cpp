@@ -86,3 +86,20 @@ List* ArchiveList(const char* prefix, ArchiveConfig *archive_config, bool report
 
     return fileNameList;
 }
+
+bool ArchiveFileExist(const char* file_path, ArchiveConfig *archive_config)
+{
+    bool ret = false;
+    if (archive_config == NULL) {
+        ereport(WARNING, (errmsg("when check file exist, the archive config is null")));
+        return ret;
+    }
+
+    if (archive_config->media_type == ARCHIVE_OBS) {
+        ret = checkOBSFileExist(file_path, archive_config);
+    } else if (archive_config->media_type == ARCHIVE_NAS) {
+        ret = checkNASFileExist(file_path, archive_config);
+    }
+
+    return ret;
+}

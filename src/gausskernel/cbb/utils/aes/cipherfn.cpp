@@ -35,7 +35,9 @@
 #include "getopt_long.h"
 #include "pgxc/pgxc.h"
 #include "gaussdb_version.h"
+#ifdef ENABLE_GSS
 #include "gssapi/gssapi_krb5.h"
+#endif /* ENABLE_GSS */
 
 #include "tde_key_management/tde_key_manager.h"
 
@@ -47,6 +49,12 @@
 
 #ifdef ENABLE_UT
 #define static
+
+/* ugly hook for tde().get_key, it should be mocked in ut testcase */
+const char *fake_tde_get_key(const char *str)
+{
+    return str;
+}
 #endif
 
 const char* pgname = "gs_encrypt";
@@ -796,7 +804,7 @@ bool gs_decrypt_aes_speed(
     }
 }
 
-static inline const char* GetCipherPrefix(KeyMode mode)
+static inline const char* GetCipherPrefix(int mode)
 {
     switch (mode) {
         case SOURCE_MODE:
@@ -805,6 +813,8 @@ static inline const char* GetCipherPrefix(KeyMode mode)
             return "usermapping";
         case SUBSCRIPTION_MODE:
             return "subscription";
+        case HADR_MODE:
+            return "hadr";
         default:
             ereport(ERROR, (errmsg("unknown key mode: %d", mode)));
             return NULL;
@@ -820,13 +830,12 @@ static inline const char* GetCipherPrefix(KeyMode mode)
  */
 static GS_UCHAR* getECKeyString(KeyMode mode)
 {
-    Assert(mode == SOURCE_MODE || mode == USER_MAPPING_MODE || mode == SUBSCRIPTION_MODE);
+    Assert(mode == SOURCE_MODE || mode == USER_MAPPING_MODE || mode == SUBSCRIPTION_MODE || mode == HADR_MODE);
     GS_UCHAR* plainkey = NULL;
     char* gshome = NULL;
     char cipherdir[MAXPGPATH] = {0};
     char cipherfile[MAXPGPATH] = {0};
     const char *cipherPrefix = GetCipherPrefix(mode);
-
     int ret = 0;
 
     /*
@@ -884,7 +893,7 @@ static GS_UCHAR* getECKeyString(KeyMode mode)
  * @IN mode: key mode
  * @RETURN: void
  */
-void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length, KeyMode mode)
+void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length, int mode)
 {
     GS_UINT32 ciphertextlen = 0;
     GS_UCHAR ciphertext[1024];
@@ -897,7 +906,7 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
     }
 
     /* First, get encrypt key */
-    cipherkey = getECKeyString(mode);
+    cipherkey = getECKeyString((KeyMode)mode);
 
     /* Clear cipher buffer which will be used later */
     ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
@@ -984,7 +993,7 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
  * @RETURN: bool, true if encrypt success, false if not
  */
 bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
-                          uint32 dest_plain_length, KeyMode mode)
+                          uint32 dest_plain_length, int mode)
 {
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 ciphertextlen = 0;
@@ -993,15 +1002,18 @@ bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
     GS_UCHAR* cipherkey = NULL;
     errno_t ret = EOK;
 
-    if (NULL == src_cipher_text || !IsECEncryptedString(src_cipher_text)) {
+    if (NULL == src_cipher_text || (!IsECEncryptedString(src_cipher_text) && mode != HADR_MODE)) {
         return false;
     }
 
     /* Get key string */
-    cipherkey = getECKeyString(mode);
+    cipherkey = getECKeyString((KeyMode)mode);
 
     /* Step-1: Decode */
-    ciphertext = (GS_UCHAR*)(SEC_decodeBase64((char*)(src_cipher_text + strlen(EC_ENCRYPT_PREFIX)), &ciphertextlen));
+    if (mode != HADR_MODE) {
+        src_cipher_text += strlen(EC_ENCRYPT_PREFIX);
+    }
+    ciphertext = (GS_UCHAR*)(SEC_decodeBase64(src_cipher_text, &ciphertextlen));
     plaintext = (GS_UCHAR*)palloc(ciphertextlen);
     ret = memset_s(plaintext, ciphertextlen, 0, ciphertextlen);
     securec_check(ret, "\0", "\0");
@@ -1086,7 +1098,7 @@ bool IsECEncryptedString(const char* src_cipher_text)
  * @IN src_options: source options to be encrypted
  * @RETURN: void
  */
-void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, int arrayLength, KeyMode mode)
+void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, int arrayLength, int mode)
 {
     int i;
     char* srcString = NULL;
@@ -1158,7 +1170,7 @@ void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, in
  * @IN mode: key mode
  * @RETURN: void
  */
-void DecryptOptions(List *options, const char** sensitiveOptionsArray, int arrayLength, KeyMode mode)
+void DecryptOptions(List *options, const char** sensitiveOptionsArray, int arrayLength, int mode)
 {
     if (options == NULL) {
         return;
@@ -1359,8 +1371,8 @@ void encryptBlockOrCUData(const char* plainText, const size_t plainLength,
     tde_key_manager->init();
     plain_key = tde_key_manager->get_key(tdeInfo->cmk_id, tdeInfo->dek_cipher);
 #else
-    /* ugly hook for TDEKeyManager->get_key() function, gs_strdup should be mocked in ut */
-    plain_key = (const char*)gs_strdup("0123456789abcdef0123456789abcdef");
+    /* ugly hook for TDEKeyManager->get_key() function, fake_tde_get_key should be mocked in ut */
+    plain_key = fake_tde_get_key(plain_key);
 #endif
     Assert(strlen(plain_key) == KEY_128BIT_LEN * 2);
 
@@ -1416,8 +1428,8 @@ void decryptBlockOrCUData(const char* cipherText, const size_t cipherLength,
     tde_key_manager->init();
     plain_key = tde_key_manager->get_key(tdeInfo->cmk_id, tdeInfo->dek_cipher);
 #else
-    /* ugly hook for TDEKeyManager->get_key() function, gs_strdup should be mocked in ut */
-    plain_key = (const char*)gs_strdup("0123456789abcdef0123456789abcdef");
+    /* ugly hook for TDEKeyManager->get_key() function, fake_tde_get_key should be mocked in ut */
+    plain_key = fake_tde_get_key(plain_key);
 #endif
     Assert(strlen(plain_key) == KEY_128BIT_LEN * 2);
 

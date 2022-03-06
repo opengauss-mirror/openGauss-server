@@ -2045,9 +2045,8 @@ void WLMCheckDefaultXactReadOnly(void)
 {
     int save_errno = errno;
 
-    /* set XactReadOnly for transaction,if IDLEINTRANSACTION no need to cancel stmt */
+    /* if IDLEINTRANSACTION no need to cancel stmt */
     if (!u_sess->attr.attr_storage.DefaultXactReadOnly) {
-        u_sess->attr.attr_storage.DefaultXactReadOnly = true;
         if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL ||
             t_thrd.shemem_ptr_cxt.MyBEEntry->st_state == STATE_IDLEINTRANSACTION ||
             t_thrd.shemem_ptr_cxt.MyBEEntry->st_state == STATE_IDLEINTRANSACTION_ABORTED) {
@@ -2086,6 +2085,7 @@ void WLMCheckDefaultXactReadOnly(void)
         }
     }
 
+    u_sess->sig_cxt.got_SIGHUP = true;
     /* If we're still here, waken anything waiting on the process latch */
     if (t_thrd.proc) {
         SetLatch(&t_thrd.proc->procLatch);

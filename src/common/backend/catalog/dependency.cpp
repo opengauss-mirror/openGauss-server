@@ -7,6 +7,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/common/backend/catalog/dependency.cpp
@@ -20,6 +21,7 @@
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_db_privilege.h"
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/gs_matview.h"
 #include "catalog/gs_model.h"
@@ -148,6 +150,7 @@ static const Oid object_classes[MAX_OCLASS] = {
     UserMappingRelationId,           /* OCLASS_USER_MAPPING */
     PgSynonymRelationId,             /* OCLASS_SYNONYM */
     DefaultAclRelationId,            /* OCLASS_DEFACL */
+    DbPrivilegeId,                   /* OCLASS_DB_PRIVILEGE */
     ExtensionRelationId,             /* OCLASS_EXTENSION */
     PgDirectoryRelationId,           /* OCLASS_DIRECTORY */
     PgJobRelationId,                 /* OCLASS_PG_JOB */
@@ -1399,6 +1402,11 @@ static void doDeletion(const ObjectAddress* object, int flags)
         case OCLASS_DEFACL:
             RemoveDefaultACLById(object->objectId);
             break;
+
+        case OCLASS_DB_PRIVILEGE:
+            DropDbPrivByOid(object->objectId);
+            break;
+
 #ifdef PGXC
         case OCLASS_PGXC_CLASS:
             RemovePgxcClass(object->objectId, IS_PGXC_DATANODE);
@@ -2436,6 +2444,9 @@ ObjectClass getObjectClass(const ObjectAddress* object)
         case DefaultAclRelationId:
             return OCLASS_DEFACL;
 
+        case DbPrivilegeId:
+            return OCLASS_DB_PRIVILEGE;
+
         case ExtensionRelationId:
             return OCLASS_EXTENSION;
         case PgxcGroupRelationId:
@@ -3043,6 +3054,29 @@ char* getObjectDescription(const ObjectAddress* object)
             break;
         }
 
+        case OCLASS_DB_PRIVILEGE: {
+            Relation dbPrivRel = heap_open(DbPrivilegeId, AccessShareLock);
+            if (!RelationIsValid(dbPrivRel)) {
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("Could not open the relation gs_db_privilege."),
+                        errcause("System error."), erraction("Contact engineer to support.")));
+            }
+
+            HeapTuple dbPrivTuple = SearchSysCache1(DBPRIVOID, ObjectIdGetDatum(object->objectId));
+            if (!HeapTupleIsValid(dbPrivTuple)) {
+                heap_close(dbPrivRel, AccessShareLock);
+                break;
+            }
+            
+            bool isNull = false;
+            Datum datum = heap_getattr(
+                dbPrivTuple, Anum_gs_db_privilege_privilege_type, RelationGetDescr(dbPrivRel), &isNull);
+            appendStringInfo(&buffer, _("\"%s\""), text_to_cstring(DatumGetTextP(datum)));
+
+            ReleaseSysCache(dbPrivTuple);
+            heap_close(dbPrivRel, AccessShareLock);
+            break;
+        }
         case OCLASS_EXTENSION: {
             char* extname = NULL;
 
@@ -3132,10 +3166,16 @@ char* getObjectDescription(const ObjectAddress* object)
             HeapTuple tup;
             char *pubname;
             Form_pg_publication_rel prform;
+            ScanKeyData scanKey[1];
+            ScanKeyInit(&scanKey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(object->objectId));
+            Relation rel = heap_open(PublicationRelRelationId, AccessShareLock);
+            SysScanDesc scanDesc = systable_beginscan(rel, PublicationRelObjectIndexId, true, NULL, 1, scanKey);
 
-            tup = SearchSysCache1(PUBLICATIONREL, ObjectIdGetDatum(object->objectId));
+            tup = systable_getnext(scanDesc);
             if (!HeapTupleIsValid(tup)) {
-                elog(ERROR, "cache lookup failed for publication table %u", object->objectId);
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("could not find tuple for publication %u", object->objectId)));
             }
 
             prform = (Form_pg_publication_rel)GETSTRUCT(tup);
@@ -3143,7 +3183,8 @@ char* getObjectDescription(const ObjectAddress* object)
 
             appendStringInfo(&buffer, _("publication table %s in publication %s"), get_rel_name(prform->prrelid),
                 pubname);
-            ReleaseSysCache(tup);
+            systable_endscan(scanDesc);
+            heap_close(rel, AccessShareLock);
             break;
         }
 

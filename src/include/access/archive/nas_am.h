@@ -34,5 +34,6 @@ size_t NasRead(const char* fileName, int offset, char *buffer, int length, Archi
 int NasWrite(const char* fileName, const char *buffer, const int bufferLength, ArchiveConfig *nas_config = NULL);
 int NasDelete(const char* fileName, ArchiveConfig *nas_config = NULL);
 List* NasList(const char* prefix, ArchiveConfig *nas_config = NULL);
+bool checkNASFileExist(const char* file_path, ArchiveConfig *nas_config);
 
 #endif /* NAS_AM_H */

@@ -52,7 +52,7 @@ public:
     bool set_kms_info(const char *key, const char *value);
     static bool from_handle(long handle, ClientLogicJNI **handle_ptr, DriverError *status);
     bool run_pre_query(const char *original_query, DriverError *status);
-    bool run_post_query(DriverError *status);
+    bool run_post_query(const char *statement_name, DriverError *status);
     bool preare_statement(const char *query, const char *statement_name, size_t parameter_count, DriverError *status);
     bool replace_statement_params(const char *statement_name, const char * const param_values[], size_t parameter_count,
         DriverError *status);
@@ -62,12 +62,13 @@ public:
         size_t &length_output, DriverError *status) const;
     size_t get_record_data_oid_length(int oid, const char* column_name);
     const int *get_record_data_oids(int oid, const char* column_name);
-    bool process_record_data(const char *data_2_process, const int *original_oids, unsigned char **proccessed_data,
-        bool *is_encreypted, size_t &length_output, DriverError *status);
+    bool process_record_data(const char *data_2_process, const int *original_oids,  size_t original_oids_length,
+        unsigned char **proccessed_data, bool *is_encreypted, size_t &length_output, DriverError *status);
     bool replace_message(const char *original_message, char **new_message, DriverError *status) const;
     const char *get_new_query(const char *query);
     void set_jni_env_and_cl_impl(JNIEnv *env, jobject jni_cl_impl);
     void reload_cache_if_needed() const;
+    void reload_cache() const;
 
 private:
     PGconn *m_stub_conn = NULL;

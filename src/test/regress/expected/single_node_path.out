@@ -79,3 +79,69 @@ SELECT '' AS count, popen(f1) AS open_path FROM PATH_TBL;
        | [(11,12),(13,14)]
 (8 rows)
 
+-- test type coercion for index match
+set enable_seqscan = off;
+create table test2(column1 float8 not null, column2 char not null collate "C", column3 char(100) not null collate "C", column4 int);
+create table test3(like test2 including all);
+create index on test2(column1);
+create index on test2(column2);
+create index on test2(column3);
+create index on test2(column4);
+explain (costs off) update test2 set column4 = 0 from test3 where test2.column1 > test3.column2 and test2.column2 like test3.column2 and test3.column3 < test3.column3;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Update on test2
+   ->  Nested Loop
+         ->  Seq Scan on test3
+               Filter: (column3 < column3)
+         ->  Index Scan using test2_column1_idx on test2
+               Index Cond: (column1 > (test3.column2)::double precision)
+               Filter: (column2 ~~ (test3.column2)::text)
+(7 rows)
+
+explain (costs off) select *  from test2, test3 where test2.column1 > test3.column1 and test2.column2 like test3.column2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on test3
+   ->  Index Scan using test2_column1_idx on test2
+         Index Cond: (column1 > test3.column1)
+         Filter: (column2 ~~ (test3.column2)::text)
+(5 rows)
+
+explain (costs off) select /*+ nestloop(test2 test3) */*  from test2, test3 where test2.column2 = test3.column2::varchar;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Nested Loop
+   ->  Seq Scan on test3
+   ->  Index Scan using test2_column2_idx on test2
+         Index Cond: (column2 = ((test3.column2)::character varying)::bpchar)
+(4 rows)
+
+/* cannot use index for bpchar <-> text */
+explain (costs off) merge into test2 using (select '1' AS c1, '5278' as c2) V ON (test2.column3 = V.c2)
+WHEN NOT MATCHED THEN INSERT (column1, column2, column3, column4) VALUES (V.c1,1,V.c2,1);
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Merge on test2
+   ->  Nested Loop Left Join
+         Join Filter: ((test2.column3)::text = ('5278'::text))
+         ->  Result
+         ->  Seq Scan on test2
+(5 rows)
+
+/* index with type coercion is acceptable */
+create index on test2(text(column3));
+explain (costs off) merge into test2 using (select '1' AS c1, '5278' as c2) V ON (test2.column3 = V.c2)
+WHEN NOT MATCHED THEN INSERT (column1, column2, column3, column4) VALUES (V.c1,1,V.c2,1);
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Merge on test2
+   ->  Nested Loop Left Join
+         ->  Result
+         ->  Index Scan using test2_text_idx on test2
+               Index Cond: ((column3)::text = ('5278'::text))
+(5 rows)
+
+drop table test2;
+drop table test3;

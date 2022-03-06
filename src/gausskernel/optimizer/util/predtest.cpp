@@ -97,7 +97,6 @@ static bool list_member_strip(const List* list, Expr* datum);
 static bool btree_predicate_proof(const Expr* predicate, const Node* clause, bool refute_it);
 static Oid get_btree_test_op(Oid pred_op, Oid clause_op, bool refute_it);
 static void InvalidateOprProofCacheCallBack(Datum arg, int cacheid, uint32 hashvalue);
-
 /*
  * predicate_implied_by
  *	  Recursively checks whether the clauses in restrictinfo_list imply
@@ -1455,7 +1454,7 @@ static Oid get_btree_test_op(Oid pred_op, Oid clause_op, bool refute_it)
             hash_create("Btree proof lookup cache", 256, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
         /* Arrange to flush cache on pg_amop changes */
-        CacheRegisterSyscacheCallback(AMOPOPID, InvalidateOprProofCacheCallBack, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(AMOPOPID, InvalidateOprProofCacheCallBack, (Datum)0);
     }
 
     key.pred_op = pred_op;
@@ -1584,7 +1583,7 @@ static Oid get_btree_test_op(Oid pred_op, Oid clause_op, bool refute_it)
 /*
  * Callback for pg_amop inval events
  */
-static void InvalidateOprProofCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
+void InvalidateOprProofCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
 {
     HASH_SEQ_STATUS status;
     OprProofCacheEntry* hentry = NULL;

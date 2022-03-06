@@ -388,6 +388,63 @@ static void set_correlated_rel_pathlist(PlannerInfo* root, RelOptInfo* rel)
     return;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
+/*
+ * Check we could reduce broadcast above scan of predpush subquery or not.
+ */
+static bool reduce_predpush_broadcast(PlannerInfo* root, Path *path)
+{
+    bool reduce = false;
+    ItstDisKey dis_keys = root->dis_keys;
+
+    if (list_length(path->distribute_keys) != 1) {
+        return false;
+    }
+
+    if (!IsA((Node*)linitial(path->distribute_keys), Var)) {
+        return false;
+    }
+
+    Var *dist_key = (Var *)linitial(path->distribute_keys);
+
+    if (dis_keys.superset_keys != NULL && list_length(dis_keys.superset_keys) == 1) {
+        List *matching = (List *)linitial(dis_keys.superset_keys);
+
+        if (list_length(matching) == 1) {
+            Var *var = (Var *)linitial(matching);
+            if (equal(var, dist_key)) {
+                reduce = true;
+            }
+        }
+    }
+
+    return reduce;
+}
+
+static Path *make_predpush_subpath(PlannerInfo* root, RelOptInfo* rel, Path *path)
+{
+    List* quals = NULL;
+    Path *subpath = NULL;
+    ListCell* lc = NULL;
+    Bitmapset* upper_params = NULL;
+
+    foreach (lc, rel->subplanrestrictinfo) {
+        RestrictInfo *res_info = (RestrictInfo*)lfirst(lc);
+        quals = lappend(quals, res_info->clause);
+    }
+
+    /* get the upper param IDs */
+    if (SUBQUERY_PREDPUSH(root)) {
+        upper_params = collect_param_clause((Node*)quals);
+    }
+
+    subpath = (Path*)create_result_path(root, rel, quals, path, upper_params);
+
+    return subpath;
+}
+
+#endif
+
 /*
  * set_base_rel_pathlists
  *	  Finds all paths available for scanning each base-relation entry.
@@ -459,6 +516,26 @@ static void set_base_rel_pathlists(PlannerInfo* root)
                 foreach (lc2, rel->cheapest_total_path) {
                     if (path == lfirst(lc2))
                         break;
+                }
+
+                /* Here we want to reduce broadcast in predpush */
+                if (SUBQUERY_PREDPUSH(root) &&
+                    rel->subplanrestrictinfo != NIL &&
+                    reduce_predpush_broadcast(root, path)) {
+                    subpath = make_predpush_subpath(root, rel, path);
+
+                    /* Do not free old path, maybe it's used in other places. */
+                    lfirst(lc) = subpath;
+                    if (lc2 != NULL) {
+                        lfirst(lc2) = subpath;
+                    }
+
+                    /* Set cheapest startup path as result + predpush-index path */
+                    if (is_cheapest_startup) {
+                        rel->cheapest_startup_path = subpath;
+                    }
+
+                    continue;
                 }
 
                 Distribution* distribution = ng_get_dest_distribution(path);
@@ -3653,9 +3730,14 @@ static void make_partiterator_pathkey(
     int2vector* partitionKey = NULL;
     ListCell* pk_cell = NULL;
     ListCell* rt_ec_cell = NULL;
+    IndexesUsableType usable_type;
     Oid indexOid = ((IndexPath*)itrpath->subPath)->indexinfo->indexoid;
-    IndexesUsableType usable_type = eliminate_partition_index_unusable(indexOid, rel->pruning_result, NULL, NULL);
-
+    if (u_sess->attr.attr_sql.enable_hypo_index && ((IndexPath *)itrpath->subPath)->indexinfo->hypothetical) {
+        /* hypothetical index does not support partition index unusable */
+        usable_type = INDEXES_FULL_USABLE;
+    } else {
+        usable_type = eliminate_partition_index_unusable(indexOid, rel->pruning_result, NULL, NULL);
+    }
     if (INDEXES_FULL_USABLE != usable_type) {
         /* some index partition is unusable */
         OPT_LOG(DEBUG2, "fail to inherit pathkeys since some index partition is unusable");
@@ -3956,71 +4038,6 @@ static Path* create_partiterator_path(PlannerInfo* root, RelOptInfo* rel, Path* 
     }
 
     return result;
-}
-
-/*
- * Compute the number of parallel workers that should be used to scan a
- * relation.  We compute the parallel workers based on the size of the heap to
- * be scanned and the size of the index to be scanned, then choose a minimum
- * of those.
- *
- * "heap_pages" is the number of pages from the table that we expect to scan, or
- * -1 if we don't expect to scan any.
- *
- */
-int compute_parallel_worker(const RelOptInfo *rel, double heap_pages, int rel_maxworker)
-{
-    int  parallel_workers = 0;
-    int  max_workers = max_parallel_maintenance_workers;
-
-    if (rel_maxworker != -1) {
-        max_workers = Min(max_workers, rel_maxworker);
-    }
-
-    /*
-     * If the number of pages being scanned is insufficient to justify a
-     * parallel scan, just return zero ... unless it's an inheritance
-     * child. In that case, we want to generate a parallel path here
-     * anyway.  It might not be worthwhile just for this relation, but
-     * when combined with all of its inheritance siblings it may well pay
-     * off.
-     */
-    if ((rel->reloptkind == RELOPT_BASEREL &&
-        heap_pages >= 0 && heap_pages < min_parallel_table_scan_size) ||
-        max_workers == 0) {
-        return 0;
-    }
-
-    /* Return what user tell us */
-    if (rel_maxworker != -1) {
-        return max_workers;
-    }
-
-    if (heap_pages >= 0) {
-        int  heap_parallel_threshold;
-        int  heap_parallel_workers = 1;
-        /*
-         * Select the number of workers based on the log of the size of
-         * the relation.  This probably needs to be a good deal more
-         * sophisticated, but we need something here for now.  Note that
-         * the upper limit of the min_parallel_table_scan_size GUC is
-         * chosen to prevent overflow here.
-         */
-        heap_parallel_threshold = Max(min_parallel_table_scan_size, 1);
-        while (heap_pages >= (BlockNumber)heap_parallel_threshold) {
-            heap_parallel_workers++;
-            heap_parallel_threshold *= 4;
-            if (heap_parallel_threshold > INT_MAX / 4) {
-                break;      /* avoid overflow */
-            }
-        }
-        parallel_workers = heap_parallel_workers;
-    }
-
-    /* In no case use more than caller supplied maximum number of workers */
-    parallel_workers = Min(parallel_workers, max_workers);
-
-    return parallel_workers;
 }
 
 /*

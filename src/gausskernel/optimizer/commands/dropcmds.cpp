@@ -45,6 +45,9 @@ static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId)
         case OBJECT_FUNCTION:
             aclresult = pg_proc_aclcheck(objectId, GetUserId(), ACL_DROP);
             break;
+        case OBJECT_PACKAGE:
+            aclresult = pg_package_aclcheck(objectId, GetUserId(), ACL_DROP);
+            break;
         case OBJECT_SCHEMA:
             aclresult = pg_namespace_aclcheck(objectId, GetUserId(), ACL_DROP);
             break;
@@ -63,6 +66,7 @@ static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId)
 static void DropExtensionInListIsSupported(List* objname)
 {
     static const char *supportList[] = {
+        "drop",
         "postgis",
         "packages",
 #ifndef ENABLE_MULTIPLE_NODES

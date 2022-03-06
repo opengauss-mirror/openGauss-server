@@ -1,0 +1,42 @@
+-- 设置guc参数
+\! /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/install//data6/zhoutl/GaussDB_test/install/bin/gs_guc reload -Z datanode -D /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/ -c "audit_rotation_size=2048"
+The gs_guc run with the following arguments: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/install//data6/zhoutl/GaussDB_test/install/bin/gs_guc -Z datanode -D /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/ -c audit_rotation_size=2048 reload ].
+expected instance path: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc reload: audit_rotation_size=2048: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/postgresql.conf]
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/install//data6/zhoutl/GaussDB_test/install/bin/gs_guc reload -Z datanode -D /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/ -c "audit_dml_state=1"
+The gs_guc run with the following arguments: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/install//data6/zhoutl/GaussDB_test/install/bin/gs_guc -Z datanode -D /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/ -c audit_dml_state=1 reload ].
+expected instance path: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc reload: audit_dml_state=1: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/postgresql.conf]
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+-- 产生dml_action 审计日志
+CREATE TABLE T_TEST_ROTATION_SIZE
+(
+    COL1    int4            DEFAULT 1,
+    COL2     VARCHAR(1024) DEFAULT 'test_rotation_size');
+CREATE OR REPLACE PROCEDURE TRANSACTION_TEST_ROTATION_SIZE()
+AS
+BEGIN
+FOR i IN 0..1000000 LOOP
+INSERT INTO T_TEST_ROTATION_SIZE(COL1, COL2) VALUES (i, 'test_time');
+COMMIT;
+END LOOP;
+END;
+/
+CALL TRANSACTION_TEST_ROTATION_SIZE();
+ transaction_test_rotation_size 
+--------------------------------
+ 
+(1 row)
+
+-- 提取新生成的文件大小 与2.1M比较 全部小于2.1M 为执行成功
+\! flag=0 && for i in $(find /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/pg_audit -newermt $(date -d "-75 seconds" +%H:%M:%S) -name "*_adt"); do size=$(du -h --exclude=index_table_new $i  | grep -oP '\d*\.\d+M'); if [[ $size > '2.1M' ]]; then flag=1; echo $size; echo $i; fi; done && [[ "$flag" == 0 ]] && echo 'all the logs are less than 2.1M' || echo 'error -- some logs exceed limit'  
+all the logs are less than 2.1M

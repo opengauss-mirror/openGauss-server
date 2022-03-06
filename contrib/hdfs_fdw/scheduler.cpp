@@ -716,7 +716,11 @@ List* CNSchedulingForAnalyze(unsigned int* totalFilesNum, unsigned int* numOfDns
     if (isglbstats) {
         if (IS_OBS_CSV_TXT_FOREIGN_TABLE(foreignTableId)) {
             /* for dist obs foreign table.*/
+#ifndef ENABLE_LITE_MODE
             allTask = CNSchedulingForDistOBSFt(foreignTableId);
+#else
+            FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
         } else {
             if (rel_loc_info == NULL) {
                 ereport(ERROR,

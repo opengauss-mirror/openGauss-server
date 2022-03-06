@@ -62,6 +62,7 @@ public:
     void CheckSessionTimeout();
     void CheckPermissionForSendSignal(knl_session_context* sess, sig_atomic_t* lock);
     void getSessionMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, knl_sess_control** sess);
+    void getSessionMemoryContextInfo(const char* ctx_name, StringInfoData* buf, knl_sess_control** sess);
     knl_session_context* GetSessionByIdx(int idx);
     int FindCtrlIdxBySessId(uint64 id);
     TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);

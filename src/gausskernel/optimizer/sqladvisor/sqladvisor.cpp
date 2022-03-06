@@ -421,7 +421,7 @@ Datum analyze_query(PG_FUNCTION_ARGS)
 
     Cost cost = 0.0;
     analyzeQuery(adviseQuery, true, &cost);
-    
+    pfree_ext(queryString);
     PG_RETURN_BOOL(true);
 }
 

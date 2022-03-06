@@ -1,0 +1,34 @@
+-- 清理历史审计日志
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');
+
+create user audit_fault_user1 with password 'Gauss@123';
+select pg_sleep(1);
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_user' and object_name = 'audit_fault_user1';
+
+-- 故障1：覆盖
+\! cur_audit_file=`find @abs_srcdir@/tmp_check/datanode1/pg_audit -name "*_adt" | sort -r | head -1` && echo "fault 1: overwritten xxxxx" > $cur_audit_file
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_user' and object_name = 'audit_fault_user1';
+
+select pg_sleep(1);
+
+create user audit_fault_user2 with password 'Gauss@123';
+select pg_sleep(1);
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_user' and object_name = 'audit_fault_user2';
+
+-- 故障2: 追加
+\! cur_audit_file=`find @abs_srcdir@/tmp_check/datanode1/pg_audit -name "*_adt" | sort -r | head -1` && echo "fault 2: appending yyyyy" >> $cur_audit_file
+
+create user audit_fault_user3 with password 'Gauss@123';
+select pg_sleep(1);
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_user' and object_name = 'audit_fault_user3';
+
+create user audit_fault_user4 with password 'Gauss@123';
+select pg_sleep(1);
+SELECT detail_info FROM pg_query_audit('2021-12-17 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_user' and object_name = 'audit_fault_user4';
+
+-- 恢复
+drop user audit_fault_user1;
+drop user audit_fault_user2;
+drop user audit_fault_user3;
+drop user audit_fault_user4;
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');

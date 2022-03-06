@@ -21,7 +21,9 @@
 #define strpos(p, s) (strstr((p), (s)) != NULL ? strstr((p), (s)) - (p) : -1)
 
 #include "access/obs/obs_am.h"
+#ifndef ENABLE_LITE_MODE
 #include "eSDKOBS.h"
+#endif
 
 #include "lib/stringinfo.h"
 #include "miscadmin.h"
@@ -38,6 +40,202 @@
 #include "postmaster/alarmchecker.h"
 #include "replication/walreceiver.h"
 
+/* ----------------------------------------------------------------------------
+ * Utility functions
+ * ----------------------------------------------------------------------------
+ */
+/*
+ * - Brief: Find nth sub-string from the given string, return -1 when not found
+ * - Parameter:
+ *      @str: where to work
+ *      @N: N'th ocurrence
+ *      @find: what to 'find'
+ * - Return:
+ *      value -1: when not found
+ *      value > 0: the actual position in given string
+ * Notes: position index stats from 0.
+ */
+int find_Nth(const char *str, unsigned N, const char *find)
+{
+    int cursor, pos;
+    unsigned i = 0;
+    const char *curptr = str;
+
+    Assert(str != NULL);
+
+    if (N == 0) {
+        return -1;
+    }
+
+    cursor = 0;
+    curptr = str + cursor;
+
+    while (i < N) {
+        pos = strpos(curptr, find);
+        if (pos == -1) {
+            /* Not found, return directly */
+            return -1;
+        }
+
+        cursor += pos + 1;
+        curptr = str + cursor;
+
+        i++;
+    }
+    return (cursor - 1);
+}
+
+/*
+ * - Brief: Fetch hostname, bucket, prefix in given string
+ * - Parameter:
+ *      @url: input URL that will be parsed into hostbame, bucket, prefix
+ *      @hostname: output hostname in palloc()'ed string
+ *      @bucket: output bucket in palloc()'ed string
+ *      @prefix: output prefix in palloc()'ed string
+ * - Return:
+ *      no return value
+ */
+void FetchUrlProperties(const char *url, char **hostname, char **bucket, char **prefix)
+{
+#define LOCAL_STRING_BUFFER_SIZE 512
+
+    int ibegin = 0;
+    int iend = 0;
+    char buffer[LOCAL_STRING_BUFFER_SIZE];
+    char *invalid_element = NULL;
+    error_t rc = EOK;
+    int copylen = 0;
+
+    /* At least we should pass-in a valid url and one of to-be fetched properties */
+    Assert(url != NULL && (hostname || bucket || prefix));
+
+    /* hostname is requred to fetch from Object's URL */
+    if (hostname != NULL) {
+        rc = memset_s(buffer, LOCAL_STRING_BUFFER_SIZE, 0, LOCAL_STRING_BUFFER_SIZE);
+        securec_check(rc, "\0", "\0");
+        ibegin = find_Nth(url, 2, "/");
+        iend = find_Nth(url, 3, "/");
+
+        copylen = iend - ibegin - 1;
+
+        /* if hostname is invalid, goto error message */
+        if (ibegin < 0 || iend < 0 || copylen <= 0) {
+            invalid_element = "hostname";
+            goto FETCH_URL_ERROR;
+        }
+
+        rc = strncpy_s(buffer, LOCAL_STRING_BUFFER_SIZE, url + (ibegin + 1), copylen);
+        securec_check(rc, "", "");
+
+        *hostname = pstrdup(buffer);
+    }
+
+    /* bucket is required to fetch from Object's URL */
+    if (bucket != NULL) {
+        rc = memset_s(buffer, LOCAL_STRING_BUFFER_SIZE, 0, LOCAL_STRING_BUFFER_SIZE);
+        securec_check(rc, "\0", "\0");
+        ibegin = find_Nth(url, 3, "/");
+        iend = find_Nth(url, 4, "/");
+
+        copylen = iend - ibegin - 1;
+
+        /* if bucket name is invalid, goto error message */
+        if (ibegin < 0 || iend < 0 || copylen <= 0) {
+            invalid_element = "bucket";
+            goto FETCH_URL_ERROR;
+        }
+
+        rc = strncpy_s(buffer, LOCAL_STRING_BUFFER_SIZE, url + (ibegin + 1), copylen);
+        securec_check(rc, "", "");
+
+        *bucket = pstrdup(buffer);
+    }
+
+    /* prefix is required to fetch from Object's URL */
+    if (prefix != NULL) {
+        rc = memset_s(buffer, LOCAL_STRING_BUFFER_SIZE, 0, LOCAL_STRING_BUFFER_SIZE);
+        securec_check(rc, "\0", "\0");
+        ibegin = find_Nth(url, 4, "/");
+        /* if prefix is invalid, goto error message */
+        if (ibegin < 0) {
+            invalid_element = "prefix";
+            goto FETCH_URL_ERROR;
+        }
+        copylen = strlen(url) - ibegin;
+
+        rc = strncpy_s(buffer, LOCAL_STRING_BUFFER_SIZE, url + (iend + 1), copylen);
+        securec_check(rc, "", "");
+
+        *prefix = pstrdup(buffer);
+    }
+    return;
+
+FETCH_URL_ERROR:
+    ereport(ERROR,
+            (errcode(ERRCODE_FDW_INVALID_OPTION_DATA), errmsg("OBS URL's %s is not valid '%s'", invalid_element, url)));
+}
+
+/*
+ * @Description:  get bucket and prefix from folder name
+ * @IN folderName: folder name
+ * @OUT bucket: bucket name
+ * @OUT prefix: perifx
+ * @See also:
+ * @Important: use current memory context for bucket and prefix
+ */
+void FetchUrlPropertiesForQuery(const char *folderName, char **bucket, char **prefix)
+{
+    Assert(folderName && bucket && prefix);
+    Assert(!(*bucket) && !(*prefix));
+
+    error_t rc = EOK;
+    char *invalid_element = NULL;
+
+    int ibegin = 0;
+    int iend = 0;
+    int bucketLen = 0;
+    int prefixLen = 0;
+
+    if (folderName[0] == '/') {
+        /*  /bucket/prefix  */
+        ibegin = 1;
+        iend = find_Nth(folderName, 2, "/");
+    } else {
+        /*  bucket/prefix  */
+        ibegin = 0;
+        iend = find_Nth(folderName, 1, "/");
+    }
+
+    /* get bucket */
+    bucketLen = iend - ibegin;
+    if (bucketLen <= 0) {
+        invalid_element = "bucket";
+        goto FETCH_URL_ERROR2;
+    }
+
+    *bucket = (char *)palloc0(bucketLen + 1);
+    rc = strncpy_s((*bucket), (bucketLen + 1), (folderName + ibegin), bucketLen);
+    securec_check(rc, "", "");
+
+    /* get prefix */
+    prefixLen = strlen(folderName) - (iend + 1);
+    if (prefixLen < 0) {
+        invalid_element = "prefix";
+        goto FETCH_URL_ERROR2;
+    }
+
+    *prefix = (char *)palloc0(prefixLen + 1);
+    rc = strncpy_s((*prefix), (prefixLen + 1), (folderName + iend + 1), prefixLen);
+    securec_check(rc, "", "");
+
+    return;
+
+FETCH_URL_ERROR2:
+    ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_OPTION_DATA),
+                    errmsg("OBS URL's %s is not valid '%s'", invalid_element, folderName)));
+}
+
+#ifndef ENABLE_LITE_MODE
 // Some Windows stuff
 #ifndef FOPEN_EXTRA_FLAGS
 #define FOPEN_EXTRA_FLAGS ""
@@ -58,18 +256,12 @@ static int64 ifModifiedSince = -1;
 static int64 ifNotModifiedSince = -1;
 static char* ifMatch = 0;
 static char* ifNotMatch = 0;
+static int headerLen = 22;
 
-
-#define OBS_CIPHER_LIST "DHE-RSA-AES128-GCM-SHA256:" \
-                        "DHE-RSA-AES256-GCM-SHA384:" \
-                        "DHE-DSS-AES128-GCM-SHA256:" \
-                        "DHE-DSS-AES256-GCM-SHA384:" \
-                        "ECDHE-ECDSA-AES128-GCM-SHA256:" \
+#define OBS_CIPHER_LIST "ECDHE-ECDSA-AES128-GCM-SHA256:" \
                         "ECDHE-ECDSA-AES256-GCM-SHA384:" \
                         "ECDHE-RSA-AES128-GCM-SHA256:" \
                         "ECDHE-RSA-AES256-GCM-SHA384:" \
-                        "DHE-RSA-AES128-CCM:" \
-                        "DHE-RSA-AES256-CCM:" \
                         "ECDHE-ECDSA-AES128-CCM:" \
                         "ECDHE-ECDSA-AES256-CCM"
 
@@ -93,8 +285,6 @@ MemoryContext GetObsMemoryContext(void)
 {
     return t_thrd.obs_cxt.ObsMemoryContext;
 }
-
-int find_Nth(const char *str, unsigned N, const char *find);
 
 /* Request results, saved as globals ----------------------------------------- */
 static THR_LOCAL obs_status statusG = OBS_STATUS_OK;
@@ -1395,201 +1585,6 @@ void DestroyObsReadWriteHandler(OBSReadWriteHandler *handler, bool obsQueryType)
     pfree_ext(handler);
 }
 
-/* ----------------------------------------------------------------------------
- * Utility functions
- * ----------------------------------------------------------------------------
- */
-/*
- * - Brief: Find nth sub-string from the given string, return -1 when not found
- * - Parameter:
- *      @str: where to work
- *      @N: N'th ocurrence
- *      @find: what to 'find'
- * - Return:
- *      value -1: when not found
- *      value > 0: the actual position in given string
- * Notes: position index stats from 0.
- */
-int find_Nth(const char *str, unsigned N, const char *find)
-{
-    int cursor, pos;
-    unsigned i = 0;
-    const char *curptr = str;
-
-    Assert(str != NULL);
-
-    if (N == 0) {
-        return -1;
-    }
-
-    cursor = 0;
-    curptr = str + cursor;
-
-    while (i < N) {
-        pos = strpos(curptr, find);
-        if (pos == -1) {
-            /* Not found, return directly */
-            return -1;
-        }
-
-        cursor += pos + 1;
-        curptr = str + cursor;
-
-        i++;
-    }
-    return (cursor - 1);
-}
-
-/*
- * - Brief: Fetch hostname, bucket, prefix in given string
- * - Parameter:
- *      @url: input URL that will be parsed into hostbame, bucket, prefix
- *      @hostname: output hostname in palloc()'ed string
- *      @bucket: output bucket in palloc()'ed string
- *      @prefix: output prefix in palloc()'ed string
- * - Return:
- *      no return value
- */
-void FetchUrlProperties(const char *url, char **hostname, char **bucket, char **prefix)
-{
-#define LOCAL_STRING_BUFFER_SIZE 512
-
-    int ibegin = 0;
-    int iend = 0;
-    char buffer[LOCAL_STRING_BUFFER_SIZE];
-    char *invalid_element = NULL;
-    error_t rc = EOK;
-    int copylen = 0;
-
-    /* At least we should pass-in a valid url and one of to-be fetched properties */
-    Assert(url != NULL && (hostname || bucket || prefix));
-
-    /* hostname is requred to fetch from Object's URL */
-    if (hostname != NULL) {
-        rc = memset_s(buffer, LOCAL_STRING_BUFFER_SIZE, 0, LOCAL_STRING_BUFFER_SIZE);
-        securec_check(rc, "\0", "\0");
-        ibegin = find_Nth(url, 2, "/");
-        iend = find_Nth(url, 3, "/");
-
-        copylen = iend - ibegin - 1;
-
-        /* if hostname is invalid, goto error message */
-        if (ibegin < 0 || iend < 0 || copylen <= 0) {
-            invalid_element = "hostname";
-            goto FETCH_URL_ERROR;
-        }
-
-        rc = strncpy_s(buffer, LOCAL_STRING_BUFFER_SIZE, url + (ibegin + 1), copylen);
-        securec_check(rc, "", "");
-
-        *hostname = pstrdup(buffer);
-    }
-
-    /* bucket is required to fetch from Object's URL */
-    if (bucket != NULL) {
-        rc = memset_s(buffer, LOCAL_STRING_BUFFER_SIZE, 0, LOCAL_STRING_BUFFER_SIZE);
-        securec_check(rc, "\0", "\0");
-        ibegin = find_Nth(url, 3, "/");
-        iend = find_Nth(url, 4, "/");
-
-        copylen = iend - ibegin - 1;
-
-        /* if bucket name is invalid, goto error message */
-        if (ibegin < 0 || iend < 0 || copylen <= 0) {
-            invalid_element = "bucket";
-            goto FETCH_URL_ERROR;
-        }
-
-        rc = strncpy_s(buffer, LOCAL_STRING_BUFFER_SIZE, url + (ibegin + 1), copylen);
-        securec_check(rc, "", "");
-
-        *bucket = pstrdup(buffer);
-    }
-
-    /* prefix is required to fetch from Object's URL */
-    if (prefix != NULL) {
-        rc = memset_s(buffer, LOCAL_STRING_BUFFER_SIZE, 0, LOCAL_STRING_BUFFER_SIZE);
-        securec_check(rc, "\0", "\0");
-        ibegin = find_Nth(url, 4, "/");
-        /* if prefix is invalid, goto error message */
-        if (ibegin < 0) {
-            invalid_element = "prefix";
-            goto FETCH_URL_ERROR;
-        }
-        copylen = strlen(url) - ibegin;
-
-        rc = strncpy_s(buffer, LOCAL_STRING_BUFFER_SIZE, url + (iend + 1), copylen);
-        securec_check(rc, "", "");
-
-        *prefix = pstrdup(buffer);
-    }
-    return;
-
-FETCH_URL_ERROR:
-    ereport(ERROR,
-            (errcode(ERRCODE_FDW_INVALID_OPTION_DATA), errmsg("OBS URL's %s is not valid '%s'", invalid_element, url)));
-}
-
-/*
- * @Description:  get bucket and prefix from folder name
- * @IN folderName: folder name
- * @OUT bucket: bucket name
- * @OUT prefix: perifx
- * @See also:
- * @Important: use current memory context for bucket and prefix
- */
-void FetchUrlPropertiesForQuery(const char *folderName, char **bucket, char **prefix)
-{
-    Assert(folderName && bucket && prefix);
-    Assert(!(*bucket) && !(*prefix));
-
-    error_t rc = EOK;
-    char *invalid_element = NULL;
-
-    int ibegin = 0;
-    int iend = 0;
-    int bucketLen = 0;
-    int prefixLen = 0;
-
-    if (folderName[0] == '/') {
-        /*  /bucket/prefix  */
-        ibegin = 1;
-        iend = find_Nth(folderName, 2, "/");
-    } else {
-        /*  bucket/prefix  */
-        ibegin = 0;
-        iend = find_Nth(folderName, 1, "/");
-    }
-
-    /* get bucket */
-    bucketLen = iend - ibegin;
-    if (bucketLen <= 0) {
-        invalid_element = "bucket";
-        goto FETCH_URL_ERROR2;
-    }
-
-    *bucket = (char *)palloc0(bucketLen + 1);
-    rc = strncpy_s((*bucket), (bucketLen + 1), (folderName + ibegin), bucketLen);
-    securec_check(rc, "", "");
-
-    /* get prefix */
-    prefixLen = strlen(folderName) - (iend + 1);
-    if (prefixLen < 0) {
-        invalid_element = "prefix";
-        goto FETCH_URL_ERROR2;
-    }
-
-    *prefix = (char *)palloc0(prefixLen + 1);
-    rc = strncpy_s((*prefix), (prefixLen + 1), (folderName + iend + 1), prefixLen);
-    securec_check(rc, "", "");
-
-    return;
-
-FETCH_URL_ERROR2:
-    ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_OPTION_DATA),
-                    errmsg("OBS URL's %s is not valid '%s'", invalid_element, folderName)));
-}
-
 /*
  * @Description: check obs server adress is valid
  * @IN hostName: obs server adress
@@ -1818,8 +1813,23 @@ static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, Arc
     }
 
     /* Fill in obs full file path */
-    rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_obs->archive_prefix, key);
-    securec_check_ss(rc, "\0", "\0");
+    if (strncmp(key, "global_barrier_records", headerLen) != 0) {
+        rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_obs->archive_prefix, key);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        char pathPrefix[MAXPGPATH] = {0};
+        rc = strcpy_s(pathPrefix, MAXPGPATH, archive_obs->archive_prefix);
+        securec_check_ss(rc, "\0", "\0");
+        if (!IS_PGXC_COORDINATOR) {
+            char *p = strrchr(pathPrefix, '/');
+            if (p == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Obs path prefix is invalid")));
+            }
+            *p = '\0';
+        }
+        rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pathPrefix, key);
+        securec_check_ss(rc, "\0", "\0");
+    }
 
     handler->m_object_info.key = pstrdup(xlogfpath);
     handler->m_object_info.version_id = NULL;
@@ -1945,7 +1955,7 @@ void fillObsOption(obs_options *option, ArchiveConfig *obs_config = NULL)
         archive_obs = getArchiveConfig();
     }
 
-    if (archive_obs == NULL) {
+    if (archive_obs == NULL || archive_obs->conn_config == NULL || archive_obs->conn_config->obs_address == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Cannot get obs bucket config from replication slots")));
     }
@@ -2518,9 +2528,23 @@ bool checkOBSFileExist(const char* file_path, ArchiveConfig *obs_config)
         &head_properties_callback,
         &head_complete_callback
     };
-
-    rc = snprintf_s(obsFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", obs_config->archive_prefix, file_path);
-    securec_check_ss(rc, "\0", "\0");
+    if (strncmp(file_path, "global_barrier_records", headerLen) != 0) {
+        rc = snprintf_s(obsFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", obs_config->archive_prefix, file_path);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        char pathPrefix[MAXPGPATH] = {0};
+        rc = strcpy_s(pathPrefix, MAXPGPATH, obs_config->archive_prefix);
+        securec_check_ss(rc, "\0", "\0");
+        if (!IS_PGXC_COORDINATOR) {
+            char *p = strrchr(pathPrefix, '/');
+            if (p == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Obs path prefix is invalid")));
+            }
+            *p = '\0';
+        }
+        rc = snprintf_s(obsFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pathPrefix, file_path);
+        securec_check_ss(rc, "\0", "\0");
+    }
 
     ereport(DEBUG1, (errmsg("[OBS] before ListObjects check OBS file %s exist", obsFilePath)));
 
@@ -2668,3 +2692,4 @@ bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ArchiveConfig 
     pfree_ext(metadataBuffer);
     return true;
 }
+#endif

@@ -161,9 +161,6 @@ static ObjectAddress get_object_address_attribute(
 static ObjectAddress get_object_address_type(ObjectType objtype, List* objname, bool missing_ok);
 static ObjectAddress get_object_address_opcf(ObjectType objtype, List* objname, List* objargs, bool missing_ok);
 static const ObjectPropertyType* get_object_property_data(Oid class_id);
-static ObjectAddress get_object_address_publication_rel(List *objname, List *objargs,
-    Relation *relation, bool missing_ok);
-
 
 /*
  * Translate an object name and arguments (as passed by the parser) to an
@@ -191,19 +188,23 @@ ObjectAddress get_object_address(
     ObjectAddress address;
     ObjectAddress old_address = {InvalidOid, InvalidOid, 0};
     Relation relation = NULL;
-    uint64 inval_count;
+    Relation old_relation = NULL;
     List* objargs_agg = NULL;
 
     /* Some kind of lock must be taken. */
     Assert(lockmode != NoLock);
-
+    uint64 sess_inval_count;
+    uint64 thrd_inval_count = 0;
     for (;;) {
         /*
          * Remember this value, so that, after looking up the object name and
          * locking it, we can check whether any invalidation messages have
          * been processed that might require a do-over.
          */
-        inval_count = u_sess->inval_cxt.SharedInvalidMessageCounter;
+        sess_inval_count = u_sess->inval_cxt.SIMCounter;
+        if (EnableLocalSysCache()) {
+            thrd_inval_count = t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;
+        }
 
         /* Look up object address. */
         switch (objtype) {
@@ -336,8 +337,6 @@ ObjectAddress get_object_address(
             case OBJECT_DIRECTORY:
                 address = get_object_address_unqualified(objtype, objname, missing_ok);
                 break;
-            case OBJECT_PUBLICATION_REL:
-                address = get_object_address_publication_rel(objname, objargs, &relation, missing_ok);
             default:
                 ereport(
                     ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized objtype: %d", (int)objtype)));
@@ -362,9 +361,21 @@ ObjectAddress get_object_address(
          */
         if (OidIsValid(old_address.classId)) {
             if (old_address.classId == address.classId && old_address.objectId == address.objectId &&
-                old_address.objectSubId == address.objectSubId)
-                break;
+                old_address.objectSubId == address.objectSubId) {
+                    if (old_relation != NULL) {
+                        Assert(old_relation == relation);
+                        /* should be 2 */
+                        Assert(old_relation->rd_refcnt > 1);
+                        heap_close(old_relation, NoLock);
+                        old_relation = NULL;
+                    }
+                    break;
+                }
             if (old_address.classId != RelationRelationId) {
+                if (old_relation != NULL) {
+                    heap_close(old_relation, NoLock);
+                    old_relation = NULL;
+                }
                 if (IsSharedRelation(old_address.classId))
                     UnlockSharedObject(old_address.classId, old_address.objectId, 0, lockmode);
                 else
@@ -403,9 +414,18 @@ ObjectAddress get_object_address(
          * up no longer refers to the object we locked, so we retry the lookup
          * and see whether we get the same answer.
          */
-        if (inval_count == u_sess->inval_cxt.SharedInvalidMessageCounter || relation != NULL)
-            break;
+        if (EnableLocalSysCache()) {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter &&
+                thrd_inval_count == t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter) {
+                break;
+            }
+        } else {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter) {
+                break;
+            }
+        }
         old_address = address;
+        old_relation = relation;
     }
 
     /* Return the object address and the relation. */
@@ -768,6 +788,8 @@ static ObjectAddress get_object_address_attribute(
                 (errcode(ERRCODE_UNDEFINED_COLUMN),
                     errmsg("column \"%s\" of relation \"%s\" does not exist", attname, NameListToString(relname))));
 
+        /* close but save lock */
+        heap_close(relation, NoLock);
         address.classId = RelationRelationId;
         address.objectId = InvalidOid;
         address.objectSubId = InvalidAttrNumber;
@@ -825,47 +847,6 @@ static ObjectAddress get_object_address_type(ObjectType objtype, List* objname, 
 #endif
 
     ReleaseSysCache(tup);
-
-    return address;
-}
-
-/*
- * Find the ObjectAddress for a publication relation.  The objname parameter
- * is the relation name; objargs contains the publication name.
- */
-static ObjectAddress get_object_address_publication_rel(List *objname, List *objargs, Relation *relation,
-    bool missing_ok)
-{
-    ObjectAddress address;
-    char *pubname;
-    Publication *pub;
-
-    address.classId = PublicationRelRelationId;
-    address.objectId = InvalidOid;
-    address.objectSubId = InvalidOid;
-
-    *relation = relation_openrv_extended(makeRangeVarFromNameList(objname), AccessShareLock, missing_ok);
-    if (!relation)
-        return address;
-
-    /* fetch publication name from input list */
-    pubname = strVal(linitial(objargs));
-
-    /* Now look up the pg_publication tuple */
-    pub = GetPublicationByName(pubname, missing_ok);
-    if (!pub)
-        return address;
-
-    /* Find the publication relation mapping in syscache. */
-    address.objectId =
-        GetSysCacheOid2(PUBLICATIONRELMAP, ObjectIdGetDatum(RelationGetRelid(*relation)), ObjectIdGetDatum(pub->oid));
-    if (!OidIsValid(address.objectId)) {
-        if (!missing_ok)
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("publication relation \"%s\" in publication \"%s\" does not exist",
-                RelationGetRelationName(*relation), pubname)));
-        return address;
-    }
 
     return address;
 }

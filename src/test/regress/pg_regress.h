@@ -99,7 +99,7 @@ typedef struct tagREGR_REPLACE_PATTERNS_STRU {
 /* To store the values of the regress.conf values */
 extern REGR_CONF_ITEMS_STRU g_stRegrConfItems;
 
-typedef PID_TYPE (*test_function)(const char*, _stringlist**, _stringlist**, _stringlist**);
+typedef PID_TYPE (*test_function)(const char*, _stringlist**, _stringlist**, _stringlist**, bool use_jdbc_client);
 typedef void (*init_function)(void);
 
 typedef PID_TYPE (*diag_function)(char*);
@@ -114,6 +114,7 @@ extern bool debug;
 extern char* inputdir;
 extern char* outputdir;
 extern char* launcher;
+extern char* top_builddir;
 
 /*
  * This should not be global but every module should be able to read command

@@ -37,10 +37,7 @@ bool IsSkipInsertUndo(UndoRecPtr urp);
 bool IsSkipInsertSlot(UndoSlotPtr urp);
 
 /* Check undo record valid.. */
-bool CheckUndoRecordValid(UndoRecPtr urp, bool checkForceRecycle);
-
-/* Check undo record recovery status for ROS */
-UndoRecoveryStatus CheckUndoRecordRecoveryStatus(UndoRecPtr urp);
+UndoRecordState CheckUndoRecordValid(UndoRecPtr urp, bool checkForceRecycle);
 
 void CheckPointUndoSystemMeta(XLogRecPtr checkPointRedo);
 
@@ -65,10 +62,9 @@ void SetUndoMetaLSN(XlogUndoMeta *meta, XLogRecPtr lsn);
 void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startUndoPtr, 
     UndoRecPtr lastRecord, uint32 lastRecordSize);
 void ReleaseSlotBuffer();
-
+void InitUndoCountThreshold();
 UndoRecPtr GetPrevUrp(UndoRecPtr currUrp);
 } // namespace undo
 
 extern void GetUndoFileDirectory(char *path, int len, UndoPersistence upersistence);
-
 #endif // __KNL_UUNDOAPI_H__

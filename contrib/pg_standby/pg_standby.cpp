@@ -125,9 +125,9 @@ struct stat stat_buf;
 
 #define XLOG_DATA_FNAME_LEN 24
 /* Reworked from access/xlog_internal.h */
-#define XLogFileName(fname, tli, logSegNo)            \
+#define XLogFileName(fname, len, tli, logSegNo)            \
     snprintf(fname,                                   \
-        XLOG_DATA_FNAME_LEN + 1,                      \
+        len,                      \
         "%08X%08X%08X",                               \
         tli,                                          \
         (uint32)((logSegNo) / XLogSegmentsPerXLogId), \
@@ -345,7 +345,7 @@ static bool SetWALFileNameForCleanup(void)
         }
     }
 
-    XLogFileName(exclusiveCleanupFileName, tli, (((uint32)log) << 32) | seg);
+    XLogFileName(exclusiveCleanupFileName, MAXFNAMELEN, tli, (((uint32)log) << 32) | seg);
 
     return cleanup;
 }

@@ -108,3 +108,35 @@ SELECT '' AS four, * FROM VARCHAR_TBL;
       | abcd
 (4 rows)
 
+create table tab_1(col1 varchar(3)); 
+create table tab_2(col2 char(3));
+insert into tab_2 values('   ');
+insert into tab_1 select col2 from tab_2;
+select * from tab_1 where col1 is null;
+ col1 
+------
+ 
+(1 row)
+
+select * from tab_1 where col1='   ';
+ col1 
+------
+(0 rows)
+
+delete from tab_1;
+set behavior_compat_options = 'char_coerce_compat';
+insert into tab_1 select col2 from tab_2;
+select * from tab_1 where col1 is null;
+ col1 
+------
+(0 rows)
+
+select * from tab_1 where col1='   ';
+ col1 
+------
+    
+(1 row)
+
+set behavior_compat_options = ''; 
+drop table tab_1;
+drop table tab_2;

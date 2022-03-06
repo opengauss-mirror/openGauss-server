@@ -144,6 +144,9 @@ DROP TRIGGER update_trigger ON test_trigger_src_tbl;
 DROP TRIGGER delete_trigger ON test_trigger_src_tbl;
 DROP TABLE IF EXISTS test_trigger_src_tbl;
 DROP TABLE IF EXISTS test_trigger_des_tbl;
+DROP FUNCTION tri_delete_func;
+DROP FUNCTION tri_insert_func;
+DROP FUNCTION tri_update_func;
 
 DROP COLUMN ENCRYPTION KEY triggerCEK1;
 DROP COLUMN ENCRYPTION KEY triggerCEK2;

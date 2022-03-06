@@ -22,7 +22,7 @@ BEGIN
 END; $$
 LANGUAGE plpgsql;
 
-\df
+\df f_processed_in_plpgsql
 
 DROP FUNCTION f_processed_in_plpgsql();
 DROP TABLE accounts;

@@ -22,6 +22,7 @@
 #include "utils/snapshot.h"
 #include "utils/timestamp.h"
 #include "access/ustore/knl_utuple.h"
+#include "lib/binaryheap.h"
 
 /* an individual tuple, stored in one chunk of memory */
 typedef struct ReorderBufferTupleBuf {
@@ -32,7 +33,8 @@ typedef struct ReorderBufferTupleBuf {
     HeapTupleData tuple;
     /* pre-allocated size of tuple buffer, different from tuple size */
     Size alloc_tuple_size;
-
+    /* auxiliary pointer for caching freed tuples */
+    ReorderBufferTupleBuf* freeNext;
     /* actual tuple data follows */
 } ReorderBufferTupleBuf;
 /* pointer to the data stored in a TupleBuf */
@@ -46,7 +48,8 @@ typedef struct ReorderBufferUTupleBuf {
     UHeapTupleData tuple;
     /* pre-allocated size of tuple buffer, different from tuple size */
     Size alloc_tuple_size;
-
+    /* auxiliary pointer for caching freed tuples */
+    ReorderBufferUTupleBuf* freeNext;
     /* actual tuple data follows */
 } ReorderBufferUTupleBuf;
 #define ReorderBufferUTupleBufData(p) ((UHeapDiskTuple)MAXALIGN(((char*)p) + sizeof(ReorderBufferUTupleBuf)))
@@ -102,6 +105,7 @@ typedef struct ReorderBufferChange {
             ReorderBufferTupleBuf* oldtuple;
             /* valid for INSERT || UPDATE */
             ReorderBufferTupleBuf* newtuple;
+            CommitSeqNo snapshotcsn;
         } tp;
 
         /* Old, new utuples when action == UHEAP_INSERT|UPDATE|DELETE */
@@ -115,6 +119,7 @@ typedef struct ReorderBufferChange {
             ReorderBufferUTupleBuf* oldtuple;
             /* valid for INSERT || UPDATE */
             ReorderBufferUTupleBuf* newtuple;
+            CommitSeqNo snapshotcsn;
         } utp;
 
         /* New snapshot, set when action == *_INTERNAL_SNAPSHOT */
@@ -299,6 +304,13 @@ typedef void (*ReorderBufferBeginCB)(ReorderBuffer* rb, ReorderBufferTXN* txn);
 /* commit callback signature */
 typedef void (*ReorderBufferCommitCB)(ReorderBuffer* rb, ReorderBufferTXN* txn, XLogRecPtr commit_lsn);
 
+/* abort callback signature */
+typedef void (*ReorderBufferAbortCB)(ReorderBuffer* rb, ReorderBufferTXN* txn);
+
+/* prepare callback signature */
+typedef void (*ReorderBufferPrepareCB)(ReorderBuffer* rb, ReorderBufferTXN* txn);
+
+
 struct ReorderBuffer {
     /*
      * xid => ReorderBufferTXN lookup table
@@ -333,6 +345,8 @@ struct ReorderBuffer {
     ReorderBufferBeginCB begin;
     ReorderBufferApplyChangeCB apply_change;
     ReorderBufferCommitCB commit;
+    ReorderBufferAbortCB abort;
+    ReorderBufferPrepareCB prepare;
 
     /*
      * Pointer that will be passed untouched to the callbacks.
@@ -365,6 +379,7 @@ struct ReorderBuffer {
     /* cached ReorderBufferTupleBufs */
     slist_head cached_tuplebufs;
     Size nr_cached_tuplebufs;
+    TransactionId lastRunningXactOldestXmin;
 
     XLogRecPtr current_restart_decoding_lsn;
 
@@ -372,6 +387,60 @@ struct ReorderBuffer {
     char* outbuf;
     Size outbufsize;
 };
+
+/* entry for a hash table we use to map from xid to our transaction state */
+typedef struct ReorderBufferTXNByIdEnt {
+    TransactionId xid;
+    ReorderBufferTXN *txn;
+} ReorderBufferTXNByIdEnt;
+
+/* data structures for (relfilenode, ctid) => (cmin, cmax) mapping */
+typedef struct ReorderBufferTupleCidKey {
+    RelFileNode relnode;
+    ItemPointerData tid;
+} ReorderBufferTupleCidKey;
+
+typedef struct ReorderBufferTupleCidEnt {
+    ReorderBufferTupleCidKey key;
+    CommandId cmin;
+    CommandId cmax;
+    CommandId combocid; /* just for debugging */
+} ReorderBufferTupleCidEnt;
+
+/* k-way in-order change iteration support structures */
+typedef struct ReorderBufferIterTXNEntry {
+    XLogRecPtr lsn;
+    ReorderBufferChange *change;
+    ReorderBufferTXN *txn;
+    int fd;
+    XLogSegNo segno;
+} ReorderBufferIterTXNEntry;
+
+typedef struct ReorderBufferIterTXNState {
+    binaryheap *heap;
+    Size nr_txns;
+    dlist_head old_change;
+    ReorderBufferIterTXNEntry entries[FLEXIBLE_ARRAY_MEMBER];
+} ReorderBufferIterTXNState;
+
+/* toast datastructures */
+typedef struct ReorderBufferToastEnt {
+    Oid chunk_id;                  /* toast_table.chunk_id */
+    int32 last_chunk_seq;          /* toast_table.chunk_seq of the last chunk we
+                           * have seen */
+    Size num_chunks;               /* number of chunks we've already seen */
+    Size size;                     /* combined size of chunks seen */
+    dlist_head chunks;             /* linked list of chunks */
+    struct varlena *reconstructed; /* reconstructed varlena now pointed
+                                    * to in main tup */
+} ReorderBufferToastEnt;
+
+/* Disk serialization support datastructures */
+typedef struct ReorderBufferDiskChange {
+    Size size;
+    ReorderBufferChange change;
+    /* data follows */
+} ReorderBufferDiskChange;
 
 ReorderBuffer* ReorderBufferAllocate(void);
 void ReorderBufferFree(ReorderBuffer*);

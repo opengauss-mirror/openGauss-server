@@ -36,6 +36,38 @@ ERROR:  value too long for type character varying(100)
 CONTEXT:  PL/pgSQL function f_processed_in_plpgsql(byteawithoutorderwithequalcol,byteawithoutorderwithequalcol) line 5 at SQL statement
 DROP FUNCTION f_processed_in_plpgsql();
 DROP TABLE accounts;
+CREATE TABLE creditcard_info1 (id_number int,name text, credit_card varchar(19));
+CREATE TABLE creditcard_info2 (id_number int,name text encrypted with (column_encryption_key = ret_cek3, encryption_type = DETERMINISTIC),credit_card varchar(19) encrypted with (column_encryption_key = ret_cek3, encryption_type = DETERMINISTIC));
+CREATE or replace FUNCTION exec_insert1() RETURNS void AS $$
+   insert into creditcard_info1 values(1,2,3);
+   select credit_card from creditcard_info1;
+    $$ LANGUAGE SQL;
+ERROR:  return type mismatch in function declared to return void
+DETAIL:  Actual return type is character varying.
+CONTEXT:  SQL function "exec_insert1"
+CREATE or replace FUNCTION exec_insert2() RETURNS void AS $$
+   insert into creditcard_info2 values(1,2,3);
+   select credit_card from creditcard_info2;
+    $$ LANGUAGE SQL;
+ERROR:  return type mismatch in function declared to return void
+DETAIL:  Actual return type is character varying.
+CONTEXT:  SQL function "exec_insert2"
+CREATE or replace FUNCTION exec_insert1() RETURNS int AS $$
+   insert into creditcard_info1 values(1,2,3);
+   select credit_card from creditcard_info1;
+    $$ LANGUAGE SQL;
+ERROR:  return type mismatch in function declared to return integer
+DETAIL:  Actual return type is character varying.
+CONTEXT:  SQL function "exec_insert1"
+CREATE or replace FUNCTION exec_insert2() RETURNS int AS $$
+   insert into creditcard_info2 values(1,2,3);
+   select credit_card from creditcard_info2;
+    $$ LANGUAGE SQL;
+ERROR:  return type mismatch in function declared to return integer
+DETAIL:  Actual return type is character varying.
+CONTEXT:  SQL function "exec_insert2"
+DROP TABLE creditcard_info1;
+DROP TABLE creditcard_info2;
 DROP COLUMN ENCRYPTION KEY ret_cek3;
 DROP CLIENT MASTER KEY ret_cmk3;
 \! gs_ktool -d all

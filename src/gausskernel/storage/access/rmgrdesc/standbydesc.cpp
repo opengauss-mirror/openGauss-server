@@ -18,6 +18,28 @@
 
 #include "storage/standby.h"
 
+const char* standby_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_STANDBY_LOCK) {
+        return "standby_lock";
+    } else if (info == XLOG_RUNNING_XACTS) {
+        return "running_xact";
+    } else if (info == XLOG_STANDBY_CSN) {
+        return "standby_csn";
+    } else if (info == XLOG_STANDBY_UNLOCK) {
+        return "standby_unlock";
+#ifndef ENABLE_MULTIPLE_NODES
+    } else if (info == XLOG_STANDBY_CSN_COMMITTING) {
+        return "standby_csn_committing";
+    } else if (info == XLOG_STANDBY_CSN_ABORTED) {
+        return "standby_csn_abort";
+#endif
+    } else {
+        return "unkown_type";
+    }
+}
+
 void standby_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
@@ -45,14 +67,14 @@ void standby_desc(StringInfo buf, XLogReaderState *record)
             appendStringInfo(buf, " xid " XID_FMT " db %u rel %u", xlrec->locks[i].xid, xlrec->locks[i].dbOid,
                              xlrec->locks[i].relOid);
         }
-#ifndef ENABLE_MULTIPLE_NODES
+
     } else if (info == XLOG_STANDBY_CSN_COMMITTING) {
         uint64* id = ((uint64 *)XLogRecGetData(record));
         appendStringInfo(buf, " XLOG_STANDBY_CSN_COMMITTING, xid %lu, csn %lu", id[0], id[1]);
     } else if (info == XLOG_STANDBY_CSN_ABORTED) {
         uint64* id = ((uint64 *)XLogRecGetData(record));
         appendStringInfo(buf, " XLOG_STANDBY_CSN_ABORTED, xid %lu", id[0]);
-#endif
+
     } else
         appendStringInfo(buf, "UNKNOWN");
 }

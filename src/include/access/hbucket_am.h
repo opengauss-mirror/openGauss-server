@@ -47,9 +47,13 @@ typedef struct RedisMergeItemOrderArray {
 }RedisMergeItemOrderArray;
 
 extern RedisMergeItem *hbkt_get_one_merge_item(char *merge_list, int merge_list_length, int2 bucketid);
-
+#ifdef ENABLE_MULTIPLE_NODES
 extern TableScanDesc GetTableScanDesc(TableScanDesc scan, Relation rel);
 extern IndexScanDesc GetIndexScanDesc(IndexScanDesc scan);
+#else
+#define GetTableScanDesc(scan, rel)   (scan)
+#define GetIndexScanDesc(scan)        (scan)
+#endif
 extern oidvector* hbkt_load_buckets(Relation relation, BucketInfo* bkt_info);
 
 extern RedisMergeItemOrderArray *hbkt_get_all_merge_item(char* merge_list, int merge_list_length);

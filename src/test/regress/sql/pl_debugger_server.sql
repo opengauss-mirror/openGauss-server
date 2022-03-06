@@ -278,6 +278,25 @@ select * from turn_on_debugger('test_debug_recursive');
 
 select * from test_debug_recursive (1, 1);
 
+--test empty procedure
+CREATE OR REPLACE PROCEDURE test_empty(i int,j out int)
+AS
+DECLARE
+begin
+
+end;
+/
+
+truncate debug_info;
+
+select * from turn_on_debugger('test_empty');
+
+select * from dbe_pldebugger.local_debug_server_info();
+
+select * from debug_info;
+
+call test_empty(1, '');
+
 -- test set_var
 CREATE OR REPLACE PROCEDURE test_setvar(x int) AS
 DECLARE

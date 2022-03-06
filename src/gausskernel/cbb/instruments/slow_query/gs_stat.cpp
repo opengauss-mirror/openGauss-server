@@ -170,6 +170,25 @@ void gs_stat_get_timeout_beentry(int timeout_threshold, Tuplestorestate* tupStor
     }
 }
 
+/*
+ * Free PgBackendStatusNode and its underlying palloc-ed data structures, include st_appname, st_clienthostname
+ * st_conninfo and st_activity. We just have palloced these four variables in function 'gs_stat_encap_status_info'.
+ */
+void FreeBackendStatusNodeMemory(PgBackendStatusNode* node)
+{
+    while (node != NULL) {
+        if (node->data != NULL) {
+            pfree_ext(node->data->st_appname);
+            pfree_ext(node->data->st_clienthostname);
+            pfree_ext(node->data->st_conninfo);
+            pfree_ext(node->data->st_activity);
+        }
+        pfree_ext(node->data);
+        PgBackendStatusNode* tempNode = node;
+        node = node->next;
+        pfree_ext(tempNode);
+    }
+}
 
 bool gs_stat_encap_status_info(PgBackendStatus* localentry, PgBackendStatus* beentry)
 {
@@ -211,6 +230,7 @@ bool gs_stat_encap_status_info(PgBackendStatus* localentry, PgBackendStatus* bee
             securec_check(rc, "", "");
             localentry->st_block_sessionid = beentry->st_block_sessionid;
             localentry->globalSessionId = beentry->globalSessionId;
+            localentry->st_unique_sql_key = beentry->st_unique_sql_key;
         }
 
         pgstat_save_changecount_after(beentry, after_changecount);

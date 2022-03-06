@@ -70,31 +70,6 @@ static bool run_procedure_job(Datum job_name, StringInfoData *buf);
 static char *run_external_job(Datum job_name);
 
 /*
- * @brief delete by sysscan
- *  Perform a simple heap delete.
- * @param rel               Target relation
- * @param object_name       Delete by key
- * @param attribute_number  Attribute number
- */
-static void delete_by_sysscan(Relation rel, const Datum object_name, AttrNumber attribute_number)
-{
-    ScanKeyInfo scan_key_info;
-    scan_key_info.attribute_value = object_name;
-    scan_key_info.attribute_number = attribute_number;
-    scan_key_info.procedure = F_TEXTEQ;
-    List *tuples = search_by_sysscan_1(rel, &scan_key_info);
-    if (tuples == NULL) {
-        return;
-    }
-    ListCell *lc = NULL;
-    foreach (lc, tuples) {
-        HeapTuple tuple = (HeapTuple)lfirst(lc);
-        simple_heap_delete(rel, &tuple->t_self);
-    }
-    list_free_deep(tuples);
-}
-
-/*
  * @brief delete_by_syscache
  *  Perform a simple heap delete by searching syscache.
  * @param rel           Target relation
@@ -108,7 +83,7 @@ static void delete_by_syscache(Relation rel, const Datum object_name, SysCacheId
         return;
     }
     for (int i = 0; i < tuples->n_members; i++) {
-        HeapTuple tuple = &(tuples->members[i]->tuple);
+        HeapTuple tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(tuples, i);
         simple_heap_delete(rel, &tuple->t_self);
     }
     ReleaseSysCacheList(tuples);
@@ -146,7 +121,10 @@ void delete_from_argument(const Datum object_name)
 void delete_from_job(const Datum job_name)
 {
     Relation rel = heap_open(PgJobRelationId, RowExclusiveLock);
-    delete_by_sysscan(rel, job_name, Anum_pg_job_job_name);
+    HeapTuple tuple = search_from_pg_job(rel, job_name);
+    if (tuple != NULL) {
+        simple_heap_delete(rel, &tuple->t_self);
+    }
     heap_close(rel, NoLock);
 }
 
@@ -155,42 +133,41 @@ void delete_from_job(const Datum job_name)
  *  Delete from pg_job_proc.
  * @param job_name
  */
-void delete_from_job_proc(const Datum object_name)
+void delete_from_job_proc(const Datum job_name)
 {
     Relation rel = heap_open(PgJobProcRelationId, RowExclusiveLock);
-    delete_by_sysscan(rel, object_name, Anum_pg_job_proc_job_name);
+    HeapTuple tuple = search_from_pg_job_proc_no_exception(rel, job_name);
+    if (tuple != NULL) {
+        simple_heap_delete(rel, &tuple->t_self);
+    }
     heap_close(rel, NoLock);
 }
 
-/*
- * @brief search_from_pg_job
- *  Search from pg_job.
- * @param pg_job_rel    pg_job relation
- * @param job_name
- * @return HeapTuple    result
- */
 HeapTuple search_from_pg_job(Relation pg_job_rel, Datum job_name)
 {
-    ScanKeyInfo scan_key_info;
-    scan_key_info.attribute_value = job_name;
-    scan_key_info.attribute_number = Anum_pg_job_job_name;
-    scan_key_info.procedure = F_TEXTEQ;
-    List *tuples = search_by_sysscan_1(pg_job_rel, &scan_key_info);
+    ScanKeyInfo scan_key_info1;
+    scan_key_info1.attribute_value = job_name;
+    scan_key_info1.attribute_number = Anum_pg_job_job_name;
+    scan_key_info1.procedure = F_TEXTEQ;
+    ScanKeyInfo scan_key_info2;
+    scan_key_info2.attribute_value = PointerGetDatum(u_sess->proc_cxt.MyProcPort->database_name);
+    scan_key_info2.attribute_number = Anum_pg_job_dbname;
+    scan_key_info2.procedure = F_NAMEEQ;
+    
+    List *tuples = search_by_sysscan_2(pg_job_rel, &scan_key_info1, &scan_key_info2);
     if (tuples == NIL) {
         return NULL;
     }
     Assert(list_length(tuples) == 1);
-    HeapTuple oldtuple = NULL;
-    if (list_length(tuples) == 1) {
-        oldtuple = (HeapTuple)linitial(tuples);
-    } else {
+    if (list_length(tuples) != 1) {
         ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_UNDEFINED_OBJECT),
-                        errmsg("find %d tuples match job_name %s in system table pg_job.", list_length(tuples),
-                               TextDatumGetCString(job_name)),
-                        errdetail("N/A"), errcause("job name is not exist"), erraction("Please check job_name")));
+                    errmsg("find %d tuples match job_name %s in system table pg_job.", list_length(tuples),
+                        TextDatumGetCString(job_name)),
+                    errdetail("N/A"), errcause("job name is not exist"), erraction("Please check job_name")));
     }
-    list_free(tuples);
-    return oldtuple;
+    HeapTuple tuple = (HeapTuple)linitial(tuples);
+    list_free_ext(tuples);
+    return tuple;
 }
 
 /*
@@ -1178,6 +1155,9 @@ static bool run_procedure_job(Datum job_name, StringInfoData *buf)
     appendStringInfoString(buf, job_target->job_proc_value->action_str);
     appendStringInfoString(buf, "(");
     for (int i = 0; i < job_target->job_attribute_value->number_of_arguments; i++) {
+        if (i > 0) {
+            appendStringInfoString(buf, ", ");
+        }
         appendStringInfoString(buf, "'");
         appendStringInfoString(buf, job_target->arguments[i].argument_value);
         appendStringInfoString(buf, "'::");

@@ -66,6 +66,7 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/rbtree.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "access/heapam.h"
@@ -128,6 +129,8 @@ static void DropEmptyPartitionDirectories(Oid relid);
 /* A few variables that don't seem worth passing around as parameters */
 static THR_LOCAL BufferAccessStrategy vac_strategy;
 static THR_LOCAL int elevel = -1;
+
+static void UstoreVacuumGPIPartition(Oid relid, Relation rel);
 
 static void vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti);
 static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast);
@@ -567,6 +570,69 @@ static List *GetVacuumObjectOfSubpartitionTable(const Oid relId)
     return result;
 }
 
+static vacuum_object *GetVacuumObjectOfSubpartition(VacuumStmt* vacstmt, Oid relationid)
+{
+    Assert(PointerIsValid(vacstmt->relation->subpartitionname));
+
+    /*
+    * for dfs table, there is no partition table now so just return
+    * for dfs special vacuum.
+    */
+    if (hdfsVcuumAction(vacstmt->options)) {
+        return NULL;
+    }
+
+    Oid partitionid = InvalidOid;
+    Oid subpartitionid = InvalidOid;
+    Form_pg_partition subpartitionForm;
+    HeapTuple subpartitionTup;
+    MemoryContext oldcontext = NULL;
+    vacuum_object* vacObj = NULL;
+
+    subpartitionid = partitionNameGetPartitionOid(relationid,
+        vacstmt->relation->subpartitionname,
+        PART_OBJ_TYPE_TABLE_SUB_PARTITION,
+        AccessShareLock,
+        true,
+        false,
+        NULL,
+        NULL,
+        NoLock,
+        &partitionid);
+    if (!OidIsValid(subpartitionid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("subpartition \"%s\" of relation \"%s\" does not exist",
+                    vacstmt->relation->subpartitionname,
+                    vacstmt->relation->relname)));
+    }
+
+    subpartitionTup = SearchSysCache1WithLogLevel(PARTRELID, ObjectIdGetDatum(subpartitionid), LOG);
+    if (!HeapTupleIsValid(subpartitionTup)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for subpartition %u", subpartitionid)));
+    }
+    subpartitionForm = (Form_pg_partition)GETSTRUCT(subpartitionTup);
+    Assert(subpartitionForm->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+
+    if (t_thrd.vacuum_cxt.vac_context) {
+        oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
+    }
+
+    vacObj = (vacuum_object *)palloc0(sizeof(vacuum_object));
+    vacObj->tab_oid = subpartitionid;
+    vacObj->parent_oid = partitionid;
+    vacObj->flags = VACFLG_SUB_PARTITION;
+
+    if (t_thrd.vacuum_cxt.vac_context) {
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    ReleaseSysCache(subpartitionTup);
+    return vacObj;
+}
+
 /*
  * Build a list of Oids for each relation to be processed
  *
@@ -758,8 +824,14 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
             }
 
             ReleaseSysCache(partitionTup);
+        } else if (PointerIsValid(vacstmt->relation->subpartitionname)) {
+            /* 2. a subpartition */
+            vacObj = GetVacuumObjectOfSubpartition(vacstmt, relationid);
+            if (PointerIsValid(vacObj)) {
+                oid_list = lappend(oid_list, vacObj);
+            }
         } else {
-            /* 2.a relation */
+            /* 3.a relation */
             classTup = SearchSysCache1WithLogLevel(RELOID, ObjectIdGetDatum(relationid), LOG);
 
             if (HeapTupleIsValid(classTup)) {
@@ -1034,6 +1106,12 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
      * always an independent transaction.
      */
     *oldestXmin = GetOldestXmin(rel);
+    if (IsCatalogRelation(rel) || RelationIsAccessibleInLogicalDecoding(rel)) {
+        TransactionId CatalogXmin = GetReplicationSlotCatalogXmin();
+        if (TransactionIdIsNormal(CatalogXmin) && TransactionIdPrecedes(CatalogXmin, *oldestXmin)) {
+            *oldestXmin = CatalogXmin;
+        }
+    }
 
     Assert(TransactionIdIsNormal(*oldestXmin));
 
@@ -1053,8 +1131,8 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
      * Compute the cutoff XID, being careful not to generate a "permanent" XID
      */
     limit = *oldestXmin;
-    if (limit > FirstNormalTransactionId + freezemin)
-        limit -= freezemin;
+    if (limit > FirstNormalTransactionId + (uint64)freezemin)
+        limit -= (uint64)freezemin;
     else
         limit = FirstNormalTransactionId;
 
@@ -1064,8 +1142,8 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
      * freeze age of zero.
      */
     nextXid = ReadNewTransactionId();
-    if (nextXid > FirstNormalTransactionId + g_instance.attr.attr_storage.autovacuum_freeze_max_age)
-        safeLimit = nextXid - g_instance.attr.attr_storage.autovacuum_freeze_max_age;
+    if (nextXid > FirstNormalTransactionId + (uint64)g_instance.attr.attr_storage.autovacuum_freeze_max_age)
+        safeLimit = nextXid - (uint64)g_instance.attr.attr_storage.autovacuum_freeze_max_age;
     else
         safeLimit = FirstNormalTransactionId;
 
@@ -1101,8 +1179,8 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
          * XID.
          */
         limit = ReadNewTransactionId();
-        if (limit > FirstNormalTransactionId + freezetable)
-            limit -= freezetable;
+        if (limit > FirstNormalTransactionId + (uint64)freezetable)
+            limit -= (uint64)freezetable;
         else
             limit = FirstNormalTransactionId;
 
@@ -1118,8 +1196,8 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
          * for Xids
          */
         mxLimit = GetOldestMultiXactId();
-        if (mxLimit > FirstMultiXactId + freezemin)
-            mxLimit -= freezemin;
+        if (mxLimit > FirstMultiXactId + (uint64)freezemin)
+            mxLimit -= (uint64)freezemin;
         else
             mxLimit = FirstMultiXactId;
 
@@ -2207,6 +2285,12 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     }
 
     if (!onerel) {
+        if (onesubpart != NULL) {
+            partitionClose(onesubpartrel, onesubpart, lmode);
+        }
+        if (onesubpartrel != NULL) {
+            releaseDummyRelation(&onesubpartrel);
+        }
         if (onepart != NULL)
             partitionClose(onepartrel, onepart, lmode);
         if (onepartrel != NULL)
@@ -2351,12 +2435,14 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * get_rel_oids() but seems safer to check after we've locked the
      * relation.
      */
+
+    bool isUstoreGPI = RelationIsUstoreIndex(onerel) && RelationIsGlobalIndex(onerel);
     if (onerel->rd_rel->relkind != RELKIND_RELATION &&
 #ifdef ENABLE_MOT
         !(RelationIsForeignTable(onerel) && isMOTFromTblOid(onerel->rd_id)) &&
 #endif
         onerel->rd_rel->relkind != RELKIND_MATVIEW &&
-        onerel->rd_rel->relkind != RELKIND_TOASTVALUE) {
+        onerel->rd_rel->relkind != RELKIND_TOASTVALUE && !isUstoreGPI) {
 
         if (vacstmt->options & VACOPT_VERBOSE)
             messageLevel = VERBOSEMESSAGE;
@@ -2674,7 +2760,11 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             pgstat_report_vacuum(relid, InvalidOid, false, 0);
         } else {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
-            TableRelationVacuum(onerel, vacstmt, vac_strategy);
+            if (isUstoreGPI) {
+                UstoreVacuumGPIPartition(relid, onerel);
+            } else {
+                TableRelationVacuum(onerel, vacstmt, vac_strategy);
+            }
         }
     }
     (void)pgstat_report_waitstatus(oldStatus);
@@ -2754,9 +2844,9 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     if (isFakeRelation) {
         Assert(onerelid.relId == relid && OidIsValid(relationid));
         if (OidIsValid(subparentid)) {
-            UnLockPartitionVacuumForSession(&partIdtf, relationid, subparentid, lmode);
-
             UnLockPartitionVacuumForSession(&subpartIdtf, subparentid, relid, lmode);
+
+            UnLockPartitionVacuumForSession(&partIdtf, relationid, subparentid, lmode);
 
             UnlockRelationIdForSession(&partLockRelId, lmodePartTable);
         } else {
@@ -3737,8 +3827,9 @@ static List* get_tables_to_merge()
             appendStringInfo(info->schemaname, "%s", schema_name);
             pfree_ext(schema_name);
 
-            make_real_queries(info);
-
+            if (info->is_hdfs) {
+                make_real_queries(info);
+            }
             infos = lappend(infos, info);
 
             ereport(DEBUG1,
@@ -4254,6 +4345,7 @@ static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult **stat
     ivinfo.message_level = elevel;
     ivinfo.num_heap_tuples = indrel->rd_rel->reltuples;
     ivinfo.strategy = vac_strategy;
+    ivinfo.invisibleParts = NULL;
 
     VacStates* pvacStates = (VacStates*)palloc0(sizeof(VacStates));
     pvacStates->invisiblePartOids = invisibleParts;
@@ -4311,6 +4403,102 @@ static void GPIOpenGlobalIndexes(Relation onerel, LOCKMODE lockmode, int* nindex
     *nindexes = i;
 
     list_free(globIndOidList);
+}
+
+
+static void UstoreVacuumGPIPartition(Oid relid, Relation rel)
+{
+    ScanKeyData skey[2];
+    /* Open pg_index to find out the relation owning current GPI. */
+    Relation pgIndex = heap_open(IndexRelationId, AccessShareLock);
+    ScanKeyInit(&skey[0], Anum_pg_index_indexrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
+    SysScanDesc scanIndexes = systable_beginscan(pgIndex, IndexRelidIndexId, true, NULL, 1, skey);
+    HeapTuple indexTuple = systable_getnext(scanIndexes);
+    if (!HeapTupleIsValid(indexTuple)) {
+        systable_endscan(scanIndexes);
+        heap_close(pgIndex, NoLock);
+        return;
+    }
+    /* Get the Oid of relation. */
+    Form_pg_index indexTupleForm = (Form_pg_index)GETSTRUCT(indexTuple);
+    Oid indexOfRelOid = indexTupleForm->indrelid;
+    systable_endscan(scanIndexes);
+    heap_close(pgIndex, NoLock);
+    /* Here we first get the main partition of the relation, and then check its
+     * wait_cleanup_gpi flag is 'y' or 'n':
+     * 1. If wait_cleanup_gpi=y, which means we need to vacuum the GPI.
+     * 2. If wait_cleanup_gpi=n, which means we do not need to vacuum the GPI.
+     */
+    Relation pgPartition = heap_open(PartitionRelationId, RowExclusiveLock);
+    ScanKeyInit(&skey[0], Anum_pg_partition_parttype, BTEqualStrategyNumber,
+        F_CHAREQ, CharGetDatum(PART_OBJ_TYPE_PARTED_TABLE));
+    ScanKeyInit(&skey[1], Anum_pg_partition_parentid, BTEqualStrategyNumber,
+        F_OIDEQ, ObjectIdGetDatum(indexOfRelOid));
+    SysScanDesc scanParts = systable_beginscan(pgPartition, PartitionParentOidIndexId,
+        true, NULL, 2, skey);
+    HeapTuple partTuple = systable_getnext(scanParts);
+    if (!HeapTupleIsValid(partTuple)) {
+        systable_endscan(scanParts);
+        heap_close(pgPartition, NoLock);
+        return;
+    }
+    Form_pg_partition partTupleForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    partTuple = SearchSysCache3(PARTPARTOID, PointerGetDatum(partTupleForm->relname.data),
+        CharGetDatum(PART_OBJ_TYPE_PARTED_TABLE), ObjectIdGetDatum(indexOfRelOid));
+    systable_endscan(scanParts);
+    if (!HeapTupleIsValid(partTuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("cache lookup failed for partition %u", indexOfRelOid)));
+    }
+    /* Use PartitionInvisibleMetadataKeep to judge the wait_cleanup_gpi flag. */
+    bool isNull = false;
+    Datum partOptions = fastgetattr(partTuple, Anum_pg_partition_reloptions,
+        RelationGetDescr(pgPartition), &isNull);
+    if (isNull || !PartitionInvisibleMetadataKeep(partOptions)) {
+        ReleaseSysCache(partTuple);
+        heap_close(pgPartition, NoLock);
+        return;
+    }
+    /* Find out the invisible parts of the relation. */
+    OidRBTree *invisibleParts = CreateOidRBTree();
+    if (ConditionalLockPartition(indexOfRelOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+        PartitionGetAllInvisibleParts(indexOfRelOid, &invisibleParts);
+        UnlockPartition(indexOfRelOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    }
+    /* In rbtree, rb_leftmost will return NULL if rbtree is empty. */
+    if (rb_leftmost(invisibleParts) == NULL) {
+        DestroyOidRBTree(&invisibleParts);
+        ReleaseSysCache(partTuple);
+        heap_close(pgPartition, NoLock);
+        return;
+    }
+    /* Start the cleanup process and collect the info needed */
+    IndexVacuumInfo ivinfo;
+    ivinfo.index = rel;
+    ivinfo.analyze_only = false;
+    ivinfo.estimated_count = false;
+    ivinfo.message_level = elevel;
+    ivinfo.num_heap_tuples = -1;
+    ivinfo.strategy = vac_strategy;
+    ivinfo.invisibleParts = invisibleParts;
+    /* Cleanup process of index */
+    index_vacuum_cleanup(&ivinfo, NULL);
+    OidRBTree *cleanedParts = CreateOidRBTree();
+    OidRBTreeUnionOids(cleanedParts, invisibleParts);
+    if (ConditionalLockPartition(indexOfRelOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK)) {
+        PartitionSetEnabledClean(indexOfRelOid, cleanedParts, invisibleParts, true);
+        UnlockPartition(indexOfRelOid, ADD_PARTITION_ACTION, AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    } else {
+        /* Updates reloptions of cleanedParts in pg_partition after GPI vacuum is executed */
+        PartitionSetEnabledClean(indexOfRelOid, cleanedParts, invisibleParts, false);
+    }
+    DestroyOidRBTree(&invisibleParts);
+    DestroyOidRBTree(&cleanedParts);
+    /* Set wait_cleanup_gpi=n after we finish the vacuum cleanup. */
+    UpdateWaitCleanGpiRelOptions(pgPartition, partTuple, false, true);
+    ReleaseSysCache(partTuple);
+    heap_close(pgPartition, NoLock);
 }
 
 // vacuum main partition table to delete invisible tuple in global partition index

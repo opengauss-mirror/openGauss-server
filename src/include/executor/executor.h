@@ -276,7 +276,10 @@ extern TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDon
 extern TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd accessMtd, ExecScanRecheckMtd recheckMtd);
 extern void ExecAssignScanProjectionInfo(ScanState* node);
 extern void ExecScanReScan(ScanState* node);
-extern HTAB* ExecEvalParamExternTableOfIndex(ExprState* exprstate, ExprContext* econtext, Oid* tableOfIndexType, bool *isnestedtable);
+extern void initExecTableOfIndexInfo(ExecTableOfIndexInfo* execTableOfIndexInfo, ExprContext* econtext);
+extern bool ExecEvalParamExternTableOfIndexById(ExecTableOfIndexInfo* execTableOfIndexInfo);
+extern void ExecEvalParamExternTableOfIndex(Node* node, ExecTableOfIndexInfo* execTableOfIndexInfo);
+extern bool is_external_clob(Oid type_oid, bool is_null, Datum value);
 
 /*
  * prototypes from functions in execTuples.c
@@ -331,7 +334,7 @@ extern void end_tup_output(TupOutputState* tstate);
 /*
  * prototypes from functions in execUtils.c
  */
-extern EState* CreateExecutorState(void);
+extern EState* CreateExecutorState(MemoryContext saveCxt = NULL);
 extern void FreeExecutorState(EState* estate);
 extern ExprContext* CreateExprContext(EState* estate);
 extern ExprContext* CreateStandaloneExprContext(void);
@@ -420,6 +423,13 @@ extern bool tlist_matches_tupdesc(PlanState* ps, List* tlist, Index varno, Tuple
 extern int PthreadMutexLock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace = true);
 extern int PthreadMutexTryLock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace = true);
 extern int PthreadMutexUnlock(ResourceOwner owner, pthread_mutex_t* mutex, bool trace = true);
+
+extern int PthreadRWlockTryRdlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
+extern void PthreadRWlockRdlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
+extern int PthreadRWlockTryWrlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
+extern void PthreadRWlockWrlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
+extern void PthreadRWlockUnlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
+extern void PthreadRwLockInit(pthread_rwlock_t* rwlock, pthread_rwlockattr_t *attr);
 
 extern bool executorEarlyStop();
 extern void ExecEarlyFree(PlanState* node);

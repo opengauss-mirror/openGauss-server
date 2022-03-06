@@ -24,6 +24,7 @@
 #include "utils/postinit.h"
 #include "utils/snapmgr.h"
 #include "commands/dbcommands.h"
+#include "pgstat.h"
 
 extern void StreamSaveTxnContext(StreamTxnContext* stc);
 extern void StreamRestoreTxnContext(StreamTxnContext* stc);
@@ -259,6 +260,9 @@ void BackgroundWorkerMain(void)
 
         /* Report the error to the parallel leader and the server log */
         EmitErrorReport();
+
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
         /*
          * These operations are really just a minimal subset of
          * AbortTransaction().  We don't have very many resources to worry
@@ -366,13 +370,19 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc)
     bgw->disable_count = 0;
 
     /* Construct bgworker thread args */
-    bwa = (BackgroundWorkerArgs*)palloc(sizeof(BackgroundWorkerArgs));
+    bwa = (BackgroundWorkerArgs*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(BackgroundWorkerArgs));
     bwa->bgwcontext = bwc;
     bwa->bgworker = bgw;
     bwa->bgworkerId = bgw->bgw_id;
 
     /* Fork a new worker thread */
     bgw->bgw_notify_pid = initialize_util_thread(BGWORKER, bwa);
+    /* failed to fork a new thread */
+    if (bgw->bgw_notify_pid == 0) {
+        pfree_ext(bwa);
+        return false;
+    }
 
     /* Copy the registration data into the registered workers list. */
     slist_push_head(&t_thrd.bgworker_cxt.bgwlist, &bgw->rw_lnode);
@@ -464,7 +474,7 @@ void BgworkerListWaitFinish(int *nparticipants)
     int nunstarts = 0; 
 
     Assert(nparticipants != NULL);
-
+    WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_SYNC_BGWORKERS);
     while (!alldone) {
         nfinished = 0;
         slist_foreach(iter, &t_thrd.bgworker_cxt.bgwlist) {
@@ -499,6 +509,7 @@ void BgworkerListWaitFinish(int *nparticipants)
             usleep(BGWORKER_LOOP_SLEEP_TIME);
         }
     }
+    pgstat_report_waitstatus(oldStatus);
 }
 
 int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit)

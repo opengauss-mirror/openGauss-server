@@ -35,7 +35,7 @@
 #define ProcedureRelation_Rowtype_Id  81
 
 #define IsProcRelation(rel) (RelationGetRelid(rel) == ProcedureRelationId)
-#define IsProcCache(cache) ((cache)->cc_reloid == ProcedureRelationId)
+#define IsProcCache(reloid) ((reloid) == ProcedureRelationId)
 
 CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
 {
@@ -422,6 +422,8 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define DB4AI_PREDICT_BY_FLOAT8_OID  7106
 #define DB4AI_PREDICT_BY_NUMERIC_OID 7107
 #define DB4AI_PREDICT_BY_TEXT_OID    7108
+#define DB4AI_PREDICT_BY_FLOAT8ARRAY_OID 7109
+#define DB4AI_EXPLAIN_MODEL_OID 7110
 #define JSONAGGFUNCOID 3124
 #define JSONOBJECTAGGFUNCOID 3403
 
@@ -469,6 +471,7 @@ typedef FormData_pg_proc *Form_pg_proc;
 
 #define OID_REGEXP_SPLIT_TO_TABLE 2765
 #define OID_REGEXP_SPLIT_TO_TABLE_NO_FLAG 2766
+#define OID_ARRAY_UNNEST 2331
 
 /* cast functions oid */
 #define INT4TOCHARFUNCOID 78

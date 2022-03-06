@@ -544,6 +544,19 @@ typedef struct ObjectTypeInfo
     const char* object_name;
 } ObjectTypeInfo;
 
+typedef struct CmdCursorInfo {
+    CmdType cmd_type;
+    const char *object_name;
+} CmdCursorInfo;
+
+static CmdCursorInfo cmd_cursorinfo[] = {
+    {CMD_SELECT, "FOR SELECT FROM"},
+    {CMD_INSERT, "FOR INSERT TO"},
+    {CMD_UPDATE, "FOR UPDATE FROM"},
+    {CMD_DELETE, "FOR DELETE FROM"},
+    {CMD_UNKNOWN, NULL}
+};
+
 static OperInfo oper_infos[] = {
     {"create", T_CREATE},
     {"alter", T_ALTER},
@@ -560,7 +573,7 @@ static OperInfo oper_infos[] = {
     {"login_success", T_LOGIN_SUCCESS},
     {"login_failure", T_LOGIN_FAILURE},
     {"copy", T_COPY},
-    {"open", T_OPEN},
+    {"cursor", T_CURSOR},
     {"fetch", T_FETCH},
     {"close", T_CLOSE},
     {"all", T_ALL},
@@ -620,6 +633,20 @@ static ObjectTypeInfo object_type_infos[] =
     {O_CURSOR, "CURSOR"},
     {O_UNKNOWN, NULL}
 };
+
+/*
+ * get_cursorinfo
+ *    return cursor operation object
+ */
+const char *get_cursorinfo(CmdType type)
+{
+    for (int i = 0; cmd_cursorinfo[i].object_name != NULL; ++i) {
+        if (cmd_cursorinfo[i].cmd_type == type) {
+            return cmd_cursorinfo[i].object_name;
+        }
+    }
+    return "UNKNOWN";
+}
 
 /*
  * get_privilege_type
@@ -934,4 +961,17 @@ int get_objtype(int object_type)
             break;
     }
     return objtype;
+}
+
+CmdType get_rte_commandtype(RangeTblEntry *rte)
+{
+    if (rte->selectedCols) {
+        return CMD_SELECT;
+    } else if (rte->insertedCols) {
+        return CMD_INSERT;
+    } else if (rte->updatedCols) {
+        return CMD_UPDATE;
+    } else {
+        return CMD_UNKNOWN;
+    }
 }

@@ -137,8 +137,6 @@ static inline int ChooseSmgrManager(RelFileNode rnode)
     return MD_MANAGER;
 }
 
-/* local function prototypes */
-static void smgrshutdown(int code, Datum arg);
 
 /*
  *	smgrinit(), smgrshutdown() -- Initialize or shut down storage
@@ -159,7 +157,7 @@ void smgrinit(void)
     }
 
     /* register the shutdown proc */
-    if (!IS_THREAD_POOL_SESSION) {
+    if (!IS_THREAD_POOL_SESSION || EnableLocalSysCache()) {
         on_proc_exit(smgrshutdown, 0);
     }
 
@@ -169,7 +167,7 @@ void smgrinit(void)
 /*
  * on_proc_exit hook for smgr cleanup during backend shutdown
  */
-static void smgrshutdown(int code, Datum arg)
+void smgrshutdown(int code, Datum arg)
 {
     int i;
 
@@ -198,7 +196,7 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
     Assert(col >= 0);
     int fdNeeded = 1 + MAX_FORKNUM + col;
 
-    if (u_sess->storage_cxt.SMgrRelationHash == NULL) {
+    if (GetSMgrRelationHash() == NULL) {
         /* First time through: initialize the hash table */
         HASHCTL hashCtrl;
 
@@ -207,10 +205,18 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
         hashCtrl.keysize = sizeof(RelFileNodeBackend);
         hashCtrl.entrysize = sizeof(SMgrRelationData);
         hashCtrl.hash = tag_hash;
-        hashCtrl.hcxt = (MemoryContext)u_sess->cache_mem_cxt;
-        u_sess->storage_cxt.SMgrRelationHash =
-            hash_create("smgr relation table", 400, &hashCtrl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-        dlist_init(&u_sess->storage_cxt.unowned_reln);
+        if (EnableLocalSysCache()) {
+            hashCtrl.hcxt = t_thrd.lsc_cxt.lsc->lsc_mydb_memcxt;
+            t_thrd.lsc_cxt.lsc->SMgrRelationHash = hash_create("smgr relation table", 400,
+                &hashCtrl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+            dlist_init(&t_thrd.lsc_cxt.lsc->unowned_reln);
+        } else {
+            hashCtrl.hcxt = u_sess->cache_mem_cxt;
+            u_sess->storage_cxt.SMgrRelationHash = hash_create("smgr relation table", 400,
+                &hashCtrl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+            dlist_init(&u_sess->storage_cxt.unowned_reln);
+        }
+        
     }
 
     START_CRIT_SECTION();
@@ -218,11 +224,10 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
         /* Look up or create an entry */
         brnode.node = rnode;
         brnode.backend = backend;
-        reln = (SMgrRelation)hash_search(u_sess->storage_cxt.SMgrRelationHash, (void*)&brnode, HASH_ENTER, &found);
+        reln = (SMgrRelation)hash_search(GetSMgrRelationHash(), (void*)&brnode, HASH_ENTER, &found);
 
         /* Initialize it if not present before */
         if (!found) {
-            int forknum;
             int colnum;
 
             /* hash_search already filled in the lookup key */
@@ -234,8 +239,7 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
             reln->encrypt = false;
             temp = col + 1;
             reln->smgr_bcm_nblocks = (BlockNumber*)MemoryContextAllocZero(
-                                            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), 
-                                            temp * sizeof(BlockNumber));
+                LocalSmgrStorageMemoryCxt(), temp * sizeof(BlockNumber));
             reln->smgr_bcmarry_size = temp;
             for (colnum = 0; colnum < reln->smgr_bcmarry_size; colnum++) {
                 reln->smgr_bcm_nblocks[colnum] = InvalidBlockNumber;
@@ -246,29 +250,25 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
             reln->fileState = NULL;
 
             /* mark it not open */
-            temp = fdNeeded;
+            reln->seg_space = NULL;
             if (reln->smgr_which == SEGMENT_MANAGER) {
+                reln->md_fdarray_size = fdNeeded;
                 reln->seg_desc = (struct SegmentDesc **)MemoryContextAllocZero(
-                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), temp * sizeof(struct SegmentDesc *));
+                    LocalSmgrStorageMemoryCxt(), fdNeeded * sizeof(struct SegmentDesc *));
                 reln->md_fd = NULL;
-            } else {
+            } else if (reln->smgr_which == MD_MANAGER) {
+                reln->md_fdarray_size = fdNeeded;
                 reln->md_fd = (struct _MdfdVec**)MemoryContextAllocZero(
-                                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), temp * sizeof(struct _MdfdVec*));
+                                    LocalSmgrStorageMemoryCxt(), fdNeeded * sizeof(struct _MdfdVec*));
+                reln->seg_desc = NULL;
+            } else {
+                reln->md_fdarray_size = 1;
+                reln->md_fd = NULL;
                 reln->seg_desc = NULL;
             }
 
-            reln->seg_space = NULL;
-            reln->md_fdarray_size = temp;
-            for (forknum = 0; forknum < reln->md_fdarray_size; forknum++) {
-                if (reln->smgr_which == SEGMENT_MANAGER) {
-                    reln->seg_desc[forknum] = NULL;
-                } else {
-                    reln->md_fd[forknum] = NULL;
-                }
-            }
-
             /* it has no owner yet */
-            dlist_push_tail(&u_sess->storage_cxt.unowned_reln, &reln->node);
+            dlist_push_tail(getUnownedReln(), &reln->node);
 
             /* If it is a bucket smgr node, it should be linked in its parent smgr node */
             dlist_init(&reln->bucket_smgr_head);
@@ -359,7 +359,7 @@ void smgrclearowner(SMgrRelation *owner, SMgrRelation reln)
     /* unset our reference to the owner */
     reln->smgr_owner = NULL;
 
-    dlist_push_tail(&u_sess->storage_cxt.unowned_reln, &reln->node);
+    dlist_push_tail(getUnownedReln(), &reln->node);
 }
 
 /*
@@ -414,7 +414,7 @@ void smgrclose(SMgrRelation reln, BlockNumber blockNum)
         }
     }
 
-    if (hash_search(u_sess->storage_cxt.SMgrRelationHash, (void *)&(reln->smgr_rnode), HASH_REMOVE, NULL) == NULL) {
+    if (hash_search(GetSMgrRelationHash(), (void *)&(reln->smgr_rnode), HASH_REMOVE, NULL) == NULL) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("SMgrRelation hashtable corrupted")));
     } else {
         pfree_ext(reln->smgr_bcm_nblocks);
@@ -440,12 +440,12 @@ void smgrcloseall(void)
     SMgrRelation reln;
 
     /* Nothing to do if hashtable not set up */
-    if (u_sess->storage_cxt.SMgrRelationHash == NULL) {
+    if (GetSMgrRelationHash() == NULL) {
         return;
     }
 
     bool smgr_has_children = false;
-    hash_seq_init(&status, u_sess->storage_cxt.SMgrRelationHash);
+    hash_seq_init(&status, GetSMgrRelationHash());
 
     while ((reln = (SMgrRelation)hash_seq_search(&status)) != NULL) {
         if (smgrhaschildern(reln)) {
@@ -460,7 +460,7 @@ void smgrcloseall(void)
     }
 
     if (smgr_has_children) {
-        hash_seq_init(&status, u_sess->storage_cxt.SMgrRelationHash);
+        hash_seq_init(&status, GetSMgrRelationHash());
 
         while ((reln = (SMgrRelation)hash_seq_search(&status)) != NULL) {
             /* In the second loop, there are only hash bucket parent nodes existing in the hashtable. */
@@ -469,7 +469,27 @@ void smgrcloseall(void)
         }
     }
 }
+static void smgrcleanbolcknum(SMgrRelation reln)
+{
+    reln->smgr_targblock = InvalidBlockNumber;
+}
 
+void smgrcleanblocknumall(void)
+{
+    HASH_SEQ_STATUS status;
+    SMgrRelation reln;
+
+    /* Nothing to do if hashtable not set up */
+    if (GetSMgrRelationHash() == NULL) {
+        return;
+    }
+
+    hash_seq_init(&status, GetSMgrRelationHash());
+
+    while ((reln = (SMgrRelation)hash_seq_search(&status)) != NULL) {
+        smgrcleanbolcknum(reln);
+    }
+}
 /*
  *	smgrclosenode() -- Close SMgrRelation object for given RelFileNode,
  *					   if one exists.
@@ -483,11 +503,11 @@ void smgrclosenode(const RelFileNodeBackend &rnode)
     SMgrRelation reln;
 
     /* Nothing to do if hashtable not set up */
-    if (u_sess->storage_cxt.SMgrRelationHash == NULL) {
+    if (GetSMgrRelationHash() == NULL) {
         return;
     }
 
-    reln = (SMgrRelation)hash_search(u_sess->storage_cxt.SMgrRelationHash, (void *)&rnode, HASH_FIND, NULL);
+    reln = (SMgrRelation)hash_search(GetSMgrRelationHash(), (void *)&rnode, HASH_FIND, NULL);
     if (reln != NULL) {
         smgrclose(reln);
     }
@@ -865,7 +885,9 @@ void partition_create_new_storage(Relation rel, Partition part, const RelFileNod
     /*
      * Schedule unlinking of the old storage at transaction commit.
      */
-    PartitionDropStorage(rel, part);
+    if (!u_sess->attr.attr_storage.enable_recyclebin) {
+        PartitionDropStorage(rel, part);
+    }
 }
 
 /*
@@ -889,8 +911,9 @@ void AtEOXact_SMgr(void)
      * incurs closing all its children node. dlist_foreach_modify does not allow
      * removing the adjacent nodes.
      */
-    while (!dlist_is_empty(&u_sess->storage_cxt.unowned_reln)) {
-        dlist_node *cur = u_sess->storage_cxt.unowned_reln.head.next;
+    dlist_head *unowned_reln = getUnownedReln();
+    while (!dlist_is_empty(unowned_reln)) {
+        dlist_node *cur = unowned_reln->head.next;
         SMgrRelation rel = dlist_container(SMgrRelationData, node, cur);
         Assert(rel->smgr_owner == NULL);
         smgrclose(rel);

@@ -36,13 +36,14 @@
 #include "access/extreme_rto/posix_semaphore.h"
 #include "access/extreme_rto/spsc_blocking_queue.h"
 #include "access/xlogproc.h"
+#include "postmaster/pagerepair.h"
 
 namespace extreme_rto {
 
-static const uint32 PAGE_WORK_QUEUE_SIZE = 4096;
+static const uint32 PAGE_WORK_QUEUE_SIZE = 8192;
 
 static const uint32 EXTREME_RTO_ALIGN_LEN = 16; /* need 128-bit aligned */
-
+static const uint32 MAX_REMOTE_READ_INFO_NUM = 100;
 
 typedef enum {
     REDO_BATCH,
@@ -55,6 +56,15 @@ typedef enum {
     REDO_READ_MNG,
     REDO_ROLE_NUM,
 } RedoRole;
+
+typedef struct BadBlockRecEnt{
+    RepairBlockKey key;
+    XLogPhyBlock pblk;
+    XLogRecPtr rec_min_lsn;
+    XLogRecPtr rec_max_lsn;
+    XLogRecParseState *head;
+    XLogRecParseState *tail;
+} BadBlockRecEnt;
 
 struct PageRedoWorker {
     /*
@@ -145,9 +155,9 @@ struct PageRedoWorker {
      */
     /* XLog invalid pages. */
     void *xlogInvalidPages;
-#ifndef ENABLE_MULTIPLE_NODES
+
     void *committingCsnList;
-#endif
+
     /* ---------------------------------------------
      * Phase barrier.
      *
@@ -170,7 +180,13 @@ struct PageRedoWorker {
     uint32 fullSyncFlag;
     RedoParseManager parseManager;
     RedoBufferManager bufferManager;
+    RedoTimeCost timeCostList[TIME_COST_NUM];
+    uint32 remoteReadPageNum;
+    HTAB *badPageHashTbl;
+    char page[BLCKSZ];
+    XLogBlockDataParse *curRedoBlockState;
 };
+
 
 extern THR_LOCAL PageRedoWorker *g_redoWorker;
 
@@ -198,18 +214,12 @@ void WaitPageRedoWorkerReachLastMark(PageRedoWorker *worker);
 /* Redo processing. */
 void AddPageRedoItem(PageRedoWorker *worker, void *item);
 
-/* Run-time worker states. */
-uint64 GetCompletedRecPtr(PageRedoWorker *worker);
-void SetWorkerRestartPoint(PageRedoWorker *worker, XLogRecPtr restartPoint);
-
 void UpdatePageRedoWorkerStandbyState(PageRedoWorker *worker, HotStandbyState newState);
 
 /* Redo end states. */
 void ClearBTreeIncompleteActions(PageRedoWorker *worker);
 void *GetXLogInvalidPages(PageRedoWorker *worker);
 bool RedoWorkerIsIdle(PageRedoWorker *worker);
-void PageRedoSetAffinity(uint32 id);
-
 void DumpPageRedoWorker(PageRedoWorker *worker);
 PageRedoWorker *CreateWorker(uint32 id);
 extern void UpdateRecordGlobals(RedoItem *item, HotStandbyState standbyState);
@@ -224,6 +234,25 @@ bool LsnUpdate();
 void ResetRtoXlogReadBuf(XLogRecPtr targetPagePtr);
 bool XLogPageReadForExtRto(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen);
 void ExtremeRtoStopHere();
+void WaitAllRedoWorkerQueueEmpty();
+void WaitAllReplayWorkerIdle();
+void DispatchClosefdMarkToAllRedoWorker();
+void DispatchCleanInvalidPageMarkToAllRedoWorker(RepairFileKey key);
+
+const char *RedoWokerRole2Str(RedoRole role);
+
+
+/* block or file repair function */
+HTAB* BadBlockHashTblCreate();
+void RepairPageAndRecoveryXLog(BadBlockRecEnt *page_info, const char *page);
+void CheckRemoteReadAndRepairPage(BadBlockRecEnt *entry);
+void ClearSpecificsPageEntryAndMem(BadBlockRecEnt *entry);
+void ClearRecoveryThreadHashTbl(const RelFileNode &node, ForkNumber forknum, BlockNumber minblkno,
+    bool segment_shrink);
+void BatchClearRecoveryThreadHashTbl(Oid spcNode, Oid dbNode);
+void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType error_type,
+    XLogRecPtr old_lsn, XLogPhyBlock pblk);
+void SeqCheckRemoteReadAndRepairPage();
 
 }  // namespace extreme_rto
 #endif

@@ -202,6 +202,8 @@ void WalWriterMain(void)
         /* abort async io, must before LWlock release */
         AbortAsyncListIO();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
         /*
          * These operations are really just a minimal subset of
          * AbortTransaction().	We don't have very many resources to worry

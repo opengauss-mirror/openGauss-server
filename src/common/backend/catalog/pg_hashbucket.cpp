@@ -497,7 +497,9 @@ Partition bucketGetPartition(Partition part, int2 bucketid)
     Partition   bucket = NULL;
     MemoryContext oldcxt;
     errno_t rc;
-
+    if (!IsBootstrapProcessingMode()) {
+        ResourceOwnerEnlargeFakepartRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+    }
     oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);    
     bucket = (Partition)palloc0(sizeof(PartitionData));
 

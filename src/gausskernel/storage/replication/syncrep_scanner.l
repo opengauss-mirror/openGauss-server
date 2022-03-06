@@ -36,6 +36,13 @@ fprintf_to_ereport(const char *fmt, const char *msg)
 	ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s", msg)));
 }
 
+/*
+ * define syncrep_scanner_yylex for flex >= 2.6
+ */
+#if FLEX_MAJOR_VERSION >= 2 && FLEX_MINOR_VERSION >= 6
+#define YY_DECL int syncrep_scanner_yylex \
+               (YYSTYPE * yylval_param, YYLTYPE * yylloc_param , yyscan_t yyscanner)
+#endif
 %}
 
 %option reentrant

@@ -436,7 +436,7 @@ void eg_init_bitmap_page(SegExtentGroup *seg, BlockNumber pageno, BlockNumber fi
     XLogBeginInsert();
     XLogRegisterData((char *)&first_page, sizeof(BlockNumber));
     XLogRegisterBuffer(0, buffer, REGBUF_WILL_INIT);
-    XLogRecPtr rec_ptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_INIT_MAPPAGE, false, SegmentBktId);
+    XLogRecPtr rec_ptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_INIT_MAPPAGE, SegmentBktId);
     PageSetLSN(BufferGetPage(buffer), rec_ptr);
 
     END_CRIT_SECTION();
@@ -456,7 +456,7 @@ void eg_init_invrsptr_page(SegExtentGroup *seg, BlockNumber pageno)
 
     XLogBeginInsert();
     XLogRegisterBuffer(0, buffer, REGBUF_WILL_INIT);
-    XLogRecPtr rec_ptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_INIT_INVRSPTR_PAGE, false, SegmentBktId);
+    XLogRecPtr rec_ptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_INIT_INVRSPTR_PAGE, SegmentBktId);
     PageSetLSN(page, rec_ptr);
 
     END_CRIT_SECTION();
@@ -522,7 +522,7 @@ void eg_add_map_group(SegExtentGroup *seg, BlockNumber pageno, uint8 group_size,
         XLogRegisterData((char *)&new_map_group_info, sizeof(xl_new_map_group_info_t));
 
         XLogRegisterBuffer(0, map_head_buffer, REGBUF_STANDARD);
-        XLogRecPtr recptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_ADD_NEW_GROUP, false, SegmentBktId);
+        XLogRecPtr recptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_ADD_NEW_GROUP, SegmentBktId);
 
         PageSetLSN(page, recptr);
         END_CRIT_SECTION();
@@ -741,7 +741,7 @@ void eg_create_if_necessary(SegExtentGroup *seg)
         XLogBeginInsert();
         XLogRegisterData((char *)&seg->rnode, sizeof(RelFileNode));
         XLogRegisterData((char *)&seg->forknum, sizeof(ForkNumber));
-        XLogRecPtr xlog = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_CREATE_EXTENT_GROUP, false, SegmentBktId);
+        XLogRecPtr xlog = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_CREATE_EXTENT_GROUP, SegmentBktId);
         XLogWaitFlush(xlog);
 
         eg_init_data_files(seg, false, xlog);

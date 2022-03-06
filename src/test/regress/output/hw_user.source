@@ -643,9 +643,6 @@ ERROR:  Permission denied.
 ERROR:  Permission denied.
 drop user current_user01;
 drop user current_user02;
-/*-----------------------------------------------------------------
-		test alter user with pguser (DTS2017031606532)
------------------------------------------------------------------*/
 create or replace function isMD5(pwd text) returns bool as $$ begin return left(pwd, 3) = 'md5'; end; $$ language plpgsql;
 --alter with admin
 create user md5user_default with password 'Gauss@123';

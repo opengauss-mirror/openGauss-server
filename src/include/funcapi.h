@@ -156,6 +156,7 @@ extern TypeFuncClass get_call_result_type(FunctionCallInfo fcinfo, Oid* resultTy
 extern TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* resultTupleDesc,
     int4* resultTypeId_orig = NULL);
 extern TypeFuncClass get_func_result_type(Oid functionId, Oid* resultTypeId, TupleDesc* resultTupleDesc);
+extern void construct_func_param_desc(Oid funcid, TypeFuncClass* typclass, TupleDesc* tupdesc, Oid* resultTypeId);
 
 extern bool resolve_polymorphic_argtypes(int numargs, Oid* argtypes, const char* argmodes, Node* call_expr);
 
@@ -168,6 +169,7 @@ extern char* get_func_result_name(Oid functionId);
 extern TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmodes, Datum proargnames,
     Datum funcid);
 extern TupleDesc build_function_result_tupdesc_t(HeapTuple procTuple);
+extern TupleDesc get_func_param_desc(HeapTuple tp, Oid resultTypeId, int* return_out_args_num = NULL);
 
 /* ----------
  *	Support to ease writing functions returning composite types
@@ -261,6 +263,7 @@ extern TupleTableSlot* TupleDescGetSlot(TupleDesc tupdesc);
 extern FuncCallContext* init_MultiFuncCall(PG_FUNCTION_ARGS);
 extern FuncCallContext* per_MultiFuncCall(PG_FUNCTION_ARGS);
 extern void end_MultiFuncCall(PG_FUNCTION_ARGS, FuncCallContext* funcctx);
+extern bool is_function_with_plpgsql_language_and_outparam(Oid funcid);
 
 #define SRF_IS_FIRSTCALL() (fcinfo->flinfo->fn_extra == NULL)
 

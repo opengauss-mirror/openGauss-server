@@ -70,9 +70,10 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
          * worker processed it and backend tries to process it some later
          * point.
          */
-        int rc = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber, InvalidTransactionId);
+        UndoTraversalState rc = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber,
+            InvalidTransactionId);
         /* already processed. */
-        if (rc == UNDO_RET_FAIL) {
+        if (rc != UNDO_TRAVERSAL_COMPLETE) {
             DELETE_EX(urec);
             return;
         }
@@ -184,7 +185,7 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
             break;
         }
 
-        Oid relOid = RelationIsPartition(rel) ? rel->parentId : RelationGetRelid(rel);
+        Oid relOid = RelationIsPartition(rel) ? GetBaseRelOidOfParition(rel) : RelationGetRelid(rel);
         Oid partitionOid = RelationIsPartition(rel) ? RelationGetRelid(rel) : InvalidOid;
 
         RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, 0, urecvec->Size() - 1, xid, relOid, partitionOid,
@@ -358,11 +359,11 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
         prevUrp = undorecord->Blkprev();
 
         TransactionId oldestXid PG_USED_FOR_ASSERTS_ONLY =
-            pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+            pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
 
         /* Either oldestXidInUndo is zero or it is always <= than aborting xid */
         Assert(!TransactionIdIsValid(oldestXid) || TransactionIdPrecedesOrEquals(
-            pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo), undorecord->Xid()));
+            pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo), undorecord->Xid()));
 
         /* Store the minimum and maximum LP offsets of all undorecords */
         if (undorecord->Offset() > InvalidOffsetNumber && undorecord->Offset() < xlogMinLPOffset) {
@@ -427,8 +428,7 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
 
             case UNDO_DELETE:
             case UNDO_UPDATE:
-            case UNDO_INPLACE_UPDATE:
-            case UNDO_XID_LOCK_FOR_UPDATE: {
+            case UNDO_INPLACE_UPDATE: {
                 UHeapDiskTuple tuple = CopyTupleFromUndoRecord(relationData.relation, undorecord, buffer);
                 RestoreXactFromUndoRecord(undorecord, buffer, tuple);
 
@@ -443,39 +443,6 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
                     xlogCopyEndOffset = rp->offset + rp->len;
                 }
 
-                break;
-            }
-            case UNDO_XID_LOCK_ONLY: {
-                UHeapDiskTuple utuple;
-                OffsetNumber offnum = undorecord->Offset();
-                StringInfoData *undoData = undorecord->Rawdata();
-
-                RowPtr *rp = UPageGetRowPtr(page, offnum);
-
-                utuple = (UHeapDiskTuple)UPageGetRowData(page, rp);
-
-                // restore tuple header
-                error_t rc = memcpy_s((char *)utuple + OffsetTdId, SizeOfUHeapDiskTupleHeaderExceptXid, undoData->data,
-                    SizeOfUHeapDiskTupleHeaderExceptXid);
-                securec_check(rc, "", "");
-                utuple->xid = (ShortTransactionId)FrozenTransactionId;
-
-                RestoreXactFromUndoRecord(undorecord, buffer, utuple);
-
-                /* Store the page offsets where we start and end updating tuples */
-                if (rp->offset < xlogCopyStartOffset) {
-                    Assert(rp->offset > SizeOfUHeapPageHeaderData); 
-                    xlogCopyStartOffset = rp->offset;
-                }
-                if (rp->offset + (Offset)SizeOfUHeapDiskTupleData > xlogCopyEndOffset) {
-                    Assert(rp->offset + (Offset)SizeOfUHeapDiskTupleData <= BLCKSZ);
-                    xlogCopyEndOffset = rp->offset + SizeOfUHeapDiskTupleData;
-                }
-
-                break;
-            }
-            case UNDO_XID_MULTI_LOCK_ONLY: {
-                Assert(0);
                 break;
             }
             case UNDO_ITEMID_UNUSED:
@@ -500,9 +467,9 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
     } else if (IS_VALID_UNDO_REC_PTR(slotPrevUrp)) {
         UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
         urec->SetUrp(slotPrevUrp);
-        int rc =
+        UndoTraversalState rc =
             FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber, InvalidTransactionId);
-        if (rc == UNDO_RET_FAIL || urec->Xid() != xid) {
+        if (rc != UNDO_TRAVERSAL_COMPLETE || urec->Xid() != xid) {
             xid = InvalidTransactionId;
         }
         DELETE_EX(urec);
@@ -580,7 +547,7 @@ void ExecuteUndoForInsert(Relation rel, Buffer buffer, OffsetNumber off, Transac
     RowPtr *rp = UPageGetRowPtr(page, off);
 
     /* Rollback insert - increment the potential space for the Page */
-    UHeapRecordPotentialFreeSpace(rel, buffer, SHORTALIGN(rp->len));
+    UHeapRecordPotentialFreeSpace(buffer, SHORTALIGN(rp->len));
 
     if (RelationGetForm(rel)->relhasindex) {
         RowPtrSetDead(rp);
@@ -615,7 +582,7 @@ void ExecuteUndoForInsertRecovery(Buffer buffer, OffsetNumber off, TransactionId
     *tdid = UHeapTupleHeaderGetTDSlot(diskTuple);
 
     /* Rollback insert - increment the potential space for the Page */
-    UHeapRecordPotentialFreeSpace(NULL, buffer, SHORTALIGN(rp->len));
+    UHeapRecordPotentialFreeSpace(buffer, SHORTALIGN(rp->len));
 
     if (relhasindex) {
         RowPtrSetDead(rp);
@@ -671,7 +638,7 @@ static UHeapDiskTuple CopyTupleFromUndoRecord(Relation relation, UndoRecord *und
             diskTuple->xid = (ShortTransactionId)FrozenTransactionId;
 
             /* Rollback delete/update - decrement the potential space for the Page */
-            UHeapRecordPotentialFreeSpace(relation, buffer, -1 * SHORTALIGN(newTupleLength));
+            UHeapRecordPotentialFreeSpace(buffer, -1 * SHORTALIGN(newTupleLength));
 
             break;
         }
@@ -757,12 +724,9 @@ static UHeapDiskTuple CopyTupleFromUndoRecord(Relation relation, UndoRecord *und
             pfree(old_disktuple);
             break;
         }
-        case UNDO_XID_LOCK_FOR_UPDATE:
-        case UNDO_XID_LOCK_ONLY:
         case UNDO_ITEMID_UNUSED:
         case UNDO_INSERT:
-        case UNDO_MULTI_INSERT:
-        case UNDO_XID_MULTI_LOCK_ONLY: {
+        case UNDO_MULTI_INSERT: {
             elog(ERROR, "invalid undo record type for restoring tuple");
             break;
         }
@@ -798,7 +762,6 @@ static void RestoreXactFromUndoRecord(UndoRecord *undorecord, Buffer buffer, UHe
     }
 
     UHeapTupleHeaderSetLockerTDSlot(tuple, UHEAPTUP_SLOT_FROZEN);
-    tuple->flag &= ~UHEAP_XID_LOCK_ONLY;
 }
 
 int UpdateTupleHeaderFromUndoRecord(UndoRecord *urec, UHeapDiskTuple diskTuple, Page page)

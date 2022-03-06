@@ -136,13 +136,13 @@ with type_oids as
 )
 select * from pg_cast where castsource in ( select * from type_oids )
 						or casttarget in ( select * from type_oids ) order by 1;
- castsource | casttarget | castfunc | castcontext | castmethod 
-------------+------------+----------+-------------+------------
-         17 |       4301 |        0 | e           | b
-         20 |       4303 |        0 | e           | b
-         23 |       4303 |     4317 | e           | f
-       4301 |       4301 |     4311 | i           | f
-       4402 |       4301 |        0 | e           | b
+ castsource | casttarget | castfunc | castcontext | castmethod | castowner 
+------------+------------+----------+-------------+------------+-----------
+         17 |       4301 |        0 | e           | b          |          
+         20 |       4303 |        0 | e           | b          |          
+         23 |       4303 |     4317 | e           | f          |          
+       4301 |       4301 |     4311 | i           | f          |          
+       4402 |       4301 |        0 | e           | b          |          
 (5 rows)
 
 --final cleaning

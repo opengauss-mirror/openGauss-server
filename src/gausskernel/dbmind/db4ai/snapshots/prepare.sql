@@ -50,16 +50,16 @@ BEGIN
         GET STACKED DIAGNOSTICS e_stack_act = PG_EXCEPTION_CONTEXT;
 
         IF CURRENT_SCHEMA = 'db4ai' THEN
-            e_stack_act := replace(e_stack_act, ' prepare_snapshot(', ' db4ai.prepare_snapshot(');
-            e_stack_act := replace(e_stack_act, ' prepare_snapshot_internal(', ' db4ai.prepare_snapshot_internal(');
-            e_stack_act := replace(e_stack_act, ' sample_snapshot(', ' db4ai.sample_snapshot(');
+            e_stack_act := pg_catalog.replace(e_stack_act, ' prepare_snapshot(', ' db4ai.prepare_snapshot(');
+            e_stack_act := pg_catalog.replace(e_stack_act, ' prepare_snapshot_internal(', ' db4ai.prepare_snapshot_internal(');
+            e_stack_act := pg_catalog.replace(e_stack_act, ' sample_snapshot(', ' db4ai.sample_snapshot(');
         END IF;
 
         IF e_stack_act LIKE E'referenced column: i_idx\n'
             'SQL statement "SELECT (db4ai.prepare_snapshot_internal(s_id, p_id, m_id, r_id, i_schema, s_name, i_commands, i_comment,\n'
             '                CURRENT_USER, idx, exec_cmds)).i_idx"\n%'
         THEN
-            e_stack_act := substr(e_stack_act, 200);
+            e_stack_act := pg_catalog.substr(e_stack_act, 200);
         END IF;
 
         IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (184|550|616|723) at assignment%'
@@ -74,27 +74,27 @@ BEGIN
     --generate rules from the mapping
     IF i_mapping IS NOT NULL THEN
         DECLARE
-            sel_view TEXT := 'CREATE OR REPLACE VIEW db4ai.v' || s_id || ' WITH(security_barrier) AS SELECT ';
+            sel_view TEXT := 'CREATE OR REPLACE VIEW db4ai.v' || s_id::TEXT || ' WITH(security_barrier) AS SELECT ';
             ins_grnt TEXT := 'GRANT INSERT (';
-            ins_rule TEXT := 'CREATE OR REPLACE RULE _INSERT AS ON INSERT TO db4ai.v' || s_id || ' DO INSTEAD INSERT INTO '
-                               'db4ai.t' || coalesce(m_id, s_id) || '(';
+            ins_rule TEXT := 'CREATE OR REPLACE RULE _INSERT AS ON INSERT TO db4ai.v' || s_id::TEXT || ' DO INSTEAD INSERT INTO '
+                               'db4ai.t' || coalesce(m_id, s_id)::TEXT || '(';
             ins_vals TEXT := ' VALUES (';
             upd_grnt TEXT;
             upd_rule TEXT;
-            dist_key NAME[] := array_agg(coalesce(m[1], replace(m[2], '""', '"'))) FROM regexp_matches(
-                getdistributekey('db4ai.t' || coalesce(m_id, p_id)),'([^\s",]+)|"((?:[^"]*"")*[^"]*)"', 'g') m;
+            dist_key NAME[] := pg_catalog.array_agg(coalesce(m[1], pg_catalog.replace(m[2], '""', '"'))) FROM pg_catalog.regexp_matches(
+                pg_catalog.getdistributekey('db4ai.t' || (coalesce(m_id, p_id))::TEXT),'([^\s",]+)|"((?:[^"]*"")*[^"]*)"', 'g') m;
         BEGIN
 
-            FOR idx IN 3 .. array_length(i_mapping, 1) BY 3 LOOP
+            FOR idx IN 3 .. pg_catalog.array_length(i_mapping, 1) BY 3 LOOP
                 IF idx = 3 THEN
-                    ins_grnt := ins_grnt || quote_ident(i_mapping[idx]);
+                    ins_grnt := ins_grnt || pg_catalog.quote_ident(i_mapping[idx]);
                     ins_rule := ins_rule || coalesce(i_mapping[idx-2], i_mapping[idx-1]);
-                    ins_vals := ins_vals || 'new.' || quote_ident(i_mapping[idx]);
+                    ins_vals := ins_vals || 'new.' || pg_catalog.quote_ident(i_mapping[idx]);
                 ELSE
                     sel_view := sel_view || ', ';
-                    ins_grnt := ins_grnt || ', ' || quote_ident(i_mapping[idx]);
+                    ins_grnt := ins_grnt || ', ' || pg_catalog.quote_ident(i_mapping[idx]);
                     ins_rule := ins_rule || ', ' || coalesce(i_mapping[idx-2], i_mapping[idx-1]);
-                    ins_vals := ins_vals || ', ' || 'new.' || quote_ident(i_mapping[idx]);
+                    ins_vals := ins_vals || ', ' || 'new.' || pg_catalog.quote_ident(i_mapping[idx]);
                 END IF;
 
                 IF i_mapping[idx-2] IS NULL THEN -- handle shared columns without private (only CSS)
@@ -107,32 +107,32 @@ BEGIN
                     END IF;
                     IF dist_key IS NULL OR NOT i_mapping[idx-2] = ANY(dist_key) THEN   -- no updates on DISTRIBUTE BY columns
                         upd_grnt := CASE WHEN upd_grnt IS NULL  -- grant update only on private column
-                            THEN 'GRANT UPDATE (' ELSE upd_grnt ||', ' END || quote_ident(i_mapping[idx]);
+                            THEN 'GRANT UPDATE (' ELSE upd_grnt ||', ' END || pg_catalog.quote_ident(i_mapping[idx]);
                         upd_rule := CASE WHEN upd_rule IS NULL  -- update only private column
-                            THEN 'CREATE OR REPLACE RULE _UPDATE AS ON UPDATE TO db4ai.v' || s_id || ' DO INSTEAD UPDATE db4ai.t'
-                                || coalesce(m_id, s_id) || ' SET '
+                            THEN 'CREATE OR REPLACE RULE _UPDATE AS ON UPDATE TO db4ai.v' || s_id::TEXT || ' DO INSTEAD UPDATE db4ai.t'
+                                || coalesce(m_id, s_id)::TEXT || ' SET '
                             ELSE upd_rule || ', ' END
-                            || i_mapping[idx-2] || '=new.' || quote_ident(i_mapping[idx]); -- update private column
+                            || i_mapping[idx-2] || '=new.' || pg_catalog.quote_ident(i_mapping[idx]); -- update private column
                     END IF;
                 END IF;
-                sel_view := sel_view || ' AS ' || quote_ident(i_mapping[idx]);
+                sel_view := sel_view || ' AS ' || pg_catalog.quote_ident(i_mapping[idx]);
             END LOOP;
 
             i_exec_cmds := i_exec_cmds || ARRAY [
-                [ 'O', sel_view || ', xc_node_id, ctid FROM db4ai.t' || coalesce(m_id, s_id)
-                || CASE WHEN m_id IS NULL THEN '' ELSE ' WHERE _' || s_id END ],
-                [ 'O', 'GRANT SELECT, DELETE ON db4ai.v' || s_id || ' TO ' || i_owner ],
-                [ 'O', ins_grnt || ') ON db4ai.v' || s_id || ' TO ' || i_owner ],
-                [ 'O', ins_rule || CASE WHEN m_id IS NULL THEN ')' ELSE ', _' || s_id || ')' END || ins_vals
+                [ 'O', sel_view || ', xc_node_id, ctid FROM db4ai.t' || coalesce(m_id, s_id)::TEXT
+                || CASE WHEN m_id IS NULL THEN '' ELSE ' WHERE _' || s_id::TEXT END ],
+                [ 'O', 'GRANT SELECT, DELETE ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '"'],
+                [ 'O', ins_grnt || ') ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '"'],
+                [ 'O', ins_rule || CASE WHEN m_id IS NULL THEN ')' ELSE ', _' || s_id::TEXT || ')' END || ins_vals
                 || CASE WHEN m_id IS NULL THEN ')' ELSE ', TRUE)' END ],
-                [ 'O', 'CREATE OR REPLACE RULE _DELETE AS ON DELETE TO db4ai.v' || s_id || ' DO INSTEAD '
-                || CASE WHEN m_id IS NULL THEN 'DELETE FROM db4ai.t' || s_id ELSE 'UPDATE db4ai.t' || m_id || ' SET _' || s_id || '=FALSE' END
-                || ' WHERE t' || coalesce(m_id, s_id) || '.xc_node_id=old.xc_node_id AND t' || coalesce(m_id, s_id) || '.ctid=old.ctid' ] ];
+                [ 'O', 'CREATE OR REPLACE RULE _DELETE AS ON DELETE TO db4ai.v' || s_id::TEXT || ' DO INSTEAD '
+                || CASE WHEN m_id IS NULL THEN 'DELETE FROM db4ai.t' || s_id::TEXT ELSE 'UPDATE db4ai.t' || m_id::TEXT || ' SET _' || s_id::TEXT || '=FALSE' END
+                || ' WHERE t' || coalesce(m_id, s_id)::TEXT || '.xc_node_id=old.xc_node_id AND t' || coalesce(m_id, s_id)::TEXT || '.ctid=old.ctid' ] ];
 
             IF upd_rule IS NOT NULL THEN
                 i_exec_cmds := i_exec_cmds || ARRAY [
-                    [ 'O', upd_grnt || ') ON db4ai.v' || s_id || ' TO ' || i_owner ],
-                    [ 'O', upd_rule || ' WHERE t' || coalesce(m_id, s_id) || '.xc_node_id=old.xc_node_id AND t' || coalesce(m_id, s_id) || '.ctid=old.ctid' ]];
+                    [ 'O', upd_grnt || ') ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '"'],
+                    [ 'O', upd_rule || ' WHERE t' || coalesce(m_id, s_id)::TEXT || '.xc_node_id=old.xc_node_id AND t' || coalesce(m_id, s_id)::TEXT || '.ctid=old.ctid' ]];
             END IF;
 
             RETURN;
@@ -140,7 +140,7 @@ BEGIN
     END IF;
 
     -- Execute the queries
-    LOOP EXIT WHEN i_idx = 1 + array_length(i_exec_cmds, 1);
+    LOOP EXIT WHEN i_idx = 1 + pg_catalog.array_length(i_exec_cmds, 1);
         CASE i_exec_cmds[i_idx][1]
         WHEN 'O' THEN
             -- RAISE NOTICE 'owner executing: %', i_exec_cmds[i_idx][2];
@@ -153,18 +153,18 @@ BEGIN
         END CASE;
     END LOOP;
 
-    EXECUTE 'DROP RULE IF EXISTS _INSERT ON db4ai.v' || s_id;
-    EXECUTE 'DROP RULE IF EXISTS _UPDATE ON db4ai.v' || s_id;
-    EXECUTE 'DROP RULE IF EXISTS _DELETE ON db4ai.v' || s_id;
-    EXECUTE 'COMMENT ON VIEW db4ai.v' || s_id || ' IS ''snapshot ' || quote_ident(i_schema) || '.' || quote_ident(i_name)
-        || ' backed by db4ai.t' || coalesce(m_id, s_id) || CASE WHEN length(i_comment) > 0 THEN ' comment is "' || i_comment
+    EXECUTE 'DROP RULE IF EXISTS _INSERT ON db4ai.v' || s_id::TEXT;
+    EXECUTE 'DROP RULE IF EXISTS _UPDATE ON db4ai.v' || s_id::TEXT;
+    EXECUTE 'DROP RULE IF EXISTS _DELETE ON db4ai.v' || s_id::TEXT;
+    EXECUTE 'COMMENT ON VIEW db4ai.v' || s_id::TEXT || ' IS ''snapshot ' || pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(i_name)
+        || ' backed by db4ai.t' || coalesce(m_id, s_id)::TEXT || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment
         || '"' ELSE '' END || '''';
-    EXECUTE 'REVOKE ALL PRIVILEGES ON db4ai.v' || s_id || ' FROM ' || i_owner;
-    EXECUTE 'GRANT SELECT ON db4ai.v' || s_id || ' TO ' || i_owner || ' WITH GRANT OPTION';
-    EXECUTE 'SELECT COUNT(*) FROM db4ai.v' || s_id INTO STRICT row_count;
+    EXECUTE 'REVOKE ALL PRIVILEGES ON db4ai.v' || s_id::TEXT || ' FROM "' || i_owner || '"';
+    EXECUTE 'GRANT SELECT ON db4ai.v' || s_id::TEXT || ' TO "' || i_owner || '" WITH GRANT OPTION';
+    EXECUTE 'SELECT COUNT(*) FROM db4ai.v' || s_id::TEXT INTO STRICT row_count;
 
     INSERT INTO db4ai.snapshot (id, parent_id, matrix_id, root_id, schema, name, owner, commands, comment, row_count)
-        VALUES (s_id, p_id, m_id, r_id, i_schema, i_name, i_owner, i_commands, i_comment, row_count);
+        VALUES (s_id, p_id, m_id, r_id, i_schema, i_name, '"' || i_owner || '"', i_commands, i_comment, row_count);
 
 END;
 $$;
@@ -222,14 +222,14 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || current_setting('db4ai.message_level');
-        RAISE INFO 'effective client_min_messages is %', upper(current_setting('db4ai.message_level'));
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        RAISE INFO 'effective client_min_messages is %', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
 
     -- obtain active snapshot mode
     BEGIN
-        s_mode := upper(current_setting('db4ai_snapshot_mode'));
+        s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
@@ -240,17 +240,17 @@ BEGIN
 
     -- obtain relevant configuration parameters
     BEGIN
-        s_vers_del := upper(current_setting('db4ai_snapshot_version_delimiter'));
+        s_vers_del := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_version_delimiter'));
     EXCEPTION WHEN OTHERS THEN
         s_vers_del := '@';
     END;
     BEGIN
-        s_vers_sep := upper(current_setting('db4ai_snapshot_version_separator'));
+        s_vers_sep := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_version_separator'));
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
 
-    current_compatibility_mode := current_setting('sql_compatibility');
+    current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
@@ -265,10 +265,10 @@ BEGIN
     IF i_parent IS NULL OR i_parent = '' THEN
         RAISE EXCEPTION 'i_parent cannot be NULL or empty';
     ELSE
-        i_parent := replace(i_parent, chr(1), s_vers_del);
-        i_parent := replace(i_parent, chr(2), s_vers_sep);
-        p_name_vers := regexp_split_to_array(i_parent, s_vers_del);
-        IF array_length(p_name_vers, 1) <> 2 OR array_length(p_name_vers, 2) <> none_represent THEN
+        i_parent := pg_catalog.replace(i_parent, pg_catalog.chr(1), s_vers_del);
+        i_parent := pg_catalog.replace(i_parent, pg_catalog.chr(2), s_vers_sep);
+        p_name_vers := pg_catalog.regexp_split_to_array(i_parent, s_vers_del);
+        IF pg_catalog.array_length(p_name_vers, 1) <> 2 OR pg_catalog.array_length(p_name_vers, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_parent must contain exactly one ''%'' character', s_vers_del
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
@@ -278,31 +278,31 @@ BEGIN
     BEGIN
         SELECT id, matrix_id, root_id FROM db4ai.snapshot WHERE schema = i_schema AND name = i_parent INTO STRICT p_id, m_id, r_id;
     EXCEPTION WHEN NO_DATA_FOUND THEN
-        RAISE EXCEPTION 'parent snapshot %.% does not exist' , quote_ident(i_schema), quote_ident(i_parent);
+        RAISE EXCEPTION 'parent snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
     END;
 
     --SELECT nextval('db4ai.snapshot_sequence') INTO STRICT s_id;
-    SELECT MAX(id)+1 FROM db4ai.snapshot INTO STRICT s_id; -- openGauss BUG: cannot create sequences in initdb
+    SELECT pg_catalog.MAX(id)+1 FROM db4ai.snapshot INTO STRICT s_id; -- openGauss BUG: cannot create sequences in initdb
 
     -- extract highest used c_id from existing backing table or parent ()
     -- cannot use information_schema here, because the current user has no read permission on the backing table
-    SELECT 1 + max(ltrim(attname, 'f')::BIGINT) FROM pg_catalog.pg_attribute INTO STRICT c_id
-        WHERE attrelid = ('db4ai.t' || coalesce(m_id, p_id))::regclass AND attnum > 0 AND NOT attisdropped AND attname like 'f%';
+    SELECT 1 + pg_catalog.max(pg_catalog.ltrim(attname, 'f')::BIGINT) FROM pg_catalog.pg_attribute INTO STRICT c_id
+        WHERE attrelid = ('db4ai.t' || coalesce(m_id, p_id)::TEXT)::regclass AND attnum > 0 AND NOT attisdropped AND attname like 'f%';
 
     IF c_id IS NULL THEN
         RAISE EXCEPTION 'prepare snapshot internal error3: %', coalesce(m_id, p_id);
     END IF;
 
-    IF i_commands IS NULL OR array_length(i_commands, 1) = none_represent OR array_length(i_commands, 2) <> none_represent THEN
+    IF i_commands IS NULL OR pg_catalog.array_length(i_commands, 1) = none_represent OR pg_catalog.array_length(i_commands, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_commands array malformed'
         USING HINT = 'pass SQL DML and DDL operations as TEXT[] literal, e.g. ''{ALTER, ADD a int, DROP c, DELETE, '
                      'WHERE b=5, INSERT, FROM t, UPDATE, FROM t, SET x=y, SET z=f(z), WHERE t.u=v}''';
     END IF;
 
     -- extract normalized projection list
-    p_sv_proj := substring(pg_get_viewdef('db4ai.v' || p_id), '^SELECT (.*), t[0-9]+\.xc_node_id, t[0-9]+\.ctid FROM.*$');
-    mapping := array(SELECT unnest(ARRAY[ m[1], m[2], coalesce(m[3], replace(m[4],'""','"'))])
-        FROM regexp_matches(p_sv_proj, CASE s_mode WHEN 'CSS'
+    p_sv_proj := pg_catalog.substring(pg_catalog.pg_get_viewdef('db4ai.v' || p_id::TEXT), '^SELECT (.*), t[0-9]+\.xc_node_id, t[0-9]+\.ctid FROM.*$');
+    mapping := array(SELECT pg_catalog.unnest(ARRAY[ m[1], m[2], coalesce(m[3], pg_catalog.replace(m[4],'""','"'))])
+        FROM pg_catalog.regexp_matches(p_sv_proj, CASE s_mode WHEN 'CSS'
         -- inherited CSS columns are shared (private: nullable, shared: not null, user_cname: not null)
         THEN '(?:COALESCE\(t[0-9]+\.(f[0-9]+), )?t[0-9]+\.(f[0-9]+)(?:\))? AS (?:([^\s",]+)|"((?:[^"]*"")*[^"]*)")'
         -- all MSS columns are private (privte: not null, shared: nullable, user_cname: not null)
@@ -329,34 +329,34 @@ BEGIN
             s_bt_dist TEXT;     -- DISTRIBUTE BY clause for creating backing table
         BEGIN
 
-            FOR idx IN 3 .. array_length(mapping, 1) BY 3 LOOP
-                s_bt_proj := s_bt_proj || quote_ident(mapping[idx]) || ' AS ' || mapping[idx-2] || ',';
+            FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
+                s_bt_proj := s_bt_proj || pg_catalog.quote_ident(mapping[idx]) || ' AS ' || mapping[idx-2] || ',';
             END LOOP;
 
-            s_bt_dist := getdistributekey('db4ai.t' || coalesce(m_id, p_id));
+            s_bt_dist := pg_catalog.getdistributekey('db4ai.t' || coalesce(m_id, p_id)::TEXT);
             s_bt_dist := CASE WHEN s_bt_dist IS NULL
                         THEN ' DISTRIBUTE BY REPLICATION'
                         ELSE ' DISTRIBUTE BY HASH(' || s_bt_dist || ')' END; s_bt_dist := ''; -- we silently drop DISTRIBUTE_BY
 
             exec_cmds := ARRAY [
-                [ 'O', 'CREATE TABLE db4ai.t' || s_id || ' WITH (orientation = column, compression = low)'
+                [ 'O', 'CREATE TABLE db4ai.t' || s_id::TEXT || ' WITH (orientation = column, compression = low)'
                 -- extract and propagate DISTRIBUTE BY from parent
-                || s_bt_dist || ' AS SELECT ' || rtrim(s_bt_proj, ',') || ' FROM db4ai.v' || p_id ]];
+                || s_bt_dist || ' AS SELECT ' || pg_catalog.rtrim(s_bt_proj, ',') || ' FROM db4ai.v' || p_id::TEXT ]];
         END;
     ELSIF s_mode = 'CSS' THEN
         IF m_id IS NULL THEN
             exec_cmds := ARRAY [
-                [ 'O', 'UPDATE db4ai.snapshot SET matrix_id = ' || p_id || ' WHERE schema = ''' || i_schema || ''' AND name = '''
+                [ 'O', 'UPDATE db4ai.snapshot SET matrix_id = ' || p_id::TEXT || ' WHERE schema = ''' || i_schema || ''' AND name = '''
                 || i_parent || '''' ],
-                [ 'O', 'ALTER TABLE db4ai.t' || p_id || ' ADD _' || p_id || ' BOOLEAN NOT NULL DEFAULT TRUE' ],
-                [ 'O', 'ALTER TABLE db4ai.t' || p_id || ' ALTER _' || p_id || ' SET DEFAULT FALSE' ],
-                [ 'O', 'CREATE OR REPLACE VIEW db4ai.v' || p_id || ' WITH(security_barrier) AS SELECT ' || p_sv_proj || ', xc_node_id, ctid FROM db4ai.t'
-                || p_id || ' WHERE _' || p_id ]];
+                [ 'O', 'ALTER TABLE db4ai.t' || p_id::TEXT || ' ADD _' || p_id::TEXT || ' BOOLEAN NOT NULL DEFAULT TRUE' ],
+                [ 'O', 'ALTER TABLE db4ai.t' || p_id::TEXT || ' ALTER _' || p_id::TEXT || ' SET DEFAULT FALSE' ],
+                [ 'O', 'CREATE OR REPLACE VIEW db4ai.v' || p_id::TEXT || ' WITH(security_barrier) AS SELECT ' || p_sv_proj || ', xc_node_id, ctid FROM db4ai.t'
+                || p_id::TEXT || ' WHERE _' || p_id::TEXT ]];
             m_id := p_id;
         END IF;
         exec_cmds := exec_cmds || ARRAY [
-            [ 'O', 'ALTER TABLE db4ai.t' || m_id || ' ADD _' || s_id || ' BOOLEAN NOT NULL DEFAULT FALSE' ],
-            [ 'O', 'UPDATE db4ai.t' || m_id || ' SET _' || s_id || ' = TRUE WHERE _' || p_id ]];
+            [ 'O', 'ALTER TABLE db4ai.t' || m_id::TEXT || ' ADD _' || s_id::TEXT || ' BOOLEAN NOT NULL DEFAULT FALSE' ],
+            [ 'O', 'UPDATE db4ai.t' || m_id::TEXT || ' SET _' || s_id::TEXT || ' = TRUE WHERE _' || p_id::TEXT ]];
     END IF;
 
     -- generate and append grant, create view and rewrite rules for new snapshot
@@ -371,8 +371,8 @@ BEGIN
 
     -- apply SQL DML/DDL according to snapshot mode
     FOREACH command_str IN ARRAY (i_commands || ARRAY[NULL] ) LOOP
-        command_str := btrim(command_str);
-        pattern := upper(regexp_replace(left(command_str, 30), '\s+', ' ', 'g'));
+        command_str := pg_catalog.btrim(command_str);
+        pattern := pg_catalog.upper(pg_catalog.regexp_replace(pg_catalog.left(command_str, 30), '\s+', ' ', 'g'));
         IF pattern is NULL THEN
             next_op := NULL;
         ELSIF pattern = 'ALTER' THEN -- ALTER keyword is optional
@@ -383,21 +383,21 @@ BEGIN
             next_op := INSERT_OP;
         ELSIF pattern = 'UPDATE' THEN
             next_op := UPDATE_OP;
-        ELSIF left(pattern, 7) = 'DELETE ' THEN
+        ELSIF pg_catalog.left(pattern, 7) = 'DELETE ' THEN
             next_op := DELETE_OP;
-            SELECT coalesce(m[1], m[2]), m [3] FROM regexp_matches(command_str,
+            SELECT coalesce(m[1], m[2]), m [3] FROM pg_catalog.regexp_matches(command_str,
                 '^\s*DELETE\s+FROM\s*(?: snapshot |"snapshot")\s*(?:AS\s*(?: ([^\s"]+) |"((?:[^"]*"")*[^"]*)")\s*)?(.*)\s*$', 'i') m
             INTO next_clauses[AS_CLAUSE], next_clauses[FROM_CLAUSE];
-            RAISE NOTICE E'XXX DELETE \n%\n%', command_str, array_to_string(next_clauses, E'\n');
-        ELSIF left(pattern, 7) = 'INSERT ' THEN
+            RAISE NOTICE E'XXX DELETE \n%\n%', command_str, pg_catalog.array_to_string(next_clauses, E'\n');
+        ELSIF pg_catalog.left(pattern, 7) = 'INSERT ' THEN
             next_op := INSERT_OP;
-            SELECT coalesce(m[1], m[2]), m [3] FROM regexp_matches(command_str,
+            SELECT coalesce(m[1], m[2]), m [3] FROM pg_catalog.regexp_matches(command_str,
                 '^\s*INSERT\s+INTO\s*(?: snapshot |"snapshot")\s*(.*)\s*$', 'i') m
             INTO STRICT next_clauses[SET_CLAUSE];
-            RAISE NOTICE E'XXX INSERT \n%\n%', command_str, array_to_string(next_clauses, E'\n');
-        ELSIF left(pattern, 7) = 'UPDATE ' THEN
+            RAISE NOTICE E'XXX INSERT \n%\n%', command_str, pg_catalog.array_to_string(next_clauses, E'\n');
+        ELSIF pg_catalog.left(pattern, 7) = 'UPDATE ' THEN
             next_op := UPDATE_OP;
-            SELECT coalesce(m[1], m[2]), m [3] FROM regexp_matches(command_str,
+            SELECT coalesce(m[1], m[2]), m [3] FROM pg_catalog.regexp_matches(command_str,
                 '^\s*UPDATE\s*(?: snapshot |"snapshot")\s*(?:AS\s*(?: ([^\s"]+) |"((?:[^"]*"")*[^"]*)")\s*)?(.*)\s*$', 'i') m
             INTO STRICT next_clauses[AS_CLAUSE], next_clauses[SET_CLAUSE];
 
@@ -416,12 +416,12 @@ BEGIN
 
                 LOOP
                     idx := idx + 1;
-                    cur_ch := substr(stmt, idx, 1);
+                    cur_ch := pg_catalog.substr(stmt, idx, 1);
                     EXIT WHEN cur_ch IS NULL OR cur_ch = '';
 
                     CASE cur_ch
                     WHEN '"' THEN
-                        IF quoted AND substr(stmt, idx + 1, 1) = '"' THEN
+                        IF quoted AND pg_catalog.substr(stmt, idx + 1, 1) = '"' THEN
                             idx := idx + 1;
                         ELSE
                             quoted := NOT quoted;
@@ -441,39 +441,39 @@ BEGIN
                     WHEN ' ' THEN
                         IF quoted OR nested > 0 THEN
                             CONTINUE;
-                        ELSIF pattern IS NULL OR length(pattern) = 0 THEN
+                        ELSIF pattern IS NULL OR pg_catalog.length(pattern) = 0 THEN
                             start_pos := idx;
                             CONTINUE;
                         END IF;
                     ELSE
-                        pattern := pattern || upper(cur_ch);
+                        pattern := pattern || pg_catalog.upper(cur_ch);
                         CONTINUE;
                     END CASE;
 
 -- END splitter code for testing
 
                     IF pattern IN ('FROM', 'WHERE') THEN
-                        next_clauses[FROM_CLAUSE] := substr(next_clauses[SET_CLAUSE], start_pos + 1);
-                        next_clauses[SET_CLAUSE] := left(next_clauses[SET_CLAUSE], start_pos - 1);
+                        next_clauses[FROM_CLAUSE] := pg_catalog.substr(next_clauses[SET_CLAUSE], start_pos + 1);
+                        next_clauses[SET_CLAUSE] := pg_catalog.left(next_clauses[SET_CLAUSE], start_pos - 1);
                         EXIT;
                     END IF;
                     pattern := '';
                     start_pos := idx;
                 END LOOP;
             END;
-            RAISE NOTICE E'XXX UPDATE \n%\n%', command_str, array_to_string(next_clauses, E'\n');
-        ELSIF left(pattern, 6) = 'ALTER ' THEN
-            SELECT coalesce(m[1], m[2]), m [3] FROM regexp_matches(command_str,
+            RAISE NOTICE E'XXX UPDATE \n%\n%', command_str, pg_catalog.array_to_string(next_clauses, E'\n');
+        ELSIF pg_catalog.left(pattern, 6) = 'ALTER ' THEN
+            SELECT coalesce(m[1], m[2]), m [3] FROM pg_catalog.regexp_matches(command_str,
                 '^\s*ALTER\s+TABLE\s*(?: snapshot |"snapshot")\s*(.*)\s*$', 'i') m
             INTO STRICT next_clauses[ALTER_CLAUSE];
-            RAISE NOTICE E'XXX ALTER \n%\n%', command_str, array_to_string(next_clauses, E'\n');
+            RAISE NOTICE E'XXX ALTER \n%\n%', command_str, pg_catalog.array_to_string(next_clauses, E'\n');
             IF current_op IS NULL OR current_clauses[ALTER_CLAUSE] IS NULL THEN
                 next_op := ALTER_OP;
             ELSE
                 current_clauses[ALTER_CLAUSE] := current_clauses[ALTER_CLAUSE] || ', ' || next_clauses[ALTER_CLAUSE];
                 next_clauses[ALTER_CLAUSE] := NULL;
             END IF;
-        ELSIF left(pattern, 4) = 'ADD ' OR left(pattern, 5) = 'DROP ' THEN
+        ELSIF pg_catalog.left(pattern, 4) = 'ADD ' OR pg_catalog.left(pattern, 5) = 'DROP ' THEN
             --for chaining, conflicting ALTER ops must be avoided by user
             IF current_op IS NULL OR current_op <> ALTER_OP THEN
                 next_op := ALTER_OP; -- ALTER keyword is optional
@@ -485,7 +485,7 @@ BEGIN
                 current_clauses[ALTER_CLAUSE] := current_clauses[ALTER_CLAUSE] || ', ' || command_str;
                 CONTINUE; -- allow chaining of ALTER ops
             END IF;
-        ELSIF left(pattern, 6) = 'WHERE ' THEN
+        ELSIF pg_catalog.left(pattern, 6) = 'WHERE ' THEN
             IF current_op IS NULL THEN
                 RAISE EXCEPTION 'missing INSERT / UPDATE / DELETE keyword before WHERE clause in i_commands at: ''%''', command_str;
             ELSIF current_op NOT IN (INSERT_OP, UPDATE_OP, DELETE_OP) THEN
@@ -496,7 +496,7 @@ BEGIN
                 RAISE EXCEPTION 'multiple WHERE clauses in % at: ''%''', ops_str[current_op], command_str;
             END IF;
             CONTINUE;
-        ELSIF left(pattern, 5) = 'FROM ' THEN
+        ELSIF pg_catalog.left(pattern, 5) = 'FROM ' THEN
             IF current_op IS NULL THEN
                 RAISE EXCEPTION 'missing INSERT / UPDATE keyword before FROM clause in i_commands at: ''%''', command_str;
             ELSIF current_op NOT IN (INSERT_OP, UPDATE_OP) THEN
@@ -507,7 +507,7 @@ BEGIN
                 RAISE EXCEPTION 'multiple FROM clauses in % at: ''%''', ops_str[current_op], command_str;
             END IF;
             CONTINUE;
-        ELSIF left(pattern, 6) = 'USING ' THEN
+        ELSIF pg_catalog.left(pattern, 6) = 'USING ' THEN
             IF current_op IS NULL THEN
                 RAISE EXCEPTION 'missing DELETE keyword before USING clause in i_commands at: ''%''', command_str;
             ELSIF current_op NOT IN (DELETE_OP) THEN
@@ -518,7 +518,7 @@ BEGIN
                 RAISE EXCEPTION 'multiple USING clauses in DELETE at: ''%''', command_str;
             END IF;
             CONTINUE;
-        ELSIF left(pattern, 4) = 'SET ' THEN
+        ELSIF pg_catalog.left(pattern, 4) = 'SET ' THEN
             IF current_op IS NULL THEN
                 RAISE EXCEPTION 'missing UPDATE keyword before SET clause in i_commands at: ''%''', command_str;
             ELSIF current_op NOT IN (UPDATE_OP) THEN
@@ -529,16 +529,16 @@ BEGIN
                     THEN command_str ELSE current_clauses[SET_CLAUSE] || ' ' || command_str END;
             END IF;
             CONTINUE;
-        ELSIF left(pattern, 3) = 'AS ' THEN
+        ELSIF pg_catalog.left(pattern, 3) = 'AS ' THEN
             IF current_op IS NULL THEN
                 RAISE EXCEPTION 'missing UPDATE / DELETE keyword before AS clause in i_commands at: ''%''', command_str;
             ELSIF current_op NOT IN (UPDATE_OP, DELETE_OP) THEN
                 RAISE EXCEPTION 'illegal AS clause in % at: ''%''', ops_str[current_op], command_str;
             ELSIF current_clauses[AS_CLAUSE] IS NULL THEN
                 DECLARE
-                    as_pos INT := 3 + strpos(upper(command_str), 'AS ');
+                    as_pos INT := 3 + pg_catalog.strpos(pg_catalog.upper(command_str), 'AS ');
                 BEGIN
-                    current_clauses[AS_CLAUSE] := ltrim(substr(command_str, as_pos));
+                    current_clauses[AS_CLAUSE] := pg_catalog.ltrim(pg_catalog.substr(command_str, as_pos));
                 END;
             ELSE
                 RAISE EXCEPTION 'multiple AS clauses in % at: ''%''', ops_str[current_op], command_str;
@@ -586,12 +586,12 @@ BEGIN
 
                     LOOP
                         idx := idx + 1;
-                        cur_ch := substr(tokens, idx, 1);
+                        cur_ch := pg_catalog.substr(tokens, idx, 1);
                         EXIT WHEN cur_ch IS NULL OR cur_ch = '';
 
                         CASE cur_ch
                         WHEN '"' THEN
-                            IF quoted AND substr(tokens, idx + 1, 1) = '"' THEN
+                            IF quoted AND pg_catalog.substr(tokens, idx + 1, 1) = '"' THEN
                                 pattern := pattern || '"';
                                 idx := idx + 1;
                             ELSE
@@ -604,7 +604,7 @@ BEGIN
                             IF quoted THEN
                                 pattern := pattern || cur_ch;
                                 CONTINUE;
-                            ELSIF pattern IS NULL OR length(pattern) = 0 THEN
+                            ELSIF pattern IS NULL OR pg_catalog.length(pattern) = 0 THEN
                                 pattern := ',';
                             ELSE
                                 idx := idx - 1; -- reset on comma for next loop
@@ -613,30 +613,30 @@ BEGIN
                             IF quoted THEN
                                 pattern := pattern || cur_ch;
                                 CONTINUE;
-                            ELSIF pattern IS NULL OR length(pattern) = 0 THEN
+                            ELSIF pattern IS NULL OR pg_catalog.length(pattern) = 0 THEN
                                 CONTINUE;
                             END IF;
                         ELSE
-                            pattern := pattern || CASE WHEN quoted THEN cur_ch ELSE lower(cur_ch) END;
+                            pattern := pattern || CASE WHEN quoted THEN cur_ch ELSE pg_catalog.lower(cur_ch) END;
                             CONTINUE;
                         END CASE;
 
 -- END tokenizer code for testing
 
-                        IF alt_op = 'DROP' AND upper(dropif) = 'IF' THEN
+                        IF alt_op = 'DROP' AND pg_catalog.upper(dropif) = 'IF' THEN
                             IF pattern = ',' THEN
                                 pattern := dropif;  -- interpret 'if' as column name (not a keyword)
                                 idx := idx - 1;     -- reset on comma for next loop
-                            ELSIF upper(pattern) <> 'EXISTS' THEN
+                            ELSIF pg_catalog.upper(pattern) <> 'EXISTS' THEN
                                 RAISE EXCEPTION 'expected EXISTS keyword in % operation after ''%'' in: ''%''',
                                                 alt_op, dropif, current_clauses[ALTER_CLAUSE];
                             END IF;
                         END IF;
 
                         IF expect THEN
-                            IF upper(pattern) IN ('ADD', 'DROP') THEN
+                            IF pg_catalog.upper(pattern) IN ('ADD', 'DROP') THEN
                                 IF alt_op IS NULL THEN
-                                    alt_op := upper(pattern);
+                                    alt_op := pg_catalog.upper(pattern);
                                     expect := FALSE;
                                 ELSE
                                     RAISE EXCEPTION 'unable to extract column name in % operation: ''%''',
@@ -655,16 +655,16 @@ BEGIN
                             IF command_str IS NOT NULL THEN
                                 command_str := command_str || ' ' || pattern;
                             END IF;
-                        ELSIF upper(pattern) = 'COLUMN' THEN
+                        ELSIF pg_catalog.upper(pattern) = 'COLUMN' THEN
                             -- skip keyword COLUMN between ADD/DROP and column name
-                        ELSIF alt_op = 'DROP' AND upper(pattern) = 'IF' AND dropif IS NULL THEN
+                        ELSIF alt_op = 'DROP' AND pg_catalog.upper(pattern) = 'IF' AND dropif IS NULL THEN
                             dropif := pattern; -- 'IF' is not a keyword
-                        ELSIF alt_op = 'DROP' AND upper(pattern) = 'EXISTS' AND upper(dropif) = 'IF' THEN
+                        ELSIF alt_op = 'DROP' AND pg_catalog.upper(pattern) = 'EXISTS' AND pg_catalog.upper(dropif) = 'IF' THEN
                             dropif := pattern; -- 'EXISTS' is not a keyword
                         ELSIF alt_op IN ('ADD', 'DROP') THEN
 
                             -- attempt to map the pattern
-                            FOR idx IN 3 .. array_length(mapping, 1) BY 3 LOOP
+                            FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
                                 IF pattern = mapping[idx] THEN
                                     IF alt_op = 'ADD' THEN
                                         -- check if pattern was mapped to an existing column
@@ -673,10 +673,10 @@ BEGIN
                                         -- DROP a private column (MSS and CSS)
                                         IF mapping[idx-2] IS NOT NULL THEN
                                             command_str := CASE WHEN command_str IS NULL
-                                                THEN 'ALTER TABLE db4ai.t' || coalesce(m_id, s_id)
-                                                ELSE command_str || ',' END || ' DROP ' ||  mapping[idx-2];
+                                                THEN 'ALTER TABLE db4ai.t' || coalesce(m_id, s_id)::TEXT
+                                                ELSE command_str || ',' END || ' DROP ' ||  mapping[idx-2]::TEXT;
                                         END IF;
-                                        mapping := mapping[1:(idx-3)] || mapping[idx+1:(array_length(mapping, 1))];
+                                        mapping := mapping[1:(idx-3)] || mapping[idx+1:(pg_catalog.array_length(mapping, 1))];
                                         newmap := TRUE;
                                         alt_op := NULL;
                                         EXIT;
@@ -688,14 +688,14 @@ BEGIN
                             IF alt_op = 'ADD' THEN
                                 -- ADD a private column (MSS and CSS)
                                 command_str := CASE WHEN command_str IS NULL
-                                                THEN 'ALTER TABLE db4ai.t' || coalesce(m_id, s_id)
-                                                ELSE command_str || ',' END || ' ADD f' || c_id;
-                                mapping := mapping || ARRAY [ 'f' || c_id, NULL, pattern ]::NAME[];
+                                                THEN 'ALTER TABLE db4ai.t' || coalesce(m_id, s_id)::TEXT
+                                                ELSE command_str || ',' END || ' ADD f' || c_id::TEXT;
+                                mapping := mapping || ARRAY [ 'f' || c_id::TEXT, NULL, pattern ]::NAME[];
                                 newmap := TRUE;
                                 c_id := c_id + 1;
                             ELSIF alt_op = 'DROP' THEN
                                 -- check whether pattern needs mapping to an existing column
-                                IF dropif IS NULL OR upper(dropif) <> 'EXISTS' THEN
+                                IF dropif IS NULL OR pg_catalog.upper(dropif) <> 'EXISTS' THEN
                                     RAISE EXCEPTION 'unable to map field "%" to backing table in % operation: ''%''',
                                         pattern, alt_op, current_clauses[ALTER_CLAUSE];
                                 END IF;
@@ -712,12 +712,12 @@ BEGIN
 
                     IF quoted THEN
                         RAISE EXCEPTION 'unterminated quoted identifier ''"%'' at or near: ''%''',
-                            substr(pattern, 1, char_length(pattern)-1), current_clauses[ALTER_CLAUSE];
+                            pg_catalog.substr(pattern, 1, pg_catalog.char_length(pattern)-1), current_clauses[ALTER_CLAUSE];
                     END IF;
 
                     -- CREATE OR REPLACE: cannot drop columns from view - MUST use DROP / CREATE
                     -- clear view dependencies for backing table columns
-                    exec_cmds := exec_cmds || ARRAY [ 'O', 'DROP VIEW IF EXISTS db4ai.v' || s_id ];
+                    exec_cmds := exec_cmds || ARRAY [ 'O', 'DROP VIEW IF EXISTS db4ai.v' || s_id::TEXT ];
 
                     -- append the DDL statement for the backing table (if any)
                     IF command_str IS NOT NULL THEN
@@ -737,13 +737,13 @@ BEGIN
                 END IF;
 
                 exec_cmds := exec_cmds || ARRAY [
-                    'U', 'INSERT INTO db4ai.v' || s_id
+                    'U', 'INSERT INTO db4ai.v' || s_id::TEXT
                     || ' ' || current_clauses[SET_CLAUSE] -- generic SQL
                     || CASE WHEN current_clauses[FROM_CLAUSE] IS NULL THEN '' ELSE ' ' || current_clauses[FROM_CLAUSE] END
                     || CASE WHEN current_clauses[WHERE_CLAUSE] IS NULL THEN '' ELSE ' ' || current_clauses[WHERE_CLAUSE] END ];
             ELSIF current_op = DELETE_OP THEN
                 exec_cmds := exec_cmds || ARRAY [
-                    'U', 'DELETE FROM db4ai.v' || s_id || ' AS ' || current_clauses[AS_CLAUSE]
+                    'U', 'DELETE FROM db4ai.v' || s_id::TEXT || ' AS ' || current_clauses[AS_CLAUSE]
                     || CASE WHEN current_clauses[FROM_CLAUSE] IS NULL THEN '' ELSE ' ' || current_clauses[FROM_CLAUSE] END -- USING
                     || CASE WHEN current_clauses[WHERE_CLAUSE] IS NULL THEN '' ELSE ' ' || current_clauses[WHERE_CLAUSE] END ];
             ELSIF current_op = UPDATE_OP THEN
@@ -755,21 +755,21 @@ BEGIN
 
                 -- extract updated fields and check their mapping
                 FOR pattern IN
-                    SELECT coalesce(m[1], replace(m[2],'""','"'))
-                    FROM regexp_matches(current_clauses[SET_CLAUSE],
+                    SELECT coalesce(m[1], pg_catalog.replace(m[2],'""','"'))
+                    FROM pg_catalog.regexp_matches(current_clauses[SET_CLAUSE],
                     '([^\s"]+)\s*=|"((?:[^"]*"")*[^"]*)"\s*=','g') m
                 LOOP
-                    FOR idx IN 3 .. array_length(mapping, 1) BY 3 LOOP
+                    FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
                         IF pattern = mapping[idx] THEN
                             -- ADD a private column (only CSS)
                             IF mapping[idx-2] IS NULL THEN
                                 command_str := CASE WHEN command_str IS NULL
-                                    THEN 'ALTER TABLE db4ai.t' || m_id
+                                    THEN 'ALTER TABLE db4ai.t' || m_id::TEXT
                                     ELSE command_str || ',' END
-                                    || ' ADD f' || c_id || ' '
-                                    || format_type(atttypid, atttypmod) FROM pg_catalog.pg_attribute
-                                    WHERE attrelid = ('db4ai.t' || m_id)::regclass AND attname = mapping[idx-1];
-                                mapping[idx-2] := 'f' || c_id;
+                                    || ' ADD f' || c_id::TEXT || ' '
+                                    || pg_catalog.format_type(atttypid, atttypmod) FROM pg_catalog.pg_attribute
+                                    WHERE attrelid = ('db4ai.t' || m_id::TEXT)::regclass AND attname = mapping[idx-1];
+                                mapping[idx-2] := 'f' || c_id::TEXT;
                                 newmap := TRUE;
                                 c_id := c_id + 1;
                             END IF;
@@ -798,7 +798,7 @@ BEGIN
                 END IF;
 
                 exec_cmds := exec_cmds || ARRAY [
-                    'U', 'UPDATE db4ai.v' || s_id || ' AS ' || current_clauses[AS_CLAUSE]
+                    'U', 'UPDATE db4ai.v' || s_id::TEXT || ' AS ' || current_clauses[AS_CLAUSE]
                     || ' ' || current_clauses[SET_CLAUSE]
                     || CASE WHEN current_clauses[FROM_CLAUSE] IS NULL THEN '' ELSE ' ' || current_clauses[FROM_CLAUSE] END
                     || CASE WHEN current_clauses[WHERE_CLAUSE] IS NULL THEN '' ELSE ' ' || current_clauses[WHERE_CLAUSE] END ];
@@ -815,9 +815,9 @@ BEGIN
     -- compute final version string
     IF i_vers IS NULL OR i_vers = '' THEN
         BEGIN
-            vers_arr := regexp_split_to_array(p_name_vers[2], CASE s_vers_sep WHEN '.' THEN '\.' ELSE s_vers_sep END);
+            vers_arr := pg_catalog.regexp_split_to_array(p_name_vers[2], CASE s_vers_sep WHEN '.' THEN '\.' ELSE s_vers_sep END);
 
-            IF array_length(vers_arr, 1) <> 3 OR array_length(vers_arr, 2) <> none_represent OR
+            IF pg_catalog.array_length(vers_arr, 1) <> 3 OR pg_catalog.array_length(vers_arr, 2) <> none_represent OR
                 vers_arr[1] ~ '[^0-9]' OR vers_arr[2] ~ '[^0-9]' OR vers_arr[3] ~ '[^0-9]' THEN
                 RAISE EXCEPTION 'illegal version format';
             END IF;
@@ -831,33 +831,33 @@ BEGIN
             ELSE
                 vers_arr[3] := vers_arr[3] + 1;
             END IF;
-            i_vers := s_vers_del || array_to_string(vers_arr, s_vers_sep);
+            i_vers := s_vers_del || pg_catalog.array_to_string(vers_arr, s_vers_sep);
         EXCEPTION WHEN OTHERS THEN
             RAISE EXCEPTION 'parent has nonstandard version %. i_vers cannot be null or empty', p_name_vers[2]
             USING HINT = 'provide custom version using i_vers parameter for new snapshot';
         END;
-    ELSE
-        i_vers := replace(i_vers, chr(2), s_vers_sep);
+ELSE
+        i_vers := pg_catalog.replace(i_vers, pg_catalog.chr(2), s_vers_sep);
         IF LEFT(i_vers, 1) <> s_vers_del THEN
             i_vers := s_vers_del || i_vers;
-        ELSIF char_length(i_vers) < 2 THEN
+        ELSIF pg_catalog.char_length(i_vers) < 2 THEN
             RAISE EXCEPTION 'illegal i_vers: ''%''', s_vers_del;
         END IF;
-        IF strpos(substr(i_vers, 2), s_vers_del) > 0 THEN
+        IF pg_catalog.strpos(pg_catalog.substr(i_vers, 2), s_vers_del) > 0 THEN
             RAISE EXCEPTION 'i_vers may contain only one single, leading ''%'' character', s_vers_del
             USING HINT = 'specify snapshot version as [' || s_vers_del || ']x' || s_vers_sep || 'y' || s_vers_sep || 'z or ['
                 || s_vers_del || ']label with optional, leading ''' || s_vers_del || '''';
         END IF;
     END IF;
 
-    IF char_length(p_name_vers[1] || i_vers) > 63 THEN
+    IF pg_catalog.char_length(p_name_vers[1] || i_vers) > 63 THEN
         RAISE EXCEPTION 'snapshot name too long: ''%''', p_name_vers[1] || i_vers;
     ELSE
         s_name := p_name_vers[1] || i_vers;
     END IF;
 
     -- the final name of the snapshot
-    qual_name := quote_ident(i_schema) || '.' || quote_ident(s_name);
+    qual_name := pg_catalog.quote_ident(i_schema) || '.' || pg_catalog.quote_ident(s_name);
 
     -- check for duplicate snapshot
     IF 0 < (SELECT COUNT(0) FROM db4ai.snapshot WHERE schema = i_schema AND name = s_name) THEN
@@ -866,15 +866,15 @@ BEGIN
 
     IF s_mode = 'MSS' THEN
         exec_cmds := exec_cmds || ARRAY [
-            'O', 'COMMENT ON TABLE db4ai.t' || s_id || ' IS ''snapshot backing table, root is ' || qual_name || '''' ];
+            'O', 'COMMENT ON TABLE db4ai.t' || s_id::TEXT || ' IS ''snapshot backing table, root is ' || qual_name || '''' ];
     END IF;
 
     -- Execute the queries
-    RAISE NOTICE E'accumulated commands:\n%', array_to_string(exec_cmds, E'\n');
+    RAISE NOTICE E'accumulated commands:\n%', pg_catalog.array_to_string(exec_cmds, E'\n');
     DECLARE
         idx INTEGER := 1; -- loop counter, cannot use FOR .. iterator
     BEGIN
-        LOOP EXIT WHEN idx = 1 + array_length(exec_cmds, 1);
+        LOOP EXIT WHEN idx = 1 + pg_catalog.array_length(exec_cmds, 1);
             WHILE exec_cmds[idx][1] = 'U' LOOP
                 -- RAISE NOTICE 'user executing: %', exec_cmds[idx][2];
                 DECLARE
@@ -887,14 +887,14 @@ BEGIN
 
                     -- during function invocation, search path is redirected to {pg_temp, pg_catalog, function_schema} and becomes immutable
                     RAISE INFO 'could not resolve relation % using system-defined "search_path" setting during function invocation: ''%''',
-                        substr(e_message, 10, 1 + strpos(substr(e_message,11), '" does not exist')),
-                        array_to_string(current_schemas(TRUE),', ')
+                        pg_catalog.substr(e_message, 10, 1 + pg_catalog.strpos(pg_catalog.substr(e_message,11), '" does not exist')),
+                        pg_catalog.array_to_string(pg_catalog.current_schemas(TRUE),', ')
                         USING HINT = 'snapshots require schema-qualified table references, e.g. schema_name.table_name';
                     RAISE;
                 END;
             END LOOP;
 
-            IF idx < array_length(exec_cmds, 1) AND (exec_cmds[idx][1] IS NULL OR exec_cmds[idx][1] <> 'O') THEN -- this should never happen
+            IF idx < pg_catalog.array_length(exec_cmds, 1) AND (exec_cmds[idx][1] IS NULL OR exec_cmds[idx][1] <> 'O') THEN -- this should never happen
                 RAISE EXCEPTION 'prepare snapshot internal error1: % %', idx, exec_cmds[idx];
             END IF;
 
@@ -904,14 +904,14 @@ BEGIN
         END LOOP;
     END;
 
-    FOR idx IN 3 .. array_length(mapping, 1) BY 3 LOOP
-        s_uv_proj := s_uv_proj || quote_ident(mapping[idx]) || ',';
+    FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
+        s_uv_proj := s_uv_proj || pg_catalog.quote_ident(mapping[idx]) || ',';
     END LOOP;
     -- create custom view, owned by current user
-    EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT '|| rtrim(s_uv_proj, ',') || ' FROM db4ai.v' || s_id;
-    EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id
-        || CASE WHEN length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
-    EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO ' || CURRENT_USER;
+    EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT '|| pg_catalog.rtrim(s_uv_proj, ',') || ' FROM db4ai.v' || s_id::TEXT;
+    EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
+        || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
+    EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER || '"';
 
     -- return final snapshot name
     res := ROW(i_schema, s_name);

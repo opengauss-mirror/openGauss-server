@@ -1569,7 +1569,9 @@ retry:
     CHECK_FOR_INTERRUPTS();
     (void)ExecClearTuple(slot);
     MemoryContextReset(node->scanMcxt);
+#ifndef ENABLE_LITE_MODE
     SetObsMemoryContext(((CopyState)importState)->copycontext);
+#endif
     ReportIllegalCharExceptionThreshold();
 
     PG_TRY();

@@ -526,7 +526,7 @@ INSERT INTO TBL_H248LNK_INFO VALUES(456);
 INSERT INTO TBL_H248LNK_INFO VALUES(789);
 CREATE TABLE TBL (I_MODULENO INTEGER);
 
-CREATE OR REPLACE PROCEDURE TEST_CURSOR 
+CREATE OR REPLACE PROCEDURE TEST_CURSOR_7 
 AS
         TYPE CUR_TYPE IS REF CURSOR;
         CUR CUR_TYPE;
@@ -636,8 +636,8 @@ BEGIN
     raise notice 'SQL%%ROWCOUNT :%',NVL(TO_CHAR(SQL%ROWCOUNT),'NULL');
 END;
 /
-CALL TEST_CURSOR();
-DROP PROCEDURE TEST_CURSOR;
+CALL TEST_CURSOR_7();
+DROP PROCEDURE TEST_CURSOR_7;
 DROP TABLE TBL_H248LNK_INFO;
 DROP TABLE TBL;
 DROP TABLE TBL_RCWSCFG;
@@ -735,5 +735,31 @@ END;
 /
 CALL TEST_CRS_RPT_EMPTYSOR(0);
 CALL TEST_CRS_RPT_EMPTYSOR(1);
+
+create table tb_test(col1 int);
+create or replace procedure proc_test()
+as
+v_count int;
+begin
+insert into tb_test select 1;
+update tb_test set col1=2;
+select 1 into v_count;
+raise notice '%',v_count||','||SQL%FOUND || ',' || SQL%ROWCOUNT;
+end;
+/
+
+declare
+v_count int;
+begin
+insert into tb_test select 1;
+update tb_test set col1=2;
+select 1 into v_count;
+proc_test();
+v_count:=1;
+raise notice '%',v_count||','||SQL%FOUND || ',' || SQL%ROWCOUNT;
+end
+/
+
+drop table tb_test;
 
 drop schema hw_cursor_part7 CASCADE;

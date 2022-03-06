@@ -45,7 +45,7 @@ public:
     /* *
      * 	CREATE commands require running functions later to update local cache
      */
-    static bool run_post_query(PGconn *conn);
+    static bool run_post_query(PGconn *conn, bool force_error = false);
     static bool accept_pending_statements(PGconn *conn, bool isSuccess = true);
     static bool deal_order_by_statement(const SelectStmt * const select_stmt, ICachedColumns *select_cached_columns,
     		StatementData *statement_data);
@@ -107,6 +107,7 @@ private:
     static bool run_pre_drop_schema_statement(const DropStmt *stmt, StatementData *statement_data);
     static bool run_pre_set_statement(const VariableSetStmt *stmt, StatementData *statement_data);
     static bool run_pre_exec_direct_statement(const ExecDirectStmt *stmt, StatementData *statement_data);
+    static bool run_pre_create_function_stmt(const CreateFunctionStmt *stmt, StatementData *statement_data);
     static bool run_pre_create_rlspolicy_stmt(const CreateRlsPolicyStmt *stmt, StatementData *statement_data);
     static bool run_pre_alter_rlspolicy_stmt(const AlterRlsPolicyStmt *stmt, StatementData *statement_data);
     static bool run_pre_rlspolicy_using(const Node *stmt, StatementData *statement_data);

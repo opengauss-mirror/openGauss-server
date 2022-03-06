@@ -61,6 +61,30 @@ Datum pgxc_pool_check(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(PoolManagerCheckConnectionInfo());
 }
 
+Datum pgxc_disaster_read_set(PG_FUNCTION_ARGS)
+{
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    PG_RETURN_BOOL(false);
+}
+
+Datum pgxc_disaster_read_init(PG_FUNCTION_ARGS)
+{
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    PG_RETURN_BOOL(false);
+}
+
+Datum pgxc_disaster_read_clear(PG_FUNCTION_ARGS)
+{
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    PG_RETURN_BOOL(false);
+}
+
+Datum pgxc_disaster_read_status(PG_FUNCTION_ARGS)
+{
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    PG_RETURN_NULL();
+}
+
 /*
  * pgxc_pool_reload
  *

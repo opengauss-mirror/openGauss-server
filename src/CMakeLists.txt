@@ -28,7 +28,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/include/port/linux.h ${PROJECT_SRC_DIR}/include/pg_config_os.h
 )
 
-INCLUDE_DIRECTORIES(${LIBTHRIFT_INCLUDE_PATH} ${SNAPPY_INCLUDE_PATH} ${CJSON_INCLUDE_PATH} ${BOOST_INCLUDE_PATH} ${ZSTD_INCLUDE_PATH})
+INCLUDE_DIRECTORIES(${LIBTHRIFT_INCLUDE_PATH} ${SNAPPY_INCLUDE_PATH} ${CJSON_INCLUDE_PATH} ${BOOST_INCLUDE_PATH})
 
 set(CMAKE_MODULE_PATH 
     ${CMAKE_CURRENT_SOURCE_DIR}/bin
@@ -44,12 +44,15 @@ add_subdirectory(lib)
 add_subdirectory(gausskernel)
 add_subdirectory(test)
 
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/ssl/openssl_gsql.cnf DESTINATION share/sslcert/gds RENAME openssl.cnf)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/ssl/openssl_om.cnf DESTINATION share/sslcert/om RENAME openssl.cnf)
+endif()
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/ssl/openssl_etcd.cnf DESTINATION share/sslcert/etcd RENAME openssl.cnf)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/ssl/openssl_gsql.cnf DESTINATION share/sslcert/gds RENAME openssl.cnf)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/ssl/openssl_grpc.cnf DESTINATION share/sslcert/grpc RENAME openssl.cnf)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/ssl/openssl_gsql.cnf DESTINATION share/sslcert/gsql RENAME openssl.cnf)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/ssl/openssl_om.cnf DESTINATION share/sslcert/om RENAME openssl.cnf)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/get_PlatForm_str.sh DESTINATION lib/postgresql/pgxs/src)
+install(FILES ${CMAKE_BINARY_DIR}/${openGauss}/src/makefiles/pgxs.mk DESTINATION lib/postgresql/pgxs/src/makefiles)
+install(FILES ${PROJECT_SRC_DIR}/Makefile.shlib DESTINATION lib/postgresql/pgxs/src/)
 install(FILES ${PROJECT_OPENGS_DIR}/config/install-sh DESTINATION lib/postgresql/pgxs/config)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/cm/ DESTINATION include PATTERN "*.h"
     PATTERN "cm_server" EXCLUDE
@@ -145,6 +148,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/storage/mot DESTINATION in
 endif()
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/commands DESTINATION include/postgresql/server)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/port DESTINATION include/postgresql/server)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/lite DESTINATION include/postgresql/server)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/alarm/alarm.h DESTINATION include/postgresql/server/alarm)
 install_file(${CMAKE_CURRENT_SOURCE_DIR}/include/storage include/postgresql/server/storage)
 install_file(${CMAKE_CURRENT_SOURCE_DIR}/include include/postgresql/server)
@@ -166,25 +170,36 @@ install(CODE "execute_process(
 )
 
 # open source install part
-install(DIRECTORY ${JAVA_HOME}/jre/ DESTINATION jre FILE_PERMISSIONS OWNER_EXECUTE GROUP_EXECUTE OWNER_READ GROUP_READ)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    install(DIRECTORY ${JAVA_HOME}/jre/ DESTINATION jre FILE_PERMISSIONS OWNER_EXECUTE GROUP_EXECUTE OWNER_READ GROUP_READ)
+endif()
+
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
     install(DIRECTORY ${DCF_LIB_PATH} DESTINATION .)
 endif()
 install(DIRECTORY ${ZSTD_LIB_PATH} DESTINATION . PATTERN "*.a" EXCLUDE)
-install(DIRECTORY ${LIBOBS_LIB_PATH} DESTINATION .)
-install(DIRECTORY ${LIBOBS_INCLUDE_PATH} DESTINATION include/postgresql/server/access/obs)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    install(DIRECTORY ${LIBOBS_LIB_PATH} DESTINATION .)
+    install(DIRECTORY ${LIBOBS_INCLUDE_PATH} DESTINATION include/postgresql/server/access/obs)
+endif()
 install(DIRECTORY ${CJSON_LIB_PATH} DESTINATION .)
 install(DIRECTORY ${CJSON_INCLUDE_PATH}/cjson DESTINATION include/postgresql/server)
-install(DIRECTORY ${ETCD_BIN_PATH} DESTINATION .)
-install(DIRECTORY ${IPERF_LIB_PATH} DESTINATION .)
-install(DIRECTORY ${KERBEROS_SBIN_PATH}/ DESTINATION bin)
-install(DIRECTORY ${KERBEROS_BIN_PATH} DESTINATION .)
-install(DIRECTORY ${KERBEROS_LIB_PATH} DESTINATION .)
+if(NOT ${ENABLE_LITE_MODE} STREQUAL ON)
+    install(DIRECTORY ${ETCD_BIN_PATH} DESTINATION .)
+    install(DIRECTORY ${IPERF_LIB_PATH} DESTINATION .)
+endif()
+if(NOT ${ENABLE_LITE_MODE} STREQUAL ON)
 if(NOT ${ENABLE_MULTIPLE_NODES}_${ENABLE_PRIVATEGAUSS} STREQUAL OFF_OFF)
     install(DIRECTORY ${KMC_LIB_PATH} DESTINATION .)
 endif()
+endif()
 install(DIRECTORY ${LIBCURL_LIB_PATH} DESTINATION .)
-install(DIRECTORY ${LIBPARQUET_LIB_PATH} DESTINATION .)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    install(DIRECTORY ${KERBEROS_SBIN_PATH}/ DESTINATION bin)
+    install(DIRECTORY ${KERBEROS_BIN_PATH} DESTINATION .)
+    install(DIRECTORY ${KERBEROS_LIB_PATH} DESTINATION .)
+    install(DIRECTORY ${LIBPARQUET_LIB_PATH} DESTINATION .)
+endif()
 install(DIRECTORY ${LZ4_LIB_PATH} DESTINATION .)
 install(DIRECTORY ${LZ4_BIN_PATH} DESTINATION .)
 install(DIRECTORY ${LIBOPENSSL_BIN_PATH} DESTINATION .)
@@ -209,12 +224,19 @@ install(CODE "message(\"-- Created symlink: libatomic.so.1 -> libatomic.so.1.2.0
 endif()
 
 install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgcc_s.so.1 DESTINATION lib)
-install(FILES ${SECURE_HOME}/../Dynamic_Lib/libsecurec.so DESTINATION lib)
-install(FILES ${PLJAVA_HOME}/lib/libpljava.so DESTINATION lib)
-install(FILES ${PLJAVA_HOME}/java/pljava.jar DESTINATION lib/postgresql/java)
-install(FILES ${PLJAVA_HOME}/udstools.py DESTINATION share/postgresql/tmp)
+install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgomp.so DESTINATION lib)
+install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgomp.so.1 DESTINATION lib)
+install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgomp.so.1.0.0 DESTINATION lib)
+install(FILES ${XGBOOST_LIB_PATH}/libxgboost.so DESTINATION lib)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    install(FILES ${PLJAVA_HOME}/lib/libpljava.so DESTINATION lib)
+    install(FILES ${PLJAVA_HOME}/java/pljava.jar DESTINATION lib/postgresql/java)
+    install(FILES ${PLJAVA_HOME}/udstools.py DESTINATION share/postgresql/tmp)
+endif()
 if(NOT ${ENABLE_MULTIPLE_NODES}_${ENABLE_PRIVATEGAUSS} STREQUAL OFF_OFF)
-    install(FILES ${LIBHOTPATCH_LIB_PATH}/libdoprapatch.a DESTINATION lib)
+    if("${SUPPORT_HOTPATCH}" STREQUAL "yes")
+        install(FILES ${LIBHOTPATCH_LIB_PATH}/libdoprapatch.a DESTINATION lib)
+    endif()
 endif()
 install(CODE "execute_process(
      COMMAND cp ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libstdc++.so.6.0.24 ${prefix_home}/lib/libstdc++.so.6
@@ -228,15 +250,17 @@ WORKING_DIRECTORY ${prefix_home}/lib)"
 )
 install(CODE "message(\"-- Created symlink: libcgroup.so.1 -> libcgroup.so\")")
 
-# special
-install(CODE "execute_process(
-    COMMAND cp ${LIBPARQUET_LIB_PATH}/libparquet.so ${prefix_home}/lib/libparquet.so
-    COMMAND cp ${LIBPARQUET_LIB_PATH}/libparquet.so.14 ${prefix_home}/lib/libparquet.so.14
-    COMMAND cp ${LIBPARQUET_LIB_PATH}/libparquet.so.14.1.0 ${prefix_home}/lib/libparquet.so.14.1.0
-    COMMAND cp ${LIBPARQUET_LIB_PATH}/libarrow.so ${prefix_home}/lib/libarrow.so
-    COMMAND cp ${LIBPARQUET_LIB_PATH}/libarrow.so.14 ${prefix_home}/lib/libarrow.so.14
-    COMMAND cp ${LIBPARQUET_LIB_PATH}/libarrow.so.14.1.0 ${prefix_home}/lib/libarrow.so.14.1.0)"
-)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    # special
+    install(CODE "execute_process(
+        COMMAND cp ${LIBPARQUET_LIB_PATH}/libparquet.so ${prefix_home}/lib/libparquet.so
+        COMMAND cp ${LIBPARQUET_LIB_PATH}/libparquet.so.14 ${prefix_home}/lib/libparquet.so.14
+        COMMAND cp ${LIBPARQUET_LIB_PATH}/libparquet.so.14.1.0 ${prefix_home}/lib/libparquet.so.14.1.0
+        COMMAND cp ${LIBPARQUET_LIB_PATH}/libarrow.so ${prefix_home}/lib/libarrow.so
+        COMMAND cp ${LIBPARQUET_LIB_PATH}/libarrow.so.14 ${prefix_home}/lib/libarrow.so.14
+        COMMAND cp ${LIBPARQUET_LIB_PATH}/libarrow.so.14.1.0 ${prefix_home}/lib/libarrow.so.14.1.0)"
+    )
+endif()
 
 # fastcheck part
 install(FILES ${PROJECT_SRC_DIR}/test/regress/stub/roach_api_stub/roach_api_stub.control

@@ -519,7 +519,7 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
     }
 
     if (OldHeap->storage_type == SEGMENT_PAGE) {
-        ereport(LOG, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
+        ereport(INFO, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
             "to recycle segment space.", RelationGetRelationName(OldHeap))));
         relation_close(OldHeap, lockMode);
         return;
@@ -1521,7 +1521,7 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
  * Output       : oid of new heap
  */
 Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabHeapDesc, Datum partTabRelOptions,
-    Oid oldPartOid, Oid partToastOid, Oid NewTableSpace, bool isCStore)
+    Oid oldPartOid, Oid partToastOid, Oid NewTableSpace, bool isCStore, Oid subpartFilenode)
 {
     char NewHeapName[NAMEDATALEN];
     Oid OIDNewHeap = InvalidOid;
@@ -1550,7 +1550,7 @@ Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabHeapDesc
         partitionedTableRel->rd_rel->relkind,
         partitionedTableRel->rd_rel->relpersistence,
         false,
-        RelationIsMapped(partitionedTableRel),
+        subpartFilenode == InvalidOid ? RelationIsMapped(partitionedTableRel) : false,
         true,
         0,
         ONCOMMIT_NOOP,
@@ -3672,7 +3672,7 @@ void CBIVacuumFullMainPartiton(Oid parentOid)
 
     /* If vacuum full partitioned segment table, give hint here */
     if (parentHeap->storage_type == SEGMENT_PAGE) {
-        ereport(LOG, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
+        ereport(INFO, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
             "to recycle segment space.", RelationGetRelationName(parentHeap))));
     }
 
@@ -3877,7 +3877,7 @@ static void VacFullCompaction(Relation oldHeap, Oid partOid)
 static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, int freezeTableAge, VacuumStmt* vacstmt)
 {
     Oid tableOid = RelationGetRelid(oldHeap);
-    uint32 statFlag = tableOid;
+    uint32 statFlag = RelationIsSubPartitioned(oldHeap) ? partid_get_parentid(partOid) : tableOid;
     Oid OIDNewHeap = InvalidOid;
     bool swapToastByContent = false;
     TransactionId frozenXid = InvalidTransactionId;

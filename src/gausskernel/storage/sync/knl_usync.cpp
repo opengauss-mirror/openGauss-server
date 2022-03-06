@@ -26,6 +26,7 @@
 #include "commands/tablespace.h"
 #include "portability/instr_time.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/pagewriter.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/smgr/segment.h"
@@ -109,17 +110,9 @@ static const SyncOps SYNCSW[] = {
 
 static const int NSync = lengthof(SYNCSW);
 
-/*
- * Initialize data structures for the file sync tracking.
- */
-void InitSync(void)
+void InitPendingOps(void)
 {
-    /*
-     * Create pending-operations hashtable if we need it.  Currently, we need
-     * it if we are standalone (not under a postmaster) or if we are a startup
-     * or checkpointer auxiliary process.
-     */
-    if (!IsUnderPostmaster || AmStartupProcess() || AmCheckpointerProcess()) {
+    if (!IsUnderPostmaster || AmStartupProcess() || AmCheckpointerProcess() || AmPageWriterMainProcess()) {
         HASHCTL     hashCtl;
         errno_t rc;
 
@@ -143,6 +136,21 @@ void InitSync(void)
         hashCtl.hash = tag_hash;
         u_sess->storage_cxt.pendingOps = hash_create("Pending Ops Table",
             100L, &hashCtl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    }
+}
+
+/*
+ * Initialize data structures for the file sync tracking.
+ */
+void InitSync(void)
+{
+    /*
+     * Create pending-operations hashtable if we need it.  Currently, we need
+     * it if we are standalone (not under a postmaster) or if we are a startup
+     * or checkpointer auxiliary process.
+     */
+    if (!IsUnderPostmaster || AmStartupProcess() || AmCheckpointerProcess() || AmPageWriterMainProcess()) {
+        InitPendingOps();
         u_sess->storage_cxt.pendingUnlinks = NIL;
     }
 }
@@ -223,49 +231,34 @@ void SyncPostCheckpoint(void)
          * (note it might try to delete list entries).
          */
         if (--absorbCounter <= 0) {
-            AbsorbFsyncRequests();
+            CkptAbsorbFsyncRequests();
             absorbCounter = UNLINKS_PER_ABSORB;
         }
     }
+
+    /*
+     * 1. incremental checkpoint mode, checkpoint thread need reset the pendingOps hashtable;
+     * 2. full checkpoint mode, call ProcessSyncRequests, can remove the entry from pendingOps.
+     */
+    if (ENABLE_INCRE_CKPT) {
+        hash_destroy(u_sess->storage_cxt.pendingOps);
+        InitPendingOps();
+    }
 }
 
-/*
- *  ProcessSyncRequests() -- Process queued fsync requests.
- */
-void ProcessSyncRequests(void)
+static void AbsorbFsyncRequests(void)
 {
-    static bool syncInProgress = false;
+    if (AmPageWriterMainProcess()) {
+        PgwrAbsorbFsyncRequests();
+    } else {
+        CkptAbsorbFsyncRequests();
+    }
+}
+
+static void HandleAbnormalSyncExit(bool syncInProgress)
+{
     HASH_SEQ_STATUS hstat;
     PendingFsyncEntry *entry;
-    int absorbCounter;
-
-    /* Statistics on sync times */
-    int         processed = 0;
-    instr_time  syncStart;
-    instr_time  syncEnd;
-    instr_time  syncDiff;
-    uint64      elapsed;
-    uint64      longest = 0;
-    uint64      totalElapsed = 0;
-
-    /*
-     * This is only called during checkpoints, and checkpoints should only
-     * occur in processes that have created a pendingOps.
-     */
-    if (!u_sess->storage_cxt.pendingOps) {
-        elog(ERROR, "cannot sync without a pendingOps table");
-    }
-
-    /*
-     * If we are in the checkpointer, the sync had better include all fsync
-     * requests that were queued by backends up to this point.  The tightest
-     * race condition that could occur is that a buffer that must be written
-     * and fsync'd for the checkpoint could have been dumped by a backend just
-     * before it was visited by BufferSync().  We know the backend will have
-     * queued an fsync request before clearing the buffer's dirtybit, so we
-     * are safe as long as we do an Absorb after completing BufferSync().
-     */
-    AbsorbFsyncRequests();
 
     /*
      * To avoid excess fsync'ing (in the worst case, maybe a never-terminating
@@ -298,7 +291,48 @@ void ProcessSyncRequests(void)
             entry->cycle_ctr = u_sess->storage_cxt.sync_cycle_ctr;
         }
     }
+    return;
+}
 
+/*
+ *  ProcessSyncRequests() -- Process queued fsync requests.
+ */
+void ProcessSyncRequests(void)
+{
+    static bool syncInProgress = false;
+    HASH_SEQ_STATUS hstat;
+    PendingFsyncEntry *entry;
+    int absorbCounter;
+
+    /* Statistics on sync times */
+    int         processed = 0;
+    instr_time  syncStart;
+    instr_time  syncEnd;
+    instr_time  syncDiff;
+    uint64      elapsed;
+    uint64      longest = 0;
+    uint64      totalElapsed = 0;
+
+    /*
+     * This is only called during checkpoints, and checkpoints should only
+     * occur in processes that have created a pendingOps.
+     */
+    if (!u_sess->storage_cxt.pendingOps) {
+        ereport(ERROR, (errmsg("cannot sync without a pendingOps table")));
+    }
+
+    /*
+     * If we are in the checkpointer, the sync had better include all fsync
+     * requests that were queued by backends up to this point.  The tightest
+     * race condition that could occur is that a buffer that must be written
+     * and fsync'd for the checkpoint could have been dumped by a backend just
+     * before it was visited by BufferSync().  We know the backend will have
+     * queued an fsync request before clearing the buffer's dirtybit, so we
+     * are safe as long as we do an Absorb after completing BufferSync().
+     */
+    AbsorbFsyncRequests();
+
+    HandleAbnormalSyncExit(syncInProgress);
     /* Advance counter so that new hashtable entries are distinguishable */
     u_sess->storage_cxt.sync_cycle_ctr++;
 
@@ -371,8 +405,8 @@ void ProcessSyncRequests(void)
                 processed++;
 
                 if (u_sess->attr.attr_common.log_checkpoints) {
-                    elog(DEBUG1, "checkpoint sync: number=%d file=%s time=%.3f msec",
-                        processed, path, (double) elapsed / MSEC_PER_MICROSEC);
+                    ereport(DEBUG1, (errmsg("checkpoint sync: number=%d file=%s time=%.3f msec",
+                        processed, path, (double) elapsed / MSEC_PER_MICROSEC)));
                 }
                 break;          /* out of retry loop */
             }
@@ -388,6 +422,7 @@ void ProcessSyncRequests(void)
                         (errmsg("could not fsync file \"%s\": %m, this relation has been remove", path)));
                     break;
                 }
+                
                 /*
                  * Absorb incoming requests and check to see if a cancel arrived
                  * for this relation fork.
@@ -416,17 +451,41 @@ void ProcessSyncRequests(void)
 
         /* We are done with this entry, remove it */
         if (hash_search(u_sess->storage_cxt.pendingOps, &entry->tag, HASH_REMOVE, NULL) == NULL) {
-            elog(ERROR, "pendingOps corrupted");
+            ereport(ERROR, (errmsg("pendingOps corrupted")));
         }
     }
 
     /* Return sync performance metrics for report at checkpoint end */
-    t_thrd.xlog_cxt.CheckpointStats->ckpt_sync_rels = processed;
-    t_thrd.xlog_cxt.CheckpointStats->ckpt_longest_sync = longest;
-    t_thrd.xlog_cxt.CheckpointStats->ckpt_agg_sync_time = totalElapsed;
+    if (!AmPageWriterMainProcess()) {
+        t_thrd.xlog_cxt.CheckpointStats->ckpt_sync_rels = processed;
+        t_thrd.xlog_cxt.CheckpointStats->ckpt_longest_sync = longest;
+        t_thrd.xlog_cxt.CheckpointStats->ckpt_agg_sync_time = totalElapsed;
+    }
 
     /* Flag successful completion of ProcessSyncRequests */
     syncInProgress = false;
+}
+
+void ProcessUnlinkList(const FileTag *ftag)
+{
+    ListCell *cell;
+    ListCell *prev;
+    ListCell *next;
+
+    if (!AmPageWriterMainProcess()) {
+        prev = NULL;
+        for (cell = list_head(u_sess->storage_cxt.pendingUnlinks); cell; cell = next) {
+            PendingUnlinkEntry *entry = (PendingUnlinkEntry *) lfirst(cell);
+            next = lnext(cell);
+            if (entry->tag.handler == ftag->handler && SYNCSW[ftag->handler].matchfiletag(ftag, &entry->tag)) {
+                u_sess->storage_cxt.pendingUnlinks =
+                    list_delete_cell(u_sess->storage_cxt.pendingUnlinks, cell, prev);
+                pfree(entry);
+            } else {
+                prev = cell;
+            }
+        }
+    }
 }
 
 /*
@@ -453,9 +512,6 @@ void RememberSyncRequest(const FileTag *ftag, SyncRequestType type)
     } else if (type == SYNC_FILTER_REQUEST) {
         HASH_SEQ_STATUS hstat;
         PendingFsyncEntry *entry;
-        ListCell *cell;
-        ListCell *prev;
-        ListCell *next;
 
         /* Cancel matching fsync requests */
         hash_seq_init(&hstat, u_sess->storage_cxt.pendingOps);
@@ -466,19 +522,10 @@ void RememberSyncRequest(const FileTag *ftag, SyncRequestType type)
             }
         }
 
-        /* Remove matching unlink requests */
-        prev = NULL;
-        for (cell = list_head(u_sess->storage_cxt.pendingUnlinks); cell; cell = next) {
-            PendingUnlinkEntry *entry = (PendingUnlinkEntry *) lfirst(cell);
-            next = lnext(cell);
-            if (entry->tag.handler == ftag->handler && SYNCSW[ftag->handler].matchfiletag(ftag, &entry->tag)) {
-                u_sess->storage_cxt.pendingUnlinks = list_delete_cell(u_sess->storage_cxt.pendingUnlinks, cell, prev);
-                pfree(entry);
-            } else {
-                prev = cell;
-            }
-        }
+        /* Remove matching unlink requests, only the checkpoint thread handle the pendingUnlinks */
+        ProcessUnlinkList(ftag);
     } else if (type == SYNC_UNLINK_REQUEST) {
+        Assert(!AmPageWriterMainProcess());
         /* Unlink request: put it in the linked list */
         MemoryContext oldcxt = MemoryContextSwitchTo(u_sess->storage_cxt.pendingOpsCxt);
         PendingUnlinkEntry *entry = (PendingUnlinkEntry*)palloc(sizeof(PendingUnlinkEntry));
@@ -511,6 +558,50 @@ void RememberSyncRequest(const FileTag *ftag, SyncRequestType type)
     }
 }
 
+static bool ForwardSyncRequest(const FileTag *ftag, SyncRequestType type)
+{
+    bool ret = false;
+
+    /*
+     * Notify the checkpointer about it.  If we fail to queue a message in
+     * retryOnError mode, we have to sleep and try again ... ugly, but
+     * hopefully won't happen often.
+     *
+     * XXX should we CHECK_FOR_INTERRUPTS in this loop?  Escaping with an
+     * error in the case of SYNC_UNLINK_REQUEST would leave the
+     * no-longer-used file still present on disk, which would be bad, so
+     * I'm inclined to assume that the checkpointer will always empty the
+     * queue soon.
+     */
+    if (USE_CKPT_THREAD_SYNC) {
+        ret = CkptForwardSyncRequest(ftag, type);
+    } else {
+        switch (type) {
+            case SYNC_REQUEST:
+                ret = PgwrForwardSyncRequest(ftag, type);
+                break;
+            case SYNC_UNLINK_REQUEST:
+                ret = CkptForwardSyncRequest(ftag, type);
+                break;
+            case SYNC_FORGET_REQUEST:
+                ret = PgwrForwardSyncRequest(ftag, type);
+                break;
+            case SYNC_FILTER_REQUEST:
+                ret = PgwrForwardSyncRequest(ftag, type);
+                if (!ret) {
+                    break;
+                }
+                ret = CkptForwardSyncRequest(ftag, type);
+                break;
+            default:
+                ereport(ERROR,
+                    (errmsg("Incremental ckpt, Error SyncRequestType, the type is %d", type)));
+                break;
+        }
+    }
+    return ret;
+}
+
 /*
  * Register the sync request locally, or forward it to the checkpointer.
  *
@@ -519,7 +610,7 @@ void RememberSyncRequest(const FileTag *ftag, SyncRequestType type)
  */
 bool RegisterSyncRequest(const FileTag *ftag, SyncRequestType type, bool retryOnError)
 {
-    bool ret;
+    bool ret = false;
 
     if (u_sess->storage_cxt.pendingOps != NULL) {
         /* standalone backend or startup process: fsync state is local */
@@ -529,9 +620,10 @@ bool RegisterSyncRequest(const FileTag *ftag, SyncRequestType type, bool retryOn
 
     for (;;) {
         /*
-         * Notify the checkpointer about it.  If we fail to queue a message in
-         * retryOnError mode, we have to sleep and try again ... ugly, but
-         * hopefully won't happen often.
+         * Incremental checkpoint mode, notify the pagewriter about it,
+         * full checkpoint mode, notify checkpointer about it.  If we fail
+         * to queue a message in retryOnError mode, we have to sleep
+         * and try again ... ugly, but hopefully won't happen often.
          *
          * XXX should we CHECK_FOR_INTERRUPTS in this loop?  Escaping with an
          * error in the case of SYNC_UNLINK_REQUEST would leave the
@@ -585,4 +677,253 @@ void ForgetDatabaseSyncRequests(Oid dbid)
             (*(SYNCSW[i].sync_forgetdb_fsync))(dbid);
         }
     }
+}
+
+/*
+ * Because pagewriter.cpp exceends the maximum file line limit, some functions about checkpoint are moved here
+ */
+
+const float HALF = 0.5;
+static bool CompactPageWriterRequestQueue(void)
+{
+    bool* skip_slot = NULL;
+    int preserve_count = 0;
+    int num_skipped = 0;
+    IncreCkptSyncShmemStruct *incre_ckpt_sync_shmem = g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem;
+
+    /* Initialize skip_slot array */
+    skip_slot = (bool*)palloc0(sizeof(bool) * incre_ckpt_sync_shmem->num_requests);
+
+    /* must hold the request queue in exclusive mode */
+    Assert(LWLockHeldByMe(incre_ckpt_sync_shmem->sync_queue_lwlock));
+
+    num_skipped = getDuplicateRequest(incre_ckpt_sync_shmem->requests, incre_ckpt_sync_shmem->num_requests, skip_slot);
+    if (num_skipped == 0) {
+        pfree(skip_slot);
+        return false;
+    }
+
+    /* We found some duplicates; remove them. */
+    for (int n = 0; n < incre_ckpt_sync_shmem->num_requests; n++) {
+        if (skip_slot[n])
+            continue;
+        incre_ckpt_sync_shmem->requests[preserve_count++] = incre_ckpt_sync_shmem->requests[n];
+    }
+
+    ereport(DEBUG1,
+        (errmsg("pagewriter compacted fsync request queue from %d entries to %d entries",
+            incre_ckpt_sync_shmem->num_requests, preserve_count)));
+
+    incre_ckpt_sync_shmem->num_requests = preserve_count;
+    pfree(skip_slot);
+    return true;
+}
+
+ /* PgwrForwardSyncRequest
+ *          Forward a file-fsync request from a backend to the pagewriter.
+ */
+bool PgwrForwardSyncRequest(const FileTag *ftag, SyncRequestType type)
+{
+    CheckpointerRequest* request = NULL;
+    bool too_full = false;
+    IncreCkptSyncShmemStruct *incre_ckpt_sync_shmem = g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem;
+    LWLock *sync_queue_lwlock = incre_ckpt_sync_shmem->sync_queue_lwlock;
+
+    if (AmPageWriterMainProcess()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION),
+                errmsg("PgwrForwardSyncRequest must not be called in pagewriter main thread")));
+    }
+
+    LWLockAcquire(sync_queue_lwlock, LW_EXCLUSIVE);
+
+    /*
+     * If the pagewriter main thread isn't running or the request queue is full, the
+     * backend will have to perform its own fsync request. But before forcing
+     * that to happen, we can try to compact the request queue.
+     */
+    if (incre_ckpt_sync_shmem->pagewritermain_pid == 0 || (incre_ckpt_sync_shmem->num_requests >=
+        incre_ckpt_sync_shmem->max_requests && !CompactPageWriterRequestQueue())) {
+        LWLockRelease(sync_queue_lwlock);
+        return false;
+    }
+
+    /* OK, insert request */
+    request = &incre_ckpt_sync_shmem->requests[incre_ckpt_sync_shmem->num_requests++];
+    request->ftag = *ftag;
+    request->type = type;
+
+    /* If queue is more than half full, nudge the pagewriter to empty it */
+    too_full = (incre_ckpt_sync_shmem->num_requests >= incre_ckpt_sync_shmem->max_requests * HALF);
+
+    LWLockRelease(sync_queue_lwlock);
+
+    /* wakeup the pagwriter main thread after release lock */
+    if (too_full && g_instance.proc_base->pgwrMainThreadLatch) {
+        SetLatch(g_instance.proc_base->pgwrMainThreadLatch);
+    }
+
+    return true;
+}
+
+/* PgwrAbsorbFsyncRequests
+ *           pagewriter main thread Absorb the backend or pagewriter sub thread fsync request.
+ */
+void PgwrAbsorbFsyncRequests(void)
+{
+    CheckpointerRequest* requests = NULL;
+    CheckpointerRequest* request = NULL;
+    IncreCkptSyncShmemStruct *incre_ckpt_sync_shmem = g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem;
+    LWLock *sync_queue_lwlock = incre_ckpt_sync_shmem->sync_queue_lwlock;
+    int n;
+
+    Assert(AmPageWriterMainProcess());
+
+    /*
+     * We have to PANIC if we fail to absorb all the pending requests (eg,
+     * because our hashtable runs out of memory).  This is because the system
+     * cannot run safely if we are unable to fsync what we have been told to
+     * fsync. Fortunately, the hashtable is so small that the problem is
+     * quite unlikely to arise in practice.
+     */
+    START_CRIT_SECTION();
+
+    /* We try to avoid holding the lock for a long time by copying the request array. */
+    LWLockAcquire(sync_queue_lwlock, LW_EXCLUSIVE);
+
+    n = incre_ckpt_sync_shmem->num_requests;
+
+    if (n > 0) {
+        errno_t rc;
+        requests = (CheckpointerRequest*)palloc(n * sizeof(CheckpointerRequest));
+        rc = memcpy_s(requests, n * sizeof(CheckpointerRequest), incre_ckpt_sync_shmem->requests,
+            n * sizeof(CheckpointerRequest));
+        securec_check(rc, "\0", "\0");
+    }
+
+    incre_ckpt_sync_shmem->num_requests = 0;
+
+    LWLockRelease(sync_queue_lwlock);
+
+    for (request = requests; n > 0; request++, n--) {
+        RememberSyncRequest(&request->ftag, request->type);
+    }
+    if (requests != NULL) {
+        pfree(requests);
+    }
+    END_CRIT_SECTION();
+}
+
+/*
+ *  PageWriterSyncWithAbsorption() -- Sync files to disk and reset fsync flags.
+ *  incremental checkpoint, pagewriter main thread handle the file sync.
+ */
+void PageWriterSyncWithAbsorption(void)
+{
+    volatile IncreCkptSyncShmemStruct* cps = g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem;
+
+    SpinLockAcquire(&cps->sync_lock);
+    cps->fsync_start++;
+    SpinLockRelease(&cps->sync_lock);
+
+    ProcessSyncRequests();
+
+    SpinLockAcquire(&cps->sync_lock);
+    cps->fsync_done = cps->fsync_start;
+    SpinLockRelease(&cps->sync_lock);
+}
+
+const int WAIT_THREAD_START = 600;  /* every time sleep 0.1 sec, the 1min = 600 * 0.1 sec */
+void RequestPgwrSync(void)
+{
+    volatile IncreCkptSyncShmemStruct* cps = g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem;
+
+    /*
+     * Send signal to request sync.  It's possible that the pagewriter main thread
+     * hasn't started yet, or is in process of restarting, so we will retry a
+     * few times if needed.  Also, if not told to wait for the pagewriter main thread to do sync,
+     * we consider failure to send the signal to be nonfatal and merely
+     * LOG it.
+     */
+    for (int ntries = 0;; ntries++) {
+        if (cps->pagewritermain_pid == 0) {
+            /* max wait 1min */
+            if (ntries >= WAIT_THREAD_START || pmState == PM_SHUTDOWN) {
+                ereport(LOG, (errmsg("could not request pagewriter handle sync because pagewriter not running")));
+                break;
+            }
+        } else if (gs_signal_send(cps->pagewritermain_pid, SIGINT) != 0) {
+            /* max wait 1min */
+            if (ntries >= WAIT_THREAD_START) {
+                ereport(LOG,
+                    (errmsg("could not signal for pagewriter main thread: %m, thread pid is %lu",
+                        cps->pagewritermain_pid)));
+                break;
+            }
+        } else {
+            break; /* signal sent successfully */
+        }
+
+        CHECK_FOR_INTERRUPTS();
+        pg_usleep(100000L); /* wait 0.1 sec, then retry */
+    }
+    return;
+}
+
+/*
+ * PageWriterSyncForDw() -- File sync before dw file can be truncated or recycled.
+ * Normally, file sync operation is solely handled by pagewirter main process.
+ * For standalone backends, as well as for startup process performing dw init,
+ * they can handle fsync request.
+ */
+void PageWriterSync(void)
+{
+    Assert(ENABLE_INCRE_CKPT);
+    /* Incremental checkpoint mode, the checkpoint thread only handle the unlink list */
+    if (u_sess->storage_cxt.pendingOps && !AmCheckpointerProcess()) {
+        Assert(!IsUnderPostmaster || AmStartupProcess() || AmPageWriterMainProcess());
+        ProcessSyncRequests();
+    } else {
+        int64 old_fsync_start = 0;
+        int64 new_fsync_start = 0;
+        int64 new_fsync_done = 0;
+        volatile IncreCkptSyncShmemStruct* cps = g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem;
+        SpinLockAcquire(&cps->sync_lock);
+        old_fsync_start = cps->fsync_start;
+        SpinLockRelease(&cps->sync_lock);
+
+        RequestPgwrSync();
+
+        /* Wait for a new sync to start. */
+        for (;;) {
+            SpinLockAcquire(&cps->sync_lock);
+            new_fsync_start = cps->fsync_start;
+            SpinLockRelease(&cps->sync_lock);
+
+            if (new_fsync_start != old_fsync_start) {
+                break;
+            }
+
+            CHECK_FOR_INTERRUPTS();
+            pg_usleep(100000L);
+        }
+
+        /*
+         * We are waiting for fsync_done >= new_fsync_start, in a modulo sense.
+         */
+        for (;;) {
+            SpinLockAcquire(&cps->sync_lock);
+            new_fsync_done = cps->fsync_done;
+            SpinLockRelease(&cps->sync_lock);
+
+            if (new_fsync_done - new_fsync_start >= 0) {
+                break;
+            }
+
+            CHECK_FOR_INTERRUPTS();
+            pg_usleep(100000L);
+        }
+    }
+
+    return;
 }

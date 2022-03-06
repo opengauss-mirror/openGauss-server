@@ -81,35 +81,35 @@ select col1, col2, char_length(col3) from inserttest;
 (8 rows)
 
 drop table inserttest;
-create table s1_DTS2019021501700(id int, num int);
-create sequence ss1_DTS2019021501700;
-select setval('ss1_DTS2019021501700', 10);
+create table s1_TESTTABLE(id int, num int);
+create sequence ss1_TESTTABLE;
+select setval('ss1_TESTTABLE', 10);
  setval 
 --------
      10
 (1 row)
 
-select * from ss1_DTS2019021501700;
-    sequence_name     | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
-----------------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
- ss1_dts2019021501700 |         10 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | t         |    0
+select * from ss1_TESTTABLE;
+ sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
+ ss1_testtable |         10 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | t         |    0
 (1 row)
 
-alter table s1_DTS2019021501700 alter column id set default nextval('ss1_DTS2019021501700');
-insert into s1_DTS2019021501700 (num) values (11);
-insert into s1_DTS2019021501700 (num) values (12);
-select * from s1_DTS2019021501700 order by id;
+alter table s1_TESTTABLE alter column id set default nextval('ss1_TESTTABLE');
+insert into s1_TESTTABLE (num) values (11);
+insert into s1_TESTTABLE (num) values (12);
+select * from s1_TESTTABLE order by id;
  id | num 
 ----+-----
  11 |  11
  12 |  12
 (2 rows)
 
-select * from ss1_DTS2019021501700;
-    sequence_name     | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
-----------------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
- ss1_dts2019021501700 |         12 |           1 |            1 | 9223372036854775807 |         1 |           1 |      31 | f         | t         |    0
+select * from ss1_TESTTABLE;
+ sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
+ ss1_testtable |         12 |           1 |            1 | 9223372036854775807 |         1 |           1 |      31 | f         | t         |    0
 (1 row)
 
-drop table s1_DTS2019021501700;
-drop sequence ss1_DTS2019021501700;
+drop table s1_TESTTABLE;
+drop sequence ss1_TESTTABLE;

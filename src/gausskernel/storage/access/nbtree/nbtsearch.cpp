@@ -59,6 +59,7 @@ static void _bt_check_natts_correct(const Relation index, Page page, OffsetNumbe
 BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffer *bufP, int access, bool needStack)
 {
     BTStack stack_in = NULL;
+    int page_access = BT_READ;
 
     /* Get the root page to start with */
     *bufP = _bt_getroot(rel, access);
@@ -89,7 +90,7 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
          * if the leaf page is split and we insert to the parent page).  But
          * this is a good opportunity to finish splits of internal pages too.
          */
-        *bufP = _bt_moveright(rel, *bufP, keysz, scankey, nextkey, (access == BT_WRITE), stack_in, BT_READ);
+        *bufP = _bt_moveright(rel, *bufP, keysz, scankey, nextkey, (access == BT_WRITE), stack_in, page_access);
 
         /* if this is a leaf page, we're done */
         page = BufferGetPage(*bufP);
@@ -125,12 +126,40 @@ BTStack _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffe
             new_stack->bts_parent = stack_in;
         }
 
+		/*
+		 * Page level 1 is lowest non-leaf page level prior to leaves.  So, if
+		 * we're on the level 1 and asked to lock leaf page in write mode,
+		 * then lock next page in write mode, because it must be a leaf.
+		 */
+		if (opaque->btpo.level == 1 && access == BT_WRITE)
+			page_access = BT_WRITE;
+
         /* drop the read lock on the parent page, acquire one on the child */
-        *bufP = _bt_relandgetbuf(rel, *bufP, blkno, BT_READ);
+        *bufP = _bt_relandgetbuf(rel, *bufP, blkno, page_access);
 
         /* okay, all set to move down a level */
         stack_in = new_stack;
     }
+
+	/*
+	 * If we're asked to lock leaf in write mode, but didn't manage to, then
+	 * relock.  This should only happen when the root page is a leaf page (and
+	 * the only page in the index other than the metapage).
+	 */
+	if (access == BT_WRITE && page_access == BT_READ)
+	{
+		/* trade in our read lock for a write lock */
+		LockBuffer(*bufP, BUFFER_LOCK_UNLOCK);
+		LockBuffer(*bufP, BT_WRITE);
+
+		/*
+		 * Race -- the leaf page may have split after we dropped the read lock
+		 * but before we acquired a write lock.  If it has, we may need to
+		 * move right to its new sibling.  Do that.
+		 */
+		*bufP = _bt_moveright(rel, *bufP, keysz, scankey, nextkey, true, stack_in, BT_WRITE);
+	}
+
 
     return stack_in;
 }
@@ -1036,8 +1065,6 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
 
     /* we must have the buffer pinned and locked */
     Assert(BufferIsValid(so->currPos.buf));
-    /* We've pinned the buffer, nobody can prune this buffer, check whether snapshot is valid. */
-    CheckSnapshotIsValidException(scan->xs_snapshot, "_bt_readpage");
 
     page = BufferGetPage(so->currPos.buf);
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);

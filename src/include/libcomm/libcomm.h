@@ -127,6 +127,7 @@
 #define MAX_CN_NODE_NUM 1024
 #define MAX_CN_DN_NODE_NUM (MAX_DN_NODE_NUM + MAX_CN_NODE_NUM)  //(MaxCoords+MaxDataNodes)
 #define MIN_CN_DN_NODE_NUM (1 + 1)                              //(1 CN + 1 DN)
+#define DOUBLE_NAMEDATALEN 128
 
 #define SEC_TO_MICRO_SEC 1000
 

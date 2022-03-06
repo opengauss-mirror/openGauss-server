@@ -303,6 +303,8 @@ RemoteQueryState* CreateResponseCombiner(int node_count, CombineType combine_typ
     combiner->currentRow.msgnode = 0;
     combiner->row_store = RowStoreAlloc(CurrentMemoryContext, ROW_STORE_MAX_MEM,
                                         t_thrd.utils_cxt.CurrentResourceOwner);
+    combiner->maxCSN = InvalidCommitSeqNo;
+    combiner->hadrMainStandby = false;
     combiner->tapenodes = NULL;
     combiner->remoteCopyType = REMOTE_COPY_NONE;
     combiner->copy_file = NULL;
@@ -2774,14 +2776,6 @@ void pgxc_node_remote_commit(bool barrierLockHeld)
             /* white-box test inject end */
         }
 #endif
-        /*
-         * only send to the node whose command = commitCmd
-         * ignore the commit prepared situation which has been checked in PrepareTransaction()
-         */
-        if (u_sess->pgxc_cxt.remoteXactState->remoteNodeStatus[i] == RXACT_NODE_NONE) {
-            pgxc_node_send_gxid(connections[i], t_thrd.xact_cxt.XactXidStoreForCheck, true);
-        }
-
         if (pgxc_node_send_queryid(connections[i], u_sess->debug_query_id) != 0) {
             const int dest_max = 256;
             rc = sprintf_s(errMsg,
@@ -3053,9 +3047,6 @@ int pgxc_node_remote_abort(void)
                 new_connections[new_conn_count++] = connections[i];
             }
         } else {
-            /* only send to the node whose command is rollbackCmd , not rollback prepared */
-            pgxc_node_send_gxid(connections[i], t_thrd.xact_cxt.XactXidStoreForCheck, true);
-
             if (pgxc_node_send_query(connections[i], rollbackCmd)) {
                 rc = sprintf_s(errMsg,
                     ERRMSG_BUFF_SIZE,
@@ -6800,11 +6791,11 @@ HeapTuple* RecvRemoteSampleMessage(
  */
 void PGXCNodeCleanAndRelease(int code, Datum arg)
 {
-    /* clean gpc cn refcount and plancache in shared memory */
-    CNGPCCleanUpSession();
-
     /* Clean up prepared transactions before releasing connections */
     DropAllPreparedStatements();
+
+    /* clean saved plan but not save into gpc */
+    GPCCleanUpSessionSavedPlan();
 
     /* Release Datanode connections */
     release_handles();

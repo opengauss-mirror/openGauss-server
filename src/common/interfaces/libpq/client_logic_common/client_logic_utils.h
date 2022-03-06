@@ -29,7 +29,7 @@
 #include "client_logic_cache/dataTypes.def"
 struct RangeVar;
 typedef unsigned int Oid;
-
+typedef struct pg_conn PGconn;
 const int OBJ_NAME_BUF_LEN = 256;
 /* Array header structures */
 typedef struct {
@@ -62,9 +62,10 @@ template<typename T> inline bool is_const(T const & x)
     return true;
 }
 char *del_blanks(char *str, const int str_len);
-size_t parse_char_array(const char *input, char ***items_out);
-size_t parse_oid_array(const char *input, Oid **items_out);
-
+size_t count_char_in_str(const char *input, char niddle);
+size_t parse_string_array(PGconn* const conn, const char *input, char ***items_out);
+size_t parse_char_array(PGconn* const conn, const char *input, char **items_out);
+size_t parse_oid_array(PGconn* const conn, const char *input, Oid **items_out);
 extern void free_obj_list(ObjName *obj_list);
 extern ObjName *obj_list_append(ObjName *obj_list, const char *new_obj_name);
 

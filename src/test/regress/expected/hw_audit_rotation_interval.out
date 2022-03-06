@@ -1,0 +1,13 @@
+-- 设置guc参数
+\! /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/install//data6/zhoutl/GaussDB_test/install/bin/gs_guc reload -Z datanode -D /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/ -c "audit_rotation_interval=1"
+The gs_guc run with the following arguments: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/install//data6/zhoutl/GaussDB_test/install/bin/gs_guc -Z datanode -D /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/ -c audit_rotation_interval=1 reload ].
+expected instance path: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/postgresql.conf]
+gs_guc reload: audit_rotation_interval=1: [/data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/postgresql.conf]
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+-- 间隔60s 获取pg_audit 中最新adt文件编号 查看是否增加了1
+\! num1=`expr $(echo $(ls /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/pg_audit -lt | head -n 2 | awk '{print $9}')| tr -cd "[0-9]") + 1` && sleep 1m && num2=$(echo $(ls /data6/zhoutl/GaussDB_test/GaussDBKernel-server/opengauss/src/test/regress/tmp_check/datanode1/pg_audit -lt | head -n 2 | awk '{print $9}')| tr -cd "[0-9]") && [[ $num1 == $num2 ]] && echo 'add a new log after interval-- 60 seconds' || echo 'fail to add new logs'
+add a new log after interval-- 60 seconds

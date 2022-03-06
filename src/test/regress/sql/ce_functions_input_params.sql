@@ -36,13 +36,13 @@ create table accounts (
 
 CREATE OR REPLACE FUNCTION insert_func_2(name varchar(100), balance dec(15,2)) RETURNS VOID AS 'INSERT INTO accounts(name,balance) VALUES($1, $2);' LANGUAGE SQL;
 
-call insert_func_2('Bob', 101.30);
+call regression.public.insert_func_2('Bob', 101.30);
 call insert_func_2('George', 505.70);
 select insert_func_2('Joe', 710.00);
 select  * from insert_func_2('Donald', 1214.88);
 select * from accounts order by id;
 
-drop FUNCTION f_processed_in_sql;
+drop FUNCTION f_processed_in_sql(int, int);
 drop FUNCTION f_processed_in_sql_named;
 drop FUNCTION insert_func_2;
 

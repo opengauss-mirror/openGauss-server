@@ -1,0 +1,27 @@
+DROP USER IF EXISTS test CASCADE;
+CREATE USER test WITH CREATEDB PASSWORD "Gauss@123";
+SET ROLE test PASSWORD 'Gauss@123';
+\! gs_ktool -d all
+\! gs_ktool -g
+\! gs_ktool -g
+
+\! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_client_lib/gsjdbc4.jar:@abs_builddir@/jdbc_ce_test/ce_ddl_pbe/. ClientEncryptionMulSql @portstring@ > /dev/null 2>&1
+
+SELECT global_key_name, key_namespace, key_owner FROM gs_client_global_keys;
+
+SELECT column_key_name,  key_namespace, key_owner FROM gs_column_keys;
+
+--支持
+select count(*) from test11;
+
+DROP TABLE IF EXISTS test11;
+
+DROP CLIENT MASTER KEY MulCMK1 CASCADE;
+
+select  count(*), 'count' FROM gs_client_global_keys;
+select  count(*), 'count' FROM gs_column_keys;
+SELECT  count(*), 'count' FROM gs_encrypted_columns;
+\! gs_ktool -d all
+
+RESET ROLE;
+DROP USER IF EXISTS test CASCADE;

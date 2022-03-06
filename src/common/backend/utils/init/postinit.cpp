@@ -59,6 +59,7 @@
 #include "postmaster/snapcapturer.h"
 #include "postmaster/rbcleaner.h"
 #include "replication/catchup.h"
+#include "replication/logicalfuncs.h"
 #include "replication/walsender.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/fd.h"
@@ -92,6 +93,7 @@
 #include "instruments/percentile.h"
 #include "instruments/instr_workload.h"
 #include "gs_policy/policy_common.h"
+#include "utils/knl_relcache.h"
 #ifndef WIN32_ONLY_COMPILER
 #include "dynloader.h"
 #else
@@ -223,7 +225,7 @@ static HeapTuple GetDatabaseTuple(const char* dbname)
      */
     relation = heap_open(DatabaseRelationId, AccessShareLock);
     scan = systable_beginscan(
-        relation, DatabaseNameIndexId, u_sess->relcache_cxt.criticalSharedRelcachesBuilt, NULL, 1, key);
+        relation, DatabaseNameIndexId, LocalRelCacheCriticalSharedRelcachesBuilt(), NULL, 1, key);
 
     tuple = systable_getnext(scan);
 
@@ -260,7 +262,7 @@ static HeapTuple GetDatabaseTupleByOid(Oid dboid)
      */
     relation = heap_open(DatabaseRelationId, AccessShareLock);
     scan = systable_beginscan(
-        relation, DatabaseOidIndexId, u_sess->relcache_cxt.criticalSharedRelcachesBuilt, NULL, 1, key);
+        relation, DatabaseOidIndexId, LocalRelCacheCriticalSharedRelcachesBuilt(), NULL, 1, key);
 
     tuple = systable_getnext(scan);
 
@@ -323,6 +325,10 @@ static void PerformAuthentication(Port* port)
             ereport(LOG, (errmsg("replication connection authorized: user=%s", port->user_name)));
         else
             ereport(LOG, (errmsg("connection authorized: user=%s database=%s", port->user_name, port->database_name)));
+    }
+    if (AM_WAL_DB_SENDER) {
+        Oid userId = get_role_oid(port->user_name, false);
+        CheckLogicalPremissions(userId);
     }
 
     /* INSTR: update user login counter */
@@ -784,9 +790,9 @@ static void process_startup_options(Port* port, bool am_superuser)
         }
 
         /* check 2 -- forbid non-initial users, except gs_roach and during cluster resizing with gs_redis */
-        if (!dummyStandbyMode && GetRoleOid(port->user_name) != INITIAL_USER_ID &&
+        if (!dummyStandbyMode && GetRoleOid(port->user_name) != INITIAL_USER_ID && !AM_WAL_HADR_SENDER &&
             !(ClusterResizingInProgress() && u_sess->proc_cxt.clientIsGsredis) && !u_sess->proc_cxt.clientIsGsroach &&
-            !AM_WAL_HADR_SENDER) {
+            !AM_WAL_HADR_CN_SENDER) {
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_OPERATION), errmsg("Inner maintenance tools only for the initial user.")));
         }
@@ -1151,12 +1157,10 @@ void PostgresInitializer::SetDatabaseAndUser(const char* in_dbname, Oid dboid, c
 
 void PostgresInitializer::InitFencedSysCache()
 {
+    m_dboid = u_sess->proc_cxt.MyDatabaseId;
     InitSysCache();
-
     u_sess->proc_cxt.MyDatabaseTableSpace = DEFAULTTABLESPACE_OID;
-
     SetFencedMasterDatabase();
-
     LoadSysCache();
 }
 
@@ -1365,6 +1369,42 @@ void PostgresInitializer::InitStatementWorker()
     if (IS_PGXC_COORDINATOR) {
         InitPGXCPort();
     }
+
+    InitSettings();
+
+    FinishInit();
+}
+
+void PostgresInitializer::InitParallelDecode()
+{
+    /* Check replication permissions needed for walsender processes. */
+    Assert(!IsBootstrapProcessingMode());
+
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserStandalone();
+
+    if (!AM_WAL_DB_SENDER && !AM_PARALLEL_DECODE && !AM_LOGICAL_READ_RECORD) {
+        InitPlainWalSender();
+        return;
+    }
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitPGXCPort();
 
     InitSettings();
 
@@ -1701,8 +1741,6 @@ void PostgresInitializer::InitTxnSnapWorker()
 
     InitSettings();
 
-    InitExtensionVariable();
-
     FinishInit();
 
     AuditUserLogin();
@@ -1954,7 +1992,12 @@ void PostgresInitializer::InitThread()
      */
     t_thrd.proc_cxt.MyBackendId = InvalidBackendId;
 
-    SharedInvalBackendInit(IS_THREAD_POOL_WORKER, false);
+    if (EnableLocalSysCache()) {
+        SharedInvalBackendInit(false, false);
+    } else {
+        /* init invalid msg slot */
+        SharedInvalBackendInit(IS_THREAD_POOL_WORKER, false);
+    }
 
     if (t_thrd.proc_cxt.MyBackendId > g_instance.shmem_cxt.MaxBackends || t_thrd.proc_cxt.MyBackendId <= 0)
         ereport(FATAL, (errmsg("bad backend ID: %d", t_thrd.proc_cxt.MyBackendId)));
@@ -1987,6 +2030,56 @@ void PostgresInitializer::InitThread()
         StartupXLOG();
         on_shmem_exit(ShutdownXLOG, 0);
     }
+}
+
+void PostgresInitializer::InitLoadLocalSysCache(Oid db_oid, const char *db_name)
+{
+    if(!EnableLocalSysCache()) {
+        return;
+    }
+    ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    PG_TRY();
+    {
+        /* local_sysdb_resowner never be freed until proc exit */
+        t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.lsc_cxt.lsc->local_sysdb_resowner;
+        Assert(u_sess->proc_cxt.MyDatabaseId != InvalidOid);
+        t_thrd.lsc_cxt.lsc->ClearSysCacheIfNecessary(db_oid, db_name);
+        InitFileAccess();
+
+        /* Do local initialization of file, storage and buffer managers */
+        t_thrd.lsc_cxt.lsc->InitThreadDatabase(db_oid, db_name, u_sess->proc_cxt.MyDatabaseTableSpace);
+        t_thrd.lsc_cxt.lsc->InitDatabasePath(u_sess->proc_cxt.DatabasePath);
+
+        /* init syscache which is mounted on thread */
+        Assert(t_thrd.lsc_cxt.lsc != NULL);
+        /* this function is called by threadworker, since we have inited u_sess, we can find the db_id */
+        Assert(u_sess->proc_cxt.MyDatabaseId != InvalidOid);
+        t_thrd.lsc_cxt.lsc->tabdefcache.Init();
+        t_thrd.lsc_cxt.lsc->tabdefcache.InitPhase2();
+
+        t_thrd.lsc_cxt.lsc->partdefcache.Init();
+        t_thrd.lsc_cxt.lsc->systabcache.Init();
+        t_thrd.lsc_cxt.lsc->tabdefcache.InitPhase3();
+    }
+    PG_CATCH();
+    {
+        /* loadsyscache failed, there is noway to recovery, release resource here */
+        ResourceOwnerRelease(t_thrd.lsc_cxt.lsc->local_sysdb_resowner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+        ResourceOwnerRelease(t_thrd.lsc_cxt.lsc->local_sysdb_resowner, RESOURCE_RELEASE_LOCKS, false, true);
+        ResourceOwnerRelease(t_thrd.lsc_cxt.lsc->local_sysdb_resowner, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
+
+        /* lwlocks arre released at sigsetjmp */
+
+        /* recovery CurrentResourceOwner */
+        t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    /* local_sysdb_resowner should be empty */
+    Assert(CurrentResourceOwnerIsEmpty(t_thrd.lsc_cxt.lsc->local_sysdb_resowner));
+
+    /* recovery CurrentResourceOwner */
+    t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
 }
 
 void PostgresInitializer::InitSession()
@@ -2046,6 +2139,11 @@ void PostgresInitializer::InitStreamSession()
 
 void PostgresInitializer::InitSysCache()
 {
+    if (EnableLocalSysCache()) {
+        Assert(u_sess->proc_cxt.MyDatabaseId == InvalidOid);
+        t_thrd.lsc_cxt.lsc->ClearSysCacheIfNecessary(m_dboid, m_indbname);
+        InitFileAccess();
+    }
     /*
      * Initialize the relation cache and the system catalog caches.  Note that
      * no catalog access happens here; we only set up the hashtable structure.
@@ -2059,12 +2157,13 @@ void PostgresInitializer::InitSysCache()
      */
     RelationCacheInitializePhase2();
 
-    PartitionCacheInitialize();
-
     BucketCacheInitialize();
 
     InitCatalogCache();
     InitPlanCache();
+    if (!EnableLocalSysCache()) {
+        PartitionCacheInitialize();
+    }
 }
 
 void PostgresInitializer::SetProcessExitCallback()
@@ -2298,6 +2397,10 @@ void PostgresInitializer::SetDefaultDatabase()
     Assert(!u_sess->proc_cxt.DatabasePath);
     u_sess->proc_cxt.DatabasePath =
         MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), m_fullpath);
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->InitSessionDatabase(TemplateDbOid, m_dbname, DEFAULTTABLESPACE_OID);
+        t_thrd.lsc_cxt.lsc->InitDatabasePath(m_fullpath);
+    }
 }
 
 
@@ -2307,6 +2410,11 @@ void PostgresInitializer::SetFencedMasterDatabase()
     u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
     u_sess->proc_cxt.DatabasePath = 
 		MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), m_fullpath);
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->InitSessionDatabase(u_sess->proc_cxt.MyDatabaseId, 
+            NULL, u_sess->proc_cxt.MyDatabaseTableSpace);
+        t_thrd.lsc_cxt.lsc->InitDatabasePath(m_fullpath);
+    }
 }
 
 void PostgresInitializer::SetDatabase()
@@ -2352,7 +2460,11 @@ void PostgresInitializer::SetDatabaseByName()
     u_sess->proc_cxt.MyDatabaseId = HeapTupleGetOid(tuple);
     u_sess->proc_cxt.MyDatabaseTableSpace = dbform->dattablespace;
     /* take database name from the caller, just for paranoia */
+    m_dboid = u_sess->proc_cxt.MyDatabaseId;
     strlcpy(m_dbname, m_indbname, sizeof(m_dbname));
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->InitSessionDatabase(m_dboid, m_dbname, dbform->dattablespace);
+    }
 }
 
 void PostgresInitializer::SetDatabaseByOid()
@@ -2377,6 +2489,9 @@ void PostgresInitializer::SetDatabaseByOid()
     u_sess->proc_cxt.MyDatabaseTableSpace = dbform->dattablespace;
     Assert(u_sess->proc_cxt.MyDatabaseId == m_dboid);
     strlcpy(m_dbname, NameStr(dbform->datname), sizeof(m_dbname));
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->InitSessionDatabase(m_dboid, m_dbname, dbform->dattablespace);
+    }
 }
 
 void PostgresInitializer::LockDatabase()
@@ -2402,6 +2517,7 @@ void PostgresInitializer::LockDatabase()
      * AccessShareLock for such sessions and thereby not conflict against
      * CREATE DATABASE.
      */
+
     LockSharedObject(DatabaseRelationId, u_sess->proc_cxt.MyDatabaseId, 0, RowExclusiveLock);
     /*
      * Now we can mark our PGPROC entry with the database ID.
@@ -2478,10 +2594,16 @@ void PostgresInitializer::SetDatabasePath()
     Assert(!u_sess->proc_cxt.DatabasePath);
     u_sess->proc_cxt.DatabasePath = MemoryContextStrdup(
         SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), m_fullpath);
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->InitDatabasePath(m_fullpath);
+    }
 }
 
 void PostgresInitializer::LoadSysCache()
 {
+    if (EnableLocalSysCache()) {
+        PartitionCacheInitialize();
+    }
     /*
      * It's now possible to do real access to the system catalogs.
      *
@@ -2644,7 +2766,12 @@ void PostgresInitializer::InitCompactionThread()
      */
     t_thrd.proc_cxt.MyBackendId = InvalidBackendId;
 
-    SharedInvalBackendInit(IS_THREAD_POOL_WORKER, false);
+    if (EnableLocalSysCache()) {
+        SharedInvalBackendInit(false, false);
+    } else {
+        /* init invalid msg slot */
+        SharedInvalBackendInit(IS_THREAD_POOL_WORKER, false);
+    }
 
     if (t_thrd.proc_cxt.MyBackendId > g_instance.shmem_cxt.MaxBackends || t_thrd.proc_cxt.MyBackendId <= 0)
         ereport(FATAL, (errmsg("bad backend ID: %d", t_thrd.proc_cxt.MyBackendId)));
@@ -2693,6 +2820,8 @@ void PostgresInitializer::InitBarrierCreator()
     LoadSysCache();
 
     InitPGXCPort();
+
+    FinishInit();
 
     return;
 }

@@ -1,0 +1,17 @@
+<refentry id="SQL-TIMECAPSULE_TABLE">
+<refmeta>
+<refentrytitle>TIMECAPSULE TABLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>TIMECAPSULE TABLE</refname>
+<refpurpose>timecapsule a table to before truncate or drop</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+TIMECAPSULE TABLE 
+	[schema.]table_name TO { CSN expr | TIMESTAMP expr | BEFORE { DROP [RENAME TO table_name] | TRUNCATE } }
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -31,95 +31,217 @@
 #include "nodes/pg_list.h"
 #include "utils/builtins.h"
 
-
 #include <float.h>
 
 
-struct HyperparameterDefinition {
-    const char* name;
-    Datum default_value;
+// Probability distributions for HPO
+enum class ProbabilityDistribution {
+    UNIFORM_RANGE,
+    LOG_RANGE,
+    INVALID_DISTRIBUTION // internal, for checking
+};
+
+struct HyperparameterAutoML{
+    bool enable;            // Set if AutoML can tune the hyperparameter
+    ProbabilityDistribution distribution;
+    int32_t steps;          // Steps considered for AutoML
+    Datum min_value_automl; // Minimum value for AutoML (inclusive)
+    Datum max_value_automl; // Max value for AutoML (exclusive)
+};
+
+struct HyperparameterValidation {
     Datum min_value;
     Datum max_value;
-    const char** valid_values;
-    void (* enum_setter)(const char* s, void* enum_addr);
-    Oid type;
+    bool min_inclusive;
+    bool max_inclusive;
+    const char **valid_values;
     int32_t valid_values_size;
+    const char* (* enum_getter)(void *enum_addr);
+    void (* enum_setter)(const char *s, void *enum_addr);
+};
+
+
+struct HyperparameterDefinition {
+    const char *name;
+    Oid type;
+    Datum default_value;
+    HyperparameterValidation validation;
+    HyperparameterAutoML automl;
     int32_t offset;
     bool min_inclusive;
     bool max_inclusive;
 };
 
-struct HyperparameterValidation {
-    void* min_value;
-    bool min_inclusive;
-    void* max_value;
-    bool max_inclusive;
-    const char** valid_values;
-    int32_t valid_values_size;
+
+struct AlgorithmConfiguration{
+    AlgorithmML algorithm;
+    HyperparameterDefinition* hyperparameters;
+    int32_t hyperparameters_size;
+    MetricML* available_metrics;
+    int32_t available_metrics_size;
+    bool is_supervised;
 };
 
+// Prepare the set of hyperparameter of a the model
+List *prepare_model_hyperparameters(const HyperparameterDefinition definitions[], int32_t definitions_size,
+                                    void* hyperparameter_struct, MemoryContext memcxt);
+
+// Configure the hyperparameters of an algorithm or automl, using a list of VariableSetStmt
+void configure_hyperparameters_vset(const HyperparameterDefinition definitions[],
+                int32_t definitions_size, List *hyperparameters, void *configuration);
+
+// Configure the hyperparameters of an algorithm or automl, using a list of Hyperparameter
+void configure_hyperparameters(const HyperparameterDefinition definitions[],
+                int32_t definitions_size, const Hyperparameter *hyperparameters, int nhyperp, void *configuration);
+
+// Configure the hyperparameters of an algorithm or automl, using a list of Hyperparameter from the model warehouse
+void configure_hyperparameters_modelw(const HyperparameterDefinition definitions[],
+                int32_t definitions_size, List *hyperparameters, void *configuration);
+
+// Extract the value for a hyperparameter from a VariableSetStmt
+Datum extract_datum_from_variable_set_stmt(VariableSetStmt* stmt, const HyperparameterDefinition* definition);
+
+// Return a hyperparameter with the given name from the hyperparameter list. Returns null if none is available
+const HyperparameterDefinition* find_hyperparameter_definition(const HyperparameterDefinition definitions[],
+            int32_t definitions_size, const char* hyperparameter_name);
+
+// Get the hyperparameter definitions for one specific algorithm
+const HyperparameterDefinition* get_hyperparameter_definitions(AlgorithmML algorithm,
+                int32_t *result_size);
+
+// Get the confgiuration parameters for an architecture
+AlgorithmConfiguration* get_algorithm_configuration(AlgorithmML algorithm);
+
+// Initialize a hyperparameter struct with the default values
+void init_hyperparameters_with_defaults(const HyperparameterDefinition definitions[],
+                int32_t defintions_size, void* hyperparameter_struct);
+
+// Print the list of hyperparameters
+void print_hyperparameters(int level, List* /*<Hyperparameter*>*/ hyperparameters);
+
 // changes the final value of a hyperparameter into the model warehouse output
-void update_model_hyperparameter(Model* model, const char* name, Oid type, Datum value);
+void update_model_hyperparameter(MemoryContext memcxt, List *hyperparameters, const char* name, Oid type, Datum value);
 
-void configure_hyperparameters(AlgorithmML algorithm,
-                               List* hyperparameters, Model* model, void* hyperparameter_struct);
+////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////
 
-// Set int hyperparameter
-void set_hyperparameter_value(const char* name, int* hyperparameter,
-                              Value* value, VariableSetKind kind, int default_value, Model* model,
-                              HyperparameterValidation* validation);
-
-
-// Set double hyperparameter
-void set_hyperparameter_value(const char* name, double* hyperparameter, Value* value,
-                              VariableSetKind kind, double default_value, Model* model,
-                              HyperparameterValidation* validation);
-
-
-// Set string hyperparameter (no const)
-void set_hyperparameter_value(const char* name, char** hyperparameter, Value* value,
-                              VariableSetKind kind, char* default_value, Model* model,
-                              HyperparameterValidation* validation);
+// AutoML Configuration for a hyperparameter
+#define HP_AUTOML(automl_tuning, min_value_automl, max_value_automl, steps, distribution) \
+            automl_tuning, min_value_automl, max_value_automl, steps, distribution
+#define HP_AUTOML_INT(min_value_automl, max_value_automl, steps, distribution) \
+            HP_AUTOML(true, min_value_automl, max_value_automl, steps, distribution)
+#define HP_AUTOML_FLOAT(min_value_automl, max_value_automl, steps, distribution) \
+            HP_AUTOML(true, min_value_automl, max_value_automl, steps, distribution)
+#define HP_AUTOML_BOOL() HP_AUTOML(true,  0, 0, 0, ProbabilityDistribution::UNIFORM_RANGE)
+#define HP_AUTOML_ENUM() HP_AUTOML(true,  0, 0, 0, ProbabilityDistribution::UNIFORM_RANGE)
+#define HP_NO_AUTOML()   HP_AUTOML(false, 0, 0, 0, ProbabilityDistribution::INVALID_DISTRIBUTION)
 
 
-// Set boolean hyperparameter
-void set_hyperparameter_value(const char* name, bool* hyperparameter,
-                              Value* value, VariableSetKind kind, bool default_value, Model* model,
-                              HyperparameterValidation* validation);
-
-
-// General purpouse method to set the hyperparameters
-// Locate the hyperparameter in the list by name and set it to the selected value
-// Return the index in the list of the hyperparameters. If not found return -1
-template<typename T>
-int set_hyperparameter(const char* name, T* hyperparameter, List* hyperparameters, T default_value, Model* model,
-                       HyperparameterValidation* validation) {
-    int result = 0;
-    foreach_cell(it, hyperparameters) {
-        VariableSetStmt* current = lfirst_node(VariableSetStmt, it);
-        
-        if (strcmp(current->name, name) == 0) {
-            if (list_length(current->args) > 1) {
-                ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("Hyperparameter %s cannot be a list", current->name)));
-            }
-            
-            Value* value = NULL;
-            if (current->args != NULL) {
-                A_Const* aconst = NULL;
-                aconst = linitial_node(A_Const, current->args);
-                value = &aconst->val;
-            }
-            
-            set_hyperparameter_value(name, hyperparameter, value, current->kind, default_value, model, validation);
-            return result;
-        }
-        result++;
+// Definitions of hyperparameters. The following macors have an indirection level to allow
+// definitions using other macros such as HP_AUTOML
+#define HYPERPARAMETER_BOOL_INTERNAL(name, default_value,                                          \
+                struct_name, attribute,                                                            \
+                automl_tuning, min_value_automl, max_value_automl, steps, distribution)            \
+    {                                                                                              \
+        name, BOOLOID, BoolGetDatum(default_value),                                                \
+        {PointerGetDatum(NULL), PointerGetDatum(NULL), false, false,                               \
+        NULL, 0, NULL, NULL},                                                                      \
+        {automl_tuning, distribution, steps, min_value_automl, max_value_automl},                  \
+        offsetof(struct_name, attribute)                                                           \
     }
-    
-    // If not set by user, set the default value
-    set_hyperparameter_value(name, hyperparameter, NULL, VAR_SET_DEFAULT, default_value, model, validation);
-    return -1;
-}
+
+#define HYPERPARAMETER_BOOL(name, default_value, struct_name, attribute, automl)                   \
+        HYPERPARAMETER_BOOL_INTERNAL(name, default_value, struct_name, attribute, automl)
+
+///////////////////////////////////////////////////////////////////////////////
+
+#define HYPERPARAMETER_ENUM_INTERNAL(name, default_value,                                              \
+                enum_values, enum_values_size, enum_getter, enum_setter, struct_name, attribute,       \
+                automl_tuning, min_value_automl, max_value_automl, steps, distribution)                \
+    {                                                                                                  \
+        name, ANYENUMOID, CStringGetDatum(default_value),                                              \
+        {PointerGetDatum(NULL), PointerGetDatum(NULL), false, false,                                   \
+        enum_values, enum_values_size, enum_getter, enum_setter},                                      \
+        {automl_tuning, distribution, steps, min_value_automl, max_value_automl},                      \
+        offsetof(struct_name, attribute)                                                               \
+    }
+
+#define HYPERPARAMETER_ENUM(name, default_value, enum_values, enum_values_size, enum_getter, enum_setter,           \
+                struct_name, attribute, automl)                                                        \
+        HYPERPARAMETER_ENUM_INTERNAL(name, default_value, enum_values, enum_values_size, enum_getter, enum_setter,  \
+                struct_name, attribute, automl)
+
+///////////////////////////////////////////////////////////////////////////////
+
+#define HYPERPARAMETER_INT4_INTERNAL(name, default_value,                                              \
+                min, min_inclusive, max, max_inclusive, struct_name, attribute,                        \
+                automl_tuning, min_value_automl, max_value_automl, steps, distribution)                \
+    {                                                                                                  \
+        name, INT4OID, Int32GetDatum(default_value),                                                   \
+        {Int32GetDatum(min), Int32GetDatum(max), min_inclusive, max_inclusive,                         \
+        NULL, 0,  NULL, NULL},                                                                         \
+        {automl_tuning, distribution, steps, Int32GetDatum(min_value_automl), Int32GetDatum(max_value_automl)}, \
+        offsetof(struct_name, attribute)                                                               \
+    }
+
+#define HYPERPARAMETER_INT4(name, default_value, min, min_inclusive, max, max_inclusive,               \
+                struct_name, attribute, automl)                                                        \
+        HYPERPARAMETER_INT4_INTERNAL(name, default_value, min, min_inclusive, max, max_inclusive,      \
+        struct_name, attribute, automl)
+
+///////////////////////////////////////////////////////////////////////////////
+
+#define HYPERPARAMETER_INT8_INTERNAL(name, default_value,                                              \
+                min, min_inclusive, max, max_inclusive, struct_name, attribute,                        \
+                automl_tuning, min_value_automl, max_value_automl, steps, distribution)                \
+    {                                                                                                  \
+        name, INT8OID, Int64GetDatum(default_value),                                                   \
+        {Int64GetDatum(min), Int64GetDatum(max), min_inclusive, max_inclusive,                         \
+        NULL, 0, NULL, NULL},                                                                          \
+        {automl_tuning, distribution, steps, Int64GetDatum(min_value_automl), Int64GetDatum(max_value_automl)}, \
+        offsetof(struct_name, attribute)                                                               \
+    }
+
+#define HYPERPARAMETER_INT8(name, default_value, min, min_inclusive, max, max_inclusive,               \
+                struct_name, attribute, automl)                                                        \
+        HYPERPARAMETER_INT8_INTERNAL(name, default_value, min, min_inclusive, max, max_inclusive,      \
+        struct_name, attribute, automl)
+
+///////////////////////////////////////////////////////////////////////////////
+
+#define HYPERPARAMETER_FLOAT8_INTERNAL(name, default_value,                                                           \
+                min, min_inclusive, max, max_inclusive, struct_name, attribute,                                       \
+                automl_tuning, min_value_automl, max_value_automl, steps, distribution)                               \
+    {                                                                                                                 \
+        name, FLOAT8OID, Float8GetDatum(default_value),                                                               \
+            {Float8GetDatum(min), Float8GetDatum(max), min_inclusive, max_inclusive,                                  \
+            NULL, 0, NULL, NULL},                                                                                     \
+            {automl_tuning, distribution, steps, Float8GetDatum(min_value_automl), Float8GetDatum(max_value_automl)}, \
+            offsetof(struct_name, attribute)                                                                          \
+    }
+
+#define HYPERPARAMETER_FLOAT8(name, default_value, min, min_inclusive, max, max_inclusive,          \
+                struct_name, attribute, automl)                                                     \
+        HYPERPARAMETER_FLOAT8_INTERNAL(name, default_value, min, min_inclusive, max, max_inclusive, \
+        struct_name, attribute, automl)
+
+///////////////////////////////////////////////////////////////////////////////
+
+#define HYPERPARAMETER_STRING_INTERNAL(name, default_value,                                \
+                str_values, str_values_size, struct_name, attribute,                       \
+                automl_tuning, min_value_automl, max_value_automl, steps, distribution)    \
+    {                                                                                      \
+        name, CSTRINGOID, CStringGetDatum(default_value),                                  \
+        {PointerGetDatum(NULL), PointerGetDatum(NULL), false, false,                       \
+        str_values, str_values_size, NULL, NULL},                                          \
+        {automl_tuning, distribution, steps, min_value_automl, max_value_automl},          \
+        offsetof(struct_name, attribute)                                                   \
+    }
+
+#define HYPERPARAMETER_STRING(name, default_value, str_values, str_values_size,            \
+                struct_name, attribute, automl)                                            \
+        HYPERPARAMETER_STRING_INTERNAL(name, default_value, str_values, str_values_size,   \
+                struct_name, attribute, automl)
 
 #endif

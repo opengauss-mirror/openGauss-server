@@ -1,0 +1,92 @@
+-- generating audit logs 
+create user user_audit_mul_x with password 'Gauss@123';
+create user user_audit_mul_y with password 'Gauss@123';
+create user user_audit_mul_z with password 'Gauss@123';
+select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%create user user_audit_mul%'order by time;
+   type   | result |   object_name    |                      detail_info                       
+----------+--------+------------------+--------------------------------------------------------
+ ddl_user | ok     | user_audit_mul_x | create user user_audit_mul_x with password '********';
+ ddl_user | ok     | user_audit_mul_y | create user user_audit_mul_y with password '********';
+ ddl_user | ok     | user_audit_mul_z | create user user_audit_mul_z with password '********';
+(3 rows)
+
+-- audit thread number change to 3
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_thread_num=3" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=6" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_set_parameter=0" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+-- generating audit items
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from pg_delete_audit('0007-1-1','9999-12-31');";
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "create user user_audit_mul_001 with password 'Gauss@123'";
+CREATE ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "create user user_audit_mul_002 with password 'Gauss@123'";
+CREATE ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "create user user_audit_mul_003 with password 'Gauss@123'";
+CREATE ROLE
+-- check audit logs
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%create user user_audit_mul%'order by time;";
+   type   | result |    object_name     |                       detail_info                       
+----------+--------+--------------------+---------------------------------------------------------
+ ddl_user | ok     | user_audit_mul_001 | create user user_audit_mul_001 with password '********'
+ ddl_user | ok     | user_audit_mul_002 | create user user_audit_mul_002 with password '********'
+ ddl_user | ok     | user_audit_mul_003 | create user user_audit_mul_003 with password '********'
+(3 rows)
+
+-- audit thread number change to 1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_thread_num=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from pg_delete_audit('0007-1-1','9999-12-31');";
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "create user user_audit_mul_004 with password 'Gauss@123'";
+CREATE ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "create user user_audit_mul_005 with password 'Gauss@123'";
+CREATE ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "create user user_audit_mul_006 with password 'Gauss@123'";
+CREATE ROLE
+-- check audit logs
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select type,result,object_name,detail_info from pg_query_audit('1111-1-1','2222-2-2') where detail_info like '%create user user_audit_mul%'order by time;";
+   type   | result |    object_name     |                       detail_info                       
+----------+--------+--------------------+---------------------------------------------------------
+ ddl_user | ok     | user_audit_mul_004 | create user user_audit_mul_004 with password '********'
+ ddl_user | ok     | user_audit_mul_005 | create user user_audit_mul_005 with password '********'
+ ddl_user | ok     | user_audit_mul_006 | create user user_audit_mul_006 with password '********'
+(3 rows)
+
+-- reset env
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop user user_audit_mul_001";
+DROP ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop user user_audit_mul_002";
+DROP ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop user user_audit_mul_003";
+DROP ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop user user_audit_mul_004";
+DROP ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop user user_audit_mul_005";
+DROP ROLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop user user_audit_mul_006";
+DROP ROLE
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_thread_num" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_set_parameter" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5

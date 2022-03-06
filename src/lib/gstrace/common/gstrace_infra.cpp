@@ -383,7 +383,7 @@ static bool checkProcess(int port)
     if (fp == NULL) {
         printf("popen failed. could not query database process.\n");
         return procexist;
-    } 
+    }
     while (fgets(buf, sizeof(buf), fp) != NULL) {
         procexist = true;
         break;

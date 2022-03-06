@@ -4,9 +4,9 @@
  *	  Definitions for planner's internal data structures.
  *
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/nodes/relation.h
  *
@@ -1348,6 +1348,7 @@ typedef struct HashPath {
     List* path_hashclauses; /* join clauses used for hashing */
     int num_batches;        /* number of batches expected */
     OpMemInfo mem_info;     /* Mem info for hash table */
+    double joinRows;
 } HashPath;
 
 #ifdef PGXC
@@ -1619,9 +1620,6 @@ typedef struct RestrictInfo {
     /* cache space for hashclause processing; -1 if not yet set */
     BucketSize left_bucketsize;  /* avg bucketsize of left side */
     BucketSize right_bucketsize; /* avg bucketsize of right side */
-
-    /* Is this restrict info converted from index matching process */
-    bool converted;
 } RestrictInfo;
 
 /*

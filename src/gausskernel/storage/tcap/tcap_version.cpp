@@ -27,8 +27,10 @@
 
 #include "access/tableam.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_snapshot.h"
 #include "commands/tablecmds.h"
+#include "commands/matview.h"
 #include "executor/node/nodeModifyTable.h"
 #include "fmgr.h"
 #include "nodes/plannodes.h"
@@ -133,8 +135,8 @@ static bool TvFeatureSupport(Oid relid, char **errstr, bool isTimecapsuleTable)
         *errstr = "timecapsule feature does not support system table";
     } else if (classForm->relpersistence != RELPERSISTENCE_PERMANENT) {
         *errstr = "timecapsule feature does not support non-permanent table";
-    } else if (classForm->parttype != PARTTYPE_NON_PARTITIONED_RELATION) {
-        *errstr = "timecapsule feature does not support partitioned table";
+    } else if (rel->rd_tam_type == TAM_HEAP) {
+        *errstr = "timecapsule feature does not support heap table";
     } else if ((RELATION_HAS_BUCKET(rel) || RELATION_OWN_BUCKET(rel))) {
         *errstr = "timecapsule feature does not support hash-bucket table";
     } else if (!RelationIsRowFormat(rel)) {
@@ -249,8 +251,45 @@ static Const *TvEvalVerExpr(TvVersionType tvtype, Node *tvver)
 }
 
 /*
+ * Function function: The undo recycle thread obtains the current time and obtains SnpXmin
+ * from the flashback snapshot to calculate the transaction XID reserved in the old version.
  * We use the round-down way to obtain snapshots. that is,
- *     select * from pg_snapshot where snptime <= :tz order by snptime desc limit 1;
+ *     select SnpXmin from gs_txn_snapshot where snptime <= :tz order by snptime desc limit 1;
+ */
+TransactionId TvFetchSnpxminRecycle(TimestampTz tz)
+{
+    Relation rel;
+    SysScanDesc sd;
+    ScanKeyData skey[3];
+    HeapTuple tup;
+    Datum value;
+    bool isnull = false;
+    TransactionId snapxmin = FirstNormalTransactionId;
+
+    rel = heap_open(SnapshotRelationId, AccessShareLock);
+
+    ScanKeyInit(&skey[0], Anum_pg_snapshot_snptime, BTLessEqualStrategyNumber, 
+        F_TIMESTAMP_LE, TimestampTzGetDatum(tz));
+
+    sd = systable_beginscan(rel, SnapshotTimeCsnIndexId, true, NULL, 1, skey);
+    tup = systable_getnext(sd);
+    /* Limit 1 */
+    if (tup == NULL) {
+        elog(WARNING, "cannot find the restore point, return FirstNormalTransactionId, prevent undo recycle move");
+    } else {
+        value = heap_getattr(tup, Anum_pg_snapshot_snpxmin, RelationGetDescr(rel), &isnull);
+        snapxmin = Int64GetDatum(value);
+    }
+
+    systable_endscan(sd);
+    heap_close(rel, AccessShareLock);
+
+    return snapxmin;
+}
+
+/*
+ * We use the round-down way to obtain snapshots. that is,
+ *     select * from gs_txn_snapshot where snptime <= :tz order by snptime desc limit 1;
  */
 static void TvFetchSnapTz(TimestampTz tz, Snapshot snap)
 {
@@ -296,7 +335,7 @@ static void TvFetchSnapTz(TimestampTz tz, Snapshot snap)
 
 /*
  * We use the round-down way to obtain snapshots. that is,
- *     select * from pg_snapshot where snpcsn <= :csn order by snpcsn desc limit 1;
+ *     select * from gs_txn_snapshot where snpcsn <= :csn order by snpcsn desc limit 1;
  */
 static void TvFetchSnapCsn(int64 csn, Snapshot snap)
 {
@@ -418,8 +457,8 @@ Snapshot TvChooseScanSnap(Relation relation, Scan *scan, ScanState *ss)
     RangeTblEntry *rte = rt_fetch(scan->scanrelid, estate->es_range_table);
     TimeCapsuleClause *tcc = rte->timecapsule;
 
-    if (likely(tcc == NULL)) {        
-        return snap;    
+    if (likely(tcc == NULL)) {
+        return snap;
     } else {
         bool isnull = false;
         ExprContext *econtext;
@@ -461,19 +500,16 @@ void TvDeleteDelta(Oid relid, Snapshot snap)
     return;
 }
 
-void TvUheapDeleteDelta(Oid relid, Snapshot snap)
+void TvUheapDeleteDeltaRel(Relation rel, Relation partRel, Partition p, Snapshot snap)
 {
-    Relation rel;
     TableScanDesc sd;
     UHeapTuple tup;
     TupleTableSlot *oldslot = NULL;
+    TransactionId tmfdXmin = InvalidTransactionId;
 
     Snapshot snapshotNow = (Snapshot)palloc0(sizeof(SnapshotData));
     (void)GetSnapshotData(snapshotNow, false);
     snap->user_data = (void *)snapshotNow;
-
-    /* Notice: invoker already acquired lock */
-    rel = heap_open(relid, NoLock);
 
     EState *estate = CreateExecutorState();
     /*
@@ -489,25 +525,88 @@ void TvUheapDeleteDelta(Oid relid, Snapshot snap)
     estate->es_num_result_relations = 1;
     estate->es_result_relation_info = resultRelInfo;
 
-    sd = tableam_scan_begin(rel, snap, 0, NULL);
+    Relation relRel = (partRel != NULL) ? partRel : rel;
+    sd = tableam_scan_begin(relRel, snap, 0, NULL);
     while ((tup = (UHeapTuple)tableam_scan_getnexttuple(sd, ForwardScanDirection)) != NULL) {
-        SimpleUHeapDelete(rel, &tup->ctid, snapshotNow, &oldslot);
-        ExecDeleteIndexTuples(oldslot, &tup->ctid, estate, rel, NULL, NULL, false);
+        SimpleUHeapDelete(relRel, &tup->ctid, snapshotNow, &oldslot, &tmfdXmin);
+        ExecDeleteIndexTuples(oldslot, &tup->ctid, estate, relRel, p, NULL, false);
+        if (relRel != NULL && relRel->rd_mlogoid != InvalidOid) {
+            insert_into_mlog_table(relRel, relRel->rd_mlogoid, NULL, &tup->ctid, tmfdXmin, 'D');
+        }
         if (oldslot) {
             ExecDropSingleTupleTableSlot(oldslot);
             oldslot = NULL;
         }
     }
     tableam_scan_end(sd);
-    heap_close(rel, NoLock);
 
     FreeSnapshotDeepForce(snapshotNow);
     snap->user_data = NULL;
 
     ExecCloseIndices(resultRelInfo);
+
+    /* free the fakeRelationCache */
+    if (estate->esfRelations != NULL) {
+        FakeRelationCacheDestroy(estate->esfRelations);
+    }
+
     pfree(resultRelInfo);
 
     return;
+}
+
+void TvUheapDeleteDeltaPart(Relation rel, Oid relid, Snapshot snap)
+{
+    List* partTupleList = NIL;
+    ListCell* partCell = NULL;
+
+    /* Open partition table, find all partition names based on the parentId.
+     * partitioned table unspport the unlogged table.
+     */
+    Assert(rel->rd_rel->relpersistence != RELPERSISTENCE_UNLOGGED);
+
+    /* process all partition */
+    partTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relid);
+    foreach (partCell, partTupleList) {
+        /* the "tup" just for get partOid, UHeapTup has no HEAP_HASOID flag, so here use HeapTuple */
+        HeapTuple tup = (HeapTuple)lfirst(partCell);
+        Oid partOid = HeapTupleGetOid(tup);
+        Partition p = partitionOpen(rel, partOid, AccessExclusiveLock);
+        Relation partRel = partitionGetRelation(rel, p);
+
+        if (RelationIsSubPartitioned(rel)) {
+            List* subPartTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION, partOid);
+            ListCell* subPartCell = NULL;
+            foreach (subPartCell, subPartTupleList) {
+                HeapTuple subTup = (HeapTuple)lfirst(subPartCell);
+                Oid subPartOid = HeapTupleGetOid(subTup);
+                Partition subPar = partitionOpen(partRel, subPartOid, AccessExclusiveLock);
+                Relation subPartRel = partitionGetRelation(partRel, subPar);
+                TvUheapDeleteDeltaRel(rel, subPartRel, subPar, snap);
+                releaseDummyRelation(&subPartRel);
+                partitionClose(partRel, subPar, NoLock);
+            }
+            freePartList(subPartTupleList);
+        } else {
+            TvUheapDeleteDeltaRel(rel, partRel, p, snap);
+        }
+        releaseDummyRelation(&partRel);
+        partitionClose(rel, p, NoLock);
+    }
+    freePartList(partTupleList);
+    return;
+}
+
+void TvUheapDeleteDelta(Oid relid, Snapshot snap)
+{
+    Relation rel = heap_open(relid, NoLock);
+    if (RELATION_IS_PARTITIONED(rel)) {
+        TvUheapDeleteDeltaPart(rel, relid, snap);
+    } else {
+        TvUheapDeleteDeltaRel(rel, NULL, NULL, snap);
+    }
+
+    heap_close(rel, NoLock);
 }
 
 typedef HeapTuple (*TvFetchTupleHook)(void *arg);
@@ -674,7 +773,8 @@ static void TvInsertLostImpl(Relation rel, Snapshot snap, TvFetchTupleHook fetch
     return;
 }
 
-static void TvUheapInsertLostImpl(Relation rel, Snapshot snap, TvUheapFetchTupleHook fetchTupleHook, void *arg)
+static void TvUheapInsertLostImpl(Relation rel, Relation partRel, Partition p,
+    Snapshot snap, TvUheapFetchTupleHook fetchTupleHook, void *arg)
 {
     UHeapTuple tuple;
     ResultRelInfo *resultRelInfo;
@@ -694,9 +794,10 @@ static void TvUheapInsertLostImpl(Relation rel, Snapshot snap, TvUheapFetchTuple
     estate->es_num_result_relations = 1;
     estate->es_result_relation_info = resultRelInfo;
 
+    Relation relRel = (partRel != NULL) ? partRel : rel;
     /* Set up a tuple slot too */
     myslot = ExecInitExtraTupleSlot(estate, TAM_USTORE);
-    ExecSetSlotDescriptor(myslot, RelationGetDescr(rel));
+    ExecSetSlotDescriptor(myslot, RelationGetDescr(relRel));
 
     /* Switch into its memory context */
     MemoryContext oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
@@ -712,13 +813,20 @@ static void TvUheapInsertLostImpl(Relation rel, Snapshot snap, TvUheapFetchTuple
         ExecStoreTuple(tuple, slot, InvalidBuffer, false);
 
         /* Check the constraints of the tuple */
-        if (rel->rd_att->constr) {
+        if (relRel->rd_att->constr) {
             ExecConstraints(resultRelInfo, slot, estate);
         }
-        UHeapInsert(rel, tuple, mycid, NULL);
+        UHeapInsert(relRel, tuple, mycid, NULL);
 
         List *recheckIndexes = NULL;
-        recheckIndexes = ExecInsertIndexTuples(myslot, &tuple->ctid, estate, NULL, NULL, InvalidBktId, NULL, NULL);
+        recheckIndexes = ExecInsertIndexTuples(myslot, &tuple->ctid, estate, partRel, p, InvalidBktId, NULL, NULL);
+        if (relRel != NULL && relRel->rd_mlogoid != InvalidOid) {
+            HeapTuple htup = NULL;
+            Assert(relRel->rd_tam_type == TAM_USTORE);
+            htup = (HeapTuple)UHeapToHeap(relRel->rd_att, (UHeapTuple)tuple);
+            insert_into_mlog_table(relRel, relRel->rd_mlogoid, (HeapTuple)tuple,
+                &(((HeapTuple)tuple)->t_self), GetCurrentTransactionId(), 'I');
+        }
         list_free(recheckIndexes);
     }
     MemoryContextSwitchTo(oldcontext);
@@ -726,6 +834,11 @@ static void TvUheapInsertLostImpl(Relation rel, Snapshot snap, TvUheapFetchTuple
     ExecResetTupleTable(estate->es_tupleTable, false);
 
     ExecCloseIndices(resultRelInfo);
+
+    /* free the fakeRelationCache */
+    if (estate->esfRelations != NULL) {
+        FakeRelationCacheDestroy(estate->esfRelations);
+    }
 
     FreeExecutorState(estate);
 
@@ -752,17 +865,71 @@ void TvInsertLost(Oid relid, Snapshot snap)
     return;
 }
 
+void TvUheapInsertLostRel(Relation rel, Relation partRel, Partition p, Snapshot snap)
+{
+    TableScanDesc sd;
+    if (partRel == NULL) {
+        sd = tableam_scan_begin(rel, snap, 0, NULL);
+    } else {
+        sd = tableam_scan_begin(partRel, snap, 0, NULL);
+    }
+    /* 1. Insert one by one. */
+    TvUheapInsertLostImpl(rel, partRel, p, snap, TvUheapFetchTuple, (void *)sd);
+    tableam_scan_end(sd);
+    return;
+}
+
+void TvUheapInsertLostPart(Relation rel, Oid relid, Snapshot snap)
+{
+    List* partTupleList = NIL;
+    ListCell* partCell = NULL;
+
+    /* Open partition table, find all partition names based on the parentId.
+     * partitioned table unspport the unlogged table 
+     */
+    Assert(rel->rd_rel->relpersistence != RELPERSISTENCE_UNLOGGED);
+
+    /* process all partition */
+    partTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relid);
+    foreach (partCell, partTupleList) {
+        /* the "tup" just for get partOid, UHeapTup has no HEAP_HASOID flag, so here use HeapTuple */
+        HeapTuple tup = (HeapTuple)lfirst(partCell);
+        Oid partOid = HeapTupleGetOid(tup);
+        Partition p = partitionOpen(rel, partOid, AccessExclusiveLock);
+        Relation partRel = partitionGetRelation(rel, p);
+
+        if (RelationIsSubPartitioned(rel)) {
+            List* subPartTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION, partOid);
+            ListCell* subPartCell = NULL;
+            foreach (subPartCell, subPartTupleList) {
+                HeapTuple subTup = (HeapTuple)lfirst(subPartCell);
+                Oid subPartOid = HeapTupleGetOid(subTup);
+                Partition subPar = partitionOpen(partRel, subPartOid, AccessExclusiveLock);
+                Relation subPartRel = partitionGetRelation(partRel, subPar);
+                TvUheapInsertLostRel(rel, subPartRel, subPar, snap);
+                releaseDummyRelation(&subPartRel);
+                partitionClose(partRel, subPar, AccessExclusiveLock);
+            }
+            freePartList(subPartTupleList);
+        } else {
+            TvUheapInsertLostRel(rel, partRel, p, snap);
+        }
+        releaseDummyRelation(&partRel);
+        partitionClose(rel, p, AccessExclusiveLock);
+    }
+    freePartList(partTupleList);
+    return;
+
+}
+
 void TvUheapInsertLost(Oid relid, Snapshot snap)
 {
-    Relation rel;
-    TableScanDesc sd;
-    /* 1. Prepare to fetch lost tuples. */
-    rel = heap_open(relid, NoLock);
-    sd = tableam_scan_begin(rel, snap, 0, NULL);
-    /* 2. Insert one by one. */
-    TvUheapInsertLostImpl(rel, snap, TvUheapFetchTuple, (void *)sd);
-    /* 3. Done, clean. */
-    tableam_scan_end(sd);
+    Relation rel = heap_open(relid, NoLock);
+    if (RELATION_IS_PARTITIONED(rel)) {
+        TvUheapInsertLostPart(rel, relid, snap);
+    } else {
+        TvUheapInsertLostRel(rel, NULL, NULL, snap);
+    }
     heap_close(rel, NoLock);
     return;
 }

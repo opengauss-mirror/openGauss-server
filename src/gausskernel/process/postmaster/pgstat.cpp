@@ -97,12 +97,6 @@
 #define static
 #endif
 
-/* ----------
- * Paths for the statistics files (relative to installation's $PGDATA).
- * ----------
- */
-#define PGSTAT_STAT_PERMANENT_FILENAME "global/pgstat.stat"
-#define PGSTAT_STAT_PERMANENT_TMPFILE "global/pgstat.tmp"
 #define pg_stat_relation(flag) (InvalidOid == (flag))
 
 /* ----------
@@ -2873,9 +2867,9 @@ void CreateSharedBackendStatus(void)
         (char*)ShmemInitStruct("Backend Activity Buffer", t_thrd.shemem_ptr_cxt.BackendActivityBufferSize, &found);
 
     if (!found) {
-        rc = memset_s(
-            t_thrd.shemem_ptr_cxt.BackendActivityBuffer, t_thrd.shemem_ptr_cxt.BackendActivityBufferSize, 0, size);
-        securec_check(rc, "\0", "\0");
+        /* call MemsetHugeSize instead because the size may be larger than INT_MAX. */
+        MemsetHugeSize(
+            t_thrd.shemem_ptr_cxt.BackendActivityBuffer, t_thrd.shemem_ptr_cxt.BackendActivityBufferSize, 0);
 
         /* Initialize st_activity pointers. */
         buffer = t_thrd.shemem_ptr_cxt.BackendActivityBuffer;
@@ -3126,6 +3120,9 @@ void pgstat_bestart(void)
     beentry->st_activity[g_instance.attr.attr_common.pgstat_track_activity_query_size - 1] = '\0';
 
     beentry->st_queryid = 0;
+    beentry->st_unique_sql_key.unique_sql_id = 0;
+    beentry->st_unique_sql_key.user_id = 0;
+    beentry->st_unique_sql_key.cn_id = 0;
     beentry->st_tid = gettid();
     beentry->st_parent_sessionid = 0;
     beentry->st_thread_level = 0;
@@ -3135,6 +3132,7 @@ void pgstat_bestart(void)
     beentry->st_waitnode_count = 0;
     beentry->st_plannodeid = -1;
     beentry->st_numnodes = -1;
+    beentry->trace_cxt.trace_id[0] = '\0';
     /* Initialize wait event information. */
     beentry->st_waitevent = WAIT_EVENT_END;
     beentry->st_xid = 0;
@@ -3334,7 +3332,16 @@ static void pgstat_beshutdown_hook(int code, Datum arg)
     beentry->globalSessionId.nodeId = 0;
     beentry->globalSessionId.seq = 0;
 
-    pgstat_increment_changecount_after(beentry);
+    /*
+     * make sure st_changecount is an even before release it.
+     *
+     * In case some thread was interrupted by SIGTERM at any time with a mess st_changecount
+     * in PgBackendStatus, PgstatCollectorMain may hang-up in waiting its change to even and
+     * can not exit after receiving SIGTERM signal
+     */
+    do {
+        pgstat_increment_changecount_after(beentry);
+    } while ((beentry->st_changecount & 1) != 0);
 
     /*
      * handle below cases:
@@ -3396,7 +3403,17 @@ void pgstat_beshutdown_session(int ctrl_index)
         beentry->globalSessionId.sessionId = 0;
         beentry->globalSessionId.nodeId = 0;
         beentry->globalSessionId.seq = 0;
-        pgstat_increment_changecount_after(beentry);
+
+        /*
+         * make sure st_changecount is an even before release it.
+         *
+         * In case some thread was interrupted by SIGTERM at any time with a mess st_changecount
+         * in PgBackendStatus, PgstatCollectorMain may hang-up in waiting its change to even and
+         * can not exit after receiving SIGTERM signal
+         */
+        do {
+            pgstat_increment_changecount_after(beentry);
+        } while ((beentry->st_changecount & 1) != 0);
 
         /*
          * pgstat_beshutdown_session will be called in thread pool mode:
@@ -3632,6 +3649,23 @@ void pgstat_report_global_session_id(GlobalSessionId globalSessionId)
     pgstat_increment_changecount_after(beentry);
 }
 
+void pgstat_report_unique_sql_id(bool resetUniqueSql)
+{
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    if (IS_PGSTATE_TRACK_UNDEFINE)
+        return;
+    if (resetUniqueSql) {
+        beentry->st_unique_sql_key.unique_sql_id = 0;
+        beentry->st_unique_sql_key.cn_id = 0;
+        beentry->st_unique_sql_key.user_id = 0;
+    } else {
+        beentry->st_unique_sql_key.unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
+        beentry->st_unique_sql_key.cn_id = u_sess->unique_sql_cxt.unique_sql_cn_id;
+        beentry->st_unique_sql_key.user_id = u_sess->unique_sql_cxt.unique_sql_user_id;
+    }
+}
+
 void pgstat_report_queryid(uint64 queryid)
 {
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
@@ -3645,14 +3679,18 @@ void pgstat_report_queryid(uint64 queryid)
      * protocol.  The update must appear atomic in any case.
      */
     beentry->st_queryid = queryid;
-    if (queryid == 0) {
-        beentry->st_unique_sql_key.unique_sql_id = 0;
-        beentry->st_unique_sql_key.cn_id = 0;
-        beentry->st_unique_sql_key.user_id = 0;
-    } else {
-        beentry->st_unique_sql_key.unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
-        beentry->st_unique_sql_key.cn_id = u_sess->unique_sql_cxt.unique_sql_cn_id;
-        beentry->st_unique_sql_key.user_id = u_sess->unique_sql_cxt.unique_sql_user_id;
+}
+
+void pgstat_report_trace_id(knl_u_trace_context *trace_cxt, bool is_report_trace_id)
+{
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    if (IS_PGSTATE_TRACK_UNDEFINE)
+        return;
+    if (is_report_trace_id) {
+        errno_t rc =
+            memcpy_s((void*)beentry->trace_cxt.trace_id, MAX_TRACE_ID_SIZE, trace_cxt->trace_id,
+                     strlen(trace_cxt->trace_id) + 1);
+        securec_check(rc, "\0", "\0");
     }
 }
 
@@ -4483,12 +4521,6 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_LOGCTRL_SLEEP:
             event_name = "LOGCTRL_SLEEP";
             break;
-        case WAIT_EVENT_COMPRESS_ADDRESS_FILE_FLUSH:
-            event_name = "PCA_FLUSH";
-            break;
-        case WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC:
-            event_name = "PCA_SYNC";
-            break;
             /* no default case, so that compiler will warn */
         case IO_EVENT_NUM:
             break;
@@ -4501,14 +4533,20 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_UNDO_FILE_WRITE:
             event_name = "UndoFileWrite";
             break;
-        case WAIT_EVENT_UNDO_FILE_FLUSH:
-            event_name = "UndoFileFlush";
-            break;
         case WAIT_EVENT_UNDO_FILE_SYNC:
             event_name = "UndoFileSync";
             break;
         case WAIT_EVENT_UNDO_FILE_EXTEND:
             event_name = "UndoFileExtend";
+            break;
+        case WAIT_EVENT_UNDO_FILE_UNLINK:
+            event_name = "UndoFileUnlink";
+            break;
+        case WAIT_EVENT_UNDO_META_SYNC:
+            event_name = "UndoMetaSync";
+            break;
+        default:
+            event_name = "unknown wait event";
             break;
     }
     return event_name;
@@ -4747,6 +4785,92 @@ ThreadId* pgstat_get_stmttag_write_entry(int* num)
     pgstat_reset_current_status();
 
     return threads;
+}
+
+/*
+ * @Description: get pid from status entries by application name.
+ * @IN num: application name
+ * @OUT num: entries count
+ * @Return: all node status which names are 'application name'
+ */
+PgBackendStatusNode* pgstat_get_backend_status_by_appname(const char* appName, int* resultEntryNum)
+{
+    int idx = 0;
+
+    /* Initialize result number to 0, in case of return NULL directly */
+    if (resultEntryNum != NULL) {
+        *resultEntryNum = 0;
+    }
+
+    /* If BackendStatusArray is NULL, we will get it from other thread */
+    if (t_thrd.shemem_ptr_cxt.BackendStatusArray == NULL) {
+        if (PgBackendStatusArray != NULL) {
+            t_thrd.shemem_ptr_cxt.BackendStatusArray = PgBackendStatusArray;
+        } else {
+            return NULL;
+        }
+    }
+
+    /* Get all status entries, which procpid or sessionid is valid */
+    uint32 numBackends = 0;
+    PgBackendStatusNode* node = gs_stat_read_current_status(&numBackends);
+
+    /* If all entries procpid or sessionid are invalid, get numBackends is 0 and should return directly */
+    if (numBackends == 0) {
+        FreeBackendStatusNodeMemory(node);
+        return NULL;
+    }
+
+    /* This function is not under PgstatCollectorMain, this pointer is NULL */
+    Assert(!u_sess->stat_cxt.pgStatRunningInCollector);
+
+    /* Initialize head pointer, all nodes struct form to a list. This list does not match wich appname */
+    PgBackendStatusNode* otherNodeList = (PgBackendStatusNode*)palloc(sizeof(PgBackendStatusNode));
+    PgBackendStatusNode* otherNodeListHead = otherNodeList;
+    otherNodeList->data = NULL;
+    otherNodeList->next = NULL;
+    /* Initialize head pointer, all nodes struct form to a list, This list matches wich appname */
+    PgBackendStatusNode* resultNodeList = (PgBackendStatusNode*)palloc(sizeof(PgBackendStatusNode));
+    PgBackendStatusNode* resultNodeListHead = resultNodeList;
+    resultNodeList->data = NULL;
+    resultNodeList->next = NULL;
+
+    while (node != NULL) {
+        PgBackendStatus* beentry = node->data;
+
+        /* If the backend thread is valid and application name of beentry equals to appName, record this thread pid */
+        if (beentry != NULL) {
+            if (beentry->st_appname == NULL || beentry->st_tid < 0 || strcmp(beentry->st_appname, appName) != 0) {
+                /* Node name does not match wich appname, link this pointer to otherNodeList */
+                otherNodeList->next = node;
+                otherNodeList = otherNodeList->next;
+                node = node->next;
+                continue;
+            }
+
+            /* Node name matches appname, link this pointer to resultNodeList and return */
+            resultNodeList->next = node;
+            resultNodeList = resultNodeList->next;
+            idx++;
+        } else {
+            /* If beentry is NULL, should link this pointer to otherNodeList in order to free memory */
+            otherNodeList->next = node;
+            otherNodeList = otherNodeList->next;
+        }
+        node = node->next;
+    }
+    /* Must set tail pointer's next to NULL to separate node list to otherNodeList and resultNodeList */
+    otherNodeList->next = NULL;
+    resultNodeList->next = NULL;
+
+    if (resultEntryNum != NULL) {
+        *resultEntryNum = idx;
+    }
+
+    /* Because we have separate node list to other two lists, so just free the first list here. */
+    FreeBackendStatusNodeMemory(otherNodeListHead);
+
+    return resultNodeListHead;
 }
 
 /* ----------
@@ -5640,6 +5764,22 @@ static void pgstat_write_statsfile(bool permanent)
         fputc('d', fpout);
     }
 
+    if (g_instance.repair_cxt.global_repair_bad_block_stat != NULL) {
+        LWLockAcquire(RepairBadBlockStatHashLock, LW_SHARED);
+        HASH_SEQ_STATUS repairStat;
+        BadBlockEntry* repairEntry;
+        // write the bad page information recorded in global_repair_bad_block_stat.
+        hash_seq_init(&repairStat, g_instance.repair_cxt.global_repair_bad_block_stat);
+        while ((repairEntry = (BadBlockEntry*)hash_seq_search(&repairStat)) != NULL) {
+            fputc('R', fpout);
+            rc = fwrite(repairEntry, sizeof(BadBlockEntry), 1, fpout);
+            (void)rc; /* we'll check for error with ferror */
+        }
+        LWLockRelease(RepairBadBlockStatHashLock);
+        // Use 'r' as the terminator
+        fputc('r', fpout);
+    }
+
     /*
      * No more output to be done. Close the temp file and replace the old
      * pgstat.stat with it.  The ferror() check replaces testing for error
@@ -5707,6 +5847,8 @@ static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent)
     PgStat_StatTabEntry tabbuf;
     PgStat_StatFuncEntry funcbuf;
     PgStat_StatFuncEntry* funcentry = NULL;
+    BadBlockEntry* repairEntry = NULL;
+    BadBlockEntry repairBuf;
     HASHCTL hash_ctl;
     HTAB* dbhash = NULL;
     HTAB* tabhash = NULL;
@@ -5913,6 +6055,34 @@ static HTAB* pgstat_read_statsfile(Oid onlydb, bool permanent)
 
                 rc = memcpy_s(funcentry, sizeof(PgStat_StatFuncEntry), &funcbuf, sizeof(funcbuf));
                 securec_check(rc, "", "");
+                break;
+            case 'R':
+
+                if (g_instance.repair_cxt.global_repair_bad_block_stat == NULL) {
+                    break;
+                }
+
+                if (fread(&repairBuf, 1, sizeof(BadBlockEntry), fpin) != sizeof(BadBlockEntry)) {
+                    ereport(u_sess->stat_cxt.pgStatRunningInCollector ? LOG : WARNING,
+                            (errmsg("corrupted statistics file \"%s\"", statfile)));
+                    goto done;
+                }
+                /*
+                 * Add to the DB hash
+                 */
+                repairEntry = (BadBlockEntry*)hash_search(g_instance.repair_cxt.global_repair_bad_block_stat,
+                    (void*)&(repairBuf.key), HASH_ENTER, &found);
+                if (found) {
+                    ereport(u_sess->stat_cxt.pgStatRunningInCollector ? LOG : WARNING,
+                            (errmsg("corrupted statistics file \"%s\"", statfile)));
+                }
+
+                rc = memcpy_s(repairEntry, sizeof(BadBlockEntry), &repairBuf, sizeof(BadBlockEntry));
+                securec_check(rc, "", "");
+
+                break;
+
+            case 'r':
                 break;
 
                 /*
@@ -7145,15 +7315,15 @@ static void prepare_calculate(SqlRTInfoArray* sql_rt_info, int* counter)
     else
         sql_rt_info_count = sql_rt_info->sqlRTIndex;
 
+    *counter = 0;
     if (sql_rt_info_count == 0) {
         sql_rt_info->isFull = false;
-        *counter = sql_rt_info_count;
         LWLockRelease(PercentileLock);
         return;
     }
 
     if (u_sess->percentile_cxt.LocalsqlRT != NULL)
-        pfree(u_sess->percentile_cxt.LocalsqlRT);
+        pfree_ext(u_sess->percentile_cxt.LocalsqlRT);
 
     u_sess->percentile_cxt.LocalsqlRT = (SqlRTInfo*)MemoryContextAlloc(
         SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), sql_rt_info_count * sizeof(SqlRTInfo));
@@ -7184,13 +7354,13 @@ static void prepare_calculate_single(const SqlRTInfoArray* sql_rt_info, int* cou
         sql_rt_info_count = MAX_SQL_RT_INFO_COUNT;
     }
 
+    *counter = 0;
     if (sql_rt_info_count == 0) {
-        *counter = sql_rt_info_count;
         return;
     }
 
     if (u_sess->percentile_cxt.LocalsqlRT != NULL)
-        pfree(u_sess->percentile_cxt.LocalsqlRT);
+        pfree_ext(u_sess->percentile_cxt.LocalsqlRT);
 
     u_sess->percentile_cxt.LocalsqlRT = (SqlRTInfo*)MemoryContextAllocZero(
         SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), sql_rt_info_count * sizeof(SqlRTInfo));
@@ -8302,6 +8472,10 @@ void initMySessionMemoryEntry(void)
 
 static void endMySessionMemoryEntry(int code, Datum arg)
 {
+
+    /* release the memory on mySessionMemoryEntry */
+    pgstat_release_session_memory_entry();
+
     /* mark my entry not active. */
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->isValid = false;
 
@@ -9196,7 +9370,7 @@ TableDistributionInfo* get_remote_stat_double_write(TupleDesc tuple_desc)
     appendStringInfo(&buf,
         "SELECT node_name, curr_dwn, curr_start_page, file_trunc_num, file_reset_num, "
         "total_writes, low_threshold_writes, high_threshold_writes, "
-        "total_pages, low_threshold_pages, high_threshold_pages "
+        "total_pages, low_threshold_pages, high_threshold_pages, file_id "
         "FROM local_double_write_stat();");
 
     /* send sql and parallel fetch distribution info from all data nodes */
@@ -9288,8 +9462,8 @@ TableDistributionInfo* streaming_hadr_get_recovery_stat(TupleDesc tuple_desc)
     appendStringInfo(&buf,
         "SELECT hadr_sender_node_name, hadr_receiver_node_name, "
         "source_ip, source_port, dest_ip, dest_port, current_rto, target_rto, current_rpo, target_rpo, "
-        "current_sleep_time FROM "
-        "hadr_local_rto_and_rpo_stat();");
+        "rto_sleep_time, rpo_sleep_time FROM "
+        "gs_hadr_local_rto_and_rpo_stat();");
 
     /* send sql and parallel fetch distribution info from all data nodes */
     distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);
@@ -9316,6 +9490,34 @@ TableDistributionInfo* get_remote_node_xid_csn(TupleDesc tuple_desc)
 
     return distribuion_info;
 }
+
+#ifdef ENABLE_MULTIPLE_NODES
+TableDistributionInfo* get_remote_index_status(TupleDesc tuple_desc, const char *schname, const char *idxname)
+{
+    StringInfoData buf;
+    TableDistributionInfo* distribuion_info = NULL;
+
+    /* the memory palloced here should be free outside where it was called.*/
+    distribuion_info = (TableDistributionInfo*)palloc0(sizeof(TableDistributionInfo));
+
+    initStringInfo(&buf);
+
+    appendStringInfo(&buf, "select a.node_name::text, b.indisready, b.indisvalid from pg_index b "
+        "left join pgxc_node a on b.xc_node_id = a.node_id "
+        "where indexrelid = (select oid from pg_class where relnamespace = "
+        "(select oid from pg_namespace where nspname = %s) "
+        "and relname = %s);", quote_literal_cstr(schname), quote_literal_cstr(idxname));
+
+    /* send sql and parallel fetch distribution info from all nodes */
+    distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);
+    distribuion_info->slot = MakeSingleTupleTableSlot(tuple_desc);
+
+    pfree_ext(buf.data);
+
+    return distribuion_info;
+}
+
+#endif
 
 /*
  * the whole process statistics of bad block
@@ -9710,3 +9912,13 @@ void pgstat_reply_percentile_record()
     g_instance.stat_cxt.calculate_on_other_cn = false;
     pq_flush();
 }
+
+void pgstat_release_session_memory_entry()
+{
+    if (t_thrd.shemem_ptr_cxt.mySessionMemoryEntry != NULL) {
+        pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
+        pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
+    }
+}
+

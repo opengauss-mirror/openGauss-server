@@ -18,6 +18,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/exec/execStream.h"
+#include "db4ai/db4ai_api.h"
 
 /*
  * Optimizer common function that return a plan node's plain text, we wrapper it from
@@ -448,7 +449,11 @@ void GetPlanNodePlainText(
             *pname = *sname = *pt_operation = "Row Adapter";
             break;
         case T_RowToVec:
-            *pname = *sname = *pt_operation = "Vector Adapter";
+            if (IsA(plan->lefttree, SeqScan) && ((SeqScan*)plan->lefttree)->scanBatchMode) {
+                *pname = *sname = *pt_operation = "Vector Adapter(type: BATCH MODE)";
+            } else {
+                *pname = *sname = *pt_operation = "Vector Adapter";
+            }
             break;
         case T_VecAppend:
             *pname = *sname = *pt_operation = "Vector Append";
@@ -481,11 +486,12 @@ void GetPlanNodePlainText(
             *pname = "Vector Merge";
             *sname = *pt_operation = "Vector Merge Join";
             break;
-        case T_GradientDescent:
-            *pname = *sname = *pt_options = "Gradient Descent";
-            break;
-        case T_KMeans:
-            *pname = *sname = *pt_options = "K-Means";
+        case T_TrainModel: {
+                TrainModel *ptrain = (TrainModel*)plan;
+                AlgorithmAPI *api = get_algorithm_api(ptrain->algorithm);
+                *pname = "Train Model";
+                *sname = *pt_operation = (char*) api->name;
+            }
             break;
         default:
             *pname = *sname = *pt_operation = "?\?\?";

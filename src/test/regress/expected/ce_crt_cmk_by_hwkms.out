@@ -1,0 +1,164 @@
+-------------------------------------------------------------------------------------------------------------------------
+-- grop     : security
+-- module   : client encrypt 
+--
+-- function : test {sql：CREATE CEK}
+--      CREATE CLIENT MASTER KEY $cmk WITH (KEY_STORE = $key_store, KEY_PATH = "$key_id" , ALGORITHM = $algo);
+--
+-- dependency : 
+--      service : Huawei KMS (https://console.huaweicloud.com/dew/?region=cn-north-4#/kms/keyList/customKey)
+-------------------------------------------------------------------------------------------------------------------------
+-- prepare | generate keys in Huawei KMS website | succeed
+-- cec162c2-983d-4a66-8532-c67b915fb409 | ok
+-- 31938a5e-6460-49ce-a358-886f46c6f643 | ok
+-- d6107fb0-fa39-4ae5-ae84-019066ce9073 | ok
+-- 3be6f4e0-80bf-4209-8ba2-13cdd303f1bd | ok
+-- 43e7df16-afdc-4883-97c3-1bc7686ffc2f | to be deleted
+-- f1d088d8-3b48-4ca6-bcf1-d77496e1aba3 | unservice
+-- create cmk | succeeed
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409" , ALGORITHM = AES_256);
+CREATE CLIENT MASTER KEY cmk2 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643" , ALGORITHM = AES_256);
+-- drop cmk | succeed
+DROP CLIENT MASTER KEY cmk1;
+DROP CLIENT MASTER KEY cmk2;
+-- create after drop cmk | succeed
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073" , ALGORITHM = AES_256);
+CREATE CLIENT MASTER KEY cmk2 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd" , ALGORITHM = AES_256);
+DROP CLIENT MASTER KEY cmk1;
+DROP CLIENT MASTER KEY cmk2;
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073" , ALGORITHM = AES_256);
+CREATE CLIENT MASTER KEY cmk3 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd" , ALGORITHM = AES_256);
+-- prepare | succeed
+DROP CLIENT MASTER KEY cmk1;
+DROP CLIENT MASTER KEY cmk3;
+-- in the word "ecmk", 'e' means 'error'
+-- create cmk | loss args | error
+CREATE CLIENT MASTER KEY ecmk1 WITH (KEY_STORE = huawei_kms);
+ERROR(CLIENT): failed to create client master key, failed to find arg: KEY_PATH.
+CREATE CLIENT MASTER KEY ecmk2 WITH (KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409");
+ERROR(CLIENT): failed to create client master key, failed to find arg: KEY_STORE.
+CREATE CLIENT MASTER KEY ecmk3 WITH (ALGORITHM = AES_256);
+ERROR(CLIENT): failed to create client master key, failed to find arg: KEY_STORE.
+CREATE CLIENT MASTER KEY ecmk4 WITH (KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = AES_256);
+ERROR(CLIENT): failed to create client master key, failed to find arg: KEY_STORE.
+CREATE CLIENT MASTER KEY ecmk5 WITH (KEY_STORE = huawei_kms, ALGORITHM = AES_256);
+ERROR(CLIENT): failed to create client master key, failed to find arg: KEY_PATH.
+CREATE CLIENT MASTER KEY ecmk6 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073");
+ERROR(CLIENT): failed to create client master key, failed to find arg: ALGORITHM.
+CREATE CLIENT MASTER KEY ecmk7 WITH (KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd", KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd", ALGORITHM = AES_256);
+ERROR(CLIENT): duplicate keyPath args
+CREATE CLIENT MASTER KEY ecmk8 WITH (KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, ALGORITHM = AES_256);
+ERROR(CLIENT): duplicate keyStore args
+CREATE CLIENT MASTER KEY ecmk9 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409");
+ERROR(CLIENT): duplicate keyPath args
+CREATE CLIENT MASTER KEY ecmk10 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073");
+ERROR(CLIENT): duplicate keyPath args
+CREATE CLIENT MASTER KEY ecmk11 WITH (KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_STORE = huawei_kms);
+ERROR(CLIENT): duplicate keyStore args
+CREATE CLIENT MASTER KEY ecmk12 WITH (KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_STORE = huawei_kms);
+ERROR(CLIENT): duplicate keyStore args
+-- create cmk | redundant args | error
+CREATE CLIENT MASTER KEY ecmk20 WITH (KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = AES_256);
+ERROR(CLIENT): duplicate keyStore args
+CREATE CLIENT MASTER KEY ecmk21 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = AES_256);
+ERROR(CLIENT): duplicate keyPath args
+CREATE CLIENT MASTER KEY ecmk22 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073", KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = AES_256);
+ERROR(CLIENT): duplicate keyPath args
+CREATE CLIENT MASTER KEY ecmk23 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = AES_256, ALGORITHM = AES_256);
+ERROR(CLIENT): duplicate algorithm args
+CREATE CLIENT MASTER KEY ecmk24 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = AES_256, ALGORITHM = AES_256, ALGORITHM = AES_256, ALGORITHM = AES_256);
+ERROR(CLIENT): duplicate algorithm args
+CREATE CLIENT MASTER KEY ecmk25 WITH (KEY_STORE = huawei_kms, KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = AES_256, ALGORITHM = AES_256);
+ERROR(CLIENT): duplicate keyStore args
+-- create cmk | invalid args | error
+CREATE CLIENT MASTER KEY ecmk60 WITH (KEY_STORE = huawei_kms, KEY_PATH = , ALGORITHM = AES_256);
+ERROR:  syntax error at or near ","
+LINE 1: ...Y ecmk60 WITH (KEY_STORE = huawei_kms, KEY_PATH = , ALGORITH...
+                                                             ^
+CREATE CLIENT MASTER KEY ecmk61 WITH (KEY_STORE = huawei_kms, KEY_PATH = "c", ALGORITHM = );
+ERROR:  syntax error at or near ")"
+LINE 1: ...WITH (KEY_STORE = huawei_kms, KEY_PATH = "c", ALGORITHM = );
+                                                                     ^
+CREATE CLIENT MASTER KEY ecmk62 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb40", ALGORITHM = AES_256);
+ERROR(CLIENT): the length of cmk id is invalid.
+CREATE CLIENT MASTER KEY ecmk63 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2983d4a668532c67b915fb409", ALGORITHM = AES_256);
+ERROR(CLIENT): the length of cmk id is invalid.
+CREATE CLIENT MASTER KEY ecmk64 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2_983d_4a66_8532_c67b915fb409", ALGORITHM = AES_256);
+ERROR(CLIENT): kms server error. http status code: 400, kms server error message : {"error":{"error_msg":"Invalid key_id.","error_code":"KMS.0205"}}
+
+.
+CREATE CLIENT MASTER KEY ecmk65 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2_983d_4a66_8532_c67b915fb4099", ALGORITHM = AES_256);
+ERROR(CLIENT): the length of cmk id is invalid.
+CREATE CLIENT MASTER KEY ecmk66 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2_983d_4a66_8532_c67b915fb409cec162c2_983d_4a66_8532_c67b915fb409", ALGORITHM = AES_256);
+ERROR(CLIENT): the length of cmk id is invalid.
+CREATE CLIENT MASTER KEY ecmk68 WITH (KEY_STORE = huawei_kms, KEY_PATH = "z1938a5e-6460-49ce-a358-886f46c6f64", ALGORITHM = AES_256);
+ERROR(CLIENT): the length of cmk id is invalid.
+CREATE CLIENT MASTER KEY ecmk69 WITH (KEY_STORE = huawei_kms, KEY_PATH = ".1938a5e-6460-49ce-a358-886f46c6f64", ALGORITHM = AES_256);
+ERROR(CLIENT): the length of cmk id is invalid.
+CREATE CLIENT MASTER KEY ecmk70 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bz", ALGORITHM = AES_256);
+ERROR(CLIENT): kms server error. http status code: 404, kms server error message : {"error":{"error_msg":"Nonexistent key.","error_code":"KMS.0207"}}
+
+.
+CREATE CLIENT MASTER KEY ecmk73 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1b闲", ALGORITHM = AES_256);
+ERROR(CLIENT): the length of cmk id is invalid.
+CREATE CLIENT MASTER KEY ecmk74 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40cec162c2-983d-4a66-8532-c67b915fb40", ALGORITHM = AES_256);
+ERROR(CLIENT): the length of cmk id is invalid.
+--
+CREATE CLIENT MASTER KEY ecmk80 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM =);
+ERROR:  syntax error at or near ")"
+LINE 1: ...PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM =);
+                                                                     ^
+CREATE CLIENT MASTER KEY ecmk81 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = AES);
+ERROR(CLIENT): unpported algorithm 'aes', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk82 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073", ALGORITHM = AES_256_CBC);
+ERROR(CLIENT): unpported algorithm 'aes_256_cbc', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk83 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd", ALGORITHM = AES_256_CFB);
+ERROR(CLIENT): unpported algorithm 'aes_256_cfb', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk84 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = AES_128_CBC);
+ERROR(CLIENT): unpported algorithm 'aes_128_cbc', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk85 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = RSA_2048);
+ERROR(CLIENT): unpported algorithm 'rsa_2048', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk86 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073", ALGORITHM = RSA_3072);
+ERROR(CLIENT): unpported algorithm 'rsa_3072', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk87 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd", ALGORITHM = AES_257);
+ERROR(CLIENT): unpported algorithm 'aes_257', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk88 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = "AES_256_");
+ERROR(CLIENT): unpported algorithm 'AES_256_', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk89 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = .);
+ERROR:  syntax error at or near "."
+LINE 1: ...TH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = .);
+                                                                    ^
+CREATE CLIENT MASTER KEY ecmk90 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073", ALGORITHM = AES_25666666666666666666666666666666666666666666666666666);
+ERROR(CLIENT): unpported algorithm 'aes_25666666666666666666666666666666666666666666666666666', huawei kms only support: AES_256  
+CREATE CLIENT MASTER KEY ecmk91 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd", ALGORITHM = 嘿);
+ERROR(CLIENT): unpported algorithm '嘿', huawei kms only support: AES_256  
+-- create cmk | invalid keys | error
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "43e7df16-afdc-4883-97c3-1bc7686ffc2f", ALGORITHM = AES_256);
+ERROR(CLIENT): cmk entity '43e7df16-afdc-4883-97c3-1bc7686ffc2f' is already scheduled to be deleted, please use another cmk entity.
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "f1d088d8-3b48-4ca6-bcf1-d77496e1aba3", ALGORITHM = AES_256);
+ERROR(CLIENT): cmk entity 'f1d088d8-3b48-4ca6-bcf1-d77496e1aba3' is unavailable.
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "aad088d8-3b48-4ca6-bcf1-d77496e1ab55", ALGORITHM = AES_256);
+ERROR(CLIENT): kms server error. http status code: 404, kms server error message : {"error":{"error_msg":"Nonexistent key.","error_code":"KMS.0207"}}
+
+.
+-- prepare | succeed
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = AES_256);
+CREATE CLIENT MASTER KEY cmk2 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = AES_256);
+CREATE CLIENT MASTER KEY cmk3 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073", ALGORITHM = AES_256);
+-- create cmk | unserviceable args | error
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd", ALGORITHM = AES_256);
+ERROR:  duplicate key value violates unique constraint "gs_client_global_keys_name_index"
+DETAIL:  Key (global_key_name, key_namespace)=(cmk1, 2200) already exists.
+CREATE CLIENT MASTER KEY cmk4 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = AES_256);
+ERROR(CLIENT): key store and key path are already in use by another object
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = AES_256);
+ERROR(CLIENT): key store and key path are already in use by another object
+-- clear | succeed
+DROP CLIENT MASTER KEY cmk1;
+DROP CLIENT MASTER KEY cmk2;
+DROP CLIENT MASTER KEY cmk3;
+SELECT * FROM gs_client_global_keys;
+ global_key_name | key_namespace | key_owner | key_acl | create_date 
+-----------------+---------------+-----------+---------+-------------
+(0 rows)
+

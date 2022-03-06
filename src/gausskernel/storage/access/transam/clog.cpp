@@ -38,6 +38,7 @@
 #include "access/clog.h"
 #include "access/slru.h"
 #include "access/transam.h"
+#include "access/twophase.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
@@ -1055,6 +1056,7 @@ void TruncateCLOG(TransactionId oldestXact)
 
     /* Now we can remove the old CLOG segment(s) */
     SimpleLruTruncate(ClogCtl(0), cutoffPage, NUM_CLOG_PARTITIONS);
+    DeleteObsoleteTwoPhaseFile(cutoffPage);
 
     ereport(LOG, (errmsg("Truncate CLOG at xid %lu", oldestXact)));
 }
@@ -1123,6 +1125,7 @@ void clog_redo(XLogReaderState *record)
         ClogCtl(pageno)->shared->latest_page_number = pageno;
 
         SimpleLruTruncate(ClogCtl(0), pageno, NUM_CLOG_PARTITIONS);
+        DeleteObsoleteTwoPhaseFile(pageno);
     } else
         ereport(PANIC, (errmsg("clog_redo: unknown op code %u", (uint32)info)));
 }

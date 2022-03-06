@@ -37,6 +37,7 @@ SELECT count(*), 'count' FROM gs_client_global_keys;
 
 DROP CLIENT MASTER KEY test2.test_drop_cmk2;
 ERROR:  permission denied for schema test2
+DETAIL:  N/A
 SELECT count(*), 'count' FROM gs_client_global_keys;
  count | ?column? 
 -------+----------
@@ -54,6 +55,7 @@ SELECT count(*), 'count' FROM gs_client_global_keys;
 SET ROLE test_security_admin PASSWORD "Gauss@123";
 DROP CLIENT MASTER KEY test1.test_drop_cmk1;
 ERROR:  permission denied for schema test1
+DETAIL:  N/A
 SELECT count(*), 'count' FROM gs_client_global_keys;
  count | ?column? 
 -------+----------

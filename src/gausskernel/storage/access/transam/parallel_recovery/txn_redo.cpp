@@ -40,6 +40,7 @@
 
 #include "access/parallel_recovery/dispatcher.h"
 #include "access/parallel_recovery/txn_redo.h"
+#include "access/multi_redo_api.h"
 #include "pgstat.h"
 
 namespace parallel_recovery {
@@ -132,7 +133,7 @@ void ApplyReadyTxnShareLogRecords(RedoItem *item)
         pgstat_report_waitevent(WAIT_EVENT_END);
 
         MemoryContext oldCtx = MemoryContextSwitchTo(g_dispatcher->oldCtx);
-        ApplyRedoRecord(&item->record, item->oldVersion);
+        ApplyRedoRecord(&item->record);
         (void)MemoryContextSwitchTo(oldCtx);
 
         pg_memory_barrier();
@@ -189,7 +190,7 @@ void ApplyReadyAllShareLogRecords(RedoItem *item)
     }
     pgstat_report_waitevent(WAIT_EVENT_END);
     MemoryContext oldCtx = MemoryContextSwitchTo(g_dispatcher->oldCtx);
-    ApplyRedoRecord(&item->record, item->oldVersion);
+    ApplyRedoRecord(&item->record);
     (void)MemoryContextSwitchTo(oldCtx);
 
     FreeRedoItem(item);
@@ -227,7 +228,7 @@ static RedoItem *ProcTxnItem(RedoItem *item)
             ApplyReadyAllShareLogRecords(item);
         } else {
             MemoryContext oldCtx = MemoryContextSwitchTo(g_dispatcher->oldCtx);
-            ApplyRedoRecord(&item->record, item->oldVersion);
+            ApplyRedoRecord(&item->record);
             (void)MemoryContextSwitchTo(oldCtx);
             FreeRedoItem(item);
         }
@@ -250,14 +251,15 @@ static RedoItem *ProcTxnItem(RedoItem *item)
 void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
 {
     RedoItem *item = worker->procHead;
-
+    GetRedoStartTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_5]);
     while (item != NULL) {
         XLogReaderState *record = &item->record;
-        XLogRecPtr lrRead; /* lastReplayedReadPtr */
         XLogRecPtr lrEnd;
 
-        GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
         if (forceAll) {
+            GetRedoStartTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_6]);
+            XLogRecPtr lrRead; /* lastReplayedReadPtr */
+            GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
             /* we need to get lastCompletedPageLSN as soon as possible,so */
             /* we can not sleep here. */
             XLogRecPtr oldReplayedPageLSN = InvalidXLogRecPtr;
@@ -270,8 +272,10 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
                 GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
                 RedoInterruptCallBack();
             }
+            CountRedoTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_6]);
         }
 
+        GetReplayedRecPtrFromWorkers(&lrEnd);
         /*
          * Make sure we can replay this record.  This check is necessary
          * on the master and on the hot backup after it reaches consistency.
@@ -309,6 +313,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
     if (item == NULL) {
         worker->procTail = NULL;
     }
+    CountRedoTime(t_thrd.xlog_cxt.timeCost[TIME_COST_STEP_5]);
 }
 
 void DumpTxnWorker(TxnRedoWorker *txnWorker)
@@ -322,20 +327,6 @@ void DumpTxnWorker(TxnRedoWorker *txnWorker)
     }
 
     DumpXlogCtl();
-}
-
-void FreeTxnItem()
-{
-    MoveTxnItemToApplyQueue(g_dispatcher->txnWorker);
-    RedoItem *item = g_dispatcher->txnWorker->procHead;
-    RedoItem *nextitem = NULL;
-    while (item != NULL) {
-        nextitem = item->nextByWorker[0];
-        OnlyFreeRedoItem(item);
-        item = nextitem;
-    }
-    g_dispatcher->txnWorker->procHead = NULL;
-    g_dispatcher->txnWorker->procTail = NULL;
 }
 
 bool TxnQueueIsEmpty(TxnRedoWorker* worker)

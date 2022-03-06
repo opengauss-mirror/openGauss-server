@@ -12,16 +12,6 @@ UPDATE db4ai_houses
 CREATE MODEL houses_logregr_ngd USING logistic_regression
        FEATURES tax, bath, size TARGET price < 100000
        FROM db4ai_houses WITH seed = 1, optimizer='ngd', learning_rate=10.0;
-NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
-NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
-NOTICE:  Hyperparameter learning_rate takes value 10.000000
-NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
-NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
-NOTICE:  Hyperparameter optimizer takes value ngd
-NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
-NOTICE:  Hyperparameter seed takes value 1
-NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
-NOTICE:  GD shuffle cache size 1035
 -- compute accuracy
 SELECT COUNT(*)/(SELECT COUNT(*) FROM db4ai_houses) AS accuracy
 FROM (
@@ -39,16 +29,6 @@ FROM (
 CREATE MODEL houses_logregr_gd USING logistic_regression
        FEATURES tax_n, bath_n, size_n TARGET price < 100000
        FROM db4ai_houses WITH seed = 2, learning_rate=1.0;
-NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
-NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
-NOTICE:  Hyperparameter learning_rate takes value 1.000000
-NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
-NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
-NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
-NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
-NOTICE:  Hyperparameter seed takes value 2
-NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
-NOTICE:  GD shuffle cache size 1035
 -- just predict again
 SELECT PREDICT BY houses_logregr_gd (FEATURES tax_n, bath_n, size_n) AS prediction,
         price < 100000 AS target
@@ -69,17 +49,6 @@ CREATE MODEL houses_svm_ngd USING svm_classification
        FEATURES tax, bath, size TARGET price < 100000
        FROM db4ai_houses WITH seed = 10, batch_size=5, optimizer='ngd',
             learning_rate=10.0, lambda=50;
-NOTICE:  Hyperparameter batch_size takes value 5
-NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
-NOTICE:  Hyperparameter lambda takes value 50.000000
-NOTICE:  Hyperparameter learning_rate takes value 10.000000
-NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
-NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
-NOTICE:  Hyperparameter optimizer takes value ngd
-NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
-NOTICE:  Hyperparameter seed takes value 10
-NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
-NOTICE:  GD shuffle cache size 60786
 -- compute accuracy
 SELECT COUNT(*)/(SELECT COUNT(*) FROM db4ai_houses) AS accuracy
 FROM (
@@ -90,7 +59,7 @@ FROM (
 );
      accuracy     
 ------------------
- .866666666666667
+ .933333333333333
 (1 row)
 
 -- svm binary classification with normalized data
@@ -98,88 +67,61 @@ CREATE MODEL houses_svm_gd USING svm_classification
        FEATURES tax_n, bath_n, size_n TARGET price < 100000
        FROM db4ai_houses WITH seed = 10, batch_size=3,
             learning_rate=1.0, lambda=50;
-NOTICE:  Hyperparameter batch_size takes value 3
-NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
-NOTICE:  Hyperparameter lambda takes value 50.000000
-NOTICE:  Hyperparameter learning_rate takes value 1.000000
-NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
-NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
-NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
-NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
-NOTICE:  Hyperparameter seed takes value 10
-NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
-NOTICE:  GD shuffle cache size 85597
 -- linear regression with data not normalized
 CREATE MODEL houses_linregr_ngd USING linear_regression
        FEATURES tax, bath, size TARGET price
        FROM db4ai_houses WITH seed = 1, optimizer='ngd',
             learning_rate=2.0;
-NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
-NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
-NOTICE:  Hyperparameter learning_rate takes value 2.000000
-NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
-NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
-NOTICE:  Hyperparameter optimizer takes value ngd
-NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
-NOTICE:  Hyperparameter seed takes value 1
-NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
-NOTICE:  GD shuffle cache size 1035
--- linear regression with normalized data, pure stochastic gd 
+-- linear regression with normalized data, pure stochastic gd with arrays
 CREATE MODEL houses_linregr_gd USING linear_regression
-       FEATURES tax_n, bath_n, size_n TARGET price
-       FROM db4ai_houses WITH seed = 1, batch_size=1, learning_rate=1.0;
-NOTICE:  Hyperparameter batch_size takes value 1
-NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
-NOTICE:  Hyperparameter learning_rate takes value 1.000000
-NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
-NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
-NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
-NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
-NOTICE:  Hyperparameter seed takes value 1
-NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
-NOTICE:  GD shuffle cache size 85597
+       FEATURES feat_n TARGET price
+       FROM (SELECT price, ARRAY[tax_n, bath_n, size_n] AS feat_n FROM db4ai_houses)
+       WITH seed = 1, batch_size=1, learning_rate=1.0;
 -- just dump some residual
 SELECT id, abs(target-prediction) as residual
 FROM (
-    SELECT id, price AS target, PREDICT BY houses_linregr_gd (FEATURES tax_n, bath_n, size_n) AS prediction
+    SELECT id, price AS target, PREDICT BY houses_linregr_gd (FEATURES ARRAY[tax_n, bath_n, size_n]) AS prediction
     FROM db4ai_houses
 )
 ORDER BY residual DESC
 LIMIT 3;
  id | residual 
 ----+----------
-  8 |    66412
-  7 |    59139
- 13 |    45514
+  8 |    65880
+  7 |    58779
+ 13 |    44699
 (3 rows)
 
 -- take a look at the model warehouse (skipping time-dependent columns)
-SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, modeldata, weight,
-       hyperparametersoids, coefnames, coefvalues, coefoids, trainingscoresname, trainingscoresvalue, modeldescribe
-  FROM gs_model_warehouse;
-     modelname      | processedtuples | discardedtuples | iterations | outputtype |      modeltype      |                                    query                                     | modeldata |                   weight                   |          hyperparametersoids          |  coefnames   |  coefvalues  | coefoids |         trainingscoresname          |            trainingscoresvalue            | modeldescribe 
---------------------+-----------------+-----------------+------------+------------+---------------------+------------------------------------------------------------------------------+-----------+--------------------------------------------+---------------------------------------+--------------+--------------+----------+-------------------------------------+-------------------------------------------+---------------
- houses_logregr_ngd |              15 |               0 |         44 |         16 | logistic_regression | CREATE MODEL houses_logregr_ngd USING logistic_regression                   +|           | {-.000678481,-.430199,-.000379371,2.03712} | {23,701,701,23,23,1043,701,23,16}     | {categories} | {false,true} |          | {accuracy,f1,precision,recall,loss} | {.866667,.857143,.857143,.857143,.463442} | 
-                    |                 |                 |            |            |                     |        FEATURES tax, bath, size TARGET price < 100000                       +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 1, optimizer='ngd', learning_rate=10.0; |           |                                            |                                       |              |              |          |                                     |                                           | 
- houses_logregr_gd  |              15 |               0 |         45 |         16 | logistic_regression | CREATE MODEL houses_logregr_gd USING logistic_regression                    +|           | {-.911978,-.952683,-.766043,.657569}       | {23,701,701,23,23,1043,701,23,16}     | {categories} | {false,true} |          | {accuracy,f1,precision,recall,loss} | {.8,.769231,.833333,.714286,.525489}      | 
-                    |                 |                 |            |            |                     |        FEATURES tax_n, bath_n, size_n TARGET price < 100000                 +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 2, learning_rate=1.0;                   |           |                                            |                                       |              |              |          |                                     |                                           | 
- houses_svm_ngd     |              15 |               0 |         63 |         16 | svm_classification  | CREATE MODEL houses_svm_ngd USING svm_classification                        +|           | {-.0194004,-5.64974,-.0185561,57.7798}     | {23,701,701,701,23,23,1043,701,23,16} | {categories} | {false,true} |          | {accuracy,f1,precision,recall,loss} | {.866667,.857143,.857143,.857143,3.89375} | 
-                    |                 |                 |            |            |                     |        FEATURES tax, bath, size TARGET price < 100000                       +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 10, batch_size=5, optimizer='ngd',     +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |             learning_rate=10.0, lambda=50;                                   |           |                                            |                                       |              |              |          |                                     |                                           | 
- houses_svm_gd      |              15 |               0 |        100 |         16 | svm_classification  | CREATE MODEL houses_svm_gd USING svm_classification                         +|           | {-38.8473,9.12503,-55.4844,24.7961}        | {23,701,701,701,23,23,1043,701,23,16} | {categories} | {false,true} |          | {accuracy,f1,precision,recall,loss} | {.933333,.933333,.875,1,2.96786}          | 
-                    |                 |                 |            |            |                     |        FEATURES tax_n, bath_n, size_n TARGET price < 100000                 +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 10, batch_size=3,                      +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |             learning_rate=1.0, lambda=50;                                    |           |                                            |                                       |              |              |          |                                     |                                           | 
- houses_linregr_ngd |              15 |               0 |        100 |         23 | linear_regression   | CREATE MODEL houses_linregr_ngd USING linear_regression                     +|           | {25.0811,16472.8,24.4941,21515.9}          | {23,701,701,23,23,1043,701,23,16}     |              |              |          | {mse}                               | {1.11119e+09}                             | 
-                    |                 |                 |            |            |                     |        FEATURES tax, bath, size TARGET price                                +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 1, optimizer='ngd',                    +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |             learning_rate=2.0;                                               |           |                                            |                                       |              |              |          |                                     |                                           | 
- houses_linregr_gd  |              15 |               0 |         85 |         23 | linear_regression   | CREATE MODEL houses_linregr_gd USING linear_regression                      +|           | {103992,21220,102907,36957.9}              | {23,701,701,23,23,1043,701,23,16}     |              |              |          | {mse}                               | {1.36347e+10}                             | 
-                    |                 |                 |            |            |                     |        FEATURES tax_n, bath_n, size_n TARGET price                          +|           |                                            |                                       |              |              |          |                                     |                                           | 
-                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 1, batch_size=1, learning_rate=1.0;     |           |                                            |                                       |              |              |          |                                     |                                           | 
+SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, weight,
+       hyperparametersnames, hyperparametersoids, hyperparametersvalues,
+       trainingscoresname, trainingscoresvalue, length(modeldata) as model_data_len
+  FROM gs_model_warehouse
+  ORDER BY modelname;
+     modelname      | processedtuples | discardedtuples | iterations | outputtype |      modeltype      |                                        query                                         | weight |                                                           hyperparametersnames                                                           |                   hyperparametersoids                    |                 hyperparametersvalues                  |         trainingscoresname          |            trainingscoresvalue            | model_data_len 
+--------------------+-----------------+-----------------+------------+------------+---------------------+--------------------------------------------------------------------------------------+--------+------------------------------------------------------------------------------------------------------------------------------------------+----------------------------------------------------------+--------------------------------------------------------+-------------------------------------+-------------------------------------------+----------------
+ houses_linregr_gd  |              15 |               0 |        100 |         23 | linear_regression   | CREATE MODEL houses_linregr_gd USING linear_regression                              +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose}                                             | {23,701,701,23,23,1043,701,23,16}                        | {1,.95,1,100,0,gd,.0005,1,false}                       | {mse}                               | {1.36468e+10}                             |            340
+                    |                 |                 |            |            |                     |        FEATURES feat_n TARGET price                                                 +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |        FROM (SELECT price, ARRAY[tax_n, bath_n, size_n] AS feat_n FROM db4ai_houses)+|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |        WITH seed = 1, batch_size=1, learning_rate=1.0;                               |        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+ houses_linregr_ngd |              15 |               0 |        100 |         23 | linear_regression   | CREATE MODEL houses_linregr_ngd USING linear_regression                             +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose}                                             | {23,701,701,23,23,1043,701,23,16}                        | {1000,.95,2,100,0,ngd,.0005,1,false}                   | {mse}                               | {1.11119e+09}                             |            340
+                    |                 |                 |            |            |                     |        FEATURES tax, bath, size TARGET price                                        +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 1, optimizer='ngd',                            +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |             learning_rate=2.0;                                                       |        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+ houses_logregr_gd  |              15 |               0 |         45 |         16 | logistic_regression | CREATE MODEL houses_logregr_gd USING logistic_regression                            +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose}                                             | {23,701,701,23,23,1043,701,23,16}                        | {1000,.95,1,100,0,gd,.0005,2,false}                    | {accuracy,f1,precision,recall,loss} | {.8,.769231,.833333,.714286,.525489}      |            392
+                    |                 |                 |            |            |                     |        FEATURES tax_n, bath_n, size_n TARGET price < 100000                         +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 2, learning_rate=1.0;                           |        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+ houses_logregr_ngd |              15 |               0 |         44 |         16 | logistic_regression | CREATE MODEL houses_logregr_ngd USING logistic_regression                           +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose}                                             | {23,701,701,23,23,1043,701,23,16}                        | {1000,.95,10,100,0,ngd,.0005,1,false}                  | {accuracy,f1,precision,recall,loss} | {.866667,.857143,.857143,.857143,.463442} |            392
+                    |                 |                 |            |            |                     |        FEATURES tax, bath, size TARGET price < 100000                               +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 1, optimizer='ngd', learning_rate=10.0;         |        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+ houses_svm_gd      |              15 |               0 |        100 |         16 | svm_classification  | CREATE MODEL houses_svm_gd USING svm_classification                                 +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose,lambda,kernel,components,gamma,degree,coef0} | {23,701,701,23,23,1043,701,23,16,701,1043,23,701,23,701} | {3,.95,1,100,0,gd,.0005,10,false,50,linear,0,.5,2,1}   | {accuracy,f1,precision,recall,loss} | {.933333,.933333,.875,1,3.32112}          |            392
+                    |                 |                 |            |            |                     |        FEATURES tax_n, bath_n, size_n TARGET price < 100000                         +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 10, batch_size=3,                              +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |             learning_rate=1.0, lambda=50;                                            |        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+ houses_svm_ngd     |              15 |               0 |        100 |         16 | svm_classification  | CREATE MODEL houses_svm_ngd USING svm_classification                                +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose,lambda,kernel,components,gamma,degree,coef0} | {23,701,701,23,23,1043,701,23,16,701,1043,23,701,23,701} | {5,.95,10,100,0,ngd,.0005,10,false,50,linear,0,.5,2,1} | {accuracy,f1,precision,recall,loss} | {.933333,.933333,.875,1,3.43783}          |            392
+                    |                 |                 |            |            |                     |        FEATURES tax, bath, size TARGET price < 100000                               +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |        FROM db4ai_houses WITH seed = 10, batch_size=5, optimizer='ngd',             +|        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
+                    |                 |                 |            |            |                     |             learning_rate=10.0, lambda=50;                                           |        |                                                                                                                                          |                                                          |                                                        |                                     |                                           | 
 (6 rows)
 
 -- cleanup models in random order

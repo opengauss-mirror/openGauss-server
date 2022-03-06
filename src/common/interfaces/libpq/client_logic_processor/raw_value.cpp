@@ -104,7 +104,7 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
             allocated = true;
         }
 
-        binary = Format::text_to_binary((const PGconn*)m_conn, text_value, cached_column->get_origdatatype_oid(), 0,
+        binary = Format::text_to_binary((const PGconn*)m_conn, text_value, cached_column->get_origdatatype_oid(),
             cached_column->get_origdatatype_mod(), &binary_size, err_msg);
         if (allocated) {
             free(text_value);
@@ -129,7 +129,7 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
         rcs = memcpy_s(binary, binary_size, m_data_value, m_data_size);
         securec_check_c(rcs, "", "");
         unsigned char *result = Format::verify_and_adjust_binary(binary, &binary_size,
-            cached_column->get_origdatatype_oid(), 0, cached_column->get_origdatatype_mod(), err_msg);
+            cached_column->get_origdatatype_oid(), cached_column->get_origdatatype_mod(), err_msg);
         if (!result) {
             if (strlen(err_msg) == 0) {
                 check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "failed to convert text to binary"));

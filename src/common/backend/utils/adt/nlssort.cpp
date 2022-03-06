@@ -25,6 +25,7 @@
 #include "postgres.h"
 #include "mb/pg_wchar.h"
 #include "utils/builtins.h"
+#include "knl/knl_session.h"
 
 #include "../mb/nlssort/nlssort_pinyin_map1_simple.map"
 #include "../mb/nlssort/nlssort_pinyin_map1_complex.map"
@@ -67,6 +68,13 @@ Datum nlssort(PG_FUNCTION_ARGS)
         if (PG_ARGISNULL(0)) {
             PG_RETURN_NULL();
         }
+        if (VARSIZE_ANY_EXHDR(PG_GETARG_TEXT_P(0)) == 0) {
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                PG_RETURN_NULL();
+            } else {
+                PG_RETURN_TEXT_P(cstring_to_text("\0"));
+            }
+        }
 
         /* encode the first argument with "gb18030" */
         Datum tmp = DirectFunctionCall3(pg_convert, PG_GETARG_DATUM(0), CStringGetDatum(GetDatabaseEncodingName()),
@@ -80,6 +88,8 @@ Datum nlssort(PG_FUNCTION_ARGS)
             errcause("Error in the nlssort parameter."), erraction("Please check and revise your parameter.")));
     }
 
+    pfree_ext(chars_to_be_encoded);
+    pfree_ext(nlssort_arg);
     pfree_ext(sort_method);
 
     PG_RETURN_TEXT_P(cstring_to_text(chars_encoded));
@@ -223,6 +233,7 @@ char *remove_trailing_spaces(const char *src_str)
 {
     bool is_all_space = true;
     int len = strlen(src_str);
+    Assert(len > 0);
     int buf_size = strlen(src_str) + 1;
     char *dst_str = (char *)palloc(buf_size);
 

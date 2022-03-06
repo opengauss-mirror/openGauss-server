@@ -1,0 +1,1296 @@
+-- prepare
+DROP SCHEMA ustore_subpartition_gpi CASCADE;
+ERROR:  schema "ustore_subpartition_gpi" does not exist
+CREATE SCHEMA ustore_subpartition_gpi;
+SET CURRENT_SCHEMA TO ustore_subpartition_gpi;
+-- base function
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+);
+create index idx_month_code_local on range_list(month_code) local;
+create index idx_dept_code_global on range_list(dept_code) global;
+create index idx_user_no_global on range_list(user_no) global;
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201903', '2', '2', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+select * from range_list order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 2       |         1
+(6 rows)
+
+set enable_seqscan = off;
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.dept_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_list.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_list.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.user_no, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.dept_code)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_dept_code_global
+               Index Cond: ((range_list.dept_code)::text = '1'::text)
+(8 rows)
+
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.dept_code, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.user_no)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_user_no_global
+               Index Cond: ((range_list.user_no)::text = '1'::text)
+(8 rows)
+
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+(5 rows)
+
+drop table range_list;
+-- unique
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+);
+create unique index idx_dept_code_global on range_list(dept_code) global;
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+select * from range_list subpartition (p_201901_a);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+(1 row)
+
+select * from range_list subpartition (p_201901_b);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+(1 row)
+
+select count(*) from range_list;
+ count 
+-------
+     2
+(1 row)
+
+--error
+insert into range_list values('201902', '1', '1', 1);
+ERROR:  duplicate key value violates unique constraint "idx_dept_code_global"
+DETAIL:  Key (dept_code)=(1) already exists.
+insert into range_list values('201902', '2', '1', 1);
+ERROR:  duplicate key value violates unique constraint "idx_dept_code_global"
+DETAIL:  Key (dept_code)=(2) already exists.
+insert into range_list values('201903', '1', '1', 1);
+ERROR:  duplicate key value violates unique constraint "idx_dept_code_global"
+DETAIL:  Key (dept_code)=(1) already exists.
+insert into range_list values('201903', '2', '1', 1);
+ERROR:  duplicate key value violates unique constraint "idx_dept_code_global"
+DETAIL:  Key (dept_code)=(2) already exists.
+select count(*) from range_list;
+ count 
+-------
+     2
+(1 row)
+
+delete from range_list;
+drop index idx_dept_code_global;
+create unique index idx_user_no_global on range_list(user_no) global;
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '2', 1);
+insert into range_list values('201903', '1', '3', 1);
+insert into range_list values('201903', '2', '4', 1);
+select * from range_list subpartition (p_201901_a);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+(1 row)
+
+select * from range_list subpartition (p_201901_b);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 2       |         1
+(1 row)
+
+select * from range_list subpartition (p_201902_a);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 3       |         1
+(1 row)
+
+select * from range_list subpartition (p_201902_b);
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 4       |         1
+(1 row)
+
+select count(*) from range_list;
+ count 
+-------
+     4
+(1 row)
+
+--error
+insert into range_list values('201902', '1', '1', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(1) already exists.
+insert into range_list values('201902', '2', '1', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(1) already exists.
+insert into range_list values('201903', '1', '1', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(1) already exists.
+insert into range_list values('201903', '2', '1', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(1) already exists.
+insert into range_list values('201902', '1', '2', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(2) already exists.
+insert into range_list values('201902', '2', '2', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(2) already exists.
+insert into range_list values('201903', '1', '2', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(2) already exists.
+insert into range_list values('201903', '2', '2', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(2) already exists.
+insert into range_list values('201902', '1', '3', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(3) already exists.
+insert into range_list values('201902', '2', '3', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(3) already exists.
+insert into range_list values('201903', '1', '3', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(3) already exists.
+insert into range_list values('201903', '2', '3', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(3) already exists.
+insert into range_list values('201902', '1', '4', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(4) already exists.
+insert into range_list values('201902', '2', '4', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(4) already exists.
+insert into range_list values('201903', '1', '4', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(4) already exists.
+insert into range_list values('201903', '2', '4', 1);
+ERROR:  duplicate key value violates unique constraint "idx_user_no_global"
+DETAIL:  Key (user_no)=(4) already exists.
+select count(*) from range_list;
+ count 
+-------
+     4
+(1 row)
+
+drop table range_list;
+-- truncate subpartition
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+);
+create index idx_month_code_local on range_list(month_code) local;
+create index idx_dept_code_global on range_list(dept_code) global;
+create index idx_user_no_global on range_list(user_no) global;
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201903', '2', '2', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+select * from range_list order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 2       |         1
+(6 rows)
+
+set enable_seqscan = off;
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.dept_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_list.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_list.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.user_no, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.dept_code)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_dept_code_global
+               Index Cond: ((range_list.dept_code)::text = '1'::text)
+(8 rows)
+
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.dept_code, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.user_no)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_user_no_global
+               Index Cond: ((range_list.user_no)::text = '1'::text)
+(8 rows)
+
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+(5 rows)
+
+alter table range_list truncate subpartition p_201901_a update global index;
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.dept_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_list.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_list.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+(1 row)
+
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.user_no, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.dept_code)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_dept_code_global
+               Index Cond: ((range_list.dept_code)::text = '1'::text)
+(8 rows)
+
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+(1 row)
+
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.dept_code, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.user_no)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_user_no_global
+               Index Cond: ((range_list.user_no)::text = '1'::text)
+(8 rows)
+
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+(3 rows)
+
+alter table range_list truncate subpartition p_201901_b;
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.dept_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_list.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_list.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 2, Sub Iterations: 2
+         ->  Partitioned Seq Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Filter: ((range_list.dept_code)::text = '1'::text)
+               Selected Partitions:  1..2
+               Selected Subpartitions:  1:1, 2:1
+(11 rows)
+
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+(1 row)
+
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.dept_code, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 2, Sub Iterations: 4
+         ->  Partitioned Seq Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Filter: ((range_list.user_no)::text = '1'::text)
+               Selected Partitions:  1..2
+               Selected Subpartitions:  ALL
+(11 rows)
+
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+(2 rows)
+
+drop table range_list;
+-- split subpartition
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values (default)
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values (default)
+  )
+);
+create index idx_month_code_local on range_list(month_code) local;
+create index idx_dept_code_global on range_list(dept_code) global;
+create index idx_user_no_global on range_list(user_no) global;
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201903', '2', '2', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+select * from range_list order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 2       |         1
+(6 rows)
+
+set enable_seqscan = off;
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.dept_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_list.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_list.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.user_no, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.dept_code)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_dept_code_global
+               Index Cond: ((range_list.dept_code)::text = '1'::text)
+(8 rows)
+
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.dept_code, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.user_no)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_user_no_global
+               Index Cond: ((range_list.user_no)::text = '1'::text)
+(8 rows)
+
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+(5 rows)
+
+alter table range_list split subpartition p_201901_b values ('3') into
+(
+	subpartition p_201901_b,
+	subpartition p_201901_c
+) update global index;
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.dept_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 3
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_list.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_list.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.user_no, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.dept_code)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_dept_code_global
+               Index Cond: ((range_list.dept_code)::text = '1'::text)
+(8 rows)
+
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.dept_code, range_list.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_list.user_no)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_user_no_global
+               Index Cond: ((range_list.user_no)::text = '1'::text)
+(8 rows)
+
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+(5 rows)
+
+alter table range_list split subpartition p_201902_b values ('3') into
+(
+	subpartition p_201902_b,
+	subpartition p_201902_c
+);
+explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.dept_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 3
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_list.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_list.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.user_no, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 2, Sub Iterations: 2
+         ->  Partitioned Seq Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Filter: ((range_list.dept_code)::text = '1'::text)
+               Selected Partitions:  1..2
+               Selected Subpartitions:  1:1, 2:1
+(11 rows)
+
+select * from range_list where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_list.month_code, range_list.dept_code, range_list.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 2, Sub Iterations: 6
+         ->  Partitioned Seq Scan on ustore_subpartition_gpi.range_list
+               Output: month_code, dept_code, user_no, sales_amt
+               Filter: ((range_list.user_no)::text = '1'::text)
+               Selected Partitions:  1..2
+               Selected Subpartitions:  ALL
+(11 rows)
+
+select * from range_list where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+(5 rows)
+
+drop table range_list;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( MAXVALUE )
+  )
+);
+insert into range_range values('201902', '1', '1', 1);
+insert into range_range values('201902', '2', '1', 1);
+insert into range_range values('201902', '3', '1', 1);
+insert into range_range values('201903', '1', '1', 1);
+insert into range_range values('201903', '2', '1', 1);
+insert into range_range values('201903', '5', '1', 1);
+select * from range_range;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 5         | 1       |         1
+(6 rows)
+
+create index idx_month_code_local on range_range(month_code) local;
+create index idx_dept_code_global on range_range(dept_code) global;
+create index idx_user_no_global on range_range(user_no) global;
+set enable_seqscan = off;
+explain(costs off, verbose on) select * from range_range where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.dept_code, range_range.user_no, range_range.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 2
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_range
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_range.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_range.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_range where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_range where dept_code = '1' order by 1, 2, 3, 4;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.month_code, range_range.user_no, range_range.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_range
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_range.dept_code)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_dept_code_global
+               Index Cond: ((range_range.dept_code)::text = '1'::text)
+(8 rows)
+
+select * from range_range where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(2 rows)
+
+explain(costs off, verbose on) select * from range_range where user_no = '1' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.month_code, range_range.dept_code, range_range.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_range
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_range.user_no)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_user_no_global
+               Index Cond: ((range_range.user_no)::text = '1'::text)
+(8 rows)
+
+select * from range_range where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 5         | 1       |         1
+(6 rows)
+
+alter table range_range split subpartition p_201901_b at ('3') into
+(
+	subpartition p_201901_c,
+	subpartition p_201901_d
+) update global index;
+explain(costs off, verbose on) select * from range_range where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.dept_code, range_range.user_no, range_range.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 3
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_range
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_range.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_range.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_range where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_range where dept_code = '1' order by 1, 2, 3, 4;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.month_code, range_range.user_no, range_range.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_range
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_range.dept_code)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_dept_code_global
+               Index Cond: ((range_range.dept_code)::text = '1'::text)
+(8 rows)
+
+select * from range_range where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(2 rows)
+
+explain(costs off, verbose on) select * from range_range where user_no = '1' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.month_code, range_range.dept_code, range_range.sales_amt
+   ->  Bitmap Heap Scan on ustore_subpartition_gpi.range_range
+         Output: month_code, dept_code, user_no, sales_amt
+         Recheck Cond: ((range_range.user_no)::text = '1'::text)
+         ->  Bitmap Index Scan on idx_user_no_global
+               Index Cond: ((range_range.user_no)::text = '1'::text)
+(8 rows)
+
+select * from range_range where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 5         | 1       |         1
+(6 rows)
+
+alter table range_range split subpartition p_201902_b at ('3') into
+(
+	subpartition p_201902_c,
+	subpartition p_201903_d
+);
+explain(costs off, verbose on) select * from range_range where month_code = '201902' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.dept_code, range_range.user_no, range_range.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 1, Sub Iterations: 3
+         ->  Partitioned Bitmap Heap Scan on ustore_subpartition_gpi.range_range
+               Output: month_code, dept_code, user_no, sales_amt
+               Recheck Cond: ((range_range.month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+               ->  Partitioned Bitmap Index Scan on idx_month_code_local
+                     Index Cond: ((range_range.month_code)::text = '201902'::text)
+                     Selected Partitions:  1
+                     Selected Subpartitions:  ALL
+(15 rows)
+
+select * from range_range where month_code = '201902' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+(3 rows)
+
+explain(costs off, verbose on) select * from range_range where dept_code = '1' order by 1, 2, 3, 4;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.month_code, range_range.user_no, range_range.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 2, Sub Iterations: 2
+         ->  Partitioned Seq Scan on ustore_subpartition_gpi.range_range
+               Output: month_code, dept_code, user_no, sales_amt
+               Filter: ((range_range.dept_code)::text = '1'::text)
+               Selected Partitions:  1..2
+               Selected Subpartitions:  1:1, 2:1
+(11 rows)
+
+select * from range_range where dept_code = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(2 rows)
+
+explain(costs off, verbose on) select * from range_range where user_no = '1' order by 1, 2, 3, 4;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Sort
+   Output: month_code, dept_code, user_no, sales_amt
+   Sort Key: range_range.month_code, range_range.dept_code, range_range.sales_amt
+   ->  Partition Iterator
+         Output: month_code, dept_code, user_no, sales_amt
+         Iterations: 2, Sub Iterations: 6
+         ->  Partitioned Seq Scan on ustore_subpartition_gpi.range_range
+               Output: month_code, dept_code, user_no, sales_amt
+               Filter: ((range_range.user_no)::text = '1'::text)
+               Selected Partitions:  1..2
+               Selected Subpartitions:  ALL
+(11 rows)
+
+select * from range_range where user_no = '1' order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 3         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 5         | 1       |         1
+(6 rows)
+
+drop table range_range;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) primary key,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+select relkind from pg_class
+  where relname = 'range_range_pkey'
+  and relnamespace=(select oid from pg_namespace where nspname=CURRENT_SCHEMA);
+ relkind 
+---------
+ I
+(1 row)
+
+drop table range_range;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) primary key,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+select relkind from pg_class
+  where relname = 'range_range_pkey'
+  and relnamespace=(select oid from pg_namespace where nspname=CURRENT_SCHEMA);
+ relkind 
+---------
+ I
+(1 row)
+
+drop table range_range;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) primary key,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+select relkind from pg_class
+  where relname = 'range_range_pkey'
+  and relnamespace=(select oid from pg_namespace where nspname=CURRENT_SCHEMA);
+ relkind 
+---------
+ I
+(1 row)
+
+drop table range_range;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int,
+	primary key(month_code, dept_code)
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+select relkind from pg_class
+  where relname = 'range_range_pkey'
+  and relnamespace=(select oid from pg_namespace where nspname=CURRENT_SCHEMA);
+ relkind 
+---------
+ i
+(1 row)
+
+drop table range_range;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int,
+	primary key(month_code, dept_code, user_no)
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+select relkind from pg_class
+  where relname = 'range_range_pkey'
+  and relnamespace=(select oid from pg_namespace where nspname=CURRENT_SCHEMA);
+ relkind 
+---------
+ i
+(1 row)
+
+drop table range_range;
+CREATE TABLE range_range
+(
+    month_code VARCHAR2 ( 30 ) ,
+    dept_code  VARCHAR2 ( 30 ) ,
+    user_no    VARCHAR2 ( 30 ) ,
+    sales_amt  int,
+	primary key(month_code, user_no)
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201904' )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
+  )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+select relkind from pg_class
+  where relname = 'range_range_pkey'
+  and relnamespace=(select oid from pg_namespace where nspname=CURRENT_SCHEMA);
+ relkind 
+---------
+ I
+(1 row)
+
+drop table range_range;
+-- truncate with gpi
+CREATE TABLE range_hash_02
+(
+	col_1 int ,
+	col_2 int,
+	col_3 VARCHAR2 ( 30 ) ,
+	col_4 int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (col_1) SUBPARTITION BY hash (col_2)
+(
+ PARTITION p_range_1 VALUES LESS THAN( -10 )
+ (
+	SUBPARTITION p_hash_1_1 ,
+	SUBPARTITION p_hash_1_2 ,
+	SUBPARTITION p_hash_1_3
+ ),
+ PARTITION p_range_2 VALUES LESS THAN( 20 ),
+ PARTITION p_range_3 VALUES LESS THAN( 30)
+ (
+	SUBPARTITION p_hash_3_1 ,
+	SUBPARTITION p_hash_3_2 ,
+	SUBPARTITION p_hash_3_3
+ ),
+   PARTITION p_range_4 VALUES LESS THAN( 50)
+ (
+	SUBPARTITION p_hash_4_1 ,
+	SUBPARTITION p_hash_4_2 ,
+	SUBPARTITION range_hash_02
+ ),
+  PARTITION p_range_5 VALUES LESS THAN( MAXVALUE )
+) ENABLE ROW MOVEMENT;
+create index idx on range_hash_02(col_1);
+truncate range_hash_02;
+drop table range_hash_02;
+-- clean
+DROP SCHEMA ustore_subpartition_gpi CASCADE;
+RESET CURRENT_SCHEMA;

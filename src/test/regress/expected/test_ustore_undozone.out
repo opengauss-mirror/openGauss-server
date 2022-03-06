@@ -1,0 +1,46 @@
+-- test test_undozone
+drop table if exists test_undozone;
+NOTICE:  table "test_undozone" does not exist, skipping
+create table test_undozone (c1 int) with (storage_type=USTORE);
+select count(*) from gs_undo_meta(0, -1, 0);
+ count 
+-------
+     1
+(1 row)
+
+insert into test_undozone(c1) values(1);
+select count(*) from gs_undo_meta(0, -1, 0);
+ count 
+-------
+     2
+(1 row)
+
+create temp table test_undozone_tmp (c1 int) with (storage_type=USTORE);
+select count(*) from gs_undo_meta(0, -1, 0);
+ count 
+-------
+     2
+(1 row)
+
+insert into test_undozone_tmp(c1) values(1);
+select count(*) from gs_undo_meta(0, -1, 0);
+ count 
+-------
+     3
+(1 row)
+
+create unlogged table test_undozone_unlog (c1 int) with (storage_type=USTORE);
+select count(*) from gs_undo_meta(0, -1, 0);
+ count 
+-------
+     3
+(1 row)
+
+insert into test_undozone_unlog(c1) values(1);
+select count(*) from gs_undo_meta(0, -1, 0);
+ count 
+-------
+     4
+(1 row)
+
+drop table test_undozone;

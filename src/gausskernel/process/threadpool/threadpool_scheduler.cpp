@@ -51,7 +51,7 @@
 
 static void SchedulerSIGKILLHandler(SIGNAL_ARGS)
 {
-    proc_exit(0);
+    t_thrd.threadpool_cxt.scheduler->m_getKilled = true;
 }
 
 void ThreadPoolScheduler::SigHupHandler()
@@ -61,7 +61,7 @@ void ThreadPoolScheduler::SigHupHandler()
 
 static void reloadConfigFileIfNecessary()
 {
-    if (t_thrd.threadpool_cxt.scheduler->m_getSIGHUP) {
+    if (unlikely(t_thrd.threadpool_cxt.scheduler->m_getSIGHUP)) {
         t_thrd.threadpool_cxt.scheduler->m_getSIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
         /* Update most_available_sync if it's modified dynamically. */
@@ -86,6 +86,10 @@ void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
     }
 
     while (true) {
+        if (unlikely(scheduler->m_getKilled)) {
+            scheduler->m_getKilled = false;
+            proc_exit(0);
+        }
         pg_usleep(SCHEDULER_TIME_UNIT);
         reloadConfigFileIfNecessary();
         scheduler->DynamicAdjustThreadPool();

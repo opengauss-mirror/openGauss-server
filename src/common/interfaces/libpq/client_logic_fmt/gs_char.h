@@ -27,16 +27,15 @@
 #include <string>
 #include "postgres_fe.h"
 
-unsigned char *char_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, const char *err_msg);
-char *char_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size);
-unsigned char *bytea_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg);
-char *bytea_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size);
-unsigned char *fallback_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size);
-char *fallback_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size);
-unsigned char *fallback_brestore(const unsigned char *binary, size_t size, Oid typelem, int atttypmod,
-    size_t *result_size, const char *err_msg);
-unsigned char *varchar_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, char *err_msg);
-unsigned char *nvarchar2_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, char *err_msg);
-unsigned char *bpchar_badjust(unsigned char *binary, size_t *binary_size, Oid typelem, int atttypmod, char *err_msg);
+unsigned char *char_bin(const char *text, size_t *binary_size, const char *err_msg);
+char *char_bout(const unsigned char *binary, size_t size, size_t *result_size);
+unsigned char *bytea_bin(const char *text, size_t *binary_size, char *err_msg);
+char *bytea_bout(const unsigned char *binary, size_t size, size_t *result_size);
+unsigned char *fallback_bin(const char *text, size_t *binary_size);
+char *fallback_bout(const unsigned char *binary, size_t size, size_t *result_size);
+unsigned char *fallback_brestore(const unsigned char *binary, size_t size, size_t *result_size, const char *err_msg);
+unsigned char *varchar_badjust(unsigned char *binary, size_t *binary_size, int atttypmod, char *err_msg);
+unsigned char *nvarchar2_badjust(unsigned char *binary, size_t *binary_size, int atttypmod, char *err_msg);
+unsigned char *bpchar_badjust(unsigned char *binary, size_t *binary_size, int atttypmod, char *err_msg);
 
 #endif

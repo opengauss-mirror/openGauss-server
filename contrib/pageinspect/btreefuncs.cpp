@@ -106,11 +106,7 @@ static void GetBTPageStatistics(BlockNumber blkno, Buffer buffer, BTPageStat* st
     /* page type (flags) */
     if (P_ISDELETED(opaque)) {
         stat->type = 'd';
-
-        if (PageIs4BXidVersion(page))
-            stat->btpo.xact = opaque->btpo.xact_old;
-        else
-            stat->btpo.xact = ((BTPageOpaque)opaque)->xact;
+        stat->btpo.xact = ((BTPageOpaque)opaque)->xact;
         return;
     } else if (P_IGNORE(opaque))
         stat->type = 'e';

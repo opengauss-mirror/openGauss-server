@@ -16,7 +16,10 @@ set(TGT_trace_INC
 set(trace_DEF_OPTIONS ${MACRO_OPTIONS})
 set(trace_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(trace_LINK_OPTIONS ${BIN_LINK_OPTIONS})
-set(trace_LINK_LIBS libgstrace.a -lcgroup -lgssapi_krb5_gauss -lkrb5_gauss -lk5crypto_gauss -lcom_err_gauss -lkrb5support_gauss libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -lsecurec -pthread -lrt -lz -lminiunz)
+set(trace_LINK_LIBS libgstrace.a -lcgroup libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -pthread -lrt -lz -lminiunz)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    list(APPEND trace_LINK_LIBS -lgssapi_krb5_gauss -lkrb5_gauss -lk5crypto_gauss -lcom_err_gauss -lkrb5support_gauss)
+endif()
 add_bintarget(gstrace TGT_trace_SRC TGT_trace_INC "${trace_DEF_OPTIONS}" "${trace_COMPILE_OPTIONS}" "${trace_LINK_OPTIONS}" "${trace_LINK_LIBS}")
 add_dependencies(gstrace gstrace_static pgport_static)
 target_link_directories(gstrace PUBLIC

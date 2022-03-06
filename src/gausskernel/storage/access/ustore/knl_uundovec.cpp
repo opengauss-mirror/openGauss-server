@@ -362,7 +362,8 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
      * discard worker from discarding undo data while we are reading it.
      * On the other word, we need copy data to avoid discarded.
      */
-    if (!undo::CheckUndoRecordValid(urec->Urp(), true)) {
+    UndoRecordState state = undo::CheckUndoRecordValid(urec->Urp(), false);
+    if (state != UNDO_RECORD_NORMAL) {
         return false;
     }
 
@@ -380,8 +381,8 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
             ReleaseBuffer(urec->Buff());
             urec->SetBuff(InvalidBuffer);
         }
-        if ((!t_thrd.undo_cxt.fetchRecord) && (!undo::CheckUndoRecordValid(urec->Urp(), true))) {
-            ereport(LOG, (errmsg(UNDOFORMAT("fetch range record fail, curr undo: %lu"), urec->Urp())));
+        state = undo::CheckUndoRecordValid(urec->Urp(), false);
+        if ((!t_thrd.undo_cxt.fetchRecord) && state == UNDO_RECORD_DISCARD) {
             return false;
         } else {
             PG_RE_THROW();
@@ -532,9 +533,9 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
             urec->SetUinfo(UNDO_UREC_INFO_TRANSAC);
         }
     } else {
-        if (g_instance.attr.attr_storage.undo_zone_count == 0) {
-            ereport(ERROR, (errmsg(UNDOFORMAT("Invalid undo zone count, max count is %d, now is %d"),
-                g_instance.attr.attr_storage.undo_zone_count, g_instance.undo_cxt.uZoneCount)));
+        if (!g_instance.attr.attr_storage.enable_ustore) {
+            ereport(ERROR, (errmsg(UNDOFORMAT("Ustore is disabled, "
+                "please set GUC enable_ustore=on and restart database."))));
         }
         needSwitch = undo::CheckNeedSwitch(upersistence, totalSize);
         if (needSwitch) {

@@ -494,11 +494,8 @@ extern void lazy_vacuum_index(Relation indrel,
                                   BufferAccessStrategy vacStrategy);
 extern IndexBulkDeleteResult* lazy_cleanup_index(
     Relation indrel, IndexBulkDeleteResult* stats, LVRelStats* vacrelstats, BufferAccessStrategy vac_strategy);
-extern bool ShouldAttemptTruncation(const LVRelStats *vacrelstats);
 extern void lazy_record_dead_tuple(LVRelStats *vacrelstats,
                                            ItemPointer itemptr);
-extern BlockNumber CountNondeletablePages(Relation onerel,
-                                                 LVRelStats *vacrelstats);
 extern void vacuum_log_cleanup_info(Relation rel, LVRelStats *vacrelstats);
 extern void CBIOpenLocalCrossbucketIndex(Relation onerel, LOCKMODE lockmode, int* nindexes, Relation** iRel);
 

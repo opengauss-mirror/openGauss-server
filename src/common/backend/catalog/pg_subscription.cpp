@@ -28,7 +28,7 @@
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
-
+#include "replication/worker_internal.h"
 
 static List *textarray_to_stringlist(ArrayType *textarray);
 
@@ -62,7 +62,9 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
 
     /* Get conninfo */
     datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subconninfo, &isnull);
-    Assert(!isnull);
+    if (unlikely(isnull)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("null conninfo for subscription %u", subid)));
+    }
     sub->conninfo = TextDatumGetCString(datum);
 
     /* Get slotname */
@@ -75,12 +77,18 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
 
     /* Get synccommit */
     datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subsynccommit, &isnull);
-    Assert(!isnull);
+    if (unlikely(isnull)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("null synccommit for subscription %u", subid)));
+    }
     sub->synccommit = TextDatumGetCString(datum);
 
     /* Get publications */
     datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subpublications, &isnull);
-    Assert(!isnull);
+    if (unlikely(isnull)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("null publications for subscription %u", subid)));
+    }
     sub->publications = textarray_to_stringlist(DatumGetArrayTypeP(datum));
 
     ReleaseSysCache(tup);
@@ -121,6 +129,7 @@ int CountDBSubscriptions(Oid dbid)
  */
 void FreeSubscription(Subscription *sub)
 {
+    pfree(sub->synccommit);
     pfree(sub->name);
     pfree(sub->conninfo);
     if (sub->slotname) {
@@ -171,6 +180,46 @@ char *get_subscription_name(Oid subid, bool missing_ok)
     ReleaseSysCache(tup);
 
     return subname;
+}
+
+/* Clear the list content, only deal with DefElem and string content */
+static void ClearListContent(List *list)
+{
+    ListCell *cell = NULL;
+    foreach(cell, list) {
+        DefElem* def = (DefElem*)lfirst(cell);
+        if (def->arg == NULL || !IsA(def->arg, String)) {
+            continue;
+        }
+
+        char *str = strVal(def->arg);
+        if (str == NULL || str[0] == '\0') {
+            continue;
+        }
+
+        size_t len = strlen(str);
+        errno_t errCode = memset_s(str, len, 0, len);
+        securec_check(errCode, "\0", "\0");
+    }
+}
+
+/*
+ * Decrypt conninfo for subscription.
+ * IMPORTANT: caller should clear and free the memory after using it immediately
+ */
+char *DecryptConninfo(char *encryptConninfo)
+{
+    const char* sensitiveOptionsArray[] = {"password"};
+    const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
+    List *defList = ConninfoToDefList(encryptConninfo);
+    DecryptOptions(defList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
+    char *decryptConninfo = DefListToString(defList);
+
+    /* defList has plain content, clear it before free */
+    ClearListContent(defList);
+    list_free_ext(defList);
+    /* IMPORTANT: caller should clear and free the memory after using it immediately */
+    return decryptConninfo;
 }
 
 /*

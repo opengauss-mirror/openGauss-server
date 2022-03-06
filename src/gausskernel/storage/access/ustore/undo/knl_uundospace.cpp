@@ -65,11 +65,11 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
     WHITEBOX_TEST_STUB(UNDO_EXTEND_LOG_FAILED, WhiteboxDefaultErrorEmit);
     while (tail < offset) {
         if ((!t_thrd.xlog_cxt.InRecovery) && (static_cast<int>(g_instance.undo_cxt.undoTotalSize) +
-            static_cast<int>(g_instance.undo_cxt.undoMetaSize) >= g_instance.attr.attr_storage.undo_space_limit_size)) {
+            static_cast<int>(g_instance.undo_cxt.undoMetaSize) >= u_sess->attr.attr_storage.undo_space_limit_size)) {
             ereport(ERROR, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
                 "The undo space size %u > limit size %d. Please increase the undo_space_limit_size."),
                 g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize,
-                g_instance.attr.attr_storage.undo_space_limit_size)));
+                u_sess->attr.attr_storage.undo_space_limit_size)));
         }
         blockno = (BlockNumber)(tail / BLCKSZ + 1);
         /* Create a new undo segment. */
@@ -311,17 +311,17 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
     char *persistBlock = (char *)palloc0(UNDO_META_PAGE_SIZE * PAGES_READ_NUM);
     oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
     if (type == UNDO_LOG_SPACE) {
-        UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
+        UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
         lseek(fd, totalPageCnt * UNDO_META_PAGE_SIZE, SEEK_SET);
     } else {
-        UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
+        UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
         uint32 seek = totalPageCnt * UNDO_META_PAGE_SIZE;
-        UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, totalPageCnt);
+        UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, totalPageCnt);
         seek += totalPageCnt * UNDO_META_PAGE_SIZE;
         lseek(fd, seek, SEEK_SET);
     }
     
-    UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, totalPageCnt);
+    UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, totalPageCnt);
     spaceMetaSize = totalPageCnt * UNDO_META_PAGE_SIZE / BLCKSZ;
     g_instance.undo_cxt.undoMetaSize += spaceMetaSize;
 
@@ -372,11 +372,12 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
 
         int offset = zoneId % UNDOSPACE_COUNT_PER_PAGE;
         uspMetaInfo = (UndoSpaceMetaInfo *)(uspMetaBuffer + offset * sizeof(UndoSpaceMetaInfo));
-        UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
-        if (uspMetaInfo->tail == 0 && uzone == NULL) {
+        if (uspMetaInfo->tail == 0 &&
+            (g_instance.undo_cxt.uZones == NULL || g_instance.undo_cxt.uZones[zoneId] == NULL)) {
             continue;
         }
-
+        undo::UndoZoneGroup::InitUndoCxtUzones();
+        UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
         uzone = UndoZoneGroup::GetUndoZone(zoneId, true);
         UndoSpace *usp = uzone->GetSpace(type);
         usp->LockInit();

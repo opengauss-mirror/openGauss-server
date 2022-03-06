@@ -11,7 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 TRUNCATE [ TABLE ] [ ONLY ] {table_name [ * ]} [, ... ]
-    [ CONTINUE IDENTITY ] [ CASCADE | RESTRICT ];
+    [ CONTINUE IDENTITY ] [ CASCADE | RESTRICT [ PURGE ]];
 ALTER TABLE [ IF EXISTS  ] { [ ONLY  ] table_name  | table_name *  | ONLY ( table_name )  } 
     TRUNCATE PARTITION { partition_name  | FOR (  partition_value  [, ...] )  } ;
 </synopsis>

@@ -1,0 +1,40 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_varchar(id INT, name varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),address varchar(50) ENCRYPTED WITH  (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+starting batch : INSERT INTO t_varchar (id, name, address) VALUES (?,?,?);
+Number of rows to add: 20
+executing batch ...
+select * from t_varchar order by id;
+ id |  name   |  address   
+----+---------+------------
+  1 | Name 1  | Address 1
+  2 | Name 2  | Address 2
+  3 | Name 3  | Address 3
+  4 | Name 4  | Address 4
+  5 | Name 5  | Address 5
+  6 | Name 6  | Address 6
+  7 | Name 7  | Address 7
+  8 | Name 8  | Address 8
+  9 | Name 9  | Address 9
+ 10 | Name 10 | Address 10
+ 11 | Name 11 | Address 11
+ 12 | Name 12 | Address 12
+ 13 | Name 13 | Address 13
+ 14 | Name 14 | Address 14
+ 15 | Name 15 | Address 15
+ 16 | Name 16 | Address 16
+ 17 | Name 17 | Address 17
+ 18 | Name 18 | Address 18
+ 19 | Name 19 | Address 19
+ 20 | Name 20 | Address 20
+(20 rows)
+
+DROP table t_varchar;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;

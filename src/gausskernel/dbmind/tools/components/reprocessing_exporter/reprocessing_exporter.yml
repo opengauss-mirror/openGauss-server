@@ -1,0 +1,478 @@
+# Copyright (c) 2022 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
+os_cpu_iowait:
+  name: os_cpu_iowait
+  desc: iowait
+  query:
+    - name: os_cpu_iowait
+      promql: "
+        label_replace(
+          (avg(irate(node_cpu_seconds_total{mode='iowait'}[5m])) by (job, instance)),
+          'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: from job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+io_read_total:
+  name: io_read_total
+  desc: total number of io read
+  query:
+    - name: io_read_total
+      promql: "
+        label_replace(
+          sum by (instance) (irate(node_disk_reads_completed_total[5m]))
+            , 'instance', '$1', 'instance', '(.*):.*')"
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+io_write_total:
+  name: io_write_total
+  desc: total write number
+  query:
+    - name: io_write_total
+      promql: "
+        label_replace(
+          sum by (instance) (irate(node_disk_writes_completed_total[5m]))
+            , 'instance', '$1', 'instance', '(.*):.*')"
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+os_disk_iops:
+  name: os_disk_iops
+  desc: iops
+  query:
+    - name: os_disk_iops
+      promql: "
+        label_replace(
+          sum by (instance) (irate(node_disk_reads_completed_total[5m])) + sum by (instance)
+            (irate(node_disk_writes_completed_total[5m])),
+          'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+os_disk_ioutils:
+  name: os_disk_ioutils
+  desc: ioutils
+  query:
+    - name: os_disk_ioutils
+      promql: "
+        label_replace(
+          irate(node_disk_io_time_seconds_total[3m]),
+          'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: device
+      label: device
+      description: device label
+      usage: LABEL
+    - name: from_job
+      label: job
+      description: from job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+io_read_bytes:
+  name: io_read_bytes
+  desc: io read bytes
+  query:
+    - name: io_read_bytes
+      promql: "
+      label_replace(
+        sum by (instance) (irate(node_disk_read_bytes_total[1m])) / 1024 / 1024,
+        'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+io_write_bytes:
+  name: io_write_bytes
+  desc: io write bytes
+  query:
+    - name: io_write_bytes
+      promql: "
+      label_replace(
+        sum by (instance) (irate(node_disk_written_bytes_total[1m])) / 1024 / 1024,
+        'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+os_disk_iocapacity:
+  name: os_disk_iocapacity
+  desc: os_disk_iocapacity
+  query:
+    - name: os_disk_iocapacity
+      promql: "
+      label_replace(
+        sum by (instance) (irate(node_disk_read_bytes_total[1m])) / 1024 / 1024 + sum by (instance) (irate(node_disk_written_bytes_total[1m])) / 1024 / 1024,
+        'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+os_disk_usage:
+  name: os_disk_usage
+  desc: os_disk_usage
+  query:
+    - name: os disk usage
+      promql: "
+      label_replace(
+        1 - ((node_filesystem_avail_bytes{fstype=~'ext.|xfs'}) / node_filesystem_size_bytes{fstype=~'ext.|xfs'}),
+        'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: instance
+      usage: LABEL
+    - name: fstype
+      label: fstype
+      description: fstype
+      usage: LABEL
+    - name: mountpoint
+      label: mountpoint
+      description: mountpoint
+      usage: LABEL
+    - name: device
+      label: device
+      description: device
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+io_queue_number:
+  name: io_queue_number
+  desc: io queue number
+  query:
+    - name: io_queue_number
+      promql: "
+      label_replace(
+        rate(node_disk_io_time_weighted_seconds_total[5m]),
+        'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: instance
+      usage: LABEL
+    - name: device
+      label: device
+      description: device
+      usage: LABEL
+
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+io_read_delay_time:
+  name: io_read_delay_time
+  desc: io read delay time
+  query:
+    - name: io_read_delay_time
+      promql: "
+      label_replace(
+        rate(node_disk_read_time_seconds_total[5m]) / (rate(node_disk_reads_completed_total[5m]) + 0.00001) * 1000,
+        'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: instance
+      usage: LABEL
+    - name: device
+      label: device
+      description: device
+      usage: LABEL
+
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+io_write_delay_time:
+  name: io_write_delay_time
+  desc: io write delay time
+  query:
+    - name: io_write_delay_time
+      promql: "
+      label_replace(
+        rate(node_disk_write_time_seconds_total[5m]) / (rate(node_disk_writes_completed_total[5m]) + 0.00001) * 1000,
+        'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: instance
+      usage: LABEL
+    - name: device
+      label: device
+      description: device
+      usage: LABEL
+
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+os_cpu_processor_number:
+  name: os_cpu_processor_number
+  desc: os_cpu_processor_number
+  query:
+    - name: os_cpu_processor_number
+      promql: "
+        label_replace(
+          count by (instance, job) (node_cpu_seconds_total{mode='user'}),
+          'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: from job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+
+os_cpu_usage:
+  name: os_cpu_usage
+  desc: used for CPU usage collection
+  query:
+    - name: os_cpu_usage
+      promql: "
+        label_replace(
+          1 - (avg by(job, instance) (irate(node_cpu_seconds_total{mode='idle'}[5m]))),
+          'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: from job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+os_mem_usage:
+  name: os_mem_usage
+  desc: used for memory usage collection
+  query:
+    - name: os_mem_usage
+      promql: "
+        label_replace(
+          1 - avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) by (job, instance),
+          'instance', '$1', 'instance', '(.*):.*')
+        "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: from job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+
+gaussdb_qps_by_instance:
+  name: gaussdb_qps_by_instance
+  desc: qps collection
+  query:
+    - name: gaussdb_qps_by_instance
+      promql: |
+        ceil(sum(irate(pg_db_xact_commit[5m])) by (job, from_instance) +
+             sum(irate(pg_db_xact_rollback[5m])) by (job, from_instance))
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: from job
+      usage: LABEL
+    - name: from_instance
+      label: from_instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+

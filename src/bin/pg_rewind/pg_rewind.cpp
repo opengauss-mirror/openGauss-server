@@ -252,7 +252,7 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
         chkpttli);
 
     XLByteToSeg(chkptredo, checkSeg);
-    XLogFileName(divergeXlogFileName, chkpttli, checkSeg);
+    XLogFileName(divergeXlogFileName, MAXFNAMELEN, chkpttli, checkSeg);
     pg_log(PG_PROGRESS, "diverge xlogfile is %s, older ones will not be copied or removed.\n", divergeXlogFileName);
 
     if (libpqRotateCbmFile(conn, chkptredo) != true) {
@@ -696,7 +696,7 @@ static void rewind_dw_file()
     char* unaligned_buf = NULL;
 
     /* Delete the dw file, if it exists. */
-    rc = snprintf_s(dw_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, DW_FILE_NAME);
+    rc = snprintf_s(dw_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, OLD_DW_FILE_NAME);
     securec_check_ss_c(rc, "\0", "\0");
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {

@@ -107,9 +107,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForInsertRedo(XLogReaderState *recor
     UndoRecPtr invalidUrp = INVALID_UNDO_REC_PTR;
     Oid invalidPartitionOid = 0;
 
-
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + (hasCSN ? sizeof(CommitSeqNo) : 0));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
         blkprev = (UndoRecPtr *) ((char *)currLogPtr);
@@ -188,8 +188,10 @@ static XLogRedoAction GetInsertRedoAction(XLogReaderState *record, RedoBufferInf
     XLogRedoAction action;
 
     if (XLogRecGetInfo(record) & XLOG_UHEAP_INIT_PAGE) {
+        bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
         XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
-        XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
+        XlUndoHeader *xlundohdr =
+            (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + (hasCSN ? sizeof(CommitSeqNo) : 0));
         TransactionId *xidBase = (TransactionId *)((char *)xlundohdr + SizeOfXLUndoHeader + skipSize);
         uint16 *tdCount = (uint16 *)((char *)xidBase + sizeof(TransactionId));
 
@@ -249,7 +251,7 @@ static void PerformInsertRedoAction(XLogReaderState *record, const Buffer buf, c
     }
 
     /* decrement the potential freespace of this page */
-    UHeapRecordPotentialFreeSpace(NULL, buf, -1 * SHORTALIGN(newlen));
+    UHeapRecordPotentialFreeSpace(buf, -1 * SHORTALIGN(newlen));
 
     // set undo
     tdSlotId = UHeapTupleHeaderGetTDSlot(utup);
@@ -306,8 +308,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForDeleteRedo(XLogReaderState *recor
     bool defaultHasSubXact = false;
     uint32 readSize = 0;
 
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
         hasSubXact = (bool *) ((char *)currLogPtr);
@@ -415,7 +418,7 @@ static void PerformDeleteRedoAction(XLogReaderState *record, UHeapTupleData *utu
     }
 
     /* increment the potential freespace of this page */
-    UHeapRecordPotentialFreeSpace(NULL, buffer->buf, SHORTALIGN(datalen));
+    UHeapRecordPotentialFreeSpace(buffer->buf, SHORTALIGN(datalen));
 
     utup->disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, rp);
     utup->disk_tuple_size = RowPtrGetLen(rp);
@@ -762,8 +765,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForUpdateRedo(XLogReaderState *recor
     bool inplaceUpdate = true;
     char *xlogXorDelta = NULL;
 
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0));
     UndoRecPtr urecptr = xlundohdr->urecptr;
     char *curxlogptr = ((char *)xlundohdr) + SizeOfXLUndoHeader;
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
@@ -966,10 +970,12 @@ static void PerformUpdateOldRedoAction(XLogReaderState *record, UHeapTupleData *
     /* Mark the page as a candidate for pruning  and update the page potential freespace */
     if (xlrec->flags & XLZ_NON_INPLACE_UPDATE) {
         UPageSetPrunable(oldpage, xid);
-
         if (buffers->newbuffer.buf != oldbuf) {
-            UHeapRecordPotentialFreeSpace(NULL, oldbuf, SHORTALIGN(oldtup->disk_tuple_size));
+            UHeapRecordPotentialFreeSpace(oldbuf, SHORTALIGN(oldtup->disk_tuple_size));
         }
+    } else if (xlrec->flags & XLZ_BLOCK_INPLACE_UPDATE) {
+        UPageSetPrunable(oldpage, xid);
+        UHeapRecordPotentialFreeSpace(oldbuf, SHORTALIGN(oldtup->disk_tuple_size));
     }
 
     PageSetLSN(oldpage, lsn);
@@ -1123,7 +1129,36 @@ static Size PerformUpdateNewRedoAction(XLogReaderState *record, UpdateRedoBuffer
     /* max offset number should be valid */
     Assert(UHeapPageGetMaxOffsetNumber(newpage) + 1 >= xlrec->new_offnum);
 
-    if (!(xlrec->flags & XLZ_NON_INPLACE_UPDATE)) {
+    if (xlrec->flags & XLZ_NON_INPLACE_UPDATE) {
+        UHeapBufferPage bufpage = {newbuf, NULL};
+
+        if (UPageAddItem(NULL, &bufpage, (Item)tuples->newtup, newlen, xlrec->new_offnum, true) ==
+            InvalidOffsetNumber) {
+            elog(PANIC, "failed to add tuple");
+        }
+
+        /* Update the page potential freespace */
+        if (newbuf != oldbuf) {
+            UHeapRecordPotentialFreeSpace(newbuf, -1 * SHORTALIGN(newlen));
+        } else {
+            int delta = newlen - tuples->oldtup->disk_tuple_size;
+            UHeapRecordPotentialFreeSpace(newbuf, -1 * SHORTALIGN(delta));
+        }
+
+        if (sameBlock) {
+            UHeapPageSetUndo(newbuf, xlrec->old_tuple_td_id, xid, xlnewundohdr->urecptr);
+        } else {
+            UHeapPageSetUndo(newbuf, tuples->newtup->td_id, xid, xlnewundohdr->urecptr);
+        }
+    } else if (xlrec->flags & XLZ_BLOCK_INPLACE_UPDATE) {
+        RowPtr *rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
+        PutBlockInplaceUpdateTuple(oldpage, (Item)tuples->newtup, rp, newlen);
+        /* update the potential freespace */
+        UHeapRecordPotentialFreeSpace(newbuf, newlen);
+        Assert(oldpage == newpage);
+        UPageSetPrunable(newpage, XLogRecGetXid(record));
+        UHeapPageSetUndo(newbuf, xlrec->old_tuple_td_id, xid, urecptr);
+    } else {
         /*
          * For inplace updates, we copy the entire data portion including
          * the tuple header.
@@ -1140,27 +1175,6 @@ static Size PerformUpdateNewRedoAction(XLogReaderState *record, UpdateRedoBuffer
         }
 
         UHeapPageSetUndo(newbuf, xlrec->old_tuple_td_id, xid, urecptr);
-    } else {
-        UHeapBufferPage bufpage = {newbuf, NULL};
-
-        if (UPageAddItem(NULL, &bufpage, (Item)tuples->newtup, newlen, xlrec->new_offnum, true) ==
-            InvalidOffsetNumber) {
-            elog(PANIC, "failed to add tuple");
-        }
-
-        /* Update the page potential freespace */
-        if (newbuf != oldbuf) {
-            UHeapRecordPotentialFreeSpace(NULL, newbuf, -1 * SHORTALIGN(newlen));
-        } else {
-            int delta = newlen - tuples->oldtup->disk_tuple_size;
-            UHeapRecordPotentialFreeSpace(NULL, newbuf, -1 * SHORTALIGN(delta));
-        }
-
-        if (sameBlock) {
-            UHeapPageSetUndo(newbuf, xlrec->old_tuple_td_id, xid, xlnewundohdr->urecptr);
-        } else {
-            UHeapPageSetUndo(newbuf, tuples->newtup->td_id, xid, xlnewundohdr->urecptr);
-        }
     }
 
     Size freespace = PageGetUHeapFreeSpace(newpage); /* needed to update FSM
@@ -1335,7 +1349,9 @@ static UndoRecPtr PrepareAndInsertUndoRecordForMultiInsertRedo(XLogReaderState *
         curxlogptr += sizeof(uint16);
     }
 
-    *xlrec = (XlUHeapMultiInsert *)((char *)curxlogptr);
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
+    curxlogptr = curxlogptr + (hasCSN ? sizeof(CommitSeqNo) : 0);
+    (*xlrec) = (XlUHeapMultiInsert *)curxlogptr;
     curxlogptr = (char *)*xlrec + SizeOfUHeapMultiInsert;
 
     /* fetch number of distinct ranges */
@@ -1495,7 +1511,7 @@ static void PerformMultiInsertRedoAction(XLogReaderState *record, XlUHeapMultiIn
         }
 
         /* decrement the potential freespace of this page */
-        UHeapRecordPotentialFreeSpace(NULL, buffer->buf, SHORTALIGN(newlen));
+        UHeapRecordPotentialFreeSpace(buffer->buf, SHORTALIGN(newlen));
 
         if (!skipUndo) {
             tdSlot = UHeapTupleHeaderGetTDSlot(uhtup);
@@ -1972,10 +1988,11 @@ void UHeapUndoRedo(XLogReaderState *record)
     }
 }
 
-static TransactionId UHeapXlogGetCurrentXidInsert(XLogReaderState *record)
+static TransactionId UHeapXlogGetCurrentXidInsert(XLogReaderState *record, bool hasCSN)
 {
     XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert +
+        (hasCSN ? sizeof(CommitSeqNo) : 0));
     bool hasCurrentXid = ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0);
 
     if (!hasCurrentXid) {
@@ -1997,12 +2014,12 @@ static TransactionId UHeapXlogGetCurrentXidInsert(XLogReaderState *record)
     return *(TransactionId*)(currLogPtr);
 }
 
-static TransactionId UHeapXlogGetCurrentXidDelete(XLogReaderState *record)
+static TransactionId UHeapXlogGetCurrentXidDelete(XLogReaderState *record, bool hasCSN)
 {
     XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete +
+            (hasCSN ? sizeof(CommitSeqNo) : 0));
     bool hasCurrentXid = ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0);
-    
     if (!hasCurrentXid) {
         return XLogRecGetXid(record);
     }
@@ -2025,10 +2042,11 @@ static TransactionId UHeapXlogGetCurrentXidDelete(XLogReaderState *record)
     return *(TransactionId*)(currLogPtr);
 }
 
-static TransactionId UHeapXlogGetCurrentXidUpdate(XLogReaderState *record)
+static TransactionId UHeapXlogGetCurrentXidUpdate(XLogReaderState *record, bool hasCSN)
 {
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate +
+        (hasCSN ? sizeof(CommitSeqNo) : 0));
     bool hasCurrentXid = ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0);
 
     if (!hasCurrentXid) {
@@ -2077,22 +2095,23 @@ static TransactionId UHeapXlogGetCurrentXidMultiInsert(XLogReaderState *record)
     return *(TransactionId*)(curxlogptr);
 }
 
-TransactionId UHeapXlogGetCurrentXid(XLogReaderState *record)
+TransactionId UHeapXlogGetCurrentXid(XLogReaderState *record, bool hasCSN)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
     switch (info & XLOG_UHEAP_OPMASK) {
         case XLOG_UHEAP_INSERT:
-            return UHeapXlogGetCurrentXidInsert(record);
+            return UHeapXlogGetCurrentXidInsert(record, hasCSN);
         case XLOG_UHEAP_DELETE:
-            return UHeapXlogGetCurrentXidDelete(record);
+            return UHeapXlogGetCurrentXidDelete(record, hasCSN);
         case XLOG_UHEAP_UPDATE:
-            return UHeapXlogGetCurrentXidUpdate(record);
+            return UHeapXlogGetCurrentXidUpdate(record, hasCSN);
         case XLOG_UHEAP_FREEZE_TD_SLOT:
         case XLOG_UHEAP_INVALID_TD_SLOT:
         case XLOG_UHEAP_CLEAN:
             break;
         case XLOG_UHEAP_MULTI_INSERT:
+            /* The way we get current xid in MULTI_INSERT is not affected */
             return UHeapXlogGetCurrentXidMultiInsert(record);
         default:
             ereport(PANIC, (errmsg("UHeapRedo: unknown op code %u", (uint8)info)));    

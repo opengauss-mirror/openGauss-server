@@ -1,0 +1,284 @@
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,local_ip
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7783,7783 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,local_ip
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs=read-only
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs=primary
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,local_ip target_session_attrs= prefer-standby
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,local_ip target_session_attrs= prefer-standby
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=host_name,host_name target_session_attrs=read-only
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs=standby
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs=read-write
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs= prefer-standby
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7780,7780 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs= prefer-standby
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7780 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,local_ip target_session_attrs= prefer-standby
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=/tmp,local_ip
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,/tmp
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=/tmp,/tmp target_session_attrs=primary
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7783 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs=read-only
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7780 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs= prefer-standby
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=::1,local_ip
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=local_ip,::1
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=,
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host= ,
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=, 
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=,local_ip
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=local_ip,
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=local_ip, target_session_attrs=standby
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7780 user=ipv6_tmp password=Gauss@123
+pg_is_in_recovery
+
+f              
+
+trying dbname=postgres port=7783,7783 user=ipv6_tmp password=Gauss@123 host=local_ip,10.10.10.10
+pg_is_in_recovery
+
+t              
+
+trying postgres://ipv6_tmp@local_ip :7780,local_ip:7783/postgres?password=Gauss@123&target_session_attrs=standby
+pg_is_in_recovery
+
+t              
+
+trying postgres://ipv6_tmp@local_ip:7780,local_ip :7783/postgres?password=Gauss@123&target_session_attrs=primary
+pg_is_in_recovery
+
+f              
+
+trying postgres://ipv6_tmp@local_ip:7780,local_ip:7783/postgres?password=Gauss@123
+pg_is_in_recovery
+
+f              
+
+trying postgres://ipv6_tmp@local_ip:7780,local_ip:7783/postgres?password=Gauss@123&target_session_attrs=standby
+pg_is_in_recovery
+
+t              
+
+trying postgres://ipv6_tmp@[::1]:7780,local_ip:7783/postgres?password=Gauss@123
+pg_is_in_recovery
+
+f              
+
+trying postgres://ipv6_tmp@[::1]:7780,local_ip:7783/postgres?password=Gauss@123&target_session_attrs=standby
+pg_is_in_recovery
+
+t              
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,10.10.10.20
+Connection to database failed: could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7780?
+could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7783?
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp2 password=Gauss@123 host=local_ip,local_ip
+Connection to database failed: FATAL:  Forbid remote connection with trust method!
+FATAL:  Forbid remote connection with trust method!
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@12 host=local_ip,local_ip
+Connection to database failed: FATAL:  Invalid username/password,login denied.
+FATAL:  Invalid username/password,login denied.
+
+trying dbname=postgres port=7780,7783,7784 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip
+Connection to database failed: could not match 3 port numbers to 2 hosts
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=host_name,host_name hostaddr=local_ip
+Connection to database failed: could not match 2 host names to 1 hostaddr values
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=host_name hostaddr=local_ip,local_ip
+Connection to database failed: could not match 1 host names to 2 hostaddr values
+
+trying dbname=postgres port=7780ab,7783c user=ipv6_tmp password=Gauss@123 hostaddr=local_ip,local_ip
+Connection to database failed: invalid integer value 
+invalid integer value 
+
+trying dbname=postgres port=7780ab,7780 user=ipv6_tmp password=Gauss@123 hostaddr=local_ip,local_ip target_session_attrs=read-only
+Connection to database failed: invalid integer value 
+session is not read-only
+
+trying dbname=postgres port=7780ab,7780 user=ipv6_tmp password=Gauss@123 hostaddr=local_ip,local_ip target_session_attrs=standby
+Connection to database failed: invalid integer value 
+server is not in hot standby mode
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,10.10.10.20 target_session_attrs= prefer-standby
+Connection to database failed: could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7780?
+could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7783?
+could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7780?
+could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7783?
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 hostaddr=host_name,host_name
+Connection to database failed: could not translate host name  to address: Name or service not known
+could not translate host name  to address: Name or service not known
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 hostaddr=10.10.10.10,10.10.10.20
+Connection to database failed: could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7783?
+could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7780?
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123 host=10.10.10.10,10.10.10.20
+Connection to database failed: could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7783?
+could not connect to server: Operation now in progress
+	Is the server running on host  and accepting
+	TCP/IP connections on port 7780?
+
+trying dbname=postgresabc port=7783,7780 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip
+Connection to database failed: FATAL:  database  does not exist
+
+trying dbname=postgres port=7783 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs=read-write
+Connection to database failed: session is read-only
+session is read-only
+
+trying dbname=postgres port=0 user=ipv6_tmp password=Gauss@123 host=local_ip,local_ip target_session_attrs=read-write
+Connection to database failed: invalid port number: 
+invalid port number: 
+
+trying dbname=postgres port=7783,7780 user=ipv6_tmp password=Gauss@123
+Connection to database failed: could not match 2 port numbers to 1 hosts
+
+trying dbname=postgres port=7783 user=ipv6_tmp password=Gauss@123 target_session_attrs=read-write
+Connection to database failed: session is read-only
+
+trying dbname=postgres port=7783 user=ipv6_tmp
+Connection to database failed: FATAL:  Invalid username/password,login denied.
+
+trying dbname=postgres port=7780,7783 user=ipv6_tmp password=Gauss@123
+Connection to database failed: could not match 2 port numbers to 1 hosts
+
+trying dbname=postgres user=ipv6_tmp password=Gauss@123
+Connection to database failed: connect to server failed: No such file or directory
+
+trying postgres://ipv6_tmp@local_ip :7780,local_ip :7783/postgres?password=Gauss@123
+Connection to database failed: could not translate host name  to address: Name or service not known
+could not translate host name  to address: Name or service not known
+
+trying postgres://ipv6_tmp@local_ip :7780,local_ip:7783/postgres?password=Gauss@123&target_session_attrs=primary
+Connection to database failed: could not translate host name  to address: Name or service not known
+server is in hot standby mode
+
+trying postgres://ipv6_tmp@local_ip:7780,local_ip :7783/postgres?password=Gauss@123&target_session_attrs=standby
+Connection to database failed: server is not in hot standby mode
+could not translate host name  to address: Name or service not known
+

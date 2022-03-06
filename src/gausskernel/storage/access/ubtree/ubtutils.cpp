@@ -35,7 +35,7 @@ static bool UBTreeVisibilityCheckXid(TransactionId xmin, TransactionId xmax, boo
     Snapshot snapshot, bool isUpsert = false);
 static bool UBTreeXidSatisfiesMVCC(TransactionId xid, bool committed, Snapshot snapshot);
 static int UBTreeKeepNatts(Relation rel, IndexTuple lastleft, IndexTuple firstright, BTScanInsert itupKey);
-static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, TransactionId xmax, bool *needRecheck);
+static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, bool *needRecheck);
 static bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2);
 
 #define MAX(A, B) (((B) > (A)) ? (B) : (A))
@@ -162,7 +162,6 @@ IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, S
     ItemId iid = PageGetItemId(page, offnum);
     bool tupleAlive = false;
     bool tupleVisible = true;
-    bool needVisibilityCheck = false;
     IndexTuple tuple;
     TupleDesc tupdesc;
     BTScanOpaque so;
@@ -206,29 +205,6 @@ IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, S
     tupdesc = RelationGetDescr(scan->indexRelation);
     so = (BTScanOpaque)scan->opaque;
     keysz = so->numberOfKeys;
-
-    needVisibilityCheck = scan->xs_snapshot->satisfies != SNAPSHOT_ANY &&
-                          scan->xs_snapshot->satisfies != SNAPSHOT_TOAST;
-    TransactionId xmin, xmax;
-    bool isDead = false;
-    bool xminCommitted = false;
-    bool xmaxCommitted = false;
-    isDead = UBTreeItupGetXminXmax(page, offnum, InvalidTransactionId, &xmin, &xmax, &xminCommitted, &xmaxCommitted);
-    tupleVisible = !isDead; /* without visibility check, return non-dead tuple */
-    if (needVisibilityCheck) {
-        /*
-         * If this IndexTuple is not visible to the current Snapshot, try to get the next one.
-         * We're not going to tell heap to skip visibility check, because it doesn't cost a lot and we need heap
-         * to check the visibility with CID when snapshot's xid equals to xmin or xmax.
-         */
-        if (scan->xs_snapshot->satisfies == SNAPSHOT_MVCC &&
-            (TransactionIdIsCurrentTransactionId(xmin) || TransactionIdIsCurrentTransactionId(xmax))) {
-            tupleVisible = UBTreeVisibilityCheckCid(scan, tuple, xmax, needRecheck); /* need check cid */
-        } else {
-            tupleVisible = (!isDead) &&
-                UBTreeVisibilityCheckXid(xmin, xmax, xminCommitted, xmaxCommitted, scan->xs_snapshot, scan->isUpsert);
-        }
-    }
 
     for (key = so->keyData, ikey = 0; ikey < keysz; key++, ikey++) {
         Datum datum;
@@ -334,6 +310,29 @@ IndexTuple UBTreeCheckKeys(IndexScanDesc scan, Page page, OffsetNumber offnum, S
              * In any case, this indextuple doesn't match the qual.
              */
             return NULL;
+        }
+    }
+
+    bool needVisibilityCheck = scan->xs_snapshot->satisfies != SNAPSHOT_ANY &&
+                          scan->xs_snapshot->satisfies != SNAPSHOT_TOAST;
+    TransactionId xmin, xmax;
+    bool isDead = false;
+    bool xminCommitted = false;
+    bool xmaxCommitted = false;
+    isDead = UBTreeItupGetXminXmax(page, offnum, InvalidTransactionId, &xmin, &xmax, &xminCommitted, &xmaxCommitted);
+    tupleVisible = !isDead; /* without visibility check, return non-dead tuple */
+    if (needVisibilityCheck) {
+        /*
+         * If this IndexTuple is not visible to the current Snapshot, try to get the next one.
+         * We're not going to tell heap to skip visibility check, because it doesn't cost a lot and we need heap
+         * to check the visibility with CID when snapshot's xid equals to xmin or xmax.
+         */
+        if (scan->xs_snapshot->satisfies == SNAPSHOT_MVCC &&
+            (TransactionIdIsCurrentTransactionId(xmin) || TransactionIdIsCurrentTransactionId(xmax))) {
+            tupleVisible = UBTreeVisibilityCheckCid(scan, tuple, needRecheck); /* need check cid */
+        } else {
+            tupleVisible = (!isDead) &&
+                UBTreeVisibilityCheckXid(xmin, xmax, xminCommitted, xmaxCommitted, scan->xs_snapshot, scan->isUpsert);
         }
     }
 
@@ -443,7 +442,7 @@ bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_
 
     /* if there is no passed oldest_xmin, we will ues the current oldest_xmin */
     if (!TransactionIdIsValid(oldest_xmin)) {
-        oldest_xmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+        GetOldestXminForUndo(&oldest_xmin);
     }
 
     if (!TransactionIdIsValid(*xmin)) {
@@ -636,20 +635,9 @@ static bool UBTreeItupEquals(IndexTuple itup1, IndexTuple itup2)
     return memcmp(itup1, itup2, IndexTupleSize(itup1)) == 0;
 }
 
-static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, TransactionId xmax, bool *needRecheck)
+static bool UBTreeVisibilityCheckCid(IndexScanDesc scan, IndexTuple itup, bool *needRecheck)
 {
     BTScanOpaque so = (BTScanOpaque)scan->opaque;
-    Snapshot snapshot = scan->xs_snapshot;
-    bool isIndexOnlyScan = scan->xs_want_itup;
-
-    if (isIndexOnlyScan && snapshot->curcid == GetCurrentCommandId(false)) {
-        /* when the snapshot is the latest, index only scan don't need to recheck */
-        *needRecheck = false;
-        if (TransactionIdIsCurrentTransactionId(xmax)) {
-            return false; /* xmax is current xid: invisible */
-        }
-        return true; /* xmin is current xid, no xmax yet: visible */
-    }
 
     if (UBTreeItupEquals((IndexTuple)so->lastSelfModifiedItup, itup)) {
         *needRecheck = false;

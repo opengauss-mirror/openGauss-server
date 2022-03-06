@@ -26,8 +26,7 @@
 bool scan_bool(const char *bool_val, bool *res, const char *err_msg);
 
 bool parse_bool_with_len(const char *value, size_t len, bool *result);
-unsigned char *bool_bin(const char *text, const Oid typelem, const int atttypmod, size_t *binary_size,
-    const char *err_msg)
+unsigned char *bool_bin(const char *text, size_t *binary_size, const char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(bool));
     if (binary == NULL) {
@@ -41,7 +40,7 @@ unsigned char *bool_bin(const char *text, const Oid typelem, const int atttypmod
     return binary;
 }
 
-char *bool_bout(const unsigned char *binary, size_t size, Oid typelem, int atttypmod, size_t *result_size)
+char *bool_bout(const unsigned char *binary, size_t size, size_t *result_size)
 {
     Assert(size == sizeof(bool));
     const size_t text_size = 2;

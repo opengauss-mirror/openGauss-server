@@ -43,16 +43,16 @@ typedef struct {
  * and easy and doesn't cost much, since there shouldn't be terribly many
  * tablespaces, nor do we expect them to be frequently modified.
  */
-static void InvalidateTableSpaceCacheCallback(Datum arg, int cacheid, uint32 hashvalue)
+void InvalidateTableSpaceCacheCallback(Datum arg, int cacheid, uint32 hashvalue)
 {
     HASH_SEQ_STATUS status;
     TableSpaceCacheEntry* spc = NULL;
-
-    hash_seq_init(&status, u_sess->cache_cxt.TableSpaceCacheHash);
+    struct HTAB *TableSpaceCacheHash = GetTableSpaceCacheHash();
+    hash_seq_init(&status, TableSpaceCacheHash);
     while ((spc = (TableSpaceCacheEntry*)hash_seq_search(&status)) != NULL) {
         if (spc->opts != NULL)
             pfree_ext(spc->opts);
-        if (hash_search(u_sess->cache_cxt.TableSpaceCacheHash, (void*)&spc->oid, HASH_REMOVE, NULL) == NULL)
+        if (hash_search(TableSpaceCacheHash, (void*)&spc->oid, HASH_REMOVE, NULL) == NULL)
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
     }
 }
@@ -72,12 +72,20 @@ static void InitializeTableSpaceCache(void)
     ctl.keysize = sizeof(Oid);
     ctl.entrysize = sizeof(TableSpaceCacheEntry);
     ctl.hash = oid_hash;
-    ctl.hcxt = u_sess->cache_mem_cxt;
-    u_sess->cache_cxt.TableSpaceCacheHash =
+    if (EnableLocalSysCache()) {
+        ctl.hcxt = t_thrd.lsc_cxt.lsc->lsc_share_memcxt;
+        t_thrd.lsc_cxt.lsc->TableSpaceCacheHash =
+            hash_create("TableSpace cache", 16, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        /* Watch for invalidation events. */
+        CacheRegisterThreadSyscacheCallback(TABLESPACEOID, InvalidateTableSpaceCacheCallback, (Datum)0);
+    } else {
+        ctl.hcxt = u_sess->cache_mem_cxt;
+        u_sess->cache_cxt.TableSpaceCacheHash =
         hash_create("TableSpace cache", 16, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-
-    /* Watch for invalidation events. */
-    CacheRegisterSyscacheCallback(TABLESPACEOID, InvalidateTableSpaceCacheCallback, (Datum)0);
+        /* Watch for invalidation events. */
+        CacheRegisterSessionSyscacheCallback(TABLESPACEOID, InvalidateTableSpaceCacheCallback, (Datum)0);
+    }
+    
 }
 
 /*
@@ -100,9 +108,9 @@ static TableSpaceCacheEntry* get_tablespace(Oid spcid)
     spcid = ConvertToRelfilenodeTblspcOid(spcid);
 
     /* Find existing cache entry, if any. */
-    if (!u_sess->cache_cxt.TableSpaceCacheHash)
+    if (!GetTableSpaceCacheHash())
         InitializeTableSpaceCache();
-    spc = (TableSpaceCacheEntry*)hash_search(u_sess->cache_cxt.TableSpaceCacheHash, (void*)&spcid, HASH_FIND, NULL);
+    spc = (TableSpaceCacheEntry*)hash_search(GetTableSpaceCacheHash(), (void*)&spcid, HASH_FIND, NULL);
     if (spc != NULL)
         return spc;
 
@@ -129,7 +137,7 @@ static TableSpaceCacheEntry* get_tablespace(Oid spcid)
                 ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), errmsg("Invalid tablespace relation option.")));
             }
 
-            opts = (TableSpaceOpts*)MemoryContextAlloc(u_sess->cache_mem_cxt, VARSIZE(bytea_opts));
+            opts = (TableSpaceOpts*)MemoryContextAlloc(LocalSharedCacheMemCxt(), VARSIZE(bytea_opts));
             rc = memcpy_s(opts, VARSIZE(bytea_opts), bytea_opts, VARSIZE(bytea_opts));
             securec_check(rc, "", "");
         }
@@ -141,7 +149,7 @@ static TableSpaceCacheEntry* get_tablespace(Oid spcid)
      * reading the pg_tablespace entry, since doing so could cause a cache
      * flush.
      */
-    spc = (TableSpaceCacheEntry*)hash_search(u_sess->cache_cxt.TableSpaceCacheHash, (void*)&spcid, HASH_ENTER, NULL);
+    spc = (TableSpaceCacheEntry*)hash_search(GetTableSpaceCacheHash(), (void*)&spcid, HASH_ENTER, NULL);
     spc->opts = opts;
     return spc;
 }

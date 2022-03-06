@@ -164,7 +164,9 @@ typedef struct catclist {
     short nkeys;                             /* number of lookup keys specified */
     int n_members;                           /* number of member tuples */
     CatCache* my_cache;                      /* link to owning catcache */
-    CatCTup* members[FLEXIBLE_ARRAY_MEMBER]; /* members --- VARIABLE LENGTH ARRAY */
+    CatCTup** systups;                       /* systups, link to CatCTup for pg; link to GlobalCatCTup for lsc
+        dont access this variable directly, 
+        fetch element by call t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i) instead */
 } CatCList;                                  /* VARIABLE LENGTH STRUCT */
 
 typedef struct CatCacheHeader {
@@ -202,4 +204,9 @@ extern void PrintCatCacheLeakWarning(HeapTuple tuple);
 extern void PrintCatCacheListLeakWarning(CatCList* list);
 extern void InsertBuiltinFuncDescInBootstrap();
 extern void InsertBuiltinFuncInBootstrap();
+
+#ifndef ENABLE_MULTIPLE_NODES
+extern HeapTuple SearchSysCacheForProcAllArgs(Datum v1, Datum v2, Datum v3, Datum v4, Datum proArgModes);
+#endif
+
 #endif /* CATCACHE_H */

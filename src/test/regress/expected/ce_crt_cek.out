@@ -1,0 +1,178 @@
+-------------------------------------------------------------------------------------------------------------------------
+-- grop     : security
+-- module   : client encrypt 
+--
+-- function : test {sql：CREATE CEK}
+--      CREATE COLUMN ENCRYPTION KEY WITH VALUES (CLIENT_MASTER_KEY = $cmk, ALGORITHM = $algo, ENCRYPTED_VALUE = "$value");
+--
+-- dependency : 
+--      service : Huawei KMS (https://console.huaweicloud.com/dew/?region=cn-north-4#/kms/keyList/customKey)
+--      cmk     : CREATE CLIENT MASTER KEY $cmk WITH (KEY_STORE = huawei_kms, ...)
+-------------------------------------------------------------------------------------------------------------------------
+-- prepare | succeed
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = huawei_kms, KEY_PATH = "cec162c2-983d-4a66-8532-c67b915fb409", ALGORITHM = AES_256);
+CREATE CLIENT MASTER KEY cmk2 WITH (KEY_STORE = huawei_kms, KEY_PATH = "31938a5e-6460-49ce-a358-886f46c6f643", ALGORITHM = AES_256);
+CREATE CLIENT MASTER KEY cmk3 WITH (KEY_STORE = huawei_kms, KEY_PATH = "d6107fb0-fa39-4ae5-ae84-019066ce9073", ALGORITHM = AES_256);
+CREATE CLIENT MASTER KEY cmk4 WITH (KEY_STORE = huawei_kms, KEY_PATH = "3be6f4e0-80bf-4209-8ba2-13cdd303f1bd", ALGORITHM = AES_256);
+-- create cek | succeed
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek2 WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek3 WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek4 WITH VALUES (CLIENT_MASTER_KEY = cmk4, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = '0123456789abcdef0123456789abcdef');
+-- drop cek | succeed
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP COLUMN ENCRYPTION KEY cek2;
+DROP COLUMN ENCRYPTION KEY cek3;
+DROP COLUMN ENCRYPTION KEY cek4;
+-- create after drop cek | succeed
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek2 WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP COLUMN ENCRYPTION KEY cek2;
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek2 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+-- prepare | succeed
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP COLUMN ENCRYPTION KEY cek2;
+-- create cek | invalud cek object name | error
+CREATE COLUMN ENCRYPTION KEY WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR:  syntax error at or near "WITH VALUES"
+LINE 1: CREATE COLUMN ENCRYPTION KEY WITH VALUES (CLIENT_MASTER_KEY ...
+                                     ^
+CREATE COLUMN ENCRYPTION KEY . WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR:  syntax error at or near "."
+LINE 1: CREATE COLUMN ENCRYPTION KEY . WITH VALUES (CLIENT_MASTER_KE...
+                                     ^
+CREATE COLUMN ENCRYPTION KEY ecek 1 WITH VALUES (CLIENT_MASTER_KEY = cmk3, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR:  syntax error at or near "1"
+LINE 1: CREATE COLUMN ENCRYPTION KEY ecek 1 WITH VALUES (CLIENT_MAST...
+                                          ^
+CREATE COLUMN ENCRYPTION KEY ecek ecek WITH VALUES (CLIENT_MASTER_KEY = cmk4, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR:  syntax error at or near "ecek"
+LINE 1: CREATE COLUMN ENCRYPTION KEY ecek ecek WITH VALUES (CLIENT_M...
+                                          ^
+CREATE COLUMN ENCRYPTION KEY 啊 WITH VALUES (CLIENT_MASTER_KEY = cmk4, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR:  invalid name
+-- create cek | loss args | errr
+CREATE COLUMN ENCRYPTION KEY ecek1 WITH VALUES ();
+ERROR:  syntax error at or near ")"
+LINE 1: CREATE COLUMN ENCRYPTION KEY ecek1 WITH VALUES ();
+                                                        ^
+CREATE COLUMN ENCRYPTION KEY ecek2 WITH VALUES (CLIENT_MASTER_KEY = cmk1);
+ERROR(CLIENT): invalid column encryption key algorithm.
+CREATE COLUMN ENCRYPTION KEY ecek3 WITH VALUES (ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): failed to get client master key from cache
+CREATE COLUMN ENCRYPTION KEY ecek4 WITH VALUES (CLIENT_MASTER_KEY = cmk1, CLIENT_MASTER_KEY = cmk1);
+ERROR(CLIENT): duplicate master key args
+CREATE COLUMN ENCRYPTION KEY ecek5 WITH VALUES (ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): duplicate CEK algorithm args
+CREATE COLUMN ENCRYPTION KEY ecek6 WITH VALUES (CLIENT_MASTER_KEY = cmk1, CLIENT_MASTER_KEY = cmk1, CLIENT_MASTER_KEY = cmk1, CLIENT_MASTER_KEY = cmk1, CLIENT_MASTER_KEY = cmk1, CLIENT_MASTER_KEY = cmk1);
+ERROR(CLIENT): duplicate master key args
+-- create cek | reduant args | error
+CREATE COLUMN ENCRYPTION KEY ecek20 WITH VALUES (CLIENT_MASTER_KEY = cmk1, CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): duplicate master key args
+CREATE COLUMN ENCRYPTION KEY ecek21 WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): duplicate CEK algorithm args
+CREATE COLUMN ENCRYPTION KEY ecek22 WITH VALUES (CLIENT_MASTER_KEY = cmk3, CLIENT_MASTER_KEY = cmk3, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "123456789abcdef0123456");
+ERROR:  syntax error at or near ""123456789abcdef0123456""
+LINE 1: ...= AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "123456789...
+                                                             ^
+CREATE COLUMN ENCRYPTION KEY ecek23 WITH VALUES (CLIENT_MASTER_KEY = cmk4, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "123456789abcdef0123456");
+ERROR:  syntax error at or near ""123456789abcdef0123456""
+LINE 1: ...= AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "123456789...
+                                                             ^
+-- create cek | invalid args | error
+CREATE COLUMN ENCRYPTION KEY ecek40 WITH VALUES (CLIENT_MASTER_KEY = cmk5, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): failed to get client master key cmk5 from cache
+--
+CREATE COLUMN ENCRYPTION KEY ecek50 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "");
+ERROR:  zero-length delimited identifier at or near """"
+LINE 1: ...RITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "");
+                                                                   ^
+CREATE COLUMN ENCRYPTION KEY ecek51 WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "0123456789abcdef0");
+ERROR:  syntax error at or near ""0123456789abcdef0""
+LINE 1: ...= AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "012345678...
+                                                             ^
+CREATE COLUMN ENCRYPTION KEY ecek52 WITH VALUES (CLIENT_MASTER_KEY = cmk3, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "0123456789abcdef0123456789abcdef01");
+ERROR:  syntax error at or near ""0123456789abcdef0123456789abcdef01""
+LINE 1: ...= AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "012345678...
+                                                             ^
+CREATE COLUMN ENCRYPTION KEY ecek53 WITH VALUES (CLIENT_MASTER_KEY = cmk4, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+NOTICE:  identifier "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" will be truncated to "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"
+ERROR:  syntax error at or near ""0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef""
+LINE 1: ...= AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = "012345678...
+                                                             ^
+-- clear | succeed
+DROP CLIENT MASTER KEY cmk1 CASCADE;
+DROP CLIENT MASTER KEY cmk2 CASCADE;
+DROP CLIENT MASTER KEY cmk3 CASCADE;
+DROP CLIENT MASTER KEY cmk4 CASCADE;
+SELECT * FROM gs_column_keys;
+ column_key_name | column_key_distributed_id | global_key_id | key_namespace | key_owner | create_date | key_acl 
+-----------------+---------------------------+---------------+---------------+-----------+-------------+---------
+(0 rows)
+
+SELECT * FROM gs_client_global_keys;
+ global_key_name | key_namespace | key_owner | key_acl | create_date 
+-----------------+---------------+-----------+---------+-------------
+(0 rows)
+
+-------------------------------------------------------------------------------------------------------------
+-- dependency : 
+--      tool  : gs_ktool (sorce code: src/bin/gs_ktool)
+-------------------------------------------------------------------------------------------------------------
+-- prepare | succeed
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g && gs_ktool -g && gs_ktool -g && gs_ktool -g
+GENERATE
+1
+GENERATE
+2
+GENERATE
+3
+GENERATE
+4
+CREATE CLIENT MASTER KEY cmk1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/1", ALGORITHM = AES_256_CBC);
+CREATE CLIENT MASTER KEY cmk2 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2", ALGORITHM = AES_256_CBC);
+CREATE CLIENT MASTER KEY cmk3 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/3", ALGORITHM = AES_256_CBC);
+CREATE CLIENT MASTER KEY cmk4 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4", ALGORITHM = AES_256_CBC);
+-- create cek | succeed
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek2 WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek3 WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek4 WITH VALUES (CLIENT_MASTER_KEY = cmk4, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256, ENCRYPTED_VALUE = '0123456789abcdef0123456789abcdef');
+-- drop cek | succeed
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP COLUMN ENCRYPTION KEY cek2;
+DROP COLUMN ENCRYPTION KEY cek3;
+DROP COLUMN ENCRYPTION KEY cek4;
+-- create after drop cek | succeed
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek2 WITH VALUES (CLIENT_MASTER_KEY = cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP COLUMN ENCRYPTION KEY cek2;
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE COLUMN ENCRYPTION KEY cek2 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+-- clear | succeed
+DROP CLIENT MASTER KEY cmk1 CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to column encryption key: cek1
+drop cascades to column encryption key: cek2
+DROP CLIENT MASTER KEY cmk2 CASCADE;
+DROP CLIENT MASTER KEY cmk3 CASCADE;
+DROP CLIENT MASTER KEY cmk4 CASCADE;
+SELECT * FROM gs_column_keys;
+ column_key_name | column_key_distributed_id | global_key_id | key_namespace | key_owner | create_date | key_acl 
+-----------------+---------------------------+---------------+---------------+-----------+-------------+---------
+(0 rows)
+
+SELECT * FROM gs_client_global_keys;
+ global_key_name | key_namespace | key_owner | key_acl | create_date 
+-----------------+---------------+-----------+---------+-------------
+(0 rows)
+
+\! gs_ktool -d all
+DELETE ALL
+ 1 2 3 4

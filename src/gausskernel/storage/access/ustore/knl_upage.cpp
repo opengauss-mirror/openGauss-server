@@ -444,6 +444,19 @@ UHeapTuple UHeapGetTuplePartial(Relation relation, Buffer buffer, OffsetNumber o
     return tuple;
 }
 
+static Size UPageGetFreeSpace(Page page)
+{
+    int space = (int)((UHeapPageHeaderData *)page)->pd_upper -
+        (int)((UHeapPageHeaderData *)page)->pd_lower;
+    if (space < (int)sizeof(RowPtr)) {
+        return 0;
+    }
+    space -= sizeof(RowPtr);
+
+    return (Size)space;
+}
+
+
 /*
  * PageGetUHeapFreeSpace
  * Returns the size of the free (allocatable) space on a uheap page,
@@ -456,7 +469,7 @@ Size PageGetUHeapFreeSpace(Page page)
 {
     Size space;
 
-    space = PageGetFreeSpace(page);
+    space = UPageGetFreeSpace(page);
     if (space > 0) {
         OffsetNumber offnum, nline;
 
@@ -648,7 +661,7 @@ UHeapFreeOffsetRanges *UHeapGetUsableOffsetRanges(Buffer buffer, UHeapTuple *tup
     return ufreeOffsetRanges;
 }
 
-void UHeapRecordPotentialFreeSpace(Relation rel, Buffer buffer, int delta)
+void UHeapRecordPotentialFreeSpace(Buffer buffer, int delta)
 {
     UHeapPageHeaderData *page = (UHeapPageHeaderData *)BufferGetPage(buffer);
     Assert(page->potential_freespace >= 0);

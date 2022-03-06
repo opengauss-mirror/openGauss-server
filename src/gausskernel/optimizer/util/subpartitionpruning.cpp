@@ -117,55 +117,22 @@ PruningResult* getFullPruningResult(Relation relation)
         for (i = 0; i < rangePartitionMap->rangeElementsNum; i++) {
             pruningRes->bm_rangeSelectedPartitions = bms_add_member(pruningRes->bm_rangeSelectedPartitions, i);
             pruningRes->ls_rangeSelectedPartitions = lappend_int(pruningRes->ls_rangeSelectedPartitions, i);
-            if (RelationIsSubPartitioned(relation)) {
-                Oid partitionid = rangePartitionMap->rangeElements[i].partitionOid;
-                SubPartitionPruningResult *subPartPruningRes =
-                    PreGetSubPartitionFullPruningResult(relation, partitionid);
-                if (subPartPruningRes == NULL) {
-                    continue;
-                }
-                subPartPruningRes->partSeq = i;
-                pruningRes->ls_selectedSubPartitions = lappend(pruningRes->ls_selectedSubPartitions, subPartPruningRes);
-            }
         }
-
         if (relation->partMap->type != PART_TYPE_INTERVAL) {
             pruningRes->intervalOffset = 0;
             pruningRes->intervalSelectedPartitions = NULL;
         }
     } else if (relation->partMap->type == PART_TYPE_LIST) {
         listPartitionMap = (ListPartitionMap*)relation->partMap;
-
         for (i = 0; i < listPartitionMap->listElementsNum; i++) {
             pruningRes->bm_rangeSelectedPartitions = bms_add_member(pruningRes->bm_rangeSelectedPartitions, i);
             pruningRes->ls_rangeSelectedPartitions = lappend_int(pruningRes->ls_rangeSelectedPartitions, i);
-            if (RelationIsSubPartitioned(relation)) {
-                Oid partitionid = listPartitionMap->listElements[i].partitionOid;
-                SubPartitionPruningResult *subPartPruningRes =
-                    PreGetSubPartitionFullPruningResult(relation, partitionid);
-                if (subPartPruningRes == NULL) {
-                    continue;
-                }
-                subPartPruningRes->partSeq = i;
-                pruningRes->ls_selectedSubPartitions = lappend(pruningRes->ls_selectedSubPartitions, subPartPruningRes);
-            }
         }
     } else if (relation->partMap->type == PART_TYPE_HASH) {
         hashPartitionMap = (HashPartitionMap*)relation->partMap;
-
         for (i = 0; i < hashPartitionMap->hashElementsNum; i++) {
             pruningRes->bm_rangeSelectedPartitions = bms_add_member(pruningRes->bm_rangeSelectedPartitions, i);
             pruningRes->ls_rangeSelectedPartitions = lappend_int(pruningRes->ls_rangeSelectedPartitions, i);
-            if (RelationIsSubPartitioned(relation)) {
-                Oid partitionid = hashPartitionMap->hashElements[i].partitionOid;
-                SubPartitionPruningResult *subPartPruningRes =
-                    PreGetSubPartitionFullPruningResult(relation, partitionid);
-                if (subPartPruningRes == NULL) {
-                    continue;
-                }
-                subPartPruningRes->partSeq = i;
-                pruningRes->ls_selectedSubPartitions = lappend(pruningRes->ls_selectedSubPartitions, subPartPruningRes);
-            }
         }
     }
 
@@ -323,7 +290,6 @@ static IndexesUsableType eliminate_subpartition_index_unusable(Relation heapRel,
 
     List* part_seqs = inputPruningResult->ls_rangeSelectedPartitions;
     ListCell* cell = NULL;
-    int idx = 0;
     bool unusable = false;
 
     // first copy out 2 copies
@@ -354,7 +320,7 @@ static IndexesUsableType eliminate_subpartition_index_unusable(Relation heapRel,
         /* get index partition and add it to a list for following scan */
         ListCell *lc = NULL;
         SubPartitionPruningResult *subPartPruning =
-            (SubPartitionPruningResult *)list_nth(inputPruningResult->ls_selectedSubPartitions, idx++);
+            GetSubPartitionPruningResult(inputPruningResult->ls_selectedSubPartitions, partSeq);
         List *subPartList = subPartPruning->ls_selectedSubPartitions;
 
         foreach (lc, subPartList)

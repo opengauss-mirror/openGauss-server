@@ -99,6 +99,9 @@ extern bool pgxc_find_nonshippable_row_trig(
 extern bool pgxc_query_contains_foreign_table(List* rtable);
 extern bool pgxc_check_dynamic_param(List* dynamicExpr, ParamListInfo params);
 
+/* check junk tlist */
+extern bool check_replicated_junktlist(Query* subquery);
+
 /* For online expansion, we need some user defined function to be shippable to DN  */
 extern bool redis_func_shippable(Oid funcid);
 #ifdef ENABLE_MULTIPLE_NODES

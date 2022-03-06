@@ -94,11 +94,6 @@ insert into up_neg_05 values(1,1,1,1,1) on duplicate key update c3 = 2;
 ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
 insert into up_neg_05 values(1,1,1,1,1) on duplicate key update c1 =1, c2 = 1, c3=2, c4=1,c5=1;
 ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
----- where clause
-insert into up_neg_05 values(1,1,1,1,1) on duplicate key update c4 = 1 where c1=1;
-ERROR:  syntax error at or near "where"
-LINE 1: ... values(1,1,1,1,1) on duplicate key update c4 = 1 where c1=1...
-                                                             ^
 ---- from clause
 insert into up_neg_05 values(1,1,1,1,1) on duplicate key update c4 = 1 from up_neg_04 where c1=1;
 ERROR:  syntax error at or near "from"

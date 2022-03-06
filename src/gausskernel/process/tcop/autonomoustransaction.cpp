@@ -148,13 +148,36 @@ void AutonomousSession::DetachSession(void)
 }
 
 /*
+ * SetDeadLockTimeOut()
+ * Set current session DeadlockTimeout to INT_MAX.
+ * So the deadlock can be reported by autonomous session.
+ */
+void AutonomousSession::SetDeadLockTimeOut(void)
+{
+    saved_deadlock_timeout = u_sess->attr.attr_storage.DeadlockTimeout;
+    u_sess->attr.attr_storage.DeadlockTimeout = INT_MAX;
+}
+
+/*
+ * ReSetDeadLockTimeOut()
+ * Restore current session DeadlockTimeout.
+ */
+void AutonomousSession::ReSetDeadLockTimeOut(void)
+{
+    if (saved_deadlock_timeout != 0) {
+        u_sess->attr.attr_storage.DeadlockTimeout = saved_deadlock_timeout;
+        saved_deadlock_timeout = 0;
+    }
+}
+
+/*
  * ExecSimpleQuery
  * Entry for executing concatenation statements. 
  * If the execution is successful, the execution result is returned. 
  * An error message is displayed.
  */
-Datum AutonomousSession::ExecSimpleQuery(const char* query, TupleDesc resultTupleDesc, 
-                                            int64 currentXid, bool isLockWait)
+ATResult AutonomousSession::ExecSimpleQuery(const char* query, TupleDesc resultTupleDesc, 
+                                            int64 currentXid, bool isLockWait, bool is_plpgsql_func_with_outparam)
 {
     if (unlikely(query == NULL)) {
         ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR),
@@ -167,11 +190,11 @@ Datum AutonomousSession::ExecSimpleQuery(const char* query, TupleDesc resultTupl
     m_res = PQexecAutonm(m_conn, query, currentXid, isLockWait);
     t_thrd.int_cxt.ImmediateInterruptOK = old;
 
-    ATResult result = HandlePGResult(m_conn, m_res, resultTupleDesc);
+    ATResult result = HandlePGResult(m_conn, m_res, resultTupleDesc, is_plpgsql_func_with_outparam);
     PQclear(m_res);
     m_res = NULL;
 
-    return result.ResTup;
+    return result;
 }
 
 /*
@@ -210,8 +233,8 @@ void CreateAutonomousSession(void)
         u_sess->SPI_cxt.autonomous_session->Init();
         u_sess->SPI_cxt.autonomous_session->AttachSession();
         u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("set session_timeout = 0;", NULL, 0);
-        u_sess->SPI_cxt.autonomous_session->current_attach_sessionid =
-            u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("select pg_current_sessid();", NULL, 0);
+        ATResult res = u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("select pg_current_sessid();", NULL, 0);
+        u_sess->SPI_cxt.autonomous_session->current_attach_sessionid = res.ResTup;
     } else {
         if (!u_sess->SPI_cxt.autonomous_session->GetConnStatus() 
             && !u_sess->SPI_cxt.autonomous_session->ReConnSession()) {
@@ -228,6 +251,7 @@ void CreateAutonomousSession(void)
 void DestoryAutonomousSession(bool force)
 {
     if (u_sess->SPI_cxt.autonomous_session && (force || u_sess->SPI_cxt._connected == 0)) {
+        u_sess->SPI_cxt.autonomous_session->ReSetDeadLockTimeOut();
         u_sess->SPI_cxt.autonomous_session->DetachSession();
         AutonomousSession* autonomousSession = u_sess->SPI_cxt.autonomous_session;
         pfree(autonomousSession);
@@ -240,14 +264,16 @@ void DestoryAutonomousSession(bool force)
  * HandleResInfo
  * Process the result returned by the 'select function'.
  */
-Datum HandleResInfo(PGconn* conn, const PGresult* result, TupleDesc resultTupleDesc)
+Datum HandleResInfo(PGconn *conn, const PGresult *result, TupleDesc resultTupleDesc, bool is_plpgsql_func_with_outparam,
+                    bool *resisnull)
 {
     Oid typeInput;
     Oid typeParam;
     int nColumns = PQnfields(result);
     int nRows = PQntuples(result);
     Datum res;
-    if (nColumns > 1 || nRows > 1) {
+    *resisnull = false;
+    if ((nColumns > 1 || nRows > 1) && !is_plpgsql_func_with_outparam) {
         ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), 
             errmsg("Invalid autonomous transaction return datatypes"),
             errdetail("nColumns = %d, nRows = %d", nColumns, nRows),
@@ -255,22 +281,48 @@ Datum HandleResInfo(PGconn* conn, const PGresult* result, TupleDesc resultTupleD
             erraction("Contact Huawei Engineer.")));
     }
 
-    Oid ftype = PQftype(result, 0);
-    char* valueStr = PQgetvalue(result, 0, 0);
+    if (!is_plpgsql_func_with_outparam) {
+        Oid ftype = PQftype(result, 0);
+        char* valueStr = PQgetvalue(result, 0, 0);
 
-    if (resultTupleDesc != NULL) {
-        res = RecordCstringGetDatum(resultTupleDesc, valueStr);
+        if (resultTupleDesc != NULL) {
+            res = RecordCstringGetDatum(resultTupleDesc, valueStr);
+        } else {
+            /* translate data string to Datum */
+            getTypeInputInfo(ftype, &typeInput, &typeParam);
+            if (PQgetisnull(result,0,0)) {
+                res = (Datum)0;
+                *resisnull = true;
+            } else {
+                res = OidInputFunctionCall(typeInput, valueStr, typeParam, -1);
+            }
+        }
     } else {
-        /* translate data string to Datum */
-        getTypeInputInfo(ftype, &typeInput, &typeParam);
-        res = OidInputFunctionCall(typeInput, valueStr, typeParam, -1);
+        Datum *values = (Datum*)palloc(sizeof(Datum) * nColumns);
+        bool *nulls = (bool*)palloc(sizeof(bool) * nColumns);
+
+        for (int i = 0; i < nColumns; i++) {
+            Oid ftype = PQftype(result, i);
+            char* valueStr = PQgetvalue(result, 0, i);
+            getTypeInputInfo(ftype, &typeInput, &typeParam);
+            nulls[i] = PQgetisnull(result,0,i);
+            if (nulls[i]) {
+                values[i] = (Datum)0;
+            } else {
+                values[i] = OidInputFunctionCall(typeInput, valueStr, typeParam, -1);
+            }
+        }
+        HeapTuple rettup = heap_form_tuple(resultTupleDesc, values, nulls);
+        res = PointerGetDatum(SPI_returntuple(rettup, resultTupleDesc));
+        pfree(values);
+        pfree(nulls);
     }
 
     return res;
 }
 
 
-ATResult HandlePGResult(PGconn* conn, PGresult* pgresult, TupleDesc resultTupleDesc)
+ATResult HandlePGResult(PGconn* conn, PGresult* pgresult, TupleDesc resultTupleDesc, bool is_plpgsql_func_with_outparam)
 {
     if (unlikely(conn == NULL || pgresult == NULL)) {
         ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("invalid data \" %s \" in autonomous transactions",
@@ -286,6 +338,7 @@ ATResult HandlePGResult(PGconn* conn, PGresult* pgresult, TupleDesc resultTupleD
             res.result = RES_COMMAND_OK;
             res.withtuple = true;
             res.ResTup = (Datum)0;
+            res.resisnull = true;
             break;
         /*
          * contains a single result tuple from the current command. 
@@ -296,12 +349,13 @@ ATResult HandlePGResult(PGconn* conn, PGresult* pgresult, TupleDesc resultTupleD
             res.result = RES_SINGLE_TUPLE;
             res.withtuple = true;
             res.ResTup = (Datum)0;
+            res.resisnull = true;
             break;
         case PGRES_TUPLES_OK:
             res.result = RES_TUPLES_OK;
             res.withtuple = true;
 
-            res.ResTup = HandleResInfo(conn, pgresult, resultTupleDesc);
+            res.ResTup = HandleResInfo(conn, pgresult, resultTupleDesc, is_plpgsql_func_with_outparam, &res.resisnull);
             break;
 
         /* the string sent to the server was empty */
@@ -497,7 +551,9 @@ PGresult* PQexecAutonm(PGconn* conn, const char* query, int64 automnXid, bool is
         return NULL;
     }
     if (isLockWait) {
+        u_sess->SPI_cxt.autonomous_session->SetDeadLockTimeOut();
         XactLockTableWait(automnXid);
+        u_sess->SPI_cxt.autonomous_session->ReSetDeadLockTimeOut();
         CHECK_FOR_INTERRUPTS();
     }
     return PQexecAutonmFinish(conn);

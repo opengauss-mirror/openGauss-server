@@ -1,7 +1,6 @@
 -------------------------
 -- unsupport procedure --
 -------------------------
---set enable_stream_operator = on;
 ---------------------forall------------------------
 SET CHECK_FUNCTION_BODIES TO ON;
 \! gs_ktool -d all
@@ -54,7 +53,7 @@ CREATE OR REPLACE PROCEDURE INSERT_IMAGE
 )
 AS
 BEGIN
-	INSERT INTO Image VALUES ( id_param, title_param, artist_param, description_param, dataTime_param, xresolution_param, yresolution_param, resolution_unit_param, imageSize_param, alititude_param, latitude_param, longitude_param, imagePath_param);
+	INSERT INTO Image VALUES ( id_param, artist_param, artist_param, description_param, dataTime_param, xresolution_param, yresolution_param, resolution_unit_param, imageSize_param, alititude_param, latitude_param, longitude_param, imagePath_param);
 END;
 /
 CALL INSERT_IMAGE(8, 'img4214196','ZAVIER', 'a river', '2019-11-22 12:45:26', 720, 720, 'px', 1244, 510, 29.75, 105.79, '/DCIM/Camera/img4214196');
@@ -85,9 +84,18 @@ end
 $BODY$
 LANGUAGE plpgsql;
 call select_data();
-ERROR:  structure of query does not match function result type
-DETAIL:  Returned type integer does not match expected type text in column 1.
-CONTEXT:  PL/pgSQL function select_data() line 3 at RETURN QUERY
+ id_param | artist_param 
+----------+--------------
+        1 | IDO
+        2 | IDO
+        3 | ZAVIER
+        4 | AVI
+        5 | AVI
+        6 | ELI
+        7 | ELI
+        8 | ZAVIER
+(8 rows)
+
 DROP PROCEDURE IF EXISTS INSERT_IMAGE;
 DROP PROCEDURE IF EXISTS update_description();
 DROP FUNCTION IF EXISTS select_data();

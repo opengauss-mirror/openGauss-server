@@ -1950,6 +1950,19 @@ static SeqScan* create_seqscan_plan(PlannerInfo* root, Path* best_path, List* tl
 
     copy_path_costsize(&scan_plan->plan, best_path);
 
+    /*
+     * While u_sess->attr.attr_sql.vectorEngineStrategy is OPT_VECTOR_ENGINE, we will use the
+     * tuples number of relation to compute cost to determine using vector engine or not.
+     * Partition table may have pruning, so for patition table using path rows instead of tuples.
+     */
+    if (u_sess->attr.attr_sql.vectorEngineStrategy == OPT_VECTOR_ENGINE &&
+        (best_path->parent->pruning_result == NULL ||
+         best_path->parent->pruning_result->state == PRUNING_RESULT_FULL)) {
+        scan_plan->tableRows = best_path->parent->tuples;
+    } else {
+        scan_plan->tableRows = best_path->rows;
+    }
+
     return scan_plan;
 }
 
@@ -2563,17 +2576,7 @@ static Scan* create_indexscan_plan(
                         continue; /* implied by index predicate */
             }
         }
-        
-        /* 
-         * Add index scan filter condition only when the rinfo is not built by type conversion.
-         * Our system supports some type convertions to match the index type. When this conversion
-         * happened, the rinfo will be deep copied from another rinfo parsed from user's input. To
-         * distinguish them, we mark rinfo->converted = true. Obviously, the rinfo(s) built by conversion
-         * should not be added into qpqual again. (refer to function: ConvertTypeForIdxMatch for conversion process)
-         */
-        if (rinfo->converted == false) {
-            qpqual = lappend(qpqual, rinfo);
-        }
+        qpqual = lappend(qpqual, rinfo);
     }
 
     /* Sort clauses into best execution order */
@@ -4887,6 +4890,7 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
     /* Set dop from path. */
     join_plan->join.plan.dop = best_path->jpath.path.dop;
     hash_plan->plan.dop = best_path->jpath.path.dop;
+    join_plan->joinRows = best_path->joinRows;
 
     join_plan->isSonicHash = u_sess->attr.attr_sql.enable_sonic_hashjoin && isSonicHashJoinEnable(join_plan);
 
@@ -5583,6 +5587,7 @@ static SeqScan* make_seqscan(List* qptlist, List* qpqual, Index scanrelid)
     plan->righttree = NULL;
     plan->isDeltaTable = false;
     node->scanrelid = scanrelid;
+    node->scanBatchMode = false;
 
     return node;
 }
@@ -5985,6 +5990,7 @@ SubqueryScan* make_subqueryscan(List* qptlist, List* qpqual, Index scanrelid, Pl
 
 /*
  * Support partition index unusable.
+ * Hypothetical index does not support partition index unusable.
  *
  */
 Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath)
@@ -5992,7 +5998,7 @@ Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIter
     Plan* plan = NULL;
 
     /* The subpath is index path. */
-    if (is_partitionIndex_Subpath(pIterpath->subPath)) {
+    if (u_sess->attr.attr_sql.enable_hypo_index == false && is_partitionIndex_Subpath(pIterpath->subPath)) {
         Path* index_path = pIterpath->subPath;
 
         /* Get the usable type of the index subpath. */
@@ -6072,6 +6078,12 @@ Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIter
     } else if (is_pwj_path((Path*)pIterpath)) {
         plan = (Plan*)create_partIterator_plan(root, pIterpath, NULL);
     } else { /* Other pathes. */
+        if (u_sess->attr.attr_sql.enable_hypo_index && is_partitionIndex_Subpath(pIterpath->subPath) &&
+            ((IndexPath *)pIterpath->subPath)->indexinfo->hypothetical) {
+            pIterpath->subPath->parent->partItrs_for_index_usable =
+                bms_num_members(pIterpath->subPath->parent->pruning_result->bm_rangeSelectedPartitions);
+            pIterpath->subPath->parent->partItrs_for_index_unusable = 0;
+        }
         GlobalPartIterator* gpIter = (GlobalPartIterator*)palloc(sizeof(GlobalPartIterator));
         gpIter->curItrs = pIterpath->subPath->parent->partItrs;
         gpIter->pruningResult = pIterpath->subPath->parent->pruning_result;
@@ -8871,10 +8883,12 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
         node->updateTlist = upsertClause->updateTlist;
         node->exclRelTlist = upsertClause->exclRelTlist;
         node->exclRelRTIndex = upsertClause->exclRelIndex;
+        node->upsertWhere = upsertClause->upsertWhere;
     } else {
         node->upsertAction = UPSERT_NONE;
         node->updateTlist = NIL;
         node->exclRelTlist = NIL;
+        node->upsertWhere = NULL;
     }
 
 #ifdef STREAMPLAN

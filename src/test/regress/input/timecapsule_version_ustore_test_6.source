@@ -1,15 +1,10 @@
 set enable_default_ustore_table = on;
 
-show vacuum_defer_cleanup_age;
-show version_retention_age;
+show undo_retention_time;
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 900" > /dev/null 2>&1
 select pg_sleep(4);
-show vacuum_defer_cleanup_age;
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
-select pg_sleep(4);
-show version_retention_age;
+show undo_retention_time;
 
 create schema schema_test_ztt2;
 set search_path = schema_test_ztt2;
@@ -731,15 +726,10 @@ drop TABLESPACE new_tablespace_2;
 drop schema schema_test_ztt2;
 reset search_path;
 
-show vacuum_defer_cleanup_age;
 show version_retention_age;
 
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 0" > /dev/null 2>&1
 select pg_sleep(4);
-show vacuum_defer_cleanup_age;
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
-select pg_sleep(4);
-show version_retention_age;
+show undo_retention_time;
 
 set enable_default_ustore_table = off;

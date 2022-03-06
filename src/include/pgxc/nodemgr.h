@@ -44,6 +44,12 @@ typedef struct {
     NodeDefinition* nodesDefinition; /* all data nodes' defination */
 } GlobalNodeDefinition;
 
+typedef struct SkipNodeDefinition {
+    Oid nodeoid;
+    NameData nodename;
+    int slicenum;
+} SkipNodeDefinition;
+
 /* Connection statistics info */
 typedef struct {
     Oid primaryNodeId;         /* original primary nodeid */
@@ -64,6 +70,8 @@ extern Size NodeTablesShmemSize(void);
 
 extern void PgxcNodeListAndCount(void);
 extern void PgxcNodeGetOids(Oid** coOids, Oid** dnOids, int* num_coords, int* num_dns, bool update_preferred);
+extern void PgxcNodeGetOidsForInit(Oid** coOids, Oid** dnOids,
+    int* num_coords, int* num_dns, int * num_primaries, bool update_preferred);
 extern void PgxcNodeGetStandbyOids(Oid** coOids, Oid** dnOids, int* numCoords, int* numDns, bool needInitPGXC);
 extern NodeDefinition* PgxcNodeGetDefinition(Oid node, bool checkStandbyNodes = false);
 extern void PgxcNodeAlter(AlterNodeStmt* stmt);
@@ -98,4 +106,27 @@ extern void dn_info_hash_insert(Oid dn_oid, int row);
 extern void dn_info_hash_delete(Oid dn_oid);
 extern void dn_info_hash_destory();
 
+typedef struct {
+    char host[NAMEDATALEN];
+    int port;
+} DisasterAddr;
+
+typedef struct {
+    int slice;
+    int port;
+    char host[NAMEDATALEN];
+    char host1[NAMEDATALEN];
+    char node_name[NAMEDATALEN];
+} DisasterNode;
+
+typedef struct {
+    List* addrs;
+    DisasterNode* disaster_info;
+    int num_cn;
+    int num_dn;
+    int num_one_slice;
+} DisasterReadContext;
+
+extern void UpdateConsistencyPoint();
+extern void UpdateCacheAndConsistencyPoint(DisasterReadContext* drContext);
 #endif /* NODEMGR_H */

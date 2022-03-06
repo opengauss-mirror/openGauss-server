@@ -75,7 +75,7 @@ void clean_empty_conn_4cl(PGconn *conn)
     }
     libpq_free(conn->dbName);
     if (conn->client_logic != NULL) {
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS) && (!defined(ENABLE_LITE_MODE))))
         free_kms_cache(conn->client_logic->client_cache_id);
 #endif
         delete conn->client_logic;
@@ -148,7 +148,7 @@ bool ClientLogicJNI::set_kms_info(const char *key, const char *value)
         return false; /* should never happen */
     }
 
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS) && (!defined(ENABLE_LITE_MODE))))
     CmkemErrCode ret = CMKEM_SUCCEED;
     ret = set_kms_cache_auth_info(m_stub_conn->client_logic->client_cache_id, key, value);
     if (ret != CMKEM_SUCCEED) {
@@ -290,14 +290,15 @@ const int* ClientLogicJNI::get_record_data_oids(int oid, const char *column_name
 }
 
 bool ClientLogicJNI::process_record_data(const char *data_2_process, const int *original_oids,
-    unsigned char **proccessed_data, bool *is_client_logic, size_t &length_output, DriverError *status)
+                                         size_t original_oids_length, unsigned char **proccessed_data,
+                                         bool *is_client_logic, size_t &length_output, DriverError *status)
 {
     if (status == NULL || data_2_process == NULL || proccessed_data == NULL) {
         return false;
     }
     size_t converted_len = strlen(data_2_process);
-    if (!RecordProcessor::DeProcessRecord(m_stub_conn, data_2_process, converted_len, original_oids, 0,
-        proccessed_data, length_output, is_client_logic)) {
+    if (!RecordProcessor::DeProcessRecord(m_stub_conn, data_2_process, converted_len, original_oids,
+                                          original_oids_length, 0, proccessed_data, length_output, is_client_logic)) {
         status->set_error(JNI_SYSTEM_ERROR_CODES::CLIENT_LOGIC_FAILED);
         return false;
     }
@@ -310,10 +311,11 @@ bool ClientLogicJNI::process_record_data(const char *data_2_process, const int *
 /*
  * runs the post query client logic function to clean its state machine
  * @param status
+ * @param statement_name when issued for prepared statement contains the statement name, otherwise an empty string
  * @param[out] status error information if any
  * @return true on success or false on failure
  */
-bool ClientLogicJNI::run_post_query(DriverError *status)
+bool ClientLogicJNI::run_post_query(const char *statement_name,  DriverError *status)
 {
     if (status == NULL) {
         return false;
@@ -324,6 +326,11 @@ bool ClientLogicJNI::run_post_query(DriverError *status)
         return false;
     }
     m_stub_conn->client_logic->m_lastResultStatus = PGRES_COMMAND_OK;
+    if (strlen(statement_name) > 0) {
+        check_strncpy_s(strncpy_s(m_stub_conn->client_logic->lastStmtName, NAMEDATALEN, statement_name,
+            strlen(statement_name)));
+    }
+
     Processor::run_post_query(m_stub_conn);
     m_post_query_needed = false;
     return true;
@@ -362,8 +369,9 @@ bool ClientLogicJNI::preare_statement(const char *query, const char *statement_n
     }
     // run_post_query is required here to make replace parameters work
     m_stub_conn->client_logic->m_lastResultStatus = PGRES_COMMAND_OK;
+    m_stub_conn->queryclass = PGQUERY_PREPARE;
     Processor::run_post_query(m_stub_conn);
-    m_post_query_needed = false;
+    m_stub_conn->queryclass = PGQUERY_SIMPLE; // Setting it back to PGQUERY_SIMPLE as the default
     return true;
 }
 /*
@@ -616,4 +624,14 @@ void ClientLogicJNI::clear_current_query()
 void ClientLogicJNI::set_jni_env_and_cl_impl(JNIEnv *env, jobject jni_cl_impl)
 {
     m_stub_conn->client_logic->m_data_fetcher_manager->set_jni_env_and_cl_impl(env, jni_cl_impl);
+}
+
+/**
+ * Reloads the client logic cache, called when there is an error related to missing client logic cache
+ */
+void ClientLogicJNI::reload_cache() const
+{
+    JNI_LOG_DEBUG("in reload_cache");
+    m_stub_conn->client_logic->cacheRefreshType = CacheRefreshType::CACHE_ALL;
+    m_stub_conn->client_logic->m_cached_column_manager->load_cache(m_stub_conn); // Load the cache
 }

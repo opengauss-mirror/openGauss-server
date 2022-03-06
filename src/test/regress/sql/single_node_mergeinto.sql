@@ -246,6 +246,71 @@ delete from dtt where a = 5; -- now dtt: (1,1),(2,2)  fkt:(1,1)
 merge into fkt using dtt on (dtt.a=fkt.a) when matched then update set fkt.b = 3 when not matched then insert values(dtt.a, dtt.b);
 select * from fkt;
 
+-- test for merge with where clauses
+create table explain_t1 (a int, b int);
+create table explain_t2 (f1 int, f2 int);
+explain (verbose on, costs off) merge into explain_t1
+    using explain_t2 tt2 on explain_t1.a = tt2.f1
+when not matched then
+    insert values(1,3) where tt2.f1 = 1;
+
+explain (verbose on, costs off) merge into explain_t1
+    using explain_t2 tt2 on explain_t1.a = tt2.f1
+when matched then
+    update set b = 10 where explain_t1.a = 1;
+
+explain (verbose on, costs off) merge into explain_t1
+    using explain_t2 tt2 on explain_t1.a = tt2.f1
+when matched then
+    update set b = 10 where explain_t1.a = 1
+when not matched then
+    insert values(1,3) where tt2.f1 = 1;
+
+explain (verbose on, costs off) merge into explain_t1
+    using explain_t2 tt2 on explain_t1.a = tt2.f1
+when matched then
+    update set b = 10 where tt2.f2 = 1;
+
+-- duplicate alias on source table
+explain (verbose on, costs off) merge into explain_t2 t2 using (
+  select
+    t1.a,
+    t1.b,
+    t1.a aa,
+    t1.b bb
+  from
+    explain_t1 t1
+) tmp on (t2.f1 = tmp.b)
+when matched THEN
+    update
+    set
+      t2.f2 = tmp.aa
+    where
+      t2.f1 = tmp.bb;
+
+explain (verbose on, costs off) merge /*+ leading((t2 t1)) */ into explain_t2 t2 using (
+  select
+    t1.a,
+    t1.b,
+    t1.a aa,
+    t1.b bb
+  from
+    explain_t1 t1
+) tmp on (t2.f1 = tmp.b)
+when not matched THEN
+  insert values(1,3) where tmp.bb = 1;
+
+explain (verbose on, costs off) merge /*+ leading((t1 t2)) */ into explain_t2 t2 using (
+  select
+    t1.a,
+    t1.b,
+    t1.a aa,
+    t1.b bb
+  from
+    explain_t1 t1
+) tmp on (t2.f1 = tmp.b)
+when not matched THEN
+  insert values(1,3) where tmp.bb = 1;
 
 ------------------------------------------------
 -- clean up

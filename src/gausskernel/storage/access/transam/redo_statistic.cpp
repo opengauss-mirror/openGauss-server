@@ -186,12 +186,17 @@ char *redo_get_name_by_wait_type(uint32 type)
     }
 }
 
+static inline uint32 MinNumber(uint32 a, uint32 b)
+{
+    return (b < a ? b : a);
+}
+
 void redo_get_worker_info_text(char *info, uint32 max_info_len)
 {
     RedoWorkerStatsData worker[MAX_RECOVERY_THREAD_NUM] = {0};
     uint32 worker_num = 0;
     errno_t errorno = EOK;
-    GetRedoWrokerStatistic(&worker_num, worker, MAX_RECOVERY_THREAD_NUM);
+    GetRedoWrokerStatistic(&worker_num, worker, MinNumber((uint32)MAX_RECOVERY_THREAD_NUM, max_info_len));
 
     if (worker_num == 0) {
         errorno = snprintf_s(info, max_info_len, max_info_len - 1, "%-16s", "no redo worker");

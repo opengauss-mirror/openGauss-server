@@ -228,6 +228,31 @@ static void xact_desc_abort(StringInfo buf, xl_xact_abort *xlrec, bool abortXlog
     }
 }
 
+const char *xact_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_XACT_COMMIT_COMPACT) {
+        return "commit_compact";
+    } else if (info == XLOG_XACT_COMMIT) {
+        return "commit";
+    } else if (info == XLOG_XACT_ABORT) {
+        return "abort";
+    } else if (info == XLOG_XACT_ABORT_WITH_XID) {
+        return "abort_with_xid";
+    } else if (info == XLOG_XACT_PREPARE) {
+        return "prepare";
+    } else if (info == XLOG_XACT_COMMIT_PREPARED) {
+        return "commit_prepared";
+    } else if (info == XLOG_XACT_ABORT_PREPARED) {
+        return "abort_prepared";
+    } else if (info == XLOG_XACT_ASSIGNMENT) {
+        return "assignment";
+    } else {
+        return "unkown_type";
+    }
+}
+
+
 void xact_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

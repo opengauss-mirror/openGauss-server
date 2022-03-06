@@ -1,0 +1,95 @@
+CREATE TABLE moons(
+    id BIGSERIAL,
+    cls SMALLINT,
+	x REAL,
+	y REAL
+);
+NOTICE:  CREATE TABLE will create implicit sequence "moons_id_seq" for serial column "moons.id"
+\copy moons(cls, x, y) FROM '@abs_srcdir@/data/moons.csv' DELIMITER ',';
+SELECT COUNT(*) FROM moons;
+ count 
+-------
+   200
+(1 row)
+
+-- linear, expected accuracy = 0.890
+CREATE MODEL moons_linear USING svm_classification
+       FEATURES x, y TARGET cls
+       FROM moons
+	   WITH seed=54, batch_size=8, decay=1e-20,
+            learning_rate=0.01215337, lambda=920.90725960,
+			tolerance=0.06377824, max_iterations=2;
+-- gaussian, expected accuracy = 0.935
+CREATE MODEL moons_gaussian USING svm_classification
+       FEATURES x, y TARGET cls
+       FROM moons
+	   WITH seed=1, batch_size=4, decay=0.80858937,
+            learning_rate=0.16556385, lambda=274.28986109,
+			tolerance=0.00714786, max_iterations=33,
+			kernel='gaussian', gamma=0.96736585;
+-- polynomial, expected accuracy = 1.000
+CREATE MODEL moons_polynomial USING svm_classification
+       FEATURES x, y TARGET cls
+       FROM moons
+	   WITH seed=1, batch_size=2, decay=0.87908244,
+            learning_rate=0.40456318, lambda=53.75794302,
+			tolerance=0.00003070, max_iterations=35,
+			kernel='polynomial', degree=4, coef0=1.11311435;
+-- display the three models
+SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, weight,
+       hyperparametersnames, hyperparametersoids, hyperparametersvalues,
+       trainingscoresname, trainingscoresvalue, length(modeldata) as model_data_len
+  FROM gs_model_warehouse
+  WHERE modelname LIKE 'moons%'
+  ORDER BY modelname;
+    modelname     | processedtuples | discardedtuples | iterations | outputtype |     modeltype      |                                  query                                   | weight |                                                           hyperparametersnames                                                           |                   hyperparametersoids                    |                                   hyperparametersvalues                                   |         trainingscoresname          |        trainingscoresvalue         | model_data_len 
+------------------+-----------------+-----------------+------------+------------+--------------------+--------------------------------------------------------------------------+--------+------------------------------------------------------------------------------------------------------------------------------------------+----------------------------------------------------------+-------------------------------------------------------------------------------------------+-------------------------------------+------------------------------------+----------------
+ moons_gaussian   |             200 |               0 |         32 |         21 | svm_classification | CREATE MODEL moons_gaussian USING svm_classification                    +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose,lambda,kernel,components,gamma,degree,coef0} | {23,701,701,23,23,1043,701,23,16,701,1043,23,701,23,701} | {4,.80858937,.16556385,33,0,gd,.00714786,1,false,274.28986109,gaussian,0,.96736585,2,1}   | {accuracy,f1,precision,recall,loss} | {.935,.934673,.939394,.93,7.73244} |           2396
+                  |                 |                 |            |            |                    |        FEATURES x, y TARGET cls                                         +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |        FROM moons                                                       +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |            WITH seed=1, batch_size=4, decay=0.80858937,                 +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |             learning_rate=0.16556385, lambda=274.28986109,              +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |                         tolerance=0.00714786, max_iterations=33,        +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |                         kernel='gaussian', gamma=0.96736585;             |        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+ moons_linear     |             200 |               0 |          1 |         21 | svm_classification | CREATE MODEL moons_linear USING svm_classification                      +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose,lambda,kernel,components,gamma,degree,coef0} | {23,701,701,23,23,1043,701,23,16,701,1043,23,701,23,701} | {8,1e-20,.01215337,2,0,gd,.06377824,54,false,920.9072596,linear,0,.5,2,1}                 | {accuracy,f1,precision,recall,loss} | {.89,.888889,.897959,.88,10.6976}  |            380
+                  |                 |                 |            |            |                    |        FEATURES x, y TARGET cls                                         +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |        FROM moons                                                       +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |            WITH seed=54, batch_size=8, decay=1e-20,                     +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |             learning_rate=0.01215337, lambda=920.90725960,              +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |                         tolerance=0.06377824, max_iterations=2;          |        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+ moons_polynomial |             200 |               0 |         35 |         21 | svm_classification | CREATE MODEL moons_polynomial USING svm_classification                  +|        | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose,lambda,kernel,components,gamma,degree,coef0} | {23,701,701,23,23,1043,701,23,16,701,1043,23,701,23,701} | {2,.87908244,.40456318,35,0,gd,3.07e-05,1,false,53.75794302,polynomial,0,.5,4,1.11311435} | {accuracy,f1,precision,recall,loss} | {1,1,1,1,.489574}                  |           2396
+                  |                 |                 |            |            |                    |        FEATURES x, y TARGET cls                                         +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |        FROM moons                                                       +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |            WITH seed=1, batch_size=2, decay=0.87908244,                 +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |             learning_rate=0.40456318, lambda=53.75794302,               +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |                         tolerance=0.00003070, max_iterations=35,        +|        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+                  |                 |                 |            |            |                    |                         kernel='polynomial', degree=4, coef0=1.11311435; |        |                                                                                                                                          |                                                          |                                                                                           |                                     |                                    | 
+(3 rows)
+
+-- validate the modes by predicting all at the same time, expected [0.89, 0.935, 1.0]
+SELECT (SUM(CASE WHEN t=p1 THEN 1 ELSE 0 END) / (SELECT COUNT(*) FROM moons)) AS acc_lin,
+       (SUM(CASE WHEN t=p2 THEN 1 ELSE 0 END) / (SELECT COUNT(*) FROM moons)) AS acc_gauss,
+       (SUM(CASE WHEN t=p3 THEN 1 ELSE 0 END) / (SELECT COUNT(*) FROM moons)) AS acc_poly
+ FROM (SELECT cls AS t,
+	PREDICT BY moons_linear (FEATURES x, y) AS p1,
+	PREDICT BY moons_gaussian (FEATURES x, y) AS p2,
+	PREDICT BY moons_polynomial (FEATURES x, y) AS p3
+	FROM moons
+);
+ acc_lin | acc_gauss | acc_poly 
+---------+-----------+----------
+     .89 |      .935 |        1
+(1 row)
+
+-- cleanup models
+DROP MODEL moons_linear;
+DROP MODEL moons_gaussian;
+DROP MODEL moons_polynomial;
+-- cleanup tables
+DROP TABLE IF EXISTS moons;
+SELECT 'DB4AI SVM KERNELS TEST COMPLETED';
+             ?column?             
+----------------------------------
+ DB4AI SVM KERNELS TEST COMPLETED
+(1 row)
+

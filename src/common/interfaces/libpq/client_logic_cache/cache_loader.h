@@ -167,7 +167,6 @@ private:
                                     tables from the server */
     DatabaseType m_compat_type; /* server SQL compatibility */
     NameData m_current_database_name;
-
     double m_change_epoch = 0; /* time stamp of the latest client logic configuration fetched from the server */
     void update_last_change_epoch(const char *time_since_epoc);
     double get_local_max_time_stamp() const;
@@ -175,6 +174,7 @@ private:
 
 private:
     static const int m_FQDN_MAX_SIZE = NAMEDATALEN * 4;
+    static const int NUMBER_BASE = 10;
 };
 
 #endif /* CACHE_LOADER_H */

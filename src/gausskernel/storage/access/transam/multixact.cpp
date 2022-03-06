@@ -581,7 +581,7 @@ MultiXactId ReadNextMultiXactId(void)
  * Note that in case we return false, the number of remaining members is
  * not to be trusted.
  */
-bool DoMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining, bool nowait)
+bool DoMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining, bool nowait, int waitSec)
 {
     bool result = true;
     MultiXactMember *members = NULL;
@@ -615,7 +615,7 @@ bool DoMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining
                 break;
             }
         } else {
-            XactLockTableWait(memxid, true);
+            XactLockTableWait(memxid, true, waitSec);
         }
     }
 
@@ -637,9 +637,9 @@ bool DoMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining
  * We return (in *remaining, if not NULL) the number of members that are still
  * running, including any (non-aborted) subtransactions of our own transaction.
  */
-void MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
+void MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining, int waitSec)
 {
-    DoMultiXactIdWait(multi, status, remaining, false);
+    DoMultiXactIdWait(multi, status, remaining, false, waitSec);
 }
 
 /*
@@ -2095,8 +2095,8 @@ XLogRecParseState *multixact_xlog_ddl_parse_to_block(XLogReaderState *record, ui
     }
     filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
     XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
-    XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype, false,
-                            (char *)XLogRecGetData(record));
+    XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype,
+        (char *)XLogRecGetData(record));
     return recordstatehead;
 }
 XLogRecParseState *multixact_xlog_offset_parse_to_block(XLogReaderState *record, uint32 *blocknum)

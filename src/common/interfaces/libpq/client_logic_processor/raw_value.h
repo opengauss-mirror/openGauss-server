@@ -80,7 +80,6 @@ public:
 
     /* the connection object */
     PGconn *m_conn;
-
 private:
     void free_processed_data();
     int ref_count;

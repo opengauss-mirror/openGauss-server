@@ -10,12 +10,24 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-UPDATE [/*+ plan_hint */] [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+UPDATE [/*+ plan_hint */] [ ONLY ] table_name [ partition_clause ] [ * ] [ [ AS ] alias ]
     SET {column_name = { expression | DEFAULT } |
           ( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }
           }[, ...]
     [ FROM from_list] [ WHERE condition ]
     [ RETURNING {* | {output_expression [ [ AS ] output_name ]} [, ...] }];
+
+where sub_query can be:
+SELECT [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
+{ * | {expression [ [ AS ] output_name ]} [, ...] }
+[ FROM from_item [, ...] ]
+[ WHERE condition ]
+[ GROUP BY grouping_element [, ...] ]
+[ HAVING condition [, ...] ]
+where partition_clause can be:
+PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } |
+SUBPARTITION { ( subpartition_name ) | FOR ( subpartition_value [, ...] ) }
+NOTICE: 'partition_clause' is only avaliable in CENTRALIZED mode!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

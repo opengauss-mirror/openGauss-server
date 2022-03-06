@@ -44,7 +44,14 @@ extern HANDLE sysauditPipe[2];
 #endif
 
 extern ThreadId pgaudit_start(void);
+extern void pgaudit_start_all(void);
+extern void pgaudit_stop_all(void);
 extern void allow_immediate_pgaudit_restart(void);
+
+// multi-thread audit
+extern void audit_process_cxt_init(void);
+extern void audit_process_cxt_exit();
+extern int audit_load_thread_index(void);
 
 #ifdef EXEC_BACKEND
 extern void PgAuditorMain();
@@ -98,8 +105,13 @@ typedef enum {
     AUDIT_POLICY_EVENT,
     MASKING_POLICY_EVENT,
 	SECURITY_EVENT,
-	AUDIT_DDL_SEQUENCE,   
-    AUDIT_DDL_KEY           // ddl_sequence in struct AuditTypeDescs
+	AUDIT_DDL_SEQUENCE,           // ddl_sequence in struct AuditTypeDescs   
+    AUDIT_DDL_KEY,
+    AUDIT_DDL_PACKAGE,
+    AUDIT_DDL_MODEL,
+    AUDIT_DDL_GLOBALCONFIG,
+    AUDIT_DDL_PUBLICATION_SUBSCRIPTION,
+    AUDIT_DDL_FOREIGN_DATA_WRAPPER
 } AuditType;
 
 /* keep the same sequence with parameter audit_system_object */
@@ -124,19 +136,55 @@ typedef enum {
     DDL_DIRECTORY,
     DDL_SYNONYM,
     DDL_SEQUENCE,
-    DDL_KEY
+    DDL_KEY,
+    DDL_PACKAGE,
+    DDL_MODEL,
+    DDL_PUBLICATION_SUBSCRIPTION,
+    DDL_GLOBALCONFIG,
+    DDL_FOREIGN_DATA_WRAPPER
 } DDLType;
 
+/*
+ * Brief        : the string field number in audit record
+ * Description    :
+ */
+typedef enum {
+    AUDIT_USER_ID = 0,
+    AUDIT_USER_NAME,
+    AUDIT_DATABASE_NAME,
+    AUDIT_CLIENT_CONNINFO,
+    AUDIT_OBJECT_NAME,
+    AUDIT_DETAIL_INFO,
+    AUDIT_NODENAME_INFO,
+    AUDIT_THREADID_INFO,
+    AUDIT_LOCALPORT_INFO,
+    AUDIT_REMOTEPORT_INFO
+} AuditStringFieldNum;
+
+struct AuditElasticEvent {
+    const char* aDataType;
+    const char* aDataResult;
+    const char* auditUserId;
+    const char* auditUserName;
+    const char* auditDatabaseName;
+    const char* clientConnInfo;
+    const char* objectName;
+    const char* detailInfo;
+    const char* nodeNameInfo;
+    const char* threadIdInfo;
+    const char* localPortInfo;
+    const char* remotePortInfo;
+    long long   eventTime;
+};
+
 typedef enum { AUDIT_UNKNOWN = 0, AUDIT_OK, AUDIT_FAILED } AuditResult;
-
 typedef enum { AUDIT_FUNC_QUERY = 0, AUDIT_FUNC_DELETE } AuditFuncType;
-
 typedef enum { STD_AUDIT_TYPE = 0, UNIFIED_AUDIT_TYPE } AuditClassType;
+
 extern void audit_report(AuditType type, AuditResult result, const char* object_name, const char* detail_info, AuditClassType ctype = STD_AUDIT_TYPE);
-
 extern Datum pg_query_audit(PG_FUNCTION_ARGS);
-
 extern Datum pg_delete_audit(PG_FUNCTION_ARGS);
+extern bool pg_auditor_thread(ThreadId pid);
 
 /* define a macro about the return value of security function */
 #define check_intval(errno, express, retval, file, line) \

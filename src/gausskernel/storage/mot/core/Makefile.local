@@ -158,7 +158,7 @@ DEPS := $(OBJS:.o=.d)
 ifeq ($(UNDERPG), yes)
 	ifeq ($(SECURE), yes)	
 		CFLAGS += -DMOT_SECURE
-		LDFLAGS += -L$(LIBOBS_LIB_PATH) -lsecurec
+		LDFLAGS += -L$(LIBOBS_LIB_PATH) -l$(SECURE_C_CHECK)
 	endif
 endif
 

@@ -817,6 +817,30 @@ static void SnapBuildPurgeCommittedTxn(SnapBuild *builder)
 }
 
 /*
+ * SnapBuild handle commtted transaction.
+ */
+static void SnapBuildChange(bool forced_timetravel, bool *top_needs_timetravel, bool sub_needs_timetravel,
+    SnapBuild *builder, TransactionId xid)
+{
+    if (forced_timetravel) {
+        if (!RecoveryInProgress()) {
+            ereport(DEBUG1, (errmsg("forced transaction %lu to do timetravel.", xid)));
+        }
+        SnapBuildAddCommittedTxn(builder, xid);
+    } else if (ReorderBufferXidHasCatalogChanges(builder->reorder, xid)) {
+        /* add toplevel transaction to base snapshot */
+        if (!RecoveryInProgress()) {
+            ereport(DEBUG2, (errmsg("found top level transaction %lu, with catalog changes!", xid)));
+        }
+        *top_needs_timetravel = true;
+        SnapBuildAddCommittedTxn(builder, xid);
+    } else if (sub_needs_timetravel) {
+        /* mark toplevel txn as timetravel as well */
+        SnapBuildAddCommittedTxn(builder, xid);
+    }
+}
+
+/*
  * Handle everything that needs to be done when a transaction commits
  */
 void SnapBuildCommitTxn(SnapBuild *builder, XLogRecPtr lsn, TransactionId xid, int nsubxacts, TransactionId *subxacts)
@@ -880,22 +904,7 @@ void SnapBuildCommitTxn(SnapBuild *builder, XLogRecPtr lsn, TransactionId xid, i
         }
     }
 
-    if (forced_timetravel) {
-        if (!RecoveryInProgress()) {
-            ereport(DEBUG1, (errmsg("forced transaction %lu to do timetravel.", xid)));
-        }
-        SnapBuildAddCommittedTxn(builder, xid);
-    } else if (ReorderBufferXidHasCatalogChanges(builder->reorder, xid)) {
-        /* add toplevel transaction to base snapshot */
-        if (!RecoveryInProgress()) {
-            ereport(DEBUG2, (errmsg("found top level transaction %lu, with catalog changes!", xid)));
-        }
-        top_needs_timetravel = true;
-        SnapBuildAddCommittedTxn(builder, xid);
-    } else if (sub_needs_timetravel) {
-        /* mark toplevel txn as timetravel as well */
-        SnapBuildAddCommittedTxn(builder, xid);
-    }
+    SnapBuildChange(forced_timetravel, &top_needs_timetravel, sub_needs_timetravel, builder, xid);
 
     /* if there's any reason to build a historic snapshot, to so now */
     if (forced_timetravel || top_needs_timetravel || sub_needs_timetravel) {
@@ -1478,6 +1487,20 @@ out:
     ReorderBufferSetRestartPoint(builder->reorder, builder->last_serialized_snapshot);
 }
 
+static void CheckDiskFile(SnapBuildOnDisk* ondisk, char* path, size_t pathLen)
+{
+    if (ondisk->magic != SNAPBUILD_MAGIC) {
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("snapbuild state file \"%s\" has wrong magic %u instead of %d", path, ondisk->magic,
+                               SNAPBUILD_MAGIC)));
+    }
+
+    if (ondisk->version != SNAPBUILD_VERSION) {
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("snapbuild state file \"%s\" has unsupported version %u instead of %d", path,
+                               ondisk->version, SNAPBUILD_VERSION)));
+    }
+}
 /*
  * Restore a snapshot into 'builder' if previously one has been stored at the
  * location indicated by 'lsn'. Returns true if successful, false otherwise.
@@ -1524,17 +1547,7 @@ static bool SnapBuildRestore(SnapBuild *builder, XLogRecPtr lsn)
                                                           readBytes, SnapBuildOnDiskConstantSize)));
     }
 
-    if (ondisk.magic != SNAPBUILD_MAGIC) {
-        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                        errmsg("snapbuild state file \"%s\" has wrong magic %u instead of %d", path, ondisk.magic,
-                               SNAPBUILD_MAGIC)));
-    }
-
-    if (ondisk.version != SNAPBUILD_VERSION) {
-        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                        errmsg("snapbuild state file \"%s\" has unsupported version %u instead of %d", path,
-                               ondisk.version, SNAPBUILD_VERSION)));
-    }
+    CheckDiskFile(&ondisk, path, strlen(path));
 
     INIT_CRC32(checksum);
     COMP_CRC32(checksum, ((char *)&ondisk) + SnapBuildOnDiskNotChecksummedSize,
@@ -1651,6 +1664,35 @@ snapshot_not_interesting:
     return false;
 }
 
+static DIR *CheckSnapDir(const char *basedirpath, const char *snsdirpath)
+{
+    DIR *snap_dir = AllocateDir(snsdirpath);
+    if (!(snap_dir == NULL && errno == ENOENT)) {
+        return snap_dir;
+    }
+    
+    /* create dir if not exist */
+    if (mkdir(snsdirpath, S_IRWXU) < 0) {
+        if (errno == ENOENT) {
+            /* create parent dir first if not exist */
+            if (mkdir(basedirpath, S_IRWXU) < 0) {
+                ereport(ERROR,
+                    (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", basedirpath)));
+            }
+            /* and then create the sub dir */
+            if (mkdir(snsdirpath, S_IRWXU) < 0) {
+                ereport(ERROR,
+                    (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", snsdirpath)));
+            }
+        } else {
+            /* Failure other than not exists */
+            ereport(ERROR,
+                (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", snsdirpath)));
+        }
+    }
+    snap_dir = AllocateDir(snsdirpath);
+    return snap_dir;
+}
 /*
  * Remove all serialized snapshots that are not required anymore because no
  * slot can need them. This doesn't actually have to run during a checkpoint,
@@ -1682,29 +1724,7 @@ void CheckPointSnapBuild(void)
         cutoff = redo;
     }
 
-    snap_dir = AllocateDir(snsdirpath);
-    if (snap_dir == NULL && errno == ENOENT) {
-        /* create dir if not exist */
-        if (mkdir(snsdirpath, S_IRWXU) < 0) {
-            if (errno == ENOENT) {
-                /* create parent dir first if not exist */
-                if (mkdir(basedirpath, S_IRWXU) < 0) {
-                    ereport(ERROR,
-                            (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", basedirpath)));
-                }
-                /* and then create the sub dir */
-                if (mkdir(snsdirpath, S_IRWXU) < 0) {
-                    ereport(ERROR,
-                            (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", snsdirpath)));
-                }
-            } else {
-                /* Failure other than not exists */
-                ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", snsdirpath)));
-            }
-        }
-        snap_dir = AllocateDir(snsdirpath);
-    }
+    snap_dir = CheckSnapDir(basedirpath, snsdirpath);
     while ((snap_de = ReadDir(snap_dir, snsdirpath)) != NULL) {
         uint32 hi;
         uint32 lo;

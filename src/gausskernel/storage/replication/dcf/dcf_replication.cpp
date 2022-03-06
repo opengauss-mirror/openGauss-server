@@ -31,9 +31,11 @@
 #include <signal.h>
 #include <string>
 #include "storage/shmem.h"
+#include "replication/dcf_flowcontrol.h"
 #include "replication/dcf_replication.h"
 #include "replication/walreceiver.h"
 #include "utils/timestamp.h"
+#include "utils/guc.h"
 #include "storage/copydir.h"
 #include "postmaster/postmaster.h"
 #include "port/pg_crc32c.h"
@@ -46,18 +48,18 @@
 #endif
 
 #define TEMP_CONF_FILE "postgresql.conf.bak"
-#define CONFIG_BAK_FILENAME "postgresql.conf.bak"
 
-/* Statistics for log control */
-static const int MICROSECONDS_PER_SECONDS = 1000000;
-static const int MILLISECONDS_PER_SECONDS = 1000;
-static const int MILLISECONDS_PER_MICROSECONDS = 1000;
-static const int INIT_CONTROL_REPLY = 3;
-static const int MAX_CONTROL_REPLY = 10;
-static const int SLEEP_MORE = 200;
-static const int SLEEP_LESS = 200;
-static const int SHIFT_SPEED = 3;
 
+bool IsDCFReadyOrDisabled(void)
+{
+    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+        if (!t_thrd.dcf_cxt.dcfCtxInfo->isDcfStarted) {
+            ereport(DEBUG1, (errmodule(MOD_DCF), errmsg("DCF thread has not been started.")));
+        }
+        return t_thrd.dcf_cxt.dcfCtxInfo->isDcfStarted;
+    }
+    return true;
+}
 /* The dcf interfaces */
 bool DCFSendMsg(uint32 streamID, uint32 destNodeID, const char* msg, uint32 msgSize)
 {
@@ -76,13 +78,14 @@ static bool SetDCFReplyMsgIfNeed()
     XLogRecPtr receivePtr = InvalidXLogRecPtr;
     XLogRecPtr writePtr = InvalidXLogRecPtr;
     XLogRecPtr flushPtr = InvalidXLogRecPtr;
+    XLogRecPtr applyPtr = InvalidXLogRecPtr;
     XLogRecPtr replayReadPtr = InvalidXLogRecPtr;
     int rc = 0;
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     volatile DcfContextInfo *dcfCtx = t_thrd.dcf_cxt.dcfCtxInfo;
     XLogRecPtr sndFlushPtr;
-
+    applyPtr = GetXLogReplayRecPtr(nullptr, &replayReadPtr);
     SpinLockAcquire(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
     receivePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->receivePtr;
     writePtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->writePtr;
@@ -121,7 +124,7 @@ static bool SetDCFReplyMsgIfNeed()
     dcfCtx->dcf_reply_message->receive = receivePtr;
     dcfCtx->dcf_reply_message->write = writePtr;
     dcfCtx->dcf_reply_message->flush = flushPtr;
-    dcfCtx->dcf_reply_message->apply = GetXLogReplayRecPtr(nullptr, &replayReadPtr);
+    dcfCtx->dcf_reply_message->apply = applyPtr;
     dcfCtx->dcf_reply_message->applyRead = replayReadPtr;
     dcfCtx->dcf_reply_message->sendTime = now;
     dcfCtx->dcf_reply_message->replyRequested = false;
@@ -417,6 +420,13 @@ void InitDcfSSL()
 
     dcf_guc_param = u_sess->attr.attr_security.ssl_cert_notify_time;
     SetDcfParam("SSL_CERT_NOTIFY_TIME", std::to_string(dcf_guc_param).c_str());
+
+    /* set dcf ssl_cipher to TLS1.2 */
+    SetDcfParam("SSL_CIPHER",
+        "ECDHE-ECDSA-AES256-GCM-SHA384:"
+        "ECDHE-ECDSA-AES128-GCM-SHA256:"
+        "ECDHE-RSA-AES256-GCM-SHA384:"
+        "ECDHE-RSA-AES128-GCM-SHA256:");
 }
 
 bool SetDcfParams()
@@ -528,359 +538,6 @@ bool SetDcfParams()
     dcf_guc_param = g_instance.attr.attr_storage.dcf_attr.dcf_mec_batch_size;
     SetDcfParam("MEC_BATCH_SIZE", std::to_string(dcf_guc_param).c_str());
     return true;
-}
-
-inline static void SetNodeInfo(int nodeIndex, uint32 nodeID, DCFStandbyReplyMessage reply)
-{
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].nodeID = nodeID;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].isMember = true;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].isActive = true;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].receive = reply.receive;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].write = reply.write;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].flush = reply.flush;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].apply = reply.apply;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].peer_role = reply.peer_role;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].peer_state = reply.peer_state;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].sendTime = reply.sendTime;
-}
-
-bool SetNodeInfoByNodeID(uint32 nodeID, DCFStandbyReplyMessage reply, int *nodeIndex)
-{
-    *nodeIndex = -1;
-    DCFStandbyInfo nodeInfo;
-    /* Find if the src_node_id has added to nodes info */
-    for (int i = 0; i < DCF_MAX_NODES; i++) {
-        nodeInfo = t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[i];
-        if (nodeInfo.nodeID == nodeID) {
-            *nodeIndex = i;
-            break;
-        }
-    }
-    if (*nodeIndex == -1) {
-        for (int i = 0; i < DCF_MAX_NODES; i++) {
-            nodeInfo = t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[i];
-            if (!nodeInfo.isMember) {
-                *nodeIndex = i;
-                break;
-            }
-        }
-    }
-    if (*nodeIndex == -1) {
-        ereport(WARNING,
-            (errmsg("Can't add the node info with node id %u for no space in dcf nodes info array", nodeID)));
-        return false;
-    }
-    SetNodeInfo(*nodeIndex, nodeID, reply);
-    return true;
-}
-
-bool IsForceUpdate(TimestampTz preSendTime, TimestampTz curSendTime)
-{
-    long secToTime;
-    int microsecToTime;
-    long millisecTimeDiff = 0;
-    TimestampDifference(preSendTime,
-        curSendTime, &secToTime, &microsecToTime);
-    millisecTimeDiff = secToTime * MILLISECONDS_PER_SECONDS
-        + microsecToTime / MILLISECONDS_PER_MICROSECONDS;
-    ereport(DEBUG1, (errmsg("The millisec_time_diff is %ld", millisecTimeDiff)));
-    return (millisecTimeDiff > MILLISECONDS_PER_SECONDS);
-}
-static inline uint64 LogCtrlCountBigSpeed(uint64 originSpeed, uint64 curSpeed)
-{
-    uint64 updateSpeed = (((originSpeed << SHIFT_SPEED) - originSpeed) >> SHIFT_SPEED) + curSpeed;
-    return updateSpeed;
-}
-
-/*
- * Estimate the time standby need to flush and apply log.
- */
-int DCFLogCtrlCalculateCurrentRTO(const DCFStandbyReplyMessage *reply, DCFLogCtrlData* logCtrl)
-{
-    long secToTime;
-    int microsecToTime;
-    if (XLByteLT(reply->receive, reply->flush) || XLByteLT(reply->flush, reply->apply) ||
-        XLByteLT(reply->flush, logCtrl->prev_flush) || XLByteLT(reply->apply, logCtrl->prev_apply)) {
-        return -1;
-    }
-    if (XLByteEQ(reply->receive, reply->apply)) {
-        logCtrl->prev_RTO = logCtrl->current_RTO;
-        logCtrl->current_RTO = 0;
-        return -1;
-    }
-    uint64 part1 = reply->receive - reply->flush;
-    uint64 part2 = reply->flush - reply->apply;
-    uint64 part1Diff = reply->flush - logCtrl->prev_flush;
-    uint64 part2Diff = reply->apply - logCtrl->prev_apply;
-    if (logCtrl->prev_reply_time == 0) {
-        return -1;
-    }
-
-    TimestampDifference(logCtrl->prev_reply_time, reply->sendTime, &secToTime, &microsecToTime);
-    long millisecTimeDiff = secToTime * MILLISECONDS_PER_SECONDS + microsecToTime / MILLISECONDS_PER_MICROSECONDS;
-    if (millisecTimeDiff <= 10) {
-        return -1;
-    }
-
-    /*
-     * consumeRatePart1 and consumeRatePart2 is based on 7/8 previous_speed(walsnd->log_ctrl.pre_rate1) and 1/8
-     * speed_now(part1_diff / millisec_time_diff). To be more precise and keep more decimal point, we expand speed_now
-     * by multiply first then divide, which is (8 * previous_speed * 7/8 + speed_now) / 8.
-     */
-    if (logCtrl->pre_rate1 != 0) {
-        logCtrl->pre_rate1 = LogCtrlCountBigSpeed(logCtrl->pre_rate1, (uint64)(part1Diff / millisecTimeDiff));
-    } else {
-        logCtrl->pre_rate1 = ((part1Diff / (uint64)millisecTimeDiff) << SHIFT_SPEED);
-    }
-    if (logCtrl->pre_rate2 != 0) {
-        logCtrl->pre_rate2 = LogCtrlCountBigSpeed(logCtrl->pre_rate2, (uint64)(part2Diff / millisecTimeDiff));
-    } else {
-        logCtrl->pre_rate2 = ((uint64)(part2Diff / millisecTimeDiff) << SHIFT_SPEED);
-    }
-
-    uint64 consumeRatePart1 = (logCtrl->pre_rate1 >> SHIFT_SPEED);
-    uint64 consumeRatePart2 = (logCtrl->pre_rate2 >> SHIFT_SPEED);
-    if (consumeRatePart1 == 0)
-        consumeRatePart1 = 1;
-
-    if (consumeRatePart2 == 0)
-        consumeRatePart2 = 1;
-
-    uint64 secRTOPart1 = (part1 / consumeRatePart1) / MILLISECONDS_PER_SECONDS;
-    uint64 secRTOPart2 = ((part1 + part2) / consumeRatePart2) / MILLISECONDS_PER_SECONDS;
-    uint64 secRTO = (secRTOPart1 > secRTOPart2) ? secRTOPart1 : secRTOPart2;
-    ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
-                     errmsg("The RTO estimated is = : %lu seconds. reply->reveive is %lu, reply->flush is %lu, "
-                            "reply->apply is %lu, pre_flush is %lu, pre_apply is %lu, TimestampDifference is %ld, "
-                            "consumeRatePart1 is %lu, consumeRatePart2 is %lu",
-                            secRTO, reply->receive, reply->flush, reply->apply, logCtrl->prev_flush,
-                            logCtrl->prev_apply, millisecTimeDiff, consumeRatePart1, consumeRatePart2)));
-    return secRTO;
-}
-
-/* Calculate the RTO and RPO changes and control the changes as long as one changes. */
-static void DCFLogCtrlCalculateIndicatorChange(DCFLogCtrlData *logCtrl, int64 *gapDiff, int64 *gap)
-{
-    int64 rtoPrevGap = 0;
-    int64 rtoGapDiff = 0;
-    int64 rtoGap = 0;
-    int64 rpoPrevGap = 0;
-    int64 rpoGapDiff = 0;
-    int64 rpoGap = 0;
-
-    if (t_thrd.dcf_cxt.dcfCtxInfo->targetRTO > 0) {
-        if (logCtrl->prev_RTO < 0) {
-            logCtrl->prev_RTO = logCtrl->current_RTO;
-        }
-
-        int targetRTO = t_thrd.dcf_cxt.dcfCtxInfo->targetRTO;
-        int64 currentRTO = logCtrl->current_RTO;
-        rtoGap = currentRTO - targetRTO;
-        rtoPrevGap = logCtrl->prev_RTO - targetRTO;
-        rtoGapDiff = rtoGap - rtoPrevGap;
-    }
-
-    if (t_thrd.dcf_cxt.dcfCtxInfo->targetRPO > 0) {
-        if (logCtrl->prev_RPO < 0) {
-            logCtrl->prev_RPO = logCtrl->current_RPO;
-        }
-
-        int targetRPO = t_thrd.dcf_cxt.dcfCtxInfo->targetRPO;
-        int64 currentRPO = logCtrl->current_RPO;
-        rpoGap = currentRPO - targetRPO;
-        rpoPrevGap = logCtrl->prev_RPO - targetRPO;
-        rpoGapDiff = rpoGap - rpoPrevGap;
-    }
-
-    if (abs(rpoGapDiff) > abs(rtoGapDiff)) {
-        *gapDiff = rpoGapDiff;
-        *gap = rpoGap;
-    } else {
-        *gapDiff = rtoGapDiff;
-        *gap = rtoGap;
-    }
-    ereport(DEBUG4, (errmodule(MOD_RTO_RPO), errmsg("[LogCtrlCalculateIndicatorChange] rto_gap=%d, rto_gap_diff=%d,"
-            "rpo_gap=%d, rpo_gap_diff=%d, gap=%d, gap_diff=%d",
-        (int)rtoGap, (int)rtoGapDiff, (int)rpoGap, (int)rpoGapDiff, (int)*gap, (int)*gapDiff)));
-}
-
-static bool HandleKeepAlive(DCFLogCtrlData *logCtrl)
-{
-    if (logCtrl->just_keep_alive) {
-        if (logCtrl->current_RTO == 0) {
-            logCtrl->sleep_time = 0;
-        } else {
-            logCtrl->sleep_time -= (SLEEP_LESS * 10);
-        }
-        if (logCtrl->sleep_time < 0) {
-            logCtrl->sleep_time = 0;
-        }
-        return true;
-    }
-    return false;
-}
-
-/*
- * If current RTO/RPO is less than target_rto/time_to_target_rpo, primary need less sleep.
- * If current RTO/RPO is more than target_rto/time_to_target_rpo, primary need more sleep.
- * If current RTO/RPO equals to target_rto/time_to_target_rpo, primary will sleep.
- * according to balance_sleep to maintain rto.
- */
-void DCFLogCtrlCalculateSleepTime(DCFLogCtrlData *logCtrl)
-{
-    int64 gapDiff;
-    int64 gap;
-    DCFLogCtrlCalculateIndicatorChange(logCtrl, &gapDiff, &gap);
-
-    int64 sleepTime = logCtrl->sleep_time;
-    /* use for rto log */
-    int64 preTime = logCtrl->sleep_time;
-    int balanceRange = 1;
-    if (HandleKeepAlive(logCtrl)) {
-        return;
-    }
-
-    /* mark balance sleep time */
-    if (abs(gapDiff) <= balanceRange) {
-        if (logCtrl->balance_sleep_time == 0) {
-            logCtrl->balance_sleep_time = sleepTime;
-        } else {
-            logCtrl->balance_sleep_time = (logCtrl->balance_sleep_time + sleepTime) / 2;
-        }
-        ereport(DEBUG4, (errmodule(MOD_RTO_RPO), errmsg("The balance time for log control is : %ld microseconds",
-            logCtrl->balance_sleep_time)));
-    }
-
-    /* rto balance, currentRTO close to targetRTO */
-    if (abs(gap) <= balanceRange) {
-        if (logCtrl->balance_sleep_time != 0) {
-            logCtrl->sleep_time = logCtrl->balance_sleep_time;
-        } else {
-            sleepTime -= SLEEP_LESS;
-            logCtrl->sleep_time = (sleepTime >= 0) ? sleepTime : 0;
-        }
-    }
-
-    /* need more sleep, currentRTO larger than targetRTO
-     *  get bigger, but no more than 1s
-     */
-    if (gap > balanceRange) {
-        sleepTime += SLEEP_MORE;
-        logCtrl->sleep_time = (sleepTime < 1 * MICROSECONDS_PER_SECONDS) ? sleepTime : MICROSECONDS_PER_SECONDS;
-    }
-
-    /* need less sleep, currentRTO less than targetRTO */
-    if (gap < -balanceRange) {
-        sleepTime -= SLEEP_LESS;
-        logCtrl->sleep_time = (sleepTime >= 0) ? sleepTime : 0;
-    }
-    /* log control take effect */
-    if (preTime == 0 && logCtrl->sleep_time != 0) {
-        ereport(LOG,
-                (errmodule(MOD_RTO_RPO),
-                 errmsg("Log control take effect, target_rto is %d, current_rto is %ld, current the sleep time is %ld "
-                        "microseconds",
-                        t_thrd.dcf_cxt.dcfCtxInfo->targetRTO, logCtrl->current_RTO,
-                        logCtrl->sleep_time)));
-    }
-    /* log control take does not effect */
-    if (preTime != 0 && logCtrl->sleep_time == 0) {
-        ereport(LOG, (errmodule(MOD_RTO_RPO),
-            errmsg("Log control does not take effect, target_rto is %d, current_rto is %ld, current the sleep time "
-                    "is %ld microseconds",
-                t_thrd.dcf_cxt.dcfCtxInfo->targetRTO, logCtrl->current_RTO, logCtrl->sleep_time)));
-    }
-    ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
-                     errmsg("The sleep time for log control is : %ld microseconds", logCtrl->sleep_time)));
-}
-
-/*
- * Count the limit for sleep_count, it is based on sleep time.
- */
-void DCFLogCtrlCountSleepLimit(DCFLogCtrlData *logCtrl)
-{
-    int64 sleepCountLimitCount;
-    if (logCtrl->sleep_time == 0) {
-        sleepCountLimitCount = MAX_CONTROL_REPLY;
-    } else {
-        sleepCountLimitCount = INIT_CONTROL_REPLY * MICROSECONDS_PER_SECONDS / logCtrl->sleep_time;
-        sleepCountLimitCount = (sleepCountLimitCount > MAX_CONTROL_REPLY) ?
-            MAX_CONTROL_REPLY : sleepCountLimitCount;
-    }
-    if (sleepCountLimitCount <= 0) {
-        sleepCountLimitCount = INIT_CONTROL_REPLY;
-    }
-    logCtrl->sleep_count_limit = sleepCountLimitCount;
-    ereport(DEBUG1, (errmsg("Sleep count limit is %ld.", logCtrl->sleep_count_limit)));
-}
-
-/*
- * Update the sleep time for primary.
- */
-void SleepNodeReplication(int nodeIndex)
-{
-    if (t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_time > MICROSECONDS_PER_SECONDS) {
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_time = MICROSECONDS_PER_SECONDS;
-    }
-    if (t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_time >= 0) {
-        dcf_pause_rep(1, t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[nodeIndex].nodeID,
-                    (uint32)t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_time);
-    }
-    g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_sleep_time =
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_time;
-}
-
-static void ResetDCFNodeInfo(int index)
-{
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].isMember = false;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].isActive = false;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].nodeID = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].receive = InvalidXLogRecPtr;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].write = InvalidXLogRecPtr;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].flush = InvalidXLogRecPtr;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].apply = InvalidXLogRecPtr;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].applyRead = InvalidXLogRecPtr;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].peer_role = UNKNOWN_MODE;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].peer_state = UNKNOWN_STATE;
-    t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[index].sendTime = 0;
-}
-
-static void ResetDCFNodeLogCtl(int index)
-{
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].sleep_time = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].balance_sleep_time = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].prev_RTO = -1;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].current_RTO = -1;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].sleep_count = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].sleep_count_limit = MAX_CONTROL_REPLY;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].prev_flush = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].prev_apply = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].prev_reply_time = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].pre_rate1 = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].pre_rate2 = 0;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].prev_RPO = -1;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].current_RPO = -1;
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[index].just_keep_alive = false;
-}
-
-bool ResetDCFNodeInfoWithNodeID(uint32 nodeID)
-{
-    for (int i = 0; i < DCF_MAX_NODES; i++) {
-        if (t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[i].nodeID == nodeID) {
-            ResetDCFNodeInfo(i);
-            ResetDCFNodeLogCtl(i);
-            return true;
-        }
-    }
-    return false;
-}
-
-void ResetDCFNodesInfo(void)
-{
-    for (int i = 0; i < DCF_MAX_NODES; i++) {
-        ResetDCFNodeInfo(i);
-        ResetDCFNodeLogCtl(i);
-    }
 }
 
 bool InitDcfAndStart() 
@@ -1045,39 +702,6 @@ void LaunchPaxos()
     Assert(dcfCtx->isDcfStarted);
     /* Synchronize standby's configure file once the HA build successfully. */
     CheckConfigFile(true);
-}
-
-/* If it's called in call back func, ASSERT DcfCallBackThreadShmemInit true */
-bool QueryLeaderNodeInfo(uint32* leaderID, char* leaderIP, uint32 ipLen, uint32 *leaderPort)
-{
-    Assert((t_thrd.dcf_cxt.is_dcf_thread && t_thrd.dcf_cxt.isDcfShmemInited) ||
-           !t_thrd.dcf_cxt.is_dcf_thread);
-    /* dcf_node_id > 0 */
-    *leaderID = 0;
-    uint32 tmpPort = 0;
-    uint32 *port = &tmpPort;
-    char tmpIP[DCF_MAX_IP_LEN] = {0};
-    char *ip = tmpIP;
-    uint32 leaderIPLen = DCF_MAX_IP_LEN;
-    if (leaderPort != NULL) {
-        port = leaderPort;
-    }
-    if (leaderIP != NULL) {
-        ip= leaderIP;
-    }
-    if (ipLen != 0) {
-        leaderIPLen = ipLen;
-    }
-    bool success = (dcf_query_leader_info(1, ip, leaderIPLen, port, leaderID) == 0);
-    if (!success) {
-        ereport(WARNING, (errmsg("DCF failed to query leader info.")));
-        return false;
-    }
-    if (*leaderID == 0) {
-        ereport(WARNING, (errmsg("DCF leader does not exist.")));
-        return false;
-    }
-    return true;
 }
 
 /*
@@ -1448,71 +1072,5 @@ void DcfSendArchiveXlogResponse(ArchiveTaskStatus *archive_task_status)
     volatile unsigned int *pitr_task_status = &archive_task_status->pitr_task_status;
     pg_memory_barrier();
     pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
-}
-
-/* It is necessary to free nodeinfos outside when call this function */
-bool GetNodeInfos(cJSON **nodeInfos)
-{
-    char replicInfo[DCF_MAX_STREAM_INFO_LEN] = {0};
-    int len = dcf_query_stream_info(1, replicInfo, DCF_MAX_STREAM_INFO_LEN * sizeof(char));
-    if (len == 0) {
-        ereport(WARNING, (errmodule(MOD_DCF), errmsg("Failed to query dcf config!")));
-        return false;
-    }
-    *nodeInfos = cJSON_Parse(replicInfo);
-    if (*nodeInfos == nullptr) {
-        const char* errorPtr = cJSON_GetErrorPtr();
-        if (errorPtr != nullptr) {
-            ereport(WARNING, (errmodule(MOD_DCF), errmsg("Failed to parse dcf config: %s!", errorPtr)));
-        } else {
-            ereport(WARNING, (errmodule(MOD_DCF), errmsg("Failed to parse dcf config: unkonwn error.")));
-        }
-        return false;
-    }
-    return true;
-}
-
-/* Get dcf role, ip and port from cJSON corresponding to its nodeID */
-bool GetDCFNodeInfo(const cJSON *nodeJsons, int nodeID, char *role, int roleLen, char *ip, int ipLen, int *port)
-{
-    if (!cJSON_IsArray(nodeJsons)) {
-        ereport(WARNING, (errmodule(MOD_DCF), errmsg("Must exist array format in the json file.")));
-        return false;
-    }
-    const cJSON* nodeJson = nullptr;
-    errno_t rc = EOK;
-    cJSON_ArrayForEach(nodeJson, nodeJsons)
-    {
-        cJSON *idJson = cJSON_GetObjectItem(nodeJson, "node_id");
-        if (idJson == nullptr) {
-            ereport(WARNING, (errmodule(MOD_DCF), errmsg("No items with node id %d!", nodeID)));
-            return false;
-        }
-        if (idJson->valueint == nodeID) {
-            cJSON *roleJson = cJSON_GetObjectItem(nodeJson, "role");
-            if (roleJson == nullptr) {
-                ereport(WARNING, (errmodule(MOD_DCF), errmsg("No role item with node id %d!", nodeID)));
-                return false;
-            }
-            rc = strcpy_s(role, roleLen, roleJson->valuestring);
-            securec_check(rc, "\0", "\0");
-            cJSON *ipJson = cJSON_GetObjectItem(nodeJson, "ip");
-            if (ipJson == nullptr) {
-                ereport(WARNING, (errmodule(MOD_DCF), errmsg("No ip item with node id %d!", nodeID)));
-                return false;
-            }
-            rc = strcpy_s(ip, ipLen, ipJson->valuestring);
-            securec_check(rc, "\0", "\0");
-            cJSON *portJson = cJSON_GetObjectItem(nodeJson, "port");
-            if (portJson == nullptr) {
-                ereport(WARNING, (errmodule(MOD_DCF), errmsg("No port item with node id %d!", nodeID)));
-                return false;
-            }
-            *port = portJson->valueint;
-            return true;
-        }
-    }
-    ereport(WARNING, (errmodule(MOD_DCF), errmsg("No node item with node id %d found!", nodeID)));
-    return false;
 }
 #endif

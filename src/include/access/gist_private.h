@@ -419,6 +419,7 @@ extern SplitedPageLayout *gistSplit(Relation r, Page page, IndexTuple *itup, int
 /* gistxlog.c */
 extern void gist_redo(XLogReaderState *record);
 extern void gist_desc(StringInfo buf, XLogReaderState *record);
+extern const char *gist_type_name(uint8 subtype);
 extern void gist_xlog_startup(void);
 extern void gist_xlog_cleanup(void);
 

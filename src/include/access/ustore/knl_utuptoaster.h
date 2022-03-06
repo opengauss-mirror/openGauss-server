@@ -55,5 +55,5 @@ UHeapTuple UHeapToastInsertOrUpdate(Relation relation, UHeapTuple newtup, UHeapT
 extern struct varlena *UHeapInternalToastFetchDatum(struct varatt_external toastPointer, Relation toastrel,
     Relation toastidx);
 extern struct varlena *UHeapInternalToastFetchDatumSlice(struct varatt_external toast_pointer, Relation toastrel,
-    Relation toastidx, int32 sliceoffset, int32 length);
+    Relation toastidx, int64 sliceoffset, int32 length);
 #endif

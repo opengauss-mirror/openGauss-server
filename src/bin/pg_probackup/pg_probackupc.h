@@ -50,6 +50,10 @@ extern int        rw_timeout;
 /* backup options */
 extern bool        smooth_checkpoint;
 
+/* list of dirs which will not to be backuped
+   it will be backuped up in external dirs  */
+extern parray *pgdata_nobackup_dir;
+
 /* remote probackup options */
 extern char* remote_agent;
 

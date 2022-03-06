@@ -28,7 +28,8 @@
 
 #define XC_NodeIdAttributeNumber (-8)
 #define BucketIdAttributeNumber (-9)
-#define FirstLowInvalidHeapAttributeNumber (-10)
+#define UidAttributeNumber (-10)
+#define FirstLowInvalidHeapAttributeNumber (-11)
 
 #else
 #define FirstLowInvalidHeapAttributeNumber (-8)

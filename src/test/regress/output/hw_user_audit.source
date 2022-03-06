@@ -124,7 +124,7 @@ select pg_sleep(1);
  
 (1 row)
 
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_dml_state;show audit_dml_state_select;create table DTS2018091711491_t1 (id int, num int) distribute by hash(id);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_dml_state;show audit_dml_state_select;create table TESTTABLE_t1 (id int, num int) distribute by hash(id);"
  audit_dml_state 
 -----------------
  1
@@ -136,21 +136,21 @@ select pg_sleep(1);
 (1 row)
 
 CREATE TABLE
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "insert into DTS2018091711491_t1 values (1,1);"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "insert into TESTTABLE_t1 values (1,1);"
 INSERT 0 1
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from DTS2018091711491_t1 where id=1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from TESTTABLE_t1 where id=1;"
  id | num 
 ----+-----
   1 |   1
 (1 row)
 
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop table DTS2018091711491_t1;"
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "drop table TESTTABLE_t1;"
 DROP TABLE
-\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select type,result,object_name,detail_info from pg_query_audit('0007-1-1','9999-12-31') where OBJECT_name ='dts2018091711491_t1' order by time;";
-       type        | result |     object_name     |                  detail_info                  
--------------------+--------+---------------------+-----------------------------------------------
- dml_action        | ok     | dts2018091711491_t1 | insert into DTS2018091711491_t1 values (1,1);
- dml_action_select | ok     | dts2018091711491_t1 | select * from DTS2018091711491_t1 where id=1;
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select type,result,object_name,detail_info from pg_query_audit('0007-1-1','9999-12-31') where OBJECT_name ='testtable_t1' order by time;";
+       type        | result | object_name  |                  detail_info                  
+-------------------+--------+--------------+-----------------------------------------------
+ dml_action        | ok     | testtable_t1 | insert into TESTTABLE_t1 values (1,1);
+ dml_action_select | ok     | testtable_t1 | select * from TESTTABLE_t1 where id=1;
 (2 rows)
 
 \! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select * from pg_delete_audit('0007-1-1','9999-12-31');";

@@ -203,8 +203,6 @@ void ExceptionHandlerForPartition(GetPartitionOidArgs *args, Oid partitionOid, b
  */
 static Oid partitionGetPartitionOid(GetPartitionOidArgs* args, LOCKMODE lockMode, bool missingOk, bool noWait)
 {
-    /* remember SharedInvalidMessageCounter */
-    uint64 invalCount = 0;
     Oid partitionOid = InvalidOid;
     Oid partitionOldOid = InvalidOid;
     bool retry = false;
@@ -225,13 +223,18 @@ static Oid partitionGetPartitionOid(GetPartitionOidArgs* args, LOCKMODE lockMode
      * by calling AcceptInvalidationMessages() before beginning this loop, but
      * that would add a significant amount overhead, so for now we don't.
      */
+    uint64 sess_inval_count;
+    uint64 thrd_inval_count = 0;
     for (;;) {
         /*
          * Remember this value, so that, after looking up the partition name
          * and locking its OID, we can check whether any invalidation messages
          * have been processed that might require a do-over.
          */
-        invalCount = u_sess->inval_cxt.SharedInvalidMessageCounter;
+        sess_inval_count = u_sess->inval_cxt.SIMCounter;
+        if (EnableLocalSysCache()) {
+            thrd_inval_count = t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;
+        }
 
         /* get partition oid */
         if (args->givenPartitionName) {
@@ -318,8 +321,15 @@ static Oid partitionGetPartitionOid(GetPartitionOidArgs* args, LOCKMODE lockMode
         /*
          * If no invalidation message were processed, we're done!
          */
-        if (u_sess->inval_cxt.SharedInvalidMessageCounter == invalCount) {
-            break;
+        if (EnableLocalSysCache()) {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter &&
+                thrd_inval_count == t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter) {
+                break;
+            }
+        } else {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter) {
+                break;
+            }
         }
 
         /*
@@ -427,8 +437,8 @@ Oid partitionNameGetPartitionOid(Oid partitionedRelationOid, const char* partiti
  * @Return: partition oid
  * @See also: partitionNameGetPartitionOid()
  */
-Oid partitionValuesGetPartitionOid(
-    Relation rel, List* partKeyValueList, LOCKMODE lockMode, bool topClosed, bool missingOk, bool noWait)
+Oid partitionValuesGetPartitionOid(Relation rel, List *partKeyValueList, LOCKMODE lockMode, bool topClosed,
+    bool missingOk, bool noWait)
 {
     GetPartitionOidArgs args;
     /* get partition oid from given values */
@@ -446,6 +456,41 @@ Oid partitionValuesGetPartitionOid(
     args.callbackObjLockMode = NoLock;
 
     return partitionGetPartitionOid(&args, lockMode, missingOk, noWait);
+}
+
+Oid subpartitionValuesGetSubpartitionOid(Relation rel, List *partKeyValueList, List *subpartKeyValueList,
+    LOCKMODE lockMode, bool topClosed, bool missingOk, bool noWait, Oid *partOidForSubPart)
+{
+    GetPartitionOidArgs args;
+    /* get partition oid from given values */
+    args.givenPartitionName = false;
+    args.partitionedRel = rel;
+    args.partKeyValueList = partKeyValueList;
+    args.partitionedRelOid = rel->rd_id;
+    args.topClosed = topClosed;
+    /* the following arguments is not used. */
+    args.partitionName = NULL;
+    args.objectType = PART_OBJ_TYPE_TABLE_PARTITION;
+    args.callback = NULL;
+    args.callbackArgs = NULL;
+    args.callbackObjLockMode = NoLock;
+
+    *partOidForSubPart = partitionGetPartitionOid(&args, lockMode, missingOk, noWait);
+    if (!OidIsValid(*partOidForSubPart)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("The partition which owns the subpartition is missing"),
+            errdetail("N/A"),
+            errcause("Maybe the subpartition table is dropped"),
+            erraction("Check system table 'pg_partition' for more information")));
+    }
+
+    Partition part = partitionOpen(rel, *partOidForSubPart, lockMode);
+    Relation partrel = partitionGetRelation(rel, part);
+    Oid subpartOid = partitionValuesGetPartitionOid(partrel, subpartKeyValueList, lockMode, true, true, false);
+    releaseDummyRelation(&partrel);
+    partitionClose(rel, part, NoLock);
+
+    return subpartOid;
 }
 
 /*
@@ -647,7 +692,7 @@ static Oid getPartitionIndexFormData(Oid indexid, Oid partitionid, Form_pg_parti
                 errhint("In redistribution, local parititon index maybe not exists.")));
         return InvalidOid;
     }
-    tuple = &catlist->members[0]->tuple;
+    tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, 0);
     partitionForm = (Form_pg_partition)GETSTRUCT(tuple);
     result = HeapTupleGetOid(tuple);
     if (!onlyOid) {
@@ -696,6 +741,34 @@ Oid getPartitionIndexTblspcOid(Oid indexid, Oid partitionid)
     }
 
     return tblspcOid;
+}
+
+/*
+ * @Description: Given OIDs of index relation and heap partition, get relname of index partition.
+ * @IN indexid: given index relation's OID
+ * @IN partitionid: given partition's  OID
+ * @Return: relname Oid of index partition.
+ * @See also:
+ */
+char* getPartitionIndexName(Oid indexid, Oid partitionid)
+{
+    FormData_pg_partition indexPartFormData;
+    Oid indexPartOid = InvalidOid;
+    char* name = NULL;
+
+    errno_t rc = memset_s(&indexPartFormData, PARTITION_TUPLE_SIZE, 0, PARTITION_TUPLE_SIZE);
+    securec_check(rc, "\0", "\0");
+
+    indexPartOid = getPartitionIndexFormData<false>(indexid, partitionid, &indexPartFormData);
+    if (OidIsValid(indexPartOid)) {
+        name = pstrdup(NameStr(indexPartFormData.relname));
+    } else {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("Invalid Oid of local index %u on the partition %u.", indexid, partitionid)));
+    }
+
+    return name;
 }
 
 /*
@@ -949,6 +1022,125 @@ List* RelationGetSubPartitionList(Relation relation, LOCKMODE lockmode)
     return subPartList;
 }
 
+/* give one partitioned relation, return a list, consisting of relname of all its partition and subpartition */
+List* RelationGetPartitionNameList(Relation relation)
+{
+    List* partnameList = NIL;
+    List *partTupleList = NIL;
+    if (!RelationIsPartitioned(relation)) {
+        return partnameList;
+    }
+
+    if (RelationIsPartitionOfSubPartitionTable(relation)) { /* a partition of subpartition */
+        partTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION, relation->rd_id);
+        Assert(PointerIsValid(partTupleList));
+
+        ListCell *partCell = NULL;
+        Form_pg_partition partitionTuple = NULL;
+        foreach (partCell, partTupleList) {
+            partitionTuple = (Form_pg_partition)GETSTRUCT((HeapTuple)lfirst(partCell));
+            partnameList = lappend(partnameList, pstrdup(partitionTuple->relname.data));
+        }
+        list_free_deep(partTupleList);
+    } else { /* a relation */
+        partTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relation->rd_id);
+        Assert(PointerIsValid(partTupleList));
+
+        ListCell *partCell = NULL;
+        Form_pg_partition partitionTuple = NULL;
+        foreach (partCell, partTupleList) {
+            partitionTuple = (Form_pg_partition)GETSTRUCT((HeapTuple)lfirst(partCell));
+            partnameList = lappend(partnameList, pstrdup(partitionTuple->relname.data));
+            if (RelationIsSubPartitioned(relation)) {
+                List *subpartTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION,
+                    HeapTupleGetOid((HeapTuple)lfirst(partCell)));
+
+                ListCell *subpartCell = NULL;
+                Form_pg_partition subpartitionTuple = NULL;
+                foreach (subpartCell, subpartTupleList) {
+                    subpartitionTuple = (Form_pg_partition)GETSTRUCT((HeapTuple)lfirst(subpartCell));
+                    partnameList = lappend(partnameList, pstrdup(subpartitionTuple->relname.data));
+                }
+                list_free_deep(subpartTupleList);
+            }
+        }
+        list_free_deep(partTupleList);
+    }
+
+    return partnameList;
+}
+
+void RelationGetSubpartitionInfo(Relation relation, char *subparttype, List **subpartKeyPosList,
+    int2vector **subpartitionKey)
+{
+    if (!RelationIsSubPartitioned(relation)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("Un-support feature"),
+            errdetail("Can not get subpartition information for NON-SUBPARTITIONED table"),
+            errcause("Try get the subpartition information on a NON-SUBPARTITIONED object"),
+            erraction("Check system table 'pg_partition' for more information")));
+    }
+
+    Oid partid = InvalidOid;
+    ArrayType* pos_array = NULL;
+    Datum pos_raw = (Datum)0;
+    bool isNull = false;
+
+    Relation pg_partition = heap_open(PartitionRelationId, AccessShareLock);
+    ScanKeyData key[2];
+    SysScanDesc scan = NULL;
+    HeapTuple tuple = NULL;
+    ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+        CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION));
+    ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relation->rd_id));
+    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, NULL, 2, key);
+    if (HeapTupleIsValid((tuple = systable_getnext(scan)))) {
+        partid = HeapTupleGetOid(tuple);
+        pos_raw = heap_getattr(tuple, Anum_pg_partition_partkey, RelationGetDescr(pg_partition), &isNull);
+    }
+    systable_endscan(scan);
+
+    if (isNull) {
+        heap_close(pg_partition, AccessShareLock);
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+            errmsg("Null partition key value for relation \"%s\"", RelationGetRelationName(relation)),
+            errdetail("N/A"),
+            errcause("Unexpected partition tuple in pg_partition for this relation"),
+            erraction("Check system table 'pg_partition' for more information")));
+    }
+    pos_array = DatumGetArrayTypeP(pos_raw);
+    int ncolumn = ARR_DIMS(pos_array)[0];
+    int16* attnums = (int16*)ARR_DATA_PTR(pos_array);
+    Assert(ncolumn > 0);
+    if (PointerIsValid(subpartitionKey)) {
+        *subpartitionKey = buildint2vector(attnums, ncolumn);
+    }
+    if (PointerIsValid(subpartKeyPosList)) {
+        for (int i = 0; i < ncolumn; i++) {
+            *subpartKeyPosList = lappend_int(*subpartKeyPosList, (int)(attnums[i]) - 1);
+        }
+    }
+
+    if (PointerIsValid(subparttype)) {
+        ScanKeyData subkey[2];
+        SysScanDesc subscan = NULL;
+        HeapTuple subtuple = NULL;
+        ScanKeyInit(&subkey[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+            CharGetDatum(PART_OBJ_TYPE_TABLE_SUB_PARTITION));
+        ScanKeyInit(&subkey[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(partid));
+        subscan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, NULL, 2, subkey);
+        if (HeapTupleIsValid((subtuple = systable_getnext(subscan)))) {
+            *subparttype = ((Form_pg_partition)GETSTRUCT(subtuple))->partstrategy;
+        } else {
+            *subparttype = PART_STRATEGY_INVALID;
+        }
+        systable_endscan(subscan);
+    }
+
+    heap_close(pg_partition, AccessShareLock);
+}
+
 // give one partitioned index  relation,
 // return a list, consisting of oid of all its index partition
 List* indexGetPartitionOidList(Relation indexRelation)
@@ -1004,6 +1196,18 @@ Relation SubPartitionGetRelation(Relation heap, Partition subPart, LOCKMODE lock
     partitionClose(heap, part, lockmode);
 
     return subPartRel;
+}
+
+Partition SubPartitionOidGetPartition(Relation rel, Oid subPartOid, LOCKMODE lockmode)
+{
+    Oid parentOid = partid_get_parentid(subPartOid);
+    Partition part = partitionOpen(rel, parentOid, lockmode);
+    Relation partRel = partitionGetRelation(rel, part);
+    Partition subPart = partitionOpen(partRel, subPartOid, lockmode);
+    releaseDummyRelation(&partRel);
+    partitionClose(rel, part, NoLock);
+
+    return subPart;
 }
 
 Relation SubPartitionOidGetParentRelation(Relation rel, Oid subPartOid, LOCKMODE lockmode)
@@ -1200,3 +1404,24 @@ HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId)
 
     return tuple;
 }
+
+/*
+ * @@GaussDB@@
+ * Target		: GetBaseRelOid
+ * Brief		:
+ * Description	: For partition, return parentId, For indexpartition, return parentId,
+ *  				  For subpartition, return grandparentId, For indexsubpartition, return parentId,
+ *
+ * Notes		:
+ */
+Oid GetBaseRelOidOfParition(Relation relation)
+{
+    Assert(RelationIsPartition(relation));
+
+    if (RelationIsSubPartitionOfSubPartitionTable(relation)) {
+        return relation->grandparentId;
+    }
+
+    return relation->parentId;
+}
+

@@ -88,6 +88,7 @@ typedef struct printTableOpt {
     int encoding;                      /* character encoding */
     int env_columns;                   /* $COLUMNS on psql start, 0 is unset */
     int columns;                       /* target width for wrapped format */
+    bool feedback;                  /* don't output row counts, etc. */
 } printTableOpt;
 
 /*

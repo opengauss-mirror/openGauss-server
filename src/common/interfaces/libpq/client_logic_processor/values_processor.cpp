@@ -45,10 +45,10 @@
 static bool process_get_value_index(const ICachedColumns *cached_columns, size_t values_per_row_count,
                                     size_t m, size_t i, size_t &raw_value_index)
 {
-    const ICachedColumn *cached_column = cached_columns->at(i);
     if (cached_columns->is_in_scheme_order()) {
         /* this can happen when "INSERT INTO TABLE VALUES" contains less values than the number of columns in
          * the original table */
+        const ICachedColumn *cached_column = cached_columns->at(i);
         if (cached_column->get_col_idx() > values_per_row_count) {
             return false;
         }
@@ -86,13 +86,13 @@ static void process_prepare_state(const RawValue *raw_value, StatementData *stat
     if (!statement_data->params.new_param_values) {
         Assert(!statement_data->params.copy_sizes);
         statement_data->params.new_param_values =
-            (unsigned char **)calloc(sizeof(unsigned char *), statement_data->nParams);
-        statement_data->params.copy_sizes = (size_t *)calloc(sizeof(size_t), statement_data->nParams);
+                        (unsigned char **)calloc(statement_data->nParams, sizeof(unsigned char *));
+        statement_data->params.copy_sizes = (size_t *)calloc(statement_data->nParams, sizeof(size_t));
         statement_data->params.nParams = statement_data->nParams;
     }
     Assert(!statement_data->params.new_param_values[raw_value->m_location]);
     statement_data->params.new_param_values[raw_value->m_location] =
-        (unsigned char *)calloc(copy_size, sizeof(unsigned char));
+                        (unsigned char *)calloc(copy_size + 1, sizeof(unsigned char));
     if (statement_data->params.new_param_values[raw_value->m_location] == NULL) {
         fprintf(stderr, "ERROR(CLIENT): out of memory when processing state\n");
         return;
@@ -103,14 +103,14 @@ static void process_prepare_state(const RawValue *raw_value, StatementData *stat
         raw_value->m_processed_data, copy_size));
     if (!statement_data->params.adjusted_param_values) {
         statement_data->params.adjusted_param_values =
-            (const char **)calloc(statement_data->nParams, sizeof(const char *));
+                        (const char **)calloc(statement_data->nParams, sizeof(const char *));
         if (statement_data->params.adjusted_param_values ==  NULL) {
             fprintf(stderr, "ERROR(CLIENT): out of memory when processing state\n");
             return;
         }
         statement_data->params.nParams = statement_data->nParams;
     }
-    
+
     if (statement_data->params.new_param_values[raw_value->m_location] != NULL) {
         statement_data->params.adjusted_param_values[raw_value->m_location] = 
             (const char*)statement_data->params.new_param_values[raw_value->m_location];
@@ -254,17 +254,19 @@ bool ValuesProcessor::process_values(StatementData *statement_data, const ICache
             if (!process_inside_value(statement_data, raw_value, cached_column)) {
                 return false;
             }
-
-            /* process the data for prepare statement */
-            process_prepare_state(raw_value, statement_data);
-
-            /*
-             * 1. realign locations inside the rawValue after data was processed and probably enlarged
-             * (does not apply if this is param)
-             * 2. add the rawValue to the list of rawValues intended for replacement in the original query to be sent to
-             * the client
-             */
-            if (!raw_value->m_is_param) {
+            if (raw_value->m_is_param) {
+                process_prepare_state(raw_value, statement_data);
+                /*
+                 * adding to raw values list. adding to rawValuesForReplace is unnesscary
+                 * since the replcment of the param in the params array is done by the parmter index
+                 * and we do not need to replace them all in one place
+                 */
+                statement_data->conn->client_logic->raw_values_for_post_query.add(raw_value);
+            } else {
+                /* 1. realign locations inside the rawValue after data was processed and probably enlarged
+                 *    (does not apply if this is param)
+                 * 2. add the rawValue to the list of rawValues intended for replacement in the original
+                 *    query to be sent to the client */
                 int size_diff = (int)raw_value->m_processed_data_size - (int)raw_value->m_data_size;
                 statement_data->offset += size_diff;
                 for (size_t j = 1 + (raw_value_index + (m * values_per_row_count)); j < raw_values->size(); ++j) {
@@ -272,8 +274,6 @@ bool ValuesProcessor::process_values(StatementData *statement_data, const ICache
                 }
                 statement_data->conn->client_logic->rawValuesForReplace->add(raw_value);
                 raw_values->erase(raw_value_index, false);
-            } else {
-                statement_data->conn->client_logic->raw_values_for_post_query.add(raw_value);
             }
         }
     }
@@ -426,7 +426,7 @@ DecryptDataRes ValuesProcessor::deprocess_value(PGconn *conn, const unsigned cha
         rc = memset_s(err_msg, MAX_ERRMSG_LENGTH, 0, MAX_ERRMSG_LENGTH);
         securec_check_c(rc, "\0", "\0");
         unsigned char *result =
-            Format::restore_binary(*plain_text, plain_text_size, original_typeid, 0, -1, &result_size, err_msg);
+            Format::restore_binary(*plain_text, plain_text_size, original_typeid, &result_size, err_msg);
         if (result == NULL) { 
             return DEC_DATA_ERR;
         }
@@ -457,7 +457,7 @@ void ValuesProcessor::process_text_format(unsigned char **plain_text, size_t &pl
     ProcessStatus process_status, int original_typeid)
 {
     size_t result_size = 0;
-    char *res = Format::binary_to_text(*plain_text, plain_text_size, original_typeid, 0, -1, &result_size);
+    char *res = Format::binary_to_text(*plain_text, plain_text_size, original_typeid, &result_size);
     if (res == NULL) {
         fprintf(stderr, "ERROR(CLIENT): failed to convert binary to text\n");
         return;

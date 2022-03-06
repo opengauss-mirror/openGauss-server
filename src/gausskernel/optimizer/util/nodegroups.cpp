@@ -2773,7 +2773,7 @@ Bitmapset *ngroup_info_hash_search(Oid ngroup_oid)
 
     uint32 hashcode = oid_hash((const void *)&ngroup_oid, sizeof(ngroup_oid));
     LWLock *new_partition_lock = ngroup_mapping_partitionlock(hashcode);
-
+    (void)LWLockAcquire(NgroupDestoryLock, LW_SHARED);
     (void)LWLockAcquire(new_partition_lock, LW_SHARED);
     NGroupInfo *ngroup_info = (NGroupInfo *)hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_FIND, &found);
 
@@ -2782,6 +2782,7 @@ Bitmapset *ngroup_info_hash_search(Oid ngroup_oid)
         bms_nodeids = bms_copy(ngroup_info->bms_nodeids);
     }
     LWLockRelease(new_partition_lock);
+    LWLockRelease(NgroupDestoryLock);
 
     return bms_nodeids;
 }
@@ -2796,7 +2797,7 @@ void  ngroup_info_hash_insert(Oid ngroup_oid, Bitmapset *bms_node_ids)
     MemoryContext old_mem_context = MemoryContextSwitchTo(g_instance.ngroup_hash_table->hcxt);
     bms_node_ids_copy = bms_copy(bms_node_ids);
     MemoryContextSwitchTo(old_mem_context);
-    
+    (void)LWLockAcquire(NgroupDestoryLock, LW_SHARED);
     (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
     NGroupInfo *ngroup_info = (NGroupInfo *)hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_ENTER, &found);
     
@@ -2805,14 +2806,16 @@ void  ngroup_info_hash_insert(Oid ngroup_oid, Bitmapset *bms_node_ids)
         ngroup_info->bms_nodeids = bms_node_ids_copy;
     } else {
         LWLockRelease(new_partition_lock);
+        LWLockRelease(NgroupDestoryLock);
         pfree(bms_node_ids_copy);
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
                 errmsg("failed to insert node group hash table")));
     }
     LWLockRelease(new_partition_lock);
+    LWLockRelease(NgroupDestoryLock);
 }
 
-void ngroup_info_hash_delete(Oid ngroup_oid)
+void ngroup_info_hash_delete(Oid ngroup_oid, bool is_destory)
 {
     if (InvalidOid == ngroup_oid) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
@@ -2822,8 +2825,10 @@ void ngroup_info_hash_delete(Oid ngroup_oid)
     Bitmapset *bms_ptr = NULL;
     uint32 hashcode = oid_hash((const void *)&ngroup_oid, sizeof(ngroup_oid));
     LWLock *new_partition_lock = ngroup_mapping_partitionlock(hashcode);
-    
-    (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);    
+    if (!is_destory) {
+        (void)LWLockAcquire(NgroupDestoryLock, LW_SHARED);
+    }
+    (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
     NGroupInfo *ngroup_info = (NGroupInfo *)hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_FIND, &found);
 
     if (ngroup_info)
@@ -2831,7 +2836,13 @@ void ngroup_info_hash_delete(Oid ngroup_oid)
         
     hash_search(g_instance.ngroup_hash_table, &ngroup_oid, HASH_REMOVE, &found);
     LWLockRelease(new_partition_lock);
+    if (!is_destory) {
+        LWLockRelease(NgroupDestoryLock);
+    }
     if (!found && ngroup_info) {
+        if (is_destory) {
+            LWLockRelease(NgroupDestoryLock);
+        }
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
                 errmsg("delete failed from nodegroup hash table, Oid is %u.", ngroup_oid)));
     }
@@ -2844,11 +2855,14 @@ void ngroup_info_hash_destory(void)
     HASH_SEQ_STATUS hash_seq;
     NGroupInfo* entry = NULL;
 
+    (void)LWLockAcquire(NgroupDestoryLock, LW_EXCLUSIVE);
+
     hash_seq_init(&hash_seq, g_instance.ngroup_hash_table);
     while ((entry = (NGroupInfo*)hash_seq_search(&hash_seq)) != NULL) {
         ereport(LOG, (errmsg(" ngroup_info_hash_print ngroup_info_hash__delete_all entry->oid: %d ", entry->oid)));
-        ngroup_info_hash_delete(entry->oid);
+        ngroup_info_hash_delete(entry->oid, true);
     }
+    LWLockRelease(NgroupDestoryLock);
 }
 
 

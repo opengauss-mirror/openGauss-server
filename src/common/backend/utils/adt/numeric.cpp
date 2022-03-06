@@ -39,7 +39,6 @@
 #include "utils/biginteger.h"
 #include "utils/gs_bitmap.h"
 #include "utils/guc.h"
-#include "utils/guc_sql.h"
 #include "utils/int8.h"
 #include "utils/numeric.h"
 #include "utils/sortsupport.h"
@@ -161,7 +160,6 @@ static void zero_var(NumericVar* var);
 
 static const char* set_var_from_str(const char* str, const char* cp, NumericVar* dest);
 static void set_var_from_num(Numeric value, NumericVar* dest);
-static void init_var_from_num(Numeric num, NumericVar* dest);
 static void set_var_from_var(const NumericVar* value, NumericVar* dest);
 static char* get_str_from_var(NumericVar* var);
 static char* get_str_from_var_sci(NumericVar* var, int rscale);
@@ -169,7 +167,6 @@ static char* get_str_from_var_sci(NumericVar* var, int rscale);
 static void apply_typmod(NumericVar* var, int32 typmod);
 
 static int32 numericvar_to_int32(const NumericVar* var);
-static bool numericvar_to_int64(const NumericVar* var, int64* result);
 static double numeric_to_double_no_overflow(Numeric num);
 static double numericvar_to_double_no_overflow(NumericVar* var);
 
@@ -335,22 +332,6 @@ Datum numeric_out(PG_FUNCTION_ARGS)
     NumericVar x;
     char* str = NULL;
     int scale = 0;
-
-    if (u_sess->attr.attr_sql.for_print_tuple && !u_sess->attr.attr_sql.numeric_out_for_format) {
-        char *result = NULL;
-        /* to prevent stack overflow*/
-        u_sess->attr.attr_sql.numeric_out_for_format = true;
-        double var = DatumGetFloat8(DirectFunctionCall1(numeric_float8, NumericGetDatum(num)));
-        u_sess->attr.attr_sql.numeric_out_for_format = false;
-        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
-            result = apply_num_format(var);
-        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
-            result = apply_num_width(var);
-        }
-        if (result != NULL) {
-            PG_RETURN_CSTRING(result);
-        }
-    }
 
     /*
      * Handle NaN
@@ -1395,7 +1376,7 @@ static Datum numeric_abbrev_convert(Datum original_datum, SortSupport ssup)
      * This is to handle packed datums without needing a palloc/pfree cycle;
      * we keep and reuse a buffer large enough to handle any short datum.
      */
-    if (VARATT_IS_SHORT(original_varatt)) {
+    if (!VARATT_IS_HUGE_TOAST_POINTER(original_varatt) && VARATT_IS_SHORT(original_varatt)) {
         void* buf = nss->buf;
         Size sz = VARSIZE_SHORT(original_varatt) - VARHDRSZ_SHORT;
 
@@ -4122,9 +4103,7 @@ static const char* set_var_from_str(const char* str, const char* cp, NumericVar*
 static void set_var_from_num(Numeric num, NumericVar* dest)
 {
     Assert(!NUMERIC_IS_BI(num));
-    int ndigits;
-
-    ndigits = NUMERIC_NDIGITS(num);
+    int ndigits = NUMERIC_NDIGITS(num);
 
     alloc_var(dest, ndigits);
 
@@ -4152,7 +4131,7 @@ static void set_var_from_num(Numeric num, NumericVar* dest)
  *	propagate to the original Numeric! It's OK to use it as the destination
  *	argument of one of the calculational functions, though.
  */
-static inline void init_var_from_num(Numeric num, NumericVar* dest)
+void init_var_from_num(Numeric num, NumericVar* dest)
 {
     Assert(!NUMERIC_IS_BI(num));
     dest->ndigits = NUMERIC_NDIGITS(num);
@@ -4617,7 +4596,7 @@ static void apply_typmod(NumericVar* var, int32 typmod)
  *
  * If overflow, return false (no error is raised).  Return true if okay.
  */
-static bool numericvar_to_int64(const NumericVar* var, int64* result)
+bool numericvar_to_int64(const NumericVar* var, int64* result)
 {
     NumericDigit* digits = NULL;
     int ndigits;
@@ -18565,7 +18544,7 @@ int convert_int128_to_short_numeric_byscale(_out_ char* outBuf, _in_ int128 v, _
  * @IN value: input numeric value.
  * @return: Numeric - Datum points to fast numeric format
  */
-Datum try_convert_numeric_normal_to_fast(Datum value)
+Datum try_convert_numeric_normal_to_fast(Datum value, ScalarVector *arr)
 {
     Numeric val = DatumGetNumeric(value);
 
@@ -18580,7 +18559,7 @@ Datum try_convert_numeric_normal_to_fast(Datum value)
     // should be ( whole_scale <= MAXINT64DIGIT)
     if (CAN_CONVERT_BI64(whole_scale)) {
         int64 result = convert_short_numeric_to_int64_byscale(val, numVar.dscale);
-        return makeNumeric64(result, numVar.dscale);
+        return makeNumeric64(result, numVar.dscale, arr);
     } else if (CAN_CONVERT_BI128(whole_scale)) {
         int128 result = 0;
         convert_short_numeric_to_int128_byscale(val, numVar.dscale, result);

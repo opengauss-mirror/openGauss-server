@@ -230,8 +230,11 @@ typedef struct knl_session_attr_sql {
     char* db4ai_snapshot_version_delimiter;
     char* db4ai_snapshot_version_separator;
     int pldebugger_timeout;
-	bool for_print_tuple;
-    bool numeric_out_for_format;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    bool uppercase_attribute_name;
+#endif
+    int vectorEngineStrategy;
 #ifndef ENABLE_MULTIPLE_NODES
     bool enable_custom_parser;
 #endif

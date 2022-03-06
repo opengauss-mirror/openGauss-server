@@ -11,9 +11,9 @@ GENERATE
 GENERATE
 3
 DROP CLIENT MASTER KEY IF EXISTS ImgCMK1 CASCADE;
-NOTICE:  global setting "imgcmk1" does not exist
+NOTICE:  client master key "imgcmk1" does not exist
 DROP CLIENT MASTER KEY IF EXISTS ImgCMK CASCADE;
-NOTICE:  global setting "imgcmk" does not exist
+NOTICE:  client master key "imgcmk" does not exist
 CREATE CLIENT MASTER KEY ImgCMK1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 CREATE CLIENT MASTER KEY ImgCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/2" , ALGORITHM = AES_256_CBC);
 CREATE COLUMN ENCRYPTION KEY ImgCEK1 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK1, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
@@ -62,6 +62,18 @@ explain INSERT INTO creditcard_info3 VALUES (3, 'xiaoli','xiaoli', 621187780);
 (3 rows)
 
 --支持
+select * from creditcard_info2 where regression.public.creditcard_info2.name1 = (select name1 from creditcard_info3 order by id_number limit 1);
+ id_number | name1 | name2 |     credit_card     
+-----------+-------+-------+---------------------
+         1 | joe   | joe   | 6217986500001288393
+(1 row)
+
+select * from creditcard_info2 where public.creditcard_info2.name1 = (select name1 from creditcard_info3 order by id_number limit 1);
+ id_number | name1 | name2 |     credit_card     
+-----------+-------+-------+---------------------
+         1 | joe   | joe   | 6217986500001288393
+(1 row)
+
 select * from creditcard_info2 where name1 = (select name1 from creditcard_info3 order by id_number limit 1);
  id_number | name1 | name2 |     credit_card     
 -----------+-------+-------+---------------------
@@ -100,7 +112,7 @@ explain select * from (select * from creditcard_info3) as a , (select * from cre
 --?.*
 --?.*
 --?.*
---?.*
+(5 rows)
 
 select credit_card, name1 
 from 
@@ -285,7 +297,7 @@ CREATE CLIENT MASTER KEY lidj_cmk WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_k
 CREATE COLUMN ENCRYPTION KEY lidj_cek WITH VALUES (CLIENT_MASTER_KEY = lidj_cmk, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
 BEGIN;
 DROP CLIENT MASTER KEY IF EXISTS lidj_cmk CASCADE;
-NOTICE:  drop cascades to column setting: lidj_cek
+NOTICE:  drop cascades to column encryption key: lidj_cek
 ROLLBACK;
 CREATE TABLE creditcard_info (id_number  int, name  text encrypted with (column_encryption_key = lidj_cek, encryption_type = DETERMINISTIC));
 INSERT INTO creditcard_info VALUES (1,'joe');
@@ -310,7 +322,7 @@ select * from creditcard_info order by id_number;
 BEGIN;
 DROP TABLE creditcard_info;
 DROP CLIENT MASTER KEY IF EXISTS lidj_cmk CASCADE;
-NOTICE:  drop cascades to column setting: lidj_cek
+NOTICE:  drop cascades to column encryption key: lidj_cek
 ROLLBACK;
 select * from creditcard_info order by id_number;
  id_number |  name  
@@ -367,6 +379,6 @@ select  count(*), 'count' from gs_column_keys;
      0 | count
 (1 row)
 
-\! gs_ktool -d all
+--?.*gs_ktool -d all
 DELETE ALL
  1 2 3

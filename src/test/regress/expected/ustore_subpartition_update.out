@@ -1,0 +1,348 @@
+--prepare
+DROP SCHEMA ustore_subpartition_update CASCADE;
+ERROR:  schema "ustore_subpartition_update" does not exist
+CREATE SCHEMA ustore_subpartition_update;
+SET CURRENT_SCHEMA TO ustore_subpartition_update;
+--update
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+)DISABLE ROW MOVEMENT;
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+select * from range_list order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+(6 rows)
+
+--error
+update range_list set month_code = '201903';
+ERROR:  fail to update partitioned table "range_list"
+DETAIL:  disable row movement
+--error
+update range_list set dept_code = '2';
+ERROR:  fail to update partitioned table "range_list"
+DETAIL:  disable row movement
+update range_list set user_no = '2';
+select * from range_list order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 2       |         1
+ 201902     | 1         | 2       |         1
+ 201902     | 2         | 2       |         1
+ 201903     | 1         | 2       |         1
+ 201903     | 2         | 2       |         1
+ 201903     | 2         | 2       |         1
+(6 rows)
+
+-- test for upsert and merge into, both should report error
+insert into range_list values('201902', '1', '1', 1) ON DUPLICATE KEY UPDATE sales_amt=1;
+CREATE TABLE temp_table
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE);
+insert into temp_table values('201802', '1', '1', 1), ('201901', '2', '1', 1), ('201702', '1', '1', 1);
+MERGE INTO range_list t1
+USING temp_table t2
+ON (t1.dept_code = t2.dept_code)
+WHEN MATCHED THEN
+  UPDATE SET t1.month_code = t2.month_code WHERE t1.dept_code > 1
+WHEN NOT MATCHED THEN
+  INSERT VALUES (t2.month_code, t2.dept_code, t2.user_no, t2.sales_amt) WHERE t2.sales_amt = 1;
+ERROR:  fail to update partitioned table "range_list"
+DETAIL:  disable row movement
+drop table temp_table;
+drop table range_list;
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+)ENABLE ROW MOVEMENT;
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201902', '2', '1', 1);
+insert into range_list values('201902', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+insert into range_list values('201903', '1', '1', 1);
+insert into range_list values('201903', '2', '1', 1);
+select * from range_list order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+(6 rows)
+
+select * from range_list subpartition (p_201901_a) order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
+(2 rows)
+
+select * from range_list subpartition (p_201901_b) order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+(1 row)
+
+update range_list set dept_code = '2' where month_code = '201902';
+select * from range_list subpartition (p_201901_a) order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from range_list subpartition (p_201901_b) order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 2         | 1       |         1
+(3 rows)
+
+select * from range_list partition (p_201901) order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+ 201902     | 2         | 1       |         1
+ 201902     | 2         | 1       |         1
+(3 rows)
+
+select * from range_list partition (p_201902) order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+(3 rows)
+
+update range_list set month_code = '201903' where month_code = '201902';
+select * from range_list partition (p_201901) order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from range_list partition (p_201902) order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
+(6 rows)
+
+drop table range_list;
+-- FOREIGN KEY
+drop table tb_02;
+ERROR:  table "tb_02" does not exist
+CREATE TABLE tb_02
+(
+    col_1 int PRIMARY KEY,
+    col_2 int ,
+    col_3 VARCHAR2 ( 30 ) ,
+    col_4 int
+) WITH (STORAGE_TYPE=USTORE);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tb_02_pkey" for table "tb_02"
+drop table range_range_02 cascade;
+ERROR:  table "range_range_02" does not exist
+CREATE TABLE range_range_02
+(
+    col_1 int ,
+    col_2 int ,
+    col_3 VARCHAR2 ( 30 ) ,
+    col_4 int ,
+FOREIGN KEY(col_1) REFERENCES tb_02(col_1)
+) WITH (STORAGE_TYPE=USTORE)
+PARTITION BY RANGE (col_1) SUBPARTITION BY RANGE (col_2)
+(
+  PARTITION p_range_1 VALUES LESS THAN( 10 )
+  (
+    SUBPARTITION p_range_1_1 VALUES LESS THAN( 50 ),
+    SUBPARTITION p_range_1_2 VALUES LESS THAN( MAXVALUE )
+  ),
+  PARTITION p_range_2 VALUES LESS THAN( 80 )
+  (
+    SUBPARTITION p_range_2_1 VALUES LESS THAN( 50 ),
+    SUBPARTITION p_range_2_2 VALUES LESS THAN( MAXVALUE )
+  )
+);
+insert into tb_02 values(0,0,0,0);
+insert into range_range_02 values(0,0,0,0);
+update tb_02 set col_1=8 where col_2=0;
+ERROR:  update or delete on table "tb_02" violates foreign key constraint "range_range_02_col_1_fkey" on table "range_range_02"
+DETAIL:  Key (col_1)=(0) is still referenced from table "range_range_02".
+drop table range_range_02 cascade;
+drop table tb_02;
+drop table tb_02;
+ERROR:  table "tb_02" does not exist
+CREATE TABLE tb_02
+(
+    col_1 int PRIMARY KEY,
+    col_2 int ,
+    col_3 VARCHAR2 ( 30 ) ,
+    col_4 int
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tb_02_pkey" for table "tb_02"
+drop table list_list_02 cascade;
+ERROR:  table "list_list_02" does not exist
+CREATE TABLE list_list_02
+(
+    col_1 int ,
+    col_2 int ,
+    col_3 VARCHAR2 ( 30 ) ,
+    col_4 int ,
+    FOREIGN KEY(col_1) REFERENCES tb_02(col_1)
+)
+PARTITION BY list (col_1) SUBPARTITION BY list (col_2)
+(
+  PARTITION p_list_1 VALUES(-1,-2,-3,-4,-5,-6,-7,-8,-9,-10 )
+  (
+    SUBPARTITION p_list_1_1 VALUES ( 0,-1,-2,-3,-4,-5,-6,-7,-8,-9 ),
+    SUBPARTITION p_list_1_2 VALUES ( default )
+  ),
+  PARTITION p_list_2 VALUES(0,1,2,3,4,5,6,7,8,9)
+  (
+    SUBPARTITION p_list_2_1 VALUES ( 0,1,2,3,4,5,6,7,8,9 ),
+    SUBPARTITION p_list_2_2 VALUES ( default ),
+    SUBPARTITION p_list_2_3 VALUES ( 10,11,12,13,14,15,16,17,18,19),
+    SUBPARTITION p_list_2_4 VALUES ( 20,21,22,23,24,25,26,27,28,29 ),
+    SUBPARTITION p_list_2_5 VALUES ( 30,31,32,33,34,35,36,37,38,39 )
+  ),
+  PARTITION p_list_3 VALUES(10,11,12,13,14,15,16,17,18,19)
+  (
+    SUBPARTITION p_list_3_2 VALUES ( default )
+  ),
+  PARTITION p_list_4 VALUES(default ),
+  PARTITION p_list_5 VALUES(20,21,22,23,24,25,26,27,28,29)
+  (
+    SUBPARTITION p_list_5_1 VALUES ( 0,1,2,3,4,5,6,7,8,9 ),
+    SUBPARTITION p_list_5_2 VALUES ( default ),
+    SUBPARTITION p_list_5_3 VALUES ( 10,11,12,13,14,15,16,17,18,19),
+    SUBPARTITION p_list_5_4 VALUES ( 20,21,22,23,24,25,26,27,28,29 ),
+    SUBPARTITION p_list_5_5 VALUES ( 30,31,32,33,34,35,36,37,38,39 )
+  ),
+  PARTITION p_list_6 VALUES(30,31,32,33,34,35,36,37,38,39),
+  PARTITION p_list_7 VALUES(40,41,42,43,44,45,46,47,48,49)
+  (
+    SUBPARTITION p_list_7_1 VALUES ( default )
+  )
+) ENABLE ROW MOVEMENT;
+insert into list_list_02 values(0,0,0,0);
+ERROR:  insert or update on table "list_list_02" violates foreign key constraint "list_list_02_col_1_fkey"
+DETAIL:  Key (col_1)=(0) is not present in table "tb_02".
+insert into tb_02 values(0,0,0,0);
+insert into list_list_02 values(0,0,0,0);
+update list_list_02 set col_2=8 where col_2=0;
+update list_list_02 set col_1=8 where col_2=8;
+ERROR:  insert or update on table "list_list_02" violates foreign key constraint "list_list_02_col_1_fkey"
+DETAIL:  Key (col_1)=(8) is not present in table "tb_02".
+delete list_list_02 where col_2=8;
+drop table tb_02;
+ERROR:  cannot drop table tb_02 because other objects depend on it
+DETAIL:  constraint list_list_02_col_1_fkey on table list_list_02 depends on table tb_02
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+drop table list_list_02 cascade;
+drop table range_list_02;
+ERROR:  table "range_list_02" does not exist
+CREATE TABLE IF NOT EXISTS range_list_02
+(
+    col_1 int ,
+    col_2 int ,
+    col_3 int ,
+    col_4 int
+)
+PARTITION BY RANGE (col_1) SUBPARTITION BY list (col_2)
+(
+  PARTITION p_range_1 VALUES LESS THAN( -10 )
+  (
+    SUBPARTITION p_list_1_1 VALUES ( '-1','-2','-3','-4','-5'),
+    SUBPARTITION p_list_1_2 VALUES ( default )
+  ),
+  PARTITION p_range_2 VALUES LESS THAN( 20 )
+  (
+    SUBPARTITION p_list_2_1 VALUES ( '6','7','8','9','10'),
+    SUBPARTITION p_list_2_2 VALUES ( default )
+  ),
+   PARTITION p_range_3 VALUES LESS THAN( 30 )
+   (
+    SUBPARTITION p_list_3_1 VALUES ( default )
+  ),
+   PARTITION p_range_4 VALUES LESS THAN( 40 )
+   (
+    SUBPARTITION p_list_4_1 VALUES ( default )
+  ),
+  PARTITION p_range_5 VALUES LESS THAN( MAXVALUE )
+) ENABLE ROW MOVEMENT;
+create unique index on range_list_02(col_1,col_2);
+INSERT INTO range_list_02 VALUES (GENERATE_SERIES(-500, 500,2),GENERATE_SERIES(1500, 2500,2),
+GENERATE_SERIES(3500, 4500,2));
+insert into range_list_02 values(1,1,1,1),(4,4,4,4),(5,5,5,5),(8,8,8,8),(9,9,9,9);
+insert into range_list_02 values(11,11,1,1),(15,15,5,5),(18,81,8,8),(29,9,9,9);
+insert into range_list_02 values(21,11,1,1),(15,150,5,5),(18,811,8,8),(-2978,31,9,9);
+insert into range_list_02 values(-1,1,1,1),(-1,-15,5,5),(-8,7,8,8),(-9,29,9,9);
+insert into range_list_02 values(-8,18,1);
+update range_list_02 set col_4=80 where col_1=4;
+update range_list_02 set col_4=col_1 where col_1<5;
+update range_list_02 set col_4=col_1+ col_2 where col_1<5;
+update range_list_02 set col_1=83,col_2=8 where col_1=8;
+ERROR:  duplicate key value violates unique constraint "range_list_02_col_1_col_2_idx"
+DETAIL:  Key (col_1, col_2)=(83, 8) already exists.
+update range_list_02 set col_2=-56 where col_1=-2978;
+update range_list_02 set col_2=80 where col_2=-3;
+update range_list_02 set col_2=27 where col_2=80;
+alter table range_list_02 truncate partition p_range_1;
+alter table range_list_02 truncate SUBPARTITION p_list_2_2;
+delete from range_list_02 where col_1 >188 ;
+delete from range_list_02 where col_2 <10 and col_3>5;
+drop table range_list_02;
+DROP SCHEMA ustore_subpartition_update CASCADE;
+NOTICE:  drop cascades to table tb_02
+RESET CURRENT_SCHEMA;

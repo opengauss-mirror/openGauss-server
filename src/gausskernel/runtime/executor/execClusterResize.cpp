@@ -157,15 +157,6 @@ void RecordDeletedTuple(Oid relid, int2 bucketid, const ItemPointer tupleid, con
 }
 
 /*
- * - Brief: get and open delete_delta rel
- * - Parameter:
- *      @rel: target relation of UPDATE/DELETE/TRUNCATE operation
- *      @lockmode: lock mode
- *      @isMultiCatchup: multi catchup delta or not
- * - Return:
- *      delete_delta rel
- */
-/*
  * - Brief: Determine if the relation is under cluster resizing operation
  * - Parameter:
  *      @rel: relation that needs to check
@@ -198,6 +189,25 @@ bool RelationInClusterResizingReadOnly(const Relation rel)
 
     /* Check relation's append_mode status */
     if (!IsInitdb && RelationInRedistributeReadOnly(rel))
+        return true;
+
+    return false;
+}
+
+/*
+ * - Brief: Determine if the relation is under cluster resizing read only operation
+ * - Parameter:
+ *      @rel: relation that needs to check
+ * - Return:
+ *      @TRUE:  relation is under cluster resizing endcatchup(write error)
+ *      @FALSE: relation is not under cluster resizing endcatchup(write error)
+ */
+bool RelationInClusterResizingEndCatchup(const Relation rel)
+{
+    Assert(rel != NULL);
+
+    /* Check relation's append_mode status */
+    if (!IsInitdb && RelationInRedistributeEndCatchup(rel))
         return true;
 
     return false;
@@ -370,6 +380,15 @@ static inline void RelationGetDeleteDeltaTableName(Relation rel, char* delete_de
     return;
 }
 
+/*
+ * - Brief: get and open delete_delta rel
+ * - Parameter:
+ *      @rel: target relation of UPDATE/DELETE/TRUNCATE operation
+ *      @lockmode: lock mode
+ *      @isMultiCatchup: multi catchup delta or not
+ * - Return:
+ *      delete_delta rel
+ */
 Relation GetAndOpenDeleteDeltaRel(const Relation rel, LOCKMODE lockmode, bool isMultiCatchup)
 {
     Relation deldelta_rel;
@@ -1201,3 +1220,18 @@ void RelationGetNewTableName(Relation rel, char* newtable_name)
     }
     return;
 }
+
+/*
+ * - Brief: Determine if the relation is under cluster resizing write error mode
+ * - Parameter:
+ *      @rel: relation that needs to check
+ * - Return:
+ *      @TRUE:  relation is under cluster resizing write error mode
+ *      @FALSE: relation is not under cluster resizing write error mode
+ */
+bool RelationInClusterResizingWriteErrorMode(const Relation rel)
+{
+    return RelationInClusterResizingReadOnly(rel) ||
+        (RelationInClusterResizingEndCatchup(rel) && !pg_try_advisory_lock_for_redis(rel));
+}
+

@@ -62,7 +62,7 @@ TM_Result UHeapTupleSatisfiesUpdate(Relation rel, Snapshot snapshot, ItemPointer
 
 TransactionId UHeapTupleGetTransXid(UHeapTuple uhtup, Buffer buf, bool nobuflock);
 
-void UHeapTupleGetTransInfo(Buffer buf, OffsetNumber offnum, UHeapTupleTransInfo *txactinfo);
+UndoTraversalState UHeapTupleGetTransInfo(Buffer buf, OffsetNumber offnum, UHeapTupleTransInfo *txactinfo);
 
 UHTSVResult UHeapTupleSatisfiesOldestXmin(UHeapTuple inplacehtup, TransactionId OldestXmin, Buffer buffer,
     bool resolve_abort_in_progress, UHeapTuple *preabort_tuple, TransactionId *xid, SubTransactionId *subxid);
@@ -71,9 +71,8 @@ CommandId UHeapTupleGetCid(UHeapTuple uhtup, Buffer buf);
 
 void GetTDSlotInfo(Buffer buf, int tdId, UHeapTupleTransInfo *tdinfo);
 
-void FetchTransInfoFromUndo(BlockNumber blocknum, OffsetNumber offnum, TransactionId xid,
-    UHeapTupleTransInfo *txactinfo, ItemPointer newCtid);
-
+UndoTraversalState FetchTransInfoFromUndo(BlockNumber blocknum, OffsetNumber offnum, TransactionId xid,
+    UHeapTupleTransInfo *txactinfo, ItemPointer newCtid, bool needByPass);
 
 bool UHeapTupleIsSurelyDead(UHeapTuple uhtup, Buffer buffer, OffsetNumber offnum,
     const UHeapTupleTransInfo *cachedTdInfo, const bool useCachedTdInfo);

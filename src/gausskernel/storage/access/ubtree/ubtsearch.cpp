@@ -379,15 +379,19 @@ static void UBTreeFixActiveTupleCount(Relation rel, Buffer buf, UBTPageOpaqueInt
 {
     UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
     TransactionId xmin = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmin);
-    if (UBTreeCheckXid(xmin) == XID_ABORTED) {
-        ItemIdMarkDead(iid);
-        opaque->activeTupleCount--;
-        if (opaque->activeTupleCount == 0) {
-            UBTreeRecordEmptyPage(rel, BufferGetBlockNumber(buf), opaque->last_delete_xid);
+    TransactionId oldestXmin = InvalidTransactionId;
+    GetOldestXminForUndo(&oldestXmin);
+    if (TransactionIdPrecedes(xmin, oldestXmin)) {
+        if (UBTreeCheckXid(xmin) == XID_ABORTED) {
+            ItemIdMarkDead(iid);
+            opaque->activeTupleCount--;
+            if (opaque->activeTupleCount == 0) {
+                UBTreeRecordEmptyPage(rel, BufferGetBlockNumber(buf), opaque->last_delete_xid);
+            }
+        } else {
+            /* freeze this index tuple */
+            IndexItemIdSetFrozen(iid);
         }
-    } else if (TransactionIdPrecedes(xmin, u_sess->utils_cxt.RecentGlobalDataXmin)) {
-        /* freeze this index tuple */
-        IndexItemIdSetFrozen(iid);
     }
 }
 
@@ -1084,16 +1088,12 @@ bool UBTreeFirst(IndexScanDesc scan, ScanDirection dir)
 
     scan->xs_ctup.t_self = currItem->heapTid;
     scan->xs_recheck_itup = false;
-    if (scan->xs_want_itup) {
+    if (scan->xs_want_itup || currItem->needRecheck) {
+        /* in this case, currTuples and tupleOffset must be valid. */
+        Assert(so->currTuples != NULL && currItem->tupleOffset != INVALID_TUPLE_OFFSET);
         scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
-    } else if (currItem->tupleOffset != INVALID_TUPLE_OFFSET) {
-        /*
-         * currItem->tupleOffset is normal, but we are not doing index only scan.
-         * This case is used to indicate that we have to recheck the IndexTuple after
-         * get the visible UHeap Tuple.
-         */
-        scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
-        scan->xs_recheck_itup = true;
+        /* if we can't tell whether this tuple is visible with out CID, we must fetch UHeapTuple to recheck. */
+        scan->xs_recheck_itup = currItem->needRecheck;
     }
 
     if (scan->xs_want_ext_oid && GPIScanCheckPartOid(scan->xs_gpi_scan, currItem->partitionOid)) {
@@ -1153,16 +1153,12 @@ bool UBTreeNext(IndexScanDesc scan, ScanDirection dir)
 
     scan->xs_ctup.t_self = currItem->heapTid;
     scan->xs_recheck_itup = false;
-    if (scan->xs_want_itup) {
+    if (scan->xs_want_itup || currItem->needRecheck) {
+        /* in this case, currTuples and tupleOffset must be valid. */
+        Assert(so->currTuples != NULL && currItem->tupleOffset != INVALID_TUPLE_OFFSET);
         scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
-    } else if (currItem->tupleOffset != INVALID_TUPLE_OFFSET) {
-        /*
-         * currItem->tupleOffset is normal, but we are not doing index only scan.
-         * This case is used to indicate that we have to recheck the IndexTuple after
-         * get the visible UHeap Tuple.
-         */
-        scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
-        scan->xs_recheck_itup = true;
+        /* if we can't tell whether this tuple is visible with out CID, we must fetch UHeapTuple to recheck. */
+        scan->xs_recheck_itup = currItem->needRecheck;
     }
 
     if (scan->xs_want_ext_oid && GPIScanCheckPartOid(scan->xs_gpi_scan, currItem->partitionOid)) {
@@ -1209,8 +1205,6 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
 
     /* we must have the buffer pinned and locked */
     Assert(BufferIsValid(so->currPos.buf));
-    /* We've pinned the buffer, nobody can prune this buffer, check whether snapshot is valid. */
-    CheckSnapshotIsValidException(scan->xs_snapshot, "_bt_readpage");
 
     page = BufferGetPage(so->currPos.buf);
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -1310,6 +1304,7 @@ static void UBTreeSaveItem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, 
     currItem->indexOffset = offnum;
     currItem->partitionOid = partOid;
     currItem->tupleOffset = INVALID_TUPLE_OFFSET;
+    currItem->needRecheck = needRecheck;
 
     if (needRecheck) {
         if (!so->currTuples) {
@@ -1639,16 +1634,12 @@ static bool UBTreeEndPoint(IndexScanDesc scan, ScanDirection dir)
 
     scan->xs_ctup.t_self = currItem->heapTid;
     scan->xs_recheck_itup = false;
-    if (scan->xs_want_itup) {
+    if (scan->xs_want_itup || currItem->needRecheck) {
+        /* in this case, currTuples and tupleOffset must be valid. */
+        Assert(so->currTuples != NULL && currItem->tupleOffset != INVALID_TUPLE_OFFSET);
         scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
-    } else if (currItem->tupleOffset != INVALID_TUPLE_OFFSET) {
-        /*
-         * currItem->tupleOffset is normal, but we are not doing index only scan.
-         * This case is used to indicate that we have to recheck the IndexTuple after
-         * get the visible UHeap Tuple.
-         */
-        scan->xs_itup = (IndexTuple)(so->currTuples + currItem->tupleOffset);
-        scan->xs_recheck_itup = true;
+        /* if we can't tell whether this tuple is visible with out CID, we must fetch UHeapTuple to recheck. */
+        scan->xs_recheck_itup = currItem->needRecheck;
     }
 
     if (scan->xs_want_ext_oid && GPIScanCheckPartOid(scan->xs_gpi_scan, currItem->partitionOid)) {

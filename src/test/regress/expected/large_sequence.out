@@ -1,0 +1,772 @@
+CREATE SCHEMA large_sequence;
+SET CURRENT_SCHEMA = large_sequence;
+-- test psql support
+CREATE SEQUENCE S1;
+CREATE LARGE SEQUENCE S2;
+\d
+--?.*
+--?.*
+--?.*
+--? large_sequence | s1   | sequence       | .* | 
+--? large_sequence | s2   | large sequence | .* | 
+(2 rows)
+
+\ds
+--?.*
+--?.*
+--?.*
+--? large_sequence | s1   | sequence       | .* | 
+--? large_sequence | s2   | large sequence | .* | 
+(2 rows)
+
+\d S1
+         Sequence "large_sequence.s1"
+    Column     |  Type   |        Value        
+---------------+---------+---------------------
+ sequence_name | name    | s1
+ last_value    | bigint  | 1
+ start_value   | bigint  | 1
+ increment_by  | bigint  | 1
+ max_value     | bigint  | 9223372036854775807
+ min_value     | bigint  | 1
+ cache_value   | bigint  | 1
+ log_cnt       | bigint  | 0
+ is_cycled     | boolean | f
+ is_called     | boolean | f
+ uuid          | bigint  | 0
+
+\d S2
+                Large Sequence "large_sequence.s2"
+    Column     |  Type   |                  Value                  
+---------------+---------+-----------------------------------------
+ sequence_name | name    | s2
+ last_value    | int16   | 1
+ start_value   | int16   | 1
+ increment_by  | int16   | 1
+ max_value     | int16   | 170141183460469231731687303715884105727
+ min_value     | int16   | 1
+ cache_value   | int16   | 1
+ log_cnt       | bigint  | 0
+ is_cycled     | boolean | f
+ is_called     | boolean | f
+ uuid          | bigint  | 0
+
+COMMENT ON LARGE SEQUENCE S2 IS 'FOO';
+COMMENT ON LARGE SEQUENCE S2 IS NULL;
+-- temp sequences not support
+CREATE TEMP LARGE SEQUENCE myseq2;
+ERROR:  Temporary sequences are not supported
+CREATE TEMP LARGE SEQUENCE myseq3;
+ERROR:  Temporary sequences are not supported
+-- default no cache, no start, no cycle
+CREATE LARGE SEQUENCE S
+INCREMENT 17014118346046923173168730371588410572
+MINVALUE 17014118346046923173168730371588410573
+MAXVALUE 170141183460469231731687303715884105721;
+-- basic api
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 34028236692093846346337460743176821145
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 51042355038140769519506191114765231717
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 68056473384187692692674921486353642289
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 85070591730234615865843651857942052861
+(1 row)
+
+SELECT * FROM nextval('s');
+                 nextval                 
+-----------------------------------------
+ 102084710076281539039012382229530463433
+(1 row)
+
+SELECT * FROM nextval('s');
+                 nextval                 
+-----------------------------------------
+ 119098828422328462212181112601118874005
+(1 row)
+
+SELECT * FROM nextval('s');
+                 nextval                 
+-----------------------------------------
+ 136112946768375385385349842972707284577
+(1 row)
+
+SELECT * FROM nextval('s');
+                 nextval                 
+-----------------------------------------
+ 153127065114422308558518573344295695149
+(1 row)
+
+SELECT * FROM nextval('s');
+                 nextval                 
+-----------------------------------------
+ 170141183460469231731687303715884105721
+(1 row)
+
+SELECT * FROM nextval('s');
+ERROR:  nextval: reached maximum value of sequence "s" (170141183460469231731687303715884105721)
+SELECT * FROM setval('s', 17014118346046923173168730371588410573);
+                 setval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 34028236692093846346337460743176821145
+(1 row)
+
+SELECT * FROM lastval();
+                lastval                 
+----------------------------------------
+ 34028236692093846346337460743176821145
+(1 row)
+
+SELECT * FROM currval('s');
+                currval                 
+----------------------------------------
+ 34028236692093846346337460743176821145
+(1 row)
+
+SELECT * FROM setval('s', 17014118346046923173168730371588410573, FALSE);
+                 setval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM setval('s'::text, 17014118346046923173168730371588410573);
+                 setval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM setval('s'::text, 17014118346046923173168730371588410573, FALSE);
+                 setval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM nextval('s'::text);
+                nextval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM currval('s'::text);
+                currval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM setval('s'::regclass, 17014118346046923173168730371588410573);
+                 setval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM setval('s'::regclass, 17014118346046923173168730371588410573, FALSE);
+                 setval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM nextval('s'::regclass);
+                nextval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM currval('s'::regclass);
+                currval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+-- needs drop large sequence
+DROP SEQUENCE S;
+ERROR:  "s" is not a sequence
+HINT:  Use DROP LARGE SEQUENCE to remove a large sequence.
+DROP LARGE SEQUENCE S;
+-- cycle
+CREATE LARGE SEQUENCE S
+INCREMENT 17014118346046923173168730371588410572
+MINVALUE 17014118346046923173168730371588410573
+MAXVALUE 51042355038140769519506191114765231717
+CYCLE;
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 34028236692093846346337460743176821145
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 51042355038140769519506191114765231717
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 34028236692093846346337460743176821145
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 51042355038140769519506191114765231717
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+DROP LARGE SEQUENCE S;
+-- cache
+CREATE LARGE SEQUENCE S
+INCREMENT 17014118346046923173168730371588410572
+MINVALUE 17014118346046923173168730371588410573
+MAXVALUE 170141183460469231731687303715884105721
+CACHE 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 17014118346046923173168730371588410573
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 34028236692093846346337460743176821145
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 51042355038140769519506191114765231717
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 68056473384187692692674921486353642289
+(1 row)
+
+SELECT * FROM nextval('s');
+                nextval                 
+----------------------------------------
+ 85070591730234615865843651857942052861
+(1 row)
+
+SELECT * FROM nextval('s');
+                 nextval                 
+-----------------------------------------
+ 102084710076281539039012382229530463433
+(1 row)
+
+DROP LARGE SEQUENCE S;
+-- start with
+CREATE LARGE SEQUENCE S
+INCREMENT -17014118346046923173168730371588410572
+MINVALUE 17014118346046923173168730371588410573
+MAXVALUE 170141183460469231731687303715884105721
+START WITH 170141183460469231731687303715884105720
+CACHE 5;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+DROP LARGE SEQUENCE S;
+CREATE LARGE SEQUENCE S
+INCREMENT 100000000000000000000000000000000000
+MINVALUE 100000000000000000000000000000000000
+MAXVALUE 100000000000000000000000000000000000000;
+-- can create sequence with default nextval(<large sequence>)
+CREATE TABLE TAB_SEQ(c1 numeric, c2 numeric default nextval('S'), c3 serial);
+NOTICE:  CREATE TABLE will create implicit sequence "tab_seq_c3_seq" for serial column "tab_seq.c3"
+INSERT INTO TAB_SEQ VALUES(0);
+INSERT INTO TAB_SEQ VALUES(0);
+INSERT INTO TAB_SEQ VALUES(0);
+INSERT INTO TAB_SEQ VALUES(0);
+INSERT INTO TAB_SEQ VALUES(0);
+INSERT INTO TAB_SEQ VALUES(0);
+SELECT * FROM TAB_SEQ ORDER BY c3;
+ c1 |                  c2                  | c3 
+----+--------------------------------------+----
+  0 | 100000000000000000000000000000000000 |  1
+  0 | 200000000000000000000000000000000000 |  2
+  0 | 300000000000000000000000000000000000 |  3
+  0 | 400000000000000000000000000000000000 |  4
+  0 | 500000000000000000000000000000000000 |  5
+  0 | 600000000000000000000000000000000000 |  6
+(6 rows)
+
+\d TAB_SEQ
+                     Table "large_sequence.tab_seq"
+ Column |  Type   |                      Modifiers                       
+--------+---------+------------------------------------------------------
+ c1     | numeric | 
+ c2     | numeric | default nextval('s'::regclass)
+ c3     | integer | not null default nextval('tab_seq_c3_seq'::regclass)
+
+-- cannot drop
+DROP LARGE SEQUENCE S;
+ERROR:  cannot drop large sequence s because other objects depend on it
+DETAIL:  default for table tab_seq column c2 depends on large sequence s
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP LARGE SEQUENCE S CASCADE;
+NOTICE:  drop cascades to default for table tab_seq column c2
+-- default value is dropped accordingly
+\d TAB_SEQ
+                     Table "large_sequence.tab_seq"
+ Column |  Type   |                      Modifiers                       
+--------+---------+------------------------------------------------------
+ c1     | numeric | 
+ c2     | numeric | 
+ c3     | integer | not null default nextval('tab_seq_c3_seq'::regclass)
+
+-- alter sequence
+CREATE LARGE SEQUENCE foo;
+-- rename not supported
+ALTER LARGE SEQUENCE foo RENAME TO bar;
+ERROR:  RENAME SEQUENCE is not yet supported.
+SELECT * FROM foo;
+ sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------
+ foo           |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+-- alter maxvalue - ok
+ALTER LARGE SEQUENCE foo MAXVALUE 1000;
+-- alter owner role -ok
+CREATE ROLE role_foo PASSWORD '!@#123qwe';
+ALTER LARGE SEQUENCE foo OWNER TO role_foo;
+-- alter owner column - fail if owners are different
+CREATE TABLE tab_foo (a bigint);
+ALTER LARGE SEQUENCE foo OWNED BY tab_foo.a;
+ERROR:  sequence must have same owner as table it is linked to
+DROP LARGE SEQUENCE IF EXISTS foo;
+CREATE LARGE SEQUENCE foo;
+ALTER LARGE SEQUENCE IF EXISTS foo OWNED BY tab_foo.a;
+-- owner column set OK
+DROP TABLE tab_foo;
+-- alter if exitsts works
+ALTER LARGE SEQUENCE IF EXISTS foo MAXVALUE 100;
+NOTICE:  relation "foo" does not exist, skipping
+CREATE LARGE SEQUENCE foo INCREMENT 10 CYCLE;
+ALTER LARGE SEQUENCE IF EXISTS foo MAXVALUE 30;
+SELECT * FROM nextval('foo');
+ nextval 
+---------
+       1
+(1 row)
+
+SELECT * FROM nextval('foo');
+ nextval 
+---------
+      11
+(1 row)
+
+SELECT * FROM nextval('foo');
+ nextval 
+---------
+      21
+(1 row)
+
+SELECT * FROM nextval('foo');
+ nextval 
+---------
+       1
+(1 row)
+
+ALTER LARGE SEQUENCE IF EXISTS foo NO MAXVALUE;
+SELECT * FROM nextval('foo');
+ nextval 
+---------
+      11
+(1 row)
+
+SELECT * FROM nextval('foo');
+ nextval 
+---------
+      21
+(1 row)
+
+SELECT * FROM nextval('foo');
+ nextval 
+---------
+      31
+(1 row)
+
+SELECT * FROM nextval('foo');
+ nextval 
+---------
+      41
+(1 row)
+
+ALTER LARGE SEQUENCE IF EXISTS foo NOMAXVALUE;
+-- alter other attributes are not supported
+ALTER LARGE SEQUENCE IF EXISTS foo MINVALUE 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+ALTER LARGE SEQUENCE IF EXISTS foo NO CYCLE;
+ERROR:  ALTER SEQUENCE is not yet supported.
+ALTER LARGE SEQUENCE IF EXISTS foo START 1;
+ERROR:  ALTER SEQUENCE is not yet supported.
+ALTER LARGE SEQUENCE IF EXISTS foo CACHE 100;
+-- test for largeserial
+CREATE TABLE serialTest (f1 text, f2 largeserial);
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest_f2_seq" for serial column "serialtest.f2"
+INSERT INTO serialTest VALUES ('foo');
+INSERT INTO serialTest VALUES ('bar');
+INSERT INTO serialTest VALUES ('force', 17014118346046923173168730371588410573);
+INSERT INTO serialTest VALUES ('wrong', NULL);
+ERROR:  null value in column "f2" violates not-null constraint
+DETAIL:  Failing row contains (wrong, null).
+SELECT * FROM serialTest;
+  f1   |                   f2                   
+-------+----------------------------------------
+ foo   |                                      1
+ bar   |                                      2
+ force | 17014118346046923173168730371588410573
+(3 rows)
+
+CREATE TABLE serialTest2 (f1 text, f2 serial, f3 smallserial, f4 serial2,
+  f5 bigserial, f6 serial8, f7 largeserial, f8 serial16);
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest2_f2_seq" for serial column "serialtest2.f2"
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest2_f3_seq" for serial column "serialtest2.f3"
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest2_f4_seq" for serial column "serialtest2.f4"
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest2_f5_seq" for serial column "serialtest2.f5"
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest2_f6_seq" for serial column "serialtest2.f6"
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest2_f7_seq" for serial column "serialtest2.f7"
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest2_f8_seq" for serial column "serialtest2.f8"
+INSERT INTO serialTest2 (f1)
+  VALUES ('test_defaults');
+INSERT INTO serialTest2 (f1, f2, f3, f4, f5, f6, f7, f8)
+  VALUES ('test_max_vals', 2147483647, 32767, 32767, 9223372036854775807,
+          9223372036854775807, 170141183460469231731687303715884105727, 170141183460469231731687303715884105727),
+         ('test_min_vals', -2147483648, -32768, -32768, -9223372036854775808,
+          -9223372036854775808, -170141183460469231731687303715884105728, -170141183460469231731687303715884105728);
+INSERT INTO serialTest2 (f1, f7)
+  VALUES ('bogus', -170141183460469231731687303715884105729);
+INSERT INTO serialTest2 (f1, f8)
+  VALUES ('bogus', -170141183460469231731687303715884105729);
+INSERT INTO serialTest2 (f1, f7)
+  VALUES ('bogus', 170141183460469231731687303715884105728);
+INSERT INTO serialTest2 (f1, f8)
+  VALUES ('bogus', 170141183460469231731687303715884105728);
+SELECT * FROM serialTest2 ORDER BY f2 ASC;
+      f1       |     f2      |   f3   |   f4   |          f5          |          f6          |                    f7                    |                    f8                    
+---------------+-------------+--------+--------+----------------------+----------------------+------------------------------------------+------------------------------------------
+ test_min_vals | -2147483648 | -32768 | -32768 | -9223372036854775808 | -9223372036854775808 | -170141183460469231731687303715884105728 | -170141183460469231731687303715884105728
+ test_defaults |           1 |      1 |      1 |                    1 |                    1 |                                        1 |                                        1
+ bogus         |           2 |      2 |      2 |                    2 |                    2 | -170141183460469231731687303715884105729 |                                        2
+ bogus         |           3 |      3 |      3 |                    3 |                    3 |                                        2 | -170141183460469231731687303715884105729
+ bogus         |           4 |      4 |      4 |                    4 |                    4 |  170141183460469231731687303715884105728 |                                        3
+ bogus         |           5 |      5 |      5 |                    5 |                    5 |                                        3 |  170141183460469231731687303715884105728
+ test_max_vals |  2147483647 |  32767 |  32767 |  9223372036854775807 |  9223372036854775807 |  170141183460469231731687303715884105727 |  170141183460469231731687303715884105727
+(7 rows)
+
+SELECT nextval('serialTest2_f2_seq');
+ nextval 
+---------
+       6
+(1 row)
+
+SELECT nextval('serialTest2_f3_seq');
+ nextval 
+---------
+       6
+(1 row)
+
+SELECT nextval('serialTest2_f4_seq');
+ nextval 
+---------
+       6
+(1 row)
+
+SELECT nextval('serialTest2_f5_seq');
+ nextval 
+---------
+       6
+(1 row)
+
+SELECT nextval('serialTest2_f6_seq');
+ nextval 
+---------
+       6
+(1 row)
+
+SELECT nextval('serialTest2_f7_seq');
+ nextval 
+---------
+       4
+(1 row)
+
+SELECT nextval('serialTest2_f8_seq');
+ nextval 
+---------
+       4
+(1 row)
+
+-- Create table like
+CREATE TABLE cat (like serialTest2);
+NOTICE:  CREATE TABLE will create implicit sequence "cat_f2_seq" for serial column "cat.f2"
+NOTICE:  CREATE TABLE will create implicit sequence "cat_f3_seq" for serial column "cat.f3"
+NOTICE:  CREATE TABLE will create implicit sequence "cat_f4_seq" for serial column "cat.f4"
+NOTICE:  CREATE TABLE will create implicit sequence "cat_f5_seq" for serial column "cat.f5"
+NOTICE:  CREATE TABLE will create implicit sequence "cat_f6_seq" for serial column "cat.f6"
+NOTICE:  CREATE TABLE will create implicit sequence "cat_f7_seq" for serial column "cat.f7"
+NOTICE:  CREATE TABLE will create implicit sequence "cat_f8_seq" for serial column "cat.f8"
+INSERT INTO cat (f1)
+  VALUES ('eins');
+INSERT INTO cat (f1)
+  VALUES ('zwei');
+INSERT INTO cat (f1)
+  VALUES ('drei');
+INSERT INTO cat (f1)
+  VALUES ('funf');
+SELECT * FROM cat;
+  f1  | f2 | f3 | f4 | f5 | f6 | f7 | f8 
+------+----+----+----+----+----+----+----
+ eins |  1 |  1 |  1 |  1 |  1 |  1 |  1
+ zwei |  2 |  2 |  2 |  2 |  2 |  2 |  2
+ drei |  3 |  3 |  3 |  3 |  3 |  3 |  3
+ funf |  4 |  4 |  4 |  4 |  4 |  4 |  4
+(4 rows)
+
+-- renaming serial sequences
+ALTER TABLE serialtest_f7_seq RENAME TO serialtest_f7_foo;
+ERROR:  relation "serialtest_f7_seq" does not exist
+INSERT INTO serialTest VALUES ('more');
+SELECT * FROM serialTest;
+  f1   |                   f2                   
+-------+----------------------------------------
+ foo   |                                      1
+ bar   |                                      2
+ force | 17014118346046923173168730371588410573
+ more  |                                      3
+(4 rows)
+
+-- Check dependencies of serial and ordinary sequences
+CREATE LARGE SEQUENCE myseq2;
+CREATE LARGE SEQUENCE myseq3;
+-- Cannot have type cast in nextval's argument
+CREATE TABLE t1 (
+  f1 serial,
+  f2 numeric DEFAULT nextval('myseq2'),
+  f3 numeric DEFAULT nextval('myseq3'::text)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_f1_seq" for serial column "t1.f1"
+ERROR:  argument of nextval() must be plain const value
+CREATE TABLE t1 (
+  f1 largeserial,
+  f2 numeric DEFAULT nextval('myseq2'),
+  f3 numeric DEFAULT nextval('myseq3')
+);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_f1_seq" for serial column "t1.f1"
+-- Both drops should fail
+DROP LARGE SEQUENCE t1_f1_seq;
+ERROR:  cannot drop large sequence t1_f1_seq because other objects depend on it
+DETAIL:  default for table t1 column f1 depends on large sequence t1_f1_seq
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP LARGE SEQUENCE myseq2;
+ERROR:  cannot drop large sequence myseq2 because other objects depend on it
+DETAIL:  default for table t1 column f2 depends on large sequence myseq2
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP TABLE t1;
+-- Fails because no longer existent:
+DROP SEQUENCE t1_f1_seq;
+ERROR:  sequence "t1_f1_seq" does not exist
+DROP LARGE SEQUENCE myseq2;
+-- Information schema do not support large sequence for now
+SELECT * FROM information_schema.sequences WHERE sequence_name in ('myseq3');
+ sequence_catalog | sequence_schema | sequence_name | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |              maximum_value              | increment | cycle_option 
+------------------+-----------------+---------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+-----------------------------------------+-----------+--------------
+ regression       | large_sequence  | myseq3        | int16     |               128 |                       2 |             0 | 1           | 1             | 170141183460469231731687303715884105727 | 1         | NO
+(1 row)
+
+-- Privilige check
+CREATE LARGE SEQUENCE priv_seq;
+CREATE ROLE zeus PASSWORD '123qwe!@#';
+GRANT SELECT ON priv_seq TO zeus;
+GRANT ALL ON SCHEMA large_sequence TO zeus;
+SET ROLE zeus PASSWORD '123qwe!@#';
+SELECT * FROM priv_seq;
+ sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------
+ priv_seq      |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+\d priv_seq
+             Large Sequence "large_sequence.priv_seq"
+    Column     |  Type   |                  Value                  
+---------------+---------+-----------------------------------------
+ sequence_name | name    | priv_seq
+ last_value    | int16   | 1
+ start_value   | int16   | 1
+ increment_by  | int16   | 1
+ max_value     | int16   | 170141183460469231731687303715884105727
+ min_value     | int16   | 1
+ cache_value   | int16   | 1
+ log_cnt       | bigint  | 0
+ is_cycled     | boolean | f
+ is_called     | boolean | f
+ uuid          | bigint  | 0
+
+SELECT nextval('priv_seq');
+ERROR:  permission denied for sequence priv_seq
+CONTEXT:  referenced column: nextval
+ALTER LARGE SEQUENCE priv_seq MAXVALUE 100;
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+COMMENT ON LARGE SEQUENCE priv_seq IS 'FOO';
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+DROP LARGE SEQUENCE priv_seq;
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+RESET ROLE;
+GRANT UPDATE ON priv_seq TO zeus;
+SET ROLE zeus PASSWORD '123qwe!@#';
+SELECT nextval('priv_seq');
+ nextval 
+---------
+       1
+(1 row)
+
+ALTER LARGE SEQUENCE priv_seq MAXVALUE 100;
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+COMMENT ON LARGE SEQUENCE priv_seq IS 'FOO';
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+DROP LARGE SEQUENCE priv_seq;
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+RESET ROLE;
+GRANT USAGE ON priv_seq TO zeus;
+SET ROLE zeus PASSWORD '123qwe!@#';
+ALTER LARGE SEQUENCE priv_seq MAXVALUE 100;
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+COMMENT ON LARGE SEQUENCE priv_seq IS 'FOO';
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+DROP LARGE SEQUENCE priv_seq;
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+RESET ROLE;
+GRANT ALTER ON priv_seq TO zeus;
+SET ROLE zeus PASSWORD '123qwe!@#';
+ALTER LARGE SEQUENCE priv_seq MAXVALUE 100;
+COMMENT ON LARGE SEQUENCE priv_seq IS 'FOO';
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+DROP LARGE SEQUENCE priv_seq;
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+RESET ROLE;
+GRANT COMMENT ON priv_seq TO zeus;
+SET ROLE zeus PASSWORD '123qwe!@#';
+COMMENT ON LARGE SEQUENCE priv_seq IS 'FOO';
+DROP LARGE SEQUENCE priv_seq;
+ERROR:  permission denied for relation priv_seq
+DETAIL:  N/A
+RESET ROLE;
+GRANT DROP ON priv_seq TO zeus;
+SET ROLE zeus PASSWORD '123qwe!@#';
+DROP LARGE SEQUENCE priv_seq;
+RESET ROLE;
+CREATE SCHEMA seq_priv_schema;
+CREATE LARGE SEQUENCE seq_priv_schema.priv_seq;
+GRANT ALL ON SCHEMA seq_priv_schema TO zeus;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA seq_priv_schema TO zeus;
+SET ROLE zeus PASSWORD '123qwe!@#';
+SET current_schema = seq_priv_schema;
+SELECT * FROM priv_seq;
+ sequence_name | last_value | start_value | increment_by |                max_value                | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------------------------------------+-----------+-------------+---------+-----------+-----------+------
+ priv_seq      |          1 |           1 |            1 | 170141183460469231731687303715884105727 |         1 |           1 |       0 | f         | f         |    0
+(1 row)
+
+\d priv_seq
+             Large Sequence "seq_priv_schema.priv_seq"
+    Column     |  Type   |                  Value                  
+---------------+---------+-----------------------------------------
+ sequence_name | name    | priv_seq
+ last_value    | int16   | 1
+ start_value   | int16   | 1
+ increment_by  | int16   | 1
+ max_value     | int16   | 170141183460469231731687303715884105727
+ min_value     | int16   | 1
+ cache_value   | int16   | 1
+ log_cnt       | bigint  | 0
+ is_cycled     | boolean | f
+ is_called     | boolean | f
+ uuid          | bigint  | 0
+
+SELECT nextval('priv_seq');
+ nextval 
+---------
+       1
+(1 row)
+
+ALTER LARGE SEQUENCE priv_seq MAXVALUE 100;
+COMMENT ON LARGE SEQUENCE priv_seq IS 'FOO';
+DROP LARGE SEQUENCE priv_seq;
+RESET ROLE;
+DROP SCHEMA seq_priv_schema CASCADE;
+REVOKE ALL ON SCHEMA large_sequence FROM zeus;
+DROP ROLE zeus;
+SET current_schema = large_sequence;
+create table ctest (a int) with (orientation=column);
+create user ctest_user password 'huawei@123';
+alter table ctest owner to "ctest_user";
+drop user ctest_user cascade;
+DROP ROLE role_foo;
+DROP SCHEMA large_sequence CASCADE;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to sequence s1
+drop cascades to large sequence s2
+drop cascades to table tab_seq
+drop cascades to large sequence foo
+drop cascades to table serialtest
+drop cascades to table serialtest2
+drop cascades to table cat
+drop cascades to large sequence myseq3

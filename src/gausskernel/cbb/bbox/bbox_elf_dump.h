@@ -31,7 +31,11 @@
 #include <sys/poll.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
+#ifndef WITH_OPENEULER_OS
 #include <sys/sysctl.h>
+#else
+#include <linux/sysctl.h>
+#endif
 #include <sys/ptrace.h>
 #include <asm/ptrace.h>
 #include <sys/time.h>
@@ -96,6 +100,7 @@ extern "C" {
 #define THREAD_SELF_COMMAND_LINE_FILE "/proc/self/cmdline"
 
 #define VDSO_NAME_STRING "[vdso]"
+#define VVAR_NAME_STRING "[vvar]"
 #define DEVICE_ZERO_NAME_STRING "/dev/zero"
 #define DEVICE_PREFIX_LEN 5
 #define DEVICE_AND_NODE_FIELD_NUM 2
@@ -109,6 +114,7 @@ extern "C" {
 #define PF_DEVICE 0x40000000
 #define PF_VDSO 0x20000000
 #define PF_MAPPEDFILE 0x10000000
+#define PF_VVAR 0x08000000
 
 #define BBOX_SECTION_NUM 3
 #define BBOX_SHSTR_INDEX 2

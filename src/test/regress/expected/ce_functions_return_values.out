@@ -15,8 +15,8 @@ INSERT INTO t_num (id, num) VALUES (2, 6666);
 SELECT * from t_num;
  id | num  
 ----+------
-  1 | 5555
   2 | 6666
+  1 | 5555
 (2 rows)
 
 CREATE FUNCTION select1 () RETURNS t_num LANGUAGE SQL
@@ -62,21 +62,54 @@ begin
 end;
 $BODY$
 language plpgsql ;
-\df
-                                                                   List of functions
- Schema |           Name           |                Result data type                | Argument data types |  Type  | fencedmode | propackage | prokind 
---------+--------------------------+------------------------------------------------+---------------------+--------+------------+------------+---------
- public | f_processed_return_table | TABLE(val_p integer, val2_p integer encrypted) |                     | normal | f          | f          | f
- public | get_rows_setof           | SETOF t_num                                    |                     | normal | f          | f          | f
- public | reffunc                  | refcursor                                      | refcursor           | normal | f          | f          | f
- public | select1                  | t_num                                          |                     | normal | f          | f          | f
- public | select2                  | t_num                                          |                     | normal | f          | f          | f
- public | select3                  | SETOF t_num                                    |                     | normal | f          | f          | f
- public | select4                  | SETOF t_num                                    |                     | normal | f          | f          | f
- public | select5                  | integer encrypted                              |                     | normal | f          | f          | f
- public | select6                  | SETOF integer encrypted                        |                     | normal | f          | f          | f
- public | select7                  | TABLE(a integer, b integer encrypted)          |                     | normal | f          | f          | f
-(10 rows)
+\df select1
+                                           List of functions
+ Schema |  Name   | Result data type | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------+---------+------------------+---------------------+--------+------------+------------+---------
+ public | select1 | t_num            |                     | normal | f          | f          | f
+(1 row)
+
+\df select2
+                                           List of functions
+ Schema |  Name   | Result data type | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------+---------+------------------+---------------------+--------+------------+------------+---------
+ public | select2 | t_num            |                     | normal | f          | f          | f
+(1 row)
+
+\df select3
+                                           List of functions
+ Schema |  Name   | Result data type | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------+---------+------------------+---------------------+--------+------------+------------+---------
+ public | select3 | SETOF t_num      |                     | normal | f          | f          | f
+(1 row)
+
+\df select4
+                                           List of functions
+ Schema |  Name   | Result data type | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------+---------+------------------+---------------------+--------+------------+------------+---------
+ public | select4 | SETOF t_num      |                     | normal | f          | f          | f
+(1 row)
+
+\df select5
+                                            List of functions
+ Schema |  Name   | Result data type  | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------+---------+-------------------+---------------------+--------+------------+------------+---------
+ public | select5 | integer encrypted |                     | normal | f          | f          | f
+(1 row)
+
+\df select6
+                                               List of functions
+ Schema |  Name   |    Result data type     | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------+---------+-------------------------+---------------------+--------+------------+------------+---------
+ public | select6 | SETOF integer encrypted |                     | normal | f          | f          | f
+(1 row)
+
+\df select7
+                                                      List of functions
+ Schema |  Name   |           Result data type            | Argument data types |  Type  | fencedmode | propackage | prokind 
+--------+---------+---------------------------------------+---------------------+--------+------------+------------+---------
+ public | select7 | TABLE(a integer, b integer encrypted) |                     | normal | f          | f          | f
+(1 row)
 
 call select1();
  id | num  
@@ -124,13 +157,6 @@ call select7();
  2 | 6666
 (2 rows)
 
-call select7();
- a |  b   
----+------
- 1 | 5555
- 2 | 6666
-(2 rows)
-
 CALL f_processed_return_table();
  val_p | val2_p 
 -------+--------
@@ -167,17 +193,6 @@ drop cascades to function select2()
 drop cascades to function select3()
 drop cascades to function select4()
 drop cascades to function get_rows_setof()
-\df
-                                                                   List of functions
- Schema |           Name           |                Result data type                | Argument data types |  Type  | fencedmode | propackage | prokind 
---------+--------------------------+------------------------------------------------+---------------------+--------+------------+------------+---------
- public | f_processed_return_table | TABLE(val_p integer, val2_p integer encrypted) |                     | normal | f          | f          | f
- public | reffunc                  | refcursor                                      | refcursor           | normal | f          | f          | f
- public | select5                  | integer encrypted                              |                     | normal | f          | f          | f
- public | select6                  | SETOF integer encrypted                        |                     | normal | f          | f          | f
- public | select7                  | TABLE(a integer, b integer encrypted)          |                     | normal | f          | f          | f
-(5 rows)
-
 DROP FUNCTION select6; 
 DROP FUNCTION select5; 
 DROP FUNCTION select7; 
@@ -185,12 +200,6 @@ DROP FUNCTION reffunc(refcursor);
 DROP FUNCTION get_rows_setof();
 ERROR:  function get_rows_setof does not exist
 DROP FUNCTION f_processed_return_table();
-\df
-                                         List of functions
- Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage | prokind 
---------+------+------------------+---------------------+------+------------+------------+---------
-(0 rows)
-
 SELECT COUNT(*) FROM gs_encrypted_proc;
  count 
 -------

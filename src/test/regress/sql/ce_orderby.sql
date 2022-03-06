@@ -47,6 +47,6 @@ DROP COLUMN ENCRYPTION KEY public.UnsupportCEK;
 
 DROP CLIENT MASTER KEY testns.UnsupportCMK;
 DROP CLIENT MASTER KEY public.UnsupportCMK;
-DROP SCHEMA testns CASCADE;
+
 \! gs_ktool -d all
 

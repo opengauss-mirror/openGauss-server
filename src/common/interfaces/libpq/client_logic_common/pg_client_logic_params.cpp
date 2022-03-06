@@ -21,94 +21,19 @@
  * -------------------------------------------------------------------------
  */
 
-#include "libpq-int.h"
 #include "client_logic_common/pg_client_logic_params.h"
 #include <cstdlib>
-
-PGClientLogicParams::PGClientLogicParams(const PGClientLogicParams &other)
-{
-    init(other);
-}
-
-void PGClientLogicParams::init(const PGClientLogicParams &other)
-{
-    nParams = other.nParams;
-    new_param_values = NULL;
-    adjusted_query = other.adjusted_query;
-    adjusted_query_size = other.adjusted_query_size;
-    adjusted_paramTypes = NULL;
-    copy_sizes = NULL;
-    adjusted_param_lengths = NULL;
-    adjusted_param_values = NULL;
-    new_query = NULL;
-    new_query_size = other.new_query_size;
-    if (other.new_query != NULL && other.new_query_size > 0) {
-        new_query = (char *)calloc(new_query_size + 1, sizeof(char));
-        if (new_query == NULL) {
-            printf("out of memory\n");
-            exit(EXIT_FAILURE);
-        }
-        check_strncpy_s(strncpy_s(new_query, new_query_size + 1, other.new_query, other.new_query_size));
-        new_query[new_query_size] = '\0';
-    }
-    if (other.nParams && other.copy_sizes) {
-        copy_sizes = (size_t *)calloc(other.nParams, sizeof(size_t));
-        if (copy_sizes == NULL) {
-            printf("out of memory\n");
-            exit(EXIT_FAILURE);
-        }
-        check_memcpy_s(
-            memcpy_s(copy_sizes, nParams * sizeof(size_t), other.copy_sizes, other.nParams * sizeof(size_t)));
-    }
-    if (other.new_param_values) {
-        new_param_values = (unsigned char **)calloc(other.nParams, sizeof(unsigned char *));
-        if (new_param_values == NULL) {
-            printf("out of memory\n");
-            exit(EXIT_FAILURE);
-        }
-        for (size_t i = 0; i < other.nParams; ++i) {
-            if (copy_sizes != NULL && copy_sizes[i]) {
-                new_param_values[i] = (unsigned char *)calloc(other.copy_sizes[i], sizeof(unsigned char));
-                if (new_param_values[i] == NULL) {
-                    printf("out of memory\n");
-                    exit(EXIT_FAILURE);
-                }
-                check_memcpy_s(memcpy_s(new_param_values[i], copy_sizes[i] * sizeof(unsigned char),
-                    other.new_param_values[i], other.copy_sizes[i]));
-            } else {
-                new_param_values[i] = NULL;
-            }
-        }
-    }
-    if (other.adjusted_paramTypes) {
-        adjusted_paramTypes = (Oid *)calloc(other.nParams, sizeof(Oid));
-        if (adjusted_paramTypes == NULL) {
-            printf("out of memory\n");
-            exit(EXIT_FAILURE);
-        }
-        check_memcpy_s(memcpy_s(adjusted_paramTypes, nParams * sizeof(Oid), other.adjusted_paramTypes,
-            other.nParams * sizeof(Oid)));
-    }
-    if (other.adjusted_param_lengths) {
-        adjusted_param_lengths = (int *)calloc(other.nParams, sizeof(int));
-        if (adjusted_param_lengths == NULL) {
-            printf("out of memory\n");
-            exit(EXIT_FAILURE);
-        }
-        check_memcpy_s(memcpy_s(adjusted_param_lengths, nParams * sizeof(int), other.adjusted_param_lengths,
-            other.nParams * sizeof(int)));
-    }
-}
 
 PGClientLogicParams::~PGClientLogicParams()
 {
     for (size_t i = 0; i < nParams; i++) {
-        libpq_free(new_param_values[i]);
+        if (copy_sizes && copy_sizes[i]) {
+            libpq_free(new_param_values[i]);
+        }
     }
     libpq_free(new_param_values);
     libpq_free(copy_sizes);
     libpq_free(adjusted_paramTypes);
-
     libpq_free(adjusted_param_values);
     libpq_free(adjusted_param_lengths);
     libpq_free(new_query);

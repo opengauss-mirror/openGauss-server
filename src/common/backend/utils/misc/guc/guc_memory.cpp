@@ -264,7 +264,22 @@ static void InitMemoryConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-        
+
+#ifdef MEMORY_CONTEXT_CHECKING
+        // variable to enable memory check
+        {{"enable_memory_context_check_debug",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("check the memory context info on debug mode."),
+            NULL},
+            &g_instance.attr.attr_memory.enable_memory_context_check_debug,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
+
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -318,7 +333,7 @@ static void InitMemoryConfigureNamesInt()
             NULL,
             NULL},
         {{"local_syscache_threshold",
-            PGC_POSTMASTER,
+            PGC_SIGHUP,
             NODE_ALL,
             RESOURCES_MEM,
             gettext_noop("Sets the maximum threshold for cleaning cache."),
@@ -329,6 +344,20 @@ static void InitMemoryConfigureNamesInt()
             1 * 1024,
             512 * 1024,
             check_syscache_threshold_gpc,
+            NULL,
+            NULL},
+        {{"global_syscache_threshold",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the maximum threshold for cleaning global syscache."),
+            NULL,
+            GUC_UNIT_KB},
+            &g_instance.attr.attr_memory.global_syscache_threshold,
+            160 * 1024,
+            16 * 1024,
+            1024 * 1024 * 1024,
+            NULL,
             NULL,
             NULL},
         {{"work_mem",
@@ -633,7 +662,6 @@ static bool check_syscache_threshold_gpc(int* newval, void** extra, GucSource so
                    *newval / 1024)));
         g_instance.attr.attr_memory.local_syscache_threshold = 16 * 1024;
     }
-
     return true;
 }
 

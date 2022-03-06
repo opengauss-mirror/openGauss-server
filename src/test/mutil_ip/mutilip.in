@@ -1,0 +1,60 @@
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$error_ip,$g_local_ip
+dbname=postgres port=$dn1_standby_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$error_ip,$g_local_ip
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs=read-only
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs=primary
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$error_ip,$g_local_ip target_session_attrs= prefer-standby
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$error_ip,$g_local_ip target_session_attrs= prefer-standby
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$host_name,$host_name target_session_attrs=read-only
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs=standby
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs=read-write
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs= prefer-standby
+dbname=postgres port=$dn1_primary_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs= prefer-standby
+dbname=postgres port=$dn1_primary_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$error_ip,$g_local_ip target_session_attrs= prefer-standby
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=/tmp,$g_local_ip
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$error_ip,/tmp
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=/tmp,/tmp target_session_attrs=primary
+dbname=postgres port=$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs=read-only
+dbname=postgres port=$dn1_primary_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs= prefer-standby
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip_v6,$g_local_ip
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip_v6
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=,
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=  ,
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=,    
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=,$g_local_ip
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip, target_session_attrs=standby
+dbname=postgres port=$dn1_primary_port user=ipv6_tmp password=$passwd
+dbname=postgres port=$dn1_standby_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,$error_ip
+postgres://ipv6_tmp@$g_local_ip :$dn1_primary_port,$g_local_ip:$dn1_standby_port/postgres?password=$passwd!target_session_attrs=standby
+postgres://ipv6_tmp@$g_local_ip:$dn1_primary_port,$g_local_ip :$dn1_standby_port/postgres?password=$passwd!target_session_attrs=primary
+postgres://ipv6_tmp@$g_local_ip:$dn1_primary_port,$g_local_ip:$dn1_standby_port/postgres?password=$passwd
+postgres://ipv6_tmp@$g_local_ip:$dn1_primary_port,$g_local_ip:$dn1_standby_port/postgres?password=$passwd!target_session_attrs=standby
+postgres://ipv6_tmp@[$g_local_ip_v6]:$dn1_primary_port,$g_local_ip:$dn1_standby_port/postgres?password=$passwd
+postgres://ipv6_tmp@[$g_local_ip_v6]:$dn1_primary_port,$g_local_ip:$dn1_standby_port/postgres?password=$passwd!target_session_attrs=standby
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$error_ip,$error_ip2
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp2 password=$passwd host=$g_local_ip,$g_local_ip
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password='Gauss@12' host=$g_local_ip,$g_local_ip
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port,7784 user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$host_name,$host_name hostaddr=$g_local_ip
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$host_name hostaddr=$g_local_ip,$g_local_ip
+dbname=postgres port=${error_port},${error_port2} user=ipv6_tmp password=$passwd hostaddr=$g_local_ip,$g_local_ip
+dbname=postgres port=${error_port},$dn1_primary_port user=ipv6_tmp password=$passwd hostaddr=$g_local_ip,$g_local_ip target_session_attrs=read-only
+dbname=postgres port=${error_port},$dn1_primary_port user=ipv6_tmp password=$passwd hostaddr=$g_local_ip,$g_local_ip target_session_attrs=standby
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd host=$error_ip,$error_ip2 target_session_attrs= prefer-standby
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd hostaddr=$host_name,$host_name
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd hostaddr=${error_ip},${error_ip2}
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=${error_ip},${error_ip2}
+dbname=postgresabc port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip
+dbname=postgres port=$dn1_standby_port user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs=read-write
+dbname=postgres port=0 user=ipv6_tmp password=$passwd host=$g_local_ip,$g_local_ip target_session_attrs=read-write
+dbname=postgres port=$dn1_standby_port,$dn1_primary_port user=ipv6_tmp password=$passwd
+dbname=postgres port=$dn1_standby_port user=ipv6_tmp password=$passwd target_session_attrs=read-write
+dbname=postgres port=$dn1_standby_port user=ipv6_tmp
+dbname=postgres port=$dn1_primary_port,$dn1_standby_port user=ipv6_tmp password=$passwd
+dbname=postgres user=ipv6_tmp password=$passwd
+postgres://ipv6_tmp@$g_local_ip :$dn1_primary_port,$g_local_ip :$dn1_standby_port/postgres?password=$passwd
+postgres://ipv6_tmp@$g_local_ip :$dn1_primary_port,$g_local_ip:$dn1_standby_port/postgres?password=$passwd!target_session_attrs=primary
+postgres://ipv6_tmp@$g_local_ip:$dn1_primary_port,$g_local_ip :$dn1_standby_port/postgres?password=$passwd!target_session_attrs=standby
+postgres://ipv6_tmp@[]:$dn1_primary_port,$g_local_ip:$dn1_standby_port/postgres?password=$passwd!target_session_attrs=standby

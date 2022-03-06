@@ -182,7 +182,7 @@ Oid FindDefaultConversion(Oid name_space, int32 for_encoding, int32 to_encoding)
         CONDEFAULT, ObjectIdGetDatum(name_space), Int32GetDatum(for_encoding), Int32GetDatum(to_encoding));
 
     for (i = 0; i < catlist->n_members; i++) {
-        tuple = &catlist->members[i]->tuple;
+        tuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         body = (Form_pg_conversion)GETSTRUCT(tuple);
         if (body->condefault) {
             proc = body->conproc;

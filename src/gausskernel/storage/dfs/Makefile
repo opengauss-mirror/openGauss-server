@@ -25,7 +25,9 @@ subdir = src/gausskernel/storage/dfs
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
+ifeq ($(enable_lite_mode), no)
 SUBDIRS = obs
+endif
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"

@@ -575,7 +575,7 @@ void UHeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool 
     if (UPageAddItem(NULL, &bufpage, (Item)utup, newlen, xlrec->offnum, true) == InvalidOffsetNumber)
         ereport(PANIC, (errmsg("UHeapXlogInsertOperatorPage: failed to add tuple")));
 
-    UHeapRecordPotentialFreeSpace(NULL, buffer->buf, -1 * SHORTALIGN(newlen));
+    UHeapRecordPotentialFreeSpace(buffer->buf, -1 * SHORTALIGN(newlen));
 
     // set undo
     int tdSlotId = UHeapTupleHeaderGetTDSlot(utup);
@@ -634,7 +634,7 @@ void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size 
     }
 
     /* increment the potential freespace of this page */
-    UHeapRecordPotentialFreeSpace(NULL, buffer->buf, SHORTALIGN(datalen));
+    UHeapRecordPotentialFreeSpace(buffer->buf, SHORTALIGN(datalen));
 
     utup.disk_tuple = (UHeapDiskTuple)UPageGetRowData(page, rp);
     utup.disk_tuple_size = RowPtrGetLen(rp);
@@ -649,7 +649,7 @@ void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size 
 }
 
 void UHeapXlogUpdateOperatorOldpage(UpdateRedoBuffers* buffers, void *recorddata,
-    bool inplaceUpdate, UHeapTupleData *oldtup, bool sameBlock,
+    bool inplaceUpdate, bool blockInplaceUpdate, UHeapTupleData *oldtup, bool sameBlock,
     BlockNumber blk, TransactionId recordxid)
 {
     XLogRecPtr lsn = buffers->oldbuffer.lsn;
@@ -686,11 +686,11 @@ void UHeapXlogUpdateOperatorOldpage(UpdateRedoBuffers* buffers, void *recorddata
     }
 
     /* Mark the page as a candidate for pruning  and update the page potential freespace */
-    if (!inplaceUpdate) {
+    if (!inplaceUpdate || blockInplaceUpdate) {
         UPageSetPrunable(oldpage, recordxid);
 
         if (!sameBlock) {
-            UHeapRecordPotentialFreeSpace(NULL, oldbuf, SHORTALIGN(oldtup->disk_tuple_size));
+            UHeapRecordPotentialFreeSpace(oldbuf, SHORTALIGN(oldtup->disk_tuple_size));
         }
     }
 
@@ -698,8 +698,8 @@ void UHeapXlogUpdateOperatorOldpage(UpdateRedoBuffers* buffers, void *recorddata
 }
 
 Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata,
-    bool inplaceUpdate, void *blkdata, UHeapTupleData *oldtup, Size recordlen,
-    Size data_len, bool isinit, bool istoast, bool sameBlock,
+    bool inplaceUpdate, bool blockInplaceUpdate, void *blkdata, UHeapTupleData *oldtup,
+    Size recordlen, Size data_len, bool isinit, bool istoast, bool sameBlock,
     TransactionId recordxid, UpdateRedoAffixLens *affixLens)
 {
     XLogRecPtr lsn = buffers->newbuffer.lsn;
@@ -825,7 +825,7 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
      */
 
     bool onlyCopyDelta = (inplaceUpdate && oldtup->disk_tuple->t_hoff == xlhdr.t_hoff &&
-                            newlen == oldtup->disk_tuple_size);
+        (newlen == oldtup->disk_tuple_size) && !blockInplaceUpdate);
     uint32 bitmaplen = 0;
     uint32 deltalen = 0;
     char *bitmapData = NULL;
@@ -920,7 +920,16 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
     /* max offset number should be valid */
     Assert(UHeapPageGetMaxOffsetNumber(newpage) + 1 >= xlrec->new_offnum);
 
-    if (inplaceUpdate) {
+    if (blockInplaceUpdate) {
+        Assert(!onlyCopyDelta);
+        RowPtr *rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
+        PutBlockInplaceUpdateTuple(oldpage, (Item)newtup, rp, newlen);
+        /* update the potential freespace */
+        UHeapRecordPotentialFreeSpace(newbuf, newlen);
+        Assert(oldpage == newpage);
+        UPageSetPrunable(newpage, recordxid);
+        UHeapPageSetUndo(newbuf, xlrec->old_tuple_td_id, recordxid, urecptr);
+    } else if (inplaceUpdate) {
         /*
          * For inplace updates, we copy the entire data portion including
          * the tuple header.
@@ -962,10 +971,10 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
 
         /* Update the page potential freespace */
         if (newbuf != oldbuf) {
-            UHeapRecordPotentialFreeSpace(NULL, newbuf, -1 * SHORTALIGN(newlen));
+            UHeapRecordPotentialFreeSpace(newbuf, -1 * SHORTALIGN(newlen));
         } else {
             int delta = newlen - oldtup->disk_tuple_size;
-            UHeapRecordPotentialFreeSpace(NULL, newbuf, -1 * SHORTALIGN(delta));
+            UHeapRecordPotentialFreeSpace(newbuf, -1 * SHORTALIGN(delta));
         }
 
         if (sameBlock) {
@@ -1127,7 +1136,7 @@ void UHeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, 
         }
 
         /* decrement the potential freespace of this page */
-        UHeapRecordPotentialFreeSpace(NULL, buffer->buf, SHORTALIGN(newlen));
+        UHeapRecordPotentialFreeSpace(buffer->buf, SHORTALIGN(newlen));
 
         if (!skipUndo) {
             tdSlot = UHeapTupleHeaderGetTDSlot(uhtup);
@@ -1353,6 +1362,7 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
     bool isinit = (XLogBlockHeadGetInfo(blockhead) & XLOG_UHEAP_INIT_PAGE) != 0;
     bool istoast = (XLogBlockHeadGetInfo(blockhead) & XLOG_UHEAP_INIT_TOAST_PAGE) != 0;
     bool inplaceUpdate = !(xlrec->flags & XLZ_NON_INPLACE_UPDATE);
+    bool blockInplaceUpdate = (xlrec->flags & XLZ_BLOCK_INPLACE_UPDATE);
     TransactionId recordxid = XLogBlockHeadGetXid(blockhead);
     bool sameBlock = false;
     XLogRedoAction action;
@@ -1373,15 +1383,16 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
                 buffers.oldbuffer.lsn = buffers.newbuffer.lsn;
 
                 UHeapXlogUpdateOperatorOldpage(&buffers, (void *)maindata, inplaceUpdate,
-                    &oldtup, sameBlock, oldblk, recordxid);
+                    blockInplaceUpdate, &oldtup, sameBlock, oldblk, recordxid);
             }
 
             blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
             Assert(blkdata != NULL);
             Size recordlen = datadecode->main_data_len;
             Size dataLen = datadecode->blockdata.data_len;
-            freespace = UHeapXlogUpdateOperatorNewpage(&buffers, (void *)maindata, inplaceUpdate, (void *)blkdata,
-                &oldtup, recordlen, dataLen, isinit, istoast, sameBlock, recordxid, &affixLens);
+            freespace = UHeapXlogUpdateOperatorNewpage(&buffers, (void *)maindata, inplaceUpdate,
+                blockInplaceUpdate, (void *)blkdata,  &oldtup, recordlen, dataLen, isinit,
+                istoast, sameBlock, recordxid, &affixLens);
             /* may should free space */
             if (!inplaceUpdate && freespace < BLCKSZ / FREESPACE_FRACTION) {
                 RelFileNode rnode;
@@ -1389,7 +1400,6 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
                 rnode.dbNode = blockhead->dbNode;
                 rnode.relNode = blockhead->relNode;
                 rnode.bucketNode = blockhead->bucketNode;
-                rnode.opt = blockhead->opt;
                 XLogRecordPageWithFreeSpace(rnode, bufferinfo->blockinfo.blkno, freespace);
             }
         } else {
@@ -1402,7 +1412,7 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
             }
 
             UHeapXlogUpdateOperatorOldpage(&buffers, (void *)maindata, inplaceUpdate,
-                &oldtup, sameBlock, newblk, recordxid);
+                blockInplaceUpdate, &oldtup, sameBlock, newblk, recordxid);
         }
 
         MakeRedoBufferDirty(bufferinfo);

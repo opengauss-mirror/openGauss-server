@@ -22,104 +22,100 @@
  */
 
 #include "postgres.h"
+#include "utils/bytea.h"
 
 #include "db4ai/gd.h"
+#include "db4ai/db4ai_common.h"
 #include "db4ai/model_warehouse.h"
 #include "db4ai/predict_by.h"
+#include "db4ai/kernel.h"
 
-typedef struct GradientDescentPredictor {
-    GradientDescentAlgorithm *algorithm;
-    int ncategories;
-    Oid return_type;
-    Matrix weights;
-    Matrix features;
-    Datum *categories;
-} GradientDescentPredictor;
+extern bool verify_pgarray(ArrayType const * pg_array, int32_t n);
 
-ModelPredictor gd_predict_prepare(const Model *model)
+ModelPredictor gd_predict_prepare(AlgorithmAPI *self, const SerializedModel *model, Oid return_type)
 {
-    GradientDescentPredictor *gdp = (GradientDescentPredictor *)palloc0(sizeof(GradientDescentPredictor));
-    ModelGradientDescent *gdp_model = (ModelGradientDescent *)model;
-    gdp->algorithm = gd_get_algorithm(gdp_model->model.algorithm);
-    gdp->ncategories = gdp_model->ncategories;
-    gdp->return_type = gdp_model->model.return_type;
-
-    ArrayType *arr = (ArrayType *)pg_detoast_datum((struct varlena *)DatumGetPointer(gdp_model->weights));
-    Assert(arr->elemtype == FLOAT4OID);
-
-    int coefficients = ARR_DIMS(arr)[0];
-    matrix_init(&gdp->weights, coefficients);
-    matrix_init(&gdp->features, coefficients);
-
-    Datum dt;
-    bool isnull;
-    gd_float *pf = gdp->weights.data;
-    ArrayIterator it = array_create_iterator(arr, 0);
-    while (array_iterate(it, &dt, &isnull)) {
-        Assert(!isnull);
-        *pf++ = DatumGetFloat4(dt);
+    SerializedModelGD *gdp = (SerializedModelGD *)palloc0(sizeof(SerializedModelGD));
+    gd_deserialize((GradientDescent*)self, model, return_type, gdp);
+    if (gdp->algorithm->prepare_kernel != nullptr) {
+        gdp->kernel = gdp->algorithm->prepare_kernel(gdp->input, &gdp->hyperparameters);
+        if (gdp->kernel != nullptr)
+            matrix_init(&gdp->aux_input, gdp->input);
     }
-    array_free_iterator(it);
-    if (arr != (ArrayType *)DatumGetPointer(gdp_model->weights))
-        pfree(arr);
-
-    if (gdp->ncategories > 0) {
-        arr = (ArrayType *)pg_detoast_datum((struct varlena *)DatumGetPointer(gdp_model->categories));
-        gdp->categories = (Datum *)palloc(ARR_DIMS(arr)[0] * sizeof(Datum));
-
-        int cat = 0;
-        it = array_create_iterator(arr, 0);
-        while (array_iterate(it, &dt, &isnull)) {
-            Assert(!isnull);
-            gdp->categories[cat++] = dt;
-        }
-        array_free_iterator(it);
-        if (arr != (ArrayType *)DatumGetPointer(gdp_model->categories))
-            pfree(arr);
-    } else
-        gdp->categories = nullptr;
-
     return (ModelPredictor *)gdp;
 }
 
-Datum gd_predict(ModelPredictor pred, Datum *values, bool *isnull, Oid *types, int ncolumns)
+Datum gd_predict(AlgorithmAPI *self, ModelPredictor pred, Datum *values, bool *isnull, Oid *types, int ncolumns)
 {
     // extract coefficients from model
-    GradientDescentPredictor *gdp = (GradientDescentPredictor *)pred;
-
+    SerializedModelGD *gdp = (SerializedModelGD *)pred;
+    bool const has_bias = gdp->algorithm->add_bias;
+    
     // extract the features
-    if (ncolumns != (int)gdp->weights.rows - 1)
-        elog(ERROR, "Invalid number of features for prediction, provided %d, expected %d", ncolumns,
-            gdp->weights.rows - 1);
+    float8 *w;
+    if (gdp->kernel == nullptr)
+        w = gdp->features.data;
+    else
+        w = gdp->aux_input.data;
 
-    gd_float *w = gdp->features.data;
-    for (int i = 0; i < ncolumns; i++) {
-        double value;
-        if (isnull[i])
-            value = 0.0; // default value for feature, it is not the target for sure
-        else
-            value = gd_datum_get_float(types[i], values[i]);
-
-        *w++ = value;
-    }
-    *w = 1.0; // bias
-
-    Datum result = 0;
-    gd_float r = gdp->algorithm->predict_callback(&gdp->features, &gdp->weights);
-    if (dep_var_is_binary(gdp->algorithm)) {
-        if (gdp->ncategories == 0) {
-            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("For classification algorithms: %s, the number of categories should not be 0.",
-                                   gdp->algorithm->name)));
-        }
-        result = gdp->categories[0];
-        if (r != gdp->algorithm->min_class) {
-            if (gdp->ncategories == 2 && r == gdp->algorithm->max_class)
-                result = gdp->categories[1];
-        }
+    if (ncolumns == 1 && (types[0] == FLOAT8ARRAYOID || types[0] == FLOAT4ARRAYOID)) {
+        Assert(!isnull[0]);
+        
+        gd_copy_pg_array_data(w, values[0], gdp->input);
+        w += gdp->input;
     } else {
-        result = gd_float_get_datum(gdp->return_type, r);
+        if (ncolumns != gdp->input)
+            ereport(ERROR, (errmodule(MOD_DB4AI),
+                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Invalid number of features for prediction, provided %d, expected %d",
+                           ncolumns, gdp->input)));
+        
+        for (int i = 0; i < ncolumns; i++) {
+            double value;
+            if (isnull[i])
+                value = 0.0; // default value for feature, it is not the target for sure
+            else
+                value = datum_get_float8(types[i], values[i]);
+            
+            *w++ = value;
+        }
     }
 
+    if (gdp->kernel != nullptr) {
+        // now apply the kernel transformation using a fake vector
+        Matrix tmp;
+        matrix_init(&tmp, gdp->kernel->coefficients);
+        
+        // make sure the transformation points to the destination vector
+        float8 *p = matrix_swap_data(&tmp, gdp->features.data);
+        gdp->kernel->transform(gdp->kernel, &gdp->aux_input, &tmp);
+        matrix_swap_data(&tmp, p);
+        matrix_release(&tmp);
+
+        // update pointers of data
+        w = gdp->features.data + gdp->kernel->coefficients;
+    }
+
+    if (has_bias)
+        *w = 1.0;
+    
+    // and predict
+    bool categorize;
+    Datum result =
+        gdp->algorithm->predict(&gdp->features, &gdp->weights, gdp->return_type, gdp->extra_data, false, &categorize);
+    if (categorize) {
+        Assert(!gd_dep_var_is_continuous(gdp->algorithm));
+        float8 r = DatumGetFloat4(result);
+        if (gd_dep_var_is_binary(gdp->algorithm)) {
+            result = gdp->categories[0];
+            if (r != gdp->algorithm->min_class) {
+                Assert(r == gdp->algorithm->max_class);
+                result = gdp->categories[1];
+            }
+        } else {
+            Assert(r < gdp->ncategories);
+            result = gdp->categories[(int)r];
+        }
+    }
+    
     return result;
 }

@@ -1,0 +1,289 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+select copy_summary_create();
+ copy_summary_create 
+---------------------
+ t
+(1 row)
+
+select copy_error_log_create();
+ copy_error_log_create 
+-----------------------
+ t
+(1 row)
+
+-- comments of load data
+load truncate into table sqlldr_tbl
+-- comments in load data
+fields terminated by ','
+TRAILING NULLCOLS;
+                                               LOAD TRANSFORM TO COPY RESULT                                               
+---------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM STDIN LOAD DELIMITER ',' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data truncate into table sqlldr_tbl fields terminated by ',';
+                                 LOAD TRANSFORM TO COPY RESULT                                 
+-----------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM STDIN LOAD DELIMITER ',' IGNORE_EXTRA_DATA;
+(1 row)
+
+load append into table sqlldr_tbl fields terminated '|';
+                   LOAD TRANSFORM TO COPY RESULT                   
+-------------------------------------------------------------------
+ \COPY sqlldr_tbl FROM STDIN LOAD DELIMITER '|' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data replace into table sqlldr_tbl fields terminated by '\t' TRAILING NULLCOLS;
+                                               LOAD TRANSFORM TO COPY RESULT                                                
+----------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM STDIN LOAD DELIMITER '\t' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+load into table sqlldr_tbl fields terminated '|';
+                                             LOAD TRANSFORM TO COPY RESULT                                             
+-----------------------------------------------------------------------------------------------------------------------
+ SELECT 'has_data_in_table' FROM sqlldr_tbl LIMIT 1; \COPY sqlldr_tbl FROM STDIN LOAD DELIMITER '|' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data insert into table sqlldr_tbl fields terminated by '\t' TRAILING NULLCOLS;
+                                                           LOAD TRANSFORM TO COPY RESULT                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ SELECT 'has_data_in_table' FROM sqlldr_tbl LIMIT 1; \COPY sqlldr_tbl FROM STDIN LOAD DELIMITER '\t' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS;
+                                                 LOAD TRANSFORM TO COPY RESULT                                                  
+--------------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.csv' LOAD DELIMITER ',' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_ver.txt' append into table sqlldr_tbl fields terminated by '|';
+                       LOAD TRANSFORM TO COPY RESULT                        
+----------------------------------------------------------------------------
+ \COPY sqlldr_tbl FROM 'test_ver.txt' LOAD DELIMITER '|' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_tab.txt' replace into table sqlldr_tbl fields terminated '\t';
+                                      LOAD TRANSFORM TO COPY RESULT                                      
+---------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD DELIMITER '\t' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_tab.txt' into table sqlldr_tbl fields terminated '\t';
+                                                  LOAD TRANSFORM TO COPY RESULT                                                  
+---------------------------------------------------------------------------------------------------------------------------------
+ SELECT 'has_data_in_table' FROM sqlldr_tbl LIMIT 1; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD DELIMITER '\t' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_tab.txt' insert into table sqlldr_tbl fields terminated '\t';
+                                                  LOAD TRANSFORM TO COPY RESULT                                                  
+---------------------------------------------------------------------------------------------------------------------------------
+ SELECT 'has_data_in_table' FROM sqlldr_tbl LIMIT 1; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD DELIMITER '\t' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS;
+                                                 LOAD TRANSFORM TO COPY RESULT                                                  
+--------------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.csv' LOAD DELIMITER ',' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_ver.txt' append into table sqlldr_tbl fields terminated by '|';
+                       LOAD TRANSFORM TO COPY RESULT                        
+----------------------------------------------------------------------------
+ \COPY sqlldr_tbl FROM 'test_ver.txt' LOAD DELIMITER '|' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_tab.txt' replace into table sqlldr_tbl fields terminated '\t';
+                                      LOAD TRANSFORM TO COPY RESULT                                      
+---------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD DELIMITER '\t' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_ver.txt' into table sqlldr_tbl fields terminated by '|';
+                                                 LOAD TRANSFORM TO COPY RESULT                                                  
+--------------------------------------------------------------------------------------------------------------------------------
+ SELECT 'has_data_in_table' FROM sqlldr_tbl LIMIT 1; \COPY sqlldr_tbl FROM 'test_ver.txt' LOAD DELIMITER '|' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_tab.txt' insert into table sqlldr_tbl fields terminated '\t';
+                                                  LOAD TRANSFORM TO COPY RESULT                                                  
+---------------------------------------------------------------------------------------------------------------------------------
+ SELECT 'has_data_in_table' FROM sqlldr_tbl LIMIT 1; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD DELIMITER '\t' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test.csv' truncate into table sqlldr_tbl fields terminated by ',,' TRAILING NULLCOLS;
+                                                  LOAD TRANSFORM TO COPY RESULT                                                  
+---------------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.csv' LOAD DELIMITER ',,' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_ver.txt' append into table sqlldr_tbl fields terminated by '||';
+                        LOAD TRANSFORM TO COPY RESULT                        
+-----------------------------------------------------------------------------
+ \COPY sqlldr_tbl FROM 'test_ver.txt' LOAD DELIMITER '||' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_tab.txt' replace into table sqlldr_tbl fields terminated '\t\t';
+                                       LOAD TRANSFORM TO COPY RESULT                                       
+-----------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD DELIMITER '\t\t' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_ver.txt' into table sqlldr_tbl fields terminated by '||';
+                                                  LOAD TRANSFORM TO COPY RESULT                                                  
+---------------------------------------------------------------------------------------------------------------------------------
+ SELECT 'has_data_in_table' FROM sqlldr_tbl LIMIT 1; \COPY sqlldr_tbl FROM 'test_ver.txt' LOAD DELIMITER '||' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile 'test_tab.txt' insert into table sqlldr_tbl fields terminated '\t\t';
+                                                   LOAD TRANSFORM TO COPY RESULT                                                   
+-----------------------------------------------------------------------------------------------------------------------------------
+ SELECT 'has_data_in_table' FROM sqlldr_tbl LIMIT 1; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD DELIMITER '\t\t' IGNORE_EXTRA_DATA;
+(1 row)
+
+-- characterset
+load data characterset utf8 infile 'test_tab.txt' truncate into table sqlldr_tbl;
+                                      LOAD TRANSFORM TO COPY RESULT                                       
+----------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD ENCODING 'utf8' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data characterset 'utf8' infile 'test_tab.txt' replace into table sqlldr_tbl;
+                                      LOAD TRANSFORM TO COPY RESULT                                       
+----------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD ENCODING 'utf8' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data characterset "utf8" infile 'test_tab.txt' replace into table sqlldr_tbl;
+                                      LOAD TRANSFORM TO COPY RESULT                                       
+----------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD ENCODING 'utf8' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data characterset AL32UTF8 infile 'test_tab.txt' replace into table sqlldr_tbl;
+                                      LOAD TRANSFORM TO COPY RESULT                                       
+----------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD ENCODING 'utf8' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data characterset al32utf8 infile 'test_tab.txt' replace into table sqlldr_tbl;
+                                      LOAD TRANSFORM TO COPY RESULT                                       
+----------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD ENCODING 'utf8' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data characterset zhs16gbk infile 'test_tab.txt' replace into table sqlldr_tbl;
+                                      LOAD TRANSFORM TO COPY RESULT                                      
+---------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD ENCODING 'gbk' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data characterset zhs32gb18030 infile 'test_tab.txt' replace into table sqlldr_tbl;
+                                        LOAD TRANSFORM TO COPY RESULT                                        
+-------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test_tab.txt' LOAD ENCODING 'gb18030' IGNORE_EXTRA_DATA;
+(1 row)
+
+-- when
+load data infile "test.txt" truncate into table sqlldr_tbl WHEN (1-1) = '1' trailing nullcols;
+                                                           LOAD TRANSFORM TO COPY RESULT                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.txt' LOAD LOG ERRORS DATA WHEN (1-1) = '1' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile "test.txt" truncate into table sqlldr_tbl WHEN (2-2) = '|' trailing nullcols;
+                                                           LOAD TRANSFORM TO COPY RESULT                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.txt' LOAD LOG ERRORS DATA WHEN (2-2) = '|' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+load data infile "test.txt" truncate into table sqlldr_tbl WHEN (2-4) = 'XY' trailing nullcols;
+                                                           LOAD TRANSFORM TO COPY RESULT                                                            
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.txt' LOAD LOG ERRORS DATA WHEN (2-4) = 'XY' FILL_MISSING_FIELDS 'multi' IGNORE_EXTRA_DATA;
+(1 row)
+
+-- load when exceptions
+load data infile "test.txt" truncate into table sqlldr_tbl WHEN (0-1) = '1';
+ERROR:  WHEN start position 0 should be > 0
+load data infile "test.txt" truncate into table sqlldr_tbl WHEN (2-0) = '|';
+ERROR:  WHEN end position 0 should be > 0
+load data infile "test.txt" truncate into table sqlldr_tbl WHEN (2-1) = 'XY';
+ERROR:  WHEN start position 2 should be <= end position 1
+load data infile "test.txt" truncate into table sqlldr_tbl WHEN (-2-1) = 'XY';
+ERROR:  syntax error at or near "-"
+LINE 1: ...e "test.txt" truncate into table sqlldr_tbl WHEN (-2-1) = 'X...
+                                                             ^
+-- copy when exceptions
+\COPY sqlldr_tbl FROM STDIN ENCODING 'utf8' DELIMITER ',' WHEN (0-1) = '40';
+ERROR:  WHEN start position 0 should be > 0
+\COPY sqlldr_tbl FROM STDIN ENCODING 'utf8' DELIMITER ',' WHEN (2-0) = '40';
+ERROR:  WHEN end position 0 should be > 0
+\COPY sqlldr_tbl FROM STDIN ENCODING 'utf8' DELIMITER ',' WHEN (3-1) = '40';
+ERROR:  WHEN start position 3 should be <= end position 1
+\COPY sqlldr_tbl FROM STDIN ENCODING 'utf8' DELIMITER ',' WHEN (-3-1) = '40';
+ERROR:  syntax error at or near "-"
+LINE 1: ...l FROM STDIN  ENCODING 'utf8' DELIMITER ',' WHEN (-3-1) = '4...
+                                                             ^
+-- options
+OPTIONS() load data infile "test.txt" truncate into table sqlldr_tbl;
+                            LOAD TRANSFORM TO COPY RESULT                             
+--------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.txt' LOAD IGNORE_EXTRA_DATA;
+(1 row)
+
+OPTIONS(skip=-1) load data infile "test.txt" truncate into table sqlldr_tbl;
+ERROR:  SKIP=-1 in OPTIONS should be >= 0
+OPTIONS(skip=0) load data infile "test.txt" truncate into table sqlldr_tbl;
+                                LOAD TRANSFORM TO COPY RESULT                                
+---------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.txt' LOAD SKIP 0 IGNORE_EXTRA_DATA;
+(1 row)
+
+OPTIONS(skip=100) load data infile "test.txt" truncate into table sqlldr_tbl;
+                                 LOAD TRANSFORM TO COPY RESULT                                 
+-----------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.txt' LOAD SKIP 100 IGNORE_EXTRA_DATA;
+(1 row)
+
+OPTIONS(errors=-1) load data infile "test.txt" truncate into table sqlldr_tbl;
+ERROR:  ERRORS=-1 in OPTIONS should be >= 0
+OPTIONS(errors=2) load data infile "test.txt" truncate into table sqlldr_tbl;
+                                             LOAD TRANSFORM TO COPY RESULT                                             
+-----------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.txt' LOAD LOG ERRORS DATA REJECT LIMIT '2' IGNORE_EXTRA_DATA;
+(1 row)
+
+OPTIONS(errors=10) load data infile "test.txt" truncate into table sqlldr_tbl;
+                                             LOAD TRANSFORM TO COPY RESULT                                              
+------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'test.txt' LOAD LOG ERRORS DATA REJECT LIMIT '10' IGNORE_EXTRA_DATA;
+(1 row)
+
+OPTIONS(data='file.csv') load data infile "test.txt" truncate into table sqlldr_tbl;
+                            LOAD TRANSFORM TO COPY RESULT                             
+--------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'file.csv' LOAD IGNORE_EXTRA_DATA;
+(1 row)
+
+OPTIONS(data="file.csv") load data infile "test.txt" truncate into table sqlldr_tbl;
+                            LOAD TRANSFORM TO COPY RESULT                             
+--------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'file.csv' LOAD IGNORE_EXTRA_DATA;
+(1 row)
+
+OPTIONS(data="file.csv", skip=10, errors=64)  load data infile "test.txt" truncate into table sqlldr_tbl;
+                                                 LOAD TRANSFORM TO COPY RESULT                                                  
+--------------------------------------------------------------------------------------------------------------------------------
+ TRUNCATE TABLE sqlldr_tbl ; \COPY sqlldr_tbl FROM 'file.csv' LOAD LOG ERRORS DATA REJECT LIMIT '64' SKIP 10 IGNORE_EXTRA_DATA;
+(1 row)
+
+-- teardown
+drop table sqlldr_tbl;

@@ -5,7 +5,7 @@
 set time zone 'PRC';
 --
 --
-CREATE TABLE DTS2016112903778_tbl
+CREATE TABLE TESTTABLE_tbl
 (
 D_ID int,
 D_W_ID int,
@@ -14,18 +14,18 @@ D_STREET_1 varchar(20)
 )
 with(orientation = column)
 ;
-COPY DTS2016112903778_tbl FROM STDIN;
-alter table DTS2016112903778_tbl add column d6 decimal(64,10) default null;
-SELECT DISTINCT d6 FROM DTS2016112903778_tbl;
+COPY TESTTABLE_tbl FROM STDIN;
+alter table TESTTABLE_tbl add column d6 decimal(64,10) default null;
+SELECT DISTINCT d6 FROM TESTTABLE_tbl;
  d6 
 ----
    
 (1 row)
 
-DROP TABLE DTS2016112903778_tbl;
+DROP TABLE TESTTABLE_tbl;
 --
 --
-create table DTS2016120906561_tbl
+create table TESTTABLE_tbl
 (
 D_ID int, 
 D_W_ID int, 
@@ -35,7 +35,7 @@ D_STREET_1 varchar(20)
 with(orientation = column) 
 ;
 -- rows number is (56, 64), and then touch this bug
-copy DTS2016120906561_tbl from STDIN;
-delete from DTS2016120906561_tbl;
-alter table DTS2016120906561_tbl add column d11 decimal(32,10) not null;
-drop table DTS2016120906561_tbl;
+copy TESTTABLE_tbl from STDIN;
+delete from TESTTABLE_tbl;
+alter table TESTTABLE_tbl add column d11 decimal(32,10) not null;
+drop table TESTTABLE_tbl;

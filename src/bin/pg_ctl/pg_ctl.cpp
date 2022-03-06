@@ -126,7 +126,8 @@ typedef enum {
 typedef enum {
     UNKNOWN_OPERATION = 0,
     ADD_OPERATION,
-    REMOVE_OPERATION
+    REMOVE_OPERATION,
+    CHANGE_OPERATION
 } MemberOperation;
 
 #define MAX_PERCENT 100
@@ -188,6 +189,7 @@ static char setrunmode_status_file[MAXPGPATH];
 static char g_changeroleStatusFile[MAXPGPATH];
 static char primary_file[MAXPGPATH];
 static char standby_file[MAXPGPATH];
+static char cascade_standby_file[MAXPGPATH];
 static char pg_ctl_lockfile[MAXPGPATH];
 static char pg_conf_file[MAXPGPATH];
 static FILE* lockfile = NULL;
@@ -211,6 +213,8 @@ static MemberOperation member_operation = UNKNOWN_OPERATION;
 static unsigned int new_node_port = 0;
 static char new_node_ip[IP_LEN] = {0};
 static unsigned int new_node_id = 0;
+static int group = -1;
+static int priority = -1;
 static bool g_dcfEnabled = false;
 bool no_need_fsync = false;
 bool need_copy_upgrade_file = false;
@@ -878,18 +882,32 @@ static pgpid_t start_postmaster(void)
             securec_check_ss_c(ret, "\0", "\0");
         }
 #else
-        ret = snprintf_s(cmd,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "exec \"%s\" %s %s %s< \"%s\" >> \"%s\" 2>&1",
-            exec_path,
-            pgdata_opt,
-            post_opts,
-            pgha_opt ? pgha_opt : "",
-            DEVNULL,
-            log_file);
-        securec_check_ss_c(ret, "\0", "\0");
-
+        if (undocumented_version) {
+            ret = snprintf_s(cmd,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "exec \"%s\" -u %u %s %s %s< \"%s\" >> \"%s\" 2>&1",
+                exec_path,
+                (uint32)undocumented_version,
+                pgdata_opt,
+                post_opts,
+                pgha_opt ? pgha_opt : "",
+                DEVNULL,
+                log_file);
+            securec_check_ss_c(ret, "\0", "\0");
+        } else {
+            ret = snprintf_s(cmd,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "exec \"%s\" %s %s %s< \"%s\" >> \"%s\" 2>&1",
+                exec_path,
+                pgdata_opt,
+                post_opts,
+                pgha_opt ? pgha_opt : "",
+                DEVNULL,
+                log_file);
+            securec_check_ss_c(ret, "\0", "\0");
+        }
 #endif
     } else {
 #ifdef ENABLE_MULTIPLE_NODES
@@ -922,16 +940,30 @@ static pgpid_t start_postmaster(void)
             securec_check_ss_c(ret, "\0", "\0");
         }
 #else
-        ret = snprintf_s(cmd,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "exec \"%s\" %s %s %s < \"%s\" 2>&1",
-            exec_path,
-            pgdata_opt,
-            post_opts,
-            pgha_opt ? pgha_opt : "",
-            DEVNULL);
-        securec_check_ss_c(ret, "\0", "\0");
+        if (undocumented_version) {
+            ret = snprintf_s(cmd,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "exec \"%s\" -u %u %s %s %s < \"%s\" 2>&1",
+                exec_path,
+                (uint32)undocumented_version,
+                pgdata_opt,
+                post_opts,
+                pgha_opt ? pgha_opt : "",
+                DEVNULL);
+            securec_check_ss_c(ret, "\0", "\0");
+        } else {
+            ret = snprintf_s(cmd,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "exec \"%s\" %s %s %s < \"%s\" 2>&1",
+                exec_path,
+                pgdata_opt,
+                post_opts,
+                pgha_opt ? pgha_opt : "",
+                DEVNULL);
+            securec_check_ss_c(ret, "\0", "\0");
+        }
 #endif
     }
 
@@ -2144,6 +2176,10 @@ static void do_notify(uint32 term)
                pgha_str[strlen("primary")] == '\0') {
         notify_file = xstrdup(primary_file);
         notify_mode = PRIMARY_MODE;
+    } else if ((pgha_str != NULL) && 0 == strncmp(pgha_str, "cascade_standby", strlen("cascade_standby")) &&
+               pgha_str[strlen("cascade_standby")] == '\0') {
+        notify_file = xstrdup(cascade_standby_file);
+        notify_mode = CASCADE_STANDBY_MODE;
     } else {
         pg_log(PG_WARNING, _(" the parameter of notify is not recognized\n"));
         exit(1);
@@ -3474,6 +3510,7 @@ static void do_advice(void)
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_LITE_MODE
 static void doDCFAddCmdHelp(void)
 {
     printf(_("  %s member         [-O OPERATION] [-u DCF-NODE-ID] [-i DCF-NODE-IP] "
@@ -3486,13 +3523,15 @@ static void doDCFAddCmdHelp(void)
 static void doDCFOptionHelp(void)
 {
     printf(_("\nOptions for DCF:\n"));
-    printf(_("  -O, --operation=OPERATION          Operation of adding or removing a DN configuration.\n"));
+    printf(_("  -O, --operation=OPERATION          Operation of adding or removing or change a DN configuration.\n"));
     printf(_("  -u, --nodeid=DCF-NODE-ID           It is required for member command.\n"));
     printf(_("  -i, --ip=DCF-NODE-IP               It is required when OPERATION of member command is \"add\".\n"));
     printf(_("  -e, --port=DCF-NODE-PORT           It is required when OPERATION of member command is \"add\".\n"));
     printf(_("  -R, --role=DCF-NODE-ROLE           The option is \"follower\" or \"passive\".\n"));
     printf(_("  -v, --votenum=VOTE-NUM             It is required when XMODE is \"minority\".\n"));
     printf(_("  -x, --xmode=XMODE                  The option can be \"minority\" or \"normal\" mode in DCF.\n"));
+    printf(_("  -G,                                The option is a int type to set group number in DCF.\n"));
+    printf(_("  --priority,                        The option is a int type to set priority number in DCF.\n"));
 }
 
 static void doDCFOptionDesHelp(void)
@@ -3500,6 +3539,7 @@ static void doDCFOptionDesHelp(void)
     printf(_("\nOPERATION are:\n"));
     printf(_("  add            add a member to DCF configuration.\n"));
     printf(_("  remove         remove a member from DCF configuration.\n"));
+    printf(_("  change         change DCF node configuration.\n"));
     printf(_("\nXMODE are:\n"));
     printf(_("  minority       the leader in DCF can reach consensus when getting less than half nodes' response.\n"));
     printf(_("  normal         the leader in DCF can reach consensus when getting more than half nodes' response.\n"));
@@ -3508,6 +3548,7 @@ static void doDCFOptionDesHelp(void)
     printf(_("  passive        passive role in DCF\n"));
 
 }
+#endif
 #endif
 
 static void do_help(void)
@@ -3552,15 +3593,18 @@ static void do_help(void)
 #endif
     (void)printf(_("  %s querybuild   [-D DATADIR]\n"), progname);
     printf(_("  %s copy   [-D DATADIR] [-Q COPYMODE]\n"), progname);
-#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_PRIVATEGAUSS)
+#if defined(ENABLE_MULTIPLE_NODES) || (defined(ENABLE_PRIVATEGAUSS) && (!defined(ENABLE_LITE_MODE)))
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_LITE_MODE
     doDCFAddCmdHelp();
+#endif
 #endif
 
     printf(_("\nCommon options:\n"));
-    printf(_("  -b,  --mode=MODE	 the mode of building the datanode.MODE can be \"full\", \"incremental\", "
+    printf(_("  -b,  --mode=MODE	 the mode of building the datanode or coordinator."
+             "MODE can be \"full\", \"incremental\", "
              "\"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", "
              "\"cross_cluster_incremental\", \"cross_cluster_standby_full\"\n"));
     printf(_("  -D, --pgdata=DATADIR   location of the database storage area\n"));
@@ -3603,21 +3647,25 @@ static void do_help(void)
     printf(_("  -p PATH-TO-POSTGRES    normally not necessary\n"));
     printf(_("\nOptions for stop or restart:\n"));
     printf(_("  -m, --mode=MODE        MODE can be \"fast\" or \"immediate\"\n"));
+#ifdef ENABLE_MULTIPLE_NODES
     printf(_("\nOptions for restore:\n"));
     printf(_("  --remove-backup        Remove the pg_rewind_bak dir after restore with \"restore\" command\n"));
+#endif
     printf(_("\nOptions for xlog copy:\n"));
     printf(_(
         "  -Q, --mode=MODE        MODE can be \"copy_from_local\", \"force_copy_from_local\", \"copy_from_share\"\n"));
 
-#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_PRIVATEGAUSS)
+#if defined(ENABLE_MULTIPLE_NODES) || (defined(ENABLE_PRIVATEGAUSS) && (!defined(ENABLE_LITE_MODE)))
     printf(_("\nOptions for hotpatch:\n"));
     printf(
         _("  -a ACTION  patch command, ACTION can be \"load\" \"unload\" \"active\" \"deactive\" \"info\" \"list\"\n"));
     printf(_("  -n NAME    patch name, NAME should be patch name with path\n"));
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_LITE_MODE
     doDCFOptionHelp();
     doDCFOptionDesHelp();
+#endif
 #endif
 
     printf(_("\nShutdown modes are:\n"));
@@ -3626,7 +3674,6 @@ static void do_help(void)
 
     (void)printf(_("\nSwitchover modes are:\n"));
     (void)printf(_("  -f          quit directly, with proper shutdown and do not perform checkpoint\n"));
-    (void)printf(_("  smart       demote primary after all clients have disconnected(not recommended in cluster)\n"));
     (void)printf(_("  fast        demote primary directly, with proper shutdown\n"));
 
     printf(_("\nSERVERMODE are:\n"));
@@ -3653,9 +3700,7 @@ static void do_help(void)
 #endif
     printf(_("\nBuild connection option:\n"));
     printf(_("  -r, --recvtimeout=INTERVAL    time that receiver waits for communication from server (in seconds)\n"));
-#ifdef ENABLE_MULTIPLE_NODES
-    printf(_("  -C, connector    CN/DN connect to CN for build\n"));
-#endif
+    printf(_("  -C, connector    CN/DN connect to specified CN/DN for build\n"));
 
 #if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     printf("\nReport bugs to GaussDB support.\n");
@@ -3688,6 +3733,8 @@ static void set_member_operation(const char* operationopt)
         member_operation = ADD_OPERATION;
     } else if (strcmp(operationopt, "remove") == 0) {
         member_operation = REMOVE_OPERATION;
+    } else if (strcmp(operationopt, "change") == 0) {
+        member_operation = CHANGE_OPERATION;
     } else {
         pg_log(PG_WARNING, _("unrecognized member operation \"%s\"\n"), operationopt);
         exit(1);
@@ -3876,6 +3923,8 @@ static char* get_localrole_string(ServerMode mode)
             return "Primary";
         case STANDBY_MODE:
             return "Standby";
+        case CASCADE_STANDBY_MODE:
+            return "Cascade Standby";
         case PENDING_MODE:
             return "Pending";
         default:
@@ -4043,30 +4092,36 @@ static bool DoAutoBuild(uint32 term)
 static bool DoStandbyBuild(uint32 term)
 {
     bool buildSuccess = false;
-    pg_log(PG_WARNING, "%s: change build mode to CROSS_CLUSTER_INC_BUILD.\n", progname);
-    build_mode = CROSS_CLUSTER_INC_BUILD;
-    for (int i = 0; i < INC_BUILD_RETRY_TIMES; ++i) {
-        buildSuccess = do_incremental_build(term);
-        if (buildSuccess) {
-            break;
+    if (conn_str == NULL) {
+        pg_log(PG_WARNING, "%s: change build mode to CROSS_CLUSTER_INC_BUILD.\n", progname);
+        build_mode = CROSS_CLUSTER_INC_BUILD;
+        for (int i = 0; i < INC_BUILD_RETRY_TIMES; ++i) {
+            buildSuccess = do_incremental_build(term);
+            if (buildSuccess) {
+                break;
+            }
+            ResetBuildInfo();
         }
-        ResetBuildInfo();
     }
 
     if (!buildSuccess) {
-        pg_log(PG_WARNING, "%s:cross inc build failed, change build mode to standby full build.\n", progname);
-        build_mode = STANDBY_FULL_BUILD;
-        buildSuccess = do_actual_build(term);
-        if (!buildSuccess) {
-            pg_log(PG_WARNING, "%s:standby full build failed, change build mode to cross full build.\n", progname);
-            build_mode = CROSS_CLUSTER_FULL_BUILD;
+        if (conn_str != NULL) {
             buildSuccess = do_actual_build(term);
-        }
-        if (!buildSuccess) {
-            pg_log(PG_WARNING,
-                   "%s:standby full build failed, change build mode to cross standby full build.\n", progname);
-            build_mode = CROSS_CLUSTER_STANDBY_FULL_BUILD;
+        } else {
+            pg_log(PG_WARNING, "%s:cross inc build failed, change build mode to standby full build.\n", progname);
+            build_mode = STANDBY_FULL_BUILD;
             buildSuccess = do_actual_build(term);
+            if (!buildSuccess) {
+                pg_log(PG_WARNING, "%s:standby full build failed, change build mode to cross full build.\n", progname);
+                build_mode = CROSS_CLUSTER_FULL_BUILD;
+                buildSuccess = do_actual_build(term);
+            }
+            if (!buildSuccess) {
+                pg_log(PG_WARNING,
+                    "%s:standby full build failed, change build mode to cross standby full build.\n", progname);
+                build_mode = CROSS_CLUSTER_STANDBY_FULL_BUILD;
+                buildSuccess = do_actual_build(term);
+            }
         }
     }
     return buildSuccess;
@@ -4097,7 +4152,7 @@ static void do_build(uint32 term)
 
     /* if the connect info is illegal, exit */
     if ((conn_str != NULL) && (CheckLegalityOfConnInfo() == false)) {
-        pg_log(PG_WARNING, "%s: Invalid coordinator connector: %s.\n", progname, conn_str);
+        pg_log(PG_WARNING, "%s: Invalid datanode/coordinator connector: %s.\n", progname, conn_str);
         exit(1);
     }
     if (pid > 0 && build_mode != COPY_SECURE_FILES_BUILD) {
@@ -4208,59 +4263,6 @@ bool get_conn_exe_sql(const char* sqlCommond)
     PQfinish(conn);
     conn = NULL;
     return result;
-}
-
-static void find_nested_pgconf(const char** optlines, char* opt_name)
-{
-    const char* p = NULL;
-    int i = 0;
-    size_t paramlen = 0;
-    paramlen = (size_t)strnlen(opt_name, MAX_PARAM_LEN);
-    for (i = 0; optlines[i] != NULL; i++) {
-        p = optlines[i];
-        while (isspace((unsigned char)*p)) {
-            p++;
-        }
-        if (pg_strncasecmp(p, opt_name, paramlen) != 0) {
-            continue;
-        }
-        while (isspace((unsigned char)*p)) {
-            p++;
-        }
-        pg_log(PG_WARNING,
-            _("There is nested config file in postgresql.conf: %sWhich is not supported by build. "
-              "Please move out the nested config files from %s and comment the 'include' config in postgresql.conf.\n"
-              "You can add option '-q' to disable autostart during build and restore the change manually "
-              "before starting gaussdb.\n"),
-            p,
-            pg_data);
-        exit(1);
-    }
-}
-
-static void check_nested_pgconf(void)
-{
-    char config_file[MAXPGPATH] = {0};
-    char** optlines = NULL;
-    int ret = EOK;
-    static char* optname[] = {"include ", "include_if_exists "};
-
-    ret = snprintf_s(config_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
-    securec_check_ss_c(ret, "\0", "\0");
-    config_file[MAXPGPATH - 1] = '\0';
-    optlines = readfile(config_file);
-
-    if (optlines == NULL) {
-        pg_log(PG_WARNING, _("%s cannot be opened.\n"), config_file);
-        exit(1);
-    }
-
-    for (int i = 0; i < (int)lengthof(optname); i++) {
-        find_nested_pgconf((const char**)optlines, optname[i]);
-    }
-
-    freefile(optlines);
-    optlines = NULL;
 }
 
 static void do_full_backup(uint32 term)
@@ -4524,6 +4526,60 @@ static void CheckBuildParameter()
         pg_log(PG_WARNING, _(" the parameter of build is not recognized\n"));
         exit(1);
     }
+}
+
+static void find_nested_pgconf(const char** optlines, char* opt_name)
+{
+    const char* p = NULL;
+    int i = 0;
+    size_t paramlen = 0;
+    paramlen = (size_t)strnlen(opt_name, MAX_PARAM_LEN);
+    for (i = 0; optlines[i] != NULL; i++) {
+        p = optlines[i];
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (pg_strncasecmp(p, opt_name, paramlen) != 0) {
+            continue;
+        }
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+
+        pg_log(PG_WARNING,
+            _("There is nested config file in postgresql.conf: %sWhich is not supported by build. "
+              "Please move out the nested config files from %s and comment the 'include' config in postgresql.conf.\n"
+              "You can add option '-q' to disable autostart during build and restore the change manually "
+              "before starting gaussdb.\n"),
+              p, 
+              pg_data);
+        exit(1);
+    }
+}
+
+static void check_nested_pgconf(void)
+{
+    char config_file[MAXPGPATH] = {0};
+    char** optlines = NULL;
+    int ret = EOK;
+    static char* optname[] = {"include ", "include_if_exists "};
+
+    ret = snprintf_s(config_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+    config_file[MAXPGPATH - 1] = '\0';
+    optlines = readfile(config_file);
+
+    if (optlines == NULL) {
+        pg_log(PG_WARNING, _("%s cannot be opened.\n"), config_file);
+        exit(1);
+    }
+
+    for (int i = 0; i < (int)lengthof(optname); i++) {
+        find_nested_pgconf((const char**)optlines, optname[i]);
+    }
+
+    freefile(optlines);
+    optlines = NULL;
 }
 
 /*
@@ -5475,10 +5531,13 @@ void do_change_role(void)
         exit(1);
     }
     int timeoutRet = 2;
+    int ret = 0;
+    char context[MAXPGPATH] = {0};
     bool isTimeout = false;
     bool isSuccess = false;
+    int roleStatus = -1;
     ServerMode run_mode = get_runmode();
-    if (run_mode == PRIMARY_MODE) {
+    if (run_mode == PRIMARY_MODE && strcmp(new_role, "passive") != 0) {
         pg_log(PG_WARNING, _("Can't change primary role.\n"));
         exit(1);
     }
@@ -5493,8 +5552,15 @@ void do_change_role(void)
     }
     pg_log(PG_WARNING, _("Start changing local DCF node role.\n"));
 
+    if (strcmp(new_role, "fo") == 0) {
+        roleStatus = 0;
+    } else if (strcmp(new_role, "pa") == 0) {
+        roleStatus = 1;
+    }
+    ret = snprintf_s(context, MAXPGPATH, MAXPGPATH - 1, "%d_%d_%d", roleStatus, group, priority);
+    securec_check_ss_c(ret, "\0", "\0");
     /* Write role into change_role_file */
-    if (!WriteFileInfo(change_role_file, new_role, strlen(new_role))) {
+    if (!WriteFileInfo(change_role_file, context, strlen(context))) {
         RemoveFileIfExist(change_role_file);
         exit(1);
     }
@@ -5656,6 +5722,8 @@ void SetConfigFilePath()
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/standby", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(cascade_standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/cascade_standby", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(pg_ctl_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/pg_ctl.lock", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(pg_conf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
@@ -5726,6 +5794,7 @@ int main(int argc, char** argv)
         {"force", no_argument, NULL, 'f'},
         {"obsmode", no_argument, NULL, 2},
         {"no-fsync", no_argument, NULL, 3},
+        {"priority", required_argument, NULL, 4},
         {"keycn", required_argument, NULL, 'k'},
         {"slotname", required_argument, NULL, 'K'},
         {"taskid", required_argument, NULL, 'I'},
@@ -5799,10 +5868,15 @@ int main(int argc, char** argv)
         FREE_AND_RESET(pgxcCommand);
         pgxcCommand = xstrdup("--single_node");
 #ifdef ENABLE_PRIVATEGAUSS
-        while ((c = getopt_long(argc, argv, "a:b:cD:e:fi:l:m:M:N:n:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:T:Q:", long_options,
+#ifndef ENABLE_LITE_MODE
+        while ((c = getopt_long(argc, argv, "a:b:cD:e:fi:G:l:m:M:N:n:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:T:Q:", long_options,
             &option_index)) != -1)
 #else
-        while ((c = getopt_long(argc, argv, "b:cD:e:fi:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:dqL:T:Q:", long_options,
+        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:T:Q:", long_options,
+            &option_index)) != -1)
+#endif
+#else
+        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:dqL:T:Q:", long_options,
             &option_index)) != -1)
 #endif
 #endif
@@ -6143,7 +6217,16 @@ int main(int argc, char** argv)
                     FREE_AND_RESET(taskid);
                     taskid = xstrdup(optarg);
                     break;
-
+                case 'G': {
+                    check_input_for_security(optarg);
+                    check_num_input(optarg);
+                    group = atoi(optarg);
+                    if (group < 0 || group > INT_MAX) {
+                        pg_log(PG_WARNING, _("unexpected vote number specified\n"));
+                        goto Error;
+                    }
+                    break;
+                }
                 case 1:
                     clear_backup_dir = true;
                     break;
@@ -6153,6 +6236,16 @@ int main(int argc, char** argv)
                 case 3:
                     no_need_fsync = true;
                     break;
+                case 4:{
+                    check_input_for_security(optarg);
+                    check_num_input(optarg);
+                    priority = atoi(optarg);
+                    if (priority < 0 || priority > INT_MAX) {
+                        pg_log(PG_WARNING, _("unexpected vote number specified\n"));
+                        goto Error;
+                    }
+                    break;
+                }
                 default:
                     /* getopt_long already issued a suitable error message */
                     do_advice();
@@ -6194,6 +6287,8 @@ int main(int argc, char** argv)
                 ctl_command = ADD_MEMBER_COMMAND;
             else if (strcmp(argv[optind], "member") == 0 && member_operation == REMOVE_OPERATION)
                 ctl_command = REMOVE_MEMBER_COMMAND;
+            else if (strcmp(argv[optind], "member") == 0 && member_operation == CHANGE_OPERATION)
+                ctl_command = CHANGE_ROLE_COMMAND;
             else if (strcmp(argv[optind], "changerole") == 0)
                 ctl_command = CHANGE_ROLE_COMMAND;
             else if (strcmp(argv[optind], "setrunmode") == 0)

@@ -301,14 +301,9 @@ void setHistSize(const char* targetName, const char* targetValue, bool setToDefa
 void initializeInput(int flags)
 {
 #ifdef USE_READLINE
-
-#ifndef ENABLE_MULTIPLE_NODES
     flags &= useReadline;
-#endif
 
     if (flags & 1) {
-        useReadline = true;
-
         /* these two things must be done in this order: */
         initialize_readline();
         rl_variable_bind ("enable-meta-key", "off");

@@ -8,10 +8,18 @@ Command:     INSERT
 Description: create new rows in a table
 Syntax:
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-INSERT [/*+ plan_hint */] INTO table_name [ ( column_name [, ...] ) ]
+INSERT [/*+ plan_hint */] INTO table_name [partition_clause] [ AS alias ] [ ( column_name [, ...] ) ]
     { DEFAULT VALUES | VALUES {( { expression | DEFAULT } [, ...] ) }[, ...] | query }
-    [ ON DUPLICATE KEY UPDATE { NOTHING | { column_name = { expression | DEFAULT } } [, ...] } ]
+    [ ON DUPLICATE KEY UPDATE { NOTHING | { column_name = { expression | DEFAULT } } [, ...] [ WHERE condition ] } ]
     [ RETURNING {* | {output_expression [ [ AS ] output_name ] }[, ...]} ];
+
+where with_query can be:
+with_query_name [ ( column_name [, ...] ) ] AS [ [ NOT ] MATERIALIZED ]
+( {select | values | insert | update | delete} )
+where partition_clause can be:
+PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } |
+SUBPARTITION { ( subpartition_name ) | FOR ( subpartition_value [, ...] ) }
+NOTICE: 'partition_clause' is only avaliable in CENTRALIZED mode!
 
 -- test permission
 --- test with no sequence column

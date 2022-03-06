@@ -24,9 +24,11 @@
 #ifndef PQRQUET_FILE_READER_H
 #define PQRQUET_FILE_READER_H
 
+#ifndef ENABLE_LITE_MODE
 #include "parquet/api/reader.h"
 #include "parquet/types.h"
 #include "parquet/deprecated_io.h"
+#endif
 #include "utils/dfs_vector.h"
 #include "utils/bloom_filter.h"
 #include "vecexecutor/vectorbatch.h"

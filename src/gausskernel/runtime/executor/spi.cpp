@@ -236,11 +236,34 @@ void SPI_restore_current_stp_transaction_state()
 }
 
 /* This function will be called by commit/rollback inside STP to start a new transaction */
-void SPI_start_transaction(void)
+void SPI_start_transaction(List* transactionHead)
 {
+    Oid savedCurrentUser = InvalidOid;
+    int saveSecContext = 0;
+    MemoryContext savedContext = MemoryContextSwitchTo(t_thrd.mem_cxt.portal_mem_cxt);
+    GetUserIdAndSecContext(&savedCurrentUser, &saveSecContext);
+    if (transactionHead != NULL) {
+        ListCell* cell;
+        foreach(cell, transactionHead) {
+            transactionNode* node = (transactionNode*)lfirst(cell);
+            SetUserIdAndSecContext(node->userId, node->secContext);
+            break;
+        }
+    }
+    MemoryContextSwitchTo(savedContext);
     MemoryContext oldcontext = CurrentMemoryContext;
-    StartTransactionCommand(true);
+    PG_TRY();
+    {
+        StartTransactionCommand(true);
+    }
+    PG_CATCH();
+    {
+        SetUserIdAndSecContext(savedCurrentUser, saveSecContext);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     MemoryContextSwitchTo(oldcontext);
+    SetUserIdAndSecContext(savedCurrentUser, saveSecContext);
 }
 
 /* 
@@ -454,9 +477,6 @@ void SPI_savepoint_rollback(const char* spName)
      * interrupt previous cursor fetch.
      */
     CommitTransactionCommand(true);
-
-    /* move old subtransaction's remain resource into new subtransaction. */
-    XactResumeSPIContext(false);
 }
 
 /*
@@ -489,9 +509,6 @@ void SPI_savepoint_release(const char* spName)
      * interrupt previous cursor fetch.
      */
     CommitTransactionCommand(true);
-
-    /* move old subtransaction's remain resource into new subtransaction. */
-    XactResumeSPIContext(false);
 }
 
 /*
@@ -1280,7 +1297,7 @@ char *SPI_fname(TupleDesc tupdesc, int fnumber)
     if (fnumber > 0) {
         attr = tupdesc->attrs[fnumber - 1];
     } else {
-        attr = SystemAttributeDefinition(fnumber, true, false);
+        attr = SystemAttributeDefinition(fnumber, true, false, false);
     }
 
     return pstrdup(NameStr(attr->attname));
@@ -1310,7 +1327,7 @@ char *SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber)
     if (fnumber > 0) {
         typoid = tupdesc->attrs[fnumber - 1]->atttypid;
     } else {
-        typoid = (SystemAttributeDefinition(fnumber, true, false))->atttypid;
+        typoid = (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }
 
     getTypeOutputInfo(typoid, &foutoid, &typo_is_varlen);
@@ -1363,7 +1380,7 @@ char *SPI_gettype(TupleDesc tupdesc, int fnumber)
     if (fnumber > 0) {
         typoid = tupdesc->attrs[fnumber - 1]->atttypid;
     } else {
-        typoid = (SystemAttributeDefinition(fnumber, true, false))->atttypid;
+        typoid = (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }
 
     type_tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
@@ -1389,7 +1406,7 @@ Oid SPI_gettypeid(TupleDesc tupdesc, int fnumber)
     if (fnumber > 0) {
         return tupdesc->attrs[fnumber - 1]->atttypid;
     } else {
-        return (SystemAttributeDefinition(fnumber, true, false))->atttypid;
+        return (SystemAttributeDefinition(fnumber, true, false, false))->atttypid;
     }
 }
 
@@ -1566,6 +1583,19 @@ Portal SPI_cursor_open_with_paramlist(const char *name, SPIPlanPtr plan, ParamLi
     return SPI_cursor_open_internal(name, plan, params, read_only, isCollectParam);
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
+/* check plan's stream node and set flag */
+static void check_portal_stream(Portal portal)
+{
+    if (IS_PGXC_COORDINATOR && check_stream_for_loop_fetch(portal)) {
+        if (!ENABLE_SQL_BETA_FEATURE(PLPGSQL_STREAM_FETCHALL)) {
+            /* save flag for warning */
+            u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = portal->hasStreamForPlpgsql;
+        }
+    }
+}
+#endif
+
 /*
  * SPI_cursor_open_internal
  *
@@ -1733,11 +1763,15 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
         CommandCounterIncrement();
         snapshot = GetTransactionSnapshot();
     }
+
 #ifdef ENABLE_MULTIPLE_NODES
     if (isCollectParam && checkCommandTag(portal->commandTag) && checkPlan(portal->stmts)) {
         collectDynWithArgs(query_string, paramLI, portal->cursorOptions);
     }
+    /* check plan if has stream */
+    check_portal_stream(portal);
 #endif
+
     /*
      * If the plan has parameters, copy them into the portal.  Note that this
      * must be done after revalidating the plan, because in dynamic parameter
@@ -1758,6 +1792,10 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
 
     /* Pop the SPI stack */
     SPI_STACK_LOG("end", NULL, plan);
+
+    /* reset flag */
+    u_sess->SPI_cxt.has_stream_in_cursor_or_forloop_sql = false;
+
     _SPI_end_call(true);
 
     /* Return the created portal */
@@ -2728,7 +2766,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
                  * return a special result code if the statement was spelled
                  * SELECT INTO.
                  */
-                if (IsA(stmt, CreateTableAsStmt)) {
+                if (IsA(stmt, CreateTableAsStmt) && ((CreateTableAsStmt *)stmt)->relkind != OBJECT_MATVIEW) {
                     Assert(strncmp(completionTag, "SELECT ", 7) == 0);
                     u_sess->SPI_cxt._current->processed = strtoul(completionTag + 7, NULL, 10);
                     if (((CreateTableAsStmt *)stmt)->is_select_into) {
@@ -2841,7 +2879,7 @@ fail:
     return my_res;
 }
 
-static bool IsNeedSubTxnForSPIPlan(SPIPlanPtr plan, ParamListInfo paramLI)
+static bool IsNeedSubTxnForSPIPlan(SPIPlanPtr plan)
 {
     /* not required to act as the same as O */
     if (!PLSTMT_IMPLICIT_SAVEPOINT) {
@@ -2873,6 +2911,17 @@ static bool IsNeedSubTxnForSPIPlan(SPIPlanPtr plan, ParamListInfo paramLI)
             if (qry->commandType != CMD_SELECT || qry->rowMarks != NULL || qry->hasModifyingCTE) {
                 return true;
             }
+
+#ifdef ENABLE_MULTIPLE_NODES
+            /*
+             * DN aborts subtransaction automatically once error occurs. Current start an new implicit
+             * savepoint to isolate from runtime error even that it is a read only statement.
+             *
+             * If statement contains only system table, it will run at CN without savepint. It's
+             * a worth thing to check it?
+             */
+            return list_length(plansource->relationOids) != 0;
+#endif
         }
     }
 
@@ -2889,9 +2938,10 @@ extern int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
 {
     int my_res = 0;
 
-    if (IsNeedSubTxnForSPIPlan(plan, paramLI)) {
+    if (IsNeedSubTxnForSPIPlan(plan)) {
         volatile int curExceptionCounter;
         MemoryContext oldcontext = CurrentMemoryContext;
+        int64 stackId = u_sess->plsql_cxt.nextStackEntryId;
 
         /* start an implicit savepoint for this stmt. */
         SPI_savepoint_create(NULL);
@@ -2911,7 +2961,7 @@ extern int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
             if (curExceptionCounter == u_sess->SPI_cxt.portal_stp_exception_counter &&
                 GetCurrentTransactionName() == NULL) {
                 SPI_savepoint_rollbackAndRelease(NULL, InvalidTransactionId);
-                XactResumeSPIContext(true);
+                stp_cleanup_subxact_resowner(stackId);
             }
             PG_RE_THROW();
         }
@@ -2924,7 +2974,7 @@ extern int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
         if (curExceptionCounter == u_sess->SPI_cxt.portal_stp_exception_counter &&
             GetCurrentTransactionName() == NULL) {
             SPI_savepoint_release(NULL);
-            XactResumeSPIContext(true);
+            stp_cleanup_subxact_resowner(stackId);
         }
     } else {
         my_res = _SPI_execute_plan0(plan, paramLI, snapshot,
@@ -3021,9 +3071,7 @@ ParamListInfo _SPI_convert_params(int nargs, Oid *argtypes, Datum *Values, const
             if (cursor_data != NULL) {
                 CopyCursorInfoData(&prm->cursor_data, &cursor_data[i]);
             }
-            prm->tableOfIndexType = InvalidOid;
-            prm->tableOfIndex = NULL;
-            prm->isnestedtable = false;
+            prm->tabInfo = NULL;
         }
     } else {
         param_list_info = NULL;

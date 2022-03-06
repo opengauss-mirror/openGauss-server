@@ -28,7 +28,7 @@ set(TGT_initdb_INC
 set(initdb_DEF_OPTIONS ${MACRO_OPTIONS} -DFRONTEND)
 set(initdb_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(initdb_LINK_OPTIONS ${BIN_LINK_OPTIONS})
-set(initdb_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -lsecurec -lrt -lz -lminiunz)
+set(initdb_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz)
 add_bintarget(gs_initdb TGT_initdb_SRC TGT_initdb_INC "${initdb_DEF_OPTIONS}" "${initdb_COMPILE_OPTIONS}" "${initdb_LINK_OPTIONS}" "${initdb_LINK_LIBS}")
 add_dependencies(gs_initdb elog_static pgport_static)
 target_link_directories(gs_initdb PUBLIC

@@ -83,15 +83,15 @@ insert into t4 values(4, 'def');
 insert into t4 values(5, 'efg');
 commit;
 
-select * from t4;
+select * from t4 order by c1;
 
 start transaction;
 update t4 set c2 = 'aaaabbbbccccdddd' where c1 = 3;
 update t4 set c2 = 'aaaabbbbccccdddd' where c1 = 2;
-select * from t4;
+select * from t4 order by c1;
 rollback;
 
-select * from t4;
+select * from t4 order by c1;
 
 -- Test updates involving mixed table types
 drop table if exists t5;

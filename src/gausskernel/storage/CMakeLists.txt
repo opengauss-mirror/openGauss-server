@@ -30,6 +30,10 @@ if("${ENABLE_MOT}" STREQUAL "ON")
     list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/mot)
 endif()
 
+if("${ENABLE_UT}" STREQUAL "ON")
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/test)
+endif()
+
 add_subdirectory(access)
 add_subdirectory(bulkload)
 add_subdirectory(buffer)
@@ -52,5 +56,9 @@ add_subdirectory(dorado_operation)
 
 if("${ENABLE_MOT}" STREQUAL "ON")
     add_subdirectory(mot)
+endif()
+
+if("${ENABLE_UT}" STREQUAL "ON")
+    add_subdirectory(test)
 endif()
 

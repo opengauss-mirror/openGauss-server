@@ -34,7 +34,7 @@
 #define AttributeRelation_Rowtype_Id  75
 
 #define IsAttributeRelation(rel) (RelationGetRelid(rel) == AttributeRelationId)
-#define IsAttributeCache(cache) ((cache)->cc_reloid == AttributeRelationId)
+#define IsAttributeCache(reloid) ((reloid) == AttributeRelationId)
 
 CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BKI_SCHEMA_MACRO
 {

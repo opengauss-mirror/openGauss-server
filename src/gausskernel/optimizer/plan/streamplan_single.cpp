@@ -612,8 +612,11 @@ static void mark_distribute_setop_distribution(PlannerInfo* root, Node* node, Pl
                                              redistributeDistribution);
                     }
                 }
-                Stream *streamNode = (Stream *)newplan;
-                streamNode->is_sorted = IsA(node, MergeAppend) ? true : false;
+
+                if (IsA(newplan, Stream)) {
+                    Stream *streamNode = (Stream *)newplan;
+                    streamNode->is_sorted = IsA(node, MergeAppend) ? true : false;
+                }
 
                 if (PointerIsValid(mergeAppend)) {
                     newSubPlans = lappend(newSubPlans,

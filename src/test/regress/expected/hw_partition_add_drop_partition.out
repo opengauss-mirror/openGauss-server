@@ -1,0 +1,913 @@
+DROP SCHEMA hw_partition_add_drop_partition CASCADE;
+ERROR:  schema "hw_partition_add_drop_partition" does not exist
+CREATE SCHEMA hw_partition_add_drop_partition;
+SET CURRENT_SCHEMA TO hw_partition_add_drop_partition;
+--
+----range table----
+--
+--prepare
+CREATE TABLE range_sales
+(
+    product_id     INT4 NOT NULL,
+    customer_id    INT4 PRIMARY KEY,
+    time_id        DATE,
+    channel_id     CHAR(1),
+    type_id        INT4,
+    quantity_sold  NUMERIC(3),
+    amount_sold    NUMERIC(10,2)
+)
+PARTITION BY RANGE (time_id)
+(
+    PARTITION time_2008 VALUES LESS THAN ('2009-01-01'),
+    PARTITION time_2009 VALUES LESS THAN ('2010-01-01'),
+    PARTITION time_2010 VALUES LESS THAN ('2011-01-01'),
+    PARTITION time_2011 VALUES LESS THAN ('2012-01-01')
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_sales_pkey" for table "range_sales"
+INSERT INTO range_sales SELECT generate_series(1,1000),
+                               generate_series(1,1000),
+                               date_pli('2008-01-01', generate_series(1,1000)),
+                               generate_series(1,1000)%10,
+                               generate_series(1,1000)%10,
+                               generate_series(1,1000)%1000,
+                               generate_series(1,1000);
+CREATE INDEX range_sales_idx ON range_sales(product_id) LOCAL;
+--check for add partition
+--fail, can not add subpartition on no-subpartitioned table
+ALTER TABLE range_sales ADD PARTITION time_temp1 VALUES LESS THAN ('2013-01-01')
+    (
+        SUBPARTITION time_temp1_part1 VALUES LESS THAN (200),
+        SUBPARTITION time_temp1_part2 VALUES LESS THAN (500),
+        SUBPARTITION time_temp1_part3 VALUES LESS THAN (800),
+        SUBPARTITION time_temp1_part4 VALUES LESS THAN (1200)
+    );
+ERROR:  Un-support feature
+DETAIL:  Can not add subpartition against NON-SUBPARTITIONED table
+--fail, out of range
+ALTER TABLE range_sales ADD PARTITION time_temp2 VALUES LESS THAN ('2011-06-01');
+ERROR:  upper boundary of adding partition MUST overtop last existing partition
+--fail, invalid format
+ALTER TABLE range_sales ADD PARTITION time_temp3 VALUES ('2013-01-01');
+ERROR:  can not add none-range partition to range partition table
+--success, add 1 partition
+ALTER TABLE range_sales ADD PARTITION time_2012 VALUES LESS THAN ('2013-01-01');
+--success, add 1 partition
+ALTER TABLE range_sales ADD PARTITION time_end VALUES LESS THAN (MAXVALUE);
+--fail, out of range
+ALTER TABLE range_sales ADD PARTITION time_temp4 VALUES LESS THAN ('2014-01-01');
+ERROR:  upper boundary of adding partition MUST overtop last existing partition
+--check for ok after add
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='range_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+   relname   | parttype | partstrategy | hasfilenode | reltablespace | partkey |  boundaries  
+-------------+----------+--------------+-------------+---------------+---------+--------------
+ time_2008   | p        | r            | t           |             0 |         | {2009-01-01}
+ time_2009   | p        | r            | t           |             0 |         | {2010-01-01}
+ time_2010   | p        | r            | t           |             0 |         | {2011-01-01}
+ time_2011   | p        | r            | t           |             0 |         | {2012-01-01}
+ time_2012   | p        | r            | t           |             0 |         | {2013-01-01}
+ time_end    | p        | r            | t           |             0 |         | {NULL}
+ range_sales | r        | r            | f           |             0 | 3       | 
+(7 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='range_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname          | parttype | partstrategy | hasfilenode | indisusable 
+--------------------------+----------+--------------+-------------+-------------
+ time_2008_product_id_idx | x        | n            | t           | t
+ time_2009_product_id_idx | x        | n            | t           | t
+ time_2010_product_id_idx | x        | n            | t           | t
+ time_2011_product_id_idx | x        | n            | t           | t
+ time_2012_product_id_idx | x        | n            | t           | t
+ time_end_product_id_idx  | x        | n            | t           | t
+(6 rows)
+
+\d+ range_sales
+                        Table "hw_partition_add_drop_partition.range_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "range_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
+    "range_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2009_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION time_2011_product_id_idx, PARTITION time_2012_product_id_idx, PARTITION time_end_product_id_idx)  TABLESPACE pg_default
+Partition By RANGE(time_id)
+Number of partitions: 6 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--check for drop partition (for)
+--success, drop partition time_2009
+ALTER TABLE range_sales DROP PARTITION time_2009;
+--success, drop partition time_2011
+ALTER TABLE range_sales DROP PARTITION FOR ('2011-06-01');
+--fail, invalid type
+ALTER TABLE range_sales DROP PARTITION FOR (1);
+ERROR:  partition key value must be const or const-evaluable expression
+--fail, number not equal to the number of partkey
+ALTER TABLE range_sales DROP PARTITION FOR ('2011-06-01', 1);
+ERROR:  number of boundary items NOT EQUAL to number of partition keys
+--fail, can not drop subpartition on no-subpartition table
+ALTER TABLE range_sales DROP SUBPARTITION FOR ('2011-06-01', 1);
+ERROR:  Un-support feature
+DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
+--success, drop partition time_2012
+ALTER TABLE range_sales DROP PARTITION FOR ('2011-06-01');
+--check for ok after drop
+SELECT count(*) FROM range_sales;
+ count 
+-------
+   635
+(1 row)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='range_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+   relname   | parttype | partstrategy | hasfilenode | reltablespace | partkey |  boundaries  
+-------------+----------+--------------+-------------+---------------+---------+--------------
+ time_2008   | p        | r            | t           |             0 |         | {2009-01-01}
+ time_2010   | p        | r            | t           |             0 |         | {2011-01-01}
+ time_end    | p        | r            | t           |             0 |         | {NULL}
+ range_sales | r        | r            | f           |             0 | 3       | 
+(4 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='range_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname          | parttype | partstrategy | hasfilenode | indisusable 
+--------------------------+----------+--------------+-------------+-------------
+ time_2008_product_id_idx | x        | n            | t           | t
+ time_2010_product_id_idx | x        | n            | t           | t
+ time_end_product_id_idx  | x        | n            | t           | t
+(3 rows)
+
+\d+ range_sales
+                        Table "hw_partition_add_drop_partition.range_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "range_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default UNUSABLE
+    "range_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION time_end_product_id_idx)  TABLESPACE pg_default
+Partition By RANGE(time_id)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--
+----range table, multiple partkeys----
+--
+--prepare
+CREATE TABLE range2_sales
+(
+    product_id     INT4 NOT NULL,
+    customer_id    INT4 PRIMARY KEY,
+    time_id        DATE,
+    channel_id     CHAR(1),
+    type_id        INT4,
+    quantity_sold  NUMERIC(3),
+    amount_sold    NUMERIC(10,2)
+)
+PARTITION BY RANGE (time_id, product_id)
+(
+    PARTITION time_2008 VALUES LESS THAN ('2009-01-01', 200),
+    PARTITION time_2009 VALUES LESS THAN ('2010-01-01', 500),
+    PARTITION time_2010 VALUES LESS THAN ('2011-01-01', 800),
+    PARTITION time_2011 VALUES LESS THAN ('2012-01-01', 1200)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range2_sales_pkey" for table "range2_sales"
+INSERT INTO range2_sales SELECT generate_series(1,1000),
+                                generate_series(1,1000),
+                                date_pli('2008-01-01', generate_series(1,1000)),
+                                generate_series(1,1000)%10,
+                                generate_series(1,1000)%10,
+                                generate_series(1,1000)%1000,
+                                generate_series(1,1000);
+CREATE INDEX range2_sales_idx ON range2_sales(product_id) LOCAL;
+--check for add partition
+--fail, can not add subpartition on no-subpartitioned table
+ALTER TABLE range2_sales ADD PARTITION time_temp1 VALUES LESS THAN ('2013-01-01', 1500)
+    (
+        SUBPARTITION time_temp1_part1 VALUES LESS THAN (200),
+        SUBPARTITION time_temp1_part2 VALUES LESS THAN (500),
+        SUBPARTITION time_temp1_part3 VALUES LESS THAN (800),
+        SUBPARTITION time_temp1_part4 VALUES LESS THAN (1200)
+    );
+ERROR:  Un-support feature
+DETAIL:  Can not add subpartition against NON-SUBPARTITIONED table
+--fail, out of range
+ALTER TABLE range2_sales ADD PARTITION time_temp2 VALUES LESS THAN ('2011-06-01', 100);
+ERROR:  upper boundary of adding partition MUST overtop last existing partition
+--fail, invalid format
+ALTER TABLE range2_sales ADD PARTITION time_temp3 VALUES ('2013-01-01', 1500);
+ERROR:  can not add none-range partition to range partition table
+--success, add 1 partition
+ALTER TABLE range2_sales ADD PARTITION time_2012 VALUES LESS THAN ('2013-01-01', 1500);
+--success, add 1 partition
+ALTER TABLE range2_sales ADD PARTITION time_end VALUES LESS THAN (MAXVALUE, MAXVALUE);
+--fail, out of range
+ALTER TABLE range2_sales ADD PARTITION time_temp4 VALUES LESS THAN ('2014-01-01', 2000);
+ERROR:  upper boundary of adding partition MUST overtop last existing partition
+--check for ok after add
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='range2_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+   relname    | parttype | partstrategy | hasfilenode | reltablespace | partkey |    boundaries     
+--------------+----------+--------------+-------------+---------------+---------+-------------------
+ time_2008    | p        | r            | t           |             0 |         | {2009-01-01,200}
+ time_2009    | p        | r            | t           |             0 |         | {2010-01-01,500}
+ time_2010    | p        | r            | t           |             0 |         | {2011-01-01,800}
+ time_2011    | p        | r            | t           |             0 |         | {2012-01-01,1200}
+ time_2012    | p        | r            | t           |             0 |         | {2013-01-01,1500}
+ time_end     | p        | r            | t           |             0 |         | {NULL,NULL}
+ range2_sales | r        | r            | f           |             0 | 3 1     | 
+(7 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='range2_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname          | parttype | partstrategy | hasfilenode | indisusable 
+--------------------------+----------+--------------+-------------+-------------
+ time_2008_product_id_idx | x        | n            | t           | t
+ time_2009_product_id_idx | x        | n            | t           | t
+ time_2010_product_id_idx | x        | n            | t           | t
+ time_2011_product_id_idx | x        | n            | t           | t
+ time_2012_product_id_idx | x        | n            | t           | t
+ time_end_product_id_idx  | x        | n            | t           | t
+(6 rows)
+
+\d+ range2_sales
+                        Table "hw_partition_add_drop_partition.range2_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "range2_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
+    "range2_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2009_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION time_2011_product_id_idx, PARTITION time_2012_product_id_idx, PARTITION time_end_product_id_idx)  TABLESPACE pg_default
+Partition By RANGE(time_id, product_id)
+Number of partitions: 6 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--check for drop partition (for)
+--success, drop partition time_2009
+ALTER TABLE range2_sales DROP PARTITION time_2009;
+--success, drop partition time_2011
+ALTER TABLE range2_sales DROP PARTITION FOR ('2011-06-01', 600);
+--fail, invalid type
+ALTER TABLE range2_sales DROP PARTITION FOR (1, 100);
+ERROR:  partition key value must be const or const-evaluable expression
+--fail, number not equal to the number of partkey
+ALTER TABLE range2_sales DROP PARTITION FOR ('2011-06-01');
+ERROR:  number of boundary items NOT EQUAL to number of partition keys
+--fail, can not drop subpartition on no-subpartition table
+ALTER TABLE range2_sales DROP SUBPARTITION FOR ('2011-06-01', 1);
+ERROR:  Un-support feature
+DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
+--success, drop partition time_2012
+ALTER TABLE range2_sales DROP PARTITION FOR ('2011-06-01', 100);
+--check for ok after drop
+SELECT count(*) FROM range2_sales;
+ count 
+-------
+   635
+(1 row)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='range2_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+   relname    | parttype | partstrategy | hasfilenode | reltablespace | partkey |    boundaries    
+--------------+----------+--------------+-------------+---------------+---------+------------------
+ time_2008    | p        | r            | t           |             0 |         | {2009-01-01,200}
+ time_2010    | p        | r            | t           |             0 |         | {2011-01-01,800}
+ time_end     | p        | r            | t           |             0 |         | {NULL,NULL}
+ range2_sales | r        | r            | f           |             0 | 3 1     | 
+(4 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='range2_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname          | parttype | partstrategy | hasfilenode | indisusable 
+--------------------------+----------+--------------+-------------+-------------
+ time_2008_product_id_idx | x        | n            | t           | t
+ time_2010_product_id_idx | x        | n            | t           | t
+ time_end_product_id_idx  | x        | n            | t           | t
+(3 rows)
+
+\d+ range2_sales
+                        Table "hw_partition_add_drop_partition.range2_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "range2_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default UNUSABLE
+    "range2_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION time_end_product_id_idx)  TABLESPACE pg_default
+Partition By RANGE(time_id, product_id)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--
+----interval table----
+--
+--prepare
+CREATE TABLE interval_sales
+(
+    product_id     INT4 NOT NULL,
+    customer_id    INT4 PRIMARY KEY,
+    time_id        DATE,
+    channel_id     CHAR(1),
+    type_id        INT4,
+    quantity_sold  NUMERIC(3),
+    amount_sold    NUMERIC(10,2)
+)
+PARTITION BY RANGE (time_id) INTERVAL ('1 year')
+(
+    PARTITION time_2008 VALUES LESS THAN ('2009-01-01'),
+    PARTITION time_2009 VALUES LESS THAN ('2010-01-01'),
+    PARTITION time_2010 VALUES LESS THAN ('2011-01-01')
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_sales_pkey" for table "interval_sales"
+INSERT INTO interval_sales SELECT generate_series(1,1000),
+                                  generate_series(1,1000),
+                                  date_pli('2009-01-01', generate_series(1,1000)),
+                                  generate_series(1,1000)%10,
+                                  generate_series(1,1000)%10,
+                                  generate_series(1,1000)%1000,
+                                  generate_series(1,1000);
+CREATE INDEX interval_sales_idx ON interval_sales(product_id) LOCAL;
+--check for add partition
+--fail, can not add subpartition on no-subpartitioned table
+ALTER TABLE interval_sales ADD PARTITION time_temp1 VALUES LESS THAN ('2013-01-01')
+    (
+        SUBPARTITION time_temp1_part1 VALUES LESS THAN (200),
+        SUBPARTITION time_temp1_part2 VALUES LESS THAN (500),
+        SUBPARTITION time_temp1_part3 VALUES LESS THAN (800),
+        SUBPARTITION time_temp1_part4 VALUES LESS THAN (1200)
+    );
+ERROR:  can not add partition against interval partitioned table
+--fail, not support add interval
+ALTER TABLE interval_sales ADD PARTITION time_2012 VALUES LESS THAN ('2013-01-01');
+ERROR:  can not add partition against interval partitioned table
+--check for ok after add
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='interval_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+    relname     | parttype | partstrategy | hasfilenode | reltablespace | partkey |          boundaries          
+----------------+----------+--------------+-------------+---------------+---------+------------------------------
+ sys_p1         | p        | i            | t           |             0 |         | {"Sun Jan 01 00:00:00 2012"}
+ time_2008      | p        | r            | t           |             0 |         | {2009-01-01}
+ time_2009      | p        | r            | t           |             0 |         | {2010-01-01}
+ time_2010      | p        | r            | t           |             0 |         | {2011-01-01}
+ interval_sales | r        | i            | f           |             0 | 3       | 
+(5 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='interval_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname          | parttype | partstrategy | hasfilenode | indisusable 
+--------------------------+----------+--------------+-------------+-------------
+ sys_p1_product_id_idx    | x        | n            | t           | t
+ time_2008_product_id_idx | x        | n            | t           | t
+ time_2009_product_id_idx | x        | n            | t           | t
+ time_2010_product_id_idx | x        | n            | t           | t
+(4 rows)
+
+\d+ interval_sales
+                       Table "hw_partition_add_drop_partition.interval_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "interval_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
+    "interval_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2009_product_id_idx, PARTITION time_2010_product_id_idx, PARTITION sys_p1_product_id_idx)  TABLESPACE pg_default
+Partition By RANGE(time_id) INTERVAL('1 year')
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--check for drop partition (for)
+--success, drop partition time_2009
+ALTER TABLE interval_sales DROP PARTITION time_2009;
+--success, drop partition sys_p1
+ALTER TABLE interval_sales DROP PARTITION FOR ('2011-06-01');
+--fail, invalid type
+ALTER TABLE interval_sales DROP PARTITION FOR (1);
+ERROR:  partition key value must be const or const-evaluable expression
+--fail, number not equal to the number of partkey
+ALTER TABLE interval_sales DROP PARTITION FOR ('2010-06-01', 1);
+ERROR:  number of boundary items NOT EQUAL to number of partition keys
+--fail, can not drop subpartition on no-subpartition table
+ALTER TABLE interval_sales DROP SUBPARTITION FOR ('2010-06-01', 1);
+ERROR:  Un-support feature
+DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
+--check for ok after drop
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='interval_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+    relname     | parttype | partstrategy | hasfilenode | reltablespace | partkey |  boundaries  
+----------------+----------+--------------+-------------+---------------+---------+--------------
+ time_2008      | p        | r            | t           |             0 |         | {2009-01-01}
+ time_2010      | p        | r            | t           |             0 |         | {2011-01-01}
+ interval_sales | r        | i            | f           |             0 | 3       | 
+(3 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='interval_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname          | parttype | partstrategy | hasfilenode | indisusable 
+--------------------------+----------+--------------+-------------+-------------
+ time_2008_product_id_idx | x        | n            | t           | t
+ time_2010_product_id_idx | x        | n            | t           | t
+(2 rows)
+
+\d+ interval_sales
+                       Table "hw_partition_add_drop_partition.interval_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "interval_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default UNUSABLE
+    "interval_sales_idx" btree (product_id) LOCAL(PARTITION time_2008_product_id_idx, PARTITION time_2010_product_id_idx)  TABLESPACE pg_default
+Partition By RANGE(time_id) INTERVAL('1 year')
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--
+----list table----
+--
+--prepare
+CREATE TABLE list_sales
+(
+    product_id     INT4 NOT NULL,
+    customer_id    INT4 PRIMARY KEY,
+    time_id        DATE,
+    channel_id     CHAR(1),
+    type_id        INT4,
+    quantity_sold  NUMERIC(3),
+    amount_sold    NUMERIC(10,2)
+)
+PARTITION BY LIST (channel_id)
+(
+    PARTITION channel1 VALUES ('0', '1', '2'),
+    PARTITION channel2 VALUES ('3', '4', '5'),
+    PARTITION channel3 VALUES ('6', '7'),
+    PARTITION channel4 VALUES ('8', '9')
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "list_sales_pkey" for table "list_sales"
+INSERT INTO list_sales SELECT generate_series(1,1000),
+                              generate_series(1,1000),
+                              date_pli('2008-01-01', generate_series(1,1000)),
+                              generate_series(1,1000)%10,
+                              generate_series(1,1000)%10,
+                              generate_series(1,1000)%1000,
+                              generate_series(1,1000);
+CREATE INDEX list_sales_idx ON list_sales(product_id) LOCAL;
+--check for add partition
+--fail, can not add subpartition on no-subpartitioned table
+ALTER TABLE list_sales ADD PARTITION channel_temp1 VALUES ('X')
+    (
+        SUBPARTITION channel_temp1_part1 VALUES LESS THAN (200),
+        SUBPARTITION channel_temp1_part2 VALUES LESS THAN (500),
+        SUBPARTITION channel_temp1_part3 VALUES LESS THAN (800),
+        SUBPARTITION channel_temp1_part4 VALUES LESS THAN (1200)
+    );
+ERROR:  Un-support feature
+DETAIL:  Can not add subpartition against NON-SUBPARTITIONED table
+--fail, out of range
+ALTER TABLE list_sales ADD PARTITION channel_temp2 VALUES ('8', 'X');
+ERROR:  list boundary of adding partition MUST NOT overlap with existing partition
+--fail, value conflict
+ALTER TABLE list_sales ADD PARTITION channel_temp3 VALUES ('X', 'X', 'Z');
+ERROR:  list partition channel_temp3 has overlapped value
+--fail, invalid format
+ALTER TABLE list_sales ADD PARTITION channel_temp4 VALUES LESS THAN('X');
+ERROR:  can not add none-list partition to list partition table
+--success, add 1 partition
+ALTER TABLE list_sales ADD PARTITION channel5 VALUES ('X', 'Z');
+--success, add 1 partition
+ALTER TABLE list_sales ADD PARTITION channel_default VALUES (DEFAULT);
+--fail, out of range
+ALTER TABLE list_sales ADD PARTITION channel_temp5 VALUES ('P');
+ERROR:  list boundary of adding partition MUST NOT overlap with existing partition
+--check for ok after add
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='list_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+     relname     | parttype | partstrategy | hasfilenode | reltablespace | partkey | boundaries 
+-----------------+----------+--------------+-------------+---------------+---------+------------
+ channel1        | p        | l            | t           |             0 |         | {0,1,2}
+ channel2        | p        | l            | t           |             0 |         | {3,4,5}
+ channel3        | p        | l            | t           |             0 |         | {6,7}
+ channel4        | p        | l            | t           |             0 |         | {8,9}
+ channel5        | p        | l            | t           |             0 |         | {X,Z}
+ channel_default | p        | l            | t           |             0 |         | {NULL}
+ list_sales      | r        | l            | f           |             0 | 4       | 
+(7 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='list_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+            relname             | parttype | partstrategy | hasfilenode | indisusable 
+--------------------------------+----------+--------------+-------------+-------------
+ channel1_product_id_idx        | x        | n            | t           | t
+ channel2_product_id_idx        | x        | n            | t           | t
+ channel3_product_id_idx        | x        | n            | t           | t
+ channel4_product_id_idx        | x        | n            | t           | t
+ channel5_product_id_idx        | x        | n            | t           | t
+ channel_default_product_id_idx | x        | n            | t           | t
+(6 rows)
+
+\d+ list_sales
+                         Table "hw_partition_add_drop_partition.list_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "list_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
+    "list_sales_idx" btree (product_id) LOCAL(PARTITION channel_default_product_id_idx, PARTITION channel5_product_id_idx, PARTITION channel4_product_id_idx, PARTITION channel3_product_id_idx, PARTITION channel2_product_id_idx, PARTITION channel1_product_id_idx)  TABLESPACE pg_default
+Partition By LIST(channel_id)
+Number of partitions: 6 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--check for drop partition (for)
+--success, drop partition channel2
+ALTER TABLE list_sales DROP PARTITION channel2;
+--success, drop partition channel3
+ALTER TABLE list_sales DROP PARTITION FOR ('6');
+--fail, invalid type
+ALTER TABLE list_sales DROP PARTITION FOR (10);
+ERROR:  value too long for type character(1)
+--fail, number not equal to the number of partkey
+ALTER TABLE list_sales DROP PARTITION FOR ('6', 1);
+ERROR:  number of boundary items NOT EQUAL to number of partition keys
+--fail, can not drop subpartition on no-subpartition table
+ALTER TABLE list_sales DROP SUBPARTITION FOR ('6', 1);
+ERROR:  Un-support feature
+DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
+--success, drop partition channel_default
+ALTER TABLE list_sales DROP PARTITION FOR ('6');
+--check for ok after drop
+SELECT count(*) FROM list_sales;
+ count 
+-------
+   500
+(1 row)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='list_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+  relname   | parttype | partstrategy | hasfilenode | reltablespace | partkey | boundaries 
+------------+----------+--------------+-------------+---------------+---------+------------
+ channel1   | p        | l            | t           |             0 |         | {0,1,2}
+ channel4   | p        | l            | t           |             0 |         | {8,9}
+ channel5   | p        | l            | t           |             0 |         | {X,Z}
+ list_sales | r        | l            | f           |             0 | 4       | 
+(4 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='list_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname         | parttype | partstrategy | hasfilenode | indisusable 
+-------------------------+----------+--------------+-------------+-------------
+ channel1_product_id_idx | x        | n            | t           | t
+ channel4_product_id_idx | x        | n            | t           | t
+ channel5_product_id_idx | x        | n            | t           | t
+(3 rows)
+
+\d+ list_sales
+                         Table "hw_partition_add_drop_partition.list_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "list_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default UNUSABLE
+    "list_sales_idx" btree (product_id) LOCAL(PARTITION channel5_product_id_idx, PARTITION channel4_product_id_idx, PARTITION channel1_product_id_idx)  TABLESPACE pg_default
+Partition By LIST(channel_id)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--
+----hash table----
+--
+--prepare
+CREATE TABLE hash_sales
+(
+    product_id     INT4 NOT NULL,
+    customer_id    INT4 PRIMARY KEY,
+    time_id        DATE,
+    channel_id     CHAR(1),
+    type_id        INT4,
+    quantity_sold  NUMERIC(3),
+    amount_sold    NUMERIC(10,2)
+)
+PARTITION BY HASH (product_id)
+(
+    PARTITION product1,
+    PARTITION product2,
+    PARTITION product3,
+    PARTITION product4
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "hash_sales_pkey" for table "hash_sales"
+INSERT INTO hash_sales SELECT generate_series(1,1000),
+                              generate_series(1,1000),
+                              date_pli('2008-01-01', generate_series(1,1000)),
+                              generate_series(1,1000)%10,
+                              generate_series(1,1000)%10,
+                              generate_series(1,1000)%1000,
+                              generate_series(1,1000);
+CREATE INDEX hash_sales_idx ON hash_sales(product_id) LOCAL;
+--check for add partition
+--fail, not support add hash
+ALTER TABLE hash_sales ADD PARTITION product_temp1
+    (
+        SUBPARTITION product_temp1_part1 VALUES LESS THAN (200),
+        SUBPARTITION product_temp1_part2 VALUES LESS THAN (500),
+        SUBPARTITION product_temp1_part3 VALUES LESS THAN (800),
+        SUBPARTITION product_temp1_part4 VALUES LESS THAN (1200)
+    );
+ERROR:  syntax error at or near "("
+LINE 2:     (
+            ^
+--fail, not support add hash
+ALTER TABLE hash_sales ADD PARTITION product_temp2;
+ERROR:  syntax error at or near ";"
+LINE 1: ALTER TABLE hash_sales ADD PARTITION product_temp2;
+                                                          ^
+--fail, invalid format
+ALTER TABLE hash_sales ADD PARTITION product_temp3 VALUES LESS THAN('X');
+ERROR:  can not add hash partition
+--check for ok after add
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='hash_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+  relname   | parttype | partstrategy | hasfilenode | reltablespace | partkey | boundaries 
+------------+----------+--------------+-------------+---------------+---------+------------
+ product1   | p        | h            | t           |             0 |         | {0}
+ product2   | p        | h            | t           |             0 |         | {1}
+ product3   | p        | h            | t           |             0 |         | {2}
+ product4   | p        | h            | t           |             0 |         | {3}
+ hash_sales | r        | h            | f           |             0 | 1       | 
+(5 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='hash_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname         | parttype | partstrategy | hasfilenode | indisusable 
+-------------------------+----------+--------------+-------------+-------------
+ product1_product_id_idx | x        | n            | t           | t
+ product2_product_id_idx | x        | n            | t           | t
+ product3_product_id_idx | x        | n            | t           | t
+ product4_product_id_idx | x        | n            | t           | t
+(4 rows)
+
+\d+ hash_sales
+                         Table "hw_partition_add_drop_partition.hash_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "hash_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
+    "hash_sales_idx" btree (product_id) LOCAL(PARTITION product4_product_id_idx, PARTITION product3_product_id_idx, PARTITION product2_product_id_idx, PARTITION product1_product_id_idx)  TABLESPACE pg_default
+Partition By HASH(product_id)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+--check for drop partition (for)
+--fail, not support drop hash
+ALTER TABLE hash_sales DROP PARTITION product2;
+ERROR:  Droping hash partition is unsupported.
+--fail, not support drop hash
+ALTER TABLE hash_sales DROP PARTITION FOR (0);
+ERROR:  Droping hash partition is unsupported.
+--fail, not support drop hash
+ALTER TABLE hash_sales DROP PARTITION FOR (0, 0);
+ERROR:  Droping hash partition is unsupported.
+--fail, can not drop subpartition on no-subpartition table
+ALTER TABLE hash_sales DROP SUBPARTITION FOR(0, 0);
+ERROR:  Un-support feature
+DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
+--fail, can not drop subpartition on no-subpartition table
+ALTER TABLE hash_sales DROP SUBPARTITION FOR(0);
+ERROR:  Un-support feature
+DETAIL:  Can not drop subpartition against NON-SUBPARTITIONED table
+--check for ok after drop
+SELECT count(*) FROM hash_sales;
+ count 
+-------
+  1000
+(1 row)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.reltablespace, p1.partkey, p1.boundaries
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='hash_sales'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.parttype, p1.relname;
+  relname   | parttype | partstrategy | hasfilenode | reltablespace | partkey | boundaries 
+------------+----------+--------------+-------------+---------------+---------+------------
+ product1   | p        | h            | t           |             0 |         | {0}
+ product2   | p        | h            | t           |             0 |         | {1}
+ product3   | p        | h            | t           |             0 |         | {2}
+ product4   | p        | h            | t           |             0 |         | {3}
+ hash_sales | r        | h            | f           |             0 | 1       | 
+(5 rows)
+
+SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, p1.indisusable
+    FROM pg_class c1, pg_partition p1, pg_namespace n1
+    WHERE c1.relname='hash_sales_idx'
+        AND c1.relnamespace=n1.oid
+        AND n1.nspname=CURRENT_SCHEMA
+        AND (p1.parentid=c1.oid)
+    ORDER BY p1.relname;
+         relname         | parttype | partstrategy | hasfilenode | indisusable 
+-------------------------+----------+--------------+-------------+-------------
+ product1_product_id_idx | x        | n            | t           | t
+ product2_product_id_idx | x        | n            | t           | t
+ product3_product_id_idx | x        | n            | t           | t
+ product4_product_id_idx | x        | n            | t           | t
+(4 rows)
+
+\d+ hash_sales
+                         Table "hw_partition_add_drop_partition.hash_sales"
+    Column     |              Type              | Modifiers | Storage  | Stats target | Description 
+---------------+--------------------------------+-----------+----------+--------------+-------------
+ product_id    | integer                        | not null  | plain    |              | 
+ customer_id   | integer                        | not null  | plain    |              | 
+ time_id       | timestamp(0) without time zone |           | plain    |              | 
+ channel_id    | character(1)                   |           | extended |              | 
+ type_id       | integer                        |           | plain    |              | 
+ quantity_sold | numeric(3,0)                   |           | main     |              | 
+ amount_sold   | numeric(10,2)                  |           | main     |              | 
+Indexes:
+    "hash_sales_pkey" PRIMARY KEY, btree (customer_id) TABLESPACE pg_default
+    "hash_sales_idx" btree (product_id) LOCAL(PARTITION product4_product_id_idx, PARTITION product3_product_id_idx, PARTITION product2_product_id_idx, PARTITION product1_product_id_idx)  TABLESPACE pg_default
+Partition By HASH(product_id)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+create table test_range_pt (a int primary key, b int, c int)
+partition by range(a)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (maxvalue)
+)ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_range_pt_pkey" for table "test_range_pt"
+insert into test_range_pt values(1),(2001);
+create view vp1 as select * from test_range_pt partition for (1);
+alter table test_range_pt drop partition p1;
+ERROR:  Cannot perform this operation because There are views or rules that depend on table test_range_pt.
+DETAIL:  N/A
+HINT:  drop the views or rules first. Use pg_rules to find rules. Use pg_class, pg_rewrite, pg_depend, pg_namespacesql to find views
+create table tt ( a int, b int,c int);
+alter table test_range_pt exchange partition (p1) with table tt update global index;
+ERROR:  Cannot perform this operation because There are views or rules that depend on table test_range_pt.
+DETAIL:  N/A
+HINT:  drop the views or rules first. Use pg_rules to find rules. Use pg_class, pg_rewrite, pg_depend, pg_namespacesql to find views
+drop view vp1;
+drop table test_range_pt;
+drop table tt;
+--finish
+DROP TABLE range_sales;
+DROP TABLE range2_sales;
+DROP TABLE interval_sales;
+DROP TABLE list_sales;
+DROP TABLE hash_sales;
+DROP SCHEMA hw_partition_add_drop_partition CASCADE;
+RESET CURRENT_SCHEMA;

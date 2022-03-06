@@ -49,6 +49,19 @@ Oid exprType(const Node* expr)
     }
 
     switch (nodeTag(expr)) {
+        case T_BoolExpr:
+        case T_BooleanTest:
+        case T_CurrentOfExpr:
+        case T_HashFilter:
+        case T_NullTest:
+        case T_ScalarArrayOpExpr:
+        case T_RowCompareExpr:
+            type = BOOLOID;
+            break;
+        case T_GroupingFunc:
+        case T_GroupingId:
+            type = INT4OID;
+            break;
         case T_Var:
             type = ((const Var*)expr)->vartype;
             break;
@@ -60,9 +73,6 @@ Oid exprType(const Node* expr)
             break;
         case T_Aggref:
             type = ((const Aggref*)expr)->aggtype;
-            break;
-        case T_GroupingFunc:
-            type = INT4OID;
             break;
         case T_WindowFunc:
             type = ((const WindowFunc*)expr)->wintype;
@@ -91,12 +101,6 @@ Oid exprType(const Node* expr)
             break;
         case T_NullIfExpr:
             type = ((const NullIfExpr*)expr)->opresulttype;
-            break;
-        case T_ScalarArrayOpExpr:
-            type = BOOLOID;
-            break;
-        case T_BoolExpr:
-            type = BOOLOID;
             break;
         case T_SubLink: {
             const SubLink* sublink = (const SubLink*)expr;
@@ -187,9 +191,6 @@ Oid exprType(const Node* expr)
         case T_RowExpr:
             type = ((const RowExpr*)expr)->row_typeid;
             break;
-        case T_RowCompareExpr:
-            type = BOOLOID;
-            break;
         case T_CoalesceExpr:
             type = ((const CoalesceExpr*)expr)->coalescetype;
             break;
@@ -205,13 +206,6 @@ Oid exprType(const Node* expr)
                 type = XMLOID;
             }
             break;
-        case T_NullTest:
-        case T_HashFilter:
-            type = BOOLOID;
-            break;
-        case T_BooleanTest:
-            type = BOOLOID;
-            break;
         case T_CoerceToDomain:
             type = ((const CoerceToDomain*)expr)->resulttype;
             break;
@@ -221,20 +215,15 @@ Oid exprType(const Node* expr)
         case T_SetToDefault:
             type = ((const SetToDefault*)expr)->typeId;
             break;
-        case T_CurrentOfExpr:
-            type = BOOLOID;
-            break;
         case T_PlaceHolderVar:
             type = exprType((Node*)((const PlaceHolderVar*)expr)->phexpr);
             break;
-        case T_GroupingId:
-            type = INT4OID;
-            break;
         case T_Rownum:
-            type = NUMERICOID;
-            break;
-        case T_GradientDescentExpr:
-            type = ((const GradientDescentExpr*)expr)->fieldtype;
+            if (ROWNUM_TYPE_COMPAT) {
+                type = NUMERICOID;
+            } else {
+                type = INT8OID;
+            }
             break;
         default:
             ereport(ERROR,
@@ -848,9 +837,6 @@ Oid exprCollation(const Node* expr)
             break;
         case T_PlaceHolderVar:
             coll = exprCollation((Node*)((const PlaceHolderVar*)expr)->phexpr);
-            break;
-        case T_GradientDescentExpr:
-            coll = InvalidOid;
             break;
         default:
             ereport(
@@ -1564,7 +1550,6 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Null:
         case T_PgFdwRemoteInfo:
         case T_Rownum:
-        case T_GradientDescentExpr:
             /* primitive node types with no expression subnodes */
             break;
         case T_Aggref: {
@@ -1808,6 +1793,8 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_UpsertExpr: {
             UpsertExpr* upsertClause = (UpsertExpr*)node;
             if (p2walker(upsertClause->updateTlist, context))
+                return true;
+            if (p2walker(upsertClause->upsertWhere, context))
                 return true;
         } break;
         case T_JoinExpr: {
@@ -2515,6 +2502,7 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
 
             FLATCOPY(newnode, upsertClause, UpsertExpr, isCopy);
             MUTATE(newnode->updateTlist, upsertClause->updateTlist, List*);
+            MUTATE(newnode->upsertWhere, upsertClause->upsertWhere, Node*);
             return (Node*)newnode;
         } break;
         case T_FromExpr: {

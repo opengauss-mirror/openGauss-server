@@ -32,6 +32,7 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "cipher.h"
+#include "utils/knl_relcache.h"
 
 extern Datum pg_options_to_table(PG_FUNCTION_ARGS);
 extern Datum postgresql_fdw_validator(PG_FUNCTION_ARGS);
@@ -610,8 +611,8 @@ FdwRoutine* GetFdwRoutineForRelation(Relation relation, bool makecopy)
         /* Get the info by consulting the catalogs and the FDW code */
         fdwroutine = GetFdwRoutineByRelId(RelationGetRelid(relation));
 
-        /* Save the data for later reuse in u_sess->cache_mem_cxt */
-        cfdwroutine = (FdwRoutine*)MemoryContextAlloc(u_sess->cache_mem_cxt, sizeof(FdwRoutine));
+        /* Save the data for later reuse in LocalMyDBCacheMemCxt() */
+        cfdwroutine = (FdwRoutine*)MemoryContextAlloc(LocalMyDBCacheMemCxt(), sizeof(FdwRoutine));
         rc = memcpy_s(cfdwroutine, sizeof(FdwRoutine), fdwroutine, sizeof(FdwRoutine));
         securec_check(rc, "", "");
 

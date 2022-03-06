@@ -609,10 +609,16 @@ static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerI
         bool isNull = false;
         HeapTuple newtuple;
         AclResult aclresult;
+        Oid nspid = HeapTupleGetOid(tup);
 
         /* Otherwise, must be owner of the existing object */
-        if (!pg_namespace_ownercheck(HeapTupleGetOid(tup), GetUserId()))
+        if (IsSystemNamespace(nspid)) {
+            if (!initialuser()) {
+                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_NAMESPACE, NameStr(nspForm->nspname));
+            }
+        } else if (!pg_namespace_ownercheck(nspid, GetUserId())) {
             aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_NAMESPACE, NameStr(nspForm->nspname));
+        }
 
         /* Must be able to become new owner */
         check_is_member_of_role(GetUserId(), newOwnerId);

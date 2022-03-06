@@ -235,6 +235,8 @@ HTAB* hash_create(const char* tabname, long nelem, HASHCTL* info, int flags)
         }
     }
 
+    MemoryContext currentDynaHashCxt = t_thrd.dyhash_cxt.CurrentDynaHashCxt;
+
     /* Initialize the hash header, plus a copy of the table name */
     hashp = (HTAB*)DynaHashAlloc(sizeof(HTAB) + strlen(tabname) + 1);
     MemSet(hashp, 0, sizeof(HTAB));
@@ -318,7 +320,7 @@ HTAB* hash_create(const char* tabname, long nelem, HASHCTL* info, int flags)
         /* setup hash table defaults */
         hashp->hctl = NULL;
         hashp->dir = NULL;
-        hashp->hcxt = t_thrd.dyhash_cxt.CurrentDynaHashCxt;
+        hashp->hcxt = currentDynaHashCxt;
         hashp->isshared = false;
     }
 

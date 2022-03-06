@@ -234,7 +234,7 @@ Datum pg_control_checkpoint(PG_FUNCTION_ARGS)
      */
     XLByteToSeg(controlFile->checkPointCopy.redo, segno);
 
-    XLogFileName(xlogfilename, controlFile->checkPointCopy.ThisTimeLineID, segno);
+    XLogFileName(xlogfilename, MAXFNAMELEN, controlFile->checkPointCopy.ThisTimeLineID, segno);
 
     i = 0;
     /* Populate the values and null arrays */

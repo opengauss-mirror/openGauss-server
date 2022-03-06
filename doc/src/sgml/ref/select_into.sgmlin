@@ -24,7 +24,7 @@ SELECT [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
     [ LIMIT { count | ALL } ]
     [ OFFSET start [ ROW | ROWS ] ]
     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
-    [ {FOR { UPDATE | SHARE } [ OF table_name [, ...] ] [ NOWAIT ]} [...] ];
+    [ {FOR { UPDATE | SHARE } [ OF table_name [, ...] ] [ NOWAIT | WAIT N ]} [...] ];
 </synopsis>
 </refsynopsisdiv>
 </refentry>

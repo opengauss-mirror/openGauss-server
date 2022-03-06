@@ -131,6 +131,7 @@ static char dir_check_file(pgFile *file, bool backup_logs);
 static char check_in_tablespace(pgFile *file, bool in_tablespace);
 static char check_db_dir(pgFile *file);
 static char check_digit_file(pgFile *file);
+static char check_nobackup_dir(pgFile *file);
 static void dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
                                                     bool exclude, bool follow_symlink, bool backup_logs,
                                                     bool skip_hidden, int external_dir_num, fio_location location);
@@ -479,8 +480,8 @@ pgFileCompareLinked(const void *f1, const void *f2)
 int
 pgFileCompareSize(const void *f1, const void *f2)
 {
-    pgFile *f1p = (pgFile *)const_cast<void*>(f1);
-    pgFile *f2p = (pgFile *)const_cast<void*>(f2);
+    pgFile *f1p = *(pgFile **)f1;
+    pgFile *f2p = *(pgFile **)f2;
 
     if (f1p->size > f2p->size)
         return 1;
@@ -493,7 +494,7 @@ pgFileCompareSize(const void *f1, const void *f2)
 static int
 pgCompareString(const void *str1, const void *str2)
 {
-    return strcmp((char *)const_cast<void*>( str1), (char *)const_cast<void*>(str2));
+    return strcmp(*(char **) str1, *(char **) str2);
 }
 
 /* Compare two Oids */
@@ -644,6 +645,12 @@ dir_check_file(pgFile *file, bool backup_logs)
                 return CHECK_EXCLUDE_FALSE;
             }
         }
+
+        ret = check_nobackup_dir(file);
+        if (ret != -1) {  /* -1 means need backup */
+            return ret;
+        }
+
     }
 
     /*
@@ -717,6 +724,23 @@ if (in_tablespace)
     }
 
     return -1;
+}
+
+static char check_nobackup_dir(pgFile *file)
+{
+    char ret = -1;   /* -1 means need backup */
+    int i = 0;
+    if (pgdata_nobackup_dir) {
+        for (i = 0; i < (int)parray_num(pgdata_nobackup_dir); i++) {
+            char *file_path = (char *)parray_get(pgdata_nobackup_dir, i);
+            /* relative tablespace path exclude */
+            if (strcmp(file->rel_path, file_path) == 0) {
+                elog(VERBOSE, "Excluding external directory content: %s", file->rel_path);
+                return CHECK_EXCLUDE_FALSE;
+            }
+        }
+    }
+    return ret;
 }
 
 static char check_db_dir(pgFile *file)

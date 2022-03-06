@@ -810,7 +810,7 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
             sinp = (struct sockaddr*)(addr->ai_addr);
             if (addr->ai_family == AF_INET6) {
                 result = inet_net_ntop(AF_INET6,
-                    &((struct sockaddr_in*)sinp)->sin_addr,
+                    &((struct sockaddr_in6*)sinp)->sin6_addr,
                     128,
                     t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
                     IP_LEN);
@@ -1587,6 +1587,39 @@ int pq_flush(void)
     return res;
 }
 
+/* If query is been canceled, print information */
+static void QueryCancelPrint()
+{
+    if (t_thrd.storage_cxt.cancel_from_timeout) {
+        /* For STATEMENT、AUTOVACUUM、WLM、DEADLOCK timeout */
+        ereport(LOG,
+            (errcode(ERRCODE_QUERY_CANCELED),
+                errmsg("canceling statement due to statement timeout"),
+                ignore_interrupt(true)));
+    } else {
+        /* If node is coordinator, client is "user". And if node is datanode, client is "coordinator" */
+        ereport(LOG,
+            (errcode(ERRCODE_QUERY_CANCELED),
+                errmsg("canceling statement due to %s request", IS_PGXC_DATANODE ? "coordinator" : "user"),
+                ignore_interrupt(true)));
+    }
+    return;
+}
+
+/* If send message to client failed, set flag to true */
+static void SetConnectionLostFlag()
+{
+    if ((StreamThreadAmI() == false) && (!t_thrd.proc_cxt.proc_exit_inprogress)) {
+        /* For client connection, set ClientConnectionLost to true */
+        t_thrd.int_cxt.ClientConnectionLost = 1;
+        InterruptPending = 1;
+    } else if (StreamThreadAmI()) {
+        /* For stream connection, set StreamConnectionLost to true */
+        t_thrd.int_cxt.StreamConnectionLost = 1;
+    }
+    return;
+}
+
 /* --------------------------------
  *		internal_flush - flush pending output
  *
@@ -1602,8 +1635,10 @@ int internal_flush(void)
 
     static THR_LOCAL int last_reported_send_errno = 0;
 
+    errno_t ret;
     char* bufptr = t_thrd.libpq_cxt.PqSendBuffer + t_thrd.libpq_cxt.PqSendStart;
     char* bufend = t_thrd.libpq_cxt.PqSendBuffer + t_thrd.libpq_cxt.PqSendPointer;
+    char connTimeInfoStr[INITIAL_EXPBUFFER_SIZE] = {'\0'};
     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_UNDEFINED, true);
 
     if (StreamThreadAmI() == false) {
@@ -1617,6 +1652,20 @@ int internal_flush(void)
             global_node_definition ? global_node_definition->num_nodes : -1);
     }
 
+    /*
+     * In session initialize process, client is connecting.
+     * If reply messages failed, we record entire connecting time and print it in error message.
+     */
+    if (u_sess->clientConnTime_cxt.checkOnlyInConnProcess) {
+        instr_time currentTime;
+        INSTR_TIME_SET_CURRENT(u_sess->clientConnTime_cxt.connEndTime);
+        currentTime = u_sess->clientConnTime_cxt.connEndTime;
+        INSTR_TIME_SUBTRACT(currentTime, u_sess->clientConnTime_cxt.connStartTime);
+        ret = sprintf_s(connTimeInfoStr, INITIAL_EXPBUFFER_SIZE,
+            " Client connection consumes %lfms.", INSTR_TIME_GET_MILLISEC(currentTime));
+        securec_check_ss(ret, "", "");
+    }
+
     while (bufptr < bufend) {
         int r;
 
@@ -1624,18 +1673,7 @@ int internal_flush(void)
         if (unlikely(r == 0 && (StreamThreadAmI() == true || u_sess->proc_cxt.MyProcPort->is_logic_conn))) {
             /* Stop query when cancel happend */
             if (t_thrd.int_cxt.QueryCancelPending) {
-                if (t_thrd.storage_cxt.cancel_from_timeout) {
-                    ereport(LOG,
-                        (errcode(ERRCODE_QUERY_CANCELED),
-                            errmsg("canceling statement due to statement timeout"),
-                            ignore_interrupt(true)));
-                } else {
-                    ereport(LOG,
-                        (errcode(ERRCODE_QUERY_CANCELED),
-                            errmsg("canceling statement due to %s request", IS_PGXC_DATANODE ? "coordinator" : "user"),
-                            ignore_interrupt(true)));
-                }
-
+                QueryCancelPrint();
                 (void)pgstat_report_waitstatus(oldStatus);
                 return EOF;
             } else {
@@ -1671,15 +1709,15 @@ int internal_flush(void)
                 last_reported_send_errno = errno;
                 ereport(COMMERROR,
                     (errcode_for_socket_access(),
-                        errmsg("could not send data to client [ Remote IP: %s PORT: %s FD: %d BLOCK: %d]. Detail: %m",
+                        errmsg("could not send data to client [ Remote IP: %s PORT: %s FD: %d BLOCK: %d].%s Detail: %m",
                             u_sess->proc_cxt.MyProcPort->remote_host,
                             (u_sess->proc_cxt.MyProcPort->remote_port != NULL &&
                              u_sess->proc_cxt.MyProcPort->remote_port[0] != '\0')
                             ? u_sess->proc_cxt.MyProcPort->remote_port : "",
                             u_sess->proc_cxt.MyProcPort->sock,
-                            u_sess->proc_cxt.MyProcPort->noblock)));
+                            u_sess->proc_cxt.MyProcPort->noblock,
+                            connTimeInfoStr)));
             }
-
 
             /*
              * We drop the buffered data anyway so that processing can
@@ -1688,12 +1726,7 @@ int internal_flush(void)
              * the connection.
              */
             t_thrd.libpq_cxt.PqSendStart = t_thrd.libpq_cxt.PqSendPointer = 0;
-            if ((StreamThreadAmI() == false) && (!t_thrd.proc_cxt.proc_exit_inprogress)) {
-                t_thrd.int_cxt.ClientConnectionLost = 1;
-                InterruptPending = 1;
-            } else if (StreamThreadAmI()) {
-                t_thrd.int_cxt.StreamConnectionLost = 1;
-            }
+            SetConnectionLostFlag();
             (void)pgstat_report_waitstatus(oldStatus);
             return EOF;
         }

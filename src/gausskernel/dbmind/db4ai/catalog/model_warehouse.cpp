@@ -13,7 +13,7 @@
  * See the Mulan PSL v2 for more details.
  *---------------------------------------------------------------------------------------
  *
- *  command.h
+ * model_warehouse.cpp
  *
  * IDENTIFICATION
  *        src/gausskernel/catalog/model_warehouse.cpp
@@ -24,6 +24,7 @@
 #include "db4ai/model_warehouse.h"
 #include "db4ai/gd.h"
 #include "db4ai/aifuncs.h"
+#include "db4ai/db4ai_api.h"
 #include "access/tableam.h"
 #include "catalog/gs_model.h"
 #include "catalog/indexing.h"
@@ -33,6 +34,7 @@
 #include "utils/fmgroids.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/bytea.h"
 
 typedef enum ListType {
     HYPERPARAMETERS = 0,
@@ -46,16 +48,6 @@ template <ListType ltype> void ListToTuple(List *list, Datum *name, Datum *value
 template <ListType listType> void TupleToList(Model *model, Datum *names, Datum *values, Datum *oids);
 
 template <ListType ltype> static void add_model_parameter(Model *model, const char *name, Oid type, Datum value);
-
-static Datum string_to_datum(const char *str, Oid datatype);
-
-void store_SGD(Datum *values, bool *nulls, ModelGradientDescent *SGDmodel);
-void get_SGD(HeapTuple *tuple, ModelGradientDescent *resGD, Form_gs_model_warehouse tuplePointer);
-
-void store_kmeans(Datum *values, bool *nulls, ModelKMeans *kmeansModel);
-void get_kmeans(HeapTuple *tuple, ModelKMeans *modelKmeans);
-void splitStringFillCentroid(WHCentroid *curseCent, char *strDescribe);
-char *splitStringFillCoordinates(WHCentroid *curseCent, char *strCoordinates, int dimension);
 
 // Store the model in the catalog tables
 void store_model(const Model *model)
@@ -91,6 +83,8 @@ void store_model(const Model *model)
     values[Anum_gs_model_outputType - 1] = ObjectIdGetDatum(model->return_type);
     values[Anum_gs_model_query - 1] = CStringGetTextDatum(model->sql);
 
+    values[Anum_gs_model_model_type - 1] = CStringGetTextDatum(algorithm_ml_to_string(model->algorithm));
+
     if (model->hyperparameters == nullptr) {
         nulls[Anum_gs_model_hyperparametersNames - 1] = true;
         nulls[Anum_gs_model_hyperparametersValues - 1] = true;
@@ -102,17 +96,6 @@ void store_model(const Model *model)
         values[Anum_gs_model_hyperparametersOids - 1] = ListOids;
     }
 
-    if (model->train_info == nullptr) {
-        nulls[Anum_gs_model_coefNames - 1] = true;
-        nulls[Anum_gs_model_coefValues - 1] = true;
-        nulls[Anum_gs_model_coefOids - 1] = true;
-    } else {
-        ListToTuple<ListType::COEFS>(model->train_info, &ListNames, &ListValues, &ListOids);
-        values[Anum_gs_model_coefNames - 1] = ListNames;
-        values[Anum_gs_model_coefValues - 1] = ListValues;
-        values[Anum_gs_model_coefOids - 1] = ListOids;
-    }
-
     if (model->scores == nullptr) {
         nulls[Anum_gs_model_trainingScoresName - 1] = true;
         nulls[Anum_gs_model_trainingScoresValue - 1] = true;
@@ -122,21 +105,41 @@ void store_model(const Model *model)
         values[Anum_gs_model_trainingScoresValue - 1] = ListValues;
     }
 
-    switch (model->algorithm) {
-        case LOGISTIC_REGRESSION:
-        case SVM_CLASSIFICATION:
-        case LINEAR_REGRESSION: {
-            store_SGD(values, nulls, (ModelGradientDescent *)model);
-        } break;
-        case KMEANS: {
-            store_kmeans(values, nulls, (ModelKMeans *)model);
-        } break;
-        default:
-            // do not cache
-            ereport(NOTICE, (errmsg("clone model for type %d", (int)model->algorithm)));
-            break;
+    if (model->data.version != DB4AI_MODEL_UNDEFINED) {
+        if (model->data.version >= DB4AI_MODEL_INVALID)
+                ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Invalid model version %d", model->data.version)));
+
+        // prepare an array with the version and the content in hexadecimal format
+        // add extra two for '\x', two for version
+        int bc = VARHDRSZ + (model->data.size * 2) + 4;
+        bytea* arr = (bytea*)palloc(bc);
+        SET_VARSIZE(arr, bc);
+
+        char* pdata = (char*)VARDATA(arr);
+        *pdata++ = '\\';
+        *pdata++ = 'x';
+
+        char ch = (char)model->data.version;
+        pdata += hex_encode(&ch, 1, pdata);
+        hex_encode((char*)model->data.raw_data, model->data.size, pdata);
+
+        values[Anum_gs_model_modelData - 1] = PointerGetDatum(arr);
+    } else {
+        if (model->model_data == 0)
+            nulls[Anum_gs_model_modelData - 1] = true;
+        else
+            values[Anum_gs_model_modelData - 1] = model->model_data;
     }
 
+    // DEPRECATED
+    nulls[Anum_gs_model_weight - 1] = true;
+    nulls[Anum_gs_model_modeldescribe - 1] = true;
+    nulls[Anum_gs_model_coefNames - 1] = true;
+    nulls[Anum_gs_model_coefValues - 1] = true;
+    nulls[Anum_gs_model_coefOids - 1] = true;
+
+    // create tuple and insert into model warehouse
     tuple = heap_form_tuple(rel->rd_att, values, nulls);
     (void)simple_heap_insert(rel, tuple);
     CatalogUpdateIndexes(rel, tuple);
@@ -144,8 +147,225 @@ void store_model(const Model *model)
     heap_close(rel, RowExclusiveLock);
 }
 
+/* get SGD model */
+void get_sgd_model_data(HeapTuple *tuple, ModelGradientDescent *resGD, Form_gs_model_warehouse tuplePointer)
+{
+    char *strValues;
+    Datum dtValues;
+    ArrayBuildState *astate = NULL;
+    bool isnull = false;
+
+    /*  weight */
+    resGD->weights = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_weight, &isnull);
+
+    /* categories */
+    resGD->ncategories = 0;
+    Datum dtCat = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_coefValues, &isnull);
+
+    if (!isnull) {
+        ArrayType *arrValues = DatumGetArrayTypeP(dtCat);
+        ArrayIterator itValue = array_create_iterator(arrValues, 0);
+        while (array_iterate(itValue, &dtValues, &isnull)) {
+            resGD->ncategories++;
+            strValues = TextDatumGetCString(dtValues);
+            dtValues = string_to_datum(strValues, tuplePointer->outputtype);
+            astate = accumArrayResult(astate, dtValues, false, tuplePointer->outputtype, CurrentMemoryContext);
+        }
+        resGD->categories = makeArrayResult(astate, CurrentMemoryContext);
+    } else {
+        resGD->categories = PointerGetDatum(NULL);
+    }
+}
+
+char *splitStringFillCoordinates(WHCentroid *curseCent, char *strCoordinates, int dimension)
+{
+    char *cur, *context = NULL;
+    Datum dtCur;
+    int iter = 0;
+    double *res = (double *)palloc0(dimension * sizeof(double));
+
+    while (iter < dimension) {
+        if (iter == 0) {
+            cur = strtok_r(strCoordinates, ")(,", &context);
+        } else {
+            cur = strtok_r(NULL, ")(,", &context);
+        }
+
+        if (cur != NULL) {
+            dtCur = string_to_datum(cur, FLOAT8OID);
+            res[iter] = DatumGetFloat8(dtCur);
+            iter++;
+        } else {
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("the Coordinates result seems not match their dimension or actual_num_centroids.")));
+        }
+    }
+    curseCent->coordinates = res;
+
+    return context;
+}
+
+void splitStringFillCentroid(WHCentroid *curseCent, char *strDescribe)
+{
+    char *cur, *name, *context = NULL;
+    Datum dtCur;
+
+    name = strtok_r(strDescribe, ":,", &context);
+    cur = strtok_r(NULL, ":,", &context);
+    while (cur != NULL and name != NULL) {
+        if (strcmp(name, "id") == 0) {
+            dtCur = string_to_datum(cur, INT8OID);
+            curseCent->id = DatumGetUInt32(dtCur);
+        } else if (strcmp(name, "objective_function") == 0) {
+            dtCur = string_to_datum(cur, FLOAT8OID);
+            curseCent->objective_function = DatumGetFloat8(dtCur);
+        } else if (strcmp(name, "avg_distance_to_centroid") == 0) {
+            dtCur = string_to_datum(cur, FLOAT8OID);
+            curseCent->avg_distance_to_centroid = DatumGetFloat8(dtCur);
+        } else if (strcmp(name, "min_distance_to_centroid") == 0) {
+            dtCur = string_to_datum(cur, FLOAT8OID);
+            curseCent->min_distance_to_centroid = DatumGetFloat8(dtCur);
+        } else if (strcmp(name, "max_distance_to_centroid") == 0) {
+            dtCur = string_to_datum(cur, FLOAT8OID);
+            curseCent->max_distance_to_centroid = DatumGetFloat8(dtCur);
+        } else if (strcmp(name, "std_dev_distance_to_centroid") == 0) {
+            dtCur = string_to_datum(cur, FLOAT8OID);
+            curseCent->std_dev_distance_to_centroid = DatumGetFloat8(dtCur);
+        } else if (strcmp(name, "cluster_size") == 0) {
+            dtCur = string_to_datum(cur, INT8OID);
+            curseCent->cluster_size = DatumGetUInt64(dtCur);
+        } else {
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("this description should not be here in KMEANS: %s", cur)));
+        }
+        name = strtok_r(NULL, ":,", &context);
+        cur = strtok_r(NULL, ":,", &context);
+    }
+}
+
+void get_kmeans_model_data(HeapTuple *tuple, ModelKMeans *modelKmeans)
+{
+    Datum dtValue, dtName;
+    bool isnull;
+    char *strValue, *strName, *coordinates = NULL;
+    uint32_t coefContainer;
+    int offset = 0;
+    WHCentroid *curseCent;
+
+    modelKmeans->model.algorithm = KMEANS;
+
+    /* coef */
+    Datum dtCoefValues = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_coefValues, &isnull);
+    ArrayType *arrValues = DatumGetArrayTypeP(dtCoefValues);
+    ArrayIterator itValue = array_create_iterator(arrValues, 0);
+
+    Datum dtCoefNames = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_coefNames, &isnull);
+    ArrayType *arrNames = DatumGetArrayTypeP(dtCoefNames);
+    ArrayIterator itName = array_create_iterator(arrNames, 0);
+
+    int decimal_scale = 10;
+    while (array_iterate(itName, &dtName, &isnull)) {
+        array_iterate(itValue, &dtValue, &isnull);
+        strName = TextDatumGetCString(dtName);
+        strValue = TextDatumGetCString(dtValue);
+        coefContainer = strtol(strValue, NULL, decimal_scale);
+        if (strcmp(strName, "original_num_centroids") == 0) {
+            modelKmeans->original_num_centroids = coefContainer;
+        } else if (strcmp(strName, "actual_num_centroids") == 0) {
+            modelKmeans->actual_num_centroids = coefContainer;
+        } else if (strcmp(strName, "seed") == 0) {
+            modelKmeans->seed = coefContainer;
+        } else if (strcmp(strName, "dimension") == 0) {
+            modelKmeans->dimension = coefContainer;
+        } else if (strcmp(strName, "distance_function_id") == 0) {
+            modelKmeans->distance_function_id = coefContainer;
+        } else if (strcmp(strName, "coordinates") == 0) {
+            coordinates = strValue;
+        } else {
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("the coef should not be here in KMEANS: %s", strName)));
+        }
+    }
+
+    modelKmeans->centroids =
+        reinterpret_cast<WHCentroid *>(palloc0(sizeof(WHCentroid) * modelKmeans->actual_num_centroids));
+
+    /* describe */
+    Datum dtDescribe = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_modeldescribe, &isnull);
+    ArrayType *arrDescribe = DatumGetArrayTypeP(dtDescribe);
+    ArrayIterator itDescribe = array_create_iterator(arrDescribe, 0);
+
+    while (array_iterate(itDescribe, &dtName, &isnull)) {
+        curseCent = modelKmeans->centroids + offset;
+        strName = TextDatumGetCString(dtName);
+        coordinates = splitStringFillCoordinates(curseCent, coordinates, modelKmeans->dimension);
+        splitStringFillCentroid(curseCent, strName);
+        offset++;
+    }
+}
+
+void setup_model_data_v0(Model *model, const bool &only_model, const AlgorithmML &algorithm, const char *modelType,
+                         HeapTuple tuple, Form_gs_model_warehouse tuplePointer, void *result)
+{
+    switch (algorithm) {
+        case LOGISTIC_REGRESSION:
+        case SVM_CLASSIFICATION:
+        case LINEAR_REGRESSION: {
+            result = palloc0(sizeof(ModelGradientDescent));
+            ModelGradientDescent *resGD = (ModelGradientDescent *)result;
+            get_sgd_model_data(&tuple, resGD, tuplePointer);
+            model = &(resGD->model);
+        } break;
+        case KMEANS: {
+            result = palloc0(sizeof(ModelKMeans));
+            ModelKMeans *resKmeans = (ModelKMeans *)result;
+            get_kmeans_model_data(&tuple, resKmeans);
+            model = &(resKmeans->model);
+        } break;
+        default:
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("the type of model is invalid: %s", modelType)));
+            break;
+    }
+}
+
+void setup_model_data_v1(Model *model, HeapTuple &tuple, const bool only_model, bool &isnull)
+{
+    if (!only_model) {
+        model->model_data = SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_modelData, &isnull);
+        if (isnull) {
+            model->model_data = 0;
+            return;
+        }
+
+        bytea *arr = (bytea *)pg_detoast_datum((struct varlena *)DatumGetPointer(model->model_data));
+        char *pdata = (char *)VARDATA(arr);
+
+        char ch;
+        hex_decode(pdata + 2, 2, &ch);  // skip '\x'
+        model->data.version = (SerializedModelVersion)ch;
+        if (model->data.version == DB4AI_MODEL_UNDEFINED || model->data.version >= DB4AI_MODEL_INVALID)
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("Invalid model version %d", model->data.version)));
+
+        model->data.size = (VARSIZE(arr) - 4 - VARHDRSZ) / 2;
+        model->data.raw_data = palloc(model->data.size);
+        hex_decode(pdata + 4, model->data.size * 2, (char *)model->data.raw_data);
+
+        if (PointerGetDatum(arr) != model->model_data) pfree(arr);
+    }
+}
+
+static const size_t model_gradient_descent_size = sizeof(ModelGradientDescent);
+static const size_t model_kmeans_size = sizeof(ModelKMeans);
+static const size_t model_size[] = {[LOGISTIC_REGRESSION] = model_gradient_descent_size,
+                                    [SVM_CLASSIFICATION] = model_gradient_descent_size,
+                                    [LINEAR_REGRESSION] = model_gradient_descent_size,
+                                    [PCA] = 0,
+                                    [KMEANS] = model_kmeans_size};
+
 // Get the model from the catalog tables
-Model *get_model(const char *model_name, bool only_model)
+const Model *get_model(const char *model_name, bool only_model)
 {
     void *result = NULL;
     Model *model = NULL;
@@ -161,46 +381,38 @@ Model *get_model(const char *model_name, bool only_model)
     }
 
     HeapTuple tuple = SearchSysCache1(DB4AI_MODEL, CStringGetDatum(model_name));
-    if (!HeapTupleIsValid(tuple)) {
+    if (!HeapTupleIsValid(tuple)) 
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("There is no model called \"%s\".", model_name)));
-        return NULL;
-    }
+    
 
     Form_gs_model_warehouse tuplePointer = (Form_gs_model_warehouse)GETSTRUCT(tuple);
     const char *modelType = TextDatumGetCString(SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_model_type, &isnull));
 
     algorithm = get_algorithm_ml(modelType);
-    if (algorithm == INVALID_ALGORITHM_ML) {
+    if (algorithm >= INVALID_ALGORITHM_ML) {
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("the type of model is invalid: %s", modelType)));
     }
 
-    if (only_model) {
-        result = palloc0(sizeof(Model));
-        model = (Model *)result;
-    } else {
-        switch (algorithm) {
-            case LOGISTIC_REGRESSION:
-            case SVM_CLASSIFICATION:
-            case LINEAR_REGRESSION: {
-                result = palloc0(sizeof(ModelGradientDescent));
-                ModelGradientDescent *resGD = (ModelGradientDescent *)result;
-                get_SGD(&tuple, resGD, tuplePointer);
-                model = &(resGD->model);
-            } break;
-            case KMEANS: {
-                result = palloc0(sizeof(ModelKMeans));
-                ModelKMeans *resKmeans = (ModelKMeans *)result;
-                get_kmeans(&tuple, resKmeans);
-                model = &(resKmeans->model);
-            } break;
-            default:
-                ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("the type of model is invalid: %s", modelType)));
-                break;
+    model = (Model *) palloc0(sizeof(Model));
+    setup_model_data_v1(model, tuple, only_model, isnull);
+    if (model->model_data == 0) {
+        pfree(model);
+        if (only_model) {
+            result = palloc0(sizeof(Model));
+            model = (Model *)result;
+        } else if (algorithm == LOGISTIC_REGRESSION || algorithm == SVM_CLASSIFICATION ||
+                   algorithm == LINEAR_REGRESSION || algorithm == KMEANS) {
+            result = palloc0(model_size[algorithm]);
+            setup_model_data_v0(model, only_model, algorithm, modelType, tuple, tuplePointer, result);
+            model->data.version = DB4AI_MODEL_V00;
+        } else {
+            result = palloc0(sizeof(Model));
+            model = (Model *)result;
         }
     }
+
     model->algorithm = algorithm;
     model->model_name = model_name;
     model->exec_time_secs = tuplePointer->exectime;
@@ -210,6 +422,7 @@ Model *get_model(const char *model_name, bool only_model)
     model->return_type = tuplePointer->outputtype;
     model->num_actual_iterations = tuplePointer->iterations;
     model->sql = TextDatumGetCString(SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_query, &isnull));
+    model->memory_context = CurrentMemoryContext;
 
     ListNames = SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_hyperparametersNames, &isnull);
     ListValues = SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_hyperparametersValues, &isnullValue);
@@ -218,21 +431,17 @@ Model *get_model(const char *model_name, bool only_model)
         TupleToList<ListType::HYPERPARAMETERS>(model, &ListNames, &ListValues, &ListOids);
     }
 
-    ListNames = SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_coefNames, &isnull);
-    ListValues = SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_coefValues, &isnullValue);
-    ListOids = SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_coefOids, &isnullOid);
-    if (!isnull && !isnullValue && !isnullOid) {
-        TupleToList<ListType::COEFS>(model, &ListNames, &ListValues, &ListOids);
-    }
-
     ListNames = SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_trainingScoresName, &isnull);
     ListValues = SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_trainingScoresValue, &isnullValue);
     if (!isnull && !isnullValue) {
         TupleToList<ListType::SCORES>(model, &ListNames, &ListValues, NULL);
     }
 
+    // DEPRECATED
+    model->weights = 0;
+
     ReleaseSysCache(tuple);
-    return (Model *)result;
+    return model;
 }
 
 void elog_model(int level, const Model *model)
@@ -245,7 +454,8 @@ void elog_model(int level, const Model *model)
     const char* model_type = algorithm_ml_to_string(model->algorithm);
 
     appendStringInfo(&buf, "\n:type %s", model_type);
-    appendStringInfo(&buf, "\n:sql %s", model->sql);
+    if (model->sql != NULL)
+        appendStringInfo(&buf, "\n:sql %s", model->sql);
     if (model->hyperparameters != nullptr) {
         appendStringInfoString(&buf, "\n:hyperparameters");
         foreach (lc, model->hyperparameters) {
@@ -259,7 +469,6 @@ void elog_model(int level, const Model *model)
     appendStringInfo(&buf, "\n:exec time %lf s", model->exec_time_secs);
     appendStringInfo(&buf, "\n:processed %ld tuples", model->processed_tuples);
     appendStringInfo(&buf, "\n:discarded %ld tuples", model->discarded_tuples);
-    appendStringInfo(&buf, "\n:actual number of iterations %d", model->num_actual_iterations);
     if (model->train_info != nullptr) {
         appendStringInfoString(&buf, "\n:info");
         foreach (lc, model->train_info) {
@@ -275,37 +484,20 @@ void elog_model(int level, const Model *model)
             appendStringInfo(&buf, "\n   :%s %.16g", score->name, score->value);
         }
     }
-    if (model->algorithm == LOGISTIC_REGRESSION ||
-        model->algorithm == SVM_CLASSIFICATION ||
-        model->algorithm == LINEAR_REGRESSION) {
-        ModelGradientDescent *model_gd = (ModelGradientDescent *)model;
-        appendStringInfoString(&buf, "\n:gradient_descent:");
-        appendStringInfo(&buf, "\n   :algorithm %s", gd_get_algorithm(model_gd->model.algorithm)->name);
-        getTypeOutputInfo(FLOAT4ARRAYOID, &typoutput, &typIsVarlena);
-        appendStringInfo(&buf, "\n   :weights %s", OidOutputFunctionCall(typoutput, model_gd->weights));
-        if (model_gd->ncategories > 0) {
-            Datum dt;
-            bool isnull;
-            bool first = true;
-            struct varlena *src_arr = (struct varlena *)DatumGetPointer(model_gd->categories);
-            ArrayType *arr = (ArrayType *)pg_detoast_datum(src_arr);
-            Assert(arr->elemtype == model->return_type);
-            ArrayIterator it = array_create_iterator(arr, 0);
 
-            getTypeOutputInfo(model->return_type, &typoutput, &typIsVarlena);
-            appendStringInfo(&buf, "\n   :categories %d {", model_gd->ncategories);
-            while (array_iterate(it, &dt, &isnull)) {
-                Assert(!isnull);
-                appendStringInfo(&buf, "%s%s", first ? "" : ",", OidOutputFunctionCall(typoutput, dt));
-                first = false;
-            }
-            appendStringInfoString(&buf, "}");
-
-            array_free_iterator(it);
-            if (arr != (ArrayType *)src_arr)
-                pfree(arr);
+    AlgorithmAPI* api = get_algorithm_api(model->algorithm);
+    if (api->explain != nullptr) {
+        Oid typoutput;
+        bool typIsVarlena;
+        ListCell* lc;
+        List* infos = api->explain(api, &model->data, model->return_type);
+        foreach(lc, infos) {
+            TrainingInfo* info = lfirst_node(TrainingInfo, lc);
+            getTypeOutputInfo(info->type, &typoutput, &typIsVarlena);
+            appendStringInfo(&buf, "\n:%s %s", info->name, OidOutputFunctionCall(typoutput, info->value));
         }
     }
+
     elog(level, "Model=%s%s", model->model_name, buf.data);
     pfree(buf.data);
 }
@@ -333,9 +525,14 @@ template <ListType ltype> void ListToTuple(List *list, Datum *name, Datum *value
                 iter++;
             } break;
             case ListType::COEFS: {
+                Oid typeOut;
+                bool isvarlena;
                 TrainingInfo *cell = (TrainingInfo *)lfirst(it);
                 t_names = cstring_to_text(cell->name);
-                t_values = cstring_to_text(Datum_to_string(cell->value, cell->type, false));
+
+                getTypeOutputInfo(cell->type, &typeOut, &isvarlena);
+                t_values = cstring_to_text(OidOutputFunctionCall(typeOut, cell->value));
+
                 array_container[iter] = ObjectIdGetDatum(cell->type);
                 astateName =
                     accumArrayResult(astateName, PointerGetDatum(t_names), false, TEXTOID, CurrentMemoryContext);
@@ -413,8 +610,13 @@ template <ListType listType> void TupleToList(Model *model, Datum *names, Datum 
                 array_iterate(itOid, &dtOid, &isnull);
                 strNames = TextDatumGetCString(dtNames);
                 strValues = TextDatumGetCString(dtValues);
+
+                Oid typInput, typIOParam;
+                getTypeInputInfo(dtOid, &typInput, &typIOParam);
+
+                dtValues = OidInputFunctionCall(typInput, strValues, typIOParam, -1);
+
                 tranOids = DatumGetObjectId(dtOid);
-                dtValues = string_to_datum(strValues, tranOids);
                 add_model_parameter<listType>(model, strNames, tranOids, dtValues);
             } break;
             case ListType::SCORES: {
@@ -460,301 +662,4 @@ template <ListType ltype> static void add_model_parameter(Model *model, const ch
             return;
         }
     }
-}
-
-static Datum string_to_datum(const char *str, Oid datatype)
-{
-    switch (datatype) {
-        case BOOLOID:
-            return DirectFunctionCall1(boolin, CStringGetDatum(str));
-        case INT1OID:
-        case INT2OID:
-        case INT4OID:
-            return Int32GetDatum(atoi(str));
-        case INT8OID:
-            return Int64GetDatum(atoi(str));
-        case VARCHAROID:
-        case BPCHAROID:
-        case CHAROID:
-        case TEXTOID:
-            return CStringGetTextDatum(str);
-        case FLOAT4OID:
-        case FLOAT8OID:
-            return DirectFunctionCall1(float8in, CStringGetDatum(str));
-        default:
-            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("The type is not supported: %d", datatype)));
-            return CStringGetTextDatum(str);
-    }
-}
-
-/* store SGD model */
-void store_SGD(Datum *values, bool *nulls, ModelGradientDescent *SGDmodel)
-{
-    nulls[Anum_gs_model_modelData - 1] = true;
-    nulls[Anum_gs_model_modeldescribe - 1] = true;
-
-    values[Anum_gs_model_model_type - 1] = CStringGetTextDatum(algorithm_ml_to_string(SGDmodel->model.algorithm));
-    values[Anum_gs_model_weight - 1] = SGDmodel->weights;
-    if (SGDmodel->ncategories > 0) {
-        text *categoriesName, *categoriesValue;
-        ArrayBuildState *astate = NULL;
-        Datum dt;
-        bool isnull;
-
-        nulls[Anum_gs_model_coefNames - 1] = false;
-        categoriesName = cstring_to_text("categories");
-        astate = accumArrayResult(astate, PointerGetDatum(categoriesName), false, TEXTOID, CurrentMemoryContext);
-        values[Anum_gs_model_coefNames - 1] = makeArrayResult(astate, CurrentMemoryContext);
-        astate = NULL;
-
-        ArrayType *arr = (ArrayType *)pg_detoast_datum((struct varlena *)DatumGetPointer(SGDmodel->categories));
-        ArrayIterator it = array_create_iterator(arr, 0);
-        while (array_iterate(it, &dt, &isnull)) {
-            categoriesValue = cstring_to_text(Datum_to_string(dt, SGDmodel->model.return_type, false));
-            astate = accumArrayResult(astate, PointerGetDatum(categoriesValue), false, TEXTOID, CurrentMemoryContext);
-        }
-        values[Anum_gs_model_coefValues - 1] = makeArrayResult(astate, CurrentMemoryContext);
-        nulls[Anum_gs_model_coefValues - 1] = false;
-    }
-}
-
-/* get SGD model */
-void get_SGD(HeapTuple *tuple, ModelGradientDescent *resGD, Form_gs_model_warehouse tuplePointer)
-{
-    char *strValues;
-    Datum dtValues;
-    ArrayBuildState *astate = NULL;
-    bool isnull = false;
-
-    /*  weight */
-    resGD->weights = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_weight, &isnull);
-
-    /* categories */
-    resGD->ncategories = 0;
-    Datum dtCat = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_coefValues, &isnull);
-
-    if (!isnull) {
-        ArrayType *arrValues = DatumGetArrayTypeP(dtCat);
-        ArrayIterator itValue = array_create_iterator(arrValues, 0);
-        while (array_iterate(itValue, &dtValues, &isnull)) {
-            resGD->ncategories++;
-            strValues = TextDatumGetCString(dtValues);
-            dtValues = string_to_datum(strValues, tuplePointer->outputtype);
-            astate = accumArrayResult(astate, dtValues, false, tuplePointer->outputtype, CurrentMemoryContext);
-        }
-        resGD->categories = makeArrayResult(astate, CurrentMemoryContext);
-    } else {
-        resGD->categories = PointerGetDatum(NULL);
-    }
-}
-
-/* get kmeans model */
-void store_kmeans(Datum *values, bool *nulls, ModelKMeans *kmeansModel)
-{
-    ArrayBuildState *astateName = NULL, *astateValue = NULL, *astateDescribe = NULL;
-    text *tValue, *txDescribe, *txCoodinate;
-    int lenDescribe = 200 * sizeof(char), lengthD = 0, lengthC = 0;
-    int lenCoodinate = 15 * kmeansModel->dimension * kmeansModel->actual_num_centroids;
-    WHCentroid *centroid;
-    double *coordinateContainer;
-    char *describeElem, *strCoordinates = (char *)palloc0(lenCoodinate);
-
-    values[Anum_gs_model_outputType - 1] = ObjectIdGetDatum(kmeansModel->model.return_type);
-    nulls[Anum_gs_model_modelData - 1] = true;
-    nulls[Anum_gs_model_weight - 1] = true;
-    values[Anum_gs_model_model_type - 1] = CStringGetTextDatum(algorithm_ml_to_string(KMEANS));
-
-    tValue = cstring_to_text(Datum_to_string(Int64GetDatum(kmeansModel->original_num_centroids), INT8OID, false));
-    astateName = accumArrayResult(astateName, CStringGetTextDatum("original_num_centroids"), false, TEXTOID,
-        CurrentMemoryContext);
-    astateValue = accumArrayResult(astateValue, PointerGetDatum(tValue), false, TEXTOID, CurrentMemoryContext);
-
-    tValue = cstring_to_text(Datum_to_string(Int64GetDatum(kmeansModel->actual_num_centroids), INT8OID, false));
-    astateName =
-        accumArrayResult(astateName, CStringGetTextDatum("actual_num_centroids"), false, TEXTOID, CurrentMemoryContext);
-    astateValue = accumArrayResult(astateValue, PointerGetDatum(tValue), false, TEXTOID, CurrentMemoryContext);
-
-    tValue = cstring_to_text(Datum_to_string(Int64GetDatum(kmeansModel->dimension), INT8OID, false));
-    astateName = accumArrayResult(astateName, CStringGetTextDatum("dimension"), false, TEXTOID, CurrentMemoryContext);
-    astateValue = accumArrayResult(astateValue, PointerGetDatum(tValue), false, TEXTOID, CurrentMemoryContext);
-
-    tValue = cstring_to_text(Datum_to_string(Int64GetDatum(kmeansModel->distance_function_id), INT8OID, false));
-    astateName =
-        accumArrayResult(astateName, CStringGetTextDatum("distance_function_id"), false, TEXTOID, CurrentMemoryContext);
-    astateValue = accumArrayResult(astateValue, PointerGetDatum(tValue), false, TEXTOID, CurrentMemoryContext);
-
-    tValue = cstring_to_text(Datum_to_string(Int64GetDatum(kmeansModel->seed), INT8OID, false));
-    astateName = accumArrayResult(astateName, CStringGetTextDatum("seed"), false, TEXTOID, CurrentMemoryContext);
-    astateValue = accumArrayResult(astateValue, PointerGetDatum(tValue), false, TEXTOID, CurrentMemoryContext);
-
-    astateName = accumArrayResult(astateName, CStringGetTextDatum("coordinates"), false, TEXTOID, CurrentMemoryContext);
-
-    for (uint32_t i = 0; i < kmeansModel->actual_num_centroids; i++) {
-        lengthD = 0;
-        describeElem = (char *)palloc0(lenDescribe);
-        centroid = kmeansModel->centroids + i;
-
-        lengthD = sprintf_s(describeElem + lengthD, lenDescribe - lengthD, "id:%d,", centroid->id);
-        lengthD += sprintf_s(describeElem + lengthD, lenDescribe - lengthD, "objective_function:%f,",
-            centroid->objective_function);
-        lengthD += sprintf_s(describeElem + lengthD, lenDescribe - lengthD, "avg_distance_to_centroid:%f,",
-            centroid->avg_distance_to_centroid);
-        lengthD += sprintf_s(describeElem + lengthD, lenDescribe - lengthD, "min_distance_to_centroid:%f,",
-            centroid->min_distance_to_centroid);
-        lengthD += sprintf_s(describeElem + lengthD, lenDescribe - lengthD, "max_distance_to_centroid:%f,",
-            centroid->max_distance_to_centroid);
-        lengthD += sprintf_s(describeElem + lengthD, lenDescribe - lengthD, "std_dev_distance_to_centroid:%f,",
-            centroid->std_dev_distance_to_centroid);
-        lengthD += sprintf_s(describeElem + lengthD, lenDescribe - lengthD, "cluster_size:%d", centroid->cluster_size);
-
-        txDescribe = cstring_to_text(describeElem);
-        astateDescribe =
-            accumArrayResult(astateDescribe, PointerGetDatum(txDescribe), false, TEXTOID, CurrentMemoryContext);
-
-        coordinateContainer = centroid->coordinates;
-        lengthC += sprintf_s(strCoordinates + lengthC, lenCoodinate - lengthC, "(");
-        for (uint32_t j = 0; j < kmeansModel->dimension; j++) {
-            lengthC += sprintf_s(strCoordinates + lengthC, lenCoodinate - lengthC, "%f,", coordinateContainer[j]);
-        }
-        lengthC--;
-        lengthC += sprintf_s(strCoordinates + lengthC, lenCoodinate - lengthC, ")");
-    }
-    txCoodinate = cstring_to_text(strCoordinates);
-    astateValue = accumArrayResult(astateValue, PointerGetDatum(txCoodinate), false, TEXTOID, CurrentMemoryContext);
-
-    values[Anum_gs_model_modeldescribe - 1] = makeArrayResult(astateDescribe, CurrentMemoryContext);
-    values[Anum_gs_model_coefValues - 1] = makeArrayResult(astateValue, CurrentMemoryContext);
-    values[Anum_gs_model_coefNames - 1] = makeArrayResult(astateName, CurrentMemoryContext);
-
-    nulls[Anum_gs_model_coefValues - 1] = false;
-    nulls[Anum_gs_model_coefNames - 1] = false;
-
-    return;
-}
-
-void get_kmeans(HeapTuple *tuple, ModelKMeans *modelKmeans)
-{
-    Datum dtValue, dtName;
-    bool isnull;
-    char *strValue, *strName, *coordinates = NULL;
-    uint32_t coefContainer;
-    int offset = 0;
-    WHCentroid *curseCent;
-
-    modelKmeans->model.algorithm = KMEANS;
-
-    /* coef */
-    Datum dtCoefValues = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_coefValues, &isnull);
-    ArrayType *arrValues = DatumGetArrayTypeP(dtCoefValues);
-    ArrayIterator itValue = array_create_iterator(arrValues, 0);
-
-    Datum dtCoefNames = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_coefNames, &isnull);
-    ArrayType *arrNames = DatumGetArrayTypeP(dtCoefNames);
-    ArrayIterator itName = array_create_iterator(arrNames, 0);
-
-    while (array_iterate(itName, &dtName, &isnull)) {
-        array_iterate(itValue, &dtValue, &isnull);
-        strName = TextDatumGetCString(dtName);
-        strValue = TextDatumGetCString(dtValue);
-        coefContainer = atoi(strValue);
-        if (strcmp(strName, "original_num_centroids") == 0) {
-            modelKmeans->original_num_centroids = coefContainer;
-        } else if (strcmp(strName, "actual_num_centroids") == 0) {
-            modelKmeans->actual_num_centroids = coefContainer;
-        } else if (strcmp(strName, "seed") == 0) {
-            modelKmeans->seed = coefContainer;
-        } else if (strcmp(strName, "dimension") == 0) {
-            modelKmeans->dimension = coefContainer;
-        } else if (strcmp(strName, "distance_function_id") == 0) {
-            modelKmeans->distance_function_id = coefContainer;
-        } else if (strcmp(strName, "coordinates") == 0) {
-            coordinates = strValue;
-        } else {
-            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("the coef should not be here in KMEANS: %s", strName)));
-        }
-    }
-
-    modelKmeans->centroids =
-        reinterpret_cast<WHCentroid *>(palloc0(sizeof(WHCentroid) * modelKmeans->actual_num_centroids));
-
-    /* describe */
-    Datum dtDescribe = SysCacheGetAttr(DB4AI_MODEL, *tuple, Anum_gs_model_modeldescribe, &isnull);
-    ArrayType *arrDescribe = DatumGetArrayTypeP(dtDescribe);
-    ArrayIterator itDescribe = array_create_iterator(arrDescribe, 0);
-
-    while (array_iterate(itDescribe, &dtName, &isnull)) {
-        curseCent = modelKmeans->centroids + offset;
-        strName = TextDatumGetCString(dtName);
-        coordinates = splitStringFillCoordinates(curseCent, coordinates, modelKmeans->dimension);
-        splitStringFillCentroid(curseCent, strName);
-        offset++;
-    }
-}
-
-void splitStringFillCentroid(WHCentroid *curseCent, char *strDescribe)
-{
-    char *cur, *name, *context = NULL;
-    Datum dtCur;
-
-    name = strtok_r(strDescribe, ":,", &context);
-    cur = strtok_r(NULL, ":,", &context);
-    while (cur != NULL and name != NULL) {
-        if (strcmp(name, "id") == 0) {
-            dtCur = string_to_datum(cur, INT8OID);
-            curseCent->id = DatumGetUInt32(dtCur);
-        } else if (strcmp(name, "objective_function") == 0) {
-            dtCur = string_to_datum(cur, FLOAT8OID);
-            curseCent->objective_function = DatumGetFloat8(dtCur);
-        } else if (strcmp(name, "avg_distance_to_centroid") == 0) {
-            dtCur = string_to_datum(cur, FLOAT8OID);
-            curseCent->avg_distance_to_centroid = DatumGetFloat8(dtCur);
-        } else if (strcmp(name, "min_distance_to_centroid") == 0) {
-            dtCur = string_to_datum(cur, FLOAT8OID);
-            curseCent->min_distance_to_centroid = DatumGetFloat8(dtCur);
-        } else if (strcmp(name, "max_distance_to_centroid") == 0) {
-            dtCur = string_to_datum(cur, FLOAT8OID);
-            curseCent->max_distance_to_centroid = DatumGetFloat8(dtCur);
-        } else if (strcmp(name, "std_dev_distance_to_centroid") == 0) {
-            dtCur = string_to_datum(cur, FLOAT8OID);
-            curseCent->std_dev_distance_to_centroid = DatumGetFloat8(dtCur);
-        } else if (strcmp(name, "cluster_size") == 0) {
-            dtCur = string_to_datum(cur, INT8OID);
-            curseCent->cluster_size = DatumGetUInt64(dtCur);
-        } else {
-            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("this description should not be here in KMEANS: %s", cur)));
-        }
-        name = strtok_r(NULL, ":,", &context);
-        cur = strtok_r(NULL, ":,", &context);
-    }
-}
-
-char *splitStringFillCoordinates(WHCentroid *curseCent, char *strCoordinates, int dimension)
-{
-    char *cur, *context = NULL;
-    Datum dtCur;
-    int iter = 0;
-    double *res = (double *)palloc0(dimension * sizeof(double));
-
-    while (iter < dimension) {
-        if (iter == 0) {
-            cur = strtok_r(strCoordinates, ")(,", &context);
-        } else {
-            cur = strtok_r(NULL, ")(,", &context);
-        }
-
-        if (cur != NULL) {
-            dtCur = string_to_datum(cur, FLOAT8OID);
-            res[iter] = DatumGetFloat8(dtCur);
-            iter++;
-        } else {
-            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("the Coordinates result seems not match their dimension or actual_num_centroids.")));
-        }
-    }
-    curseCent->coordinates = res;
-
-    return context;
 }

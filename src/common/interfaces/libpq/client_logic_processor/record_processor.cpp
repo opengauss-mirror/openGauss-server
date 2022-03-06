@@ -29,8 +29,9 @@
 #include "client_logic_cache/icached_rec.h"
 #include "client_logic_cache/dataTypes.def"
 #include "client_logic_cache/icached_column_manager.h"
+
 bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, size_t processed_data_size,
-    const int* original_typesid, int format, unsigned char** plain_text,
+    const int* original_typesid, const size_t original_typesid_size, int format,  unsigned char** plain_text,
     size_t& plain_text_size, bool* is_decrypted)
 {
     DecryptDataRes dec_dat_res = DEC_DATA_ERR;
@@ -52,13 +53,13 @@ bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, 
     const char* end = NULL;
     int idx = 0;
     bool first = true;
-    while (pdata) {
+    while (pdata && (size_t) idx < original_typesid_size) {
         if (!first) {
             /* if this is not the first variable in the row, we need to add comma and space */
             size_t cur_size = strlen(result);
-            /* 2: the count of char ', ' between 2 results, such as 'a, b' */
-            const int char_num = 2;
-            new_res = (char*)libpq_realloc(result, cur_size, cur_size + char_num + 1);
+            /* 1: the count of char ',' between 2 results, such as 'a,b' */
+            const int char_num = m_NULL_TERMINATION_SIZE;
+            new_res = (char*)libpq_realloc(result, cur_size, cur_size + char_num + m_NULL_TERMINATION_SIZE);
             if (new_res == NULL) {
                 libpq_free(result);
                 fprintf(stderr, "allocation failure when trying to deprocess record\n");
@@ -66,7 +67,6 @@ bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, 
             }
             result = new_res;
             result[cur_size] = ',';
-            result[cur_size + 1] = ' ';
             result[cur_size + char_num] = '\0';
         }
         first = false;
@@ -83,13 +83,12 @@ bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, 
             &plain, plain_size, process_status);
         if (dec_dat_res == DEC_DATA_SUCCEED) {
             *is_decrypted = true;
-
             size_t oldsize = strlen(result);
-            newsize = oldsize + plain_size + 1 + 1;
+            newsize = oldsize + plain_size + m_NULL_TERMINATION_SIZE;
             if (original_id == BYTEAOID) {
-                newsize += 1;
+                newsize += m_BYTEA_PREFIX_SIZE;
             }
-            new_res = (char*)libpq_realloc(result, oldsize + 1, newsize);
+            new_res = (char*)libpq_realloc(result, oldsize + m_NULL_TERMINATION_SIZE, newsize);
             if (new_res == NULL) {
                 libpq_free(result);
                 libpq_free(plain);
@@ -100,9 +99,11 @@ bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, 
             if (original_id != BYTEAOID) {
                 check_strncat_s(strncat_s(result, newsize, (char*)plain, plain_size));
             } else {
-                size_t result_size = strlen(result);
+                size_t result_size = strlen(result) + m_NULL_TERMINATION_SIZE;
                 result[result_size] = '"';
-                result[result_size + 1] = '\0';
+                result[result_size + m_NULL_TERMINATION_SIZE] = '\0';
+                const char* bytea_begin = "\"\\";
+                check_strncat_s(strncat_s(result, newsize, bytea_begin, m_BYTEA_PREFIX_SIZE));
                 check_strncat_s(strncat_s(result, newsize, (char*)plain, plain_size));
                 end--; /* for the quote will be copied */
             }
@@ -119,7 +120,7 @@ bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, 
     if (end) {
         end++;
         size_t oldsize = strlen(result);
-        newsize = oldsize + processed_data_size - (end - processed_data) + 1;
+        newsize = oldsize + processed_data_size - (end - processed_data) + m_NULL_TERMINATION_SIZE;
         new_res = (char*)libpq_realloc(result, oldsize + 1, newsize);
         if (new_res == NULL) {
             libpq_free(result);
@@ -128,8 +129,8 @@ bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, 
         }
         result = new_res;
         check_strncat_s(strncat_s(result, newsize, end, processed_data_size - (end - processed_data)));
+        result[newsize - m_NULL_TERMINATION_SIZE] = '\0';
     }
-    result[newsize - 1] = '\0';
     *plain_text = (unsigned char*)result;
     plain_text_size = newsize;
     return true;

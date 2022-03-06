@@ -1,41 +1,22 @@
 -- test: sighup
 set enable_default_ustore_table = on;
-show vacuum_defer_cleanup_age;
- vacuum_defer_cleanup_age 
---------------------------
+show undo_retention_time;
+ undo_retention_time 
+---------------------
  0
 (1 row)
 
-show version_retention_age;
- version_retention_age 
------------------------
- 0
-(1 row)
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 900" > /dev/null 2>&1
 select pg_sleep(4);
  pg_sleep 
 ----------
  
 (1 row)
 
-show vacuum_defer_cleanup_age;
- vacuum_defer_cleanup_age 
---------------------------
- 10000
-(1 row)
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
-select pg_sleep(4);
- pg_sleep 
-----------
- 
-(1 row)
-
-show version_retention_age;
- version_retention_age 
------------------------
- 10000
+show undo_retention_time;
+ undo_retention_time 
+---------------------
+ 15min
 (1 row)
 
 create schema schema_test_3;
@@ -86,13 +67,13 @@ select * from dual where exists (select 1 from gs_txn_snapshot where snpxmin - g
 select * from dual where exists (select 1 from gs_txn_snapshot where snpxmin - gs_txid_oldestxmin() < 10000 - 1000);
  dummy 
 -------
-(0 rows)
+ X
+(1 row)
 
 select * from dual where exists (select 1 from gs_txn_snapshot where snpxmin - gs_txid_oldestxmin() >= 10000 - 1000);
  dummy 
 -------
- X
-(1 row)
+(0 rows)
 
 -- test: syntax - [timecapsule { timestamp | csn } expression ]
 select * from dual timecapsule timestamp 0;
@@ -170,13 +151,15 @@ partition by range (ca_address_sk)
 )
 enable row movement;
 select * from tv_web_returns_p2 timecapsule timestamp 0;
-ERROR:  timecapsule feature does not support partitioned table
+ERROR:  argument of TIMESTAMP must be type timestamp with time zone, not type integer
+LINE 1: select * from tv_web_returns_p2 timecapsule timestamp 0;
+                                                              ^
 select * from tv_web_returns_p2 timecapsule csn 0;
-ERROR:  timecapsule feature does not support partitioned table
+ERROR:  restore point not found
 timecapsule table tv_web_returns_p2 to timestamp 0;
-ERROR:  timecapsule feature does not support partitioned table
+ERROR:  argument of TIMESTAMP must be type timestamp with time zone, not type integer
 timecapsule table tv_web_returns_p2 to csn 0;
-ERROR:  timecapsule feature does not support partitioned table
+ERROR:  restore point not found
 drop table if exists tv_web_returns_p2;
 select * from pg_class timecapsule timestamp 0;
 ERROR:  timecapsule feature does not support system table
@@ -192,17 +175,17 @@ create table tv_lineitem
 (
     l_orderkey    bigint not null
   , l_partkey     bigint not null
-)
+) 
 with (orientation = column)
 ; 
 select * from tv_lineitem timecapsule timestamp 0;
-ERROR:  timecapsule feature does not support non-row oriented table
+ERROR:  timecapsule feature does not support heap table
 select * from tv_lineitem timecapsule csn 0;
-ERROR:  timecapsule feature does not support non-row oriented table
+ERROR:  timecapsule feature does not support heap table
 timecapsule table tv_lineitem to timestamp 0;
-ERROR:  timecapsule feature does not support non-row oriented table
+ERROR:  timecapsule feature does not support heap table
 timecapsule table tv_lineitem to csn 0;
-ERROR:  timecapsule feature does not support non-row oriented table
+ERROR:  timecapsule feature does not support heap table
 drop table if exists tv_lineitem;
 drop table if exists tv_cities;
 NOTICE:  table "tv_cities" does not exist, skipping
@@ -399,7 +382,7 @@ select pg_sleep(4);
 
 alter table fb_qtbl_invalid_4 add partition p3 values less than (30);
 select * from fb_qtbl_invalid_4 timecapsule timestamp now() - 1/(24*60*60);
-ERROR:  timecapsule feature does not support partitioned table
+ERROR:  The table definition of "fb_qtbl_invalid_4" has been changed.
 drop table fb_qtbl_invalid_4;
 --timecapsule query normal table
 drop table if exists fb_qtbl_normal_1;
@@ -464,22 +447,19 @@ select * from fb_qtbl_normal_2 timecapsule timestamp now() - 1/(24*60*60) where 
 (1 row)
 
 explain (costs off) select * from fb_qtbl_normal_2 timecapsule timestamp now() - 1/(24*60*60) where id > 0;
-                   QUERY PLAN                    
--------------------------------------------------
- Bitmap Heap Scan on fb_qtbl_normal_2
-   Recheck Cond: (id > 0)
-   ->  Bitmap Index Scan on idx_fb_qtbl_normal_2
-         Index Cond: (id > 0)
-(4 rows)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Index Only Scan using idx_fb_qtbl_normal_2 on fb_qtbl_normal_2
+   Index Cond: (id > 0)
+(2 rows)
 
 explain (costs off) select * from fb_qtbl_normal_2 where id > 0;
-                   QUERY PLAN                    
--------------------------------------------------
- Bitmap Heap Scan on fb_qtbl_normal_2
-   Recheck Cond: (id > 0)
-   ->  Bitmap Index Scan on idx_fb_qtbl_normal_2
-         Index Cond: (id > 0)
-(4 rows)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ [Bypass]
+ Index Only Scan using idx_fb_qtbl_normal_2 on fb_qtbl_normal_2
+   Index Cond: (id > 0)
+(3 rows)
 
 drop table fb_qtbl_normal_2;
 --timecapsule to before ddl
@@ -649,13 +629,12 @@ select * from fb_tbl_normal_2 where id > 0 order by id;
 (1 row)
 
 explain (costs off) select * from fb_tbl_normal_2 where id > 0;
-                   QUERY PLAN                   
-------------------------------------------------
- Bitmap Heap Scan on fb_tbl_normal_2
-   Recheck Cond: (id > 0)
-   ->  Bitmap Index Scan on idx_fb_tbl_normal_2
-         Index Cond: (id > 0)
-(4 rows)
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ [Bypass]
+ Index Only Scan using idx_fb_tbl_normal_2 on fb_tbl_normal_2
+   Index Cond: (id > 0)
+(3 rows)
 
 drop table temp;
 drop table fb_tbl_normal_2;
@@ -970,10 +949,31 @@ begin
     execute immediate 'timecapsule table fb_tbl_normal to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
 end;
 /
--- call pro_fb_tbl_normal_rb1(1);
--- select * from fb_tbl_normal order by id;
--- call pro_fb_tbl_normal_rb1(2);
--- select * from fb_tbl_normal order by id;
+call pro_fb_tbl_normal_rb1(1);
+ pro_fb_tbl_normal_rb1 
+-----------------------
+ 
+(1 row)
+
+select * from fb_tbl_normal order by id;
+ id |     tt     
+----+------------
+  1 | adgasdfasg
+(1 row)
+
+call pro_fb_tbl_normal_rb1(2);
+ pro_fb_tbl_normal_rb1 
+-----------------------
+ 
+(1 row)
+
+select * from fb_tbl_normal order by id;
+ id  |     tt     
+-----+------------
+  10 | adgasdfasg
+ 100 | sfgsafjhaf
+(2 rows)
+
 call pro_fb_tbl_normal_rb1(3);
  pro_fb_tbl_normal_rb1 
 -----------------------
@@ -1000,43 +1000,5 @@ drop cascades to function pro_fb_tbl_normal_re1()
 drop cascades to function pro_timecapsule1()
 drop cascades to function pro_fb_tbl_normal_rb1(integer)
 reset search_path;
--- reset vacuum_defer_cleanup_age
-show vacuum_defer_cleanup_age;
- vacuum_defer_cleanup_age 
---------------------------
- 10000
-(1 row)
-
-show version_retention_age;
- version_retention_age 
------------------------
- 10000
-(1 row)
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
-select pg_sleep(4);
- pg_sleep 
-----------
- 
-(1 row)
-
-show vacuum_defer_cleanup_age;
- vacuum_defer_cleanup_age 
---------------------------
- 0
-(1 row)
-
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
-select pg_sleep(4);
- pg_sleep 
-----------
- 
-(1 row)
-
-show version_retention_age;
- version_retention_age 
------------------------
- 0
-(1 row)
-
-set enable_default_ustore_table = off;
+set enable_default_ustore_table = off; 
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 0" > /dev/null 2>&1

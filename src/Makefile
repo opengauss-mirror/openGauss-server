@@ -12,7 +12,7 @@ subdir = src
 top_builddir = ..
 include Makefile.global
 
-ifeq ($(enable_multiple_nodes)_$(enable_privategauss), no_yes)
+ifeq ($(enable_multiple_nodes)_$(enable_privategauss)_$(enable_lite_mode), no_yes_no)
 dirs_in_central_mode = $(top_builddir)/../distribute/cm $(top_builddir)/../distribute/bin 
 endif
 

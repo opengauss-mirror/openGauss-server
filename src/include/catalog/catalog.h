@@ -56,6 +56,7 @@ extern bool IsSystemRelation(Relation relation);
 extern bool IsToastRelation(Relation relation);
 extern bool IsCatalogRelation(Relation relation);
 
+extern bool IsSysSchema(Oid namespaceId);
 extern bool IsSystemClass(Form_pg_class reltuple);
 extern bool IsToastClass(Form_pg_class reltuple);
 extern bool IsCatalogClass(Oid relid, Form_pg_class reltuple);
@@ -63,7 +64,6 @@ extern bool IsCatalogClass(Oid relid, Form_pg_class reltuple);
 extern bool IsSystemNamespace(Oid namespaceId);
 extern bool IsToastNamespace(Oid namespaceId);
 extern bool IsCStoreNamespace(Oid namespaceId);
-
 extern bool IsPerformanceNamespace(Oid namespaceId);
 extern bool IsSnapshotNamespace(Oid namespaceId);
 extern bool IsMonitorSpace(Oid namespaceId);

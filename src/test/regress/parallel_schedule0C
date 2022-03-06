@@ -1,9 +1,9 @@
-#test: sqlldr/load_to_copy_basic
+test: sqlldr/load_to_copy_basic
 test: sqlldr/load_to_table_basic
-#test: sqlldr/load_to_table_column
-#test: sqlldr/gs_loader_basic
-#test: sqlldr/gs_loader_parameter
-#test: sqlldr/gs_loader_column
-#test: sqlldr/gs_loader_multi_data
-#test: sqlldr/gs_loader_issues
-#test: sqlldr/gs_loader_column_filler
+test: sqlldr/load_to_table_column
+test: sqlldr/gs_loader_basic
+test: sqlldr/gs_loader_parameter
+test: sqlldr/gs_loader_column
+test: sqlldr/gs_loader_multi_data
+test: sqlldr/gs_loader_issues
+test: sqlldr/gs_loader_column_filler

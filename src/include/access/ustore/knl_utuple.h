@@ -37,7 +37,6 @@ struct TupleTableSlot;
 #define UHEAP_DELETED 0x0010         /* tuple deleted */
 #define UHEAP_INPLACE_UPDATED 0x0020 /* tuple is updated inplace */
 #define UHEAP_UPDATED 0x0040         /* tuple is not updated inplace */
-#define UHEAP_XID_LOCK_ONLY 0x0080   /* xid, if valid, is only a locker */
 
 #define UHEAP_XID_KEYSHR_LOCK 0x0100     /* xid is a key-shared locker */
 #define UHEAP_XID_NOKEY_EXCL_LOCK 0x0200 /* xid is a nokey-exclusive locker */
@@ -62,11 +61,10 @@ struct TupleTableSlot;
                                      * another partition */
 #define UHEAP_LOCK_MASK (UHEAP_XID_SHR_LOCK | UHEAP_XID_EXCL_LOCK)
 
-#define UHEAP_VIS_STATUS_MASK 0x3FF0 /* mask for visibility bits (5 ~ 14 \
+#define UHEAP_VIS_STATUS_MASK 0x7FF0 /* mask for visibility bits (5 ~ 14 \
                                       * bits) */
 #define UHEAP_LOCK_STATUS_MASK                                                                       \
-    (UHEAP_XID_LOCK_ONLY | UHEAP_XID_KEYSHR_LOCK | UHEAP_XID_NOKEY_EXCL_LOCK | UHEAP_XID_EXCL_LOCK | \
-        UHEAP_MULTI_LOCKERS)
+    (UHEAP_XID_KEYSHR_LOCK | UHEAP_XID_NOKEY_EXCL_LOCK | UHEAP_XID_EXCL_LOCK | UHEAP_MULTI_LOCKERS)
 
 
 /*
@@ -75,10 +73,10 @@ struct TupleTableSlot;
 #define SINGLE_LOCKER_XID_IS_EXCL_LOCKED(infomask) ((infomask & SINGLE_LOCKER_INFOMASK) == SINGLE_LOCKER_XID_EXCL_LOCK)
 #define SINGLE_LOCKER_XID_IS_SHR_LOCKED(infomask) ((infomask & SINGLE_LOCKER_INFOMASK) == SINGLE_LOCKER_XID_SHR_LOCK)
 
+#define UHEAP_XID_IS_LOCK(infomask) (((infomask) & SINGLE_LOCKER_XID_IS_LOCK) != 0)
 #define UHEAP_XID_IS_SHR_LOCKED(infomask) (((infomask)&UHEAP_LOCK_MASK) == UHEAP_XID_SHR_LOCK)
 #define UHEAP_XID_IS_EXCL_LOCKED(infomask) (((infomask)&UHEAP_LOCK_MASK) == UHEAP_XID_EXCL_LOCK)
 #define UHeapTupleHasExternal(tuple) (((tuple)->disk_tuple->flag & UHEAP_HASEXTERNAL) != 0)
-#define UHEAP_XID_IS_LOCKED_ONLY(infomask) (((infomask)&UHEAP_XID_LOCK_ONLY) != 0)
 
 #define UHeapTupleHasMultiLockers(infomask) (((infomask)&UHEAP_MULTI_LOCKERS) != 0)
 
@@ -117,11 +115,14 @@ struct TupleTableSlot;
 
 #define UHeapTupleHeaderSetMovedPartitions(udisk_tuple) ((udisk_tuple)->flag |= UHEAP_MOVED)
 
-#define UHeapTupleHeaderClearSingleLocker(udisk_tuple) \
-    ((udisk_tuple)->flag &= ~(SINGLE_LOCKER_XID_IS_LOCK | SINGLE_LOCKER_XID_IS_SUBXACT))
+#define UHeapTupleHeaderClearSingleLocker(utuple)                                         \
+    do {                                                                                  \
+        (utuple)->xid = (ShortTransactionId)FrozenTransactionId;                         \
+        (utuple)->flag &= ~(SINGLE_LOCKER_XID_IS_LOCK | SINGLE_LOCKER_XID_IS_SUBXACT);   \
+    } while (0)
 
 #define IsUHeapTupleModified(infomask) \
-    ((infomask & (UHEAP_DELETED | UHEAP_UPDATED | UHEAP_INPLACE_UPDATED | UHEAP_XID_LOCK_ONLY)) != 0)
+    ((infomask & (UHEAP_DELETED | UHEAP_UPDATED | UHEAP_INPLACE_UPDATED)) != 0)
 
 /* UHeap tuples do not have the idea of xmin/xmax but a single XID */
 #define UHEAP_XID_COMMITTED 0x0800
@@ -190,6 +191,7 @@ typedef UHeapTupleData *UHeapTuple;
 inline UHeapTuple uheaptup_alloc(Size size)
 {
     UHeapTuple tup = (UHeapTuple)palloc0(size);
+    tup->t_bucketId = InvalidBktId;
     tup->tupTableType = UHEAP_TUPLE;
     return tup;
 }
@@ -290,10 +292,11 @@ void SlotDeformUTuple(TupleTableSlot *slot, UHeapTuple tuple, long *offp, int na
 uint32 UHeapCalcTupleDataSize(TupleDesc tuple_desc, Datum *values, const bool *is_nulls, uint32 hoff,
     bool enableReverseBitmap, bool enableReserve);
 HeapTuple UHeapCopyHeapTuple(TupleTableSlot *slot);
-void UHeapSlotStoreUHeapTuple(UHeapTuple utuple, TupleTableSlot *slot, bool shouldFree);
+void UHeapSlotStoreUHeapTuple(UHeapTuple utuple, TupleTableSlot *slot, bool shouldFree, bool batchMode);
 
 void UHeapSlotClear(TupleTableSlot *slot);
 void UHeapSlotGetSomeAttrs(TupleTableSlot *slot, int attnum);
+void UHeapSlotFormBatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows, int attnum);
 void UHeapSlotGetAllAttrs(TupleTableSlot *slot);
 Datum UHeapSlotGetAttr(TupleTableSlot *slot, int attnum, bool *isnull);
 bool UHeapSlotAttIsNull(const TupleTableSlot *slot, int attnum);

@@ -24,4 +24,6 @@ extern void ExecSeqRestrPos(SeqScanState* node);
 extern void ExecReScanSeqScan(SeqScanState* node);
 extern void InitScanRelation(SeqScanState* node, EState* estate, int eflags);
 extern RangeScanInRedis reset_scan_qual(Relation currHeapRel, ScanState *node, bool isRangeScanInRedis = false);
+
+extern ExprState *ExecInitVecExpr(Expr *node, PlanState *parent);
 #endif /* NODESEQSCAN_H */

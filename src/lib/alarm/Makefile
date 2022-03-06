@@ -24,7 +24,7 @@
 top_builddir=../../..
 include $(top_builddir)/src/Makefile.global
 subdir = src/alarm/client
-override CPPFLAGS := -I. -I../common/ -I$(top_srcdir)/../Platform/N9000_RPC_Lib/ $(CPPFLAGS) -g3 -ggdb3  -O3 -lsecurec
+override CPPFLAGS := -I. -I../common/ -I$(top_srcdir)/../Platform/N9000_RPC_Lib/ $(CPPFLAGS) -g3 -ggdb3  -O3 -l$(SECURE_C_CHECK)
 LDFLAGS += $(top_srcdir)/../Platform/N9000_RPC_Lib/
 
 include $(top_srcdir)/src/gausskernel/common.mk

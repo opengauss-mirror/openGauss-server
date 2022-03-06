@@ -1,0 +1,65 @@
+CREATE TABLE moons(
+    id BIGSERIAL,
+    cls SMALLINT,
+	x REAL,
+	y REAL
+);
+
+\copy moons(cls, x, y) FROM '@abs_srcdir@/data/moons.csv' DELIMITER ',';
+
+SELECT COUNT(*) FROM moons;
+
+-- linear, expected accuracy = 0.890
+CREATE MODEL moons_linear USING svm_classification
+       FEATURES x, y TARGET cls
+       FROM moons
+	   WITH seed=54, batch_size=8, decay=1e-20,
+            learning_rate=0.01215337, lambda=920.90725960,
+			tolerance=0.06377824, max_iterations=2;
+
+-- gaussian, expected accuracy = 0.935
+CREATE MODEL moons_gaussian USING svm_classification
+       FEATURES x, y TARGET cls
+       FROM moons
+	   WITH seed=1, batch_size=4, decay=0.80858937,
+            learning_rate=0.16556385, lambda=274.28986109,
+			tolerance=0.00714786, max_iterations=33,
+			kernel='gaussian', gamma=0.96736585;
+
+-- polynomial, expected accuracy = 1.000
+CREATE MODEL moons_polynomial USING svm_classification
+       FEATURES x, y TARGET cls
+       FROM moons
+	   WITH seed=1, batch_size=2, decay=0.87908244,
+            learning_rate=0.40456318, lambda=53.75794302,
+			tolerance=0.00003070, max_iterations=35,
+			kernel='polynomial', degree=4, coef0=1.11311435;
+
+-- display the three models
+SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, weight,
+       hyperparametersnames, hyperparametersoids, hyperparametersvalues,
+       trainingscoresname, trainingscoresvalue, length(modeldata) as model_data_len
+  FROM gs_model_warehouse
+  WHERE modelname LIKE 'moons%'
+  ORDER BY modelname;
+
+-- validate the modes by predicting all at the same time, expected [0.89, 0.935, 1.0]
+SELECT (SUM(CASE WHEN t=p1 THEN 1 ELSE 0 END) / (SELECT COUNT(*) FROM moons)) AS acc_lin,
+       (SUM(CASE WHEN t=p2 THEN 1 ELSE 0 END) / (SELECT COUNT(*) FROM moons)) AS acc_gauss,
+       (SUM(CASE WHEN t=p3 THEN 1 ELSE 0 END) / (SELECT COUNT(*) FROM moons)) AS acc_poly
+ FROM (SELECT cls AS t,
+	PREDICT BY moons_linear (FEATURES x, y) AS p1,
+	PREDICT BY moons_gaussian (FEATURES x, y) AS p2,
+	PREDICT BY moons_polynomial (FEATURES x, y) AS p3
+	FROM moons
+);
+
+-- cleanup models
+DROP MODEL moons_linear;
+DROP MODEL moons_gaussian;
+DROP MODEL moons_polynomial;
+
+-- cleanup tables
+DROP TABLE IF EXISTS moons;
+
+SELECT 'DB4AI SVM KERNELS TEST COMPLETED';

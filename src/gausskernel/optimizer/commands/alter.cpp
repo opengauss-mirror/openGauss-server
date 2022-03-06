@@ -533,6 +533,9 @@ void ExecAlterOwnerStmt(AlterOwnerStmt* stmt)
             AlterFunctionOwner(stmt->object, stmt->objarg, newowner);
             break;
 
+        case OBJECT_PACKAGE:
+            AlterPackageOwner(stmt->object, newowner);
+            break;
         case OBJECT_LANGUAGE:
             AlterLanguageOwner(strVal(linitial(stmt->object)), newowner);
             break;

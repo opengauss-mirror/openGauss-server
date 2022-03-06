@@ -41,6 +41,30 @@ INSERT INTO t_grammer (c1, c3, c4.a) VALUES(84, '{81, 82, 83}', 850) ON DUPLICAT
 -- support UPDATE NOTHING
 INSERT INTO t_grammer VALUES(91, 1, '{91, 92, 93}', ROW(94, 95)) ON DUPLICATE KEY UPDATE NOTHING;
 INSERT INTO t_grammer (c5, c1, c2, c4) VALUES('{91,92}', 92, DEFAULT, ROW(910, 920)) ON DUPLICATE KEY UPDATE NOTHING;
+-- support INSERT with assigned alias
+INSERT INTO t_grammer AS T1 VALUES(991, 1);
+INSERT INTO t_grammer T2 VALUES(992, 1);
+ERROR:  syntax error at or near "T2"
+LINE 1: INSERT INTO t_grammer T2 VALUES(992, 1);
+                              ^
+INSERT INTO t_grammer * AS T1 VALUES(993, 1);
+ERROR:  syntax error at or near "*"
+LINE 1: INSERT INTO t_grammer * AS T1 VALUES(993, 1);
+                              ^
+INSERT INTO t_grammer AS T1 VALUES(991, 2) ON DUPLICATE KEY UPDATE T1.C2 = EXCLUDED.C2 + 1;
+INSERT INTO t_grammer T2 VALUES(992, 3) ON DUPLICATE KEY UPDATE T2.C2 = EXCLUDED.C2 + 1 WHERE T2.C1 > 100;
+ERROR:  syntax error at or near "T2"
+LINE 1: INSERT INTO t_grammer T2 VALUES(992, 3) ON DUPLICATE KEY UPD...
+                              ^
+INSERT INTO t_grammer * AS T1 VALUES(993, 4) ON DUPLICATE KEY UPDATE NOTHING;
+ERROR:  syntax error at or near "*"
+LINE 1: INSERT INTO t_grammer * AS T1 VALUES(993, 4) ON DUPLICATE KE...
+                              ^
+-- excluded is reserved keyword
+INSERT INTO t_grammer * AS excluded VALUES(993, 4) ON DUPLICATE KEY UPDATE NOTHING;
+ERROR:  syntax error at or near "*"
+LINE 1: INSERT INTO t_grammer * AS excluded VALUES(993, 4) ON DUPLIC...
+                              ^
 -- UPDATE target: unsupport with schema but support with tablename
 INSERT INTO t_grammer VALUES(0, 0, '{0,0}', ROW(0, 0), '{107, 108}') ON DUPLICATE KEY UPDATE
 	upsert_test.t_grammer.c2 = c2 * 10, upsert_test.t_grammer.c3[1:2] = c5[1:2], upsert_test.t_grammer.c4.a = c1;
@@ -75,9 +99,6 @@ INSERT INTO t_default VALUES(91, 0.91, '2020-05-17') ON DUPLICATE KEY UPDATE c2 
 INSERT INTO t_default VALUES(92, DEFAULT, '2020-05-17') ON DUPLICATE KEY UPDATE c2 = 10, c3 = DEFAULT;
 -- unsupport alias
 INSERT INTO t_grammer AS alias VALUES (91) ON DUPLICATE KEY UPDATE c2 = VALUES(c1);
-ERROR:  syntax error at or near "AS"
-LINE 1: INSERT INTO t_grammer AS alias VALUES (91) ON DUPLICATE KEY ...
-                              ^
 -- unsupport VALUES with expr
 INSERT INTO t_grammer VALUES(0, 0) ON DUPLICATE KEY UPDATE c2 = sqrt(VALUES(c2));
 ERROR:  syntax error at or near "("
@@ -163,12 +184,13 @@ SELECT * FROM t_grammer ORDER BY 1;
   82 | -100 | {881,882}     |           | 
   83 | -100 | {81,82,83}    | (810,820) | 
   84 | -100 | {81,82,83}    | (850,)    | 
-  91 |    1 | {91,92,93}    | (94,95)   | 
+  91 |   91 | {91,92,93}    | (94,95)   | 
   92 | -100 |               | (910,920) | {91,92}
  101 |    1 | {102,103,104} | (105,106) | {107,108}
  102 |    2 | {102,103,104} | (105,106) | {107,108}
  103 |    3 | {102,103,104} | (105,106) | {107,108}
-(35 rows)
+ 991 |    3 |               |           | 
+(36 rows)
 
 SELECT * FROM t_default ORDER BY 1;
 --? c1 |        c2        |               c3

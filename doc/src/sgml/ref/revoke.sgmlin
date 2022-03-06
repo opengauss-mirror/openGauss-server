@@ -106,7 +106,7 @@ REVOKE [ GRANT OPTION FOR ]
     ON DATA SOURCE src_name [, ...]
     FROM { [GROUP] role_name | PUBLIC } [, ...];
 REVOKE [ GRANT OPTION FOR ]
-    { { EXECUTE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
+    { { EXECUTE | ALTER | DROP } [, ...] | ALL [ PRIVILEGES ] }
     ON PACKAGE package_name [, ...]
     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
     [ CASCADE | RESTRICT ];
@@ -114,6 +114,12 @@ REVOKE [ ADMIN OPTION FOR ]
     role_name [, ...] FROM role_name [, ...]
     [ CASCADE | RESTRICT ];
 REVOKE ALL { PRIVILEGES | PRIVILEGE } FROM role_name;
+REVOKE [ ADMIN OPTION FOR ]
+    { CREATE ANY TABLE | ALTER ANY TABLE | DROP ANY TABLE | SELECT ANY TABLE | INSERT ANY TABLE |
+    UPDATE ANY TABLE | DELETE ANY TABLE | CREATE ANY SEQUENCE | CREATE ANY INDEX |
+    CREATE ANY FUNCTION | EXECUTE ANY FUNCTION | CREATE ANY PACKAGE |
+    EXECUTE ANY PACKAGE | CREATE ANY TYPE } [, ...]
+    FROM [ GROUP ] role_name [, ...];
 </synopsis>
 </refsynopsisdiv>
 </refentry>

@@ -57,6 +57,7 @@ enum ModuleId {
     MOD_EXECUTOR,     /* Row Executor */
     MOD_OPFUSION,     /* Bypass Opfusion */
     MOD_GPC,          /* Global plancache */
+    MOD_GSC,          /* Global syscache */
     MOD_VEC_EXECUTOR, /* Vector Executor */
     MOD_STREAM,       /* Stream */
     MOD_LLVM,         /* LLVM */
@@ -134,6 +135,8 @@ enum ModuleId {
     MOD_SPI,
     MOD_NEST_COMPILE,
     MOD_RESOWNER,
+    MOD_LOGICAL_DECODE,    /* logical decode */
+    MOD_GPRC, /* global package runtime cache */
 
     /*
      * Add your module id above.

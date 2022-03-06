@@ -1,0 +1,65 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_string(key int,_varchar_ varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_char_ char(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_text_ text ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+*******inserting data to the serial table
+INSERT INTO t_string (key, _varchar_, _char_, _text_) VALUES (?,?,?,?);
+1,varchar data,char data,text data
+INSERT INTO t_string (key, _varchar_, _char_, _text_) VALUES (?,?,?,?);
+2,varchar data 2,char data 2,text data 2
+*************inserting data verification
+select * from t_string where (_varchar_ = ? and _char_ = ?) or _text_ =? order by key
+varchar data,char data,text data 2
+ key |   _varchar_    |                       _char_                       |   _text_    
+-----+----------------+----------------------------------------------------+-------------
+   1 | varchar data   | char data                                          | text data
+   2 | varchar data 2 | char data 2                                        | text data 2
+(2 rows)
+
+***************updating data
+Update t_string set _varchar_ =? , _char_ = ? where _text_ = ? or key = ?
+varchar updated data,char updated data,text data 2,2
+**************updating data verification
+select * from t_string where _varchar_ = ? and _char_ = ?
+varchar updated data,char updated data
+ key |      _varchar_       |                       _char_                       |   _text_    
+-----+----------------------+----------------------------------------------------+-------------
+   2 | varchar updated data | char updated data                                  | text data 2
+(1 row)
+
+*************deleting data
+delete from  t_string where _varchar_ = ? and _text_ = ? and _char_ = ? 
+varchar updated data,text data 2,char updated data
+*******************deleting data verification
+select * from t_string where _varchar_ = ? and _text_ = ? and _char_ = ?
+varchar updated data,text data 2,char updated data
+ key | _varchar_ | _char_ | _text_ 
+-----+-----------+--------+--------
+(0 rows)
+
+select * from t_string
+
+ key |  _varchar_   |                       _char_                       |  _text_   
+-----+--------------+----------------------------------------------------+-----------
+   1 | varchar data | char data                                          | text data
+(1 row)
+
+*************deleting all data
+delete  from t_string
+
+No results were returned by the query.
+**************deleting all data verification
+select * from t_string
+
+ key | _varchar_ | _char_ | _text_ 
+-----+-----------+--------+--------
+(0 rows)
+
+drop table t_string;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;

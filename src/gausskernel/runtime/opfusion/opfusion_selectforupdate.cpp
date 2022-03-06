@@ -130,9 +130,18 @@ bool SelectForUpdateFusion::execute(long max_rows, char *completionTag)
     /* ******************
      * step 1: prepare *
      * ***************** */
-    m_local.m_scan->start_row = m_c_global->m_limitOffset >= 0 ? m_c_global->m_limitOffset : 0;
-    m_local.m_scan->get_rows =
-        m_c_global->m_limitCount >= 0 ? (m_c_global->m_limitCount + m_local.m_scan->start_row) : max_rows;
+    int64 start_row = m_c_global->m_limitOffset >= 0 ? m_c_global->m_limitOffset : 0;
+    int64 alreadyfetch = (m_local.m_position > start_row) ? (m_local.m_position - start_row) : 0;
+    /* no limit get fetch size rows */
+    int64 get_rows = max_rows;
+    if (m_c_global->m_limitCount >= 0) {
+        /* fetch size, limit */
+        int64 limit_row = (m_c_global->m_limitCount - alreadyfetch > 0) ? m_c_global->m_limitCount - alreadyfetch : 0;
+        get_rows = (limit_row > max_rows) ? max_rows : limit_row;
+    }
+    m_local.m_scan->start_row = start_row;
+    m_local.m_scan->get_rows = get_rows;
+
     if (m_local.m_position == 0) {
         m_local.m_scan->refreshParameter(m_local.m_outParams == NULL ? m_local.m_params : m_local.m_outParams);
         m_local.m_scan->Init(max_rows);
@@ -159,7 +168,6 @@ bool SelectForUpdateFusion::execute(long max_rows, char *completionTag)
         if (max_rows == 0 || nprocessed < (unsigned long)max_rows) {
             m_local.m_isCompleted = true;
         }
-        m_local.m_position += nprocessed;
     } else {
         m_local.m_isCompleted = true;
     }
@@ -220,8 +228,13 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
     securec_check(errorno, "\0", "\0");
 
     newtuple.t_data = &(tbuf.hdr);
-    while (nprocessed < (unsigned long)start_row && (tuple = m_local.m_scan->getTuple()) != NULL) {
-        nprocessed++;
+    while (m_local.m_position < (long)start_row && (tuple = m_local.m_scan->getTuple()) != NULL) {
+        m_local.m_position++;
+    }
+    if (m_local.m_position < (long)start_row) {
+        Assert(tuple == NULL);
+        get_rows = 0;
+        m_local.m_isCompleted = true;
     }
 
     while (nprocessed < (unsigned long)get_rows && (tuple = m_local.m_scan->getTuple()) != NULL) {
@@ -262,7 +275,11 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
             result = tableam_tuple_lock(bucket_rel == NULL ? destRel : bucket_rel, &newtuple, &buffer,
                 GetCurrentCommandId(true), LockTupleExclusive, LockWaitBlock, &tmfd,
                 false, // allow_lock_self (heap implementation)
+#ifdef ENABLE_MULTIPLE_NODES
+                false,
+#else
                 true,  // follow_updates
+#endif
                 false, // eval
                 GetActiveSnapshot(), &(((HeapTuple)tuple)->t_self), true);
 
@@ -302,6 +319,7 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
                 case TM_Ok:
                     /* done successfully */
                     nprocessed++;
+                    m_local.m_position++;
                     (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
                     ExecClearTuple(m_local.m_reslot);
                     break;
@@ -352,6 +370,7 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
 
                     tableam_tslot_getsomeattrs(m_local.m_reslot, m_global->m_tupDesc->natts);
                     nprocessed++;
+                    m_local.m_position++;
                     (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
                     ((HeapTuple)tuple)->t_self = tmfd.ctid;
                     tuple = copyTuple;

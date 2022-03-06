@@ -313,7 +313,8 @@ static void AddRelcacheInvalidationMessage(InvalidationListHeader* hdr, Oid dbId
 
     /* Don't add a duplicate item */
     /* We assume dbId need not be checked because it will never change */
-    ProcessMessageList(hdr->rclist, if (msg->rc.id == SHAREDINVALRELCACHE_ID && msg->rc.relId == relId) return );
+    ProcessMessageList(hdr->rclist, if (msg->rc.id == SHAREDINVALRELCACHE_ID &&
+        (msg->rc.relId == relId || msg->rc.relId == InvalidOid)) return);
 
     /* OK, add the item */
     msg.rc.id = SHAREDINVALRELCACHE_ID;
@@ -411,7 +412,7 @@ static void ProcessInvalidationMessagesMulti(
  */
 static void RegisterCatcacheInvalidation(int cacheId, uint32 hashValue, Oid dbId)
 {
-    AddCatcacheInvalidationMessage(&u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs, cacheId, hashValue, dbId);
+    AddCatcacheInvalidationMessage(&GetInvalCxt()->transInvalInfo->CurrentCmdInvalidMsgs, cacheId, hashValue, dbId);
 }
 
 /*
@@ -421,7 +422,7 @@ static void RegisterCatcacheInvalidation(int cacheId, uint32 hashValue, Oid dbId
  */
 static void RegisterCatalogInvalidation(Oid dbId, Oid catId)
 {
-    AddCatalogInvalidationMessage(&u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs, dbId, catId);
+    AddCatalogInvalidationMessage(&GetInvalCxt()->transInvalInfo->CurrentCmdInvalidMsgs, dbId, catId);
 }
 
 /*
@@ -431,7 +432,7 @@ static void RegisterCatalogInvalidation(Oid dbId, Oid catId)
  */
 static void RegisterRelcacheInvalidation(Oid dbId, Oid relId)
 {
-    AddRelcacheInvalidationMessage(&u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs, dbId, relId);
+    AddRelcacheInvalidationMessage(&GetInvalCxt()->transInvalInfo->CurrentCmdInvalidMsgs, dbId, relId);
 
     /*
      * Most of the time, relcache invalidation is associated with system
@@ -455,7 +456,7 @@ static void RegisterRelcacheInvalidation(Oid dbId, Oid relId)
 
 static void RegisterPartcacheInvalidation(Oid dbId, Oid partId)
 {
-    AddPartcacheInvalidationMessage(&u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs, dbId, partId);
+    AddPartcacheInvalidationMessage(&GetInvalCxt()->transInvalInfo->CurrentCmdInvalidMsgs, dbId, partId);
 
     /*
      * Most of the time, relcache invalidation is associated with system
@@ -493,20 +494,141 @@ static void SendCatcacheInvalidation(int cacheId, uint32 hashValue, Oid dbId)
     SendSharedInvalidMessages(&msg, 1);
 }
 
+void LocalExecuteThreadAndSessionInvalidationMessage(SharedInvalidationMessage* msg)
+{
+    LocalExecuteThreadInvalidationMessage(msg);
+    LocalExecuteSessionInvalidationMessage(msg);
+}
+
+static void ThreadInvalidCatalog(SharedInvalidationMessage* msg)
+{
+    if (msg->cat.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->cat.dbId == InvalidOid) {
+        CatalogCacheFlushCatalog(msg->cat.catId);
+        /* CatalogCacheFlushCatalog calls CallSyscacheCallbacks as needed */
+    }
+}
+static void ThreadInvalidRelCache(SharedInvalidationMessage* msg)
+{
+    if (msg->rc.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->rc.dbId == InvalidOid) {
+        RelationCacheInvalidateEntry(msg->rc.relId);
+        knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+        for (int i = 0; i < inval_cxt->relcache_callback_count; i++) {
+            struct RELCACHECALLBACK* ccitem = inval_cxt->relcache_callback_list + i;
+            (*ccitem->function)(ccitem->arg, msg->rc.relId);
+        }
+    }
+}
+static void ThreadInvalidSmgr(SharedInvalidationMessage* msg)
+{
+    /*
+     * We could have smgr entries for relations of other databases, so no
+     * short-circuit test is possible here.
+     */
+    RelFileNodeBackend rnode;
+    RelFileNodeCopy(rnode.node, msg->sm.rnode, InvalidBktId);
+    rnode.backend = (msg->sm.backend_hi << 16) | (int)msg->sm.backend_lo;
+    smgrclosenode(rnode);
+}
+static void ThreadInvalidHbktSmgr(SharedInvalidationMessage* msg)
+{
+    RelFileNodeBackend rnode;
+    /* Hash bucket table is always regular relations */
+    rnode.backend = InvalidBackendId;
+    RelFileNodeCopy(rnode.node, msg->hbksm.rnode, (int) msg->hbksm.bucketId);
+    smgrclosenode(rnode);
+}
+static void ThreadInvalidRelmap(SharedInvalidationMessage* msg)
+{
+    /* We only care about our own database and shared catalogs */
+    if (msg->rm.dbId == InvalidOid) {
+        RelationMapInvalidate(true);
+    } else if (msg->rm.dbId == t_thrd.lsc_cxt.lsc->my_database_id) {
+        RelationMapInvalidate(false);
+    }
+}
+static void ThreadInvalidPartCache(SharedInvalidationMessage* msg)
+{
+    if (msg->pc.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->pc.dbId == InvalidOid) {
+        PartitionCacheInvalidateEntry(msg->pc.partId);
+        knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+        for (int i = 0; i < inval_cxt->partcache_callback_count; i++) {
+            struct PARTCACHECALLBACK* ccitem = inval_cxt->partcache_callback_list + i;
+            (*ccitem->function)(ccitem->arg, msg->pc.partId);
+        }
+    }
+}
+static void ThreadInvalidCatCache(SharedInvalidationMessage* msg)
+{
+    if (msg->cc.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->cc.dbId == InvalidOid) {
+        CatalogCacheIdInvalidate(msg->cc.id, msg->cc.hashValue);
+        CallThreadSyscacheCallbacks(msg->cc.id, msg->cc.hashValue);
+    }
+}
 /*
- * LocalExecuteInvalidationMessage
+ * LocalExecuteThreadInvalidationMessage
  *
  * Process a single invalidation message (which could be of any type).
  * Only the local caches are flushed; this does not transmit the message
  * to other backends.
  */
-void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
+void LocalExecuteThreadInvalidationMessage(SharedInvalidationMessage* msg)
+{
+    if (!EnableLocalSysCache()) {
+        return;
+    }
+    Assert(CheckMyDatabaseMatch());
+    switch (msg->id) {
+        case SHAREDINVALCATALOG_ID: { /* reset system table */
+            ThreadInvalidCatalog(msg);
+            break;
+        }
+        case SHAREDINVALRELCACHE_ID: { /* invalid table and call callbackfunc registered on the table */
+            ThreadInvalidRelCache(msg);
+            break;
+        }
+        case SHAREDINVALSMGR_ID: { /* invalid smgr struct, dont care which db it belongs to */
+            ThreadInvalidSmgr(msg);
+            break;
+        }
+        case SHAREDINVALHBKTSMGR_ID: { /* invalid smgr struct, dont care which db it belongs to */
+            ThreadInvalidHbktSmgr(msg);
+            break;
+        }
+        case SHAREDINVALRELMAP_ID: { /* invalid relmap cxt */
+            ThreadInvalidRelmap(msg);
+            break;
+        }
+        case SHAREDINVALPARTCACHE_ID: { /* invalid partcache and call callbackfunc registered on the part */
+            ThreadInvalidPartCache(msg);
+            break;
+        }
+        case SHAREDINVALFUNC_ID: { /* func hashtable no in thread, so invalid it by session inval msg */
+            break;
+        }
+        default:{
+            if (msg->id >= 0) { /* invalid catcache, most cases are ddls on rel */
+                ThreadInvalidCatCache(msg);
+            } else {
+            ereport(FATAL, (errmsg("unrecognized SI message ID: %d", msg->id)));
+            }
+        }
+    }
+}
+
+/*
+ *
+ *
+ * Process a single invalidation message (which could be of any type).
+ * Only the local caches are flushed; this does not transmit the message
+ * to other backends.
+ */
+static void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
 {
     if (msg->id >= 0) {
         if (msg->cc.dbId == u_sess->proc_cxt.MyDatabaseId || msg->cc.dbId == InvalidOid) {
             CatalogCacheIdInvalidate(msg->cc.id, msg->cc.hashValue);
 
-            CallSyscacheCallbacks(msg->cc.id, msg->cc.hashValue);
+            CallSessionSyscacheCallbacks(msg->cc.id, msg->cc.hashValue);
         }
     } else if (msg->id == SHAREDINVALCATALOG_ID) {
         if (msg->cat.dbId == u_sess->proc_cxt.MyDatabaseId || msg->cat.dbId == InvalidOid) {
@@ -563,7 +685,7 @@ void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
         }
     } else if (msg->id == SHAREDINVALFUNC_ID) {
         if (msg->fm.dbId == u_sess->proc_cxt.MyDatabaseId || msg->fm.dbId == InvalidOid) {
-            plpgsql_HashTableDeleteAndCheckFunc(msg->fm.cacheId, msg->fm.objId);
+            plpgsql_hashtable_delete_and_check_invalid_item(msg->fm.cacheId, msg->fm.objId);
         }
     } else {
         ereport(FATAL, (errmsg("unrecognized SI message ID: %d", msg->id)));
@@ -576,6 +698,60 @@ void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
 #else
         if (check == true && (u_sess->pcache_cxt.gpc_remote_msg == false || pmState == PM_HOT_STANDBY)) {
 #endif
+            u_sess->pcache_cxt.gpc_in_ddl = true;
+        }
+    }
+}
+
+void LocalExecuteSessionInvalidationMessage(SharedInvalidationMessage* msg)
+{
+    if (!EnableLocalSysCache()) {
+        LocalExecuteInvalidationMessage(msg);
+        return;
+    }
+    Assert(CheckMyDatabaseMatch());
+    if (msg->id >= 0) {
+        if (msg->cc.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->cc.dbId == InvalidOid) {
+            CallSessionSyscacheCallbacks(msg->cc.id, msg->cc.hashValue);
+        }
+    } else if (msg->id == SHAREDINVALCATALOG_ID) {
+        if (msg->cat.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->cat.dbId == InvalidOid) {
+            t_thrd.lsc_cxt.lsc->systabcache.SessionCatCacheCallBack(msg->cat.catId);
+            /* CatalogCacheFlushCatalog calls CallSyscacheCallbacks as needed */
+        }
+    } else if (msg->id == SHAREDINVALRELCACHE_ID) {
+        if (msg->rc.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->rc.dbId == InvalidOid) {
+            knl_u_inval_context *inval_cxt = &u_sess->inval_cxt;
+            for (int i = 0; i < inval_cxt->relcache_callback_count; i++) {
+                struct RELCACHECALLBACK* ccitem = inval_cxt->relcache_callback_list + i;
+                (*ccitem->function)(ccitem->arg, msg->rc.relId);
+            }
+        }
+    } else if (msg->id == SHAREDINVALSMGR_ID) {
+        /* on GSC mode, smgrcache is in thread memcxt */
+    } else if (msg->id == SHAREDINVALHBKTSMGR_ID) {
+        /* on GSC mode, smgrcache is in thread memcxt */
+    } else if (msg->id == SHAREDINVALRELMAP_ID) {
+        /* on GSC mode, relmap is in thread memcxt */
+    } else if (msg->id == SHAREDINVALPARTCACHE_ID) {
+        if (msg->pc.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->pc.dbId == InvalidOid) {
+            knl_u_inval_context *inval_cxt = &u_sess->inval_cxt;
+            for (int i = 0; i < inval_cxt->partcache_callback_count; i++) {
+                struct PARTCACHECALLBACK* ccitem = inval_cxt->partcache_callback_list + i;
+                (*ccitem->function)(ccitem->arg, msg->pc.partId);
+            }
+        }
+    } else if (msg->id == SHAREDINVALFUNC_ID) {
+        if (msg->fm.dbId == t_thrd.lsc_cxt.lsc->my_database_id || msg->fm.dbId == InvalidOid) {
+            plpgsql_hashtable_delete_and_check_invalid_item(msg->fm.cacheId, msg->fm.objId);
+        }
+    } else {
+        ereport(FATAL, (errmsg("unrecognized SI message ID: %d", msg->id)));
+    }
+
+    if (ENABLE_GPC) {
+        bool check = GlobalPlanCache::MsgCheck(msg);
+        if (check == true && u_sess->pcache_cxt.gpc_remote_msg == false) {
             u_sess->pcache_cxt.gpc_in_ddl = true;
         }
     }
@@ -594,26 +770,31 @@ void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
  */
 void InvalidateSystemCaches(void)
 {
+    InvalidateThreadSystemCaches();
+    InvalidateSessionSystemCaches();
+}
+
+void InvalidateSessionSystemCaches(void)
+{
+    if (!EnableLocalSysCache()) {
+        ResetCatalogCaches();
+        RelationCacheInvalidate();
+        PartitionCacheInvalidate();
+    }
     int i;
-
-    ResetCatalogCaches();
-    RelationCacheInvalidate(); /* gets smgr and relmap too */
-    PartitionCacheInvalidate();
-    for (i = 0; i < u_sess->inval_cxt.syscache_callback_count; i++) {
-        struct SYSCACHECALLBACK* ccitem = u_sess->inval_cxt.syscache_callback_list + i;
-
+    knl_u_inval_context *inval_cxt = &u_sess->inval_cxt;
+    for (i = 0; i < inval_cxt->syscache_callback_count; i++) {
+        struct SYSCACHECALLBACK* ccitem = inval_cxt->syscache_callback_list + i;
         (*ccitem->function)(ccitem->arg, ccitem->id, 0);
     }
 
-    for (i = 0; i < u_sess->inval_cxt.relcache_callback_count; i++) {
-        struct RELCACHECALLBACK* ccitem = u_sess->inval_cxt.relcache_callback_list + i;
-
+    for (i = 0; i < inval_cxt->relcache_callback_count; i++) {
+        struct RELCACHECALLBACK* ccitem = inval_cxt->relcache_callback_list + i;
         (*ccitem->function)(ccitem->arg, InvalidOid);
     }
 
-    for (i = 0; i < u_sess->inval_cxt.partcache_callback_count; i++) {
-        struct PARTCACHECALLBACK* ccitem = u_sess->inval_cxt.partcache_callback_list + i;
-
+    for (i = 0; i < inval_cxt->partcache_callback_count; i++) {
+        struct PARTCACHECALLBACK* ccitem = inval_cxt->partcache_callback_list + i;
         (*ccitem->function)(ccitem->arg, InvalidOid);
     }
 
@@ -623,20 +804,34 @@ void InvalidateSystemCaches(void)
     }
 }
 
-/*
- * AcceptInvalidationMessages
- *		Read and process invalidation messages from the shared invalidation
- *		message queue.
- *
- * Note:
- *		This should be called as the first step in processing a transaction.
- */
-void AcceptInvalidationMessages(void)
+void InvalidateThreadSystemCaches(void)
 {
-    u_sess->pcache_cxt.gpc_remote_msg = true;
-    ++u_sess->inval_cxt.deepthInAcceptInvalidationMessage;
-    ReceiveSharedInvalidMessages(LocalExecuteInvalidationMessage, InvalidateSystemCaches);
-    u_sess->pcache_cxt.gpc_remote_msg = false;
+    if (!EnableLocalSysCache()) {
+        return;
+    }
+    int i;
+    ResetCatalogCaches();
+    RelationCacheInvalidate(); /* gets smgr and relmap too */
+    PartitionCacheInvalidate();
+    knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+    for (i = 0; i < inval_cxt->syscache_callback_count; i++) {
+        struct SYSCACHECALLBACK* ccitem = inval_cxt->syscache_callback_list + i;
+        (*ccitem->function)(ccitem->arg, ccitem->id, 0);
+    }
+
+    for (i = 0; i < inval_cxt->relcache_callback_count; i++) {
+        struct RELCACHECALLBACK* ccitem = inval_cxt->relcache_callback_list + i;
+        (*ccitem->function)(ccitem->arg, InvalidOid);
+    }
+
+    for (i = 0; i < inval_cxt->partcache_callback_count; i++) {
+        struct PARTCACHECALLBACK* ccitem = inval_cxt->partcache_callback_list + i;
+        (*ccitem->function)(ccitem->arg, InvalidOid);
+    }
+}
+
+static void TestCodeToForceCacheFlushes()
+{
     /*
      * Test code to force cache flushes anytime a flush could happen.
      *
@@ -665,8 +860,48 @@ void AcceptInvalidationMessages(void)
 #elif defined(CLOBBER_CACHE_RECURSIVELY)
     InvalidateSystemCaches();
 #endif
+}
 
-    --u_sess->inval_cxt.deepthInAcceptInvalidationMessage;
+/*
+ * AcceptInvalidationMessages
+ *		Read and process invalidation messages from the shared invalidation
+ *		message queue.
+ *
+ * Note:
+ *		This should be called as the first step in processing a transaction.
+ */
+void AcceptInvalidationMessages()
+{
+    if (EnableLocalSysCache()) {
+        u_sess->pcache_cxt.gpc_remote_msg = true;
+        knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+        ++inval_cxt->DeepthInAcceptInvalidationMessage;
+        if (!IS_THREAD_POOL_WORKER) {
+            ReceiveSharedInvalidMessages(LocalExecuteThreadAndSessionInvalidationMessage,
+                InvalidateSystemCaches, false);
+        } else {
+            ReceiveSharedInvalidMessages(LocalExecuteThreadInvalidationMessage, InvalidateThreadSystemCaches, false);
+            u_sess->pcache_cxt.gpc_remote_msg = false;
+            TestCodeToForceCacheFlushes();
+            --inval_cxt->DeepthInAcceptInvalidationMessage;
+
+            u_sess->pcache_cxt.gpc_remote_msg = true;
+            inval_cxt = &u_sess->inval_cxt;
+            ++inval_cxt->DeepthInAcceptInvalidationMessage;
+            ReceiveSharedInvalidMessages(LocalExecuteSessionInvalidationMessage, InvalidateSessionSystemCaches, true);
+        }
+        u_sess->pcache_cxt.gpc_remote_msg = false;
+        TestCodeToForceCacheFlushes();
+        --inval_cxt->DeepthInAcceptInvalidationMessage;
+        return;
+    }
+
+    u_sess->pcache_cxt.gpc_remote_msg = true;
+    ++u_sess->inval_cxt.DeepthInAcceptInvalidationMessage;
+    ReceiveSharedInvalidMessages(LocalExecuteInvalidationMessage, InvalidateSystemCaches, false);
+    u_sess->pcache_cxt.gpc_remote_msg = false;
+    TestCodeToForceCacheFlushes();
+    --u_sess->inval_cxt.DeepthInAcceptInvalidationMessage;
 }
 
 /*
@@ -675,12 +910,13 @@ void AcceptInvalidationMessages(void)
  */
 void AtStart_Inval(void)
 {
-    Assert(u_sess->inval_cxt.transInvalInfo == NULL);
-    u_sess->inval_cxt.transInvalInfo =
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
+    Assert(inval_cxt->transInvalInfo == NULL);
+    inval_cxt->transInvalInfo =
         (TransInvalidationInfo*)MemoryContextAllocZero(u_sess->top_transaction_mem_cxt, sizeof(TransInvalidationInfo));
-    u_sess->inval_cxt.transInvalInfo->my_level = GetCurrentTransactionNestLevel();
-    u_sess->inval_cxt.SharedInvalidMessagesArray = NULL;
-    u_sess->inval_cxt.numSharedInvalidMessagesArray = 0;
+    inval_cxt->transInvalInfo->my_level = GetCurrentTransactionNestLevel();
+    inval_cxt->SharedInvalidMessagesArray = NULL;
+    inval_cxt->numSharedInvalidMessagesArray = 0;
 }
 
 /*
@@ -707,53 +943,54 @@ void PostPrepare_Inval(void)
 void AtSubStart_Inval(void)
 {
     TransInvalidationInfo* myInfo = NULL;
-
-    Assert(u_sess->inval_cxt.transInvalInfo != NULL);
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
+    Assert(inval_cxt->transInvalInfo != NULL);
     myInfo =
         (TransInvalidationInfo*)MemoryContextAllocZero(u_sess->top_transaction_mem_cxt, sizeof(TransInvalidationInfo));
-    myInfo->parent = u_sess->inval_cxt.transInvalInfo;
+    myInfo->parent = inval_cxt->transInvalInfo;
     myInfo->my_level = GetCurrentTransactionNestLevel();
-    u_sess->inval_cxt.transInvalInfo = myInfo;
+    inval_cxt->transInvalInfo = myInfo;
 }
 
 /*
- * Collect invalidation messages into u_sess->inval_cxt.SharedInvalidMessagesArray array.
+ * Collect invalidation messages into GetInvalCxt()->SharedInvalidMessagesArray array.
  */
 static void MakeSharedInvalidMessagesArray(const SharedInvalidationMessage* msgs, int n)
 {
     /*
      * Initialise array first time through in each commit
      */
-    if (u_sess->inval_cxt.SharedInvalidMessagesArray == NULL) {
-        u_sess->inval_cxt.maxSharedInvalidMessagesArray = FIRSTCHUNKSIZE;
-        u_sess->inval_cxt.numSharedInvalidMessagesArray = 0;
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
+    if (inval_cxt->SharedInvalidMessagesArray == NULL) {
+        inval_cxt->maxSharedInvalidMessagesArray = FIRSTCHUNKSIZE;
+        inval_cxt->numSharedInvalidMessagesArray = 0;
 
         /*
          * Although this is being palloc'd we don't actually free it directly.
          * We're so close to EOXact that we now we're going to lose it anyhow.
          */
-        u_sess->inval_cxt.SharedInvalidMessagesArray = (SharedInvalidationMessage*)palloc(
-            u_sess->inval_cxt.maxSharedInvalidMessagesArray * sizeof(SharedInvalidationMessage));
+        inval_cxt->SharedInvalidMessagesArray = (SharedInvalidationMessage*)palloc(
+            inval_cxt->maxSharedInvalidMessagesArray * sizeof(SharedInvalidationMessage));
     }
 
-    if ((u_sess->inval_cxt.numSharedInvalidMessagesArray + n) > u_sess->inval_cxt.maxSharedInvalidMessagesArray) {
-        while ((u_sess->inval_cxt.numSharedInvalidMessagesArray + n) > u_sess->inval_cxt.maxSharedInvalidMessagesArray)
-            u_sess->inval_cxt.maxSharedInvalidMessagesArray *= 2;
+    if ((inval_cxt->numSharedInvalidMessagesArray + n) > inval_cxt->maxSharedInvalidMessagesArray) {
+        while ((inval_cxt->numSharedInvalidMessagesArray + n) > inval_cxt->maxSharedInvalidMessagesArray)
+            inval_cxt->maxSharedInvalidMessagesArray *= 2;
 
-        u_sess->inval_cxt.SharedInvalidMessagesArray =
-            (SharedInvalidationMessage*)repalloc(u_sess->inval_cxt.SharedInvalidMessagesArray,
-                u_sess->inval_cxt.maxSharedInvalidMessagesArray * sizeof(SharedInvalidationMessage));
+        inval_cxt->SharedInvalidMessagesArray =
+            (SharedInvalidationMessage*)repalloc(inval_cxt->SharedInvalidMessagesArray,
+                inval_cxt->maxSharedInvalidMessagesArray * sizeof(SharedInvalidationMessage));
     }
 
     /*
      * Append the next chunk onto the array
      */
-    int rc = memcpy_s(u_sess->inval_cxt.SharedInvalidMessagesArray + u_sess->inval_cxt.numSharedInvalidMessagesArray,
+    int rc = memcpy_s(inval_cxt->SharedInvalidMessagesArray + inval_cxt->numSharedInvalidMessagesArray,
         n * sizeof(SharedInvalidationMessage),
         msgs,
         n * sizeof(SharedInvalidationMessage));
     securec_check(rc, "\0", "\0");
-    u_sess->inval_cxt.numSharedInvalidMessagesArray += n;
+    inval_cxt->numSharedInvalidMessagesArray += n;
 }
 
 /*
@@ -772,16 +1009,16 @@ static void MakeSharedInvalidMessagesArray(const SharedInvalidationMessage* msgs
 int xactGetCommittedInvalidationMessages(SharedInvalidationMessage** msgs, bool* RelcacheInitFileInval)
 {
     MemoryContext oldcontext;
-
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
     /* Must be at top of stack */
-    Assert(u_sess->inval_cxt.transInvalInfo != NULL && u_sess->inval_cxt.transInvalInfo->parent == NULL);
+    Assert(inval_cxt->transInvalInfo != NULL && inval_cxt->transInvalInfo->parent == NULL);
 
     /*
      * Relcache init file invalidation requires processing both before and
      * after we send the SI messages.  However, we need not do anything unless
      * we committed.
      */
-    *RelcacheInitFileInval = u_sess->inval_cxt.transInvalInfo->RelcacheInitFileInval;
+    *RelcacheInitFileInval = inval_cxt->transInvalInfo->RelcacheInitFileInval;
 
     /*
      * Walk through TransInvalidationInfo to collect all the messages into a
@@ -794,17 +1031,17 @@ int xactGetCommittedInvalidationMessages(SharedInvalidationMessage** msgs, bool*
     oldcontext = MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
 
     ProcessInvalidationMessagesMulti(
-        &u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs, MakeSharedInvalidMessagesArray);
+        &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs, MakeSharedInvalidMessagesArray);
     ProcessInvalidationMessagesMulti(
-        &u_sess->inval_cxt.transInvalInfo->PriorCmdInvalidMsgs, MakeSharedInvalidMessagesArray);
+        &inval_cxt->transInvalInfo->PriorCmdInvalidMsgs, MakeSharedInvalidMessagesArray);
     MemoryContextSwitchTo(oldcontext);
 
     Assert(
-        !(u_sess->inval_cxt.numSharedInvalidMessagesArray > 0 && u_sess->inval_cxt.SharedInvalidMessagesArray == NULL));
+        !(inval_cxt->numSharedInvalidMessagesArray > 0 && inval_cxt->SharedInvalidMessagesArray == NULL));
 
-    *msgs = u_sess->inval_cxt.SharedInvalidMessagesArray;
+    *msgs = inval_cxt->SharedInvalidMessagesArray;
 
-    return u_sess->inval_cxt.numSharedInvalidMessagesArray;
+    return inval_cxt->numSharedInvalidMessagesArray;
 }
 
 /*
@@ -874,37 +1111,38 @@ void ProcessCommittedInvalidationMessages(
  */
 void AtEOXact_Inval(bool isCommit)
 {
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
     if (isCommit) {
         /* Must be at top of stack */
-        Assert(u_sess->inval_cxt.transInvalInfo != NULL && u_sess->inval_cxt.transInvalInfo->parent == NULL);
+        Assert(inval_cxt->transInvalInfo != NULL && inval_cxt->transInvalInfo->parent == NULL);
 
         /*
          * Relcache init file invalidation requires processing both before and
          * after we send the SI messages.  However, we need not do anything
          * unless we committed.
          */
-        if (u_sess->inval_cxt.transInvalInfo->RelcacheInitFileInval) {
+        if (inval_cxt->transInvalInfo->RelcacheInitFileInval) {
             RelationCacheInitFilePreInvalidate();
         }
-        AppendInvalidationMessages(&u_sess->inval_cxt.transInvalInfo->PriorCmdInvalidMsgs,
-            &u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs);
+
+        AppendInvalidationMessages(&inval_cxt->transInvalInfo->PriorCmdInvalidMsgs,
+            &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs);
 
         ProcessInvalidationMessagesMulti(
-            &u_sess->inval_cxt.transInvalInfo->PriorCmdInvalidMsgs, SendSharedInvalidMessages);
+            &inval_cxt->transInvalInfo->PriorCmdInvalidMsgs, SendSharedInvalidMessages);
 
-        if (u_sess->inval_cxt.transInvalInfo->RelcacheInitFileInval) {
+        if (inval_cxt->transInvalInfo->RelcacheInitFileInval) {
             RelationCacheInitFilePostInvalidate();
         }
-    } else if (u_sess->inval_cxt.transInvalInfo != NULL) {
+    } else if (inval_cxt->transInvalInfo != NULL) {
         /* Must be at top of stack */
-        Assert(u_sess->inval_cxt.transInvalInfo->parent == NULL);
-
+        Assert(inval_cxt->transInvalInfo->parent == NULL);
         ProcessInvalidationMessages(
-            &u_sess->inval_cxt.transInvalInfo->PriorCmdInvalidMsgs, LocalExecuteInvalidationMessage);
+            &inval_cxt->transInvalInfo->PriorCmdInvalidMsgs, LocalExecuteThreadAndSessionInvalidationMessage);
     }
 
     /* Need not free anything explicitly */
-    u_sess->inval_cxt.transInvalInfo = NULL;
+    inval_cxt->transInvalInfo = NULL;
 }
 
 /*
@@ -928,7 +1166,8 @@ void AtEOXact_Inval(bool isCommit)
 void AtEOSubXact_Inval(bool isCommit)
 {
     int my_level = GetCurrentTransactionNestLevel();
-    TransInvalidationInfo* myInfo = u_sess->inval_cxt.transInvalInfo;
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
+    TransInvalidationInfo* myInfo = inval_cxt->transInvalInfo;
 
     if (isCommit) {
         /* Must be at non-top of stack */
@@ -947,18 +1186,17 @@ void AtEOSubXact_Inval(bool isCommit)
         }
 
         /* Pop the transaction state stack */
-        u_sess->inval_cxt.transInvalInfo = myInfo->parent;
+        inval_cxt->transInvalInfo = myInfo->parent;
 
         /* Need not free anything else explicitly */
         pfree_ext(myInfo);
     } else if (myInfo != NULL && myInfo->my_level == my_level) {
         /* Must be at non-top of stack */
         Assert(myInfo->parent != NULL);
-
-        ProcessInvalidationMessages(&myInfo->PriorCmdInvalidMsgs, LocalExecuteInvalidationMessage);
+        ProcessInvalidationMessages(&myInfo->PriorCmdInvalidMsgs, LocalExecuteThreadAndSessionInvalidationMessage);
 
         /* Pop the transaction state stack */
-        u_sess->inval_cxt.transInvalInfo = myInfo->parent;
+        inval_cxt->transInvalInfo = myInfo->parent;
 
         /* Need not free anything else explicitly */
         pfree_ext(myInfo);
@@ -982,19 +1220,21 @@ void AtEOSubXact_Inval(bool isCommit)
  */
 void CommandEndInvalidationMessages(void)
 {
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
     /*
      * You might think this shouldn't be called outside any transaction, but
      * bootstrap does it, and also ABORT issued when not in a transaction. So
      * just quietly return if no state to work on.
      */
-    if (u_sess->inval_cxt.transInvalInfo == NULL) {
+    if (inval_cxt->transInvalInfo == NULL) {
         return;
     }
-
+    ProcessInvalidationMessagesMulti(
+        &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs, GlobalExecuteSharedInvalidMessages);
     ProcessInvalidationMessages(
-        &u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs, LocalExecuteInvalidationMessage);
-    AppendInvalidationMessages(&u_sess->inval_cxt.transInvalInfo->PriorCmdInvalidMsgs,
-        &u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs);
+        &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs, LocalExecuteThreadAndSessionInvalidationMessage);
+    AppendInvalidationMessages(&inval_cxt->transInvalInfo->PriorCmdInvalidMsgs,
+        &inval_cxt->transInvalInfo->CurrentCmdInvalidMsgs);
 }
 
 /*
@@ -1111,7 +1351,7 @@ void CacheInvalidateHeapTuple(Relation relation, HeapTuple tuple, HeapTuple newt
 
 void CacheInvalidateFunction(Oid funcId, Oid pkgId)
 {
-    AddFunctionCacheInvalidationMessage(&u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs,
+    AddFunctionCacheInvalidationMessage(&GetInvalCxt()->transInvalInfo->CurrentCmdInvalidMsgs,
                                         u_sess->proc_cxt.MyDatabaseId, funcId, pkgId);
 }
 
@@ -1129,7 +1369,6 @@ void CacheInvalidateFunction(Oid funcId, Oid pkgId)
 void CacheInvalidateCatalog(Oid catalogId)
 {
     Oid databaseId;
-
     if (IsSharedRelation(catalogId)) {
         databaseId = InvalidOid;
     } else {
@@ -1340,7 +1579,7 @@ void CacheInvalidateHeapTupleInplace(Relation relation, HeapTuple tuple)
 }
 
 /*
- * CacheRegisterSyscacheCallback
+ * CacheRegisterThreadSyscacheCallback
  *		Register the specified function to be called for all future
  *		invalidation events in the specified cache.  The cache ID and the
  *		hash value of the tuple being invalidated will be passed to the
@@ -1352,21 +1591,62 @@ void CacheInvalidateHeapTupleInplace(Relation relation, HeapTuple tuple)
  * worth troubling over, especially since most of the current callees just
  * flush all cached state anyway.
  */
-void CacheRegisterSyscacheCallback(int cacheid, SyscacheCallbackFunction func, Datum arg)
+void CacheRegisterThreadSyscacheCallback(int cacheid, SyscacheCallbackFunction func, Datum arg)
 {
-    if (u_sess->inval_cxt.syscache_callback_count >= MAX_SYSCACHE_CALLBACKS) {
+    if (!EnableLocalSysCache()) {
+        CacheRegisterSessionSyscacheCallback(cacheid, func, arg);
+        return;
+    }
+    knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+    for (int i = 0; i < inval_cxt->syscache_callback_count; i++) {
+        if (inval_cxt->syscache_callback_list[i].id == cacheid &&
+            inval_cxt->syscache_callback_list[i].function == func) {
+            Assert(IS_THREAD_POOL_STREAM);
+            if (inval_cxt->syscache_callback_list[i].arg != arg) {
+                inval_cxt->syscache_callback_list[i].arg = arg;
+            }
+            return;
+        }
+    }
+    if (inval_cxt->syscache_callback_count >= MAX_SYSCACHE_CALLBACKS) {
+        ereport(FATAL, (errmsg("out of syscache_callback_list slots")));
+    }
+    Assert(func != NULL);
+    inval_cxt->syscache_callback_list[inval_cxt->syscache_callback_count].id = cacheid;
+    inval_cxt->syscache_callback_list[inval_cxt->syscache_callback_count].function = func;
+    inval_cxt->syscache_callback_list[inval_cxt->syscache_callback_count].arg = arg;
+
+    ++inval_cxt->syscache_callback_count;
+}
+
+/*
+ * CacheRegisterSessionSyscacheCallback
+ * make sure the cache the func flush is in u_sess, or you should use CacheRegisterThreadSyscacheCallback
+ */
+void CacheRegisterSessionSyscacheCallback(int cacheid, SyscacheCallbackFunction func, Datum arg)
+{
+    knl_u_inval_context *inval_cxt = &u_sess->inval_cxt;
+    for (int i = 0; i < inval_cxt->syscache_callback_count; i++) {
+        if (inval_cxt->syscache_callback_list[i].id == cacheid &&
+            inval_cxt->syscache_callback_list[i].function == func) {
+            Assert(inval_cxt->syscache_callback_list[i].arg == arg);
+            inval_cxt->syscache_callback_list[i].arg = arg;
+            return;
+        }
+    }
+    if (inval_cxt->syscache_callback_count >= MAX_SYSCACHE_CALLBACKS) {
         ereport(FATAL, (errmsg("out of syscache_callback_list slots")));
     }
 
-    u_sess->inval_cxt.syscache_callback_list[u_sess->inval_cxt.syscache_callback_count].id = cacheid;
-    u_sess->inval_cxt.syscache_callback_list[u_sess->inval_cxt.syscache_callback_count].function = func;
-    u_sess->inval_cxt.syscache_callback_list[u_sess->inval_cxt.syscache_callback_count].arg = arg;
+    inval_cxt->syscache_callback_list[inval_cxt->syscache_callback_count].id = cacheid;
+    inval_cxt->syscache_callback_list[inval_cxt->syscache_callback_count].function = func;
+    inval_cxt->syscache_callback_list[inval_cxt->syscache_callback_count].arg = arg;
 
-    ++u_sess->inval_cxt.syscache_callback_count;
+    ++inval_cxt->syscache_callback_count;
 }
 
 /*
- * CacheRegisterRelcacheCallback
+ * CacheRegisterThreadRelcacheCallback
  *		Register the specified function to be called for all future
  *		relcache invalidation events.  The OID of the relation being
  *		invalidated will be passed to the function.
@@ -1374,19 +1654,58 @@ void CacheRegisterSyscacheCallback(int cacheid, SyscacheCallbackFunction func, D
  * NOTE: InvalidOid will be passed if a cache reset request is received.
  * In this case the called routines should flush all cached state.
  */
-void CacheRegisterRelcacheCallback(RelcacheCallbackFunction func, Datum arg)
+void CacheRegisterThreadRelcacheCallback(RelcacheCallbackFunction func, Datum arg)
 {
-    if (u_sess->inval_cxt.relcache_callback_count >= MAX_RELCACHE_CALLBACKS) {
+    if (!EnableLocalSysCache()) {
+        CacheRegisterSessionRelcacheCallback(func, arg);
+        return;
+    }
+    knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+    for (int i = 0; i < inval_cxt->relcache_callback_count; i++) {
+        if (inval_cxt->relcache_callback_list[i].function == func) {
+            Assert(IS_THREAD_POOL_STREAM);
+            Assert(inval_cxt->relcache_callback_list[i].arg == arg);
+            if (inval_cxt->relcache_callback_list[i].arg != arg) {
+                inval_cxt->relcache_callback_list[i].arg = arg;
+            }
+            return;
+        }
+    }
+    if (inval_cxt->relcache_callback_count >= MAX_RELCACHE_CALLBACKS) {
         ereport(FATAL, (errmsg("out of relcache_callback_list slots")));
     }
+    Assert(func != NULL);
+    inval_cxt->relcache_callback_list[inval_cxt->relcache_callback_count].function = func;
+    inval_cxt->relcache_callback_list[inval_cxt->relcache_callback_count].arg = arg;
 
-    u_sess->inval_cxt.relcache_callback_list[u_sess->inval_cxt.relcache_callback_count].function = func;
-    u_sess->inval_cxt.relcache_callback_list[u_sess->inval_cxt.relcache_callback_count].arg = arg;
+    ++inval_cxt->relcache_callback_count;
+}
 
-    ++u_sess->inval_cxt.relcache_callback_count;
+/*
+ * CacheRegisterSessionRelcacheCallback
+ * make sure the cache the func flush is in u_sess, or you should use CacheRegisterThreadRelcacheCallback
+ */
+void CacheRegisterSessionRelcacheCallback(RelcacheCallbackFunction func, Datum arg)
+{
+    knl_u_inval_context *inval_cxt = &u_sess->inval_cxt;
+    for (int i = 0; i < inval_cxt->relcache_callback_count; i++) {
+        if (inval_cxt->relcache_callback_list[i].function == func) {
+            if (inval_cxt->relcache_callback_list[i].arg != arg) {
+                inval_cxt->relcache_callback_list[i].arg = arg;
+            }
+            return;
+        }
+    }
+    if (inval_cxt->relcache_callback_count >= MAX_RELCACHE_CALLBACKS) {
+        ereport(FATAL, (errmsg("out of relcache_callback_list slots")));
+    }
+    inval_cxt->relcache_callback_list[inval_cxt->relcache_callback_count].function = func;
+    inval_cxt->relcache_callback_list[inval_cxt->relcache_callback_count].arg = arg;
+
+    ++inval_cxt->relcache_callback_count;
 }
 /*
- * CacheRegisterRelcacheCallback
+ * CacheRegisterThreadPartcacheCallback
  *		Register the specified function to be called for all future
  *		relcache invalidation events.  The OID of the relation being
  *		invalidated will be passed to the function.
@@ -1394,30 +1713,86 @@ void CacheRegisterRelcacheCallback(RelcacheCallbackFunction func, Datum arg)
  * NOTE: InvalidOid will be passed if a cache reset request is received.
  * In this case the called routines should flush all cached state.
  */
-void CacheRegisterPartcacheCallback(PartcacheCallbackFunction func, Datum arg)
+void CacheRegisterThreadPartcacheCallback(PartcacheCallbackFunction func, Datum arg)
 {
-    if (u_sess->inval_cxt.partcache_callback_count >= MAX_PARTCACHE_CALLBACKS) {
+    if (!EnableLocalSysCache()) {
+        CacheRegisterSessionPartcacheCallback(func, arg);
+        return;
+    }
+    knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+    for (int i = 0; i < inval_cxt->partcache_callback_count; i++) {
+        if (inval_cxt->partcache_callback_list[i].function == func) {
+            Assert(IS_THREAD_POOL_STREAM);
+            Assert(inval_cxt->partcache_callback_list[i].arg == arg);
+            if (inval_cxt->partcache_callback_list[i].arg != arg) {
+                inval_cxt->partcache_callback_list[i].arg = arg;
+            }
+            return;
+        }
+    }
+    if (inval_cxt->partcache_callback_count >= MAX_PARTCACHE_CALLBACKS) {
         ereport(FATAL, (errmsg("out of partcache_callback_list slots")));
     }
+    Assert(func != NULL);
+    inval_cxt->partcache_callback_list[inval_cxt->partcache_callback_count].function = func;
+    inval_cxt->partcache_callback_list[inval_cxt->partcache_callback_count].arg = arg;
 
-    u_sess->inval_cxt.partcache_callback_list[u_sess->inval_cxt.partcache_callback_count].function = func;
-    u_sess->inval_cxt.partcache_callback_list[u_sess->inval_cxt.partcache_callback_count].arg = arg;
-
-    ++u_sess->inval_cxt.partcache_callback_count;
+    ++inval_cxt->partcache_callback_count;
 }
 
 /*
- * CallSyscacheCallbacks
+ * CacheRegisterSessionPartcacheCallback
+ * make sure the cache the func flush is in u_sess, or you should use CacheRegisterThreadPartcacheCallback
+ */
+void CacheRegisterSessionPartcacheCallback(PartcacheCallbackFunction func, Datum arg)
+{
+    knl_u_inval_context *inval_cxt = &u_sess->inval_cxt;
+    for (int i = 0; i < inval_cxt->partcache_callback_count; i++) {
+        if (inval_cxt->partcache_callback_list[i].function == func) {
+            if (inval_cxt->partcache_callback_list[i].arg != arg) {
+                inval_cxt->partcache_callback_list[i].arg = arg;
+            }
+            return;
+        }
+    }
+    if (inval_cxt->partcache_callback_count >= MAX_PARTCACHE_CALLBACKS) {
+        ereport(FATAL, (errmsg("out of partcache_callback_list slots")));
+    }
+    inval_cxt->partcache_callback_list[inval_cxt->partcache_callback_count].function = func;
+    inval_cxt->partcache_callback_list[inval_cxt->partcache_callback_count].arg = arg;
+
+    ++inval_cxt->partcache_callback_count;
+}
+
+/*
+ * CallThreadSyscacheCallbacks
  *
  * This is exported so that CatalogCacheFlushCatalog can call it, saving
  * this module from knowing which catcache IDs correspond to which catalogs.
  */
-void CallSyscacheCallbacks(int cacheid, uint32 hashvalue)
+void CallThreadSyscacheCallbacks(int cacheid, uint32 hashvalue)
+{
+    Assert(EnableGlobalSysCache());
+    int i;
+    knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
+    for (i = 0; i < inval_cxt->syscache_callback_count; i++) {
+        struct SYSCACHECALLBACK* ccitem = inval_cxt->syscache_callback_list + i;
+        if (ccitem->id == cacheid) {
+            (*ccitem->function)(ccitem->arg, cacheid, hashvalue);
+        }
+    }
+}
+
+/*
+ * CallSessionSyscacheCallbacks
+ * make sure the cache the func flush is in u_sess, or you should use CallThreadSyscacheCallbacks
+ */
+void CallSessionSyscacheCallbacks(int cacheid, uint32 hashvalue)
 {
     int i;
-
-    for (i = 0; i < u_sess->inval_cxt.syscache_callback_count; i++) {
-        struct SYSCACHECALLBACK* ccitem = u_sess->inval_cxt.syscache_callback_list + i;
+    knl_u_inval_context *inval_cxt = &u_sess->inval_cxt;
+    for (i = 0; i < inval_cxt->syscache_callback_count; i++) {
+        struct SYSCACHECALLBACK* ccitem = inval_cxt->syscache_callback_list + i;
         if (ccitem->id == cacheid) {
             (*ccitem->function)(ccitem->arg, cacheid, hashvalue);
         }
@@ -1431,23 +1806,25 @@ void CallSyscacheCallbacks(int cacheid, uint32 hashvalue)
 static void PrepareInvalidationState(void)
 {
     TransInvalidationInfo *myInfo;
+    knl_u_inval_context *inval_cxt = GetInvalCxt();
 
-    if (u_sess->inval_cxt.transInvalInfo != NULL &&
-        u_sess->inval_cxt.transInvalInfo->my_level == GetCurrentTransactionNestLevel())
+    if (inval_cxt->transInvalInfo != NULL &&
+        inval_cxt->transInvalInfo->my_level == GetCurrentTransactionNestLevel()) {
         return;
+    }
 
     myInfo =
         (TransInvalidationInfo *)MemoryContextAllocZero(u_sess->top_transaction_mem_cxt, sizeof(TransInvalidationInfo));
-    myInfo->parent = u_sess->inval_cxt.transInvalInfo;
+    myInfo->parent = inval_cxt->transInvalInfo;
     myInfo->my_level = GetCurrentTransactionNestLevel();
 
     /*
      * If there's any previous entry, this one should be for a deeper nesting
      * level.
      */
-    Assert(u_sess->inval_cxt.transInvalInfo == NULL || myInfo->my_level > u_sess->inval_cxt.transInvalInfo->my_level);
+    Assert(inval_cxt->transInvalInfo == NULL || myInfo->my_level > inval_cxt->transInvalInfo->my_level);
 
-    u_sess->inval_cxt.transInvalInfo = myInfo;
+    inval_cxt->transInvalInfo = myInfo;
 }
 
 /*

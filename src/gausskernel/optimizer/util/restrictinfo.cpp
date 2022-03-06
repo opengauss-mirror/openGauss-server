@@ -359,12 +359,6 @@ static RestrictInfo* make_restrictinfo_internal(Expr* clause, Expr* orclause, bo
     rc = memset_s(&restrictinfo->right_bucketsize, sizeof(BucketSize), 0, sizeof(BucketSize));
     securec_check(rc, "\0", "\0");
 
-    /*
-     * Mark whether this rinfo converted.
-     * default false, become true when type conversion happened during index matching process
-     */
-    restrictinfo->converted = false;
-
     return restrictinfo;
 }
 
@@ -534,8 +528,9 @@ List* extract_actual_clauses(List* restrictinfo_list, bool pseudoconstant)
         AssertEreport(IsA(rinfo, RestrictInfo), MOD_OPT, "");
 
         /* we consider the qual is real if  pseudoconstant is true and clause_relids is non-null. */
-        if ((rinfo->pseudoconstant == pseudoconstant) && (!pseudoconstant || bms_is_empty(rinfo->clause_relids)))
+        if ((rinfo->pseudoconstant == pseudoconstant) && (!pseudoconstant || bms_is_empty(rinfo->clause_relids))) {
             result = lappend(result, rinfo->clause);
+        }
     }
     return result;
 }

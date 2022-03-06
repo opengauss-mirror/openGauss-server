@@ -21,7 +21,10 @@
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/ustore/undo/knl_uundotxn.h"
 #include "access/ustore/undo/knl_uundozone.h"
+#include "access/ubtree.h"
 #include "access/redo_statistic.h"
+#include "access/xlog_internal.h"
+#include "access/multi_redo_api.h"
 #include "connector.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_database.h"
@@ -32,6 +35,7 @@
 #include "commands/dbcommands.h"
 #include "commands/user.h"
 #include "commands/vacuum.h"
+#include "commands/verify.h"
 #include "funcapi.h"
 #include "gaussdb_version.h"
 #include "libpq/ip.h"
@@ -72,6 +76,7 @@
 #include "instruments/list.h"
 #include "replication/rto_statistic.h"
 #include "storage/lock/lock.h"
+#include "nodes/makefuncs.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define NUM_PG_LOCKTAG_ID 12
@@ -82,9 +87,7 @@
 #define LOWERCASE_LETTERS_ID 87
 #define DISPLACEMENTS_VALUE 32
 
-const int PG_STAT_USP_PERSIST_META_COLS = 7;
-const int STAT_UNDO_LOG_SIZE = 17;
-const int PG_STAT_TRANSLOT_META_COLS = 5;
+const uint32 INDEX_STATUS_VIEW_COL_NUM = 3;
 
 /* bogus ... these externs should be in a header file */
 extern Datum pg_stat_get_numscans(PG_FUNCTION_ARGS);
@@ -195,6 +198,7 @@ extern Datum pg_stat_get_buf_written_backend(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_buf_fsync_backend(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_buf_alloc(PG_FUNCTION_ARGS);
 
+char g_dir[100] = {0};
 typedef enum XactAction {
     XACTION_INSERT = 0,
     XACTION_UPDATE,
@@ -259,8 +263,6 @@ extern Datum mot_global_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_local_memory_detail(PG_FUNCTION_ARGS);
 extern Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS);
 
-/* ustore stat */
-extern Datum gs_stat_ustore(PG_FUNCTION_ARGS);
 
 extern Datum track_memory_context_detail(PG_FUNCTION_ARGS);
 
@@ -284,6 +286,8 @@ extern List* parse_autovacuum_coordinators();
 extern Datum pg_autovac_timeout(PG_FUNCTION_ARGS);
 static int64 pgxc_exec_autoanalyze_timeout(Oid relOid, int32 coordnum, char* funcname);
 extern bool allow_autoanalyze(HeapTuple tuple);
+
+int g_stat_file_id = -1;
 
 /* the size of GaussDB_expr.ir */
 #define IR_FILE_SIZE 29800
@@ -338,6 +342,11 @@ static const char* WaitStateDesc[] = {
     "wait data sync",                // STATE_WAIT_DATASYNC
     "wait data sync queue",          // STATE_WAIT_DATASYNC_QUEUE
     "flush data",                    // STATE_WAIT_FLUSH_DATA
+    "wait reserve td",               // STATE_WAIT_RESERVE_TD
+    "wait td rollback",              // STATE_WAIT_TD_ROLLBACK
+    "wait transaction rollback",     // STATE_WAIT_TRANSACTION_ROLLBACK
+    "prune table",                   // STATE_PRUNE_TABLE
+    "prune index",                   // STATE_PRUNE_INDEX
     "stream get conn",               // STATE_STREAM_WAIT_CONNECT_NODES
     "wait producer ready",           // STATE_STREAM_WAIT_PRODUCER_READY
     "synchronize quit",              // STATE_STREAM_WAIT_THREAD_SYNC_QUIT
@@ -345,6 +354,7 @@ static const char* WaitStateDesc[] = {
     "wait active statement",         // STATE_WAIT_ACTIVE_STATEMENT
     "wait memory",                   // STATE_WAIT_MEMORY
     "Sort",                          // STATE_EXEC_SORT
+    "Sort - fetch tuple",            // STATE_EXEC_SORT_FETCH_TUPLE
     "Sort - write file",             // STATE_EXEC_SORT_WRITE_FILE
     "Material",                      // STATE_EXEC_MATERIAL
     "Material - write file",         // STATE_EXEC_MATERIAL_WRITE_FILE
@@ -378,8 +388,13 @@ static const char* WaitStateDesc[] = {
     "gtm set sequence val",          // STATE_GTM_SEQUENCE_SET_VAL
     "gtm drop sequence",             // STATE_GTM_DROP_SEQUENCE
     "gtm rename sequence",           // STATE_GTM_RENAME_SEQUENCE
+    "gtm set disaster cluster",      // STATE_GTM_SET_DISASTER_CLUSTER
+    "gtm get disaster cluster",      // STATE_GTM_GET_DISASTER_CLUSTER
+    "gtm del disaster cluster",      // STATE_GTM_DEL_DISASTER_CLUSTER
     "wait sync consumer next step",  // STATE_WAIT_SYNC_CONSUMER_NEXT_STEP
-    "wait sync producer next step"   // STATE_WAIT_SYNC_PRODUCER_NEXT_STEP
+    "wait sync producer next step",  // STATE_WAIT_SYNC_PRODUCER_NEXT_STEP
+    "gtm set consistency point",     // STATE_GTM_SET_CONSISTENCY_POINT
+    "wait sync bgworkers"            // STATE_WAIT_SYNC_BGWORKERS
 };
 
 // description for WaitStatePhase enums.
@@ -391,6 +406,7 @@ static const char* WaitStatePhaseDesc[] = {
     "wait quota",  // PHASE_WAIT_QUOTA
     "autovacuum",  // PHASE_AUTOVACUUM
 };
+
 
 /* ----------
  * pgstat_get_waitstatusdesc() -
@@ -611,6 +627,45 @@ static TimestampTz pgxc_last_autovac_time(Oid relOid, char* funcname)
     FreeParallelFunctionState(state);
 
     return result;
+}
+
+/*
+ * Build tuple desc and store for the caller result
+ * return the tuple store, the tupdesc would be return by pointer.
+ */
+Tuplestorestate *BuildTupleResult(FunctionCallInfo fcinfo, TupleDesc *tupdesc)
+{
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    Tuplestorestate *tupstore = NULL;
+
+    MemoryContext per_query_ctx;
+    MemoryContext oldcontext;
+
+    /* check to see if caller supports returning a tuplestore */
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("set-valued function called in context that cannot accept a set")));
+    }
+
+    if (!(rsinfo->allowedModes & SFRM_Materialize))
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("materialize mode required, but it is not "
+                                                                       "allowed in this context")));
+
+    /* Build a tuple descriptor for our result type */
+    if (get_call_result_type(fcinfo, NULL, tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("return type must be a row type")));
+
+    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+    oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+    tupstore = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = *tupdesc;
+
+    (void)MemoryContextSwitchTo(oldcontext);
+
+    return tupstore;
 }
 
 Datum pg_stat_get_numscans(PG_FUNCTION_ARGS)
@@ -1312,13 +1367,6 @@ static Datum pg_stat_segment_space_info_internal(Oid spaceid, Oid dbid, PG_FUNCT
     }
 
     SRF_RETURN_DONE(funcctx);
-}
-
-Datum pg_stat_segment_space_info(PG_FUNCTION_ARGS)
-{
-    Oid spaceid = PG_GETARG_OID(0);
-    Oid dbid = PG_GETARG_OID(1);
-    return pg_stat_segment_space_info_internal(spaceid, dbid, fcinfo);
 }
 
 Oid get_tablespace_oid_by_name(const char *tablespacename)
@@ -2078,7 +2126,7 @@ Datum pg_stat_get_activity(PG_FUNCTION_ARGS)
 
 Datum pg_stat_get_activity_helper(PG_FUNCTION_ARGS, bool has_conninfo)
 {
-    const int ATT_COUNT = has_conninfo ? 20 : 19;
+    const int ATT_COUNT = has_conninfo ? 22 : 21;
     ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
     MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
 
@@ -2106,9 +2154,13 @@ Datum pg_stat_get_activity_helper(PG_FUNCTION_ARGS, bool has_conninfo)
         TupleDescInitEntry(tupdesc, (AttrNumber)ARG_18, "connection_info", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)ARG_19, "srespool", NAMEOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)ARG_20, "global_sessionid", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARG_21, "unique_sql_id", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARG_22, "trace_id", TEXTOID, -1, 0);
     } else {
         TupleDescInitEntry(tupdesc, (AttrNumber)ARG_18, "srespool", NAMEOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)ARG_19, "global_sessionid", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARG_20, "unique_sql_id", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARG_21, "trace_id", TEXTOID, -1, 0);
     }
 
     rsinfo->returnMode = SFRM_Materialize;
@@ -2154,7 +2206,7 @@ char* GetGlobalSessionStr(GlobalSessionId globalSessionId)
 void insert_pg_stat_get_activity_with_conninfo(Tuplestorestate *tupStore, TupleDesc tupDesc,
                                                const PgBackendStatus *beentry)
 {
-    const int ATT_NUM = 20;
+    const int ATT_NUM = 22;
 
     Datum values[ATT_NUM];
     bool nulls[ATT_NUM];
@@ -2338,6 +2390,8 @@ void insert_pg_stat_get_activity_with_conninfo(Tuplestorestate *tupStore, TupleD
         char* gId = GetGlobalSessionStr(beentry->globalSessionId);
         values[ARR_19] = CStringGetTextDatum(gId);
         pfree(gId);
+        values[ARR_20] = Int64GetDatum(beentry->st_unique_sql_key.unique_sql_id);
+        values[ARR_21] = CStringGetTextDatum(beentry->trace_cxt.trace_id);
     } else {
         /* No permissions to view data about this session */
         values[ARR_6] = CStringGetTextDatum("<insufficient privilege>");
@@ -2361,6 +2415,8 @@ void insert_pg_stat_get_activity_with_conninfo(Tuplestorestate *tupStore, TupleD
         nulls[ARR_17] = true;
         nulls[ARR_18] = true;
         nulls[ARR_19] = true;
+        nulls[ARR_20] = true;
+        nulls[ARR_21] = true;
     }
 
     tuplestore_putvalues(tupStore, tupDesc, values, nulls);
@@ -2368,7 +2424,7 @@ void insert_pg_stat_get_activity_with_conninfo(Tuplestorestate *tupStore, TupleD
 
 void insert_pg_stat_get_activity(Tuplestorestate *tupStore, TupleDesc tupDesc, const PgBackendStatus *beentry)
 {
-    const int ATT_NUM = 19;
+    const int ATT_NUM = 21;
 
     Datum values[ATT_NUM];
     bool nulls[ATT_NUM];
@@ -2549,6 +2605,8 @@ void insert_pg_stat_get_activity(Tuplestorestate *tupStore, TupleDesc tupDesc, c
             (int)beentry->globalSessionId.nodeId, beentry->globalSessionId.sessionId, beentry->globalSessionId.seq);
         values[ARR_18] = CStringGetTextDatum(globalSessionId.data);
         pfree(globalSessionId.data);
+        values[ARR_19] = Int64GetDatum(beentry->st_unique_sql_key.unique_sql_id);
+        values[ARR_20] = CStringGetTextDatum(beentry->trace_cxt.trace_id);
     } else {
         /* No permissions to view data about this session */
         values[ARR_6] = CStringGetTextDatum("<insufficient privilege>");
@@ -2571,6 +2629,8 @@ void insert_pg_stat_get_activity(Tuplestorestate *tupStore, TupleDesc tupDesc, c
         nulls[ARR_16] = true;
         nulls[ARR_17] = true;
         nulls[ARR_18] = true;
+        nulls[ARR_19] = true;
+        nulls[ARR_20] = true;
     }
 
     tuplestore_putvalues(tupStore, tupDesc, values, nulls);
@@ -3362,6 +3422,10 @@ static char* GetLocktagDecode(const char* locktag)
             appendStringInfo(&tag, "database:%u, relation:%u, page:=%u, tuple:%u, bucket:%u", locktagField1,
                 locktagField2, locktagField3, locktagField4, locktagField5);
             break;
+        case LOCKTAG_UID:
+            appendStringInfo(&tag, "database:%u, relation:%u, uid:%lu", locktagField1, locktagField2,
+                (((uint64)locktagField3) << DISPLACEMENTS_VALUE) + locktagField4);
+            break;
         case LOCKTAG_TRANSACTION:
             appendStringInfo(&tag, "transactionid:%lu", TransactionIdGetDatum(
                 (TransactionId)locktagField1 | ((TransactionId)locktagField2 << DISPLACEMENTS_VALUE)));
@@ -4049,224 +4113,6 @@ Datum pg_stat_get_env(PG_FUNCTION_ARGS)
         /* nothing left */
         SRF_RETURN_DONE(funcctx);
     }
-}
-
-Datum gs_stat_ustore(PG_FUNCTION_ARGS)
-{
-    char result[9216] = {0};
-#ifdef DEBUG_UHEAP
-    errno_t ret;
-    LWLockAcquire(UHeapStatLock, LW_SHARED);
-
-    ret = snprintf_s(result, sizeof(result), sizeof(result), "Prune Page    \n");
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tPrune Page (SUCCESS) = %lu    \n",
-        UHeapStat_shared->prune_page[PRUNE_PAGE_SUCCESS]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tPrune Page (NO_SPACE) = %lu    \n",
-        UHeapStat_shared->prune_page[PRUNE_PAGE_NO_SPACE]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tPrune Page (UPDATE_IN_PROGRESS)= %lu    \n=========================\n\n",
-        UHeapStat_shared->prune_page[PRUNE_PAGE_UPDATE_IN_PROGRESS]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tPrune Page (PRUNE_PAGE_IN_RECOVERY)= %lu    \n=========================\n\n",
-        UHeapStat_shared->prune_page[PRUNE_PAGE_IN_RECOVERY]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tPrune Page (PRUNE_PAGE_INVALID)= %lu    \n=========================\n\n",
-        UHeapStat_shared->prune_page[PRUNE_PAGE_INVALID]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tPrune Page (PRUNE_PAGE_XID_FILTER)= %lu    \n=========================\n\n",
-        UHeapStat_shared->prune_page[PRUNE_PAGE_XID_FILTER]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tPrune Page (PRUNE_PAGE_FILLFACTOR)= %lu    \n=========================\n\n",
-        UHeapStat_shared->prune_page[PRUNE_PAGE_FILLFACTOR]);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "Prune Page OPs profile    \n");
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\t Prune Page SUC: %u %u %u    \n",
-        UHeapStat_shared->op_count_suc.ins, UHeapStat_shared->op_count_suc.del, UHeapStat_shared->op_count_suc.upd);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\t Prune Page TOT: %u %u %u    \n",
-        UHeapStat_shared->op_count_tot.ins, UHeapStat_shared->op_count_tot.del, UHeapStat_shared->op_count_tot.upd);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "Prune Page OPs freespace profile    \n");
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\t Prune Page FreeSpace TOT: %u %u %u    \n", UHeapStat_shared->op_space_tot.ins,
-        UHeapStat_shared->op_space_tot.del, UHeapStat_shared->op_space_tot.upd);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "PageReserveTransactionSlot (where to get transaction slot)    \n");
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tSlot has been reserved by current xid: %lu    \n",
-        UHeapStat_shared->get_transslot_from[TRANSSLOT_RESERVED_BY_CURRENT_XID]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tGot free slot after invalidating slots: %lu    \n",
-        UHeapStat_shared->get_transslot_from[TRANSSLOT_FREE_AFTER_INVALIDATION]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tGot free slot after freezing slots: %lu    \n",
-        UHeapStat_shared->get_transslot_from[TRANSSLOT_FREE_AFTER_FREEZING]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tCannot get a free transaction slot: %lu    \n=========================\n\n",
-        UHeapStat_shared->get_transslot_from[TRANSSLOT_CANNOT_GET]);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "Inplace Update Stats    \n");
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tINPLACE UPDATE: %lu    \n",
-        UHeapStat_shared->update[INPLACE_UPDATE]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tNON INPLACE UPDATE: %lu    \n",
-        UHeapStat_shared->update[NON_INPLACE_UPDATE]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tTotal: %lu    \n=========================\n\n",
-        UHeapStat_shared->update[NON_INPLACE_UPDATE] + UHeapStat_shared->update[INPLACE_UPDATE]);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "Non Inplace Update Reasons    \n");
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tIndex Updated: %lu    \n",
-        UHeapStat_shared->noninplace_update_cause[INDEX_UPDATED]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tToast: %lu    \n",
-        UHeapStat_shared->noninplace_update_cause[TOAST]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tPrune Page Failed: %lu    \n",
-        UHeapStat_shared->noninplace_update_cause[PAGE_PRUNE_FAILED]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tSlot reused: %lu    \n",
-        UHeapStat_shared->noninplace_update_cause[SLOT_REUSED]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tnblocks < NBLOCKS: %lu    \n=========================\n\n",
-        UHeapStat_shared->noninplace_update_cause[nblocks_LESS_THAN_NBLOCKS]);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "Slot status in UHeapTupleFetch   \n");
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tFROZEN_SLOT = %lu    \n",
-        UHeapStat_shared->visibility_check_with_xid[VISIBILITY_CHECK_SUCCESS_FROZEN_SLOT]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "\tXID < Oldest XID in UNDO = %lu    \n",
-        UHeapStat_shared->visibility_check_with_xid[VISIBILITY_CHECK_SUCCESS_OLDEST_XID]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tSlot is invalid and Xid is Visible in Snapshot = %lu    \n",
-        UHeapStat_shared->visibility_check_with_xid[VISIBILITY_CHECK_SUCCESS_INVALID_SLOT]);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tFetch Trans Info From UNDO  = %lu\n=========================\n\n",
-        UHeapStat_shared->visibility_check_with_xid[VISIBILITY_CHECK_SUCCESS_UNDO]);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "Undo Chain Traversal Stat    \n");
-    securec_check_ss(ret, "\0", "\0");
-
-    double tuple_old_version_visit_rate = 0.0;
-    if (UHeapStat_shared->tuple_visits > 0) {
-        tuple_old_version_visit_rate =
-            1.0 * UHeapStat_shared->tuple_old_version_visits / UHeapStat_shared->tuple_visits;
-    }
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "Tuple visits: %lu\tOld version visits: %lu\tOld version visit rate: %.6f    \n",
-        UHeapStat_shared->tuple_visits, UHeapStat_shared->tuple_old_version_visits, tuple_old_version_visit_rate);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "Undo Chain Traversal Length    \n");
-    securec_check_ss(ret, "\0", "\0");
-
-    double chain_visited_avg_len = 0.0;
-    if (UHeapStat_shared->undo_chain_visited_count > 0) {
-        chain_visited_avg_len =
-            UHeapStat_shared->undo_chain_visited_sum_len * 1.0 / UHeapStat_shared->undo_chain_visited_count;
-    }
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\t# Of undo_chain_visited_sum_len = %ld | visited_count = %ld | miss_count = %ld | visited_avg_len = %lf | "
-        "visited_max_len = %ld | visited_min_len = %ld \n",
-        UHeapStat_shared->undo_chain_visited_sum_len, UHeapStat_shared->undo_chain_visited_count,
-        UHeapStat_shared->undo_chain_visited_miss_count, chain_visited_avg_len,
-        UHeapStat_shared->undo_chain_visited_max_len, UHeapStat_shared->undo_chain_visited_min_len);
-    securec_check_ss(ret, "\0", "\0");
-
-    double page_visited_avg_len = 0.0;
-    if (UHeapStat_shared->undo_chain_visited_count > 0) {
-        page_visited_avg_len =
-            UHeapStat_shared->undo_page_visited_sum_len * 1.0 / UHeapStat_shared->undo_chain_visited_count;
-    }
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\t# Of undo_page_visited_sum_len = %ld | visited_count = %ld | page_visited_avg_len = %lf \n",
-        UHeapStat_shared->undo_page_visited_sum_len, UHeapStat_shared->undo_chain_visited_count, page_visited_avg_len);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "prepare undo record rzero count %lu nzero_count %lu \n", UHeapStat_shared->undo_record_prepare_rzero_count,
-        UHeapStat_shared->undo_record_prepare_nzero_count);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "groups allocated %lu released %lu \n",
-        UHeapStat_shared->undo_groups_allocate, UHeapStat_shared->undo_groups_release);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "slots allocated %lu released %lu \n",
-        UHeapStat_shared->undo_slots_allocate, UHeapStat_shared->undo_slots_recycle);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "space recycle %lu unrecycle %lu \n",
-        UHeapStat_shared->undo_space_recycle, UHeapStat_shared->undo_space_unrecycle);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "oldest xid delay %lu \n",
-        UHeapStat_shared->oldest_xid_having_undo_delay);
-    securec_check_ss(ret, "\0", "\0");
-
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result), "Undo lock information:    \n");
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tDiscard lock hold time(us): total %lu\tmin %lu\tmax %lu\tcnt %lu \tavg %.6f    \n",
-        UHeapStat_shared->undo_discard_lock_hold_time_sum, UHeapStat_shared->undo_discard_lock_hold_time_min,
-        UHeapStat_shared->undo_discard_lock_hold_time_max, UHeapStat_shared->undo_discard_lock_hold_cnt,
-        1.0 * UHeapStat_shared->undo_discard_lock_hold_time_sum / Max(1, UHeapStat_shared->undo_discard_lock_hold_cnt));
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tDiscard lock wait time(us): total %lu\tmin %lu\tmax %lu\tcnt %lu\tavg %.6f    \n",
-        UHeapStat_shared->undo_discard_lock_wait_time_sum, UHeapStat_shared->undo_discard_lock_wait_time_min,
-        UHeapStat_shared->undo_discard_lock_wait_time_max, UHeapStat_shared->undo_discard_lock_wait_cnt,
-        1.0 * UHeapStat_shared->undo_discard_lock_wait_time_sum / Max(1, UHeapStat_shared->undo_discard_lock_wait_cnt));
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tSpace lock hold time(us): total %lu\tmin %lu\tmax %lu\tcnt %lu\tavg %.6f    \n",
-        UHeapStat_shared->undo_space_lock_hold_time_sum, UHeapStat_shared->undo_space_lock_hold_time_min,
-        UHeapStat_shared->undo_space_lock_hold_time_max, UHeapStat_shared->undo_space_lock_hold_cnt,
-        1.0 * UHeapStat_shared->undo_space_lock_hold_time_sum / Max(1, UHeapStat_shared->undo_space_lock_hold_cnt));
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "\tSpace lock wait time(us): total %lu\tmin %lu\tmax %lu\tcnt %lu\tavg %.6f    \n",
-        UHeapStat_shared->undo_space_lock_wait_time_sum, UHeapStat_shared->undo_space_lock_wait_time_min,
-        UHeapStat_shared->undo_space_lock_wait_time_max, UHeapStat_shared->undo_space_lock_wait_cnt,
-        1.0 * UHeapStat_shared->undo_space_lock_wait_time_sum / Max(1, UHeapStat_shared->undo_space_lock_wait_cnt));
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(result + strlen(result), sizeof(result), sizeof(result),
-        "INSERT: %lu\tRetry: %lu\tRetry Time: %lu\tRetry Max: %lu\tRetry Time MAX: %lu \n", UHeapStat_shared->dml,
-        UHeapStat_shared->retry, UHeapStat_shared->retry_time, UHeapStat_shared->retry_max,
-        UHeapStat_shared->retry_time_max);
-    securec_check_ss(ret, "\0", "\0");
-
-    result[strlen(result)] = '\0';
-
-    LWLockRelease(UHeapStatLock);
-
-#endif
-    PG_RETURN_TEXT_P(cstring_to_text(result));
 }
 
 Datum pg_backend_pid(PG_FUNCTION_ARGS)
@@ -5405,7 +5251,10 @@ Datum pg_stat_get_wlm_realtime_ec_operator_info(PG_FUNCTION_ARGS)
         }
 
         if (statistics->ec_query) {
-            values[++i] = CStringGetTextDatum(statistics->ec_query);
+            char* mask_string = NULL;
+            MASK_PASSWORD_START(mask_string, statistics->ec_query);
+            values[++i] = CStringGetTextDatum(mask_string);
+            MASK_PASSWORD_END(mask_string, statistics->ec_query);
         } else {
             nulls[++i] = true;
         }
@@ -5623,7 +5472,10 @@ Datum pg_stat_get_wlm_statistics(PG_FUNCTION_ARGS)
         securec_check(rc, "\0", "\0");
 
         /* Locking is probably not really necessary */
-        values[++i] = CStringGetTextDatum(statistics->stmt);
+        char* mask_string = NULL;
+        MASK_PASSWORD_START(mask_string, statistics->stmt);
+        values[++i] = CStringGetTextDatum(mask_string);
+        MASK_PASSWORD_END(mask_string, statistics->stmt);
         values[++i] = Int64GetDatum(statistics->blocktime);
         values[++i] = Int64GetDatum(statistics->elapsedtime);
         values[++i] = Int64GetDatum(statistics->totalcputime);
@@ -6568,11 +6420,14 @@ Datum pg_stat_get_wlm_session_info(PG_FUNCTION_ARGS)
         else
             nulls[++i] = true;
         values[++i] = Int64GetDatum(detail->debug_query_id);
-        if (detail->statement && detail->statement[0])
-            values[++i] = CStringGetTextDatum(detail->statement);
-        else
+        if (detail->statement && detail->statement[0]) {
+            char* mask_string = NULL;
+            MASK_PASSWORD_START(mask_string, detail->statement);
+            values[++i] = CStringGetTextDatum(mask_string);
+            MASK_PASSWORD_END(mask_string, detail->statement);
+        } else {
             nulls[++i] = true;
-
+        }
         if (t_thrd.proc->workingVersionNum >= SLOW_QUERY_VERSION) {
             values[++i] = CStringGetTextDatum(PlanListToString(detail->gendata.query_plan));
         } else {
@@ -6778,7 +6633,10 @@ Datum pg_stat_get_wlm_ec_operator_info(PG_FUNCTION_ARGS)
         }
 
         if (statistics->ec_query) {
-            values[++i] = CStringGetTextDatum(statistics->ec_query);
+            char* mask_string = NULL;
+            MASK_PASSWORD_START(mask_string, statistics->ec_query);
+            values[++i] = CStringGetTextDatum(mask_string);
+            MASK_PASSWORD_END(mask_string, statistics->ec_query);
         } else {
             nulls[++i] = true;
         }
@@ -8797,7 +8655,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             fctx->record[i].forknum = bufHdr->tag.forkNum;
             fctx->record[i].blocknum = bufHdr->tag.blockNum;
             fctx->record[i].usagecount = BUF_STATE_GET_USAGECOUNT(buf_state);
-			fctx->record[i].pinning_backends = BUF_STATE_GET_REFCOUNT(buf_state);
+            fctx->record[i].pinning_backends = BUF_STATE_GET_REFCOUNT(buf_state);
 
             if (buf_state & BM_DIRTY)
                 fctx->record[i].isdirty = true;
@@ -8841,7 +8699,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
          * Set all fields except the bufferid to null if the buffer is unused
          * or not valid.
          */
-        if (fctx->record[i].blocknum == InvalidBlockNumber || fctx->record[i].isvalid == false) {
+        if (fctx->record[i].blocknum == InvalidBlockNumber) {
             nulls[1] = true;
             nulls[2] = true;
             nulls[3] = true;
@@ -8873,7 +8731,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             nulls[8] = false;
             values[9] = BoolGetDatum(fctx->record[i].isvalid);
             nulls[9] = false;
-			values[10] = Int16GetDatum(fctx->record[i].usagecount);
+            values[10] = Int16GetDatum(fctx->record[i].usagecount);
             nulls[10] = false;
             values[11] = Int32GetDatum(fctx->record[i].pinning_backends);
             nulls[11] = false;
@@ -10959,25 +10817,26 @@ void insert_comm_client_info(Tuplestorestate *tupStore, TupleDesc tupDesc, const
 
 void fill_callcxt_for_comm_check_connection_status(FuncCallContext *funcctx)
 {
-    const int att_num = 5;
+    const int attNum = 6;
     int att_idx = 1;
     ConnectionStatus *conns_entry = NULL;
-    
+
     MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-    
-    TupleDesc tupdesc = CreateTemplateTupleDesc(att_num, false);
-    
+
+    TupleDesc tupdesc = CreateTemplateTupleDesc(attNum, false);
+
     TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "node_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "remote_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "remote_host", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "remote_port", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "is_connected", BOOLOID, -1, 0);
-    
+    TupleDescInitEntry(tupdesc, (AttrNumber) att_idx++, "no_error_occur", BOOLOID, -1, 0);
+
     funcctx->tuple_desc = BlessTupleDesc(tupdesc);
-    
+
     funcctx->max_calls = check_connection_status(&conns_entry);
     funcctx->user_fctx = conns_entry;
-    
+
     MemoryContextSwitchTo(oldcontext);
     return;
 }
@@ -10994,6 +10853,7 @@ void fill_values_for_comm_check_connection_status(Datum *values,
     values[att_idx++] = CStringGetTextDatum(poolCon->remote_host);
     values[att_idx++] = (Datum)(poolCon->remote_port);
     values[att_idx++] = BoolGetDatum(poolCon->is_connected);
+    values[att_idx++] = BoolGetDatum(poolCon->no_error_occur);
     return;
 }
 
@@ -11004,9 +10864,20 @@ void fill_values_for_comm_check_connection_status(Datum *values,
  */
 Datum comm_check_connection_status(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    FuncCallContext* funcctx = NULL;
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        errmsg("unsupported function/view in single node mode.")));
+    SRF_RETURN_DONE(funcctx);
+#else
+    if (IS_PGXC_DATANODE) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("unsupported functin/view in datenode.")));
+    }
+
     FuncCallContext *funcctx = NULL;
     ConnectionStatus *conns_entry = NULL;
-    const int att_num = 5;
+    const int attNum = 6;
 
     if (SRF_IS_FIRSTCALL()) {
         funcctx = SRF_FIRSTCALL_INIT();
@@ -11019,8 +10890,8 @@ Datum comm_check_connection_status(PG_FUNCTION_ARGS)
 
     if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
-        Datum values[att_num] = {0};
-        bool nulls[att_num] = {false};
+        Datum values[attNum] = {0};
+        bool nulls[attNum] = {false};
 
         fill_values_for_comm_check_connection_status(values, funcctx, conns_entry);
         HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
@@ -11038,6 +10909,7 @@ Datum comm_check_connection_status(PG_FUNCTION_ARGS)
         /* nothing left */
         SRF_RETURN_DONE(funcctx);
     }
+#endif
 }
 
 
@@ -13901,10 +13773,64 @@ Datum remote_single_flush_dw_stat(PG_FUNCTION_ARGS)
 #endif
 }
 
+static void gs_stat_read_dw_batch(Tuplestorestate *tupStore, TupleDesc tupDesc)
+{
+
+    int i, j;
+    errno_t rc = 0;
+    int row_num = g_instance.dw_batch_cxt.batch_meta_file.dw_file_num;
+    int col_num = DW_VIEW_COL_NUM;
+
+    Datum values[col_num];
+    bool nulls[col_num];
+
+    for (i = 0; i < row_num; i++) {
+        g_stat_file_id = i;
+	
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), 1, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+	
+        for (j = 0; j < col_num; j++) {
+            values[j] = g_dw_view_col_arr[j].get_data();
+            nulls[j] = false;
+        }
+		
+        tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+    }
+	
+    g_stat_file_id = -1;
+}
+
 Datum local_double_write_stat(PG_FUNCTION_ARGS)
 {
-    HeapTuple tuple = form_function_tuple(DW_VIEW_COL_NUM, DW_BATCH_FUNC);
-    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+    int i;
+    int col_num = DW_VIEW_COL_NUM;
+    TupleDesc tupdesc = NULL;
+
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+	
+    tupdesc = CreateTemplateTupleDesc(DW_VIEW_COL_NUM, false, TAM_HEAP);
+
+    for (i = 0; i < col_num; i++) {
+        TupleDescInitEntry(tupdesc, (AttrNumber)(i + 1),
+            g_dw_view_col_arr[i].name, g_dw_view_col_arr[i].data_type, -1, 0);
+    }
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    (void)gs_stat_read_dw_batch(rsinfo->setResult, rsinfo->setDesc);
+	
+    MemoryContextSwitchTo(oldcontext);
+	
+    tuplestore_donestoring(rsinfo->setResult);
+	
+    return (Datum) 0;
 }
 
 Datum remote_double_write_stat(PG_FUNCTION_ARGS)
@@ -13967,6 +13893,72 @@ Datum remote_double_write_stat(PG_FUNCTION_ARGS)
 
     SRF_RETURN_DONE(funcctx);
 #endif
+}
+
+Datum local_redo_time_count(PG_FUNCTION_ARGS)
+{
+    TupleDesc tupdesc;
+    Tuplestorestate *tupstore = BuildTupleResult(fcinfo, &tupdesc);
+    const uint32 xlog_redo_static_cols = 21;
+    Datum values[xlog_redo_static_cols];
+    bool nulls[xlog_redo_static_cols];
+
+    RedoWorkerTimeCountsInfo *workerCountInfoList = NULL;
+    uint32 realNum = 0;
+    GetRedoWorkerTimeCount(&workerCountInfoList, &realNum);
+
+    for (uint32 i = 0; i < realNum; ++i) {
+        uint32 k = 0;
+        values[k] = CStringGetTextDatum(workerCountInfoList[i].worker_name);
+        nulls[k++] = false;
+        pfree(workerCountInfoList[i].worker_name);
+
+        for (uint32 j = 0; j < (uint32)TIME_COST_NUM; ++j) {
+            values[k] = Int64GetDatum(workerCountInfoList[i].time_cost[j].totalDuration);
+            nulls[k++] = false;
+            values[k] = Int64GetDatum(workerCountInfoList[i].time_cost[j].counter);
+            nulls[k++] = false;
+        }
+        tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+    }
+    if (workerCountInfoList != NULL) {
+        pfree(workerCountInfoList);
+    }
+    tuplestore_donestoring(tupstore);
+    return (Datum)0;
+}
+
+Datum local_xlog_redo_statics(PG_FUNCTION_ARGS)
+{
+    TupleDesc tupdesc;
+    Tuplestorestate *tupstore = BuildTupleResult(fcinfo, &tupdesc);
+    const uint32 xlog_redo_static_cols = 5;
+    Datum values[xlog_redo_static_cols];
+    bool nulls[xlog_redo_static_cols];
+    const uint32 subtypeShiftSize = 4;
+    for (uint32 i = 0; i < RM_NEXT_ID; ++i) {
+        for (uint32 j = 0; j < MAX_XLOG_INFO_NUM; ++j) {
+            if (g_instance.comm_cxt.predo_cxt.xlogStatics[i][j].total_num == 0) {
+                continue;
+            }
+            uint32 k = 0;
+            values[k] = CStringGetTextDatum(RmgrTable[i].rm_type_name((j << subtypeShiftSize)));
+            nulls[k++] = false;
+            values[k] = Int32GetDatum(i);
+            nulls[k++] = false;
+            values[k] = Int32GetDatum(j << subtypeShiftSize);
+            nulls[k++] = false;
+            values[k] = Int64GetDatum(g_instance.comm_cxt.predo_cxt.xlogStatics[i][j].total_num);
+            nulls[k++] = false;
+            values[k] = Int64GetDatum(g_instance.comm_cxt.predo_cxt.xlogStatics[i][j].extra_num);
+            nulls[k++] = false;
+            tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+        }
+    }
+
+    tuplestore_donestoring(tupstore);
+
+    return (Datum)0;
 }
 
 Datum local_redo_stat(PG_FUNCTION_ARGS)
@@ -14552,7 +14544,8 @@ Datum gs_hadr_local_rto_and_rpo_stat(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)8, "target_rto", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)9, "current_rpo", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)10, "target_rpo", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)11, "current_sleep_time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)11, "rto_sleep_time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)12, "rpo_sleep_time", INT8OID, -1, 0);
         /* complete descriptor of the tupledesc */
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
@@ -14589,7 +14582,8 @@ Datum gs_hadr_local_rto_and_rpo_stat(PG_FUNCTION_ARGS)
         values[7] = Int64GetDatum(entry->target_rto);
         values[8] = Int64GetDatum(entry->current_rpo);
         values[9] = Int64GetDatum(entry->target_rpo);
-        values[10] = Int64GetDatum(entry->current_sleep_time);
+        values[10] = Int64GetDatum(entry->rto_sleep_time);
+        values[11] = Int64GetDatum(entry->rpo_sleep_time);
 
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
@@ -14628,7 +14622,8 @@ Datum gs_hadr_remote_rto_and_rpo_stat(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)8, "target_rto", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)9, "current_rpo", INT8OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)10, "target_rpo", INT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)11, "current_sleep_time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)11, "rto_sleep_time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)12, "rpo_sleep_time", INT8OID, -1, 0);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
         funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
@@ -14731,610 +14726,135 @@ Datum track_memory_context_detail(PG_FUNCTION_ARGS)
     }
 }
 
-using namespace undo;
-static uint64 UndoSize(UndoSpaceType type)
+#ifdef ENABLE_MULTIPLE_NODES
+/* Get the head row of the view of index status */
+TupleDesc get_index_status_view_frist_row()
 {
-    uint64 used = 0;
-    for (auto idx = 0; idx < UNDO_ZONE_COUNT; idx++) {
-        undo::UndoZone *uzone = (undo::UndoZone *)g_instance.undo_cxt.uZones[idx];
-        if (uzone == NULL) {
-            continue;
-        }
-        if (type == UNDO_LOG_SPACE) {
-            used += uzone->UndoSize();
+    TupleDesc tupdesc = NULL;
+    tupdesc = CreateTemplateTupleDesc(INDEX_STATUS_VIEW_COL_NUM, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "node_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "indisready", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "indisvalid", BOOLOID, -1, 0);
+    return BlessTupleDesc(tupdesc);
+}
+
+HeapTuple fetch_local_index_status(FuncCallContext *funcctx, char *schname, char *idxname)
+{
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        /* for local cn, get index status */
+        Datum values[INDEX_STATUS_VIEW_COL_NUM];
+        bool nulls[INDEX_STATUS_VIEW_COL_NUM] = {false};
+
+        Oid idx_oid = InvalidOid;
+        if (schname == NULL || strlen(schname) == 0) {
+            idx_oid = RangeVarGetRelid(makeRangeVar(NULL, idxname, -1), NoLock, false);
         } else {
-            used += uzone->SlotSize();
-        }
-    }
-    return used;
-}
-
-static void ReadUndoZoneMetaFromShared(int id, TupleDesc *tupleDesc, Tuplestorestate *tupstore)
-{
-    Assert(tupleDesc != NULL);
-    Assert(tupstore != NULL);
-
-    uint32 startIdx = 0;
-    uint32 endIdx = 0;
-    uint64 used = 0;
-    char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
-    if (id == INVALID_ZONE_ID) {
-        used = UndoSize(UNDO_LOG_SPACE) + UndoSize(UNDO_SLOT_SPACE);
-        endIdx = UNDO_ZONE_COUNT - 1;
-    } else {
-        used = UndoSize(UNDO_LOG_SPACE);
-        startIdx = id;
-        endIdx = id;
-    }
-
-    for (auto idx = startIdx; idx <= endIdx; idx++) {
-        bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
-        Datum values[PG_STAT_USP_PERSIST_META_COLS];
-        UndoZone *uzone = (undo::UndoZone *)g_instance.undo_cxt.uZones[idx];
-        if (uzone == NULL) {
-            continue;
-        }
-        values[0] = ObjectIdGetDatum((Oid)uzone->GetZoneId());
-        values[1] = ObjectIdGetDatum((Oid)uzone->GetPersitentLevel());
-        errno_t rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(uzone->GetInsert()));
-        securec_check_ss(rc, "\0", "\0");
-        values[2] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT,
-            UNDO_PTR_GET_OFFSET(uzone->GetDiscard()));
-        securec_check_ss(rc, "\0", "\0");
-        values[3] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT,
-            UNDO_PTR_GET_OFFSET(uzone->GetForceDiscard()));
-        securec_check_ss(rc, "\0", "\0");
-        values[4] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT,
-            used);
-        securec_check_ss(rc, "\0", "\0");
-        values[5] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT,
-            uzone->GetLSN());
-        securec_check_ss(rc, "\0", "\0");
-        values[6] = CStringGetTextDatum(textBuffer);
-        tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
-    }
-
-    tuplestore_donestoring(tupstore);
-}
-
-void Checkfd(int fd)
-{
-    if (fd < 0) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not open file \%s", UNDO_META_FILE)));
-        return;
-    }
-}
-
-void Checkid(const int id, uint32* startIdx, uint32* endIdx)
-{
-    if (id == INVALID_ZONE_ID) {
-        *endIdx = UNDO_ZONE_COUNT - 1;
-    } else {
-        *startIdx = id;
-        *endIdx = id;
-    }
-}
-
-void GetZoneMetaValues(Datum *values, char *textBuffer,
-    UndoZoneMetaInfo undoZoneMeta, uint32 idx, errno_t *rc)
-{
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(undoZoneMeta.insert));
-    securec_check_ss(*rc, "\0", "\0");
-    values[2] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1, 
-        UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(undoZoneMeta.discard));
-    securec_check_ss(*rc, "\0", "\0");
-    values[3] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(undoZoneMeta.forceDiscard));
-    securec_check_ss(*rc, "\0", "\0");
-    values[4] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, 0);
-    securec_check_ss(*rc, "\0", "\0");
-    values[5] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, undoZoneMeta.lsn);
-    securec_check_ss(*rc, "\0", "\0");
-    values[6] = CStringGetTextDatum(textBuffer);
-}
-
-static void ReadUndoZoneMetaFromDisk(int id, TupleDesc *tupleDesc, Tuplestorestate *tupstore)
-{
-    Assert(tupleDesc != NULL);
-    Assert(tupstore != NULL);
-    int ret = 0;
-    uint32 startIdx = 0;
-    uint32 endIdx = 0;
-    char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
-    int fd = BasicOpenFile(UNDO_META_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
-    
-    Checkfd(fd);
-    Checkid(id, &startIdx, &endIdx);
-    for (auto idx = startIdx; idx <= endIdx; idx++) {
-        bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
-        Datum values[PG_STAT_USP_PERSIST_META_COLS];
-        uint32 readPos = 0;
-        UndoZoneMetaInfo undoZoneMeta;
-        errno_t rc;
-
-        if (idx < PERSIST_ZONE_COUNT) {
-            readPos = (idx / UNDOZONE_COUNT_PER_PAGE) * UNDO_META_PAGE_SIZE +
-                (idx % UNDOZONE_COUNT_PER_PAGE) * sizeof(UndoZoneMetaInfo);
-            lseek(fd, readPos, SEEK_SET);
-            ret = read(fd, &undoZoneMeta, sizeof(UndoZoneMetaInfo));
-            if (ret != sizeof(UndoZoneMetaInfo)) {
-                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("Read undo meta file fail, expect size(%lu), real size(%u)",
-                        sizeof(UndoZoneMetaInfo), ret)));
-                break;
-            }
-        } else {
-            rc = memset_s(&undoZoneMeta, sizeof(UndoZoneMetaInfo), 0, sizeof(UndoZoneMetaInfo));
-            securec_check(rc, "\0", "\0");
-        }
-        DECLARE_NODE_COUNT();
-        GET_UPERSISTENCE_BY_ZONEID((int)idx, nodeCount);
-        values[0] = ObjectIdGetDatum((Oid)idx);
-        values[1] = ObjectIdGetDatum((Oid)upersistence);
-        GetZoneMetaValues(values, textBuffer, undoZoneMeta, idx, &rc);
-        tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
-    }
-
-    tuplestore_donestoring(tupstore);
-    close(fd);
-}
-
-static void ReadTransSlotMetaFromShared(int id, TupleDesc *tupleDesc, Tuplestorestate *tupstore)
-{
-    Assert(tupleDesc != NULL);
-    Assert(tupstore != NULL);
-
-    uint32 startIdx = 0;
-    uint32 endIdx = 0;
-    char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
-
-    if (id == INVALID_ZONE_ID) {
-        endIdx = UNDO_ZONE_COUNT - 1;
-    } else {
-        startIdx = id;
-        endIdx = id;
-    }
-
-    for (auto idx = startIdx; idx <= endIdx; idx++) {
-        bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
-        Datum values[PG_STAT_USP_PERSIST_META_COLS];
-        UndoZone *uzone = (undo::UndoZone *)g_instance.undo_cxt.uZones[idx];
-        if (uzone == NULL) {
-            continue;
-        }
-        values[0] = ObjectIdGetDatum((Oid)idx);
-        values[1] = ObjectIdGetDatum((Oid)0); // unused
-        errno_t rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(uzone->GetAllocate()));
-        securec_check_ss(rc, "\0", "\0");
-        values[2] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(uzone->GetRecycle()));
-        securec_check_ss(rc, "\0", "\0");
-        values[3] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, "%016lu",
-            UNDO_PTR_GET_OFFSET(uzone->GetRecycleXid()));
-        securec_check_ss(rc, "\0", "\0");
-        values[4] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, "%016lu",
-            GetOldestXminForUndo());
-        securec_check_ss(rc, "\0", "\0");
-        values[5] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, "%016lu",
-            pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo));
-        securec_check_ss(rc, "\0", "\0");
-        values[6] = CStringGetTextDatum(textBuffer);
-        tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
-    }
-
-    tuplestore_donestoring(tupstore);
-}
-
-void GetTransMetaValues(Datum *values, char *textBuffer, 
-    UndoZoneMetaInfo undoZoneMeta, uint32 loop, errno_t *rc)
-{
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(undoZoneMeta.allocate));
-    securec_check_ss(*rc, "\0", "\0");
-    values[2] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1, 
-        UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(undoZoneMeta.recycle));
-    securec_check_ss(*rc, "\0", "\0");
-    values[3] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        "%016lu", undoZoneMeta.recycleXid);
-    securec_check_ss(*rc, "\0", "\0");
-    values[4] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        "%016lu", GetOldestXminForUndo());
-    securec_check_ss(*rc, "\0", "\0");
-    values[5] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        "%016lu", pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo));
-    securec_check_ss(*rc, "\0", "\0");
-    values[6] = CStringGetTextDatum(textBuffer);
-}
-
-static void ReadTransSlotMetaFromDisk(int id, TupleDesc *tupleDesc, Tuplestorestate *tupstore)
-{
-    Assert(tupleDesc != NULL);
-    Assert(tupstore != NULL);
-    int ret = 0;
-    uint32 startIdx = 0;
-    uint32 endIdx = 0;
-    char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
-    int fd = BasicOpenFile(UNDO_META_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
-    
-    Checkfd(fd);
-    Checkid(id, &startIdx, &endIdx);
-    for (auto idx = startIdx; idx <= endIdx; idx++) {
-        bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
-        Datum values[PG_STAT_USP_PERSIST_META_COLS];
-        uint32 readPos = 0;
-        UndoZoneMetaInfo undoZoneMeta;
-        errno_t rc;
-
-        if (idx < PERSIST_ZONE_COUNT) {
-            readPos = (idx / UNDOZONE_COUNT_PER_PAGE) * UNDO_META_PAGE_SIZE +
-                (idx % UNDOZONE_COUNT_PER_PAGE) * sizeof(UndoZoneMetaInfo);
-            lseek(fd, readPos, SEEK_SET);
-            ret = read(fd, &undoZoneMeta, sizeof(UndoZoneMetaInfo));
-            if (ret != sizeof(UndoZoneMetaInfo)) {
-                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("Read undo meta file fail, expect size(%lu), real size(%u)",
-                        sizeof(UndoZoneMetaInfo), ret)));
-                break;
-            }
-        } else {
-            rc = memset_s(&undoZoneMeta, sizeof(UndoZoneMetaInfo), 0, sizeof(UndoZoneMetaInfo));
-            securec_check(rc, "\0", "\0");
+            idx_oid = RangeVarGetRelid(makeRangeVar(schname, idxname, -1), NoLock, false);
         }
 
-        DECLARE_NODE_COUNT();
-        GET_UPERSISTENCE_BY_ZONEID((int)idx, nodeCount);
-        values[0] = ObjectIdGetDatum((Oid)idx);
-        values[1] = ObjectIdGetDatum((Oid)upersistence);
-        GetTransMetaValues(values, textBuffer, undoZoneMeta, idx, &rc);
-        tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
-    }
-
-    tuplestore_donestoring(tupstore);
-    close(fd);
-}
-
-static uint64 UndoSpaceSize(UndoSpaceType type)
-{
-    uint64 used = 0;
-    for (auto idx = 0; idx < UNDO_ZONE_COUNT; idx++) {
-        UndoSpace *usp;
-        if (g_instance.undo_cxt.uZones[idx] == NULL) {
-            continue;
+        if (!OidIsValid(idx_oid)) {
+            ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("The given schema or index name cannot find."),
+                errdetail("Cannot find valid oid from the given index name."),
+                errcause("Input error schema or index name."),
+                erraction("Check the input schema and index name.")));
         }
-        if (type == UNDO_LOG_SPACE) {
-            usp = ((UndoZone *)g_instance.undo_cxt.uZones[idx])->GetUndoSpace();
-        } else {
-            usp = ((UndoZone *)g_instance.undo_cxt.uZones[idx])->GetSlotSpace();
+        HeapTuple indexTuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(idx_oid));
+        if (!HeapTupleIsValid(indexTuple)) {
+            ereport(ERROR, (errmodule(MOD_CACHE), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for index %u.", idx_oid),
+                errdetail("The index tuple is invalide."),
+                errcause("The index is not found in syscache."),
+                erraction("Retry this function.")));
         }
-        used += (uint64)usp->Used();
+        Form_pg_index indexForm = (Form_pg_index)GETSTRUCT(indexTuple);
+
+        values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
+        values[1] = BoolGetDatum(indexForm->indisready);
+        values[2] = BoolGetDatum(indexForm->indisvalid);
+        return heap_form_tuple(funcctx->tuple_desc, values, nulls);
     }
-    return used;
+    return NULL;
 }
 
-static void ReadUndoSpaceFromShared(int id, TupleDesc *tupleDesc, Tuplestorestate *tupstore,
-    UndoSpaceType type)
+/*
+ * @Description : Get index status on all nodes.
+ * @in         	: schemaname, idxname
+ * @out         : None
+ * @return      : Node.
+ */
+Datum gs_get_index_status(PG_FUNCTION_ARGS)
 {
-    Assert(tupleDesc != NULL);
-    Assert(tupstore != NULL);
-
-    uint32 startIdx = 0;
-    uint32 endIdx = 0;
-    char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
-    uint64 used = UndoSpaceSize(type);
-
-    if (id == INVALID_ZONE_ID) {
-        used = UndoSpaceSize(UNDO_LOG_SPACE) + UndoSpaceSize(UNDO_SLOT_SPACE);
-        endIdx = UNDO_ZONE_COUNT - 1;
-    } else {
-        used = UndoSpaceSize(type);
-        startIdx = id;
-        endIdx = id;
-    }
-
-    for (auto idx = startIdx; idx <= endIdx; idx++) {
-        bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
-        Datum values[PG_STAT_USP_PERSIST_META_COLS];
-        UndoSpace *usp;
-        if (g_instance.undo_cxt.uZones[idx] == NULL) {
-            continue;
-        }
-        if (type == UNDO_LOG_SPACE) {
-            usp = ((UndoZone *)g_instance.undo_cxt.uZones[idx])->GetUndoSpace();
-        } else {
-            usp = ((UndoZone *)g_instance.undo_cxt.uZones[idx])->GetSlotSpace();
-        }
-        values[0] = ObjectIdGetDatum((Oid)idx);
-        values[1] = ObjectIdGetDatum((Oid)0); // unused
-        errno_t rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(usp->Tail()));
-        securec_check_ss(rc, "\0", "\0");
-        values[2] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(usp->Head()));
-        securec_check_ss(rc, "\0", "\0");
-        values[3] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_FORMAT, used);
-        securec_check_ss(rc, "\0", "\0");
-        values[4] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_FORMAT, usp->Used());
-        securec_check_ss(rc, "\0", "\0");
-        values[5] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1,
-            UNDO_REC_PTR_FORMAT, usp->LSN());
-        securec_check_ss(rc, "\0", "\0");
-        values[6] = CStringGetTextDatum(textBuffer);
-        tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
-    }
-
-    tuplestore_donestoring(tupstore);
-}
-
-void GetUndoSpaceValues(Datum *values, char *textBuffer,
-    UndoSpaceMetaInfo undoSpaceMeta, uint32 loop, errno_t *rc)
-{
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(undoSpaceMeta.tail));
-    securec_check_ss(*rc, "\0", "\0");
-    values[2] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1, 
-        UNDO_REC_PTR_FORMAT, UNDO_PTR_GET_OFFSET(undoSpaceMeta.head));
-    securec_check_ss(*rc, "\0", "\0");
-    values[3] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, (uint64)0xFFFF);
-    securec_check_ss(*rc, "\0", "\0");
-    values[4] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, (undoSpaceMeta.tail - undoSpaceMeta.head) / BLCKSZ);
-    securec_check_ss(*rc, "\0", "\0");
-    values[5] = CStringGetTextDatum(textBuffer);
-    *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        UNDO_REC_PTR_FORMAT, undoSpaceMeta.lsn);
-    securec_check_ss(*rc, "\0", "\0");
-    values[6] = CStringGetTextDatum(textBuffer);
-}
-
-static void ReadUndoSpaceFromDisk(int id, TupleDesc *tupleDesc, Tuplestorestate *tupstore,
-    UndoSpaceType type)
-{
-    Assert(tupleDesc != NULL);
-    Assert(tupstore != NULL);
-    int ret = 0;
-    uint32 startIdx = 0;
-    uint32 endIdx = 0;
-    uint32 undoSpaceBegin = 0;
-    uint32 undoZoneMetaPageCnt = 0;
-    uint32 undoSpaceMetaPageCnt = 0;
-    char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
-    int fd = BasicOpenFile(UNDO_META_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
-
-    Checkfd(fd);
-    Checkid(id, &startIdx, &endIdx);
-
-    /* Seek start position for writing transactionGroup meta. */
-    UNDOZONE_META_PAGE_COUNT(UNDO_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, undoZoneMetaPageCnt);
-    UNDOZONE_META_PAGE_COUNT(UNDO_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, undoSpaceMetaPageCnt);
-    if (type == UNDO_LOG_SPACE) {
-        undoSpaceBegin = undoZoneMetaPageCnt * UNDO_META_PAGE_SIZE;
-    } else {
-        undoSpaceBegin = (undoZoneMetaPageCnt + undoSpaceMetaPageCnt) * UNDO_META_PAGE_SIZE;
-    }
-
-    for (auto idx = startIdx; idx <= endIdx; idx++) {
-        bool nulls[PG_STAT_USP_PERSIST_META_COLS] = {false};
-        Datum values[PG_STAT_USP_PERSIST_META_COLS];
-        uint32 readPos = 0;
-        UndoSpaceMetaInfo undoSpaceMeta;
-        errno_t rc;
-        if (idx < PERSIST_ZONE_COUNT) {
-            readPos = undoSpaceBegin + (idx / UNDOZONE_COUNT_PER_PAGE) * UNDO_META_PAGE_SIZE +
-                (idx % UNDOZONE_COUNT_PER_PAGE) * sizeof(UndoSpaceMetaInfo);
-            lseek(fd, readPos, SEEK_SET);
-            ret = read(fd, &undoSpaceMeta, sizeof(UndoSpaceMetaInfo));
-            if (ret != sizeof(UndoSpaceMetaInfo)) {
-                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
-                    errmsg("Read undo meta file fail, expect size(%lu), real size(%u)",
-                        sizeof(UndoSpaceMetaInfo), ret)));
-                break;
-            }
-        } else {
-            rc = memset_s(&undoSpaceMeta, sizeof(UndoSpaceMetaInfo), 0, sizeof(UndoSpaceMetaInfo));
-            securec_check(rc, "\0", "\0");
-        }
-        DECLARE_NODE_COUNT();
-        GET_UPERSISTENCE_BY_ZONEID((int)idx, nodeCount);
-        values[0] = ObjectIdGetDatum((Oid)idx);
-        values[1] = ObjectIdGetDatum((Oid)upersistence);
-        GetUndoSpaceValues(values, textBuffer, undoSpaceMeta, idx, &rc);
-        tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
-    }
-
-    tuplestore_donestoring(tupstore);
-    close(fd);
-}
-
-bool Checkrsinfo(const ReturnSetInfo *rsinfo)
-{
-    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("set-valued function called in context that cannot accept a set")));
-        return true;
-    }
-    if (!(rsinfo->allowedModes & SFRM_Materialize)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("materialize mode required, but it is not allowed in this context")));
-        return true;
-    }
-    return false;
-}
-
-Datum gs_undo_meta(PG_FUNCTION_ARGS)
-{
-    int type = PG_GETARG_INT32(0);         // Indicate meta data type(0:undozone, 1:group, 2:undoSpace, 3:slotSpace)
-    int id = PG_GETARG_INT32(1);           // zoneId (-1 represents all)
-    int metaLocation = PG_GETARG_INT32(2); // meta location (0:shared , 1:disk)
-    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
-    TupleDesc tupDesc;
-    Tuplestorestate *tupstore = NULL;
-    MemoryContext per_query_ctx;
-    MemoryContext oldcontext;
-    
-    if (Checkrsinfo(rsinfo)) {
-        PG_RETURN_VOID();
-    }
-    if (get_call_result_type(fcinfo, NULL, &tupDesc) != TYPEFUNC_COMPOSITE) {
-        elog(ERROR, "return type must be a row type");
+    if (IS_PGXC_DATANODE) {
+        ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("unsupported function on datanodes."),
+            errdetail("Cannot execute a global function direct on datanodes."),
+            errcause("Execute a global function on datanodes."),
+            erraction("Execute this function on coordinators.")));
         PG_RETURN_VOID();
     }
 
-    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
-    oldcontext = MemoryContextSwitchTo(per_query_ctx);
-    tupstore = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
-    rsinfo->returnMode = SFRM_Materialize;
-    rsinfo->setResult = tupstore;
-    rsinfo->setDesc = tupDesc;
-    MemoryContextSwitchTo(oldcontext);
+    Datum values[INDEX_STATUS_VIEW_COL_NUM];
+    bool nulls[INDEX_STATUS_VIEW_COL_NUM] = {false};
 
-    switch (type) {
-        /* Undospace meta info. */
-        case 0:
-            if (metaLocation == 0) {
-                ReadUndoZoneMetaFromShared(id, &tupDesc, tupstore);
+    char* schname = PG_GETARG_CSTRING(0);
+    char* idxname = PG_GETARG_CSTRING(1);
+
+    if (schname == NULL || strlen(schname) == 0 || idxname == NULL || strlen(idxname) == 0) {
+        ereport(ERROR, (errmodule(MOD_INDEX), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Invalid input schema name or index name."),
+            errdetail("The input schema or index name is null."),
+            errcause("Input empty or less parameters."),
+            erraction("Please input the correct schema name and index name.")));
+        PG_RETURN_VOID();
+    }
+
+    FuncCallContext *funcctx = NULL;
+    /* get the fist row of the view */
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+        funcctx->tuple_desc = get_index_status_view_frist_row();
+        /* for coordinator, get a view of all nodes */
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+        funcctx->user_fctx = get_remote_index_status(funcctx->tuple_desc, schname, idxname);
+        (void)MemoryContextSwitchTo(oldcontext);
+
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
+        }
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            HeapTuple tuple = fetch_local_index_status(funcctx, schname, idxname);
+            if (tuple != NULL) {
+                SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
             } else {
-                ReadUndoZoneMetaFromDisk(id, &tupDesc, tupstore);
+                /* release context when all tuples are returned */
+                FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
+                ExecDropSingleTupleTableSlot(slot);
+                pfree_ext(funcctx->user_fctx);
+                funcctx->user_fctx = NULL;
+                SRF_RETURN_DONE(funcctx);
             }
-            break;
-        /* TransactionGroup meta info. */
-        case 1:
-            if (metaLocation == 0) {
-                ReadTransSlotMetaFromShared(id, &tupDesc, tupstore);
-            } else {
-                ReadTransSlotMetaFromDisk(id, &tupDesc, tupstore);
-            }
-            break;
-        case 2:
-            if (metaLocation == 0) {
-                ReadUndoSpaceFromShared(id, &tupDesc, tupstore, UNDO_LOG_SPACE);
-            } else {
-                ReadUndoSpaceFromDisk(id, &tupDesc, tupstore, UNDO_LOG_SPACE);
-            }
-            break;
-        case 3:
-            if (metaLocation == 0) {
-                ReadUndoSpaceFromShared(id, &tupDesc, tupstore, UNDO_SLOT_SPACE);
-            } else {
-                ReadUndoSpaceFromDisk(id, &tupDesc, tupstore, UNDO_SLOT_SPACE);
-            }
-            break;
-        default:
-            break;
-    }
-
-    PG_RETURN_VOID();
-}
-
-Datum gs_undo_translot(PG_FUNCTION_ARGS)
-{
-    int rc = 0;
-    int type = PG_GETARG_INT32(0);    // Indicates query meta from share memory or persistent file
-    int zoneId = PG_GETARG_INT32(1); // zone id
-    char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
-    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
-    TupleDesc tupDesc;
-    Tuplestorestate *tupstore = NULL;
-    MemoryContext per_query_ctx;
-    MemoryContext oldcontext;
-
-    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("set-valued function called in context that cannot accept a set")));
-        PG_RETURN_VOID();
-    }
-    if (!(rsinfo->allowedModes & SFRM_Materialize)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("materialize mode required, but it is not allowed in this context")));
-        PG_RETURN_VOID();
-    }
-    if (get_call_result_type(fcinfo, NULL, &tupDesc) != TYPEFUNC_COMPOSITE) {
-        elog(ERROR, "return type must be a row type");
-        PG_RETURN_VOID();
-    }
-
-    per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
-    oldcontext = MemoryContextSwitchTo(per_query_ctx);
-    tupstore = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
-    rsinfo->returnMode = SFRM_Materialize;
-    rsinfo->setResult = tupstore;
-    rsinfo->setDesc = tupDesc;
-    MemoryContextSwitchTo(oldcontext);
-
-    if (type == 0 || type == 1) {
-        if (zoneId < 0 || zoneId >= UNDO_ZONE_COUNT) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Zone id is invalid %d", zoneId)));
-            PG_RETURN_VOID();
         }
-    }
 
-    UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
-    if (uzone == NULL) {
-        PG_RETURN_VOID();
-    }
-    TransactionSlot *slot = NULL;
-    /* Query translot meta info from shared memory. */
-    UndoSlotBuffer buf;
-    for (UndoSlotPtr slotPtr = uzone->GetRecycle(); slotPtr < uzone->GetAllocate();
-        slotPtr = GetNextSlotPtr(slotPtr)) {
-        buf.PrepareTransactionSlot(slotPtr);
-        slot = buf.FetchTransactionSlot(slotPtr);
-        bool nulls[PG_STAT_TRANSLOT_META_COLS] = {false};
-        Datum values[PG_STAT_TRANSLOT_META_COLS];
+        for (uint32 i = 0; i < INDEX_STATUS_VIEW_COL_NUM; i++) {
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
+        }
 
-        rc = memset_s(textBuffer, STAT_UNDO_LOG_SIZE, 0, STAT_UNDO_LOG_SIZE);
-        securec_check(rc, "\0", "\0");
-        values[0] = ObjectIdGetDatum((Oid)zoneId);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, "%016lu",
-            (uint64)slot->XactId());
-        securec_check_ss(rc, "\0", "\0");
-        values[1] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT,
-            UNDO_PTR_GET_OFFSET(slot->StartUndoPtr()));
-        securec_check_ss(rc, "\0", "\0");
-        values[2] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT,
-            UNDO_PTR_GET_OFFSET(slot->EndUndoPtr()));
-        securec_check_ss(rc, "\0", "\0");
-        values[3] = CStringGetTextDatum(textBuffer);
-        rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, UNDO_REC_PTR_FORMAT,
-            UNDO_PTR_GET_OFFSET(slotPtr));
-        securec_check_ss(rc, "\0", "\0");
-        values[4] = CStringGetTextDatum(textBuffer);
-        tuplestore_putvalues(tupstore, tupDesc, values, nulls);
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        (void)ExecClearTuple(slot);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
-    buf.Release();
-    tuplestore_donestoring(tupstore);
-    PG_RETURN_VOID();
+    SRF_RETURN_DONE(funcctx);
 }
+
+#endif

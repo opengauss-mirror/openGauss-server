@@ -16,14 +16,15 @@ ALTER TABLE [ IF EXISTS ] { table_name [*] | ONLY table_name | ONLY ( table_name
     RENAME PARTITION { partion_name | FOR ( partition_value [, ...] ) } TO partition_new_name;
 
 where action can be:
-move_clause  |
+    move_clause  |
     exchange_clause  |
     row_clause  |
     merge_clause  |
     modify_clause  |
     split_clause  |
     add_clause  |
-    drop_clause
+    drop_clause  |
+    truncate_clause
 where move_clause can be:
 MOVE PARTITION { partion_name | FOR ( partition_value [, ...] ) } TABLESPACE tablespacename
 where exchange_clause can be:
@@ -44,6 +45,10 @@ AT ( partition_value ) INTO ( PARTITION partition_name [ TABLESPACE tablespacena
 where no_split_point_clause can be:
 INTO {(partition_less_than_item [, ...] ) | (partition_start_end_item [, ...] )}
 where add_clause can be:
+ADD PARTITION ( partition_col1_name = partition_col1_value [, partition_col2_name = partition_col2_value ] [, ...] )
+    [ LOCATION 'location1' ]
+    [ PARTITION (partition_colA_name = partition_colA_value [, partition_colB_name = partition_colB_value ] [, ...] ) ]
+    [ LOCATION 'location2' ]
 ADD {partition_less_than_item | partition_start_end_item}
 where partition_less_than_item can be:
 PARTITION partition_name VALUES LESS THAN ( { partition_value | MAXVALUE }	[, ...] ) [ TABLESPACE tablespacename ]
@@ -56,6 +61,9 @@ PARTITION partition_name {
 } [TABLESPACE tablespace_name]
 where drop_clause can be:
 DROP PARTITION  { partition_name  | FOR (  partition_value [, ...] )  }
+where truncate_clause can be:
+TRUNCATE PARTITION  { partition_name | FOR (  partition_value [, ...] )  } [ UPDATE GLOBAL INDEX ]
+NOTICE: 'truncate_clause' is only avaliable in CENTRALIZED mode!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

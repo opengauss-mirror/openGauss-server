@@ -197,6 +197,13 @@ static void _ArchiveEntry(ArchiveHandle* AH, TocEntry* te)
     te->formatData = (void*)ctx;
 }
 
+#ifdef ENABLE_UT
+void uttest_custom_ArchiveEntry(ArchiveHandle* AH, TocEntry* te)
+{
+    _ArchiveEntry(AH, te);
+}
+#endif
+
 /*
  * Called by the Archiver to save any extra format-related TOC entry
  * data.

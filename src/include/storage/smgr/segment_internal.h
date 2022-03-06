@@ -71,8 +71,9 @@ typedef struct SegPhysicalFile {
 
 const int DF_ARRAY_EXTEND_STEP = 4;
 const ssize_t DF_FILE_EXTEND_STEP_BLOCKS = RELSEG_SIZE / 8;
-const ssize_t DF_FILE_EXTEND_STEP_SIZE = DF_FILE_EXTEND_STEP_BLOCKS * BLCKSZ; // 1GB
-const ssize_t DF_FILE_SLICE_SIZE = RELSEG_SIZE * BLCKSZ;             // 1GB
+const ssize_t DF_FILE_EXTEND_STEP_SIZE = DF_FILE_EXTEND_STEP_BLOCKS * BLCKSZ; // 128MB
+const ssize_t DF_FILE_SLICE_BLOCKS = RELSEG_SIZE;
+const ssize_t DF_FILE_SLICE_SIZE = DF_FILE_SLICE_BLOCKS * BLCKSZ;             // 1GB
 const ssize_t DF_FILE_MIN_BLOCKS = DF_FILE_EXTEND_STEP_BLOCKS;
 
 #define DF_OFFSET_TO_SLICENO(offset) (offset / DF_FILE_SLICE_SIZE)
@@ -98,6 +99,7 @@ void df_fsync(SegLogicFile *sf);
 void df_unlink(SegLogicFile *sf);
 void df_create_file(SegLogicFile *sf, bool redo);
 void df_shrink(SegLogicFile *sf, BlockNumber target);
+void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks);
 
 /*
  * Data files status in the segment space;

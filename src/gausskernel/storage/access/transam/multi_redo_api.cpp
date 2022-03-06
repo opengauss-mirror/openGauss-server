@@ -35,13 +35,9 @@
 #include "access/parallel_recovery/dispatcher.h"
 #include "access/extreme_rto/page_redo.h"
 #include "access/parallel_recovery/page_redo.h"
+#include "access/xlog_internal.h"
 
-
-#ifdef ENABLE_MULTIPLE_NODES
-bool g_supportHotStandby = false;   /* don't support consistency view */
-#else
 bool g_supportHotStandby = true;   /* don't support consistency view */
-#endif
 
 
 void StartUpMultiRedo(XLogReaderState *xlogreader, uint32 privateLen)
@@ -89,20 +85,6 @@ void ExtremeRtoRedoManagerSendEndToStartup()
     extreme_rto::PutRecordToReadQueue((XLogReaderState *)&extreme_rto::g_redoEndMark.record);
 }
 
-bool IsExtremeRtoReadWorkerRunning()
-{
-    if (!IsExtremeRtoRunning()) {
-        return false;
-    }
-
-    uint32 readWorkerState = pg_atomic_read_u32(&extreme_rto::g_dispatcher->rtoXlogBufState.readWorkerState);
-    if (readWorkerState == extreme_rto::WORKER_STATE_STOP || readWorkerState == extreme_rto::WORKER_STATE_EXIT) {
-        return false;
-    }
-
-    return true;
-}
-
 void DispatchRedoRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     if (IsExtremeRedo()) {
@@ -110,11 +92,16 @@ void DispatchRedoRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz
     } else if (IsParallelRedo()) {
         parallel_recovery::DispatchRedoRecordToFile(record, expectedTLIs, recordXTime);
     } else {
+        g_instance.startup_cxt.current_record = record;
         uint32 term = XLogRecGetTerm(record);
         if (term > g_instance.comm_cxt.localinfo_cxt.term_from_xlog) {
             g_instance.comm_cxt.localinfo_cxt.term_from_xlog = term;
         }
-        parallel_recovery::ApplyRedoRecord(record, t_thrd.xlog_cxt.redo_oldversion_xlog);
+
+        long readbufcountbefore = u_sess->instr_cxt.pg_buffer_usage->local_blks_read;
+        ApplyRedoRecord(record);
+        record->readblocks = u_sess->instr_cxt.pg_buffer_usage->local_blks_read - readbufcountbefore;
+        CountXLogNumbers(record);
         if (XLogRecGetRmid(record) == RM_XACT_ID)
             SetLatestXTime(recordXTime);
         SetXLogReplayRecPtr(record->ReadRecPtr, record->EndRecPtr);
@@ -337,3 +324,106 @@ void GetRedoWrokerStatistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32
         return parallel_recovery::redo_get_wroker_statistic(realNum, worker, workerLen);
     }
 }
+
+void GetRedoWorkerTimeCount(RedoWorkerTimeCountsInfo **workerCountInfoList, uint32 *realNum)
+{
+    if (IsExtremeRedo()) {
+        extreme_rto::redo_get_wroker_time_count(workerCountInfoList, realNum);
+    } else if (IsParallelRedo()) {
+        parallel_recovery::redo_get_wroker_time_count(workerCountInfoList, realNum);
+    } else {
+        *realNum = 0;
+    }
+}
+
+void CountXLogNumbers(XLogReaderState *record)
+{
+    const uint32 type_shift = 4;
+    RmgrId rm_id = XLogRecGetRmid(record);
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    if (rm_id == RM_HEAP_ID || rm_id == RM_HEAP2_ID || rm_id == RM_HEAP3_ID) {
+        info = info & XLOG_HEAP_OPMASK;
+    } else if (rm_id == RM_UHEAP_ID || rm_id == RM_UHEAP2_ID) {
+        info = info & XLOG_UHEAP_OPMASK;
+    }
+
+    info = (info >> type_shift);
+    Assert(info < MAX_XLOG_INFO_NUM);
+    Assert(rm_id < RM_NEXT_ID);
+    (void)pg_atomic_add_fetch_u64(&g_instance.comm_cxt.predo_cxt.xlogStatics[rm_id][info].total_num, 1);
+
+    if (record->max_block_id >= 0) {
+        (void)pg_atomic_add_fetch_u64(&g_instance.comm_cxt.predo_cxt.xlogStatics[rm_id][info].extra_num,
+            record->readblocks);
+    } else if (rm_id == RM_XACT_ID) {
+        ColFileNodeRel *xnodes = NULL;
+        int nrels = 0;
+        XactGetRelFiles(record, &xnodes, &nrels);
+        if (nrels > 0) {
+            (void)pg_atomic_add_fetch_u64(&g_instance.comm_cxt.predo_cxt.xlogStatics[rm_id][info].extra_num, nrels);
+        }
+    }
+}
+
+void ResetXLogStatics()
+{
+    errno_t rc = memset_s((void *)g_instance.comm_cxt.predo_cxt.xlogStatics,
+        sizeof(g_instance.comm_cxt.predo_cxt.xlogStatics), 0, sizeof(g_instance.comm_cxt.predo_cxt.xlogStatics));
+    securec_check(rc, "\0", "\0");
+}
+
+void DiagLogRedoRecord(XLogReaderState *record, const char *funcName)
+{
+    uint8 info;
+    RelFileNode oldRn = { 0 };
+    RelFileNode newRn = { 0 };
+    BlockNumber oldblk = InvalidBlockNumber;
+    BlockNumber newblk = InvalidBlockNumber;
+    bool newBlkExistFlg = false;
+    bool oldBlkExistFlg = false;
+    ForkNumber oldFk = InvalidForkNumber;
+    ForkNumber newFk = InvalidForkNumber;
+    StringInfoData buf;
+
+    /* Support redo old version xlog during upgrade (Just the runningxact log with chekpoint online ) */
+    uint32 rmid = XLogRecGetRmid(record);
+    info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+
+    initStringInfo(&buf);
+    RmgrTable[rmid].rm_desc(&buf, record);
+
+    if (XLogRecGetBlockTag(record, 0, &newRn, &newFk, &newblk)) {
+        newBlkExistFlg = true;
+    }
+    if (XLogRecGetBlockTag(record, 1, &oldRn, &oldFk, &oldblk)) {
+        oldBlkExistFlg = true;
+    }
+    ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+        errmsg("[REDO_LOG_TRACE]DiagLogRedoRecord: %s, ReadRecPtr:%lu,EndRecPtr:%lu,"
+            "newBlkExistFlg:%d,"
+            "newRn(spcNode:%u, dbNode:%u, relNode:%u),newFk:%d,newblk:%u,"
+            "oldBlkExistFlg:%d,"
+            "oldRn(spcNode:%u, dbNode:%u, relNode:%u),oldFk:%d,oldblk:%u,"
+            "info:%u, rm_name:%s, desc:%s,"
+            "max_block_id:%d",
+            funcName, record->ReadRecPtr, record->EndRecPtr, newBlkExistFlg, newRn.spcNode, newRn.dbNode, newRn.relNode,
+            newFk, newblk, oldBlkExistFlg, oldRn.spcNode, oldRn.dbNode, oldRn.relNode, oldFk, oldblk, (uint32)info,
+            RmgrTable[rmid].rm_name, buf.data, record->max_block_id)));
+    pfree_ext(buf.data);
+}
+
+void ApplyRedoRecord(XLogReaderState *record)
+{
+    ErrorContextCallback errContext;
+    errContext.callback = rm_redo_error_callback;
+    errContext.arg = (void *)record;
+    errContext.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errContext;
+    if (module_logging_is_on(MOD_REDO)) {
+        DiagLogRedoRecord(record, "ApplyRedoRecord");
+    }
+    RmgrTable[XLogRecGetRmid(record)].rm_redo(record);
+
+    t_thrd.log_cxt.error_context_stack = errContext.previous;
+}
+

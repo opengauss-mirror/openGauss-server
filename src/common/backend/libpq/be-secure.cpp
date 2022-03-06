@@ -96,7 +96,6 @@ typedef enum DHKeyLength {
     DHKey8192
 } DHKeyLength;
 
-static int verify_cb(int ok, X509_STORE_CTX* ctx);
 static void info_cb(const SSL* ssl, int type, int args);
 static const char* SSLerrmessage(void);
 static void set_user_config_ssl_ciphers(const char* sslciphers);
@@ -122,16 +121,19 @@ extern THR_LOCAL unsigned char disable_pqlocking;
 
 /* security ciphers suites in SSL connection */
 static const char* ssl_ciphers_map[] = {
-    TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,   /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256 */
-    TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,   /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
-    TLS1_TXT_DHE_RSA_WITH_AES_128_CCM,          /* TLS_DHE_RSA_WITH_AES_128_CCM */
-    TLS1_TXT_DHE_RSA_WITH_AES_256_CCM,          /* TLS_DHE_RSA_WITH_AES_256_CCM */
-    TLS1_TXT_ECDHE_RSA_WITH_AES_256_GCM_SHA384,     /* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 */
     TLS1_TXT_ECDHE_RSA_WITH_AES_128_GCM_SHA256,     /* TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 */
-    TLS1_TXT_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,   /* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 */
+    TLS1_TXT_ECDHE_RSA_WITH_AES_256_GCM_SHA384,     /* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 */
     TLS1_TXT_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,   /* TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 */
+    TLS1_TXT_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,   /* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 */
+    /* The following are compatible with earlier versions of the client. */
+    TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,       /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, */
+    TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,       /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
     NULL};
 
+#ifndef ENABLE_UT
+static
+#endif
+bool g_server_crl_err = false;
 #endif
 
 const char* ssl_cipher_file = "server.key.cipher";
@@ -442,60 +444,60 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
  *  criteria (e.g., accepting self-signed or expired certs), but
  *  for now we accept the default checks.
  */
+int be_verify_cb(int ok, X509_STORE_CTX* ctx)
+{
+    if (ok) {
+        return ok;
+    }
 
- static int verify_cb(int ok, X509_STORE_CTX* ctx)
- {
-	int cert_error = X509_STORE_CTX_get_error(ctx);
+    /* 
+    * When the CRL is abnormal, it won't be used to check whether the certificate is revoked,
+    * and the services shouldn't be affected due to the CRL exception.
+    */
+    const int crl_err_scenarios[] = {
+        X509_V_ERR_CRL_HAS_EXPIRED,
+        X509_V_ERR_UNABLE_TO_GET_CRL,
+        X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE,
+        X509_V_ERR_CRL_SIGNATURE_FAILURE,
+        X509_V_ERR_CRL_NOT_YET_VALID,
+        X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD,
+        X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD,
+        X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER,
+        X509_V_ERR_KEYUSAGE_NO_CRL_SIGN,
+        X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION,
+        X509_V_ERR_DIFFERENT_CRL_SCOPE,
+        X509_V_ERR_CRL_PATH_VALIDATION_ERROR
+    };
+    bool ignore_crl_err = false;
 
-	if (!ok)
-	{
-                ereport(LOG, (errmsg("verify error:num=%d:%s \n", cert_error,
-                X509_verify_cert_error_string(cert_error))));
-		switch (cert_error)
-		{
-			case X509_V_ERR_CRL_HAS_EXPIRED:
-				ok = 1;
-				break;
-			case X509_V_ERR_UNABLE_TO_GET_CRL:
-				ok = 1;
-				break;	
-			case X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE:
-				ok = 1;
-				break;	
-			case X509_V_ERR_CRL_SIGNATURE_FAILURE:
-				ok = 1;
-				break;
-			case X509_V_ERR_CRL_NOT_YET_VALID:
-				ok = 1;
-				break;	
-			case X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD:
-				ok = 1;
-				break;
-			case X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD:
-				ok = 1;
-				break;
-			case X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER:
-				ok = 1;
-				break;
-			case X509_V_ERR_KEYUSAGE_NO_CRL_SIGN:
-				ok = 1;
-				break;
-			case X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION:
-				ok = 1;
-				break;
-			case X509_V_ERR_DIFFERENT_CRL_SCOPE:
-				ok = 1;
-				break;
-			case X509_V_ERR_CRL_PATH_VALIDATION_ERROR:
-				ok = 1;
-				break;
-			default:
-				break;
-		}
-	}
+    int err_code = X509_STORE_CTX_get_error(ctx);
+    const char *err_msg = X509_verify_cert_error_string(err_code);
+    if (!g_server_crl_err) {
+        for (size_t i = 0; i < sizeof(crl_err_scenarios) / sizeof(crl_err_scenarios[0]); i++) {
+            if (err_code == crl_err_scenarios[i]) {
+                ereport(LOG,
+                    (errmsg("During SSL authentication, there are some errors in the CRL, so we just ignore the CRL. "
+                        "{ssl err code: %d, ssl err message: %s}\n", err_code, err_msg)));
+                
+                g_server_crl_err = true;
+                ignore_crl_err = true;
+                break;
+            }
+        }
+    } else {
+        if (err_code == X509_V_ERR_CERT_REVOKED) {
+            g_server_crl_err = false; /* reset */
+            ignore_crl_err = true;
+        }
+    }
 
-	return ok;
- }
+    if (ignore_crl_err) {
+        X509_STORE_CTX_set_error(ctx, X509_V_OK);
+        ok = 1;
+    }
+
+    return ok;
+}
 
 /*
  *  This callback is used to copy SSL information messages
@@ -855,7 +857,8 @@ static void initialize_SSL(void)
          * presented.  We might fail such connections later, depending on
          * what we find in pg_hba.conf.
          */
-        SSL_CTX_set_verify(u_sess->libpq_cxt.SSL_server_context, (SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE), verify_cb);
+        SSL_CTX_set_verify(u_sess->libpq_cxt.SSL_server_context, (SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE),
+            be_verify_cb);
 
         /* Increase the depth to support multi-level certificate. */
         SSL_CTX_set_verify_depth(u_sess->libpq_cxt.SSL_server_context, (MAX_CERTIFICATE_DEPTH_SUPPORTED - 2));
@@ -888,6 +891,8 @@ static int open_server_SSL(Port* port)
 
     Assert(port->ssl == NULL);
     Assert(port->peer == NULL);
+
+    g_server_crl_err = false;
 
     port->ssl = SSL_new(u_sess->libpq_cxt.SSL_server_context);
     if (port->ssl == NULL) {

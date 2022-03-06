@@ -32,6 +32,10 @@
 #ifndef __STDC_CONSTANT_MACROS
 #define __STDC_CONSTANT_MACROS
 #endif
+
+#include "pg_config.h"
+
+#ifdef ENABLE_LLVM_COMPILE
 #include "llvm/IR/Verifier.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
@@ -52,6 +56,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/raw_os_ostream.h"
+#endif
 
 #undef __STDC_LIMIT_MACROS
 #include "c.h"
@@ -148,6 +153,7 @@
 #define pos_atom_data 0
 #define pos_atom_nullflag 1
 
+#ifdef ENABLE_LLVM_COMPILE
 /* The whole intrinsic methods are listed in include/llvm/IR/IntrinsicEnums.inc */
 #if LLVM_MAJOR_VERSION == 10
 const int llvm_prefetch = 217;
@@ -159,6 +165,11 @@ const int llvm_prefetch = 225;
 const int llvm_sadd_with_overflow = 239;
 const int llvm_smul_with_overflow = 247;
 const int llvm_ssub_with_overflow = 252;
+#elif LLVM_MAJOR_VERSION == 12
+const int llvm_prefetch = 225;
+const int llvm_sadd_with_overflow = 240;
+const int llvm_smul_with_overflow = 250;
+const int llvm_ssub_with_overflow = 256;
 #else
 #error Un-supported LLVM version.
 #endif
@@ -189,6 +200,7 @@ class IRBuilder;
 
 class IRBuilderDefaultInserter;
 }  // namespace llvm
+#endif
 
 namespace dorado {
 
@@ -204,6 +216,7 @@ bool canInitCodegenInvironment();
  */
 bool canInitThreadCodeGen();
 
+#ifdef ENABLE_LLVM_COMPILE
 class GsCodeGen : public BaseObject {
 public:
     void initialize();
@@ -597,6 +610,7 @@ private:
     /* Records the c-function calls in codegen IR fucntion of expression tree */
     List* m_cfunction_calls;
 };
+#endif
 
 /*
  * Macros used to define the variables

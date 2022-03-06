@@ -31,6 +31,7 @@
 #include "utils/timestamp.h"
 #include "replication/heartbeat/libpq/libpq.h"
 #include "replication/heartbeat/heartbeat_conn.h"
+#include "replication/walreceiver.h"
 #include "replication/heartbeat/heartbeat_server.h"
 
 using namespace PureLibpq;
@@ -203,7 +204,7 @@ bool HeartbeatServer::IsAlreadyListen(const char *ip, int port) const
 
     for (listen_index = 0; listen_index < MAX_REPLNODE_NUM; ++listen_index) {
         if (serverListenSocket_[listen_index] != PGINVALID_SOCKET) {
-            struct sockaddr_in saddr;
+            struct sockaddr_storage saddr;
             socklen_t slen;
             char *result = NULL;
             rc = memset_s(&saddr, sizeof(saddr), 0, sizeof(saddr));
@@ -215,21 +216,34 @@ bool HeartbeatServer::IsAlreadyListen(const char *ip, int port) const
                 continue;
             }
 
-            if (saddr.sin_family == AF_INET6) {
-                result = inet_net_ntop(AF_INET6, &saddr.sin_addr, AF_INET6_MAX_BITS, sock_ip, IP_LEN);
+            if (((struct sockaddr *) &saddr)->sa_family == AF_INET6) {
+                char* ipNoZone = NULL;
+                char ipNoZoneData[IP_LEN] = {0};
+
+                /* remove any '%zone' part from an IPv6 address string */
+                ipNoZone = remove_ipv6_zone((char *)ip, ipNoZoneData, IP_LEN);
+
+                result = inet_net_ntop(AF_INET6, &((struct sockaddr_in6 *) &saddr)->sin6_addr,
+                                       AF_INET6_MAX_BITS, sock_ip, IP_LEN);
                 if (result == NULL) {
                     ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
                 }
-            } else if (saddr.sin_family == AF_INET) {
-                result = inet_net_ntop(AF_INET, &saddr.sin_addr, AF_INET_MAX_BITS, sock_ip, IP_LEN);
+
+                if ((strcmp(ipNoZone, sock_ip) == 0) && (ntohs(((struct sockaddr_in6 *) &saddr)->sin6_port)) == port) {
+                    return true;
+                }
+            } else if (((struct sockaddr *) &saddr)->sa_family == AF_INET) {
+                result = inet_net_ntop(AF_INET, &((struct sockaddr_in *) &saddr)->sin_addr,
+                                       AF_INET_MAX_BITS, sock_ip, IP_LEN);
                 if (result == NULL) {
                     ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
                 }
-            } else if (saddr.sin_family == AF_UNIX) {
+
+                if ((strcmp(ip, sock_ip) == 0) && (ntohs(((struct sockaddr_in *) &saddr)->sin_port)) == port) {
+                    return true;
+                }
+            } else if (((struct sockaddr *) &saddr)->sa_family == AF_UNIX) {
                 continue;
-            }
-            if ((strcmp(ip, sock_ip) == 0) && (ntohs(saddr.sin_port)) == port) {
-                return true;
             }
         }
     }
@@ -246,13 +260,19 @@ bool HeartbeatServer::IsAlreadyListen(const char *ip, int port) const
 bool HeartbeatServer::AddConnection(HeartbeatConnection *con, HeartbeatConnection **releasedConnPtr)
 {
     *releasedConnPtr = NULL;
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
+
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
         ReplConnInfo *replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
         if (replconninfo == NULL) {
             continue;
         }
 
-        if (strncmp((char *)replconninfo->remotehost, con->remoteHost, IP_LEN) == 0 &&
+        /* remove any '%zone' part from an IPv6 address string */
+        ipNoZone = remove_ipv6_zone(replconninfo->remotehost, ipNoZoneData, IP_LEN);
+
+        if (strncmp((char *)ipNoZone, con->remoteHost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == con->channelIdentifier) {
             if (identifiedConns_[i] != NULL) {
                 /* remove old connection if has duplicated connections. */
@@ -281,13 +301,19 @@ bool HeartbeatServer::AddConnection(HeartbeatConnection *con, HeartbeatConnectio
  */
 void HeartbeatServer::RemoveConnection(HeartbeatConnection *con)
 {
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
+
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
         ReplConnInfo *replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
         if (replconninfo == NULL) {
             continue;
         }
 
-        if (strncmp((char *)replconninfo->remotehost, con->remoteHost, IP_LEN) == 0 &&
+        /* remove any '%zone' part from an IPv6 address string */
+        ipNoZone = remove_ipv6_zone(replconninfo->remotehost, ipNoZoneData, IP_LEN);
+
+        if (strncmp((char *)ipNoZone, con->remoteHost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == con->channelIdentifier) {
             if (identifiedConns_[i] == NULL) {
                 ereport(COMMERROR, (errmsg("The connection is not existed, remote ip: %s, remote heartbeat port:%d.",

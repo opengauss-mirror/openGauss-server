@@ -1068,8 +1068,8 @@ set enable_global_stats=off;
 analyze empty_part_table;
 drop table empty_part_table;
 reset cstore_insert_mode;
-create schema DTS2017052409444;
-set current_schema=DTS2017052409444;
+create schema testschema;
+set current_schema=testschema;
 set cstore_insert_mode = main;
 create table household_demographics_h
 (
@@ -1124,10 +1124,10 @@ drop foreign table call_center_f;
 drop table household_demographics_h cascade;
 drop table call_center_h cascade;
 drop procedure test;
-drop schema DTS2017052409444 cascade;
+drop schema testschema cascade;
 set current_schema = dfs;
-create schema DTS2017072002456;
-set current_schema=DTS2017072002456;
+create schema testschema2;
+set current_schema=testschema2;
 set cstore_insert_mode = main;
 create table item_inventory_hdfs
 (
@@ -1180,7 +1180,7 @@ from (select location_id b, count(*) as cc
            8 |  21
 (6 rows)
 
-drop schema DTS2017072002456 cascade;
+drop schema testschema2 cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table item_inventory_hdfs
 drop cascades to foreign table item_inventory

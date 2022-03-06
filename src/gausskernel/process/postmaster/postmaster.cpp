@@ -87,6 +87,7 @@
 #include "access/xact.h"
 #include "bootstrap/bootstrap.h"
 #include "commands/matview.h"
+#include "commands/verify.h"
 #include "catalog/pg_control.h"
 #include "dbmind/hypopg_index.h"
 #include "instruments/instr_unique_sql.h"
@@ -154,8 +155,10 @@
 #include "postmaster/walwriter.h"
 #include "postmaster/walwriterauxiliary.h"
 #include "postmaster/lwlockmonitor.h"
+#include "postmaster/barrier_preparse.h"
 #include "replication/walreceiver.h"
 #include "replication/datareceiver.h"
+#include "replication/logical.h"
 #include "replication/slot.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
@@ -214,7 +217,9 @@
 
 #include "distributelayer/streamMain.h"
 #include "distributelayer/streamProducer.h"
+#ifndef ENABLE_LITE_MODE
 #include "eSDKOBS.h"
+#endif
 #include "cjson/cJSON.h"
 
 #include "tcop/stmt_retry.h"
@@ -254,6 +259,7 @@
 #define static
 #endif
 
+extern void InitGlobalSeq();
 extern void auto_explain_init(void);
 extern int S3_init();
 static const int RECOVERY_PARALLELISM_DEFAULT = 1;
@@ -295,6 +301,7 @@ volatile int Shutdown = NoShutdown;
 
 extern void gs_set_hs_shm_data(HaShmemData* ha_shm_data);
 extern void ReaperBackendMain();
+extern void AdjustThreadAffinity();
 
 #define EXTERN_SLOTS_NUM 17
 volatile PMState pmState = PM_INIT;
@@ -398,10 +405,12 @@ static void RemoteHostInitilize(Port* port);
 static int StartupPacketInitialize(Port* port);
 static void PsDisplayInitialize(Port* port);
 static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_saved);
+static void UpdateArchiveSlotStatus();
 
 static ServerMode get_cur_mode(void);
 static int get_cur_repl_num(void);
 
+static void PMInitDBStateFile();
 static void PMReadDBStateFile(GaussState* state);
 static void PMSetDBStateFile(GaussState* state);
 static void PMUpdateDBState(DbState db_state, ServerMode mode, int conn_num);
@@ -436,7 +445,7 @@ bool PMstateIsRun(void);
 #define GTM_LITE_CN (GTM_LITE_MODE && IS_PGXC_COORDINATOR)
 
 #ifdef ENABLE_MULTIPLE_NODES
-#define START_BARRIER_CREATOR IS_PGXC_COORDINATOR
+#define START_BARRIER_CREATOR (IS_PGXC_COORDINATOR && !IS_DISASTER_RECOVER_MODE)
 #else
 #define START_BARRIER_CREATOR IS_PGXC_DATANODE
 #endif
@@ -454,6 +463,10 @@ static void InitPostmasterDeathWatchHandle(void);
 static void NotifyShutdown(void);
 static void NotifyProcessActive(void);
 static int init_stream_comm(void);
+#ifndef ENABLE_MULTIPLE_NODES
+static void handle_change_role_signal(char *role);
+static bool CheckSignalByFile(const char *filename, void *infoPtr, size_t infoSize);
+#endif
 
 int GaussDbThreadMain(knl_thread_arg* arg);
 const char* GetThreadName(knl_thread_role role);
@@ -865,6 +878,7 @@ bool SetDBStateFileState(DbState state, bool optional)
     if (strlen(gaussdb_state_file) > 0) {
         char temppath[MAXPGPATH] = {0};
         GaussState s;
+        int len = 0;
 
         /* zero it in case gaussdb.state doesn't exist. */
         int rc = memset_s(&s, sizeof(GaussState), 0, sizeof(GaussState));
@@ -886,8 +900,9 @@ bool SetDBStateFileState(DbState state, bool optional)
         }
 
         /* Read old content from file. */
-        int len = read(fd, &s, sizeof(GaussState));
-        if (len != sizeof(GaussState)) {
+        len = read(fd, &s, sizeof(GaussState));
+        /* sizeof(int) is for current_connect_idx of GaussState */
+        if ((len != sizeof(GaussState)) && (len != sizeof(GaussState) - sizeof(int))) {
             write_stderr("Failed to read gaussdb.state: %d", errno);
             (void)close(fd);
             return false;
@@ -948,10 +963,12 @@ void signal_sysloger_flush(void)
 void SetShmemCxt(void)
 {
     int thread_pool_worker_num = 0;
+    int thread_pool_stream_proc_num = 0;
 
     if (g_threadPoolControler != NULL) {
         thread_pool_worker_num = g_threadPoolControler->GetThreadNum();
         g_instance.shmem_cxt.ThreadPoolGroupNum = g_threadPoolControler->GetGroupNum();
+        thread_pool_stream_proc_num = GetThreadPoolStreamProcNum();
     } else {
         g_instance.shmem_cxt.ThreadPoolGroupNum = 0;
     }
@@ -966,7 +983,10 @@ void SetShmemCxt(void)
                                        g_instance.attr.attr_storage.max_undo_workers + 1 +
                                        AUXILIARY_BACKENDS +
                                        AV_LAUNCHER_PROCS + 
-                                       g_max_worker_processes;
+                                       g_max_worker_processes +
+                                       thread_pool_stream_proc_num;
+
+#ifndef ENABLE_LITE_MODE
     g_instance.shmem_cxt.MaxReserveBackendId = g_instance.attr.attr_sql.job_queue_processes +
                                                g_instance.attr.attr_storage.autovacuum_max_workers +
                                                g_instance.attr.attr_storage.max_undo_workers + 1 +
@@ -974,7 +994,15 @@ void SetShmemCxt(void)
                                                AUXILIARY_BACKENDS +
                                                AV_LAUNCHER_PROCS +
                                                g_max_worker_processes;
-
+#else
+    g_instance.shmem_cxt.MaxReserveBackendId = g_instance.attr.attr_sql.job_queue_processes +
+                                               g_instance.attr.attr_storage.autovacuum_max_workers +
+                                               g_instance.attr.attr_storage.max_undo_workers + 1 +
+                                               thread_pool_worker_num +
+                                               AUXILIARY_BACKENDS +
+                                               AV_LAUNCHER_PROCS +
+                                               g_max_worker_processes;
+#endif
     Assert(g_instance.shmem_cxt.MaxBackends <= MAX_BACKENDS);
 }
 
@@ -1071,6 +1099,15 @@ bool isNotWildcard(void* val1, void* val2)
     return (strcmp(curhost, nodename) == 0) ? false : true;
 }
 
+void initKnlRTOContext(void)
+{
+    if (g_instance.rto_cxt.rto_standby_data == NULL) {
+        g_instance.rto_cxt.rto_standby_data = (RTOStandbyData*)MemoryContextAllocZero(
+            INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(RTOStandbyData) *
+            g_instance.attr.attr_storage.max_wal_senders);
+    }
+}
+
 /*
  * Postmaster main entry point
  */
@@ -1083,7 +1120,6 @@ int PostmasterMain(int argc, char* argv[])
     bool listen_addr_saved = false;
     int use_pooler_port = -1;
     int i;
-    GaussState state;
     OptParseContext optCtxt;
     errno_t rc = 0;
     Port port;
@@ -1123,6 +1159,7 @@ int PostmasterMain(int argc, char* argv[])
      */
     initialize_feature_flags();
 
+#ifndef ENABLE_LITE_MODE
     /*
      * @OBS
      * Create a global OBS CA object shared among threads
@@ -1130,6 +1167,7 @@ int PostmasterMain(int argc, char* argv[])
     initOBSCacheObject();
 
     S3_init();
+#endif
 
     /* set memory manager for minizip libs */
     pm_set_unzip_memfuncs();
@@ -1138,10 +1176,12 @@ int PostmasterMain(int argc, char* argv[])
     cJSON_Hooks hooks = {cJSON_internal_malloc, cJSON_internal_free};
     cJSON_InitHooks(&hooks);
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * Prepare codegen enviroment.
      */
     CodeGenProcessInitialize();
+#endif
 
     /* Initialize paths to installation files */
     getInstallationPaths(argv[0]);
@@ -1352,11 +1392,14 @@ int PostmasterMain(int argc, char* argv[])
             case 'X':
                 /* stop barrier */
                 if ((optCtxt.optarg != NULL) && (strlen(optCtxt.optarg) > 0)) {
-                    rc = strncpy_s(g_instance.stopBarrierId, MAX_BARRIER_ID_LENGTH, (char *)optCtxt.optarg,
-                        strlen(optCtxt.optarg));
-                    securec_check(rc, "\0", "\0");                    
-                    ereport(LOG, (errmsg("Set stop barrierID %s", g_instance.stopBarrierId)));
-                }                
+                    if (strlen(optCtxt.optarg) > MAX_BARRIER_ID_LENGTH) {
+                        ereport(FATAL, (errmsg("the options of -X is too long")));
+                    }
+                    rc = strncpy_s(g_instance.csn_barrier_cxt.stopBarrierId, MAX_BARRIER_ID_LENGTH,
+                                   (char *)optCtxt.optarg, strlen(optCtxt.optarg));
+                    securec_check(rc, "\0", "\0");
+                    ereport(LOG, (errmsg("Set stop barrierID %s", g_instance.csn_barrier_cxt.stopBarrierId)));
+                }
                 break;
             case 'c':
             case '-': {
@@ -1521,6 +1564,8 @@ int PostmasterMain(int argc, char* argv[])
 
         gs_signal_monitor_startup();
         g_instance.attr.attr_common.Logging_collector = true;
+        g_instance.global_sysdbcache.Init(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+        CreateLocalSysDBCache();
         g_instance.pid_cxt.SysLoggerPID = SysLogger_Start();
         FencedUDFMasterMain(0, NULL);
         return 0;
@@ -1538,6 +1583,7 @@ int PostmasterMain(int argc, char* argv[])
 
     /* Set parallel recovery config */
     ConfigRecoveryParallelism();
+    ProcessRedoCpuBindInfo();
     /*
         * Other one-time internal sanity checks can go here, if they are fast.
         * (Put any slow processing further down, after postmaster.pid creation.)
@@ -1546,6 +1592,8 @@ int PostmasterMain(int argc, char* argv[])
         write_stderr("%s: invalid datetoken tables, please fix\n", progname);
         ExitPostmaster(1);
     }
+
+    initKnlRTOContext();
 
     /*
         * Now that we are done processing the postmaster arguments, reset
@@ -1915,6 +1963,7 @@ int PostmasterMain(int argc, char* argv[])
         } else {
             g_instance.attr.attr_common.enable_thread_pool = false;
             g_threadPoolControler = NULL;
+            AdjustThreadAffinity();
         }
     }
 
@@ -1949,19 +1998,8 @@ int PostmasterMain(int argc, char* argv[])
         */
     SetHaShmemData();
 
-    rc = memset_s(&state, sizeof(state), 0, sizeof(state));
-    securec_check(rc, "", "");
-    state.conn_num = t_thrd.postmaster_cxt.HaShmData->repl_list_num;
-    state.mode = t_thrd.postmaster_cxt.HaShmData->current_mode;
-    state.state = STARTING_STATE;
-    state.lsn = 0;
-    state.term = 0;
-    state.sync_stat = false;
-    state.ha_rebuild_reason = NONE_REBUILD;
-    PMSetDBStateFile(&state);
-    ereport(LOG,
-        (errmsg("create gaussdb state file success: db state(STARTING_STATE), server mode(%s)",
-            wal_get_role_string(t_thrd.postmaster_cxt.HaShmData->current_mode))));
+    PMInitDBStateFile();
+
     set_max_safe_fds();
 
     /*
@@ -2004,6 +2042,7 @@ int PostmasterMain(int argc, char* argv[])
     write_nondefault_variables(PGC_POSTMASTER);
 #endif
 
+#ifndef ENABLE_LITE_MODE
 #if defined (ENABLE_MULTIPLE_NODES) || defined (ENABLE_PRIVATEGAUSS)
     /* init hotpatch */
     if (hotpatch_remove_signal_file(t_thrd.proc_cxt.DataDir) == HP_OK) {
@@ -2013,6 +2052,7 @@ int PostmasterMain(int argc, char* argv[])
             write_stderr("hotpatch init failed ret is %d!\n", ret);
         }
     }
+#endif
 #endif
     /*
      * Write the external PID file if requested
@@ -2087,6 +2127,9 @@ int PostmasterMain(int argc, char* argv[])
     /* initialize workload manager */
     InitializeWorkloadManager();
 
+    g_instance.global_sysdbcache.Init(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+    CreateLocalSysDBCache();
+
     /* Init proc's subxid cache context, parent is g_instance.instance_context */
     ProcSubXidCacheContext = AllocSetContextCreate(g_instance.instance_context,
         "ProcSubXidCacheContext",
@@ -2113,8 +2156,6 @@ int PostmasterMain(int argc, char* argv[])
     ngroup_info_hash_create();
     /*init Role id hash table*/
     InitRoleIdHashTable();
-    /* pcmap */
-    RealInitialMMapLockArray();
     /* init unique sql */
     InitUniqueSQL();
     /* init hypo index */
@@ -2130,6 +2171,8 @@ int PostmasterMain(int argc, char* argv[])
     InitPercentile();
     /* init dynamic statement track control */
     InitTrackStmtControl();
+    /* init global sequence */
+    InitGlobalSeq();
 #ifdef ENABLE_MULTIPLE_NODES
     /* init compaction */
     CompactionProcess::init_instance();
@@ -2190,6 +2233,7 @@ int PostmasterMain(int argc, char* argv[])
     if (g_instance.attr.attr_security.enable_tde) {
         /* init cloud KMS message instance */
         TDE::CKMSMessage::get_instance().init();
+        TDE::CKMSMessage::get_instance().load_user_info();
         /* init TDE storage hash table */
         if (IS_PGXC_DATANODE) {
             TDE::TDEKeyStorage::get_instance().init();
@@ -2197,8 +2241,11 @@ int PostmasterMain(int argc, char* argv[])
         }
     }
 
+#ifndef ENABLE_LITE_MODE
     if (g_instance.attr.attr_storage.enable_adio_function)
         AioResourceInitialize();
+#endif
+
     /* start alarm checker thread. */
     if (!dummyStandbyMode)
         g_instance.pid_cxt.AlarmCheckerPID = startAlarmChecker();
@@ -2472,17 +2519,6 @@ static void CheckExtremeRtoGUCConflicts(void)
                 errhint("recommend config \"wal_receiver_buffer_size=64MB\"")));
     }
 
-    if ((g_instance.attr.attr_storage.recovery_parse_workers > 1) && (u_sess->attr.attr_storage.target_rto > 0 ||
-        u_sess->attr.attr_storage.hadr_recovery_time_target > 0 ||
-        u_sess->attr.attr_storage.hadr_recovery_point_target > 0)) {
-        ereport(WARNING, (errmsg("Extreme RTO and flow control cannot be enabled at the same time."),
-                          errhint("We have reset the flow control to the off state. "
-                                  "Please modify the postgresql.conf file.")));
-
-        u_sess->attr.attr_storage.target_rto = 0;
-        u_sess->attr.attr_storage.hadr_recovery_time_target = 0;
-    }
-
 #ifndef ENABLE_MULTIPLE_NODES
     if ((g_instance.attr.attr_storage.recovery_parse_workers > 1) && g_instance.attr.attr_storage.EnableHotStandby) {
         ereport(ERROR,
@@ -2651,6 +2687,7 @@ static void ArchObsThreadStart(int threadIndex)
     errno_t rc = EOK;
     rc = memcpy_s(g_instance.archive_thread_info.slotName[threadIndex], NAMEDATALEN, slotName, strlen(slotName));
     securec_check(rc, "\0", "\0");
+
     g_instance.archive_thread_info.obsArchPID[threadIndex] = initialize_util_thread(ARCH,
         g_instance.archive_thread_info.slotName[threadIndex]);
     if (START_BARRIER_CREATOR && pmState == PM_RUN) {
@@ -2921,6 +2958,7 @@ static int ServerLoop(void)
         }
 
         ereport(DEBUG4, (errmsg("postmaster poll event process end.")));
+
         /*
          * If the AioCompleters have not been started start them.
          * These should remain run indefinitely.
@@ -2957,22 +2995,29 @@ static int ServerLoop(void)
         /* If we have lost the audit collector, try to start a new one */
 
 #ifndef ENABLE_MULTIPLE_NODES
-        if (g_instance.pid_cxt.PgAuditPID == 0 && u_sess->attr.attr_security.Audit_enabled &&
+        if (g_instance.pid_cxt.PgAuditPID != NULL && u_sess->attr.attr_security.Audit_enabled &&
             (pmState == PM_RUN || pmState == PM_HOT_STANDBY) && !dummyStandbyMode) {
-            g_instance.pid_cxt.PgAuditPID = pgaudit_start();
-            ereport(LOG, (errmsg("auditor process started, pid=%lu", g_instance.pid_cxt.PgAuditPID)));
+            pgaudit_start_all();
+        }
+
+        if (g_instance.comm_cxt.isNeedChangeRole) {
+            char role[MAXPGPATH] = {0};
+            if (!CheckSignalByFile(ChangeRoleFile, role, MAXPGPATH)) {
+                ereport(WARNING, (errmsg("Could not read changerole file")));
+                g_instance.comm_cxt.isNeedChangeRole = false;
+            }
+            handle_change_role_signal(role);
+            g_instance.comm_cxt.isNeedChangeRole = false;
         }
 #else
-        if (g_instance.pid_cxt.PgAuditPID == 0 && u_sess->attr.attr_security.Audit_enabled && pmState == PM_RUN &&
+        if (g_instance.pid_cxt.PgAuditPID != NULL && u_sess->attr.attr_security.Audit_enabled && pmState == PM_RUN &&
             !dummyStandbyMode) {
-            g_instance.pid_cxt.PgAuditPID = pgaudit_start();
-            ereport(LOG, (errmsg("auditor process started, pid=%lu", g_instance.pid_cxt.PgAuditPID)));
+            pgaudit_start_all();
         }
-#endif 
+#endif
         /* If u_sess->attr.attr_security.Audit_enabled is set to false, terminate auditor process. */
-        if (g_instance.pid_cxt.PgAuditPID != 0 && !u_sess->attr.attr_security.Audit_enabled) {
-            signal_child(g_instance.pid_cxt.PgAuditPID, SIGQUIT);
-            ereport(LOG, (errmsg("parameter audit_enabled is set to false, terminate auditor process.")));
+        if (g_instance.pid_cxt.PgAuditPID != NULL && !u_sess->attr.attr_security.Audit_enabled) {
+            pgaudit_stop_all();
         }
 
         if (g_instance.pid_cxt.AlarmCheckerPID == 0 && !dummyStandbyMode)
@@ -2988,6 +3033,21 @@ static int ServerLoop(void)
             g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
         }
 
+#ifdef ENABLE_MULTIPLE_NODES
+        /* when execuating xlog redo in standby cluster,
+          * pmState is PM_HOT_STANDBY, neither PM_RECOVERY nor PM_RUN
+          */
+        if (pmState == PM_HOT_STANDBY && g_instance.pid_cxt.BarrierPreParsePID == 0 &&
+            !dummyStandbyMode && IS_DISASTER_RECOVER_MODE) {
+            g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
+        }
+#endif
+        /*
+         * If the startup thread is running, need check the page repair thread.
+         */
+        if (g_instance.pid_cxt.PageRepairPID == 0 && (pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY)) {
+            g_instance.pid_cxt.PageRepairPID = initialize_util_thread(PAGEREPAIR_THREAD);
+        }
         /*
          * If no background writer process is running, and we are not in a
          * state that prevents it, start one.  It doesn't matter if this
@@ -3066,15 +3126,18 @@ static int ServerLoop(void)
         /*
         * Start the Undo launcher thread if we need to.
         */
-        if (g_instance.pid_cxt.UndoLauncherPID == 0 && pmState == PM_RUN && !dummyStandbyMode) {
+        if (g_instance.attr.attr_storage.enable_ustore &&
+            g_instance.pid_cxt.UndoLauncherPID == 0 &&
+            pmState == PM_RUN && !dummyStandbyMode) {
             g_instance.pid_cxt.UndoLauncherPID = initialize_util_thread(UNDO_LAUNCHER);
         }
 
-        if (g_instance.pid_cxt.GlobalStatsPID == 0 && pmState == PM_RUN && !dummyStandbyMode) {
+        if (g_instance.attr.attr_storage.enable_ustore &&
+            g_instance.pid_cxt.GlobalStatsPID == 0 && 
+            pmState == PM_RUN && !dummyStandbyMode) {
             g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
         }
-
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
         if (u_sess->attr.attr_common.upgrade_mode == 0 && g_instance.pid_cxt.ApplyLauncerPID == 0 &&
             pmState == PM_RUN && !dummyStandbyMode) {
             g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
@@ -3108,11 +3171,13 @@ static int ServerLoop(void)
             signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
         }
 
+#ifndef ENABLE_LITE_MODE
         /* If we have lost the barrier creator thread, try to start a new one */
-        if (START_BARRIER_CREATOR && g_instance.pid_cxt.BarrierCreatorPID == 0 &&
-            pmState == PM_RUN && g_instance.archive_obs_cxt.archive_slot_num != 0) {
+        if (START_BARRIER_CREATOR && g_instance.pid_cxt.BarrierCreatorPID == 0 && pmState == PM_RUN &&
+            (g_instance.archive_obs_cxt.archive_slot_num != 0 || START_AUTO_CSN_BARRIER)) {
             g_instance.pid_cxt.BarrierCreatorPID = initialize_util_thread(BARRIER_CREATOR);
         }
+#endif
 
         /* If we have lost the archiver, try to start a new one */
         if (!dummyStandbyMode) {
@@ -3139,7 +3204,7 @@ static int ServerLoop(void)
 
         /* If we have lost the stats collector, try to start a new one */
         if ((IS_PGXC_COORDINATOR || (g_instance.role == VSINGLENODE)) && g_instance.pid_cxt.SnapshotPID == 0 &&
-            pmState == PM_RUN)
+            u_sess->attr.attr_common.enable_wdr_snapshot && pmState == PM_RUN)
             g_instance.pid_cxt.SnapshotPID = snapshot_start();
 
         if (ENABLE_ASP && g_instance.pid_cxt.AshPID == 0 && pmState == PM_RUN && !dummyStandbyMode)
@@ -3149,7 +3214,8 @@ static int ServerLoop(void)
         if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0 && pmState == PM_RUN)
             g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
-        if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && g_instance.pid_cxt.PercentilePID == 0 &&
+        if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->attr.attr_common.enable_instr_rt_percentile &&
+            g_instance.pid_cxt.PercentilePID == 0 &&
             pmState == PM_RUN)
             g_instance.pid_cxt.PercentilePID = initialize_util_thread(PERCENTILE_WORKER);
 
@@ -3170,6 +3236,7 @@ static int ServerLoop(void)
             (g_instance.pid_cxt.CPMonitorPID == 0) && (pmState == PM_RUN) && !dummyStandbyMode)
             g_instance.pid_cxt.CPMonitorPID = initialize_util_thread(WLM_CPMONITOR);
 
+#ifndef ENABLE_LITE_MODE
         /* If we have lost the twophase cleaner, try to start a new one */
         if (
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3185,22 +3252,28 @@ static int ServerLoop(void)
         /* If we have lost the LWLock monitor, try to start a new one */
         if (g_instance.pid_cxt.FaultMonitorPID == 0 && pmState == PM_RUN)
             g_instance.pid_cxt.FaultMonitorPID = initialize_util_thread(FAULTMONITOR);
-
+#endif
         /* If we have lost the heartbeat service, try to start a new one */
         if (NeedHeartbeat())
             g_instance.pid_cxt.HeartbeatPID = initialize_util_thread(HEARTBEAT);
 
         /* If we have lost the csnmin sync thread, try to start a new one */
-        if (GTM_LITE_CN && g_instance.csnminsync_cxt.is_fcn_ccn &&
-            g_instance.pid_cxt.CsnminSyncPID == 0 && pmState == PM_RUN) {
+        if (GTM_LITE_CN && g_instance.pid_cxt.CsnminSyncPID == 0 && pmState == PM_RUN) {
+            g_instance.pid_cxt.CsnminSyncPID = initialize_util_thread(CSNMIN_SYNC);
+        }
+        if (IS_CN_DISASTER_RECOVER_MODE && g_instance.pid_cxt.CsnminSyncPID == 0 && pmState == PM_HOT_STANDBY) {
             g_instance.pid_cxt.CsnminSyncPID = initialize_util_thread(CSNMIN_SYNC);
         }
 
-        if (g_instance.pid_cxt.UndoRecyclerPID == 0 && pmState == PM_RUN) {
+        if (g_instance.attr.attr_storage.enable_ustore &&
+            g_instance.pid_cxt.UndoRecyclerPID == 0 &&
+            pmState == PM_RUN) {
             g_instance.pid_cxt.UndoRecyclerPID = initialize_util_thread(UNDO_RECYCLER);
         }
 
-        if (g_instance.pid_cxt.GlobalStatsPID == 0 && pmState == PM_RUN) {
+        if (g_instance.attr.attr_storage.enable_ustore &&
+            g_instance.pid_cxt.GlobalStatsPID == 0 &&
+            pmState == PM_RUN) {
             g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
         }
 
@@ -3367,6 +3440,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
     socklen_t oldTvLen = sizeof(oldTv);
     bool isTvSeted = false;
     bool clientIsAutonomousTransaction = false;
+    bool clientIsLocalHadrWalrcv = false;
     CHECK_FOR_PROCDIEPENDING();
 
     /* Set recv timeout on coordinator in case of connected from external application */
@@ -3619,6 +3693,8 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     t_thrd.role = WAL_DB_SENDER;
                 } else if (strcmp(valptr, "hadr_main_standby") == 0) {
                     t_thrd.role = WAL_HADR_SENDER;
+                } else if (strcmp(valptr, "hadr_standby_cn") == 0) {
+                    t_thrd.role = WAL_HADR_CN_SENDER;
                 } else if (strcmp(valptr, "standby_cluster") == 0) {
                     t_thrd.role = WAL_SHARE_STORE_SENDER;
                 } else {
@@ -3750,6 +3826,9 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     } else if (strcmp(valptr, "autonomoustransaction") == 0) {
                         clientIsAutonomousTransaction = true;
                         ereport(DEBUG5, (errmsg("autonomoustransaction connected")));
+                    } else if (strcmp(valptr, "local_hadr_walrcv") == 0) {
+                        clientIsLocalHadrWalrcv = true;
+                        ereport(DEBUG5, (errmsg("local hadr walreceiver connected")));
                     } else if (strcmp(valptr, "subscription") == 0) {
                         u_sess->proc_cxt.clientIsSubscription = true;
                         ereport(DEBUG5, (errmsg("subscription connected")));
@@ -3808,11 +3887,11 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
     /*  Inner tool with local sha256 will not be authenicated. */
     if (clientIsCmAgent || clientIsGsClean || clientIsOM || u_sess->proc_cxt.clientIsGsroach || clientIsWDRXdb ||
         clientIsRemoteRead || u_sess->proc_cxt.clientIsGsCtl || u_sess->proc_cxt.clientIsGsrewind ||
-        u_sess->proc_cxt.clientIsGsredis || clientIsAutonomousTransaction) {
+        u_sess->proc_cxt.clientIsGsredis || clientIsAutonomousTransaction || clientIsLocalHadrWalrcv) {
         u_sess->proc_cxt.IsInnerMaintenanceTools = true;
     }
     /* cm_agent and gs_clean should not be controlled by workload manager */
-    if (clientIsCmAgent || clientIsGsClean) {
+    if (clientIsCmAgent || clientIsGsClean || clientIsLocalHadrWalrcv) {
         u_sess->proc_cxt.IsWLMWhiteList = true;
     }
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3856,7 +3935,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
      * can make sense to first make a basebackup and then stream changes
      * starting from that.
      */
-    if (AM_WAL_SENDER && !AM_WAL_DB_SENDER && !AM_WAL_HADR_SENDER) {
+    if (AM_WAL_SENDER && !AM_WAL_DB_SENDER && !AM_WAL_HADR_SENDER && !AM_WAL_HADR_CN_SENDER) {
         port->database_name[0] = '\0';
     }
     /* set special tcp keepalive parameters for build senders */
@@ -3931,7 +4010,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
      *    to connect, we do not check.
      */
     if ((!AM_WAL_SENDER && !(isMaintenanceConnection && (clientIsGsql || clientIsCmAgent ||
-        t_thrd.postmaster_cxt.senderToBuildStandby)) && !clientIsRemoteRead) ||
+        t_thrd.postmaster_cxt.senderToBuildStandby || clientIsLocalHadrWalrcv)) && !clientIsRemoteRead) ||
         t_thrd.postmaster_cxt.senderToDummyStandby) {
 
         if (PENDING_MODE == hashmdata->current_mode && !IS_PGXC_COORDINATOR) {
@@ -3939,8 +4018,8 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     errmsg("can not accept connection in pending mode.")));
         } else {
 #ifdef ENABLE_MULTIPLE_NODES
-            if (STANDBY_MODE == hashmdata->current_mode) {
-                ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
+            if (STANDBY_MODE == hashmdata->current_mode && (!IS_DISASTER_RECOVER_MODE || GTM_FREE_MODE)) {
+                ereport(ERROR, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("can not accept connection in standby mode.")));
             }
 #else
@@ -4402,20 +4481,31 @@ void socket_close_on_exec(void)
     }
 }
 
-static bool IsNotCrossRegionMode(void)
+static void UpdateCrossRegionMode()
 {
-    int num = 0;
-    int totalNum = 0;
-    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
+    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    int i = 0, repl_list_num = 0;
+    bool is_cross_region = false;
+
+    for (i = 1; i < MAX_REPLNODE_NUM; i++) {
         if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL) {
-            totalNum++;
-            if (!t_thrd.postmaster_cxt.ReplConnArray[i]->isCrossRegion &&
-                !t_thrd.postmaster_cxt.ReplConnArray[i]->isCascade) {
-                num++;
+            repl_list_num++;
+            if (t_thrd.postmaster_cxt.ReplConnArray[i]->isCrossRegion &&
+                !IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
+                is_cross_region = true;
             }
         }
+        if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[i] != NULL) {
+            repl_list_num++;
+        }
     }
-    return (totalNum == num);
+    if (is_cross_region != hashmdata->is_cross_region) {
+        SpinLockAcquire(&hashmdata->mutex);
+        hashmdata->is_cross_region = is_cross_region;
+        hashmdata->repl_list_num = repl_list_num;
+        SpinLockRelease(&hashmdata->mutex);
+        ereport(LOG, (errmsg("SIGHUP_handler update is_cross_region: %d", hashmdata->is_cross_region)));
+    }
 }
 
 /*
@@ -4491,6 +4581,10 @@ static void SIGHUP_handler(SIGNAL_ARGS)
 
         if (g_instance.pid_cxt.StartupPID != 0)
             signal_child(g_instance.pid_cxt.StartupPID, SIGHUP);
+
+        if (g_instance.pid_cxt.PageRepairPID != 0) {
+            signal_child(g_instance.pid_cxt.PageRepairPID, SIGHUP);
+        }
 
 #ifdef PGXC /* PGXC_COORD */
         if (
@@ -4572,9 +4666,13 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.SysLoggerPID != 0)
             signal_child(g_instance.pid_cxt.SysLoggerPID, SIGHUP);
         /* signal the auditor process */
-        if (g_instance.pid_cxt.PgAuditPID != 0) {
+        if (g_instance.pid_cxt.PgAuditPID != NULL) {
             Assert(!dummyStandbyMode);
-            signal_child(g_instance.pid_cxt.PgAuditPID, SIGHUP);
+            for (int i = 0; i < g_instance.audit_cxt.thread_num; ++i) {
+                if (g_instance.pid_cxt.PgAuditPID[i] != 0) {
+                    signal_child(g_instance.pid_cxt.PgAuditPID[i], SIGHUP);
+                }
+            }
         }
         if (g_instance.pid_cxt.PgStatPID != 0)
             signal_child(g_instance.pid_cxt.PgStatPID, SIGHUP);
@@ -4645,7 +4743,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.UndoLauncherPID != 0) {
             signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGHUP);
         }
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
         if (g_instance.pid_cxt.ApplyLauncerPID != 0) {
             signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGHUP);
         }
@@ -4672,6 +4770,10 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         }
 
 #ifdef ENABLE_MULTIPLE_NODES
+        if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
+            signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGHUP);
+        }
+
         if (g_instance.pid_cxt.TsCompactionPID != 0) {
             signal_child(g_instance.pid_cxt.TsCompactionPID, SIGHUP);
         }
@@ -4681,11 +4783,9 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         (void)streaming_backend_manager(STREAMING_BACKEND_SIGHUP);
 #endif   /* ENABLE_MULTIPLE_NODES */
 
-        if (t_thrd.postmaster_cxt.HaShmData->is_cross_region && IsNotCrossRegionMode()) {
-            SpinLockAcquire(&t_thrd.postmaster_cxt.HaShmData->mutex);
-            t_thrd.postmaster_cxt.HaShmData->is_cross_region = false;
-            SpinLockRelease(&t_thrd.postmaster_cxt.HaShmData->mutex);
-        }
+        /* Update is_cross_region for streaming dr */
+        UpdateCrossRegionMode();
+
         /* Reload authentication config files too */
         int loadhbaCount = 0;
         while (!load_hba()) {
@@ -4805,6 +4905,16 @@ static void pmdie(SIGNAL_ARGS)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
             }
 
+#ifdef ENABLE_MULTIPLE_NODES
+            if (g_instance.pid_cxt.BarrierPreParsePID != 0) {
+                signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGTERM);
+            }
+#endif
+
+            if (g_instance.pid_cxt.PageRepairPID != 0) {
+                signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
+            }
+
             if (g_instance.pid_cxt.BgWriterPID != 0) {
                 Assert(!dummyStandbyMode);
                 signal_child(g_instance.pid_cxt.BgWriterPID, SIGTERM);
@@ -4898,7 +5008,7 @@ static void pmdie(SIGNAL_ARGS)
             if (g_instance.pid_cxt.UndoLauncherPID != 0) {
                 signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
             }
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
             if (g_instance.pid_cxt.ApplyLauncerPID != 0) {
                 signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
             }
@@ -4916,10 +5026,20 @@ static void pmdie(SIGNAL_ARGS)
                 }
             }
 
+#ifndef ENABLE_LITE_MODE
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
             }
+            if (g_instance.archive_thread_info.obsBarrierArchPID != NULL) {
+                int arch_loop = 0;
+                for (arch_loop = 0; arch_loop < g_instance.attr.attr_storage.max_replication_slots; arch_loop++) {
+                    if (g_instance.archive_thread_info.obsBarrierArchPID[arch_loop] != 0) {
+                        signal_child(g_instance.archive_thread_info.obsBarrierArchPID[arch_loop], SIGTERM);
+                    }
+                }
+            }
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.CsnminSyncPID != 0) {
@@ -5054,6 +5174,21 @@ static void SetWalsndsNodeState(ClusterNodeState requester, ClusterNodeState oth
     }
 }
 
+static void UpdateArchiveSlotStatus()
+{
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ReplicationSlot *slot = NULL;
+        slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        SpinLockAcquire(&slot->mutex);
+        if (!slot->active && slot->in_use && slot->extra_content != NULL &&
+            GET_SLOT_PERSISTENCY(slot->data) != RS_BACKUP) {
+            slot->active = true;
+        }
+        SpinLockRelease(&slot->mutex);
+        ereport(LOG, (errmsg("Archive slot change to active when DBstatus Promoting")));
+    }
+}
+
 /* prepare to response to standby for switchover */
 static void PrepareDemoteResponse(void)
 {
@@ -5075,6 +5210,7 @@ static void PrepareDemoteResponse(void)
         hashmdata->is_cascade_standby = true;
         SpinLockRelease(&hashmdata->mutex);
 
+        g_instance.global_sysdbcache.RefreshHotStandby();
         load_server_mode();
     }
 
@@ -5166,7 +5302,7 @@ static void ProcessDemoteRequest(void)
 
                 if (g_instance.pid_cxt.UndoLauncherPID != 0)
                     signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
                 if (g_instance.pid_cxt.ApplyLauncerPID != 0)
                     signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
 #endif
@@ -5208,6 +5344,10 @@ static void ProcessDemoteRequest(void)
 
             if (g_instance.pid_cxt.StartupPID != 0)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+
+            if (g_instance.pid_cxt.PageRepairPID != 0) {
+                signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
+            }
 
             if (g_instance.pid_cxt.BgWriterPID != 0) {
                 Assert(!dummyStandbyMode);
@@ -5292,10 +5432,12 @@ static void ProcessDemoteRequest(void)
                 signal_child(g_instance.pid_cxt.PercentilePID, SIGTERM);
             }
 
+#ifndef ENABLE_LITE_MODE
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
             }
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.CsnminSyncPID != 0) {
@@ -5342,7 +5484,7 @@ static void ProcessDemoteRequest(void)
 
                 if (g_instance.pid_cxt.UndoLauncherPID != 0)
                     signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
                 if (g_instance.pid_cxt.ApplyLauncerPID != 0)
                     signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
 #endif
@@ -5388,6 +5530,48 @@ static void ProcessDemoteRequest(void)
 }
 
 /*
+ * Reaper -- get current time.
+ */
+static void GetTimeNowForReaperLog(char* nowTime, int timeLen)
+{
+    time_t formatTime;
+    struct timeval current = {0};
+    const int tmpBufSize = 32;
+    char tmpBuf[tmpBufSize] = {0};
+
+    if (nowTime == NULL || timeLen == 0) {
+        return;
+    }
+
+    (void)gettimeofday(&current, NULL);
+    formatTime = current.tv_sec;
+    struct tm* pTime = localtime(&formatTime);
+    strftime(tmpBuf, sizeof(tmpBuf), "%Y-%m-%d %H:%M:%S", pTime);
+
+    errno_t rc = sprintf_s(nowTime, timeLen - 1, "%s.%ld ", tmpBuf, current.tv_usec / 1000);
+    securec_check_ss(rc, "\0", "\0");
+}
+
+/*
+ * Reaper -- encap reaper prefix log.
+ */
+static char* GetReaperLogPrefix(char* buf, int bufLen)
+{
+    const int bufSize = 256;
+    char timeBuf[bufSize] = {0};
+    errno_t rc;
+
+    GetTimeNowForReaperLog(timeBuf, bufSize);
+
+    rc = memset_s(buf, bufLen, 0, bufLen);
+    securec_check(rc, "\0", "\0");
+    rc = sprintf_s(buf, bufLen - 1, "%s [postmaster][reaper][%lu]", timeBuf, PostmasterPid);
+    securec_check_ss(rc, "\0", "\0");
+
+    return buf;
+}
+
+/*
  * Reaper -- signal handler to cleanup after a child process dies.
  */
 static void reaper(SIGNAL_ARGS)
@@ -5397,12 +5581,12 @@ static void reaper(SIGNAL_ARGS)
     long exitstatus; /* its exit status */
     int* status = NULL;
     ThreadId oldpid = 0;
+    char logBuf[ReaperLogBufSize] = {0};
 
 #define LOOPTEST() (pid = gs_thread_id(t_thrd.postmaster_cxt.CurExitThread))
 #define LOOPHEADER() (exitstatus = (long)(intptr_t)status)
 
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
-    ereport(DEBUG4, (errmsg_internal("reaping dead processes")));
 
     for (;;) {
         LOOPTEST();
@@ -5421,14 +5605,14 @@ static void reaper(SIGNAL_ARGS)
              */
             if (ESRCH == pthread_kill(pid, 0)) {
                 exitstatus = 0;
-                ereport(LOG, (errmsg("failed to join thread %lu, no such process", pid)));
+                write_stderr("%s LOG: failed to join thread %lu, no such process\n",
+                    GetReaperLogPrefix(logBuf, ReaperLogBufSize), pid);
             } else {
                 exitstatus = 1;
                 HandleChildCrash(pid, exitstatus, _(GetProcName(pid)));
             }
         } else {
             LOOPHEADER();
-            ereport(DEBUG1, (errmsg("have joined thread %lu, exitstatus=%ld.", pid, exitstatus)));
         }
 
         /*
@@ -5436,7 +5620,7 @@ static void reaper(SIGNAL_ARGS)
          */
         if (pid == g_instance.pid_cxt.StartupPID) {
             g_instance.pid_cxt.StartupPID = 0;
-            ereport(LOG, (errmsg("startupprocess exit")));
+            write_stderr("%s LOG: startupprocess exit\n", GetReaperLogPrefix(logBuf, ReaperLogBufSize));
 
             /*
              * Startup process exited in response to a shutdown request (or it
@@ -5454,6 +5638,8 @@ static void reaper(SIGNAL_ARGS)
             if (g_instance.demotion > NoDemote &&
                 t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
                 (EXIT_STATUS_0(exitstatus) || EXIT_STATUS_1(exitstatus))) {
+                pmState = PM_WAIT_BACKENDS;
+                /* PostmasterStateMachine logic does the rest */
                 continue;
             }
 
@@ -5464,7 +5650,8 @@ static void reaper(SIGNAL_ARGS)
              */
             if (pmState == PM_STARTUP && !EXIT_STATUS_0(exitstatus)) {
                 LogChildExit(LOG, _("startup process"), pid, exitstatus);
-                ereport(LOG, (errmsg("aborting startup due to startup process failure")));
+                write_stderr("%s LOG: aborting startup due to startup process failure\n",
+                    GetReaperLogPrefix(logBuf, ReaperLogBufSize));
                 if (get_real_recovery_parallelism() > 1) {
                     HandleChildCrash(pid, exitstatus, _("startup process"));
                 } else {
@@ -5495,6 +5682,11 @@ static void reaper(SIGNAL_ARGS)
                 continue;
             }
 
+            /* startup process exit, standby pagerepair thread can exit */
+            if (g_instance.pid_cxt.PageRepairPID != 0) {
+                signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
+            }
+
             /*
              * Startup succeeded, commence normal operations
              */
@@ -5506,6 +5698,8 @@ static void reaper(SIGNAL_ARGS)
             if (t_thrd.postmaster_cxt.HaShmData && (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
                                                        t_thrd.postmaster_cxt.HaShmData->current_mode == PENDING_MODE)) {
                 t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
+                UpdateArchiveSlotStatus();
+                g_instance.global_sysdbcache.RefreshHotStandby();
                 if (g_instance.pid_cxt.HeartbeatPID != 0)
                     signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
                 UpdateOptsFile();
@@ -5527,9 +5721,9 @@ static void reaper(SIGNAL_ARGS)
              * RecoveryInProgress()
              */
             if (g_instance.attr.attr_storage.max_wal_senders > 0 && CountChildren(BACKEND_TYPE_WALSND) > 0) {
-                ereport(LOG,
-                    (errmsg("terminating all walsender processes to force cascaded "
-                            "standby(s) to update timeline and reconnect")));
+                write_stderr("%s LOG: terminating all walsender processes to force cascaded "
+                        "standby(s) to update timeline and reconnect\n",
+                        GetReaperLogPrefix(logBuf, ReaperLogBufSize));
                 (void)SignalSomeChildren(SIGUSR2, BACKEND_TYPE_WALSND);
             }
 
@@ -5588,14 +5782,14 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.attr.attr_storage.xlog_file_path != NULL) {
                 g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = initialize_util_thread(SHARE_STORAGE_XLOG_COPYER);
             }
-            
-            if (g_instance.pid_cxt.UndoLauncherPID == 0 && !dummyStandbyMode)
+
+            if (g_instance.attr.attr_storage.enable_ustore && g_instance.pid_cxt.UndoLauncherPID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.UndoLauncherPID = initialize_util_thread(UNDO_LAUNCHER);
 
-            if (g_instance.pid_cxt.GlobalStatsPID == 0 && !dummyStandbyMode)
+            if (g_instance.attr.attr_storage.enable_ustore && g_instance.pid_cxt.GlobalStatsPID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
 
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
             if (u_sess->attr.attr_common.upgrade_mode == 0 &&
                 g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode) {
                 g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
@@ -5620,9 +5814,11 @@ static void reaper(SIGNAL_ARGS)
             if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN && g_instance.pid_cxt.RbCleanrPID== 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.RbCleanrPID = StartRbCleaner();
 
-            if ((IS_PGXC_COORDINATOR || (g_instance.role == VSINGLENODE)) && g_instance.pid_cxt.SnapshotPID == 0 && !dummyStandbyMode)
+            if ((IS_PGXC_COORDINATOR || (g_instance.role == VSINGLENODE)) && u_sess->attr.attr_common.enable_wdr_snapshot &&
+                g_instance.pid_cxt.SnapshotPID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.SnapshotPID = snapshot_start();
-            if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && g_instance.pid_cxt.PercentilePID == 0 && !dummyStandbyMode)
+            if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->attr.attr_common.enable_instr_rt_percentile &&
+                g_instance.pid_cxt.PercentilePID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.PercentilePID = initialize_util_thread(PERCENTILE_WORKER);
 
             if (ENABLE_ASP && g_instance.pid_cxt.AshPID == 0 && !dummyStandbyMode)
@@ -5634,8 +5830,9 @@ static void reaper(SIGNAL_ARGS)
             /* Database Security: Support database audit */
             /*  start auditor process */
             /* start the audit collector as needed. */
-            if (g_instance.pid_cxt.PgAuditPID == 0 && u_sess->attr.attr_security.Audit_enabled && !dummyStandbyMode)
-                g_instance.pid_cxt.PgAuditPID = pgaudit_start();
+            if (u_sess->attr.attr_security.Audit_enabled && !dummyStandbyMode) {
+                pgaudit_start_all();
+            }
 
             if (t_thrd.postmaster_cxt.audit_primary_start && !t_thrd.postmaster_cxt.audit_primary_failover &&
                 !t_thrd.postmaster_cxt.audit_standby_switchover) {
@@ -5643,6 +5840,7 @@ static void reaper(SIGNAL_ARGS)
                 t_thrd.postmaster_cxt.audit_primary_start = false;
             }
 
+#ifndef ENABLE_LITE_MODE
             if (
 #ifdef ENABLE_MULTIPLE_NODES
                 IS_PGXC_COORDINATOR &&
@@ -5656,6 +5854,7 @@ static void reaper(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.FaultMonitorPID == 0)
                 g_instance.pid_cxt.FaultMonitorPID = initialize_util_thread(FAULTMONITOR);
+#endif
 
             /* if workload manager is off, we still use this thread to build user hash table */
             if ((ENABLE_WORKLOAD_CONTROL || !WLMIsInfoInit()) && g_instance.pid_cxt.WLMCollectPID == 0 &&
@@ -5679,22 +5878,27 @@ static void reaper(SIGNAL_ARGS)
             if (NeedHeartbeat())
                 g_instance.pid_cxt.HeartbeatPID = initialize_util_thread(HEARTBEAT);
 
+#ifndef ENABLE_LITE_MODE
             if (START_BARRIER_CREATOR && g_instance.pid_cxt.BarrierCreatorPID == 0 &&
-                g_instance.archive_obs_cxt.archive_slot_num != 0) {
+                (g_instance.archive_obs_cxt.archive_slot_num != 0 || START_AUTO_CSN_BARRIER)) {
                 g_instance.pid_cxt.BarrierCreatorPID = initialize_util_thread(BARRIER_CREATOR);
             }
+#endif
 
             if (GTM_LITE_CN && g_instance.pid_cxt.CsnminSyncPID == 0) {
                 g_instance.pid_cxt.CsnminSyncPID = initialize_util_thread(CSNMIN_SYNC);
             }
+            if (IS_CN_DISASTER_RECOVER_MODE && g_instance.pid_cxt.CsnminSyncPID == 0) {
+                g_instance.pid_cxt.CsnminSyncPID = initialize_util_thread(CSNMIN_SYNC);
+            }
 
             PMUpdateDBState(NORMAL_STATE, get_cur_mode(), get_cur_repl_num());
-            ereport(LOG,
-                (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
-                    wal_get_role_string(get_cur_mode()))));
+            write_stderr("%s LOG: update gaussdb state file: db state(NORMAL_STATE), server mode(%s)\n",
+                GetReaperLogPrefix(logBuf, ReaperLogBufSize), wal_get_role_string(get_cur_mode()));
 
             /* at this point we are really open for business */
-            ereport(LOG, (errmsg("database system is ready to accept connections")));
+            write_stderr("%s LOG: database system is ready to accept connections\n",
+                GetReaperLogPrefix(logBuf, ReaperLogBufSize));
 
             continue;
         }
@@ -5706,6 +5910,16 @@ static void reaper(SIGNAL_ARGS)
             g_threadPoolControler->GetScheduler()->SetShutDown(false);
             continue;
         }
+
+        if (pid == g_instance.pid_cxt.PageRepairPID) {
+            g_instance.pid_cxt.PageRepairPID = 0;
+
+            if (!EXIT_STATUS_0(exitstatus))
+                HandleChildCrash(pid, exitstatus, _("page reapir process"));
+
+            continue;
+        }
+
         /*
          * Was it the bgwriter?  Normal exit can be ignored; we'll start a new
          * one at the next iteration of the postmaster's main loop, if
@@ -5780,15 +5994,18 @@ static void reaper(SIGNAL_ARGS)
                     if ((g_instance.attr.attr_storage.xlog_file_path != NULL) &&
                         (g_instance.pid_cxt.sharedStorageXlogCopyThreadPID != 0)) {
                         signal_child(g_instance.pid_cxt.sharedStorageXlogCopyThreadPID, SIGTERM);
-                        ereport(LOG, (errmsg("checkpoint thread exit and wait for sharestorage")));
+                        write_stderr("%s LOG: checkpoint thread exit and wait for sharestorage\n",
+                            GetReaperLogPrefix(logBuf, ReaperLogBufSize));
                         continue;
                     }
-                    ereport(LOG, (errmsg("checkpoint thread exit and nowait for sharestorage")));
+                    write_stderr("%s LOG: checkpoint thread exit and nowait for sharestorage\n",
+                        GetReaperLogPrefix(logBuf, ReaperLogBufSize));
                 }
 
                 if (pid == g_instance.pid_cxt.sharedStorageXlogCopyThreadPID) {
                     g_instance.pid_cxt.sharedStorageXlogCopyThreadPID = 0;
-                    ereport(LOG, (errmsg("sharestorage thread exit")));
+                    write_stderr("%s LOG: sharestorage thread exit\n",
+                        GetReaperLogPrefix(logBuf, ReaperLogBufSize));
                 }
 
                 /* Waken archiver for the last time */
@@ -5853,9 +6070,9 @@ static void reaper(SIGNAL_ARGS)
                  * We can also shut down the audit collector now; there's
                  * nothing left for it to do.
                  */
-                if (g_instance.pid_cxt.PgAuditPID != 0) {
+                if (g_instance.pid_cxt.PgAuditPID != NULL) {
                     Assert(!dummyStandbyMode);
-                    signal_child(g_instance.pid_cxt.PgAuditPID, SIGQUIT);
+                    pgaudit_stop_all();
                 }
             } else {
                 /*
@@ -6132,14 +6349,23 @@ static void reaper(SIGNAL_ARGS)
         /*
          * Was it the system auditor?  If so, try to start a new one.
          */
-        if (pid == g_instance.pid_cxt.PgAuditPID) {
-            Assert(!dummyStandbyMode);
-            g_instance.pid_cxt.PgAuditPID = 0;
-            if (!EXIT_STATUS_0(exitstatus))
-                LogChildExit(LOG, _("system auditor process"), pid, exitstatus);
-            if (pmState == PM_RUN)
-                g_instance.pid_cxt.PgAuditPID = pgaudit_start();
-            continue;
+        if (g_instance.pid_cxt.PgAuditPID != NULL) {
+            bool is_audit_thread = false;
+            for (int i = 0; i < g_instance.audit_cxt.thread_num; ++i) {
+                Assert(!dummyStandbyMode);
+                if (pid == g_instance.pid_cxt.PgAuditPID[i]) {
+                    g_instance.pid_cxt.PgAuditPID[i] = 0;
+                    is_audit_thread = true; 
+                    if (!EXIT_STATUS_0(exitstatus))
+                        LogChildExit(LOG, _("system auditor process"), pid, exitstatus);
+                    if (pmState == PM_RUN)
+                        g_instance.pid_cxt.PgAuditPID[i] = pgaudit_start();
+                }
+            }
+
+            if (is_audit_thread) {
+                continue;
+            }
         }
 
         /* Was it the system logger?  If so, try to start a new one */
@@ -6225,6 +6451,7 @@ static void reaper(SIGNAL_ARGS)
             continue;
         }
 
+#ifndef ENABLE_LITE_MODE
         /* Was it the barrier creator?  If so, try to start a new one */
         if (START_BARRIER_CREATOR && pid == g_instance.pid_cxt.BarrierCreatorPID) {
             g_instance.pid_cxt.BarrierCreatorPID = 0;
@@ -6232,6 +6459,7 @@ static void reaper(SIGNAL_ARGS)
                 LogChildExit(LOG, _("barrier creator process"), pid, exitstatus);
             continue;
         }
+#endif
 
         if (pid == g_instance.pid_cxt.FaultMonitorPID) {
             g_instance.pid_cxt.FaultMonitorPID = 0;
@@ -6269,7 +6497,8 @@ static void reaper(SIGNAL_ARGS)
             if (pageredoStatus == PAGE_REDO_THREAD_EXIT_NORMAL) {
                 continue;
             } else if (pageredoStatus == PAGE_REDO_THREAD_EXIT_ABNORMAL) {
-                ereport(LOG, (errmsg("aborting  due to page redo process failure")));
+                write_stderr("%s LOG: aborting  due to page redo process failure\n",
+                        GetReaperLogPrefix(logBuf, ReaperLogBufSize));
                 HandleChildCrash(pid, exitstatus, _("page redo process"));
                 continue;
             }
@@ -6292,6 +6521,14 @@ static void reaper(SIGNAL_ARGS)
         }
 
 #ifdef ENABLE_MULTIPLE_NODES
+        if (pid == g_instance.pid_cxt.BarrierPreParsePID) {
+            g_instance.pid_cxt.BarrierPreParsePID = 0;
+            write_stderr("%s LOG: barrier pre parse thread exit\n", GetReaperLogPrefix(logBuf, ReaperLogBufSize));
+            if (!EXIT_STATUS_0(exitstatus))
+                HandleChildCrash(pid, exitstatus, _("barrier pre parse process"));
+            continue;
+        }
+        
         if (pid == g_instance.pid_cxt.TsCompactionPID) {
             g_instance.pid_cxt.TsCompactionPID = 0;
             if (!EXIT_STATUS_0(exitstatus))
@@ -6320,7 +6557,7 @@ static void reaper(SIGNAL_ARGS)
                 LogChildExit(LOG, _("undo launcher process"), pid, exitstatus);
             continue;
         }
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
         if (pid == g_instance.pid_cxt.ApplyLauncerPID) {
             g_instance.pid_cxt.ApplyLauncerPID = 0;
 
@@ -6402,8 +6639,9 @@ static const char* GetProcName(ThreadId pid)
         return "full SQL statement flush process";
     else if (pid == g_instance.pid_cxt.PercentilePID)
         return "percentile collector process";
-    else if (pid == g_instance.pid_cxt.PgAuditPID)
+    else if (pg_auditor_thread(pid)) {
         return "system auditor process";
+    }
     else if (pid == g_instance.pid_cxt.SysLoggerPID)
         return "system logger process";
     else if (pid == g_instance.pid_cxt.WLMCollectPID)
@@ -6446,6 +6684,8 @@ static const char* GetProcName(ThreadId pid)
         return "pool cleaner process";
     else if (g_instance.pid_cxt.sharedStorageXlogCopyThreadPID == pid)
         return "share xlog copy process";
+    else if (g_instance.pid_cxt.BarrierPreParsePID == pid)
+        return "barrier preparse process";
     else if (g_instance.pid_cxt.CommReceiverPIDS != NULL) {
         int recv_loop = 0;
         for (recv_loop = 0; recv_loop < g_instance.attr.attr_network.comm_max_receiver; recv_loop++) {
@@ -6467,8 +6707,7 @@ static const char* GetProcName(ThreadId pid)
 static void CleanupBackend(ThreadId pid, int exitstatus) /* child's exit status. */
 {
     Dlelem* curr = NULL;
-
-    LogChildExit(DEBUG2, _("server process"), pid, exitstatus);
+    char logBuf[ReaperLogBufSize] = {0};
 
     /*
      * If a backend dies in an ugly way then we must signal all other backends
@@ -6507,11 +6746,13 @@ static void CleanupBackend(ThreadId pid, int exitstatus) /* child's exit status.
      */
     bool found = false;
     int cnt = 0;
+    knl_thread_role role = (knl_thread_role)0;
     for (curr = DLGetTail(g_instance.backend_list); curr; curr = DLGetPred(curr)) {
         Backend* bp = (Backend*)DLE_VAL(curr);
 
         if (bp->pid == pid) {
             cnt++;
+            role = bp->role;
             if (bp->dead_end) {
                 {
                     if (!ReleasePostmasterChildSlot(bp->child_slot)) {
@@ -6533,8 +6774,9 @@ static void CleanupBackend(ThreadId pid, int exitstatus) /* child's exit status.
         }
     }
     if (!found) {
-        elog(WARNING, "Did not found reaper thread id %lu in backend list, with %d thread still alive, "\
-                      "may has leak occurs", pid, cnt);
+        write_stderr("%s WARNING: Did not found reaper thread id %lu in backend list, with %d thread still alive,"
+                    "last thread role %d, may has leak occurs\n",
+                    GetReaperLogPrefix(logBuf, ReaperLogBufSize), pid, cnt, (int)role);
     }
 }
 
@@ -6547,16 +6789,20 @@ static void CleanupBackend(ThreadId pid, int exitstatus) /* child's exit status.
  */
 void HandleChildCrash(ThreadId pid, int exitstatus, const char* procname)
 {
+    char logBuf[ReaperLogBufSize] = {0};
+
     /*
      * Make log entry unless there was a previous crash (if so, nonzero exit
      * status is to be expected in SIGQUIT response; don't clutter log)
      */
     if (!g_instance.fatal_error) {
         LogChildExit(LOG, procname, pid, exitstatus);
-        ereport(LOG, (errmsg("terminating any other active server processes")));
+        write_stderr("%s LOG: terminating any other active server processes\n",
+            GetReaperLogPrefix(logBuf, ReaperLogBufSize));
     }
 
-    ereport(LOG, (errmsg("%s (ThreadId %lu) exited with exit code %d", procname, pid, WEXITSTATUS(exitstatus))));
+    write_stderr("%s LOG: %s (ThreadId %lu) exited with exit code %d\n",
+        GetReaperLogPrefix(logBuf, ReaperLogBufSize), procname, pid, WEXITSTATUS(exitstatus));
 
     // Threading: do not handle child crash,
     // &g_instance.proc_aux_base or autovacuum elog(FATAL) could reach here,
@@ -6564,7 +6810,8 @@ void HandleChildCrash(ThreadId pid, int exitstatus, const char* procname)
     // then backend may handle the signal when doing malloc, cause memory exception.
     // So exit directly.
     //
-    ereport(LOG, (errmsg("the server process exits")));
+
+    write_stderr("%s LOG: the server process exits\n", GetReaperLogPrefix(logBuf, ReaperLogBufSize));
 
     cancelIpcMemoryDetach();
 
@@ -6584,18 +6831,25 @@ static void LogChildExit(int lev, const char* procname, ThreadId pid, int exitst
      */
     char activity_buffer[1024];
     const char* activity = NULL;
+    char logBuf[ReaperLogBufSize] = {0};
 
     if (!EXIT_STATUS_0(exitstatus)) {
         activity = pgstat_get_crashed_backend_activity(pid, activity_buffer, sizeof(activity_buffer));
     }
     if (WIFEXITED(exitstatus)) {
-        ereport(lev,
-
-            /* ------
-              translator: %s is a noun phrase describing a child process, such as
-              "server process" */
-            (errmsg("%s (ThreadId %lu) exited with exit code %d", procname, pid, WEXITSTATUS(exitstatus)),
-                activity ? errdetail("Failed process was running: %s", activity) : 0));
+        if (lev == LOG) {
+            write_stderr("%s LOG: %s (ThreadId %lu) exited with exit code %d"
+                "Failed process was running: %s\n",
+                GetReaperLogPrefix(logBuf, ReaperLogBufSize), procname, pid, WEXITSTATUS(exitstatus),
+                activity ? activity : 0);
+        } else {
+            ereport(lev,
+                /* ------
+                  translator: %s is a noun phrase describing a child process, such as
+                  "server process" */
+                (errmsg("%s (ThreadId %lu) exited with exit code %d", procname, pid, WEXITSTATUS(exitstatus)),
+                    activity ? errdetail("Failed process was running: %s", activity) : 0));
+        }
     } else if (WIFSIGNALED(exitstatus)) {
 #if defined(WIN32)
         ereport(lev,
@@ -6620,22 +6874,34 @@ static void LogChildExit(int lev, const char* procname, ThreadId pid, int exitst
                  WTERMSIG(exitstatus) < NSIG ? sys_siglist[WTERMSIG(exitstatus)] : "(unknown)"),
                 activity ? errdetail("Failed process was running: %s", activity) : 0));
 #else
-        ereport(lev,
-
-            /* ------
-              translator: %s is a noun phrase describing a child process, such as
-              "server process" */
-            (errmsg("%s (ThreadId %lu) was terminated by signal %d", procname, pid, WTERMSIG(exitstatus)),
-                activity ? errdetail("Failed process was running: %s", activity) : 0));
+        if (lev == LOG) {
+            write_stderr("%s LOG: %s (ThreadId %lu) exited with exit code %d"
+                "Failed process was running: %s\n",
+                GetReaperLogPrefix(logBuf, ReaperLogBufSize), procname, pid, WEXITSTATUS(exitstatus),
+                activity ? activity : 0);
+        } else {
+            ereport(lev,
+                /* ------
+                  translator: %s is a noun phrase describing a child process, such as
+                  "server process" */
+                (errmsg("%s (ThreadId %lu) exited with exit code %d", procname, pid, WEXITSTATUS(exitstatus)),
+                    activity ? errdetail("Failed process was running: %s", activity) : 0));
+        }
 #endif
     } else {
-        ereport(lev,
-
-            /* ------
-              translator: %s is a noun phrase describing a child process, such as
-              "server process" */
-            (errmsg("%s (ThreadId %lu) exited with unrecognized status %d", procname, pid, exitstatus),
-                activity ? errdetail("Failed process was running: %s", activity) : 0));
+        if (lev == LOG) {
+            write_stderr("%s LOG: %s (ThreadId %lu) exited with unrecognized status %d"
+                "Failed process was running: %s\n",
+                GetReaperLogPrefix(logBuf, ReaperLogBufSize), procname, pid, WEXITSTATUS(exitstatus),
+                activity ? activity : 0);
+        } else {
+            ereport(lev,
+                /* ------
+                  translator: %s is a noun phrase describing a child process, such as
+                  "server process" */
+                (errmsg("%s (ThreadId %lu) exited with unrecognized status %d", procname, pid, exitstatus),
+                    activity ? errdetail("Failed process was running: %s", activity) : 0));
+        }
     }
 }
 
@@ -6662,6 +6928,10 @@ static void PostmasterStateMachineReadOnly(void)
         if (CountChildren(BACKEND_TYPE_NORMAL) == 0) {
             if (g_instance.pid_cxt.StartupPID != 0)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
+
+            if (g_instance.pid_cxt.PageRepairPID != 0) {
+                signal_child(g_instance.pid_cxt.PageRepairPID, SIGTERM);
+            }
 
             if (g_instance.pid_cxt.WalReceiverPID != 0)
                 signal_child(g_instance.pid_cxt.WalReceiverPID, SIGTERM);
@@ -6692,20 +6962,25 @@ static void PostmasterStateMachineReadOnly(void)
             if (g_instance.pid_cxt.HeartbeatPID != 0)
                 signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
 
+#ifndef ENABLE_LITE_MODE
             if (g_instance.pid_cxt.BarrierCreatorPID != 0) {
                 barrier_creator_thread_shutdown();
                 signal_child(g_instance.pid_cxt.BarrierCreatorPID, SIGTERM);
             }
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.CsnminSyncPID != 0) {
                 csnminsync_thread_shutdown();
                 signal_child(g_instance.pid_cxt.CsnminSyncPID, SIGTERM);
             }
+
+            if (g_instance.pid_cxt.BarrierPreParsePID != 0)
+                signal_child(g_instance.pid_cxt.BarrierPreParsePID, SIGTERM);
 #endif   /* ENABLE_MULTIPLE_NODES */
 
             if (g_instance.pid_cxt.UndoLauncherPID != 0)
                 signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
             if (g_instance.pid_cxt.ApplyLauncerPID != 0)
                 signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
 #endif
@@ -6740,12 +7015,26 @@ static bool ObsArchAllShutDown()
     return true;
 }
 
+static bool AuditAllShutDown()
+{
+    if (g_instance.pid_cxt.PgAuditPID != NULL) {
+        for (int i = 0; i < g_instance.audit_cxt.thread_num; i++) {
+            if (g_instance.pid_cxt.PgAuditPID[i] != 0) {
+                return false;
+            }
+        }
+    }
+    ereport(LOG, (errmsg("All Audit threads exit.")));
+    return true;
+}
+
 static void AsssertAllChildThreadExit()
 {
     /* These other guys should be dead already */
     Assert(g_instance.pid_cxt.TwoPhaseCleanerPID == 0);
     Assert(g_instance.pid_cxt.FaultMonitorPID == 0);
     Assert(g_instance.pid_cxt.StartupPID == 0);
+    Assert(g_instance.pid_cxt.PageRepairPID == 0);
     Assert(g_instance.pid_cxt.WalReceiverPID == 0);
     Assert(g_instance.pid_cxt.WalRcvWriterPID == 0);
     Assert(g_instance.pid_cxt.DataReceiverPID == 0);
@@ -6766,13 +7055,14 @@ static void AsssertAllChildThreadExit()
     Assert(g_instance.pid_cxt.HeartbeatPID == 0);
     Assert(g_instance.pid_cxt.CsnminSyncPID == 0);
     Assert(g_instance.pid_cxt.BarrierCreatorPID == 0);
+    Assert(g_instance.pid_cxt.BarrierPreParsePID == 0);
 #ifdef ENABLE_MULTIPLE_NODES
     Assert(g_instance.pid_cxt.TsCompactionPID == 0);
 #endif   /* ENABLE_MULTIPLE_NODES */
     Assert(g_instance.pid_cxt.CommPoolerCleanPID == 0);
     Assert(g_instance.pid_cxt.UndoLauncherPID == 0);
     Assert(g_instance.pid_cxt.UndoRecyclerPID == 0);
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
     Assert(g_instance.pid_cxt.ApplyLauncerPID == 0);
 #endif
     Assert(g_instance.pid_cxt.GlobalStatsPID == 0);
@@ -6829,8 +7119,9 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.RbCleanrPID == 0 && 
             g_instance.pid_cxt.SnapshotPID == 0 && g_instance.pid_cxt.PercentilePID == 0 &&
             g_instance.pid_cxt.AshPID == 0 && g_instance.pid_cxt.CsnminSyncPID == 0 &&
-            g_instance.pid_cxt.BarrierCreatorPID == 0 &&
+            g_instance.pid_cxt.BarrierCreatorPID == 0 &&  g_instance.pid_cxt.PageRepairPID == 0 &&
 #ifdef ENABLE_MULTIPLE_NODES
+            g_instance.pid_cxt.BarrierPreParsePID == 0 &&
             g_instance.pid_cxt.CommPoolerCleanPID == 0 && streaming_backend_manager(STREAMING_BACKEND_SHUTDOWN) &&
             g_instance.pid_cxt.TsCompactionPID == 0 && g_instance.pid_cxt.TsCompactionAuxiliaryPID == 0
             && g_instance.pid_cxt.CommPoolerCleanPID == 0 &&
@@ -6838,7 +7129,7 @@ static void PostmasterStateMachine(void)
 
             g_instance.pid_cxt.UndoLauncherPID == 0 && g_instance.pid_cxt.UndoRecyclerPID == 0 &&
             g_instance.pid_cxt.GlobalStatsPID == 0 &&
-#ifndef ENABLE_MULTIPLE_NODES
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
             g_instance.pid_cxt.ApplyLauncerPID == 0 &&
 #endif
             IsAllPageWorkerExit() && IsAllBuildSenderExit()) {
@@ -6917,9 +7208,9 @@ static void PostmasterStateMachine(void)
                         signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
 
                     /*  signal the auditor process */
-                    if (g_instance.pid_cxt.PgAuditPID != 0) {
+                    if (g_instance.pid_cxt.PgAuditPID != NULL) {
                         Assert(!dummyStandbyMode);
-                        signal_child(g_instance.pid_cxt.PgAuditPID, SIGQUIT);
+                        pgaudit_stop_all();
                     }
 
                     if (g_instance.pid_cxt.sharedStorageXlogCopyThreadPID != 0) {
@@ -6966,7 +7257,7 @@ static void PostmasterStateMachine(void)
          * g_instance.fatal_error processing.
          */
         if (DLGetHead(g_instance.backend_list) == NULL && g_instance.pid_cxt.PgArchPID == 0 &&
-            g_instance.pid_cxt.PgStatPID == 0 && g_instance.pid_cxt.PgAuditPID == 0 &&
+            g_instance.pid_cxt.PgStatPID == 0 && AuditAllShutDown() &&
             ckpt_all_flush_buffer_thread_exit() && ObsArchAllShutDown()) {
 
             AsssertAllChildThreadExit();
@@ -7048,6 +7339,7 @@ static void PostmasterStateMachine(void)
 
         hashmdata = t_thrd.postmaster_cxt.HaShmData;
         hashmdata->current_mode = cur_mode;
+        g_instance.global_sysdbcache.RefreshHotStandby();
         g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
         Assert(g_instance.pid_cxt.StartupPID != 0);
         pmState = PM_STARTUP;
@@ -7080,6 +7372,7 @@ static void PostmasterStateMachine(void)
         {
             volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
             hashmdata->current_mode = STANDBY_MODE;
+            g_instance.global_sysdbcache.RefreshHotStandby();
             UpdateOptsFile();
             ereport(LOG, (errmsg("archive recovery started")));
         }
@@ -7303,6 +7596,7 @@ static int BackendStartup(Port* port, bool isConnectHaPort)
      * of backends.
      */
     bn->pid = pid;
+    bn->role = WORKER;
     bn->is_autovacuum = false;
     bn->cancel_key = t_thrd.proc_cxt.MyCancelKey;
     DLInitElem(&bn->elem, bn);
@@ -7551,6 +7845,21 @@ static int StartupPacketInitialize(Port* port)
 
 static void PsDisplayInitialize(Port* port)
 {
+#ifdef ENABLE_LITE_MODE
+    char thr_name[16];
+    int rcs = 0;
+
+    if (t_thrd.role == WORKER) {
+        rcs = snprintf_truncated_s(thr_name, sizeof(thr_name), "w:%s", port->user_name);
+        securec_check_ss(rcs, "\0", "\0");
+        (void)pthread_setname_np(gs_thread_self(), thr_name);
+    } else if (t_thrd.role == THREADPOOL_WORKER) {
+        rcs = snprintf_truncated_s(thr_name, sizeof(thr_name), "tw:%s", port->user_name);
+        securec_check_ss(rcs, "\0", "\0");
+        (void)pthread_setname_np(gs_thread_self(), thr_name);
+    }
+
+#else
     char remote_ps_data[NI_MAXHOST + NI_MAXSERV + 2];
     errno_t rc;
 
@@ -7587,6 +7896,7 @@ static void PsDisplayInitialize(Port* port)
             port->database_name,
             remote_ps_data,
             u_sess->attr.attr_common.update_process_title ? "authentication" : "");
+#endif
 }
 
 void PortInitialize(Port* port, knl_thread_arg* arg)
@@ -7759,7 +8069,9 @@ void ExitPostmaster(int status)
 
     CloseGaussPidDir();
 
+#ifndef ENABLE_LITE_MODE
     obs_deinitialize();
+#endif
 
     /* when exiting the postmaster process, destroy the hash table */
     if (g_instance.comm_cxt.usedDnSpace != NULL) {
@@ -7778,7 +8090,9 @@ void ExitPostmaster(int status)
         ProcessCommLogicTearDown();
     }
 
+#ifdef ENABLE_LLVM_COMPILE
     CodeGenProcessTearDown();
+#endif
 
     /* Save llt data to disk before postmaster exit */
 #ifdef ENABLE_LLT
@@ -7814,6 +8128,9 @@ static void handle_recovery_started()
         Assert(g_instance.pid_cxt.SpBgWriterPID == 0);
         g_instance.pid_cxt.SpBgWriterPID = initialize_util_thread(SPBGWRITER);
 
+        Assert(g_instance.pid_cxt.PageRepairPID == 0);
+        g_instance.pid_cxt.PageRepairPID = initialize_util_thread(PAGEREPAIR_THREAD);
+
         if (ENABLE_INCRE_CKPT) {
             for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
                 Assert(g_instance.pid_cxt.PageWriterPID[i] == 0);
@@ -7843,7 +8160,11 @@ static void handle_begin_hot_standby()
                 wal_get_role_string(get_cur_mode()))));
 
         ereport(LOG, (errmsg("database system is ready to accept read only connections")));
-
+#ifdef ENABLE_MULTIPLE_NODES
+        if (IS_DISASTER_RECOVER_MODE && g_instance.pid_cxt.BarrierPreParsePID == 0) {
+            g_instance.pid_cxt.BarrierPreParsePID = initialize_util_thread(BARRIER_PREPARSE);
+        }
+#endif
         pmState = PM_HOT_STANDBY;
     }
 }
@@ -7858,8 +8179,10 @@ static void handle_promote_signal()
         gs_lock_test_and_set_64(&g_instance.stat_cxt.NodeStatResetTime, GetCurrentTimestamp());
         if (GetHaShmemMode() != STANDBY_MODE) {
             ereport(LOG, (errmsg("Instance can't be promoted in none standby mode.")));
-        } else if (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE) {
+        } else if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
             ereport(LOG, (errmsg("Instance can't be promoted in standby cluster")));
+        } else if (t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby) {
+            ereport(LOG, (errmsg("Instance can't be promoted in hadr_main_standby mode")));
         } else {
            /* Database Security: Support database audit */
            if (t_thrd.walreceiverfuncs_cxt.WalRcv &&
@@ -7900,6 +8223,7 @@ static void handle_primary_signal(volatile HaShmemData* hashmdata)
                          and max_wal_senders requires at least 2.")));
         else {
             hashmdata->current_mode = PRIMARY_MODE;
+            g_instance.global_sysdbcache.RefreshHotStandby();
             UpdateOptsFile();
         }
     }
@@ -7918,6 +8242,7 @@ static void handle_standby_signal(volatile HaShmemData* hashmdata)
          pmState == PM_HOT_STANDBY ||
          pmState == PM_WAIT_READONLY)) {
         hashmdata->current_mode = STANDBY_MODE;
+        g_instance.global_sysdbcache.RefreshHotStandby();
         PMUpdateDBState(NEEDREPAIR_STATE, get_cur_mode(), get_cur_repl_num());
         ereport(LOG,
            (errmsg("update gaussdb state file: db state(NEEDREPAIR_STATE), server mode(%s)",
@@ -7931,7 +8256,40 @@ static void handle_standby_signal(volatile HaShmemData* hashmdata)
     }
 }
 
+static void handle_cascade_standby_signal(volatile HaShmemData* hashmdata)
+{
+    if (g_instance.pid_cxt.StartupPID != 0 &&
+        (pmState == PM_STARTUP ||
+         pmState == PM_RECOVERY ||
+         pmState == PM_HOT_STANDBY ||
+         pmState == PM_WAIT_READONLY)) {
+        hashmdata->current_mode = STANDBY_MODE;
+        g_instance.global_sysdbcache.RefreshHotStandby();
+        hashmdata->is_cascade_standby = true;
+        PMUpdateDBState(NEEDREPAIR_STATE, get_cur_mode(), get_cur_repl_num());
+        ereport(LOG,
+           (errmsg("update gaussdb state file: db state(NEEDREPAIR_STATE), server mode(%s)",
+               wal_get_role_string(get_cur_mode()))));
+        /*
+        * wakeup startup process from sleep by signal, cause we are
+        * in standby mode, the signal has no specific affect.
+        */
+        SendNotifySignal(NOTIFY_CASCADE_STANDBY, g_instance.pid_cxt.StartupPID);
+        UpdateOptsFile();
+    }
+}
+
 #ifndef ENABLE_MULTIPLE_NODES
+static bool CheckChangeRoleFileExist(const char *filename)
+{
+    struct stat stat_buf;
+    if (stat(filename, &stat_buf) != 0 || !S_ISREG(stat_buf.st_mode)) {
+        return false;
+    } else {
+        return true;
+    }
+}
+
 static bool CheckSignalByFile(const char *filename, void *infoPtr, size_t infoSize)
 {
     FILE* sofile = nullptr;
@@ -8003,9 +8361,9 @@ static void handle_remove_member_signal(uint32 nodeID)
     }
 }
 
-static bool CheckChangeRoleSignal(char *role, int len)
+static bool CheckChangeRoleSignal()
 {
-    return CheckSignalByFile(ChangeRoleFile, role, len);
+    return CheckChangeRoleFileExist(ChangeRoleFile);
 }
 
 static int changeRole(const char *role)
@@ -8013,6 +8371,11 @@ static int changeRole(const char *role)
     FILE *sofile = nullptr;
     int timeout = 60; /* seconds */
     int ret = -1;
+    char changeStr[MAXPGPATH] = {0};
+    int roleStatus = -1;
+    int groupStatus = -1;
+    int priorityStatus = -1;
+    errno_t rc;
     sofile = fopen(TimeoutFile, "rb");
     if (sofile == nullptr) {
         ereport(WARNING, (errmsg("Open timeout file %s failed!", TimeoutFile)));
@@ -8032,12 +8395,79 @@ static int changeRole(const char *role)
     const uint32 unit = 1000;
     uint32 mTimeout = (uint32)timeout * unit;
     ereport(LOG, (errmsg("The timeout of changing role is %d ms!", mTimeout)));
-    if (strcmp(role, "fo") == 0) { /* fo denotes follower role */
-        ret = dcf_change_member_role(1, g_instance.attr.attr_storage.dcf_attr.dcf_node_id,
-            static_cast<dcf_role_t>(2), mTimeout);
-    } else if (strcmp(role, "pa") == 0) { /* pa denotes passive role */
-        ret = dcf_change_member_role(1, g_instance.attr.attr_storage.dcf_attr.dcf_node_id,
-            static_cast<dcf_role_t>(4), mTimeout);
+    if (sscanf_s(role, "%d_%d_%d", &roleStatus, &groupStatus, &priorityStatus) != 3) {
+        ereport(WARNING, (errmsg("Content could not get all param for change role %s", role)));
+        return -1;
+    }
+    if (roleStatus == 0) { /* fo denotes follower role */
+        if (groupStatus == -1 && priorityStatus == -1) {
+            ret = dcf_change_member_role(1, g_instance.attr.attr_storage.dcf_attr.dcf_node_id,
+                static_cast<dcf_role_t>(2), mTimeout);
+        } else if (groupStatus == -1 && priorityStatus != -1) {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"priority\":%d,\"role\":\"FOLLOWER\"}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, priorityStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        } else if (groupStatus != -1 && priorityStatus == -1) {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"group\":%d,\"role\":\"FOLLOWER\"}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, groupStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        } else {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"group\":%d,\"priority\":%d,\"role\":\"FOLLOWER\"}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, groupStatus, priorityStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        }
+    } else if (roleStatus == 1) { /* pa denotes passive role */
+        if (groupStatus == -1 && priorityStatus == -1) {
+            ret = dcf_change_member_role(1, g_instance.attr.attr_storage.dcf_attr.dcf_node_id,
+                static_cast<dcf_role_t>(4), mTimeout);
+        } else if (groupStatus == -1 && priorityStatus != -1) {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"priority\":%d,\"role\":\"PASSIVE\"}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, priorityStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        } else if (groupStatus != -1 && priorityStatus == -1) {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"group\":%d,\"role\":\"PASSIVE\"}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, groupStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        } else {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"group\":%d,\"priority\":%d,\"role\":\"PASSIVE\"}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, groupStatus, priorityStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        }
+    } else if (roleStatus == -1) {
+        if (groupStatus == -1 && priorityStatus == -1) {
+            ereport(WARNING, (errmsg("Nothing changed when change role been called %s", role)));
+            return 0;
+        } else if (groupStatus == -1 && priorityStatus != -1) {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"priority\":%d}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, priorityStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        } else if (groupStatus != -1 && priorityStatus == -1) {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"group\":%d}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, groupStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        } else {
+            rc = snprintf_s(changeStr, MAXPGPATH, MAXPGPATH - 1,
+                "[{\"stream_id\":1,\"node_id\":%d, \"group\":%d,\"priority\":%d}]",
+                g_instance.attr.attr_storage.dcf_attr.dcf_node_id, groupStatus, priorityStatus);
+            securec_check_ss_c(rc, "\0", "\0");
+            ret = dcf_change_member(changeStr, 60000);
+        }
     } else {
         ereport(WARNING, (errmsg("Content prefix read from role file can not be recognized %s", role)));
         return -1;
@@ -8354,7 +8784,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
     if ((mode = CheckSwitchoverSignal()) != 0 && WalRcvIsOnline() && DataRcvIsOnline() &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY)) {
-        if (!IS_SHARED_STORAGE_STANBY_CLUSTER_MODE) {
+        if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
             ereport(LOG, (errmsg("to do switchover")));
             /* Label the standby to do switchover */
             t_thrd.walreceiverfuncs_cxt.WalRcv->node_state = (ClusterNodeState)mode;
@@ -8389,6 +8819,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
         handle_standby_signal(hashmdata);
     }
 
+    /* If it is cascade standby signal, then set HaShmData and send sigusr2 to startup process */
+    if (CheckCascadeStandbySignal()) {
+        handle_cascade_standby_signal(hashmdata);
+    }
+
     if (CheckPostmasterSignal(PMSIGNAL_UPDATE_NORMAL)) {
         PMUpdateDBState(NORMAL_STATE, get_cur_mode(), get_cur_repl_num());
         ereport(LOG,
@@ -8414,8 +8849,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
 #ifndef ENABLE_MULTIPLE_NODES
     uint32 nodeID = 0;
     NewNodeInfo nodeinfo;
-    char role[3] = {0};
-    role[2] = '\0';
     RunModeParam param;
     if (g_instance.attr.attr_storage.dcf_attr.enable_dcf && CheckAddMemberSignal(&nodeinfo) &&
         t_thrd.dcf_cxt.dcfCtxInfo->isDcfStarted) {
@@ -8427,8 +8860,9 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (g_instance.attr.attr_storage.dcf_attr.enable_dcf &&
-        CheckChangeRoleSignal(role, 2) && t_thrd.dcf_cxt.dcfCtxInfo->isDcfStarted) {
-        handle_change_role_signal(role);
+        CheckChangeRoleSignal() && t_thrd.dcf_cxt.dcfCtxInfo->isDcfStarted &&
+        !g_instance.comm_cxt.isNeedChangeRole) {
+        g_instance.comm_cxt.isNeedChangeRole = true;
     }
 
     if (g_instance.attr.attr_storage.dcf_attr.enable_dcf &&
@@ -8437,8 +8871,10 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 #endif
 
+#ifndef ENABLE_LITE_MODE
 #if defined (ENABLE_MULTIPLE_NODES) || defined (ENABLE_PRIVATEGAUSS)
     check_and_process_hotpatch();
+#endif
 #endif
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
@@ -8613,6 +9049,7 @@ static void StartRbWorker(void)
 
             /* Autovac workers are not dead_end and need a child slot */
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->role = RBWORKER;
             bn->pid = initialize_util_thread(RBWORKER, bn);
             t_thrd.proc_cxt.MyPMChildSlot = 0;
             if (bn->pid > 0) {
@@ -8629,6 +9066,7 @@ static void StartRbWorker(void)
              */
             (void)ReleasePostmasterChildSlot(bn->child_slot);
             bn->pid = 0;
+            bn->role = (knl_thread_role)0;
         } else {
             ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
         }
@@ -8676,6 +9114,7 @@ static void StartTxnSnapWorker(void)
 
             /* Autovac workers are not dead_end and need a child slot */
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->role = TXNSNAP_WORKER;
             bn->pid = initialize_util_thread(TXNSNAP_WORKER, bn);
             t_thrd.proc_cxt.MyPMChildSlot = 0;
             if (bn->pid > 0) {
@@ -8692,6 +9131,7 @@ static void StartTxnSnapWorker(void)
              */
             (void)ReleasePostmasterChildSlot(bn->child_slot);
             bn->pid = 0;
+            bn->role = (knl_thread_role)0;
         } else {
             ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
         }
@@ -8739,6 +9179,7 @@ static void StartAutovacuumWorker(void)
 
             /* Autovac workers are not dead_end and need a child slot */
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->role = AUTOVACUUM_WORKER;
             bn->pid = initialize_util_thread(AUTOVACUUM_WORKER, bn);
             t_thrd.proc_cxt.MyPMChildSlot = 0;
             if (bn->pid > 0) {
@@ -8755,6 +9196,7 @@ static void StartAutovacuumWorker(void)
              */
             (void)ReleasePostmasterChildSlot(bn->child_slot);
             bn->pid = 0;
+            bn->role = (knl_thread_role)0;
         } else
             ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
     }
@@ -8861,6 +9303,7 @@ static void StartUndoWorker(void)
 
             /* UndoWorkers need a child slot */
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->role = UNDO_WORKER;
             bn->pid = initialize_util_thread(UNDO_WORKER, bn);
             t_thrd.proc_cxt.MyPMChildSlot = 0;
 
@@ -8878,6 +9321,7 @@ static void StartUndoWorker(void)
              */
             (void)ReleasePostmasterChildSlot(bn->child_slot);
             bn->pid = 0;
+            bn->role = (knl_thread_role)0;
         } else
             ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
     }
@@ -9063,6 +9507,7 @@ static void StartPgjobWorker(void)
             GenerateCancelKey(false);
             bn->cancel_key = t_thrd.proc_cxt.MyCancelKey;
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->role = JOB_WORKER;
             bn->pid = initialize_util_thread(JOB_WORKER);
             t_thrd.proc_cxt.MyPMChildSlot = 0;
             if (bn->pid > 0) {
@@ -9079,6 +9524,7 @@ static void StartPgjobWorker(void)
              */
             (void)ReleasePostmasterChildSlot(bn->child_slot);
             bn->pid = 0;
+            bn->role = (knl_thread_role)0;
             bn = NULL;
         } else
             ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
@@ -9127,6 +9573,7 @@ static void StartPoolCleaner(void)
             GenerateCancelKey(false);
             bn->cancel_key = t_thrd.proc_cxt.MyCancelKey;
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->role = COMM_POOLER_CLEAN;
             bn->pid = initialize_util_thread(COMM_POOLER_CLEAN);
             g_instance.pid_cxt.CommPoolerCleanPID = bn->pid;
             t_thrd.proc_cxt.MyPMChildSlot = 0;
@@ -9144,6 +9591,7 @@ static void StartPoolCleaner(void)
              */
             (void)ReleasePostmasterChildSlot(bn->child_slot);
             bn->pid = 0;
+            bn->role = (knl_thread_role)0;
             bn = NULL;
         } else
             ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
@@ -9176,6 +9624,7 @@ static void StartCleanStatement(void)
 
             /* Autovac workers are not dead_end and need a child slot */
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->role = TRACK_STMT_CLEANER;
             bn->pid = initialize_util_thread(TRACK_STMT_CLEANER, bn);
             t_thrd.proc_cxt.MyPMChildSlot = 0;
             if (bn->pid > 0) {
@@ -9188,6 +9637,7 @@ static void StartCleanStatement(void)
 
             (void)ReleasePostmasterChildSlot(bn->child_slot);
             bn->pid = 0;
+            bn->role = (knl_thread_role)0;
         } else {
             ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
         }
@@ -9336,6 +9786,7 @@ static ThreadId StartCatchupWorker(void)
 
             /* Data catch-up are not dead_end and need a child slot */
             bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->role = CATCHUP;
             bn->pid = initialize_util_thread(CATCHUP);
             t_thrd.proc_cxt.MyPMChildSlot = 0;
             if (bn->pid > 0) {
@@ -9352,6 +9803,7 @@ static ThreadId StartCatchupWorker(void)
              */
             (void)ReleasePostmasterChildSlot(bn->child_slot);
             bn->pid = 0;
+            bn->role = (knl_thread_role)0;
             bn = NULL;
         } else
             ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
@@ -9773,11 +10225,17 @@ void HaShmemInit(void)
         int i = 0;
 
         t_thrd.postmaster_cxt.HaShmData->current_mode = NORMAL_MODE;
+        g_instance.global_sysdbcache.RefreshHotStandby();
         for (i = 1; i < DOUBLE_MAX_REPLNODE_NUM; i++) {
             t_thrd.postmaster_cxt.HaShmData->disconnect_count[i] = 0;
             t_thrd.postmaster_cxt.HaShmData->repl_reason[i] = NONE_REBUILD;
         }
         SpinLockInit(&t_thrd.postmaster_cxt.HaShmData->mutex);
+        t_thrd.postmaster_cxt.HaShmData->current_repl = 1;
+        t_thrd.postmaster_cxt.HaShmData->prev_repl = 0;
+        t_thrd.postmaster_cxt.HaShmData->is_cascade_standby = false;
+        t_thrd.postmaster_cxt.HaShmData->is_cross_region = false;
+        t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby = false;
     }
     if (!IsUnderPostmaster) {
         gs_set_hs_shm_data(t_thrd.postmaster_cxt.HaShmData);
@@ -9792,11 +10250,15 @@ static bool IsChannelAdapt(Port* port, ReplConnInfo* repl)
     char local_ip[IP_LEN] = {0};
     char remote_ip[IP_LEN] = {0};
     char* result = NULL;
+    char* local_ipNoZone = NULL;
+    char* remote_ipNoZone = NULL;
+    char local_ipNoZoneData[IP_LEN] = {0};
+    char remote_ipNoZoneData[IP_LEN] = {0};
 
     Assert(repl != NULL);
 
     if (AF_INET6 == laddr->sa_family) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)laddr)->sin_addr, 128, local_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in6*)laddr)->sin6_addr, 128, local_ip, IP_LEN);
         if (NULL == result) {
             ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
         }
@@ -9808,7 +10270,7 @@ static bool IsChannelAdapt(Port* port, ReplConnInfo* repl)
     }
 
     if (AF_INET6 == raddr->sa_family) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)raddr)->sin_addr, 128, remote_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in6*)raddr)->sin6_addr, 128, remote_ip, IP_LEN);
         if (NULL == result) {
             ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
         }
@@ -9819,7 +10281,11 @@ static bool IsChannelAdapt(Port* port, ReplConnInfo* repl)
         }
     }
 
-    if (0 == strcmp(local_ip, repl->localhost) && 0 == strcmp(remote_ip, repl->remotehost)) {
+    /* remove any '%zone' part from an IPv6 address string */
+    local_ipNoZone = remove_ipv6_zone(repl->localhost, local_ipNoZoneData, IP_LEN);
+    remote_ipNoZone = remove_ipv6_zone(repl->remotehost, remote_ipNoZoneData, IP_LEN);
+
+    if (0 == strcmp(local_ip, local_ipNoZone) && 0 == strcmp(remote_ip, remote_ipNoZone)) {
         return true;
     } else {
         ereport(DEBUG1, (errmsg("connect local ip %s, connect remote ip %s", local_ip, remote_ip)));
@@ -9840,7 +10306,7 @@ bool IsFromLocalAddr(Port* port)
 
     /* parse the local ip address */
     if (AF_INET6 == local_addr->sa_family) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)local_addr)->sin_addr, 128, local_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in6*)local_addr)->sin6_addr, 128, local_ip, IP_LEN);
     } else if (AF_INET == local_addr->sa_family) {
         result = inet_net_ntop(AF_INET, &((struct sockaddr_in*)local_addr)->sin_addr, 32, local_ip, IP_LEN);
     }
@@ -9851,7 +10317,7 @@ bool IsFromLocalAddr(Port* port)
 
     /* parse the remote ip address */
     if (AF_INET6 == remote_addr->sa_family) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)remote_addr)->sin_addr, 128, remote_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in6*)remote_addr)->sin6_addr, 128, remote_ip, IP_LEN);
     } else if (AF_INET == remote_addr->sa_family) {
         result = inet_net_ntop(AF_INET, &((struct sockaddr_in*)remote_addr)->sin_addr, 32, remote_ip, IP_LEN);
     }
@@ -9879,7 +10345,7 @@ bool IsLocalAddr(Port* port)
     char* result = NULL;
 
     if (AF_INET6 == laddr->sa_family) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)laddr)->sin_addr, 128, local_ip, IP_LEN);
+        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in6*)laddr)->sin6_addr, 128, local_ip, IP_LEN);
     } else if (AF_INET == laddr->sa_family) {
         result = inet_net_ntop(AF_INET, &((struct sockaddr_in*)laddr)->sin_addr, 32, local_ip, IP_LEN);
     }
@@ -10075,8 +10541,10 @@ static bool IsLocalPort(Port* port)
 
     if (AF_UNIX == laddr->sa_family) {
         return true;
-    } else {
+    } else if (AF_INET == laddr->sa_family) {
         sockport = ntohs(((struct sockaddr_in*)laddr)->sin_port);
+    } else if (AF_INET6 == laddr->sa_family) {
+        sockport = ntohs(((struct sockaddr_in6*)laddr)->sin6_port);
     }
 
     if (sockport == g_instance.attr.attr_network.PostPortNumber) {
@@ -10108,11 +10576,13 @@ static void SetHaShmemData()
         default:
             break;
     }
+    g_instance.global_sysdbcache.RefreshHotStandby();
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
         if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL) {
             repl_list_num++;
-            if (t_thrd.postmaster_cxt.ReplConnArray[i]->isCrossRegion && !IS_SHARED_STORAGE_STANBY_CLUSTER_MODE) {
+            if (t_thrd.postmaster_cxt.ReplConnArray[i]->isCrossRegion &&
+                !IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
                 hashmdata->is_cross_region = true;
             }
         }
@@ -10138,8 +10608,8 @@ static bool IsAlreadyListen(const char* ip, int port)
 
     for (listen_index = 0; listen_index != MAXLISTEN; ++listen_index) {
         if (t_thrd.postmaster_cxt.ListenSocket[listen_index] != PGINVALID_SOCKET) {
-            struct sockaddr_in saddr;
-            socklen_t slen;
+            struct sockaddr_storage saddr;
+            socklen_t slen = 0;
             char* result = NULL;
             rc = memset_s(&saddr, sizeof(saddr), 0, sizeof(saddr));
             securec_check(rc, "\0", "\0");
@@ -10152,36 +10622,48 @@ static bool IsAlreadyListen(const char* ip, int port)
                 continue;
             }
 
-            if (AF_INET6 == saddr.sin_family) {
-                result = inet_net_ntop(AF_INET6, &saddr.sin_addr, 128, sock_ip, IP_LEN);
+            if (AF_INET6 == ((struct sockaddr *) &saddr)->sa_family) {
+                result = inet_net_ntop(AF_INET6, &((struct sockaddr_in6 *) &saddr)->sin6_addr, 128, sock_ip, IP_LEN);
                 if (NULL == result) {
                     ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
                 }
-            } else if (AF_INET == saddr.sin_family) {
-                result = inet_net_ntop(AF_INET, &saddr.sin_addr, 32, sock_ip, IP_LEN);
+            } else if (AF_INET == ((struct sockaddr *) &saddr)->sa_family) {
+                result = inet_net_ntop(AF_INET, &((struct sockaddr_in *) &saddr)->sin_addr, 32, sock_ip, IP_LEN);
                 if (NULL == result) {
                     ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
                 }
 
-            } else if (AF_UNIX == saddr.sin_family) {
+            } else if (AF_UNIX == ((struct sockaddr *) &saddr)->sa_family) {
                 continue;
             }
-            if ((0 == strcmp(ip, sock_ip)) && (port == ntohs(saddr.sin_port))) {
-                return true;
-            }
+
             /* Check if all IP addresses of local host had been listened already,
              * which was set using '*' in postgresql.conf.
              * :: represents all IPs for IPv6, 0.0.0.0 represents all IPs for IPv4. */
-            if (saddr.sin_family == AF_INET6) {
-                if ((strcmp(sock_ip, "::") == 0) && (port == ntohs(saddr.sin_port))) {
+            if (((struct sockaddr *) &saddr)->sa_family == AF_INET6) {
+                char* ipNoZone = NULL;
+                char ipNoZoneData[IP_LEN] = {0};
+
+                /* remove any '%zone' part from an IPv6 address string */
+                ipNoZone = remove_ipv6_zone((char *)ip, ipNoZoneData, IP_LEN);
+                if ((0 == strcmp(ipNoZone, sock_ip)) && (port == ntohs(((struct sockaddr_in6 *) &saddr)->sin6_port))) {
                     return true;
                 }
-            } else if (saddr.sin_family == AF_INET) {
-                if ((strcmp(sock_ip, "0.0.0.0") == 0) && (port == ntohs(saddr.sin_port))) {
+
+                if ((strcmp(sock_ip, "::") == 0) && (port == ntohs(((struct sockaddr_in6 *) &saddr)->sin6_port))) {
+                    return true;
+                }
+            } else if (((struct sockaddr *) &saddr)->sa_family == AF_INET) {
+                if ((0 == strcmp(ip, sock_ip)) && (port == ntohs(((struct sockaddr_in *) &saddr)->sin_port))) {
+                    return true;
+                }
+
+                if ((strcmp(sock_ip, "0.0.0.0") == 0) && (port == ntohs(((struct sockaddr_in *) &saddr)->sin_port))) {
                     return true;
                 }
             } else {
-                ereport(WARNING, (errmsg("Unknown network protocal family type: %d", saddr.sin_family)));
+                ereport(WARNING,
+                       (errmsg("Unknown network protocal family type: %d", ((struct sockaddr *) &saddr)->sa_family)));
             }
         }
     }
@@ -10204,6 +10686,8 @@ bool CheckSockAddr(struct sockaddr* sock_addr, const char* szIP, int port)
     int portNumber = 0;
     bool cmpResult = false;
     char* result = NULL;
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
 
     if ((NULL == sock_addr) || (NULL == szIP) || (0 == port)) {
         ereport(LOG, (errmsg("invalid socket information or IP string or port")));
@@ -10239,15 +10723,18 @@ bool CheckSockAddr(struct sockaddr* sock_addr, const char* szIP, int port)
             break;
 
         case AF_INET6:
+            /* remove any '%zone' part from an IPv6 address string */
+            ipNoZone = remove_ipv6_zone((char *)szIP, ipNoZoneData, IP_LEN);
+
             ipv6addr = (struct sockaddr_in6*)sock_addr;
             result = inet_net_ntop(AF_INET6, &(ipv6addr->sin6_addr), 128, IPstr, MAX_IP_STR_LEN - 1);
             if (NULL == result) {
                 ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
             }
             portNumber = ntohs(ipv6addr->sin6_port);
-            if ((((0 == strncmp(szIP, LOCAL_HOST, MAX_IP_STR_LEN)) &&
+            if ((((0 == strncmp(ipNoZone, LOCAL_HOST, MAX_IP_STR_LEN)) &&
                      (0 == strncmp(IPstr, LOOP_IPV6_IP, MAX_IP_STR_LEN))) ||
-                    (0 == strncmp(IPstr, szIP, MAX_IP_STR_LEN))) &&
+                    (0 == strncmp(IPstr, ipNoZone, MAX_IP_STR_LEN))) &&
                 (port == portNumber)) {
                 cmpResult = true;
             }
@@ -10481,7 +10968,7 @@ static void ListenSocketRegulation(void)
 
 static DbState get_share_storage_node_dbstate_sub()
 {
-    if (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE) {
+    if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
         return NORMAL_STATE;
     } else if (WalRcvIsOnline()) {
         return NORMAL_STATE;
@@ -10497,9 +10984,9 @@ DbState get_local_dbstate_sub(WalRcvData* walrcv, ServerMode mode)
     bool has_build_reason = true;
     bool share_storage_has_no_build_reason = (IS_SHARED_STORAGE_MODE &&
         t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl] == NONE_REBUILD) ||
-        (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE &&
+        (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE &&
         t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl] == CONNECT_REBUILD);
-    bool disater_recovery_has_no_build_reason = (IS_DISASTER_RECOVER_MODE &&
+    bool disater_recovery_has_no_build_reason = (IS_OBS_DISASTER_RECOVER_MODE &&
         t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl] == NONE_REBUILD);
     if ((t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl] ==
         NONE_REBUILD && walrcv != NULL && walrcv->isRuning && 
@@ -10522,7 +11009,7 @@ DbState get_local_dbstate_sub(WalRcvData* walrcv, ServerMode mode)
                     return CATCHUP_STATE;
                 } else if (IS_SHARED_STORAGE_MODE) {
                     return get_share_storage_node_dbstate_sub();
-                } else if (!WalRcvIsOnline() && !IS_DISASTER_RECOVER_MODE) {
+                } else if (!WalRcvIsOnline() && !IS_OBS_DISASTER_RECOVER_MODE) {
                     return STARTING_STATE;
                 } else {
                     return NORMAL_STATE;
@@ -10601,7 +11088,8 @@ static void PMReadDBStateFile(GaussState* state)
         ereport(LOG, (errmsg("%s: parameter state is null in PMReadDBStateFile()", progname)));
         return;
     }
-
+    int rc = memset_s(state, sizeof(GaussState), 0, sizeof(GaussState));
+    securec_check(rc, "", "");
     statef = fopen(gaussdb_state_file, "r");
     if (NULL == statef) {
         ereport(LOG,
@@ -10669,6 +11157,39 @@ static void PMSetDBStateFile(GaussState* state)
         ereport(LOG, (errmsg("can't rename \"%s\" to \"%s\": %m", temppath, gaussdb_state_file)));
 }
 
+static bool IsDBStateFileExist()
+{
+    return access(gaussdb_state_file, F_OK) != -1;
+}
+
+static void PMInitDBStateFile()
+{
+    GaussState state;
+    int rc = memset_s(&state, sizeof(state), 0, sizeof(state));
+    securec_check(rc, "", "");
+    state.conn_num = t_thrd.postmaster_cxt.HaShmData->repl_list_num;
+    state.mode = t_thrd.postmaster_cxt.HaShmData->current_mode;
+    state.state = STARTING_STATE;
+    state.lsn = 0;
+    state.term = 0;
+    state.sync_stat = false;
+    state.ha_rebuild_reason = NONE_REBUILD;
+    state.current_connect_idx = 1;
+    if (IS_CN_DISASTER_RECOVER_MODE && IsDBStateFileExist()) {
+        GaussState temp_state;
+        PMReadDBStateFile(&temp_state);
+        t_thrd.postmaster_cxt.HaShmData->current_repl = temp_state.current_connect_idx;
+        t_thrd.postmaster_cxt.HaShmData->prev_repl = temp_state.current_connect_idx;
+        state.current_connect_idx = temp_state.current_connect_idx;
+    }
+
+    PMSetDBStateFile(&state);
+    ereport(LOG,
+        (errmsg("create gaussdb state file success: db state(STARTING_STATE), server mode(%s), connection index(%d)",
+        wal_get_role_string(t_thrd.postmaster_cxt.HaShmData->current_mode), state.current_connect_idx)));
+}
+
+
 /*
  * according to input parameters, update the gaussdb state file
  */
@@ -10720,14 +11241,16 @@ static void PMUpdateDBStateHaRebuildReason(void)
         state.state = NEEDREPAIR_STATE;
     } else {
         state.state = NORMAL_STATE;
+        state.current_connect_idx = hashmdata->current_repl;
     }
     PMSetDBStateFile(&state);
     ereport(LOG,
         (errmsg("update gaussdb state file: build reason(%s), "
-                "db state(%s), server mode(%s)",
+                "db state(%s), server mode(%s), current connect index(%d)",
             wal_get_rebuild_reason_string(reason),
             wal_get_db_state_string(state.state),
-            wal_get_role_string(get_cur_mode()))));
+            wal_get_role_string(get_cur_mode()),
+            state.current_connect_idx)));
 }
 
 static int init_stream_comm()
@@ -10941,7 +11464,7 @@ void CleanSystemCaches(bool is_in_read_command)
                 (is_in_read_command ? 1 : 0))));
 
         if (IsTransactionOrTransactionBlock() || !is_in_read_command) {
-            InvalidateSystemCaches();
+            InvalidateSessionSystemCaches();
         }
     }
 }
@@ -10949,34 +11472,53 @@ void CleanSystemCaches(bool is_in_read_command)
 static void check_and_reset_ha_listen_port(void)
 {
     int j;
+    int repl_list_num = 0;
+    bool refreshReplList = false;
+    bool needToRestart = false;
+    bool refreshListenSocket = false;
 
     /*
      * when Ha replconninfo have changed and current_mode is not NORMAL,
      * dynamically modify the ha socket.
      */
     for (j = 1; j < MAX_REPLNODE_NUM; j++) {
-        if (t_thrd.postmaster_cxt.ReplConnChanged[j] || t_thrd.postmaster_cxt.CrossClusterReplConnChanged[j])
-            break;
-    }
 
-    if (j < MAX_REPLNODE_NUM) {
-        int i, repl_list_num = 0;
-
-        CreateHaListenSocket();
-
-        repl_list_num = 0;
-        for (i = 1; i < MAX_REPLNODE_NUM; i++) {
-            t_thrd.postmaster_cxt.ReplConnChanged[i] = false;
-            t_thrd.postmaster_cxt.CrossClusterReplConnChanged[i] = false;
-            if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL)
-                repl_list_num++;
-            if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[i] != NULL)
-                repl_list_num++;
+        if (t_thrd.postmaster_cxt.ReplConnChangeType[j] == ADD_REPL_CONN_INFO_WITH_OLD_LOCAL_IP_PORT ||
+            t_thrd.postmaster_cxt.ReplConnChangeType[j] == ADD_REPL_CONN_INFO_WITH_NEW_LOCAL_IP_PORT ||
+            t_thrd.postmaster_cxt.CrossClusterReplConnChanged[j]) {
+            refreshReplList = true;
         }
 
-        /* send SIGTERM to end process senders and receiver */
-        t_thrd.postmaster_cxt.HaShmData->repl_list_num = repl_list_num;
+        if (t_thrd.postmaster_cxt.ReplConnChangeType[j] == OLD_REPL_CHANGE_IP_OR_PORT ||
+            t_thrd.postmaster_cxt.CrossClusterReplConnChanged[j]) {
+            needToRestart = true;
+            refreshListenSocket = true;
+        }
 
+        if (t_thrd.postmaster_cxt.ReplConnChangeType[j] == ADD_REPL_CONN_INFO_WITH_NEW_LOCAL_IP_PORT) {
+            refreshListenSocket = true;
+        }
+
+        t_thrd.postmaster_cxt.ReplConnChangeType[j] = NO_CHANGE;
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[j] = false;
+
+        if (t_thrd.postmaster_cxt.ReplConnArray[j] != NULL)
+            repl_list_num++;
+        if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[j] != NULL)
+            repl_list_num++;
+    }
+
+    if (refreshReplList) {
+        t_thrd.postmaster_cxt.HaShmData->repl_list_num = repl_list_num;
+    }
+
+    if (refreshListenSocket) {
+        CreateHaListenSocket();
+        ListenSocketRegulation();
+    }
+
+    if (needToRestart) {
+        /* send SIGTERM to end process senders and receiver */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_WALSND);
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_DATASND);
         if (g_instance.pid_cxt.WalRcvWriterPID != 0)
@@ -10987,17 +11529,16 @@ static void check_and_reset_ha_listen_port(void)
             signal_child(g_instance.pid_cxt.DataRcvWriterPID, SIGTERM);
         if (g_instance.pid_cxt.DataReceiverPID != 0)
             signal_child(g_instance.pid_cxt.DataReceiverPID, SIGTERM);
-
-        ListenSocketRegulation();
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-        if (t_thrd.postmaster_cxt.HaShmData != NULL &&
-            t_thrd.postmaster_cxt.HaShmData->repl_list_num == 0 &&
-            t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
-            t_thrd.postmaster_cxt.HaShmData->current_mode = NORMAL_MODE;
-            SetServerMode(NORMAL_MODE);
-        }
+    if (t_thrd.postmaster_cxt.HaShmData != NULL &&
+        t_thrd.postmaster_cxt.HaShmData->repl_list_num == 0 &&
+        t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+        t_thrd.postmaster_cxt.HaShmData->current_mode = NORMAL_MODE;
+        g_instance.global_sysdbcache.RefreshHotStandby();
+        SetServerMode(NORMAL_MODE);
+    }
 #endif
 
     return;
@@ -11045,6 +11586,12 @@ template <knl_thread_role thread_role>
 static void SetAuxType()
 {
     switch (thread_role) {
+        case PARALLEL_DECODE:
+            t_thrd.bootstrap_cxt.MyAuxProcType = ParallelDecodeProcess;
+            break;
+        case LOGICAL_READ_RECORD:
+            t_thrd.bootstrap_cxt.MyAuxProcType = LogicalReadRecord;
+            break;
         case PAGEREDO:
             t_thrd.bootstrap_cxt.MyAuxProcType = PageRedoProcess;
             break;
@@ -11090,6 +11637,9 @@ static void SetAuxType()
         case PAGEWRITER_THREAD:
             t_thrd.bootstrap_cxt.MyAuxProcType = PageWriterProcess;
             break;
+        case PAGEREPAIR_THREAD:
+            t_thrd.bootstrap_cxt.MyAuxProcType = PageRepairProcess;
+            break;
         case THREADPOOL_LISTENER:
             t_thrd.bootstrap_cxt.MyAuxProcType = TpoolListenerProcess;
             break;
@@ -11106,6 +11656,9 @@ static void SetAuxType()
             t_thrd.bootstrap_cxt.MyAuxProcType = XlogCopyBackendProcess;
             break;
 #ifdef ENABLE_MULTIPLE_NODES
+        case BARRIER_PREPARSE:
+            t_thrd.bootstrap_cxt.MyAuxProcType = BarrierPreParseBackendProcess;
+            break;
         case TS_COMPACTION:
             t_thrd.bootstrap_cxt.MyAuxProcType = TsCompactionProcess;
             break;
@@ -11167,6 +11720,7 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
             t_thrd.bgworker_cxt.bgwcontext = ((BackgroundWorkerArgs *)arg->payload)->bgwcontext;
             t_thrd.bgworker_cxt.bgworker   = ((BackgroundWorkerArgs *)arg->payload)->bgworker;
             t_thrd.bgworker_cxt.bgworkerId = ((BackgroundWorkerArgs *)arg->payload)->bgworkerId;
+            pfree_ext(arg->payload);
         }
         default:
             break;
@@ -11231,42 +11785,43 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
     SetProcessingMode(BootstrapProcessing);
     u_sess->attr.attr_common.IgnoreSystemIndexes = true;
     BaseInit();
-
+    BindRedoThreadToSpecifiedCpu(thread_role);
     /*
      * When we are an auxiliary process, we aren't going to do the full
      * InitPostgres pushups, but there are a couple of things that need to get
      * lit up even in an auxiliary process.
      */
-    if (IsUnderPostmaster) {
-        /*
-         * Create a PGPROC so we can use LWLocks.  In the EXEC_BACKEND case,
-         * this was already done by SubPostmasterMain().
-         */
+    if (thread_role != LOGICAL_READ_RECORD && thread_role != PARALLEL_DECODE) {
+        if (IsUnderPostmaster) {
+            /*
+             * Create a PGPROC so we can use LWLocks.  In the EXEC_BACKEND case,
+             * this was already done by SubPostmasterMain().
+             */
 #ifndef EXEC_BACKEND
-        InitAuxiliaryProcess();
+            InitAuxiliaryProcess();
 #endif
 
-        /*
-         * Assign the ProcSignalSlot for an auxiliary process.	Since it
-         * doesn't have a BackendId, the slot is statically allocated based on
-         * the auxiliary process type (MyAuxProcType).  Backends use slots
-         * indexed in the range from 1 to g_instance.shmem_cxt.MaxBackends (inclusive), so we use
-         * g_instance.shmem_cxt.MaxBackends + 1 as the base index of the slot for an
-         * auxiliary process.
-         */
-        int index = GetAuxProcEntryIndex(g_instance.shmem_cxt.MaxBackends + 1);
+            /*
+             * Assign the ProcSignalSlot for an auxiliary process.	Since it
+             * doesn't have a BackendId, the slot is statically allocated based on
+             * the auxiliary process type (MyAuxProcType).  Backends use slots
+             * indexed in the range from 1 to g_instance.shmem_cxt.MaxBackends (inclusive), so we use
+             * g_instance.shmem_cxt.MaxBackends + 1 as the base index of the slot for an
+             * auxiliary process.
+             */
+            int index = GetAuxProcEntryIndex(g_instance.shmem_cxt.MaxBackends + 1);
 
-        ProcSignalInit(index);
+            ProcSignalInit(index);
 
-        /* finish setting up bufmgr.c */
-        InitBufferPoolBackend();
+            /* finish setting up bufmgr.c */
+            InitBufferPoolBackend();
 
-        /* register a shutdown callback for LWLock cleanup */
-        on_shmem_exit(ShutdownAuxiliaryProcess, 0);
+            /* register a shutdown callback for LWLock cleanup */
+            on_shmem_exit(ShutdownAuxiliaryProcess, 0);
+        }
+        pgstat_initialize();
+        pgstat_bestart();
     }
-
-    pgstat_initialize();
-    pgstat_bestart();
     /*
      * XLOG operations
      */
@@ -11305,6 +11860,16 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             invalid_buffer_bgwriter_main();
             proc_exit(1); /* should never return */
             break;
+
+        case LOGICAL_READ_RECORD: {
+            LogicalReadWorkerMain(arg->payload);
+            proc_exit(1); /* should never return */
+        } break;
+
+        case PARALLEL_DECODE: {
+            ParallelDecodeWorkerMain(arg->payload);
+            proc_exit(1); /* should never return */
+        } break;
 
         case CHECKPOINT_THREAD:
             /* don't set signals, checkpointer has its own agenda */
@@ -11360,6 +11925,11 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             proc_exit(1);
             break;
 
+        case PAGEREPAIR_THREAD:
+            PageRepairMain();
+            proc_exit(1);
+            break;
+
         case THREADPOOL_LISTENER:
             TpoolListenerMain(t_thrd.threadpool_cxt.listener);
             proc_exit(1);
@@ -11385,6 +11955,10 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
             proc_exit(1);
             break;
 #ifdef ENABLE_MULTIPLE_NODES
+        case BARRIER_PREPARSE:
+            BarrierPreParseMain();
+            proc_exit(1);
+            break;
         case TS_COMPACTION:
             CompactionProcess::compaction_main();
             proc_exit(1);
@@ -11441,16 +12015,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     /* Do this sooner rather than later... */
     IsUnderPostmaster = true; /* we are a postmaster subprocess now */
     Assert(thread_role == arg->role);
-    /*
-     * We should set bn at the beginning of this function, cause if we meet some error before set bn, then we
-     * can't set t_thrd.bn->dead_end to true(check gs_thread_exit), which will lead CleanupBackend failed.
-     * The logic of get child slot refer to PortInitialize -> read_backend_variables -> restore_backend_variables
-     */
-    int childSlot = 0;
-    if (arg != NULL) {
-        childSlot = ((BackendParameters*)arg->save_para)->MyPMChildSlot;
-    }
-    t_thrd.bn = GetBackend(childSlot);
+    /* get child slot from backend_variables */
+    t_thrd.child_slot = (arg != NULL) ? ((BackendParameters*)arg->save_para)->MyPMChildSlot : -1;
     /* Check this thread will use reserved memory or not */
     is_memory_backend_reserved(arg);
     /* Initialize the Memory Protection at the thread level */
@@ -11511,6 +12077,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         ereport(DEBUG2, (errmsg("start a new [%d] thread with fd:[%d]", thread_role, port.sock)));
     }
 
+    t_thrd.bn = GetBackend(t_thrd.proc_cxt.MyPMChildSlot);
+    /* thread get backend pointer, backend list can be tracked by current thread's t_thrd.bn */
+    t_thrd.is_inited = true;
+
     /* We don't need read GUC variables */
     if (!FencedUDFMasterMode && !PythonFencedMasterModel) {
         /* Read in remaining GUC variables */
@@ -11539,6 +12109,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
      * non-EXEC_BACKEND behavior.
      */
     process_shared_preload_libraries();
+    CreateLocalSysDBCache();
 
     switch (thread_role) {
         case STREAM_WORKER:
@@ -11617,15 +12188,19 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case CBMWRITER:
         case STARTUP:
         case PAGEWRITER_THREAD:
+        case PAGEREPAIR_THREAD:
         case HEARTBEAT:
         case SHARE_STORAGE_XLOG_COPYER:
 #ifdef ENABLE_MULTIPLE_NODES
+        case BARRIER_PREPARSE:
         case TS_COMPACTION:
         case TS_COMPACTION_CONSUMER:
         case TS_COMPACTION_AUXILIAY:
 #endif   /* ENABLE_MULTIPLE_NODES */
         case THREADPOOL_LISTENER:
         case THREADPOOL_SCHEDULER:
+        case LOGICAL_READ_RECORD:
+        case PARALLEL_DECODE:
         case UNDO_RECYCLER: {
             SetAuxType<thread_role>();
             /* Restore basic shared memory pointers */
@@ -11819,8 +12394,15 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         } break;
 
         case AUDITOR: {
-            t_thrd.role = AUDITOR;
-            /* Do not want to attach to shared memory */
+            /* Restore basic shared memory pointers */
+            InitShmemAccess(UsedShmemSegAddr);
+
+            /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
+            InitAuxiliaryProcess();
+
+            /* Attach process to shared data structures */
+            CreateSharedMemoryAndSemaphores(false, 0);
+
             PgAuditorMain();
             proc_exit(0);
         } break;
@@ -11982,6 +12564,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             proc_exit(0);
         }
 
+#ifndef ENABLE_LITE_MODE
         case BARRIER_CREATOR: {
             if (START_BARRIER_CREATOR) {
                 t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
@@ -12005,6 +12588,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
                 proc_exit(0);
             }
        } break;
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
         case COMM_POOLER_CLEAN: {
@@ -12093,12 +12677,15 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<DATARECWRITER>, DATARECWRITER, "datarecwriter", "data receive writer" },
     { GaussDbThreadMain<CBMWRITER>, CBMWRITER, "CBMwriter", "CBM writer" },
     { GaussDbThreadMain<PAGEWRITER_THREAD>, PAGEWRITER_THREAD, "pagewriter", "page writer" },
+    { GaussDbThreadMain<PAGEREPAIR_THREAD>, PAGEREPAIR_THREAD, "pagerepair", "page repair" },
     { GaussDbThreadMain<HEARTBEAT>, HEARTBEAT, "heartbeat", "heart beat" },
     { GaussDbThreadMain<COMM_SENDERFLOWER>, COMM_SENDERFLOWER, "COMMsendflow", "communicator sender flower" },
     { GaussDbThreadMain<COMM_RECEIVERFLOWER>, COMM_RECEIVERFLOWER, "COMMrecvflow", "communicator receiver flower" },
     { GaussDbThreadMain<COMM_RECEIVER>, COMM_RECEIVER, "COMMrecloop", "communicator receiver loop" },
     { GaussDbThreadMain<COMM_AUXILIARY>, COMM_AUXILIARY, "COMMaux", "communicator auxiliary" },
     { GaussDbThreadMain<COMM_POOLER_CLEAN>, COMM_POOLER_CLEAN, "COMMpoolcleaner", "communicator pooler auto cleaner" },
+    { GaussDbThreadMain<LOGICAL_READ_RECORD>, LOGICAL_READ_RECORD, "LogicalRead", "LogicalRead pooler auto cleaner" },
+    { GaussDbThreadMain<PARALLEL_DECODE>, PARALLEL_DECODE, "COMMpoolcleaner", "communicator pooler auto cleaner" },
     { GaussDbThreadMain<UNDO_RECYCLER>, UNDO_RECYCLER, "undorecycler", "undo recycler" },
     { GaussDbThreadMain<UNDO_LAUNCHER>, UNDO_LAUNCHER, "asyncundolaunch", "async undo launcher" },
     { GaussDbThreadMain<UNDO_WORKER>, UNDO_WORKER, "asyncundoworker", "async undo worker" },
@@ -12113,6 +12700,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
 
     /* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
+    { GaussDbThreadMain<BARRIER_PREPARSE>, BARRIER_PREPARSE, "barrierpreparse", "barrier preparse backend" },
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",
       "timeseries compaction" },
     { GaussDbThreadMain<TS_COMPACTION_CONSUMER>, TS_COMPACTION_CONSUMER, "TScompconsumer",
@@ -12243,7 +12831,28 @@ ThreadId initialize_worker_thread(knl_thread_role role, Port* port, void* payloa
     return initialize_thread(thr_argv);
 }
 
-bool isVaildIp(const char* ip)
+
+static bool isVaildIpv6(const char* ip)
+{
+    struct sockaddr_storage addr;
+    errno_t rc = 0;
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
+
+    /* remove any '%zone' part from an IPv6 address string */
+    ipNoZone = remove_ipv6_zone((char *)ip, ipNoZoneData, IP_LEN);
+
+    rc = memset_s(&addr, sizeof(addr), 0, sizeof(addr));
+    securec_check(rc, "", "");
+    addr.ss_family = AF_INET6;
+    rc = inet_pton(AF_INET6, ipNoZone, &(((struct sockaddr_in6 *) &addr)->sin6_addr));
+    if (rc <= 0) {
+        return false;
+    }
+    return true;
+}
+
+bool isVaildIpv4(const char* ip)
 {
     int dots = 0;
     int setions = 0;
@@ -12276,6 +12885,22 @@ bool isVaildIp(const char* ip)
     }
 
     return false;
+}
+
+static bool isVaildIp(const char* ip)
+{
+    bool ret = false;
+    if (NULL == ip) {
+        return false;
+    }
+
+    if (strchr(ip, ':') != NULL) {
+        return isVaildIpv6(ip);
+    } else {
+        return isVaildIpv4(ip);
+    }
+
+    return ret;
 }
 
 /*
@@ -12365,6 +12990,7 @@ Datum disable_conn(PG_FUNCTION_ARGS)
         if (!isVaildIp(host)) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("host is invalid")));
         }
+        clean_ipv6_addr(AF_INET6, host);
         errno_t rc = memcpy_s(disconn_node.disable_conn_node_host, NAMEDATALEN, host, strlen(host) + 1);
         securec_check(rc, "\0", "\0");
     }
@@ -12402,7 +13028,8 @@ Datum disable_conn(PG_FUNCTION_ARGS)
     SpinLockAcquire(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
     g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data = disconn_node;
     SpinLockRelease(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
-    ereport(LOG, (errcode(ERRCODE_LOG), errmsg("disable_conn set mode to %s", disconn_mode)));
+    ereport(LOG, (errcode(ERRCODE_LOG), errmsg("disable_conn set mode to %s and host is %s port is %d", disconn_mode,
+        host, disconn_node.disable_conn_node_port)));
     PG_RETURN_VOID();
 }
 
@@ -12422,19 +13049,24 @@ Datum read_disable_conn_file(PG_FUNCTION_ARGS)
     char* key_position = NULL;
     char local_host[NAMEDATALEN];
     char local_port[NAMEDATALEN];
-    char local_info[NAMEDATALEN];
-    const int MAX_LOCAL_ADDRESS_LENGTH = 50;
-    rc = memset_s(local_info, NAMEDATALEN, 0, NAMEDATALEN);
+    char local_info[DOUBLE_NAMEDATALEN];
+    int max_local_address_length = DOUBLE_NAMEDATALEN - 1;
+    rc = memset_s(local_info, DOUBLE_NAMEDATALEN, 0, DOUBLE_NAMEDATALEN);
     securec_check(rc, "\0", "\0");
-    if (t_thrd.postmaster_cxt.ReplConnChanged[1] == false || u_sess->attr.attr_storage.ReplConnInfoArr[1] == NULL) {
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[1] == NULL) {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("Can't get local connection address.")));
     }
-    rc = memcpy_s(local_info, NAMEDATALEN - 1, u_sess->attr.attr_storage.ReplConnInfoArr[1], MAX_LOCAL_ADDRESS_LENGTH);
+    max_local_address_length = pg_mbcliplen(u_sess->attr.attr_storage.ReplConnInfoArr[1],
+                                            strlen(u_sess->attr.attr_storage.ReplConnInfoArr[1]),
+                                            max_local_address_length);
+    rc = memcpy_s(local_info, DOUBLE_NAMEDATALEN  - 1,
+                  u_sess->attr.attr_storage.ReplConnInfoArr[1], max_local_address_length);
     securec_check(rc, "\0", "\0");
     key_position = strtok_s(local_info, " ", &next_key);
     if (key_position == NULL || sscanf_s(key_position, "localhost=%s", local_host, NAMEDATALEN - 1) != 1) {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("get local host failed!")));
     }
+    clean_ipv6_addr(AF_INET6, local_host);
 
     key_position = strtok_s(NULL, " ", &next_key);
     if (key_position == NULL || sscanf_s(key_position, "localport=%s", local_port, NAMEDATALEN - 1) != 1) {

@@ -1,0 +1,2040 @@
+----
+-- setup
+----
+CREATE SCHEMA schema_upsert_where_sublink;
+SET search_path = schema_upsert_where_sublink;
+create table tab_target(
+c1 int unique not null,
+c2 bigint default 0,
+c3 numeric default 0,
+c4 varchar(100) default 'abcdefjfieE##$#KFAEOJop13SEFJeo',
+primary key(c2,c3));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tab_target_pkey" for table "tab_target"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "tab_target_c1_key" for table "tab_target"
+INSERT INTO tab_target (c1, c2, c3) VALUES(
+    generate_series(1,10),
+    generate_series(1,10),
+    generate_series(1,10));
+CREATE TABLE tab_source(c1 int, c2 int, c3 int, c4 int);
+INSERT INTO tab_source VALUES(generate_series(1,10), generate_series(10,1, -1), generate_series(1,10), generate_series(1,10));
+---------------------------------------
+-- not corelated sublink
+---------------------------------------
+begin;
+-- in/not in sublink
+-- multi confliction -> primary key first
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'conflict1' where excluded.c1 in (select 1);
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'ERROR' where excluded.c1 not in (select 1);
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'conflict2' where excluded.c3 in (select c1 from tab_source);
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'ERROR' where excluded.c3 not in (select c1 from tab_source);
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'conflict3' where excluded.c1 not in (select 1);
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'ERROR' where excluded.c1 in (select 1);
+-- (not) exists sublink
+insert into tab_target values(4,1,2) on duplicate key update c4 = 'conflict4' where exists (select c1 from tab_source where c4 = 4);
+insert into tab_target values(4,1,2) on duplicate key update c4 = 'ERROR' where not exists (select c1 from tab_source where c4 = 4);
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'conflict5' where not exists (select c2 from tab_source where c4 = 4 and c1 = 1);
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'ERROR' where exists (select c2 from tab_source where c4 = 4 and c1 = 1);
+-- any/some
+insert into tab_target values(6,0,0) on duplicate key update c4 = 'conflict6' where excluded.c3 = any (select 0);
+insert into tab_target values(6,0,0) on duplicate key update c4 = 'ERROR' where excluded.c3 != any (select 0);
+insert into tab_target values(7,0,0) on duplicate key update c4 = 'conflict7' where excluded.c3 > some (select -1);
+insert into tab_target values(7,0,0) on duplicate key update c4 = 'ERROR' where excluded.c3 < some (select -1);
+-- opr sublink
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'conflict8' where not (excluded.c3 > (select c2 from tab_source where c3 < 8 limit 1));
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'ERROR' where (excluded.c3 > (select c2 from tab_source where c3 < 8 limit 1));
+-- nested sublink
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'conflict9' where excluded.c1 = (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = 9
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'ERROR' where excluded.c1 != (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = 9
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+-- sublink with CTE
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'conflict10' where c1 = (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = 10
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'ERROR' where c1 != (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = 10
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+select * from tab_target order by 1,2,3,4;
+ c1 | c2 | c3 |     c4     
+----+----+----+------------
+  1 |  1 |  1 | conflict1
+  2 |  2 |  2 | conflict2
+  3 |  3 |  3 | conflict3
+  4 |  4 |  4 | conflict4
+  5 |  5 |  5 | conflict5
+  6 |  6 |  6 | conflict6
+  7 |  7 |  7 | conflict7
+  8 |  8 |  8 | conflict8
+  9 |  9 |  9 | conflict9
+ 10 | 10 | 10 | conflict10
+(10 rows)
+
+rollback;
+-- check plan
+begin;
+-- in/not in sublink
+-- multi confliction -> primary key first
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'conflict1' where excluded.c1 in (select 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (hashed SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'ERROR' where excluded.c1 not in (select 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (hashed SubPlan 1))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'conflict2' where excluded.c3 in (select c1 from tab_source);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (hashed SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=10 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'ERROR' where excluded.c3 not in (select c1 from tab_source);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (hashed SubPlan 1))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=10 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'conflict3' where excluded.c1 not in (select 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (hashed SubPlan 1))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'ERROR' where excluded.c1 in (select 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (hashed SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- (not) exists sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(4,1,2) on duplicate key update c4 = 'conflict4' where exists (select c1 from tab_source where c4 = 4);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: $0
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 3
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(4,1,2) on duplicate key update c4 = 'ERROR' where not exists (select c1 from tab_source where c4 = 4);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT $0)
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 3
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'conflict5' where not exists (select c2 from tab_source where c4 = 4 and c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT $0)
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on tab_source (actual rows=0 loops=1)
+           Filter: ((c4 = 4) AND (c1 = 1))
+           Rows Removed by Filter: 10
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'ERROR' where exists (select c2 from tab_source where c4 = 4 and c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: $0
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on tab_source (actual rows=0 loops=1)
+           Filter: ((c4 = 4) AND (c1 = 1))
+           Rows Removed by Filter: 10
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- any/some
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(6,0,0) on duplicate key update c4 = 'conflict6' where excluded.c3 = any (select 0);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (hashed SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(6,0,0) on duplicate key update c4 = 'ERROR' where excluded.c3 != any (select 0);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Materialize (actual rows=1 loops=1)
+           ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(7,0,0) on duplicate key update c4 = 'conflict7' where excluded.c3 > some (select -1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Materialize (actual rows=1 loops=1)
+           ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(7,0,0) on duplicate key update c4 = 'ERROR' where excluded.c3 < some (select -1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Materialize (actual rows=1 loops=1)
+           ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- opr sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'conflict8' where not (excluded.c3 > (select c2 from tab_source where c3 < 8 limit 1));
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c3 <= ($0)::numeric)
+   InitPlan 1 (returns $0)
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 < 8)
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'ERROR' where (excluded.c3 > (select c2 from tab_source where c3 < 8 limit 1));
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c3 > ($0)::numeric)
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 < 8)
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- nested sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'conflict9' where excluded.c1 = (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = 9
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c1 = $6)
+   InitPlan 7 (returns $6)
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c1 = $5)
+           Rows Removed by Filter: 9
+           InitPlan 6 (returns $5)
+             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                   Filter: (c1 = $4)
+                   Rows Removed by Filter: 9
+                   InitPlan 5 (returns $4)
+                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                           Filter: (c1 = $3)
+                           Rows Removed by Filter: 9
+                           InitPlan 4 (returns $3)
+                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                   Filter: (c1 = $2)
+                                   Rows Removed by Filter: 9
+                                   InitPlan 3 (returns $2)
+                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                           Filter: (c1 = $1)
+                                           Rows Removed by Filter: 9
+                                           InitPlan 2 (returns $1)
+                                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                   Filter: (c1 = $0)
+                                                   Rows Removed by Filter: 9
+                                                   InitPlan 1 (returns $0)
+                                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                           Filter: (c1 = 9)
+                                                           Rows Removed by Filter: 9
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'ERROR' where excluded.c1 != (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = 9
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c1 <> $6)
+   Rows Removed by Conflict Filter: 1
+   InitPlan 7 (returns $6)
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c1 = $5)
+           Rows Removed by Filter: 9
+           InitPlan 6 (returns $5)
+             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                   Filter: (c1 = $4)
+                   Rows Removed by Filter: 9
+                   InitPlan 5 (returns $4)
+                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                           Filter: (c1 = $3)
+                           Rows Removed by Filter: 9
+                           InitPlan 4 (returns $3)
+                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                   Filter: (c1 = $2)
+                                   Rows Removed by Filter: 9
+                                   InitPlan 3 (returns $2)
+                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                           Filter: (c1 = $1)
+                                           Rows Removed by Filter: 9
+                                           InitPlan 2 (returns $1)
+                                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                   Filter: (c1 = $0)
+                                                   Rows Removed by Filter: 9
+                                                   InitPlan 1 (returns $0)
+                                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                           Filter: (c1 = 9)
+                                                           Rows Removed by Filter: 9
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- sublink with CTE
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'conflict10' where c1 = (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = 10
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 = $0)
+   InitPlan 1 (returns $0)
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 = 10)
+                 Rows Removed by Filter: 9
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'ERROR' where c1 != (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = 10
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 <> $0)
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 = 10)
+                 Rows Removed by Filter: 9
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+select * from tab_target order by 1,2,3,4;
+ c1 | c2 | c3 |     c4     
+----+----+----+------------
+  1 |  1 |  1 | conflict1
+  2 |  2 |  2 | conflict2
+  3 |  3 |  3 | conflict3
+  4 |  4 |  4 | conflict4
+  5 |  5 |  5 | conflict5
+  6 |  6 |  6 | conflict6
+  7 |  7 |  7 | conflict7
+  8 |  8 |  8 | conflict8
+  9 |  9 |  9 | conflict9
+ 10 | 10 | 10 | conflict10
+(10 rows)
+
+rollback;
+---------------------------------------
+-- corelated sublink - reference target
+---------------------------------------
+begin;
+-- in/not in sublink
+-- multi confliction -> primary key first
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'conflict1' where excluded.c1 in (select 1 where tab_target.c1 = 1);
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'ERROR' where excluded.c1 not in (select 1 where tab_target.c1 = 1);
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'conflict2' where excluded.c3 in (select c1 from tab_source where tab_target.c1 = c1);
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'ERROR' where excluded.c3 not in (select c1 from tab_source where tab_target.c1 = c1);
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'conflict3' where excluded.c1 not in (select 1 where tab_target.c1 = 1);
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'ERROR' where excluded.c1 in (select 1 where tab_target.c1 = 1);
+-- (not) exists sublink
+insert into tab_target values(4,1,2) on duplicate key update c4 = 'conflict4' where exists (select c1 from tab_source where c4 = 4 and c3 = tab_target.c3);
+insert into tab_target values(4,1,2) on duplicate key update c4 = 'ERROR' where not exists (select c1 from tab_source where c4 = 4 and c3 = tab_target.c3);
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'conflict5' where not exists (select c2 from tab_source where c4 = 4 and c3 = tab_target.c3);
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'ERROR' where exists (select c2 from tab_source where c4 = 4 and c3 = tab_target.c3);
+-- any/some
+insert into tab_target values(6,0,6) on duplicate key update c4 = 'conflict6' where excluded.c3 = any (select c3 from tab_source where tab_target.c1 = c1);
+insert into tab_target values(6,0,6) on duplicate key update c4 = 'ERROR' where excluded.c3 != any (select c3 from tab_source where tab_target.c1 = c1);
+insert into tab_target values(7,0,7) on duplicate key update c4 = 'conflict7' where excluded.c3 > some (select -1 from tab_source where tab_target.c1 = c1);
+insert into tab_target values(7,0,7) on duplicate key update c4 = 'ERROR' where excluded.c3 < some (select -1 from tab_source where tab_target.c1 = c1);
+-- opr sublink
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'conflict8' where not (excluded.c3 > (select c2 from tab_source where c3 < tab_target.c1 limit 1));
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'ERROR' where (excluded.c3 > (select c2 from tab_source where c3 < tab_target.c1 limit 1));
+-- nested sublink
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'conflict9' where excluded.c1 = (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = tab_target.c1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'ERROR' where tab_target.c1 != (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = excluded.c1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+-- sublink with CTE
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'conflict10' where c1 = (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = tab_target.c1
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'ERROR' where c1 != (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = tab_target.c1
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+select * from tab_target order by 1,2,3,4;
+ c1 | c2 | c3 |     c4     
+----+----+----+------------
+  1 |  1 |  1 | conflict1
+  2 |  2 |  2 | conflict2
+  3 |  3 |  3 | conflict3
+  4 |  4 |  4 | conflict4
+  5 |  5 |  5 | conflict5
+  6 |  6 |  6 | conflict6
+  7 |  7 |  7 | conflict7
+  8 |  8 |  8 | conflict8
+  9 |  9 |  9 | conflict9
+ 10 | 10 | 10 | conflict10
+(10 rows)
+
+rollback;
+-- check plan
+begin;
+-- in/not in sublink
+-- multi confliction -> primary key first
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'conflict1' where excluded.c1 in (select 1 where tab_target.c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+           One-Time Filter: (tab_target.c1 = 1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'ERROR' where excluded.c1 not in (select 1 where tab_target.c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (SubPlan 1))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+           One-Time Filter: (tab_target.c1 = 1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'conflict2' where excluded.c3 in (select c1 from tab_source where tab_target.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (tab_target.c1 = c1)
+           Rows Removed by Filter: 1
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'ERROR' where excluded.c3 not in (select c1 from tab_source where tab_target.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (SubPlan 1))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (tab_target.c1 = c1)
+           Rows Removed by Filter: 1
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'conflict3' where excluded.c1 not in (select 1 where tab_target.c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (SubPlan 1))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=0 loops=1)
+           One-Time Filter: (tab_target.c1 = 1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'ERROR' where excluded.c1 in (select 1 where tab_target.c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=0 loops=1)
+           One-Time Filter: (tab_target.c1 = 1)
+--?.*
+--?.*
+
+-- (not) exists sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(4,1,2) on duplicate key update c4 = 'conflict4' where exists (select c1 from tab_source where c4 = 4 and c3 = tab_target.c3);
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (alternatives: SubPlan 1 or hashed SubPlan 2)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (Actual time: never executed)
+           Filter: ((c4 = 4) AND ((c3)::numeric = tab_target.c3))
+   SubPlan 2
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(4,1,2) on duplicate key update c4 = 'ERROR' where not exists (select c1 from tab_source where c4 = 4 and c3 = tab_target.c3);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (alternatives: SubPlan 1 or hashed SubPlan 2))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (Actual time: never executed)
+           Filter: ((c4 = 4) AND ((c3)::numeric = tab_target.c3))
+   SubPlan 2
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'conflict5' where not exists (select c2 from tab_source where c4 = 4 and c3 = tab_target.c3);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (alternatives: SubPlan 1 or hashed SubPlan 2))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (Actual time: never executed)
+           Filter: ((c4 = 4) AND ((c3)::numeric = tab_target.c3))
+   SubPlan 2
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'ERROR' where exists (select c2 from tab_source where c4 = 4 and c3 = tab_target.c3);
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (alternatives: SubPlan 1 or hashed SubPlan 2)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (Actual time: never executed)
+           Filter: ((c4 = 4) AND ((c3)::numeric = tab_target.c3))
+   SubPlan 2
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+-- any/some
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(6,0,6) on duplicate key update c4 = 'conflict6' where excluded.c3 = any (select c3 from tab_source where tab_target.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (tab_target.c1 = c1)
+           Rows Removed by Filter: 5
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(6,0,6) on duplicate key update c4 = 'ERROR' where excluded.c3 != any (select c3 from tab_source where tab_target.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (tab_target.c1 = c1)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(7,0,7) on duplicate key update c4 = 'conflict7' where excluded.c3 > some (select -1 from tab_source where tab_target.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (tab_target.c1 = c1)
+           Rows Removed by Filter: 6
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(7,0,7) on duplicate key update c4 = 'ERROR' where excluded.c3 < some (select -1 from tab_source where tab_target.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (tab_target.c1 = c1)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+-- opr sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'conflict8' where not (excluded.c3 > (select c2 from tab_source where c3 < tab_target.c1 limit 1));
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c3 <= ((SubPlan 1))::numeric)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 < tab_target.c1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'ERROR' where (excluded.c3 > (select c2 from tab_source where c3 < tab_target.c1 limit 1));
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c3 > ((SubPlan 1))::numeric)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 < tab_target.c1)
+--?.*
+--?.*
+
+-- nested sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'conflict9' where excluded.c1 = (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = tab_target.c1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c1 = (SubPlan 7))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 7
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c1 = $6)
+           Rows Removed by Filter: 9
+           InitPlan 6 (returns $6)
+             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                   Filter: (c1 = $5)
+                   Rows Removed by Filter: 9
+                   InitPlan 5 (returns $5)
+                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                           Filter: (c1 = $4)
+                           Rows Removed by Filter: 9
+                           InitPlan 4 (returns $4)
+                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                   Filter: (c1 = $3)
+                                   Rows Removed by Filter: 9
+                                   InitPlan 3 (returns $3)
+                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                           Filter: (c1 = $2)
+                                           Rows Removed by Filter: 9
+                                           InitPlan 2 (returns $2)
+                                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                   Filter: (c1 = $1)
+                                                   Rows Removed by Filter: 9
+                                                   InitPlan 1 (returns $1)
+                                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                           Filter: (c1 = tab_target.c1)
+                                                           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'ERROR' where tab_target.c1 != (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = excluded.c1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 <> (SubPlan 7))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 7
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c1 = $6)
+           Rows Removed by Filter: 9
+           InitPlan 6 (returns $6)
+             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                   Filter: (c1 = $5)
+                   Rows Removed by Filter: 9
+                   InitPlan 5 (returns $5)
+                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                           Filter: (c1 = $4)
+                           Rows Removed by Filter: 9
+                           InitPlan 4 (returns $4)
+                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                   Filter: (c1 = $3)
+                                   Rows Removed by Filter: 9
+                                   InitPlan 3 (returns $3)
+                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                           Filter: (c1 = $2)
+                                           Rows Removed by Filter: 9
+                                           InitPlan 2 (returns $2)
+                                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                   Filter: (c1 = $1)
+                                                   Rows Removed by Filter: 9
+                                                   InitPlan 1 (returns $1)
+                                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                           Filter: (c1 = "excluded".c1)
+                                                           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+-- sublink with CTE
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'conflict10' where c1 = (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = tab_target.c1
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 = (SubPlan 1))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 = tab_target.c1)
+                 Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'ERROR' where c1 != (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = tab_target.c1
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 <> (SubPlan 1))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 = tab_target.c1)
+                 Rows Removed by Filter: 9
+--?.*
+--?.*
+
+select * from tab_target order by 1,2,3,4;
+ c1 | c2 | c3 |     c4     
+----+----+----+------------
+  1 |  1 |  1 | conflict1
+  2 |  2 |  2 | conflict2
+  3 |  3 |  3 | conflict3
+  4 |  4 |  4 | conflict4
+  5 |  5 |  5 | conflict5
+  6 |  6 |  6 | conflict6
+  7 |  7 |  7 | conflict7
+  8 |  8 |  8 | conflict8
+  9 |  9 |  9 | conflict9
+ 10 | 10 | 10 | conflict10
+(10 rows)
+
+rollback;
+-----------------------------------------
+-- corelated sublink - reference conflict
+-----------------------------------------
+begin;
+-- in/not in sublink
+-- multi confliction -> primary key first
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'conflict1' where excluded.c1 in (select 1 where excluded.c1 = 1);
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'ERROR' where excluded.c1 not in (select 1 where excluded.c1 = 1);
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'conflict2' where excluded.c3 in (select c1 + 1 from tab_source where excluded.c1 = c1);
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'ERROR' where excluded.c3 not in (select c1 + 1 from tab_source where excluded.c1 = c1);
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'conflict3' where excluded.c1 not in (select 1 where excluded.c1 = 1);
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'ERROR' where excluded.c1 in (select 1 where excluded.c1 = 1);
+-- (not) exists sublink
+insert into tab_target values(4,1,4) on duplicate key update c4 = 'conflict4' where exists (select c1 from tab_source where c4 = 4 and c3 = excluded.c3);
+insert into tab_target values(4,1,4) on duplicate key update c4 = 'ERROR' where not exists (select c1 from tab_source where c4 = 4 and c3 = excluded.c3);
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'conflict5' where not exists (select c2 from tab_source where c4 = 4 and c3 = excluded.c3);
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'ERROR' where exists (select c2 from tab_source where c4 = 4 and c3 = excluded.c3);
+-- any/some
+insert into tab_target values(6,0,6) on duplicate key update c4 = 'conflict6' where excluded.c3 = any (select c3 from tab_source where excluded.c1 = c1);
+insert into tab_target values(6,0,6) on duplicate key update c4 = 'ERROR' where excluded.c3 != any (select c3 from tab_source where excluded.c1 = c1);
+insert into tab_target values(7,0,7) on duplicate key update c4 = 'conflict7' where excluded.c3 > some (select -1 from tab_source where excluded.c1 = c1);
+insert into tab_target values(7,0,7) on duplicate key update c4 = 'ERROR' where excluded.c3 < some (select -1 from tab_source where excluded.c1 = c1);
+-- opr sublink
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'conflict8' where not (excluded.c3 > (select c2 from tab_source where c3 < excluded.c1 limit 1));
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'ERROR' where (excluded.c3 > (select c2 from tab_source where c3 < excluded.c1 limit 1));
+-- nested sublink
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'conflict9' where excluded.c1 = (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = excluded.c1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'ERROR' where excluded.c1 != (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = excluded.c1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+-- sublink with CTE
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'conflict10' where c1 = (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = excluded.c1
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'ERROR' where c1 != (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = excluded.c1
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+select * from tab_target order by 1,2,3,4;
+ c1 | c2 | c3 |     c4     
+----+----+----+------------
+  1 |  1 |  1 | conflict1
+  2 |  2 |  2 | conflict2
+  3 |  3 |  3 | conflict3
+  4 |  4 |  4 | conflict4
+  5 |  5 |  5 | conflict5
+  6 |  6 |  6 | conflict6
+  7 |  7 |  7 | conflict7
+  8 |  8 |  8 | conflict8
+  9 |  9 |  9 | conflict9
+ 10 | 10 | 10 | conflict10
+(10 rows)
+
+rollback;
+-- check plan
+begin;
+-- in/not in sublink
+-- multi confliction -> primary key first
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'conflict1' where excluded.c1 in (select 1 where excluded.c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+           One-Time Filter: ("excluded".c1 = 1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,1,1) on duplicate key update c4 = 'ERROR' where excluded.c1 not in (select 1 where excluded.c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (SubPlan 1))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=1 loops=1)
+           One-Time Filter: ("excluded".c1 = 1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'conflict2' where excluded.c3 in (select c1 + 1 from tab_source where excluded.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: ("excluded".c1 = c1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,2,2) on duplicate key update c4 = 'ERROR' where excluded.c3 not in (select c1 + 1 from tab_source where excluded.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (SubPlan 1))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: ("excluded".c1 = c1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'conflict3' where excluded.c1 not in (select 1 where excluded.c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (SubPlan 1))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=0 loops=1)
+           One-Time Filter: ("excluded".c1 = 1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,3,3) on duplicate key update c4 = 'ERROR' where excluded.c1 in (select 1 where excluded.c1 = 1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Result (actual rows=0 loops=1)
+           One-Time Filter: ("excluded".c1 = 1)
+--?.*
+--?.*
+
+-- (not) exists sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(4,1,4) on duplicate key update c4 = 'conflict4' where exists (select c1 from tab_source where c4 = 4 and c3 = excluded.c3);
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (alternatives: SubPlan 1 or hashed SubPlan 2)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (Actual time: never executed)
+           Filter: ((c4 = 4) AND ((c3)::numeric = "excluded".c3))
+   SubPlan 2
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(4,1,4) on duplicate key update c4 = 'ERROR' where not exists (select c1 from tab_source where c4 = 4 and c3 = excluded.c3);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (alternatives: SubPlan 1 or hashed SubPlan 2))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (Actual time: never executed)
+           Filter: ((c4 = 4) AND ((c3)::numeric = "excluded".c3))
+   SubPlan 2
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'conflict5' where not exists (select c2 from tab_source where c4 = 4 and c3 = excluded.c3);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (NOT (alternatives: SubPlan 1 or hashed SubPlan 2))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (Actual time: never executed)
+           Filter: ((c4 = 4) AND ((c3)::numeric = "excluded".c3))
+   SubPlan 2
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(0,5,5) on duplicate key update c4 = 'ERROR' where exists (select c2 from tab_source where c4 = 4 and c3 = excluded.c3);
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (alternatives: SubPlan 1 or hashed SubPlan 2)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (Actual time: never executed)
+           Filter: ((c4 = 4) AND ((c3)::numeric = "excluded".c3))
+   SubPlan 2
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c4 = 4)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+-- any/some
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(6,0,6) on duplicate key update c4 = 'conflict6' where excluded.c3 = any (select c3 from tab_source where excluded.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: ("excluded".c1 = c1)
+           Rows Removed by Filter: 5
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(6,0,6) on duplicate key update c4 = 'ERROR' where excluded.c3 != any (select c3 from tab_source where excluded.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: ("excluded".c1 = c1)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(7,0,7) on duplicate key update c4 = 'conflict7' where excluded.c3 > some (select -1 from tab_source where excluded.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: ("excluded".c1 = c1)
+           Rows Removed by Filter: 6
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(7,0,7) on duplicate key update c4 = 'ERROR' where excluded.c3 < some (select -1 from tab_source where excluded.c1 = c1);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: ("excluded".c1 = c1)
+           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+-- opr sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'conflict8' where not (excluded.c3 > (select c2 from tab_source where c3 < excluded.c1 limit 1));
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c3 <= ((SubPlan 1))::numeric)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 < "excluded".c1)
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(8,8,8) on duplicate key update c4 = 'ERROR' where (excluded.c3 > (select c2 from tab_source where c3 < excluded.c1 limit 1));
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c3 > ((SubPlan 1))::numeric)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 < "excluded".c1)
+--?.*
+--?.*
+
+-- nested sublink
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'conflict9' where excluded.c1 = (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = excluded.c1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c1 = (SubPlan 7))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 7
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c1 = $6)
+           Rows Removed by Filter: 9
+           InitPlan 6 (returns $6)
+             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                   Filter: (c1 = $5)
+                   Rows Removed by Filter: 9
+                   InitPlan 5 (returns $5)
+                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                           Filter: (c1 = $4)
+                           Rows Removed by Filter: 9
+                           InitPlan 4 (returns $4)
+                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                   Filter: (c1 = $3)
+                                   Rows Removed by Filter: 9
+                                   InitPlan 3 (returns $3)
+                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                           Filter: (c1 = $2)
+                                           Rows Removed by Filter: 9
+                                           InitPlan 2 (returns $2)
+                                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                   Filter: (c1 = $1)
+                                                   Rows Removed by Filter: 9
+                                                   InitPlan 1 (returns $1)
+                                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                           Filter: (c1 = "excluded".c1)
+                                                           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(9,9,9) on duplicate key update c4 = 'ERROR' where excluded.c1 != (
+    select c1 from tab_source where c1 = (
+        select c1 from tab_source where c1 = (
+            select c1 from tab_source where c1 = (
+                select c1 from tab_source where c1 = (
+                    select c1 from tab_source where c1 = (
+                        select c1 from tab_source where c1 = (
+                            select c1 from (
+                                select c1 from (
+                                    select c1 from (
+                                        select c1 from tab_source where c1 = excluded.c1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+);
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c1 <> (SubPlan 7))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 7
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c1 = $6)
+           Rows Removed by Filter: 9
+           InitPlan 6 (returns $6)
+             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                   Filter: (c1 = $5)
+                   Rows Removed by Filter: 9
+                   InitPlan 5 (returns $5)
+                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                           Filter: (c1 = $4)
+                           Rows Removed by Filter: 9
+                           InitPlan 4 (returns $4)
+                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                   Filter: (c1 = $3)
+                                   Rows Removed by Filter: 9
+                                   InitPlan 3 (returns $3)
+                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                           Filter: (c1 = $2)
+                                           Rows Removed by Filter: 9
+                                           InitPlan 2 (returns $2)
+                                             ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                   Filter: (c1 = $1)
+                                                   Rows Removed by Filter: 9
+                                                   InitPlan 1 (returns $1)
+                                                     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                                                           Filter: (c1 = "excluded".c1)
+                                                           Rows Removed by Filter: 9
+--?.*
+--?.*
+
+-- sublink with CTE
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'conflict10' where c1 = (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = excluded.c1
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 = (SubPlan 1))
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 = "excluded".c1)
+                 Rows Removed by Filter: 9
+--?.*
+--?.*
+
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(10,10,10) on duplicate key update c4 = 'ERROR' where c1 != (
+    with cte1 as (
+        with cte2 as (
+            with cte3 as (
+                with cte4 as (
+                    with cte5 as (
+                        select c1 from tab_source where c3 = excluded.c1
+                    ) select c1 from cte5
+                ) select c1 from cte4
+            ) select c1 from cte3
+        ) select c1 from cte2
+    ) select c1 from cte1 limit 1
+);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 <> (SubPlan 1))
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Limit (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=1 loops=1)
+                 Filter: (c3 = "excluded".c1)
+                 Rows Removed by Filter: 9
+--?.*
+--?.*
+
+select * from tab_target order by 1,2,3,4;
+ c1 | c2 | c3 |     c4     
+----+----+----+------------
+  1 |  1 |  1 | conflict1
+  2 |  2 |  2 | conflict2
+  3 |  3 |  3 | conflict3
+  4 |  4 |  4 | conflict4
+  5 |  5 |  5 | conflict5
+  6 |  6 |  6 | conflict6
+  7 |  7 |  7 | conflict7
+  8 |  8 |  8 | conflict8
+  9 |  9 |  9 | conflict9
+ 10 | 10 | 10 | conflict10
+(10 rows)
+
+rollback;
+--------
+-- misc
+--------
+begin;
+-- agg + group by
+insert into tab_target values(1,2,3) on duplicate key update c4 = 'conflict1' where excluded.c2 = (select count(1) from tab_source where c2 < 3);
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(1,2,3) on duplicate key update c4 = 'ERROR' where excluded.c2 != (select count(1) from tab_source where c2 < 3);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ("excluded".c2 <> $0)
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Aggregate (actual rows=1 loops=1)
+           ->  Seq Scan on tab_source (actual rows=2 loops=1)
+                 Filter: (c2 < 3)
+                 Rows Removed by Filter: 8
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- limit + offset
+insert into tab_target values(2,3,5) on duplicate key update c4 = 'conflict2' where excluded.c2 = (select c2 from tab_source order by c1 asc limit 1 offset 7);
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(2,3,5) on duplicate key update c4 = 'ERROR' where excluded.c2 != (select c2 from tab_source order by c1 asc limit 1 offset 7)
+                                                                                    and c3 = (select c1 from tab_source order by c1 desc limit 1 offset 7);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (("excluded".c2 <> $0) AND (tab_target.c3 = ($1)::numeric))
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Limit (actual rows=1 loops=1)
+           ->  Sort (actual rows=8 loops=1)
+                 Sort Key: schema_upsert_where_sublink.tab_source.c1
+                 Sort Method: quicksort  Memory: 26kB
+                 ->  Seq Scan on tab_source (actual rows=10 loops=1)
+   InitPlan 2 (returns $1)
+     ->  Limit (Actual time: never executed)
+           ->  Sort (Actual time: never executed)
+                 Sort Key: schema_upsert_where_sublink.tab_source.c1 DESC
+                 ->  Seq Scan on tab_source (Actual time: never executed)
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- window funcs
+insert into tab_target values(3,5,7) on duplicate key update c4 = 'conflict3' where c2 = (select sum_rows from (
+    SELECT i, sum(i) over (order by i rows between 1 preceding and 1 following) as sum_rows
+    FROM generate_series(1, 3) i order by 2 limit 1
+));
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(3,5,7) on duplicate key update c4 = 'ERROR' where c2 > (select sum_rows from (
+    SELECT i, sum(i) over (order by i rows between 1 preceding and 1 following) as sum_rows
+    FROM generate_series(1, 3) i order by 2 limit 1
+));
+                                                                 QUERY PLAN                                                                 
+--------------------------------------------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c2 > $0)
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Subquery Scan on __unnamed_subquery__ (actual rows=1 loops=1)
+           ->  Limit (actual rows=1 loops=1)
+                 ->  Sort (actual rows=1 loops=1)
+                       Sort Key: (sum(i.i) OVER (ORDER BY i.i USING = NULLS LAST ROWS BETWEEN 1::bigint PRECEDING AND 1::bigint FOLLOWING))
+                       Sort Method: top-N heapsort  Memory: 25kB
+                       ->  WindowAgg (actual rows=3 loops=1)
+                             ->  Sort (actual rows=3 loops=1)
+                                   Sort Key: i.i
+                                   Sort Method: quicksort  Memory: 25kB
+                                   ->  Function Scan on generate_series i (actual rows=3 loops=1)
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- setopt
+insert into tab_target values(4,8,9) on duplicate key update c4 = 'conflict4' where c1 = (
+    select count(*) / 2.5 from (
+        (select c1, c2 from tab_source)
+        union
+        (select c2, c1 from tab_source)
+    )
+);
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(4,8,9) on duplicate key update c4 = 'ERROR' where c1 = (
+    select count(*) / 4 from (
+        (select c1, c2 from tab_source)
+        union all
+        (select c2, c1 from tab_source)
+        minus
+        (select c1, c4 from tab_source)
+        intersect
+        (select c2, c3 from tab_source)
+    )
+);
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: ((tab_target.c1)::double precision = $0)
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Aggregate (actual rows=1 loops=1)
+           ->  Subquery Scan on __unnamed_subquery__ (actual rows=10 loops=1)
+                 ->  HashSetOp Except (actual rows=10 loops=1)
+                       ->  Append (actual rows=20 loops=1)
+                             ->  Result (actual rows=20 loops=1)
+                                   ->  Append (actual rows=20 loops=1)
+                                         ->  Seq Scan on tab_source (actual rows=10 loops=1)
+                                         ->  Seq Scan on tab_source (actual rows=10 loops=1)
+                             ->  Result (actual rows=0 loops=1)
+                                   ->  HashSetOp Intersect (actual rows=0 loops=1)
+                                         ->  Append (actual rows=20 loops=1)
+                                               ->  Subquery Scan on "*SELECT* 3" (actual rows=10 loops=1)
+                                                     ->  Seq Scan on tab_source (actual rows=10 loops=1)
+                                               ->  Subquery Scan on "*SELECT* 4" (actual rows=10 loops=1)
+                                                     ->  Seq Scan on tab_source (actual rows=10 loops=1)
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- with param
+prepare p1 as
+insert into tab_target values($1,$2,$3) on duplicate key update c4 = $4 where c1 in (
+    with cte as (
+        select c1 from tab_source where c2 in (
+            select c2 from tab_source where c1 <= $5
+        )
+    ) select c1 from cte where c1 >= $6
+);
+-- gplan not supported yet
+set plan_cache_mode = force_generic_plan;
+explain (analyze on, verbose off, timing off, costs off)
+execute p1(5, 6, 7, 'conflict5', 5, 5);
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (hashed SubPlan 1)
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Hash Join (actual rows=1 loops=1)
+           Hash Cond: (schema_upsert_where_sublink.tab_source.c2 = schema_upsert_where_sublink.tab_source.c2)
+           ->  Seq Scan on tab_source (actual rows=6 loops=1)
+                 Filter: (c1 >= 5)
+                 Rows Removed by Filter: 4
+           ->  Hash (actual rows=5 loops=1)
+                  Buckets: 32768  Batches: 1  Memory Usage: 1kB
+                 ->  HashAggregate (actual rows=5 loops=1)
+                       Group By Key: schema_upsert_where_sublink.tab_source.c2
+                       ->  Seq Scan on tab_source (actual rows=5 loops=1)
+                             Filter: (c1 <= 5)
+                             Rows Removed by Filter: 5
+--?.*
+--?.*
+
+set plan_cache_mode = force_custom_plan;
+explain (analyze on, verbose off, timing off, costs off)
+execute p1(5, 6, 7, 'ERROR', 4, 5);
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (hashed SubPlan 1)
+   Rows Removed by Conflict Filter: 1
+   ->  Result (actual rows=1 loops=1)
+   SubPlan 1
+     ->  Hash Join (actual rows=0 loops=1)
+           Hash Cond: (schema_upsert_where_sublink.tab_source.c2 = schema_upsert_where_sublink.tab_source.c2)
+           ->  Seq Scan on tab_source (actual rows=6 loops=1)
+                 Filter: (c1 >= 5)
+                 Rows Removed by Filter: 4
+           ->  Hash (actual rows=4 loops=1)
+                  Buckets: 32768  Batches: 1  Memory Usage: 1kB
+                 ->  HashAggregate (actual rows=4 loops=1)
+                       Group By Key: schema_upsert_where_sublink.tab_source.c2
+                       ->  Seq Scan on tab_source (actual rows=4 loops=1)
+                             Filter: (c1 <= 4)
+                             Rows Removed by Filter: 6
+--?.*
+--?.*
+
+-- test with hint
+-- blockname
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(6,8,7) on duplicate key update c4 = 'conflict6' where c1 = (
+    select /*+ blockname(tt) */ c4 from tab_source where c1 = 6
+);
+WARNING:  unused hint: BlockName(tt)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 = $0)
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c1 = 6)
+           Rows Removed by Filter: 9
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- no_expand
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(6,8,7) on duplicate key update c4 = 'ERROR' where c1 != (
+    select /*+ no_expand */ c4 from tab_source where c1 = 6
+);
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Insert on tab_target (actual rows=0 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 <> $0)
+   Rows Removed by Conflict Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on tab_source (actual rows=1 loops=1)
+           Filter: (c1 = 6)
+           Rows Removed by Filter: 9
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- leading/join
+explain (analyze on, verbose off, timing off, costs off)
+insert into tab_target values(7,4,7) on duplicate key update c4 = 'conflict7' where c1 = (
+    select /*+ leading((t2 t1)) mergejoin(t1 t2) */ t1.c4 from tab_source t1, tab_source t2 where t1.c2 = t2.c2 and t1.c3 = 7
+);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Insert on tab_target (actual rows=1 loops=1)
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: tab_target_pkey, tab_target_c1_key
+   Conflict Filter: (tab_target.c1 = $0)
+   InitPlan 1 (returns $0)
+     ->  Merge Join (actual rows=1 loops=1)
+           Merge Cond: (t2.c2 = t1.c2)
+           ->  Sort (actual rows=5 loops=1)
+                 Sort Key: t2.c2
+                 Sort Method: quicksort  Memory: 26kB
+                 ->  Seq Scan on tab_source t2 (actual rows=10 loops=1)
+           ->  Sort (actual rows=1 loops=1)
+                 Sort Key: t1.c2
+                 Sort Method: quicksort  Memory: 25kB
+                 ->  Seq Scan on tab_source t1 (actual rows=1 loops=1)
+                       Filter: (c3 = 7)
+                       Rows Removed by Filter: 9
+   ->  Result (actual rows=1 loops=1)
+--?.*
+--?.*
+
+-- rowmarks
+insert into tab_target values(8,4,3) on duplicate key update c4 = 'conflict8' where c1 in (select c4 from tab_source where c4 = 8 for update);
+insert into tab_target values(9,6,3) on duplicate key update c4 = 'conflict9' where c1 = (select c3 from tab_source where c1 = 9 for share);
+select * from tab_target where c1 < 10 order by 1,2,3,4;
+ c1 | c2 | c3 |    c4     
+----+----+----+-----------
+  1 |  1 |  1 | conflict1
+  2 |  2 |  2 | conflict2
+  3 |  3 |  3 | conflict3
+  4 |  4 |  4 | conflict4
+  5 |  5 |  5 | conflict5
+  6 |  6 |  6 | conflict6
+  7 |  7 |  7 | conflict7
+  8 |  8 |  8 | conflict8
+  9 |  9 |  9 | conflict9
+(9 rows)
+
+rollback;
+DROP SCHEMA schema_upsert_where_sublink CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table tab_target
+drop cascades to table tab_source

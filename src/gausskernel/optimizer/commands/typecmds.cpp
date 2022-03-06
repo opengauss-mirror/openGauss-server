@@ -40,6 +40,7 @@
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_package.h"
 #include "catalog/heap.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_authid.h"
@@ -52,8 +53,10 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_range.h"
+#include "catalog/pg_synonym.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
+#include "catalog/gs_db_privilege.h"
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 #include "commands/typecmds.h"
@@ -163,7 +166,6 @@ void DefineType(List* names, List* parameters)
     Oid resulttype;
     ListCell* pl = NULL;
     Oid typowner = InvalidOid;
-    AclResult aclresult;
 
     /*
      * isalter is true, change the owner of the objects as the owner of the
@@ -184,8 +186,13 @@ void DefineType(List* names, List* parameters)
      */
     /* Convert list of names to a name and namespace */
     typeNamespace = QualifiedNameGetCreationNamespace(names, &typname);
+    /*
+     * anyResult is true, explain that the current user is granted create any type permission
+     */
+    bool anyResult = CheckCreatePrivilegeInNamespace(typeNamespace, GetUserId(), CREATE_ANY_TYPE);
+
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
-        typowner = GetUserIdFromNspId(typeNamespace);
+        typowner = GetUserIdFromNspId(typeNamespace, false, anyResult);
 
         if (!OidIsValid(typowner))
             typowner = GetUserId();
@@ -195,15 +202,9 @@ void DefineType(List* names, List* parameters)
     } else {
         typowner = GetUserId();
     }
-    /* XXX this is unnecessary given the superuser check above */
-    /* Check we have creation rights in target namespace */
-    aclresult = pg_namespace_aclcheck(typeNamespace, GetUserId(), ACL_CREATE);
-    if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace));
+
     if (isalter) {
-        aclresult = pg_namespace_aclcheck(typeNamespace, typowner, ACL_CREATE);
-        if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace));
+        (void)CheckCreatePrivilegeInNamespace(typeNamespace, typowner, CREATE_ANY_TYPE);
     }
 
     /*
@@ -1039,9 +1040,15 @@ void DefineEnum(CreateEnumStmt* stmt)
 
     /* Convert list of names to a name and namespace */
     enumNamespace = QualifiedNameGetCreationNamespace(stmt->typname, &enumName);
-
+    /*
+     * anyResult is true, explain that the current user is granted create any type permission
+     */
+    bool anyResult = false;
+    if (!IsSysSchema(enumNamespace)) {
+        anyResult = HasSpecAnyPriv(GetUserId(), CREATE_ANY_TYPE, false);
+    }
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
-        typowner = GetUserIdFromNspId(enumNamespace);
+        typowner = GetUserIdFromNspId(enumNamespace, false, anyResult);
 
         if (!OidIsValid(typowner))
             typowner = GetUserId();
@@ -1052,12 +1059,10 @@ void DefineEnum(CreateEnumStmt* stmt)
     }
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(enumNamespace, GetUserId(), ACL_CREATE);
-    if (aclresult != ACLCHECK_OK)
+    if (aclresult != ACLCHECK_OK && !anyResult)
         aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(enumNamespace));
     if (isalter) {
-        aclresult = pg_namespace_aclcheck(enumNamespace, typowner, ACL_CREATE);
-        if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(enumNamespace));
+        (void)CheckCreatePrivilegeInNamespace(enumNamespace, typowner, CREATE_ANY_TYPE);
     }
 
     /*
@@ -1239,8 +1244,15 @@ void DefineRange(CreateRangeStmt* stmt)
 
     /* Convert list of names to a name and namespace */
     typeNamespace = QualifiedNameGetCreationNamespace(stmt->typname, &typname);
+    /*
+     * anyResult is true, explain that the current user is granted create any typepermission
+     */
+    bool anyResult = false;
+    if (!IsSysSchema(typeNamespace)) {
+        anyResult = HasSpecAnyPriv(GetUserId(), CREATE_ANY_TYPE, false);
+    }
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
-        typowner = GetUserIdFromNspId(typeNamespace);
+        typowner = GetUserIdFromNspId(typeNamespace, false, anyResult);
 
         if (!OidIsValid(typowner)) {
             typowner = GetUserId();
@@ -1253,12 +1265,10 @@ void DefineRange(CreateRangeStmt* stmt)
     }
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(typeNamespace, GetUserId(), ACL_CREATE);
-    if (aclresult != ACLCHECK_OK)
+    if (aclresult != ACLCHECK_OK && !anyResult)
         aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace));
     if (isalter) {
-        aclresult = pg_namespace_aclcheck(typeNamespace, typowner, ACL_CREATE);
-        if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(typeNamespace));
+        (void)CheckCreatePrivilegeInNamespace(typeNamespace, typowner, CREATE_ANY_TYPE);
     }
 
     /*
@@ -2076,7 +2086,7 @@ Oid DefineCompositeType(RangeVar* typevar, List* coldeflist)
      * check is here mainly to get a better error message about a "type"
      * instead of below about a "relation".
      */
-    typeNamespace = RangeVarGetAndCheckCreationNamespace(createStmt->relation, NoLock, NULL);
+    typeNamespace = RangeVarGetAndCheckCreationNamespace(createStmt->relation, NoLock, NULL, RELKIND_COMPOSITE_TYPE);
     RangeVarAdjustRelationPersistence(createStmt->relation, typeNamespace);
     old_type_oid =
         GetSysCacheOid2(TYPENAMENSP, CStringGetDatum(createStmt->relation->relname), ObjectIdGetDatum(typeNamespace));
@@ -3305,6 +3315,99 @@ void AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId, bool hasDependEntry)
 
     /* Clean up */
     heap_close(rel, RowExclusiveLock);
+}
+
+/*
+ * AlterTypeOwnerByPkg - change package type owner
+ *
+ * This is currently only used to propagate ALTER PACKAGE OWNER to a
+ * package. Package will build types, and add to pg_type.
+ * It assumes the caller has done all needed checks.
+ */
+void AlterTypeOwnerByPkg(Oid pkgOid, Oid newOwnerId)
+{
+    if (!OidIsValid(pkgOid)) {
+        return;
+    }
+
+    Relation depRel;
+    ScanKeyData key[2];
+    SysScanDesc scan;
+    HeapTuple tup;
+    const int keyNumber = 2;
+    bool isPkgDepTyp = false;
+    Form_pg_depend depTuple = NULL;
+
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid,
+        BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(PackageRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid,
+        BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(pkgOid));
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, keyNumber, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        depTuple = (Form_pg_depend)GETSTRUCT(tup);
+        isPkgDepTyp = (depTuple->deptype == DEPENDENCY_AUTO) &&
+            (depTuple->classid == TypeRelationId || depTuple->classid == PgSynonymRelationId);
+        if (!isPkgDepTyp) {
+            continue;
+        }
+        if (depTuple->classid == TypeRelationId) {
+            AlterTypeOwnerInternal(depTuple->objid, newOwnerId, false);
+        } else {
+            AlterSynonymOwnerByOid(depTuple->objid, newOwnerId);
+        }
+    }
+
+    systable_endscan(scan);
+    heap_close(depRel, RowExclusiveLock);
+    return;
+}
+
+/*
+ * AlterTypeOwnerByFunc - change func type owner
+ *
+ * This is currently only used to propagate ALTER FUNCTION OWNER
+ * Procedure will build types when the type is nested, and add to pg_type.
+ * It assumes the caller has done all needed checks.
+ */
+void AlterTypeOwnerByFunc(Oid funcOid, Oid newOwnerId)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    /* procedure type will only be build in centralized mode */
+    return;
+#endif
+    if (!OidIsValid(funcOid)) {
+        return;
+    }
+
+    Relation depRel;
+    ScanKeyData key[2];
+    SysScanDesc scan;
+    HeapTuple tup;
+    const int keyNumber = 2;
+    bool isFuncDepTyp = false;
+    Form_pg_depend depTuple = NULL;
+
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid,
+        BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ProcedureRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid,
+        BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(funcOid));
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, keyNumber, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        depTuple = (Form_pg_depend)GETSTRUCT(tup);
+        isFuncDepTyp = (depTuple->deptype == DEPENDENCY_AUTO) && depTuple->classid == TypeRelationId;
+        if (!isFuncDepTyp) {
+            continue;
+        }
+        AlterTypeOwnerInternal(depTuple->objid, newOwnerId, false);
+    }
+
+    systable_endscan(scan);
+    heap_close(depRel, RowExclusiveLock);
+    return;
 }
 
 /*

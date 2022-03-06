@@ -46,7 +46,9 @@
 #include "libpq/sha2.h"
 #include "utils/syscall_lock.h"
 #ifndef WIN32
+#ifdef ENABLE_GSS
 #include "gssapi/gssapi_krb5.h"
+#endif /* ENABLE_GSS */
 #endif  // WIN32
 #ifdef KRB5
 /*
@@ -177,10 +179,11 @@ static int pg_krb5_sendauth(PGconn* conn)
     krb5_auth_context auth_context = NULL;
     krb5_error* err_ret = NULL;
     struct krb5_info info;
+    char* host = (conn->connhost) ? conn->connhost[conn->whichhost].host : NULL;
 
     info.pg_krb5_initialised = 0;
 
-    if (!((conn->pghost != NULL) && conn->pghost[0] != '\0')) {
+    if (!((host != NULL) && host[0] != '\0')) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("host name must be specified\n"));
         return STATUS_ERROR;
     }
@@ -189,7 +192,7 @@ static int pg_krb5_sendauth(PGconn* conn)
     if (ret != STATUS_OK)
         return ret;
 
-    retval = krb5_sname_to_principal(info.pg_krb5_context, conn->pghost, conn->krbsrvname, KRB5_NT_SRV_HST, &server);
+    retval = krb5_sname_to_principal(info.pg_krb5_context, host, conn->krbsrvname, KRB5_NT_SRV_HST, &server);
     if (retval) {
         printfPQExpBuffer(&conn->errorMessage,
             "pg_krb5_sendauth: krb5_sname_to_principal: %s, err: %s\n",
@@ -425,8 +428,9 @@ static int pg_GSS_startup(PGconn* conn)
     char* krbsrvname = NULL;
     char* krbhostname = NULL;
     errno_t rc = EOK;
+    char* host = (conn->connhost) ? conn->connhost[conn->whichhost].host : NULL;
 
-    if (!((conn->pghost != NULL) && conn->pghost[0] != '\0')) {
+    if (!((host != NULL) && host[0] != '\0')) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("host name must be specified\n"));
         return STATUS_ERROR;
     }
@@ -620,6 +624,7 @@ static int pg_SSPI_startup(PGconn* conn, int use_negotiate)
 {
     SECURITY_STATUS r;
     TimeStamp expire;
+    char* host = (conn->connhost) ? conn->connhost[conn->whichhost].host : NULL;
 
     conn->sspictx = NULL;
 
@@ -656,13 +661,13 @@ static int pg_SSPI_startup(PGconn* conn, int use_negotiate)
      * but not more complex. We can skip the @REALM part, because Windows will
      * fill that in for us automatically.
      */
-    if (!((conn->pghost != NULL) && conn->pghost[0] != '\0')) {
+    if (!((host != NULL) && host[0] != '\0')) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("host name must be specified\n"));
         return STATUS_ERROR;
     }
 
     int krbsrvnameLen = strlen(conn->krbsrvname);
-    int pghostLen = strlen(conn->pghost);
+    int pghostLen = strlen(host);
 #ifndef WIN32
     if (unlikely(krbsrvnameLen > PG_INT32_MAX - pghostLen - 2)) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("krb server name or host string is too long\n"));
@@ -676,7 +681,7 @@ static int pg_SSPI_startup(PGconn* conn, int use_negotiate)
 
 #endif
 
-    int sspitarget_len = strlen(conn->krbsrvname) + strlen(conn->pghost) + 2;
+    int sspitarget_len = strlen(conn->krbsrvname) + strlen(host) + 2;
 #ifdef WIN32
     conn->sspitarget = (char*)malloc(sspitarget_len);
 #else
@@ -686,7 +691,7 @@ static int pg_SSPI_startup(PGconn* conn, int use_negotiate)
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("out of memory\n"));
         return STATUS_ERROR;
     }
-    check_sprintf_s(sprintf_s(conn->sspitarget, sspitarget_len, "%s/%s", conn->krbsrvname, conn->pghost));
+    check_sprintf_s(sprintf_s(conn->sspitarget, sspitarget_len, "%s/%s", conn->krbsrvname, host));
 
     /*
      * Indicate that we're in SSPI authentication mode to make sure that
@@ -848,15 +853,32 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
 
             break;
         }
+#ifdef ENABLE_LITE_MODE
+        case AUTH_REQ_SHA256_RFC:
+#endif
         case AUTH_REQ_SHA256: {
             char* crypt_pwd2 = NULL;
 
+#ifdef ENABLE_LITE_MODE
+            if ((SHA256_PASSWORD == conn->password_stored_method) ||
+                (SHA256_PASSWORD_RFC == conn->password_stored_method) ||
+                (PLAIN_PASSWORD == conn->password_stored_method)) {
+                if (areq == AUTH_REQ_SHA256_RFC) {
+                    if (!pg_sha256_encrypt_v1(
+                            password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf))
+                        return STATUS_ERROR;
+                } else {
+                    if (!pg_sha256_encrypt(
+                            password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf, conn->iteration_count))
+                        return STATUS_ERROR;
+                }
+#else
             if (SHA256_PASSWORD == conn->password_stored_method || PLAIN_PASSWORD == conn->password_stored_method) {
 
                 if (!pg_sha256_encrypt(
                         password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf, conn->iteration_count))
                     return STATUS_ERROR;
-
+#endif
                 rc = strncpy_s(server_key_string,
                     sizeof(server_key_string),
                     &buf[SHA256_LENGTH + SALT_STRING_LENGTH],
@@ -1018,9 +1040,6 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
 
             break;
         }
-        case AUTH_REQ_PASSWORD:
-            pwd_to_send = password;
-            break;
         /*
          * Notice: Authentication of send password directly are not currently supported.
          * need to: We remove the branch of AUTH_REQ_PASSWORD here for both implication and
@@ -1190,20 +1209,32 @@ int pg_fe_sendauth(AuthRequest areq, PGconn* conn)
         case AUTH_REQ_MD5:
         case AUTH_REQ_MD5_SHA256:
         case AUTH_REQ_SHA256:
+#ifdef ENABLE_LITE_MODE
+        case AUTH_REQ_SHA256_RFC:
+#endif
         case AUTH_REQ_SM3:
-        case AUTH_REQ_PASSWORD:
-            int status;
-            conn->password_needed = true;
-            if (conn->pgpass == NULL || conn->pgpass[0] == '\0') {
-                printfPQExpBuffer(
-                    &conn->errorMessage, libpq_gettext("FATAL:  Invalid username/password,login denied.\n"));
-                return STATUS_ERROR;
+            {
+                int status;
+                char    *password = NULL;
+                conn->password_needed = true;
+                if (conn->connhost != NULL)
+                    password = conn->connhost[conn->whichhost].password;
+
+                if (password == NULL) {
+                    password = conn->pgpass;
+                }
+
+                if (password == NULL || password[0] == '\0') {
+                    printfPQExpBuffer(
+                        &conn->errorMessage, libpq_gettext("FATAL:  Invalid username/password,login denied.\n"));
+                    return STATUS_ERROR;
+                }
+                if ((status = pg_password_sendauth(conn, password, areq)) != STATUS_OK) {
+                    printfPQExpBuffer(&conn->errorMessage, "fe_sendauth: error sending password authentication\n");
+                    return STATUS_ERROR;
+                }
+                break;
             }
-            if ((status = pg_password_sendauth(conn, conn->pgpass, areq)) != STATUS_OK) {
-                printfPQExpBuffer(&conn->errorMessage, "fe_sendauth: error sending password authentication\n");
-                return STATUS_ERROR;
-            }
-            break;
 
         case AUTH_REQ_SCM_CREDS:
             if (pg_local_sendauth(conn) != STATUS_OK)

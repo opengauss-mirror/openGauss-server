@@ -165,10 +165,25 @@ CREATE TABLE t_distributeby2(
 CREATE TABLE t_distributeby3(
     id_number int,
     name text,
-    data text) distribute by list(name)(slice s1 values (('China'),('Germary')),slice s2 values (('Japan')), slice s3 values (('USA')), slice s4 values (default));
+    data text) distribute by list(name)(slice s1 values (('China')),slice s2 values (('Japan')), slice s3 values (('USA')), slice s4 values ('Germary'),
+        slice s5 values ('Israel'), slice s6 values ('India'), slice s7 values ('Peru'), slice s8 values ('Thailand'),
+        slice s9 values ('South Africa'), slice s10 values ('New Zealand'), slice s11 values ('Nepal'), slice s12 values (default));
+CREATE TABLE t_distributeby4(
+    id_number int,
+    name text,
+    data text encrypted with(column_encryption_key = distributeby_cek,encryption_type = DETERMINISTIC)) 
+distribute by list(name)(slice s1 values (('China')),slice s2 values (('Japan')), slice s3 values (('USA')), slice s4 values ('Germary'),
+    slice s5 values ('Israel'), slice s6 values ('India'), slice s7 values ('Peru'), slice s8 values ('Thailand'),
+    slice s9 values ('South Africa'), slice s10 values ('New Zealand'), slice s11 values ('Nepal'), slice s12 values (default));
+create table ce_t1 (id BYTEAWITHOUTORDERWITHEQUALCOL);
+create table ce_t2 (id BYTEAWITHOUTORDERCOL);
+
+DROP table IF EXISTS ce_t1;
+DROP table IF EXISTS ce_t2;
 DROP table IF EXISTS t_distributeby1;
 DROP table IF EXISTS t_distributeby2;
 DROP table IF EXISTS t_distributeby3;
+DROP table IF EXISTS t_distributeby4;
 DROP COLUMN ENCRYPTION KEY IF EXISTS distributeby_cek;
 DROP CLIENT MASTER KEY IF EXISTS distributeby_cmk;
 \! gs_ktool -d all

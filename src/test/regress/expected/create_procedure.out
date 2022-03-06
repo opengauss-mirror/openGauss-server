@@ -53,3 +53,63 @@ END;
 drop procedure "test.test.test".prc_add2;
 drop procedure "test.test.test".prc_add;
 drop schema "test.test.test";
+
+set behavior_compat_options='allow_procedure_compile_check';
+drop table if exists bbb;
+NOTICE:  table "bbb" does not exist, skipping
+drop table if exists aaa;
+NOTICE:  table "aaa" does not exist, skipping
+CREATE TABLE bbb(id1 INT, id2 INT, id3 INT);
+CREATE TABLE aaa(id1 INT, id2 INT, id3 INT);
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+v int;
+BEGIN
+select count(1) INTO v from bbb where id1 = NEW.id1;
+RAISE INFO 'v1: : %' ,v;
+RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger11
+BEFORE INSERT ON aaa
+FOR EACH ROW
+EXECUTE PROCEDURE tri_insert_func();
+insert into aaa values(1,2,3);
+INFO:  v1: : 0
+select * from aaa;
+ id1 | id2 | id3 
+-----+-----+-----
+   1 |   2 |   3
+(1 row)
+
+drop TRIGGER insert_trigger11 ON aaa;
+drop FUNCTION tri_insert_func;
+drop table if exists bbb;
+drop table if exists aaa;
+create or replace function checkqweerr(a integer) returns int as $$
+declare
+b int;
+begin
+select multi_call211(a) + 1 into b;
+return b;
+end;
+$$ language plpgsql;
+ERROR:  compile failed when parse the query: select multi_call211(a) + 1
+DETAIL:  function multi_call211(integer) does not exist
+CONTEXT:  compilation of PL/pgSQL function "checkqweerr" near line 5
+call checkqweerr(1);
+ERROR:  function "checkqweerr" doesn't exist 
+create or replace procedure checkipoooowdsd2() as
+declare
+c1 sys_refcursor;
+begin
+open c1 for delete from tb_test111;
+end;
+/
+ERROR:  compile failed when parse the query: SELECT delete from tb_test111
+DETAIL:  relation "tb_test111" does not exist on datanode1
+CONTEXT:  compilation of PL/pgSQL function "checkipoooowdsd2" near line 5
+call checkipoooowdsd2();
+ERROR:  function "checkipoooowdsd2" doesn't exist 
+set behavior_compat_options='';

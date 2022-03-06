@@ -69,7 +69,7 @@
  * format have to account for that themselves.
  */
 #define att_align_datum(cur_offset, attalign, attlen, attdatum)                              \
-    (((attlen) == -1 && VARATT_IS_SHORT(DatumGetPointer(attdatum))) ? (intptr_t)(cur_offset) \
+    (((attlen) == -1 && (VARATT_IS_SHORT(DatumGetPointer(attdatum)) || VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(attdatum)) )) ? (intptr_t)(cur_offset) \
                                                                     : att_align_nominal(cur_offset, attalign))
 
 /*

@@ -48,8 +48,6 @@ static const int TEN_MICROSECOND = 10;
 #define BufHdrLocked(bufHdr) ((bufHdr)->state & BM_LOCKED)
 #define SegBufferIsPinned(bufHdr) ((bufHdr)->state & BUF_REFCOUNT_MASK)
 
-static BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum,
-                                  bool *foundPtr);
 static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state);
 static bool SegStartBufferIO(BufferDesc *buf, bool forInput);
 static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bits);
@@ -185,7 +183,7 @@ static uint32 SegWaitBufHdrUnlocked(BufferDesc *buf)
     return buf_state;
 }
 
-static bool SegPinBuffer(BufferDesc *buf)
+bool SegPinBuffer(BufferDesc *buf)
 {
     ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
                      errmsg("[SegPinBuffer] (%u %u %u %d) %d %u ", buf->tag.rnode.spcNode, buf->tag.rnode.dbNode,
@@ -246,7 +244,7 @@ static bool SegPinBufferLocked(BufferDesc *buf, const BufferTag *tag)
     return buf_state & BM_VALID;
 }
 
-static void SegUnpinBuffer(BufferDesc *buf)
+void SegUnpinBuffer(BufferDesc *buf)
 {
     ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
                      errmsg("[SegUnpinBuffer] (%u %u %u %d) %d %u ", buf->tag.rnode.spcNode, buf->tag.rnode.dbNode,
@@ -399,6 +397,24 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
     }
 }
 
+void ReportInvalidPage(RepairBlockKey key)
+{
+    /* record bad page, wait the pagerepair thread repair the page */
+    if (CheckVerionSupportRepair() && (AmStartupProcess() || AmPageRedoWorker()) &&
+        IsPrimaryClusterStandbyDN() && g_instance.repair_cxt.support_repair) {
+        XLogPhyBlock pblk_bak = {0};
+        RedoPageRepairCallBack(key, pblk_bak);
+        log_invalid_page(key.relfilenode, key.forknum, key.blocknum, CRC_CHECK_ERROR, NULL);
+        ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("invalid page in block %u of relation %s",
+                key.blocknum, relpathperm(key.relfilenode, key.forknum))));
+        return;
+    }
+    ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid page in block %u of relation %s",
+                                                         key.blocknum, relpathperm(key.relfilenode, key.forknum))));
+    return;
+}
+
 Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
 {
     bool found = false;
@@ -415,8 +431,12 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
         } else {
             seg_physical_read(spc, rnode, forkNum, blockNum, bufBlock);
             if (!PageIsVerified(bufBlock, blockNum)) {
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid page in block %u of relation %s",
-                                                                     blockNum, relpathperm(rnode, forkNum))));
+                RepairBlockKey key;
+                key.relfilenode = rnode;
+                key.forknum = forkNum;
+                key.blocknum = blockNum;
+                ReportInvalidPage(key);
+                return InvalidBuffer;
             }
             if (!PageIsSegmentVersion(bufBlock) && !PageIsNew(bufBlock)) {
                 ereport(PANIC,
@@ -424,6 +444,10 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                                 blockNum, relpathperm(rnode, forkNum), PageGetPageLayoutVersion(bufBlock))));
             }
         }
+        bufHdr->lsn_on_disk = PageGetLSN(bufBlock);
+#ifdef USE_ASSERT_CHECKING
+        bufHdr->lsn_dirty = InvalidXLogRecPtr;
+#endif
         SegTerminateBufferIO(bufHdr, false, BM_VALID);
     }
 
@@ -465,7 +489,7 @@ BufferDesc * FoundBufferInHashTable(int buf_id, LWLock *new_partition_lock, bool
     return buf;
 }
 
-static BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum,
+BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum,
                                   bool *foundPtr)
 {
     BufferDesc *buf;
@@ -592,11 +616,12 @@ static BufferDesc* get_segbuf_from_candidate_list(uint32* buf_state)
     BufferDesc* buf = NULL;
     uint32 local_buf_state;
     int buf_id = 0;
-    int list_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-    int list_id = beentry->st_tid > 0 ? (beentry->st_tid % list_num) : (beentry->st_sessionid % list_num);
 
     if (ENABLE_INCRE_CKPT && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
+        int list_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
+        volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+        int list_id = beentry->st_tid > 0 ? (beentry->st_tid % list_num) : (beentry->st_sessionid % list_num);
+
         for (int i = 0; i < list_num; i++) {
             /* the pagewriter sub thread store normal buffer pool, sub thread starts from 1 */
             int thread_id = (list_id + i) % list_num + 1;
@@ -618,8 +643,9 @@ static BufferDesc* get_segbuf_from_candidate_list(uint32* buf_state)
                 UnlockBufHdr(buf, local_buf_state);
             }
         }
+        wakeup_pagewriter_thread();
     }
-    wakeup_pagewriter_thread();
+
     return NULL;
 }
 

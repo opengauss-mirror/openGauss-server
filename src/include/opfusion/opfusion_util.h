@@ -181,6 +181,7 @@ const Oid function_id[] = {
     2089, /* convert int4 number to hex */
     2090, /* convert int8 number to hex */
     2617, /* ceiling */
+    3180, /* convert int2 to boolen */
     3192, /* convert int4 to bpchar */
     3207, /* convert text to timestamp without time zone */
     3811, /* convert int4 to money */

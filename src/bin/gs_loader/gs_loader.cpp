@@ -81,15 +81,36 @@ void SetX(char *arr1, int n1)
 bool InputPasswd(char *keyword, int max_len)
 {
     char *password = getpass("Input a password:");
-    if (password == NULL || strlen(password) > max_len) {
+    if (password == NULL) {
         std::cout << "ERROR: read password error";
         return false;
     }
-    for (int i = 0; i < strlen(password); i++) {
+    if (strlen(password) > (unsigned)max_len) {
+        std::cout << "ERROR: read password error";
+        SetX(password, strlen(password));
+        return false;
+    }
+    for (unsigned i = 0; i < strlen(password); i++) {
         keyword[i] = password[i];
         password[i] = 'x';
     }
     return true;
+}
+
+void check_danger_character(const char *inputEnvValue)
+{
+    if (inputEnvValue == NULL)
+        return;
+
+    const char* dangerCharacterList[] = {";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", NULL};
+    int i = 0;
+
+    for (i = 0; dangerCharacterList[i] != NULL; i++) {
+        if (strstr(inputEnvValue, dangerCharacterList[i]) != NULL) {
+            fprintf(stderr, "ERROR: Failed to check input value: invalid token \"%s\".\n", dangerCharacterList[i]);
+            exit(1);
+        }
+    }
 }
 }
 
@@ -154,14 +175,20 @@ int main(int argc, char **argv)
             return 0;
         }
     }
+    const char *p = const_cast<char *>(params.c_str());
+    check_danger_character(p);
+
     FILE *fp = popen(params.c_str(), "w");
     if (fp == NULL) {
+        for (unsigned i = 0; i < strlen(keyword); i++) {
+            keyword[i] = 'x';
+        }
         std::cout << "ERROR: run gs_loader error" << std::endl;
         return 0;
     }
     fputs(keyword, fp);
     fputc('\n', fp);
-    for (int i = 0; i < strlen(keyword); i++) {
+    for (unsigned i = 0; i < strlen(keyword); i++) {
         keyword[i] = 'x';
     }
     pclose(fp);

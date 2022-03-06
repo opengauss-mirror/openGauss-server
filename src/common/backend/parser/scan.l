@@ -52,6 +52,14 @@
 #define YYSTYPE core_YYSTYPE
 
 /*
+ * define core_yylex for flex >= 2.6
+ */
+#if FLEX_MAJOR_VERSION >= 2 && FLEX_MINOR_VERSION >= 6
+#define YY_DECL int core_yylex \
+               (YYSTYPE * yylval_param, YYLTYPE * yylloc_param , yyscan_t yyscanner)
+#endif
+
+/*
  * Set the type of yyextra.  All state variables used by the scanner should
  * be in yyextra, *not* statically allocated.
  */

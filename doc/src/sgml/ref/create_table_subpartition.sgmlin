@@ -1,0 +1,59 @@
+<refentry id="SQL-CREATE_TABLE_SUBPARTITION">
+<refmeta>
+<refentrytitle>CREATE TABLE SUBPARTITION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE TABLE SUBPARTITION</refname>
+<refpurpose>define a new table subpartition</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE TABLE [ IF NOT EXISTS ] subpartition_table_name
+( { column_name data_type [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | table_constraint
+    | LIKE source_table [ like_option [...] ] }
+    [, ... ]
+)
+    [ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ COMPRESS | NOCOMPRESS ]
+    [ TABLESPACE tablespace_name ]
+    PARTITION BY {RANGE | LIST | HASH} (partition_key) SUBPARTITION BY {RANGE | LIST | HASH} (subpartition_key)
+    (
+      PARTITION partition_name1 [ VALUES LESS THAN (val1) | VALUES (val1[, ...]) ] [ TABLESPACE tablespace ]
+      (
+        { SUBPARTITION subpartition_name1 [ VALUES LESS THAN (val1_1) | VALUES (val1_1[, ...])]  [ TABLESPACE tablespace ] } [, ...]
+      )
+      [, ...]
+    ) [ { ENABLE | DISABLE } ROW MOVEMENT ];
+
+where column_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ NOT NULL |
+  NULL |
+  CHECK ( expression ) |
+  DEFAULT default_expr |
+  GENERATED ALWAYS AS ( generation_expr ) STORED |
+  UNIQUE index_parameters |
+  PRIMARY KEY index_parameters |
+  REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
+    [ ON DELETE action ] [ ON UPDATE action ] }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where table_constraint can be:
+[ CONSTRAINT constraint_name ]
+{ CHECK ( expression ) |
+  UNIQUE ( column_name [, ... ] ) index_parameters |
+  PRIMARY KEY ( column_name [, ... ] ) index_parameters |
+  FOREIGN KEY ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+    [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
+[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where like_option can be:
+{ INCLUDING | EXCLUDING } { DEFAULTS | GENERATED | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | RELOPTIONS | ALL }
+where index_parameters can be:
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+[ USING INDEX TABLESPACE tablespace_name ]
+NOTICE: 'CREATE TABLE SUBPARTITION' is only avaliable in CENTRALIZED mode!
+</synopsis>
+</refsynopsisdiv>
+</refentry>

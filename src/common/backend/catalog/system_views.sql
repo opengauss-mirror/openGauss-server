@@ -111,7 +111,7 @@ CREATE VIEW pg_rules AS
         N.nspname AS schemaname,
         C.relname AS tablename,
         R.rulename AS rulename,
-        pg_get_ruledef(R.oid) AS definition
+        pg_catalog.pg_get_ruledef(R.oid) AS definition
     FROM (pg_rewrite R JOIN pg_class C ON (C.oid = R.ev_class))
         LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
     WHERE R.rulename != '_RETURN';
@@ -140,7 +140,7 @@ SELECT labelname
         WHEN 'column' THEN relcolumn
         ELSE ''
     END AS columnname
-FROM gs_policy_label WHERE length(fqdntype)>0 ORDER BY labelname, labeltype ,fqdntype;
+FROM gs_policy_label WHERE pg_catalog.length(fqdntype)>0 ORDER BY labelname, labeltype ,fqdntype;
 
 REVOKE ALL on pg_catalog.gs_labels FROM public;
 --for audit
@@ -168,7 +168,7 @@ create view pg_catalog.gs_auditing_access as
     from gs_auditing_policy p
         left join gs_auditing_policy_access a ON (a.policyoid=p.Oid)
         left join gs_labels l ON (a.labelname=l.labelname)
-    where length(a.accesstype) > 0 order by 1,3;
+    where pg_catalog.length(a.accesstype) > 0 order by 1,3;
 
 REVOKE ALL on pg_catalog.gs_auditing_access FROM public;
 
@@ -196,7 +196,7 @@ create view pg_catalog.gs_auditing_privilege as
         from gs_auditing_policy p
             left join gs_auditing_policy_privileges priv ON (priv.policyoid=p.Oid)
             left join gs_labels l ON (priv.labelname=l.labelname)
-        where length(priv.privilegetype) > 0 order by 1,3;
+        where pg_catalog.length(priv.privilegetype) > 0 order by 1,3;
 
 REVOKE ALL on pg_catalog.gs_auditing_privilege FROM public;
 
@@ -272,8 +272,8 @@ CREATE VIEW pg_views AS
     SELECT
         N.nspname AS schemaname,
         C.relname AS viewname,
-        pg_get_userbyid(C.relowner) AS viewowner,
-        pg_get_viewdef(C.oid) AS definition
+        pg_catalog.pg_get_userbyid(C.relowner) AS viewowner,
+        pg_catalog.pg_get_viewdef(C.oid) AS definition
     FROM pg_class C LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
     WHERE C.relkind = 'v';
 
@@ -281,13 +281,13 @@ CREATE VIEW pg_tables AS
     SELECT
         N.nspname AS schemaname,
         C.relname AS tablename,
-        pg_get_userbyid(C.relowner) AS tableowner,
+        pg_catalog.pg_get_userbyid(C.relowner) AS tableowner,
         T.spcname AS tablespace,
         C.relhasindex AS hasindexes,
         C.relhasrules AS hasrules,
         C.relhastriggers AS hastriggers,
         case
-            when pg_check_authid(po.creator) then pg_get_userbyid(po.creator)
+            when pg_catalog.pg_check_authid(po.creator) then pg_catalog.pg_get_userbyid(po.creator)
             else CAST(NULL AS name)
         end as tablecreator,
         po.ctime AS created,
@@ -301,10 +301,10 @@ CREATE VIEW pg_catalog.gs_matviews AS
     SELECT
         N.nspname AS schemaname,
         C.relname AS matviewname,
-        pg_get_userbyid(C.relowner) AS matviewowner,
+        pg_catalog.pg_get_userbyid(C.relowner) AS matviewowner,
         T.spcname AS tablespace,
         C.relhasindex AS hasindexes,
-        pg_get_viewdef(C.oid) AS definition
+        pg_catalog.pg_get_viewdef(C.oid) AS definition
     FROM pg_class C LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
          LEFT JOIN pg_tablespace T ON (T.oid = C.reltablespace)
     WHERE C.relkind = 'm';
@@ -315,7 +315,7 @@ CREATE VIEW pg_indexes AS
         C.relname AS tablename,
         I.relname AS indexname,
         T.spcname AS tablespace,
-        pg_get_indexdef(I.oid) AS indexdef
+        pg_catalog.pg_get_indexdef(I.oid) AS indexdef
     FROM pg_index X JOIN pg_class C ON (C.oid = X.indrelid)
          JOIN pg_class I ON (I.oid = X.indexrelid)
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
@@ -326,12 +326,12 @@ CREATE VIEW pg_indexes AS
 CREATE VIEW pg_catalog.pg_gtt_relstats WITH (security_barrier) AS
  SELECT n.nspname AS schemaname,
     c.relname AS tablename,
-    (select relfilenode from pg_get_gtt_relstats(c.oid)),
-    (select relpages from pg_get_gtt_relstats(c.oid)),
-    (select reltuples from pg_get_gtt_relstats(c.oid)),
-    (select relallvisible from pg_get_gtt_relstats(c.oid)),
-    (select relfrozenxid from pg_get_gtt_relstats(c.oid)),
-    (select relminmxid from pg_get_gtt_relstats(c.oid))
+    (select relfilenode from pg_catalog.pg_get_gtt_relstats(c.oid)),
+    (select relpages from pg_catalog.pg_get_gtt_relstats(c.oid)),
+    (select reltuples from pg_catalog.pg_get_gtt_relstats(c.oid)),
+    (select relallvisible from pg_catalog.pg_get_gtt_relstats(c.oid)),
+    (select relfrozenxid from pg_catalog.pg_get_gtt_relstats(c.oid)),
+    (select relminmxid from pg_catalog.pg_get_gtt_relstats(c.oid))
  FROM
      pg_class c
      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -341,7 +341,7 @@ CREATE VIEW pg_catalog.pg_gtt_attached_pids WITH (security_barrier) AS
  SELECT n.nspname AS schemaname,
     c.relname AS tablename,
     c.oid AS relid,
-    array(select pid from pg_gtt_attached_pid(c.oid)) AS pids
+    array(select pid from pg_catalog.pg_gtt_attached_pid(c.oid)) AS pids
  FROM
      pg_class c
      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -408,30 +408,30 @@ SELECT s.nspname AS schemaname,
     (SELECT n.nspname,
         c.relname,
         a.attname,
-        (select stainherit from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stainherit,
-        (select stanullfrac from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanullfrac,
-        (select stawidth from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stawidth,
-        (select stadistinct from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stadistinct,
-        (select stakind1 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind1,
-        (select stakind2 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind2,
-        (select stakind3 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind3,
-        (select stakind4 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind4,
-        (select stakind5 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind5,
-        (select stanumbers1 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers1,
-        (select stanumbers2 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers2,
-        (select stanumbers3 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers3,
-        (select stanumbers4 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers4,
-        (select stanumbers5 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers5,
-        (select stavalues1 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues1,
-        (select stavalues2 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues2,
-        (select stavalues3 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues3,
-        (select stavalues4 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues4,
-        (select stavalues5 from pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues5
+        (select stainherit from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stainherit,
+        (select stanullfrac from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanullfrac,
+        (select stawidth from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stawidth,
+        (select stadistinct from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stadistinct,
+        (select stakind1 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind1,
+        (select stakind2 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind2,
+        (select stakind3 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind3,
+        (select stakind4 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind4,
+        (select stakind5 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stakind5,
+        (select stanumbers1 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers1,
+        (select stanumbers2 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers2,
+        (select stanumbers3 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers3,
+        (select stanumbers4 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers4,
+        (select stanumbers5 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stanumbers5,
+        (select stavalues1 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues1,
+        (select stavalues2 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues2,
+        (select stavalues3 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues3,
+        (select stavalues4 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues4,
+        (select stavalues5 from pg_catalog.pg_get_gtt_statistics(c.oid, a.attnum, ''::text)) as stavalues5
        FROM 
          pg_class c
          JOIN pg_attribute a ON c.oid = a.attrelid
          LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE c.relpersistence='g' AND c.relkind in('r','p','i','t') and a.attnum > 0 and NOT a.attisdropped AND has_column_privilege(c.oid, a.attnum, 'select'::text)) s;
+      WHERE c.relpersistence='g' AND c.relkind in('r','p','i','t') and a.attnum > 0 and NOT a.attisdropped AND pg_catalog.has_column_privilege(c.oid, a.attnum, 'select'::text)) s;
 
 CREATE VIEW pg_stats AS
     SELECT
@@ -495,7 +495,7 @@ CREATE VIEW pg_stats AS
     FROM pg_statistic s JOIN pg_class c ON (c.oid = s.starelid AND s.starelkind='c')
          JOIN pg_attribute a ON (c.oid = attrelid AND attnum = s.staattnum)
          LEFT JOIN pg_namespace n ON (n.oid = c.relnamespace)
-    WHERE NOT attisdropped AND has_column_privilege(c.oid, a.attnum, 'select');
+    WHERE NOT attisdropped AND pg_catalog.has_column_privilege(c.oid, a.attnum, 'select');
 
 CREATE VIEW pg_catalog.pg_ext_stats AS
     SELECT
@@ -587,9 +587,9 @@ SELECT
          WHEN rel.relkind = 'L' THEN 'large sequence'::text
 		 WHEN rel.relkind = 'f' THEN 'foreign table'::text END AS objtype,
 	rel.relnamespace AS objnamespace,
-	CASE WHEN pg_table_is_visible(rel.oid)
-	     THEN quote_ident(rel.relname)
-	     ELSE quote_ident(nsp.nspname) || '.' || quote_ident(rel.relname)
+	CASE WHEN pg_catalog.pg_table_is_visible(rel.oid)
+	     THEN pg_catalog.quote_ident(rel.relname)
+	     ELSE pg_catalog.quote_ident(nsp.nspname) || '.' || pg_catalog.quote_ident(rel.relname)
 	     END AS objname,
 	l.provider, l.label
 FROM
@@ -603,9 +603,9 @@ SELECT
 	l.objoid, l.classoid, l.objsubid,
 	'column'::text AS objtype,
 	rel.relnamespace AS objnamespace,
-	CASE WHEN pg_table_is_visible(rel.oid)
-	     THEN quote_ident(rel.relname)
-	     ELSE quote_ident(nsp.nspname) || '.' || quote_ident(rel.relname)
+	CASE WHEN pg_catalog.pg_table_is_visible(rel.oid)
+	     THEN pg_catalog.quote_ident(rel.relname)
+	     ELSE pg_catalog.quote_ident(nsp.nspname) || '.' || pg_catalog.quote_ident(rel.relname)
 	     END || '.' || att.attname AS objname,
 	l.provider, l.label
 FROM
@@ -623,9 +623,9 @@ SELECT
 	     WHEN pro.proisagg = false THEN 'function'::text
 	END AS objtype,
 	pro.pronamespace AS objnamespace,
-	CASE WHEN pg_function_is_visible(pro.oid)
-	     THEN quote_ident(pro.proname)
-	     ELSE quote_ident(nsp.nspname) || '.' || quote_ident(pro.proname)
+	CASE WHEN pg_catalog.pg_function_is_visible(pro.oid)
+	     THEN pg_catalog.quote_ident(pro.proname)
+	     ELSE pg_catalog.quote_ident(nsp.nspname) || '.' || pg_catalog.quote_ident(pro.proname)
 	END || '(' || pg_catalog.pg_get_function_arguments(pro.oid) || ')' AS objname,
 	l.provider, l.label
 FROM
@@ -640,9 +640,9 @@ SELECT
 	CASE WHEN typ.typtype = 'd' THEN 'domain'::text
 	ELSE 'type'::text END AS objtype,
 	typ.typnamespace AS objnamespace,
-	CASE WHEN pg_type_is_visible(typ.oid)
-	THEN quote_ident(typ.typname)
-	ELSE quote_ident(nsp.nspname) || '.' || quote_ident(typ.typname)
+	CASE WHEN pg_catalog.pg_type_is_visible(typ.oid)
+	THEN pg_catalog.quote_ident(typ.typname)
+	ELSE pg_catalog.quote_ident(nsp.nspname) || '.' || pg_catalog.quote_ident(typ.typname)
 	END AS objname,
 	l.provider, l.label
 FROM
@@ -668,7 +668,7 @@ SELECT
 	l.objoid, l.classoid, l.objsubid,
 	'language'::text AS objtype,
 	NULL::oid AS objnamespace,
-	quote_ident(lan.lanname) AS objname,
+    pg_catalog.quote_ident(lan.lanname) AS objname,
 	l.provider, l.label
 FROM
 	pg_seclabel l
@@ -680,7 +680,7 @@ SELECT
 	l.objoid, l.classoid, l.objsubid,
 	'schema'::text AS objtype,
 	nsp.oid AS objnamespace,
-	quote_ident(nsp.nspname) AS objname,
+    pg_catalog.quote_ident(nsp.nspname) AS objname,
 	l.provider, l.label
 FROM
 	pg_seclabel l
@@ -692,7 +692,7 @@ SELECT
 	l.objoid, l.classoid, 0::int4 AS objsubid,
 	'database'::text AS objtype,
 	NULL::oid AS objnamespace,
-	quote_ident(dat.datname) AS objname,
+    pg_catalog.quote_ident(dat.datname) AS objname,
 	l.provider, l.label
 FROM
 	pg_shseclabel l
@@ -702,7 +702,7 @@ SELECT
 	l.objoid, l.classoid, 0::int4 AS objsubid,
 	'tablespace'::text AS objtype,
 	NULL::oid AS objnamespace,
-	quote_ident(spc.spcname) AS objname,
+    pg_catalog.quote_ident(spc.spcname) AS objname,
 	l.provider, l.label
 FROM
 	pg_shseclabel l
@@ -712,7 +712,7 @@ SELECT
 	l.objoid, l.classoid, 0::int4 AS objsubid,
 	'role'::text AS objtype,
 	NULL::oid AS objnamespace,
-	quote_ident(rol.rolname) AS objname,
+    pg_catalog.quote_ident(rol.rolname) AS objname,
 	l.provider, l.label
 FROM
 	pg_shseclabel l
@@ -724,7 +724,7 @@ CREATE VIEW pg_settings AS
 CREATE RULE pg_settings_u AS
     ON UPDATE TO pg_settings
     WHERE new.name = old.name DO
-    SELECT set_config(old.name, new.setting, 'f');
+    SELECT pg_catalog.set_config(old.name, new.setting, 'f');
 
 CREATE RULE pg_settings_n AS
     ON UPDATE TO pg_settings
@@ -748,26 +748,26 @@ CREATE VIEW pg_stat_all_tables AS
             C.oid AS relid,
             N.nspname AS schemaname,
             C.relname AS relname,
-            pg_stat_get_numscans(C.oid) AS seq_scan,
-            pg_stat_get_tuples_returned(C.oid) AS seq_tup_read,
-            sum(pg_stat_get_numscans(I.indexrelid))::bigint AS idx_scan,
-            sum(pg_stat_get_tuples_fetched(I.indexrelid))::bigint +
-            pg_stat_get_tuples_fetched(C.oid) AS idx_tup_fetch,
-            pg_stat_get_tuples_inserted(C.oid) AS n_tup_ins,
-            pg_stat_get_tuples_updated(C.oid) AS n_tup_upd,
-            pg_stat_get_tuples_deleted(C.oid) AS n_tup_del,
-            pg_stat_get_tuples_hot_updated(C.oid) AS n_tup_hot_upd,
-            pg_stat_get_live_tuples(C.oid) AS n_live_tup,
-            pg_stat_get_dead_tuples(C.oid) AS n_dead_tup,
-            pg_stat_get_last_vacuum_time(C.oid) as last_vacuum,
-            pg_stat_get_last_autovacuum_time(C.oid) as last_autovacuum,
-            pg_stat_get_last_analyze_time(C.oid) as last_analyze,
-            pg_stat_get_last_autoanalyze_time(C.oid) as last_autoanalyze,
-            pg_stat_get_vacuum_count(C.oid) AS vacuum_count,
-            pg_stat_get_autovacuum_count(C.oid) AS autovacuum_count,
-            pg_stat_get_analyze_count(C.oid) AS analyze_count,
-            pg_stat_get_autoanalyze_count(C.oid) AS autoanalyze_count,
-            pg_stat_get_last_data_changed_time(C.oid) AS last_data_changed
+            pg_catalog.pg_stat_get_numscans(C.oid) AS seq_scan,
+            pg_catalog.pg_stat_get_tuples_returned(C.oid) AS seq_tup_read,
+            pg_catalog.sum(pg_catalog.pg_stat_get_numscans(I.indexrelid))::bigint AS idx_scan,
+            pg_catalog.sum(pg_catalog.pg_stat_get_tuples_fetched(I.indexrelid))::bigint +
+            pg_catalog.pg_stat_get_tuples_fetched(C.oid) AS idx_tup_fetch,
+            pg_catalog.pg_stat_get_tuples_inserted(C.oid) AS n_tup_ins,
+            pg_catalog.pg_stat_get_tuples_updated(C.oid) AS n_tup_upd,
+            pg_catalog.pg_stat_get_tuples_deleted(C.oid) AS n_tup_del,
+            pg_catalog.pg_stat_get_tuples_hot_updated(C.oid) AS n_tup_hot_upd,
+            pg_catalog.pg_stat_get_live_tuples(C.oid) AS n_live_tup,
+            pg_catalog.pg_stat_get_dead_tuples(C.oid) AS n_dead_tup,
+            pg_catalog.pg_stat_get_last_vacuum_time(C.oid) as last_vacuum,
+            pg_catalog.pg_stat_get_last_autovacuum_time(C.oid) as last_autovacuum,
+            pg_catalog.pg_stat_get_last_analyze_time(C.oid) as last_analyze,
+            pg_catalog.pg_stat_get_last_autoanalyze_time(C.oid) as last_autoanalyze,
+            pg_catalog.pg_stat_get_vacuum_count(C.oid) AS vacuum_count,
+            pg_catalog.pg_stat_get_autovacuum_count(C.oid) AS autovacuum_count,
+            pg_catalog.pg_stat_get_analyze_count(C.oid) AS analyze_count,
+            pg_catalog.pg_stat_get_autoanalyze_count(C.oid) AS autoanalyze_count,
+            pg_catalog.pg_stat_get_last_data_changed_time(C.oid) AS last_data_changed
     FROM pg_class C LEFT JOIN
          pg_index I ON C.oid = I.indrelid
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
@@ -779,15 +779,15 @@ CREATE VIEW pg_stat_xact_all_tables AS
             C.oid AS relid,
             N.nspname AS schemaname,
             C.relname AS relname,
-            pg_stat_get_xact_numscans(C.oid) AS seq_scan,
-            pg_stat_get_xact_tuples_returned(C.oid) AS seq_tup_read,
-            sum(pg_stat_get_xact_numscans(I.indexrelid))::bigint AS idx_scan,
-            sum(pg_stat_get_xact_tuples_fetched(I.indexrelid))::bigint +
-            pg_stat_get_xact_tuples_fetched(C.oid) AS idx_tup_fetch,
-            pg_stat_get_xact_tuples_inserted(C.oid) AS n_tup_ins,
-            pg_stat_get_xact_tuples_updated(C.oid) AS n_tup_upd,
-            pg_stat_get_xact_tuples_deleted(C.oid) AS n_tup_del,
-            pg_stat_get_xact_tuples_hot_updated(C.oid) AS n_tup_hot_upd
+            pg_catalog.pg_stat_get_xact_numscans(C.oid) AS seq_scan,
+            pg_catalog.pg_stat_get_xact_tuples_returned(C.oid) AS seq_tup_read,
+            pg_catalog.sum(pg_catalog.pg_stat_get_xact_numscans(I.indexrelid))::bigint AS idx_scan,
+            pg_catalog.sum(pg_catalog.pg_stat_get_xact_tuples_fetched(I.indexrelid))::bigint +
+            pg_catalog.pg_stat_get_xact_tuples_fetched(C.oid) AS idx_tup_fetch,
+            pg_catalog.pg_stat_get_xact_tuples_inserted(C.oid) AS n_tup_ins,
+            pg_catalog.pg_stat_get_xact_tuples_updated(C.oid) AS n_tup_upd,
+            pg_catalog.pg_stat_get_xact_tuples_deleted(C.oid) AS n_tup_del,
+            pg_catalog.pg_stat_get_xact_tuples_hot_updated(C.oid) AS n_tup_hot_upd
     FROM pg_class C LEFT JOIN
          pg_index I ON C.oid = I.indrelid
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
@@ -819,18 +819,18 @@ CREATE VIEW pg_statio_all_tables AS
             C.oid AS relid,
             N.nspname AS schemaname,
             C.relname AS relname,
-            pg_stat_get_blocks_fetched(C.oid) -
-                    pg_stat_get_blocks_hit(C.oid) AS heap_blks_read,
-            pg_stat_get_blocks_hit(C.oid) AS heap_blks_hit,
-            sum(pg_stat_get_blocks_fetched(I.indexrelid) -
-                    pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_read,
-            sum(pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_hit,
-            pg_stat_get_blocks_fetched(T.oid) -
-                    pg_stat_get_blocks_hit(T.oid) AS toast_blks_read,
-            pg_stat_get_blocks_hit(T.oid) AS toast_blks_hit,
-            pg_stat_get_blocks_fetched(X.oid) -
-                    pg_stat_get_blocks_hit(X.oid) AS tidx_blks_read,
-            pg_stat_get_blocks_hit(X.oid) AS tidx_blks_hit
+            pg_catalog.pg_stat_get_blocks_fetched(C.oid) -
+                    pg_catalog.pg_stat_get_blocks_hit(C.oid) AS heap_blks_read,
+            pg_catalog.pg_stat_get_blocks_hit(C.oid) AS heap_blks_hit,
+            pg_catalog.sum(pg_catalog.pg_stat_get_blocks_fetched(I.indexrelid) -
+                pg_catalog.pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_read,
+            pg_catalog.sum(pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_hit,
+            pg_catalog.pg_stat_get_blocks_fetched(T.oid) -
+                    pg_catalog.pg_stat_get_blocks_hit(T.oid) AS toast_blks_read,
+            pg_catalog.pg_stat_get_blocks_hit(T.oid) AS toast_blks_hit,
+            pg_catalog.pg_stat_get_blocks_fetched(X.oid) -
+                    pg_catalog.pg_stat_get_blocks_hit(X.oid) AS tidx_blks_read,
+            pg_catalog.pg_stat_get_blocks_hit(X.oid) AS tidx_blks_hit
     FROM pg_class C LEFT JOIN
             pg_index I ON C.oid = I.indrelid LEFT JOIN
             pg_class T ON C.reltoastrelid = T.oid LEFT JOIN
@@ -856,9 +856,9 @@ CREATE VIEW pg_stat_all_indexes AS
             N.nspname AS schemaname,
             C.relname AS relname,
             I.relname AS indexrelname,
-            pg_stat_get_numscans(I.oid) AS idx_scan,
-            pg_stat_get_tuples_returned(I.oid) AS idx_tup_read,
-            pg_stat_get_tuples_fetched(I.oid) AS idx_tup_fetch
+            pg_catalog.pg_stat_get_numscans(I.oid) AS idx_scan,
+            pg_catalog.pg_stat_get_tuples_returned(I.oid) AS idx_tup_read,
+            pg_catalog.pg_stat_get_tuples_fetched(I.oid) AS idx_tup_fetch
     FROM pg_class C JOIN
             pg_index X ON C.oid = X.indrelid JOIN
             pg_class I ON I.oid = X.indexrelid
@@ -883,8 +883,8 @@ CREATE VIEW pg_statio_all_indexes AS
             C.relname AS relname,
             I.relname AS indexrelname,
             pg_stat_get_blocks_fetched(I.oid) -
-                    pg_stat_get_blocks_hit(I.oid) AS idx_blks_read,
-            pg_stat_get_blocks_hit(I.oid) AS idx_blks_hit
+                    pg_catalog.pg_stat_get_blocks_hit(I.oid) AS idx_blks_read,
+            pg_catalog.pg_stat_get_blocks_hit(I.oid) AS idx_blks_hit
     FROM pg_class C JOIN
             pg_index X ON C.oid = X.indrelid JOIN
             pg_class I ON I.oid = X.indexrelid
@@ -907,8 +907,8 @@ CREATE VIEW pg_statio_all_sequences AS
             N.nspname AS schemaname,
             C.relname AS relname,
             pg_stat_get_blocks_fetched(C.oid) -
-                    pg_stat_get_blocks_hit(C.oid) AS blks_read,
-            pg_stat_get_blocks_hit(C.oid) AS blks_hit
+                    pg_catalog.pg_stat_get_blocks_hit(C.oid) AS blks_read,
+            pg_catalog.pg_stat_get_blocks_hit(C.oid) AS blks_hit
     FROM pg_class C
             LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
     WHERE C.relkind = 'S' or C.relkind = 'L';
@@ -948,8 +948,10 @@ CREATE OR REPLACE VIEW pg_catalog.pg_stat_activity AS
 			END AS resource_pool,
             S.query_id,
             S.query,
-            S.connection_info
-    FROM pg_database D, pg_stat_get_activity_with_conninfo(NULL) AS S, pg_authid U
+            S.connection_info,
+            S.unique_sql_id,
+            S.trace_id
+    FROM pg_database D, pg_catalog.pg_stat_get_activity_with_conninfo(NULL) AS S, pg_authid U
     WHERE S.datid = D.oid AND
             S.usesysid = U.oid;
 
@@ -979,7 +981,7 @@ CREATE OR REPLACE VIEW pg_catalog.pg_stat_activity_ng AS
             S.query_id,
             S.query,
             N.node_group
-    FROM pg_database D, pg_stat_get_activity(NULL) AS S, pg_stat_get_activity_ng(NULL) AS N, pg_authid U
+    FROM pg_database D, pg_catalog.pg_stat_get_activity(NULL) AS S, pg_catalog.pg_stat_get_activity_ng(NULL) AS N, pg_authid U
     WHERE S.datid = D.oid AND
             S.usesysid = U.oid AND
             S.sessionid = N.sessionid;
@@ -1017,7 +1019,7 @@ CREATE OR REPLACE VIEW pg_catalog.pg_session_wlmstat AS
             S.query,
             S.is_plana,
             S.node_group
-    FROM pg_database D, pg_stat_get_session_wlmstat(NULL) AS S, pg_authid AS U, gs_wlm_session_respool(0) AS T
+    FROM pg_database D, pg_catalog.pg_stat_get_session_wlmstat(NULL) AS S, pg_authid AS U, pg_catalog.gs_wlm_session_respool(0) AS T
     WHERE S.datid = D.oid AND
             S.usesysid = U.oid AND
             T.sessionid = S.sessionid;
@@ -1033,7 +1035,7 @@ CREATE VIEW pg_wlm_statistics AS
             control_group,
             status,
             action 
-    FROM pg_stat_get_wlm_statistics(NULL);
+    FROM pg_catalog.pg_stat_get_wlm_statistics(NULL);
     
 CREATE VIEW gs_session_memory_statistics AS
 SELECT
@@ -1047,7 +1049,7 @@ SELECT
         S.query,
         S.node_group,
         T.top_mem_dn
-FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_realtime_session_info(NULL) AS T
+FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
 WHERE S.pid = T.threadid;
  
 CREATE VIEW pg_session_iostat AS
@@ -1065,10 +1067,10 @@ CREATE VIEW pg_session_iostat AS
         S.query,
         S.node_group,
         T.curr_io_limits as curr_io_limits
-FROM pg_stat_activity_ng AS S,  pg_stat_get_wlm_session_iostat_info(0) AS T
+FROM pg_stat_activity_ng AS S,  pg_catalog.pg_stat_get_wlm_session_iostat_info(0) AS T
 WHERE S.pid = T.threadid;
 
-CREATE VIEW gs_cluster_resource_info AS SELECT * FROM pg_stat_get_wlm_node_resource_info(0);
+CREATE VIEW gs_cluster_resource_info AS SELECT * FROM pg_catalog.pg_stat_get_wlm_node_resource_info(0);
 
 CREATE VIEW gs_session_cpu_statistics AS
 SELECT
@@ -1082,7 +1084,7 @@ SELECT
         S.query,
         S.node_group,
         T.top_cpu_dn
-FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_realtime_session_info(NULL) AS T
+FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
 WHERE S.sessionid = T.threadid;
 
 CREATE VIEW gs_wlm_session_statistics AS
@@ -1136,7 +1138,7 @@ SELECT
         S.node_group,
         T.top_cpu_dn,
         T.top_mem_dn
-FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_realtime_session_info(NULL) AS T
+FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
 WHERE S.pid = T.threadid;
 
 CREATE OR REPLACE FUNCTION gs_wlm_get_all_user_resource_info()
@@ -1150,7 +1152,7 @@ DECLARE
 	BEGIN                                                                   
 		query_str := 'SELECT rolname FROM pg_authid';
 		FOR row_name IN EXECUTE(query_str) LOOP              
-			query_str2 := 'SELECT * FROM gs_wlm_user_resource_info(''' || row_name.rolname || ''')';
+			query_str2 := 'SELECT * FROM pg_catalog.gs_wlm_user_resource_info(''' || row_name.rolname || ''')';
 			FOR row_data IN EXECUTE(query_str2) LOOP          
 				return next row_data;
 			END LOOP;                                          
@@ -1276,7 +1278,7 @@ DECLARE
 	record_cnt int;
 	BEGIN
 	    record_cnt := 0;
-		query_str := 'SELECT * FROM pg_stat_get_wlm_instance_info_with_cleanup()';
+		query_str := 'SELECT * FROM pg_catalog.pg_stat_get_wlm_instance_info_with_cleanup()';
         EXECUTE 'INSERT INTO gs_wlm_instance_history ' || query_str;
         return record_cnt;
 	END; $$
@@ -1374,7 +1376,7 @@ create table gs_wlm_session_query_info_all
 );
 
 CREATE VIEW gs_wlm_session_info_all AS
-SELECT * FROM pg_stat_get_wlm_session_info(0);
+SELECT * FROM pg_catalog.pg_stat_get_wlm_session_info(0);
 
 CREATE VIEW gs_wlm_session_info AS
 SELECT
@@ -1522,7 +1524,7 @@ FROM gs_wlm_session_info_all S;
 
 
 
-CREATE OR REPLACE FUNCTION create_wlm_session_info(IN flag int)
+CREATE OR REPLACE FUNCTION pg_catalog.create_wlm_session_info(IN flag int)
 RETURNS int
 AS $$
 DECLARE
@@ -1531,7 +1533,7 @@ DECLARE
 	BEGIN
 		record_cnt := 0;
 		
-		query_str := 'SELECT * FROM pg_stat_get_wlm_session_info(1)';
+		query_str := 'SELECT * FROM pg_catalog.pg_stat_get_wlm_session_info(1)';
 		
 		IF flag > 0 THEN
 			EXECUTE 'INSERT INTO gs_wlm_session_query_info_all ' || query_str;
@@ -1554,7 +1556,7 @@ CREATE VIEW gs_wlm_cgroup_info AS
             relpath,
             valid,
             node_group
-    FROM pg_stat_get_cgroup_info(NULL);
+    FROM pg_catalog.pg_stat_get_cgroup_info(NULL);
 	
 CREATE VIEW gs_wlm_user_info AS
 SELECT
@@ -1568,7 +1570,7 @@ SELECT
 		T.spacelimit,
 		T.childcount,
 		T.childlist
-FROM pg_roles AS S, gs_wlm_get_user_info(NULL) AS T, pg_resource_pool AS R
+FROM pg_roles AS S, pg_catalog.gs_wlm_get_user_info(NULL) AS T, pg_resource_pool AS R
 WHERE S.oid = T.userid AND T.rpoid = R.oid;
 
 CREATE VIEW gs_wlm_resource_pool AS
@@ -1583,11 +1585,11 @@ SELECT
 		T.waiting_count,
 		T.iops_limits as io_limits,
 		T.io_priority
-FROM gs_wlm_get_resource_pool_info(0) AS T, pg_resource_pool AS R
+FROM pg_catalog.gs_wlm_get_resource_pool_info(0) AS T, pg_resource_pool AS R
 WHERE T.respool_oid = R.oid;
 
 CREATE VIEW gs_wlm_rebuild_user_resource_pool AS
-	SELECT * FROM gs_wlm_rebuild_user_resource_pool(0);
+	SELECT * FROM pg_catalog.gs_wlm_rebuild_user_resource_pool(0);
 	
 CREATE VIEW gs_wlm_workload_records AS
     SELECT
@@ -1606,7 +1608,7 @@ CREATE VIEW gs_wlm_workload_records AS
 			P.queue_type AS enqueue,
             S.query,
             P.node_group
-    FROM pg_stat_get_session_wlmstat(NULL) AS S, pg_authid U, gs_wlm_get_workload_records(0) P
+    FROM pg_catalog.pg_stat_get_session_wlmstat(NULL) AS S, pg_authid U, pg_catalog.gs_wlm_get_workload_records(0) P
     WHERE P.query_pid = S.threadpid AND
             S.usesysid = U.oid;	
 
@@ -1699,7 +1701,7 @@ BEGIN
                     T.totalsize AS totalsize,
                     T.freesize AS freesize,
                     T.usedsize AS usedsize
-                  FROM pv_thread_memory_detail() T;';
+                  FROM pg_catalog.pv_thread_memory_detail() T;';
     FOR row_data IN EXECUTE(query_str) LOOP
       sessid = row_data.sessid;
       sesstype = row_data.sesstype;
@@ -1735,8 +1737,8 @@ CREATE VIEW pg_stat_replication AS
             W.receiver_replay_location,
             W.sync_priority,
             W.sync_state
-    FROM pg_stat_get_activity(NULL) AS S, pg_authid U,
-            pg_stat_get_wal_senders() AS W
+    FROM pg_catalog.pg_stat_get_activity(NULL) AS S, pg_authid U,
+         pg_catalog.pg_stat_get_wal_senders() AS W
     WHERE S.usesysid = U.oid AND
             S.pid = W.pid;
             
@@ -1760,35 +1762,35 @@ CREATE VIEW pg_stat_database AS
     SELECT
             D.oid AS datid,
             D.datname AS datname,
-            pg_stat_get_db_numbackends(D.oid) AS numbackends,
-            pg_stat_get_db_xact_commit(D.oid) AS xact_commit,
-            pg_stat_get_db_xact_rollback(D.oid) AS xact_rollback,
-            pg_stat_get_db_blocks_fetched(D.oid) -
-                    pg_stat_get_db_blocks_hit(D.oid) AS blks_read,
-            pg_stat_get_db_blocks_hit(D.oid) AS blks_hit,
-            pg_stat_get_db_tuples_returned(D.oid) AS tup_returned,
-            pg_stat_get_db_tuples_fetched(D.oid) AS tup_fetched,
-            pg_stat_get_db_tuples_inserted(D.oid) AS tup_inserted,
-            pg_stat_get_db_tuples_updated(D.oid) AS tup_updated,
-            pg_stat_get_db_tuples_deleted(D.oid) AS tup_deleted,
-            pg_stat_get_db_conflict_all(D.oid) AS conflicts,
-            pg_stat_get_db_temp_files(D.oid) AS temp_files,
-            pg_stat_get_db_temp_bytes(D.oid) AS temp_bytes,
-            pg_stat_get_db_deadlocks(D.oid) AS deadlocks,
-            pg_stat_get_db_blk_read_time(D.oid) AS blk_read_time,
-            pg_stat_get_db_blk_write_time(D.oid) AS blk_write_time,
-            pg_stat_get_db_stat_reset_time(D.oid) AS stats_reset
+            pg_catalog.pg_stat_get_db_numbackends(D.oid) AS numbackends,
+            pg_catalog.pg_stat_get_db_xact_commit(D.oid) AS xact_commit,
+            pg_catalog.pg_stat_get_db_xact_rollback(D.oid) AS xact_rollback,
+            pg_catalog.pg_stat_get_db_blocks_fetched(D.oid) -
+                    pg_catalog.pg_stat_get_db_blocks_hit(D.oid) AS blks_read,
+            pg_catalog.pg_stat_get_db_blocks_hit(D.oid) AS blks_hit,
+            pg_catalog.pg_stat_get_db_tuples_returned(D.oid) AS tup_returned,
+            pg_catalog.pg_stat_get_db_tuples_fetched(D.oid) AS tup_fetched,
+            pg_catalog.pg_stat_get_db_tuples_inserted(D.oid) AS tup_inserted,
+            pg_catalog.pg_stat_get_db_tuples_updated(D.oid) AS tup_updated,
+            pg_catalog.pg_stat_get_db_tuples_deleted(D.oid) AS tup_deleted,
+            pg_catalog.pg_stat_get_db_conflict_all(D.oid) AS conflicts,
+            pg_catalog.pg_stat_get_db_temp_files(D.oid) AS temp_files,
+            pg_catalog.pg_stat_get_db_temp_bytes(D.oid) AS temp_bytes,
+            pg_catalog.pg_stat_get_db_deadlocks(D.oid) AS deadlocks,
+            pg_catalog.pg_stat_get_db_blk_read_time(D.oid) AS blk_read_time,
+            pg_catalog.pg_stat_get_db_blk_write_time(D.oid) AS blk_write_time,
+            pg_catalog.pg_stat_get_db_stat_reset_time(D.oid) AS stats_reset
     FROM pg_database D;
 
 CREATE VIEW pg_stat_database_conflicts AS
     SELECT
             D.oid AS datid,
             D.datname AS datname,
-            pg_stat_get_db_conflict_tablespace(D.oid) AS confl_tablespace,
-            pg_stat_get_db_conflict_lock(D.oid) AS confl_lock,
-            pg_stat_get_db_conflict_snapshot(D.oid) AS confl_snapshot,
-            pg_stat_get_db_conflict_bufferpin(D.oid) AS confl_bufferpin,
-            pg_stat_get_db_conflict_startup_deadlock(D.oid) AS confl_deadlock
+            pg_catalog.pg_stat_get_db_conflict_tablespace(D.oid) AS confl_tablespace,
+            pg_catalog.pg_stat_get_db_conflict_lock(D.oid) AS confl_lock,
+            pg_catalog.pg_stat_get_db_conflict_snapshot(D.oid) AS confl_snapshot,
+            pg_catalog.pg_stat_get_db_conflict_bufferpin(D.oid) AS confl_bufferpin,
+            pg_catalog.pg_stat_get_db_conflict_startup_deadlock(D.oid) AS confl_deadlock
     FROM pg_database D;
 
 CREATE VIEW pg_stat_user_functions AS
@@ -1796,24 +1798,24 @@ CREATE VIEW pg_stat_user_functions AS
             P.oid AS funcid,
             N.nspname AS schemaname,
             P.proname AS funcname,
-            pg_stat_get_function_calls(P.oid) AS calls,
-            pg_stat_get_function_total_time(P.oid) AS total_time,
-            pg_stat_get_function_self_time(P.oid) AS self_time
+            pg_catalog.pg_stat_get_function_calls(P.oid) AS calls,
+            pg_catalog.pg_stat_get_function_total_time(P.oid) AS total_time,
+            pg_catalog.pg_stat_get_function_self_time(P.oid) AS self_time
     FROM pg_proc P LEFT JOIN pg_namespace N ON (N.oid = P.pronamespace)
     WHERE P.prolang != 12  -- fast check to eliminate built-in functions
-          AND pg_stat_get_function_calls(P.oid) IS NOT NULL;
+          AND pg_catalog.pg_stat_get_function_calls(P.oid) IS NOT NULL;
 
 CREATE VIEW pg_stat_xact_user_functions AS
     SELECT
             P.oid AS funcid,
             N.nspname AS schemaname,
             P.proname AS funcname,
-            pg_stat_get_xact_function_calls(P.oid) AS calls,
-            pg_stat_get_xact_function_total_time(P.oid) AS total_time,
-            pg_stat_get_xact_function_self_time(P.oid) AS self_time
+            pg_catalog.pg_stat_get_xact_function_calls(P.oid) AS calls,
+            pg_catalog.pg_stat_get_xact_function_total_time(P.oid) AS total_time,
+            pg_catalog.pg_stat_get_xact_function_self_time(P.oid) AS self_time
     FROM pg_proc P LEFT JOIN pg_namespace N ON (N.oid = P.pronamespace)
     WHERE P.prolang != 12  -- fast check to eliminate built-in functions
-          AND pg_stat_get_xact_function_calls(P.oid) IS NOT NULL;
+          AND pg_catalog.pg_stat_get_xact_function_calls(P.oid) IS NOT NULL;
 
 CREATE VIEW pg_stat_bgwriter AS
     SELECT
@@ -1840,7 +1842,7 @@ CREATE VIEW pg_user_mappings AS
         ELSE
             A.rolname
         END AS usename,
-        CASE WHEN pg_has_role(S.srvowner, 'USAGE') OR has_server_privilege(S.oid, 'USAGE') THEN
+        CASE WHEN pg_catalog.pg_has_role(S.srvowner, 'USAGE') OR pg_catalog.has_server_privilege(S.oid, 'USAGE') THEN
             U.umoptions
         ELSE
             NULL
@@ -1852,47 +1854,47 @@ CREATE VIEW pg_user_mappings AS
 REVOKE ALL on pg_user_mapping FROM public;
 
 -- these functions are added for supporting default format transformation
-CREATE OR REPLACE FUNCTION to_char(NUMERIC)
+CREATE OR REPLACE FUNCTION pg_catalog.to_char(NUMERIC)
 RETURNS VARCHAR2
 AS $$ SELECT CAST(numeric_out($1) AS VARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_char(INT2)
+CREATE OR REPLACE FUNCTION pg_catalog.to_char(INT2)
 RETURNS VARCHAR2
-AS $$ SELECT CAST(int2out($1) AS VARCHAR2) $$
+AS $$ SELECT CAST(pg_catalog.int2out($1) AS VARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_char(INT4)
+CREATE OR REPLACE FUNCTION pg_catalog.to_char(INT4)
 RETURNS VARCHAR2
-AS $$  SELECT CAST(int4out($1) AS VARCHAR2) $$
+AS $$  SELECT CAST(pg_catalog.int4out($1) AS VARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_char(INT8)
+CREATE OR REPLACE FUNCTION pg_catalog.to_char(INT8)
 RETURNS VARCHAR2
-AS $$ SELECT CAST(int8out($1) AS VARCHAR2) $$
+AS $$ SELECT CAST(pg_catalog.int8out($1) AS VARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_char(FLOAT4)
+CREATE OR REPLACE FUNCTION pg_catalog.to_char(FLOAT4)
 RETURNS VARCHAR2
-AS $$ SELECT CAST(float4out($1) AS VARCHAR2) $$
+AS $$ SELECT CAST(pg_catalog.float4out($1) AS VARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_char(FLOAT8)
+CREATE OR REPLACE FUNCTION pg_catalog.to_char(FLOAT8)
 RETURNS VARCHAR2
-AS $$ SELECT CAST(float8out($1) AS VARCHAR2) $$
+AS $$ SELECT CAST(pg_catalog.float8out($1) AS VARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_char(TEXT)
+CREATE OR REPLACE FUNCTION pg_catalog.to_char(TEXT)
 RETURNS TEXT
 AS $$ SELECT $1 $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_number(TEXT)
+CREATE OR REPLACE FUNCTION pg_catalog.to_number(TEXT)
 RETURNS NUMERIC
-AS $$ SELECT numeric_in(textout($1), 0::Oid, -1) $$
+AS $$ SELECT pg_catalog.numeric_in(textout($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE CAST (VARCHAR2 AS RAW) WITH FUNCTION hextoraw(text) AS IMPLICIT;
+CREATE CAST (VARCHAR2 AS RAW) WITH FUNCTION pg_catalog.hextoraw(text) AS IMPLICIT;
 
 --
 -- We have a few function definitions in here, too.
@@ -1903,7 +1905,7 @@ CREATE CAST (VARCHAR2 AS RAW) WITH FUNCTION hextoraw(text) AS IMPLICIT;
 -- Tsearch debug function.  Defined here because it'd be pretty unwieldy
 -- to put it into pg_proc.h
 
-CREATE FUNCTION ts_debug(IN config regconfig, IN document text,
+CREATE FUNCTION pg_catalog.ts_debug(IN config regconfig, IN document text,
     OUT alias text,
     OUT description text,
     OUT token text,
@@ -1943,10 +1945,10 @@ WHERE tt.tokid = parse.tokid
 $$
 LANGUAGE SQL STRICT STABLE NOT FENCED;
 
-COMMENT ON FUNCTION ts_debug(regconfig,text) IS
+COMMENT ON FUNCTION pg_catalog.ts_debug(regconfig,text) IS
     'debug function for text search configuration';
 
-CREATE FUNCTION ts_debug(IN document text,
+CREATE FUNCTION pg_catalog.ts_debug(IN document text,
     OUT alias text,
     OUT description text,
     OUT token text,
@@ -1959,7 +1961,7 @@ $$
 $$
 LANGUAGE SQL STRICT STABLE NOT FENCED;
 
-COMMENT ON FUNCTION ts_debug(text) IS
+COMMENT ON FUNCTION pg_catalog.ts_debug(text) IS
     'debug function for current text search configuration';
 
 --
@@ -1971,133 +1973,133 @@ COMMENT ON FUNCTION ts_debug(text) IS
 -- to get filled in.)
 --
 
-CREATE OR REPLACE FUNCTION TO_TEXT(INT2)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(INT2)
 RETURNS TEXT
-AS $$ select CAST(int2out($1) AS VARCHAR)  $$
+AS $$ select CAST(pg_catalog.int2out($1) AS VARCHAR)  $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_TEXT(INT4)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(INT4)
 RETURNS TEXT
-AS $$  select CAST(int4out($1) AS VARCHAR)  $$
+AS $$  select CAST(pg_catalog.int4out($1) AS VARCHAR)  $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_TEXT(INT8)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(INT8)
 RETURNS TEXT
-AS $$ select CAST(int8out($1) AS VARCHAR) $$
+AS $$ select CAST(pg_catalog.int8out($1) AS VARCHAR) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_TEXT(FLOAT4)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(FLOAT4)
 RETURNS TEXT
-AS $$ select CAST(float4out($1) AS VARCHAR) $$
+AS $$ select CAST(pg_catalog.float4out($1) AS VARCHAR) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_TEXT(FLOAT8)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(FLOAT8)
 RETURNS TEXT
-AS $$ select CAST(float8out($1) AS VARCHAR) $$
+AS $$ select CAST(pg_catalog.float8out($1) AS VARCHAR) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_TEXT(NUMERIC)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(NUMERIC)
 RETURNS TEXT
-AS $$ SELECT CAST(numeric_out($1) AS VARCHAR) $$
+AS $$ SELECT CAST(pg_catalog.numeric_out($1) AS VARCHAR) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_TEXT(INTERVAL)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(INTERVAL)
 RETURNS TEXT
-AS $$  select CAST(interval_out($1) AS TEXT) $$
+AS $$  select CAST(pg_catalog.interval_out($1) AS TEXT) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 --logical decoding
 
 CREATE CAST (INTERVAL AS TEXT) WITH FUNCTION
-TO_TEXT(INTERVAL) AS IMPLICIT;
+pg_catalog.TO_TEXT(INTERVAL) AS IMPLICIT;
 
-create or replace function to_number(text)
+create or replace function pg_catalog.to_number(text)
 returns numeric
-AS $$ select numeric_in(textout($1), 0::Oid, -1) $$
+AS $$ select pg_catalog.numeric_in(pg_catalog.textout($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION time_text(time)
+CREATE OR REPLACE FUNCTION pg_catalog.time_text(time)
 RETURNS text 
-AS $$ SELECT CAST(time_out($1) AS text) $$
+AS $$ SELECT CAST(pg_catalog.time_out($1) AS text) $$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
 
-CREATE CAST (time AS text) WITH FUNCTION time_text(time) AS IMPLICIT;
+CREATE CAST (time AS text) WITH FUNCTION pg_catalog.time_text(time) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION timetz_text(timetz)
+CREATE OR REPLACE FUNCTION pg_catalog.timetz_text(timetz)
 RETURNS text 
-AS $$ SELECT CAST(timetz_out($1) AS text) $$
+AS $$ SELECT CAST(pg_catalog.timetz_out($1) AS text) $$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
 
-CREATE CAST (timetz AS text) WITH FUNCTION timetz_text(timetz) AS IMPLICIT;
+CREATE CAST (timetz AS text) WITH FUNCTION pg_catalog.timetz_text(timetz) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION reltime_text(reltime)
+CREATE OR REPLACE FUNCTION pg_catalog.reltime_text(reltime)
 RETURNS text 
-AS $$ SELECT CAST(reltimeout($1) AS text) $$
+AS $$ SELECT CAST(pg_catalog.reltimeout($1) AS text) $$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
 
-CREATE CAST (reltime AS text) WITH FUNCTION reltime_text(reltime) AS IMPLICIT;
+CREATE CAST (reltime AS text) WITH FUNCTION pg_catalog.reltime_text(reltime) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION abstime_text(abstime)
+CREATE OR REPLACE FUNCTION pg_catalog.abstime_text(abstime)
 RETURNS text 
-AS $$ SELECT CAST(abstimeout($1) AS text) $$
+AS $$ SELECT CAST(pg_catalog.abstimeout($1) AS text) $$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
 
-CREATE CAST (abstime AS text) WITH FUNCTION abstime_text(abstime) AS IMPLICIT;
+CREATE CAST (abstime AS text) WITH FUNCTION pg_catalog.abstime_text(abstime) AS IMPLICIT;
 
 /*text to num*/
-create or replace function int1(text)
+create or replace function pg_catalog.int1(text)
 returns int1
-as $$ select cast(to_number($1) as int1)$$
+as $$ select cast(pg_catalog.to_number($1) as int1)$$
 language sql IMMUTABLE strict NOT FENCED;
-create or replace function int2(text)
+create or replace function pg_catalog.int2(text)
 returns int2
-as $$ select cast(to_number($1) as int2)$$
+as $$ select cast(pg_catalog.to_number($1) as int2)$$
 language sql IMMUTABLE strict NOT FENCED;
 
-create or replace function int4(text)
+create or replace function pg_catalog.int4(text)
 returns int4
-as $$ select cast(to_number($1) as int4) $$
+as $$ select cast(pg_catalog.to_number($1) as int4) $$
 language sql IMMUTABLE strict NOT FENCED;
 
-create or replace function int8(text)
+create or replace function pg_catalog.int8(text)
 returns int8
-as $$ select cast(to_number($1) as int8) $$
+as $$ select cast(pg_catalog.to_number($1) as int8) $$
 language sql IMMUTABLE strict NOT FENCED;
 
-create or replace function float4(text)
+create or replace function pg_catalog.float4(text)
 returns float4
-as $$ select cast(to_number($1) as float4) $$
+as $$ select cast(pg_catalog.to_number($1) as float4) $$
 language sql IMMUTABLE strict NOT FENCED;
 
-create or replace function float8(text)
+create or replace function pg_catalog.float8(text)
 returns float8
-as $$ select cast(to_number($1) as float8) $$
+as $$ select cast(pg_catalog.to_number($1) as float8) $$
 language sql IMMUTABLE strict NOT FENCED;
 
 /*character to numeric*/
-CREATE OR REPLACE FUNCTION TO_NUMERIC(CHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NUMERIC(CHAR)
 RETURNS NUMERIC
-AS $$ SELECT TO_NUMBER($1::TEXT)$$
+AS $$ SELECT pg_catalog.TO_NUMBER($1::TEXT)$$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_NUMERIC(VARCHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NUMERIC(VARCHAR)
 RETURNS NUMERIC
-AS $$ SELECT TO_NUMBER($1::TEXT)$$
+AS $$ SELECT pg_catalog.TO_NUMBER($1::TEXT)$$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
 /*character to int*/
-CREATE OR REPLACE FUNCTION TO_INTEGER(VARCHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_INTEGER(VARCHAR)
 RETURNS INTEGER
-AS $$ SELECT int4in(varcharout($1)) $$
+AS $$ SELECT pg_catalog.int4in(pg_catalog.varcharout($1)) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_INTEGER(CHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_INTEGER(CHAR)
 RETURNS INTEGER
-AS $$ SELECT int4in(bpcharout($1)) $$
+AS $$ SELECT pg_catalog.int4in(pg_catalog.bpcharout($1)) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
 
-CREATE CAST (TEXT AS RAW) WITH FUNCTION hextoraw(TEXT);
-CREATE CAST (RAW AS TEXT) WITH FUNCTION rawtohex(raw) AS IMPLICIT;
+CREATE CAST (TEXT AS RAW) WITH FUNCTION pg_catalog.hextoraw(TEXT);
+CREATE CAST (RAW AS TEXT) WITH FUNCTION pg_catalog.rawtohex(raw) AS IMPLICIT;
 
 CREATE CAST (BLOB AS RAW) WITHOUT FUNCTION AS IMPLICIT;
 CREATE CAST (RAW AS BLOB) WITHOUT FUNCTION AS IMPLICIT;
@@ -2106,293 +2108,293 @@ CREATE CAST (TEXT AS CLOB) WITHOUT FUNCTION AS IMPLICIT;
 CREATE CAST (CLOB AS TEXT) WITHOUT FUNCTION AS IMPLICIT;
 
 /* text to clob */
-CREATE OR REPLACE FUNCTION to_clob(TEXT)
+CREATE OR REPLACE FUNCTION pg_catalog.to_clob(TEXT)
 RETURNS CLOB
 AS $$ select $1 $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
 /* char to clob */
-CREATE OR REPLACE FUNCTION to_clob(CHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.to_clob(CHAR)
 RETURNS CLOB
 AS $$ select CAST($1 AS TEXT) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_clob(VARCHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.to_clob(VARCHAR)
 RETURNS CLOB
 AS $$ select CAST($1 AS TEXT) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION to_clob(NVARCHAR2)
+CREATE OR REPLACE FUNCTION pg_catalog.to_clob(NVARCHAR2)
 RETURNS CLOB
 AS $$ select CAST($1 AS TEXT) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
 /*character to int8*/
-CREATE OR REPLACE FUNCTION TO_BIGINT(VARCHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_BIGINT(VARCHAR)
 RETURNS BIGINT
-AS $$ SELECT int8in(varcharout($1))$$
+AS $$ SELECT pg_catalog.int8in(pg_catalog.varcharout($1))$$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
 /*float8 to numeric*/
-CREATE OR REPLACE FUNCTION TO_NUMERIC(double precision)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NUMERIC(double precision)
 RETURNS NUMERIC
-AS $$ SELECT TO_NUMBER($1::TEXT)$$
+AS $$ SELECT pg_catalog.TO_NUMBER($1::TEXT)$$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
 /*date to char(n)*/
-CREATE OR REPLACE FUNCTION TO_TEXT(TIMESTAMP WITHOUT TIME ZONE)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(TIMESTAMP WITHOUT TIME ZONE)
 RETURNS TEXT
-AS $$  select CAST(timestamp_out($1) AS VARCHAR2)  $$
+AS $$  select CAST(pg_catalog.timestamp_out($1) AS VARCHAR2)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_TEXT(TIMESTAMP WITH TIME ZONE)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(TIMESTAMP WITH TIME ZONE)
 RETURNS TEXT
-AS $$  select CAST(timestamptz_out($1) AS VARCHAR2)  $$
+AS $$  select CAST(pg_catalog.timestamptz_out($1) AS VARCHAR2)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
 
-CREATE OR REPLACE FUNCTION TRUNC(TIMESTAMP WITH TIME ZONE)
+CREATE OR REPLACE FUNCTION pg_catalog.TRUNC(TIMESTAMP WITH TIME ZONE)
 RETURNS TIMESTAMP WITHOUT TIME ZONE AS $$
         SELECT CAST(DATE_TRUNC('day',$1) AS TIMESTAMP WITHOUT TIME ZONE);
 $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION SUBSTR(TEXT, INT8, INT8) RETURNS TEXT AS $$
-	select SUBSTR($1, $2::INT4, $3::INT4);
+CREATE OR REPLACE FUNCTION pg_catalog.SUBSTR(TEXT, INT8, INT8) RETURNS TEXT AS $$
+	select pg_catalog.SUBSTR($1, $2::INT4, $3::INT4);
 $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION SUBSTR(TEXT, INT8) RETURNS TEXT AS $$
-	select SUBSTR($1, $2::INT4);
+CREATE OR REPLACE FUNCTION pg_catalog.SUBSTR(TEXT, INT8) RETURNS TEXT AS $$
+	select pg_catalog.SUBSTR($1, $2::INT4);
 $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 /* timestamp to varchar2 */
-CREATE OR REPLACE FUNCTION TO_VARCHAR2(TIMESTAMP WITHOUT TIME ZONE)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_VARCHAR2(TIMESTAMP WITHOUT TIME ZONE)
 RETURNS VARCHAR2
-AS $$  select CAST(timestamp_out($1) AS VARCHAR2)  $$
+AS $$  select CAST(pg_catalog.timestamp_out($1) AS VARCHAR2)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
 /* interval to varchar2 */
-CREATE OR REPLACE FUNCTION TO_VARCHAR2(INTERVAL)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_VARCHAR2(INTERVAL)
 RETURNS VARCHAR2
-AS $$  select CAST(interval_out($1) AS VARCHAR2)  $$
+AS $$  select CAST(pg_catalog.interval_out($1) AS VARCHAR2)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (INTERVAL AS VARCHAR2) WITH FUNCTION TO_VARCHAR2(INTERVAL) AS IMPLICIT;
+CREATE CAST (INTERVAL AS VARCHAR2) WITH FUNCTION pg_catalog.TO_VARCHAR2(INTERVAL) AS IMPLICIT;
 
 /* char,varchar2 to interval */
-CREATE OR REPLACE FUNCTION TO_INTERVAL(BPCHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_INTERVAL(BPCHAR)
 RETURNS INTERVAL
-AS $$  select interval_in(bpcharout($1), 0::Oid, -1) $$
+AS $$  select pg_catalog.interval_in(pg_catalog.bpcharout($1), 0::Oid, -1) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_INTERVAL(VARCHAR2)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_INTERVAL(VARCHAR2)
 RETURNS INTERVAL
-AS $$  select interval_in(varcharout($1), 0::Oid, -1) $$
+AS $$  select pg_catalog.interval_in(pg_catalog.varcharout($1), 0::Oid, -1) $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (BPCHAR AS INTERVAL) WITH FUNCTION TO_INTERVAL(BPCHAR) AS IMPLICIT;
-CREATE CAST (VARCHAR2 AS INTERVAL) WITH FUNCTION TO_INTERVAL(VARCHAR2) AS IMPLICIT;
+CREATE CAST (BPCHAR AS INTERVAL) WITH FUNCTION pg_catalog.TO_INTERVAL(BPCHAR) AS IMPLICIT;
+CREATE CAST (VARCHAR2 AS INTERVAL) WITH FUNCTION pg_catalog.TO_INTERVAL(VARCHAR2) AS IMPLICIT;
 
 /* raw to varchar2 */
-CREATE CAST (RAW AS VARCHAR2) WITH FUNCTION rawtohex(RAW) AS IMPLICIT;
+CREATE CAST (RAW AS VARCHAR2) WITH FUNCTION pg_catalog.rawtohex(RAW) AS IMPLICIT;
 
 
 /* varchar2,char to timestamp */
-CREATE OR REPLACE FUNCTION TO_TS(VARCHAR2)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TS(VARCHAR2)
 RETURNS TIMESTAMP WITHOUT TIME ZONE
-AS $$  select timestamp_in(varcharout($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.timestamp_in(pg_catalog.varcharout($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_TS(BPCHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TS(BPCHAR)
 RETURNS TIMESTAMP WITHOUT TIME ZONE
-AS $$  select timestamp_in(bpcharout($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.timestamp_in(pg_catalog.bpcharout($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION timestamp_to_smalldatetime(TIMESTAMP WITHOUT TIME ZONE)
+CREATE OR REPLACE FUNCTION pg_catalog.timestamp_to_smalldatetime(TIMESTAMP WITHOUT TIME ZONE)
 RETURNS SMALLDATETIME
-AS $$  select smalldatetime_in(timestamp_out($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.smalldatetime_in(pg_catalog.timestamp_out($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
-CREATE CAST (TIMESTAMP WITHOUT TIME ZONE AS SMALLDATETIME) WITH FUNCTION timestamp_to_smalldatetime(TIMESTAMP WITHOUT TIME ZONE) AS IMPLICIT;
+CREATE CAST (TIMESTAMP WITHOUT TIME ZONE AS SMALLDATETIME) WITH FUNCTION pg_catalog.timestamp_to_smalldatetime(TIMESTAMP WITHOUT TIME ZONE) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION smalldatetime_to_timestamp(smalldatetime)
+CREATE OR REPLACE FUNCTION pg_catalog.smalldatetime_to_timestamp(smalldatetime)
 RETURNS TIMESTAMP WITHOUT TIME ZONE
-AS $$  select timestamp_in(smalldatetime_out($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.timestamp_in(pg_catalog.smalldatetime_out($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (smalldatetime AS TIMESTAMP WITHOUT TIME ZONE) WITH FUNCTION smalldatetime_to_timestamp(smalldatetime) AS IMPLICIT;
+CREATE CAST (smalldatetime AS TIMESTAMP WITHOUT TIME ZONE) WITH FUNCTION pg_catalog.smalldatetime_to_timestamp(smalldatetime) AS IMPLICIT;
 
 /* smalldatetime to text */
-CREATE OR REPLACE FUNCTION TO_TEXT(smalldatetime)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TEXT(smalldatetime)
 RETURNS TEXT
-AS $$  select CAST(smalldatetime_out($1) AS VARCHAR2)  $$
+AS $$  select CAST(pg_catalog.smalldatetime_out($1) AS VARCHAR2)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (smalldatetime AS TEXT) WITH FUNCTION TO_TEXT(smalldatetime) AS IMPLICIT;
+CREATE CAST (smalldatetime AS TEXT) WITH FUNCTION pg_catalog.TO_TEXT(smalldatetime) AS IMPLICIT;
 
 /* smalldatetime to varchar2 */
-CREATE OR REPLACE FUNCTION SMALLDATETIME_TO_VARCHAR2(smalldatetime)
+CREATE OR REPLACE FUNCTION pg_catalog.SMALLDATETIME_TO_VARCHAR2(smalldatetime)
 RETURNS VARCHAR2
-AS $$  select CAST(smalldatetime_out($1) AS VARCHAR2)  $$
+AS $$  select CAST(pg_catalog.smalldatetime_out($1) AS VARCHAR2)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (smalldatetime AS VARCHAR2) WITH FUNCTION SMALLDATETIME_TO_VARCHAR2(smalldatetime) AS IMPLICIT;
+CREATE CAST (smalldatetime AS VARCHAR2) WITH FUNCTION pg_catalog.SMALLDATETIME_TO_VARCHAR2(smalldatetime) AS IMPLICIT;
 
 /* varchar2, bpchar to smalldatetime */
-CREATE OR REPLACE FUNCTION VARCHAR2_TO_SMLLDATETIME(VARCHAR2)
+CREATE OR REPLACE FUNCTION pg_catalog.VARCHAR2_TO_SMLLDATETIME(VARCHAR2)
 RETURNS SMALLDATETIME
-AS $$  select smalldatetime_in(varcharout($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.smalldatetime_in(pg_catalog.varcharout($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE OR REPLACE FUNCTION BPCHAR_TO_SMALLDATETIME(BPCHAR)
+CREATE OR REPLACE FUNCTION pg_catalog.BPCHAR_TO_SMALLDATETIME(BPCHAR)
 RETURNS SMALLDATETIME
-AS $$  select smalldatetime_in(bpcharout($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.smalldatetime_in(pg_catalog.bpcharout($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (VARCHAR2 AS SMALLDATETIME) WITH FUNCTION VARCHAR2_TO_SMLLDATETIME(VARCHAR2) AS IMPLICIT;
+CREATE CAST (VARCHAR2 AS SMALLDATETIME) WITH FUNCTION pg_catalog.VARCHAR2_TO_SMLLDATETIME(VARCHAR2) AS IMPLICIT;
 
-CREATE CAST (BPCHAR AS SMALLDATETIME) WITH FUNCTION BPCHAR_TO_SMALLDATETIME(BPCHAR) AS IMPLICIT;
+CREATE CAST (BPCHAR AS SMALLDATETIME) WITH FUNCTION pg_catalog.BPCHAR_TO_SMALLDATETIME(BPCHAR) AS IMPLICIT;
 /*abstime TO smalldatetime*/
-CREATE OR REPLACE FUNCTION abstime_to_smalldatetime(ABSTIME)
+CREATE OR REPLACE FUNCTION pg_catalog.abstime_to_smalldatetime(ABSTIME)
 RETURNS SMALLDATETIME
-AS $$  select smalldatetime_in(timestamp_out($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.smalldatetime_in(pg_catalog.timestamp_out($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
-CREATE CAST (ABSTIME AS SMALLDATETIME) WITH FUNCTION abstime_to_smalldatetime(ABSTIME) AS IMPLICIT;
+CREATE CAST (ABSTIME AS SMALLDATETIME) WITH FUNCTION pg_catalog.abstime_to_smalldatetime(ABSTIME) AS IMPLICIT;
 
 /*smalldatetime_to_abstime*/
-CREATE OR REPLACE FUNCTION smalldatetime_to_abstime(smalldatetime)
+CREATE OR REPLACE FUNCTION pg_catalog.smalldatetime_to_abstime(smalldatetime)
 RETURNS abstime
-AS $$  select abstimein(smalldatetime_out($1))  $$
+AS $$  select pg_catalog.abstimein(pg_catalog.smalldatetime_out($1))  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (smalldatetime AS abstime) WITH FUNCTION smalldatetime_to_abstime(smalldatetime) AS IMPLICIT;
+CREATE CAST (smalldatetime AS abstime) WITH FUNCTION pg_catalog.smalldatetime_to_abstime(smalldatetime) AS IMPLICIT;
 
 /*smalldatetime to time*/
-CREATE OR REPLACE FUNCTION smalldatetime_to_time(smalldatetime)
+CREATE OR REPLACE FUNCTION pg_catalog.smalldatetime_to_time(smalldatetime)
 RETURNS time
-AS $$  select time_in(smalldatetime_out($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.time_in(pg_catalog.smalldatetime_out($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
-CREATE CAST (smalldatetime AS time) WITH FUNCTION smalldatetime_to_time(smalldatetime) AS IMPLICIT;
+CREATE CAST (smalldatetime AS time) WITH FUNCTION pg_catalog.smalldatetime_to_time(smalldatetime) AS IMPLICIT;
 
 /*smalldatetime_to_timestamptz*/
-CREATE OR REPLACE FUNCTION smalldatetime_to_timestamptz(smalldatetime)
+CREATE OR REPLACE FUNCTION pg_catalog.smalldatetime_to_timestamptz(smalldatetime)
 RETURNS TIMESTAMP WITH TIME ZONE
-AS $$  select timestamptz_in(smalldatetime_out($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.timestamptz_in(pg_catalog.smalldatetime_out($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (smalldatetime AS TIMESTAMP WITH TIME ZONE) WITH FUNCTION smalldatetime_to_timestamptz(smalldatetime) AS IMPLICIT;
+CREATE CAST (smalldatetime AS TIMESTAMP WITH TIME ZONE) WITH FUNCTION pg_catalog.smalldatetime_to_timestamptz(smalldatetime) AS IMPLICIT;
 
 /*timestamptz_to_smalldatetime*/
-CREATE OR REPLACE FUNCTION timestamptz_to_smalldatetime(TIMESTAMP WITH TIME ZONE)
+CREATE OR REPLACE FUNCTION pg_catalog.timestamptz_to_smalldatetime(TIMESTAMP WITH TIME ZONE)
 RETURNS smalldatetime
-AS $$  select smalldatetime_in(TIMESTAMPTZ_OUT($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.smalldatetime_in(pg_catalog.TIMESTAMPTZ_OUT($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
 
-CREATE CAST (TIMESTAMP WITH TIME ZONE AS smalldatetime) WITH FUNCTION timestamptz_to_smalldatetime(TIMESTAMP WITH TIME ZONE) AS IMPLICIT;
+CREATE CAST (TIMESTAMP WITH TIME ZONE AS smalldatetime) WITH FUNCTION pg_catalog.timestamptz_to_smalldatetime(TIMESTAMP WITH TIME ZONE) AS IMPLICIT;
 create type exception as (code integer, message varchar2);
-create or replace function regexp_substr(text,text)
+create or replace function pg_catalog.regexp_substr(text,text)
 returns text
 AS '$libdir/plpgsql','regexp_substr'
 LANGUAGE C STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION report_application_error(
+CREATE OR REPLACE FUNCTION pg_catalog.report_application_error(
     IN log text,
     IN code integer default null 
 )RETURNS void 
 AS '$libdir/plpgsql','report_application_error'
 LANGUAGE C VOLATILE NOT FENCED;
 
-create or replace function bitand(bigint,bigint)
+create or replace function pg_catalog.bitand(bigint,bigint)
 returns bigint 
 as $$ select $1 & $2 $$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
 
-create or replace function regexp_like(text,text)
+create or replace function pg_catalog.regexp_like(text,text)
 returns boolean as $$ select $1 ~ $2 $$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
 
-create or replace function regexp_like(text,text,text)
+create or replace function pg_catalog.regexp_like(text,text,text)
 returns boolean as $$ 
 select case $3 when 'i' then $1 ~* $2 else $1 ~ $2 end;$$
 LANGUAGE SQL STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION INTERVALTONUM(INTERVAL)
+CREATE OR REPLACE FUNCTION pg_catalog.INTERVALTONUM(INTERVAL)
 RETURNS NUMERIC
 AS '$libdir/plpgsql','intervaltonum'
 LANGUAGE C STRICT IMMUTABLE NOT FENCED;
 
-CREATE CAST (INTERVAL AS NUMERIC) WITH FUNCTION INTERVALTONUM(INTERVAL) AS IMPLICIT;
+CREATE CAST (INTERVAL AS NUMERIC) WITH FUNCTION pg_catalog.INTERVALTONUM(INTERVAL) AS IMPLICIT;
 
 /* add for nvarcahr2 data type */
-CREATE OR REPLACE FUNCTION TO_NUMERIC(NVARCHAR2)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NUMERIC(NVARCHAR2)
 RETURNS NUMERIC
-AS $$ SELECT TO_NUMBER($1::TEXT)$$
+AS $$ SELECT pg_catalog.TO_NUMBER($1::TEXT)$$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
-CREATE CAST (NVARCHAR2 AS NUMERIC) WITH FUNCTION TO_NUMERIC(NVARCHAR2) AS IMPLICIT;
+CREATE CAST (NVARCHAR2 AS NUMERIC) WITH FUNCTION pg_catalog.TO_NUMERIC(NVARCHAR2) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION TO_INTEGER(NVARCHAR2)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_INTEGER(NVARCHAR2)
 RETURNS INTEGER
-AS $$ SELECT int4in(nvarchar2out($1))$$
+AS $$ SELECT pg_catalog.int4in(pg_catalog.nvarchar2out($1))$$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
-CREATE CAST (NVARCHAR2 AS INTEGER) WITH FUNCTION TO_INTEGER(NVARCHAR2) AS IMPLICIT;
+CREATE CAST (NVARCHAR2 AS INTEGER) WITH FUNCTION pg_catalog.TO_INTEGER(NVARCHAR2) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION TO_NVARCHAR2(TIMESTAMP WITHOUT TIME ZONE)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(TIMESTAMP WITHOUT TIME ZONE)
 RETURNS NVARCHAR2
-AS $$  select CAST(timestamp_out($1) AS NVARCHAR2)  $$
+AS $$  select CAST(pg_catalog.timestamp_out($1) AS NVARCHAR2)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
-CREATE CAST (TIMESTAMP WITHOUT TIME ZONE AS NVARCHAR2) WITH FUNCTION TO_NVARCHAR2(TIMESTAMP WITHOUT TIME ZONE) AS IMPLICIT;
+CREATE CAST (TIMESTAMP WITHOUT TIME ZONE AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(TIMESTAMP WITHOUT TIME ZONE) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION TO_NVARCHAR2(INTERVAL)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INTERVAL)
 RETURNS NVARCHAR2
-AS $$  select CAST(interval_out($1) AS NVARCHAR2)  $$
+AS $$  select CAST(pg_catalog.interval_out($1) AS NVARCHAR2)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
-CREATE CAST (INTERVAL AS NVARCHAR2) WITH FUNCTION TO_NVARCHAR2(INTERVAL) AS IMPLICIT;
+CREATE CAST (INTERVAL AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(INTERVAL) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION TO_NVARCHAR2(NUMERIC)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(NUMERIC)
 RETURNS NVARCHAR2
-AS $$ SELECT CAST(numeric_out($1) AS NVARCHAR2)    $$
+AS $$ SELECT CAST(pg_catalog.numeric_out($1) AS NVARCHAR2)    $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_NVARCHAR2(INT2)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT2)
 RETURNS NVARCHAR2
-AS $$ select CAST(int2out($1) AS NVARCHAR2)  $$
+AS $$ select CAST(pg_catalog.int2out($1) AS NVARCHAR2)  $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_NVARCHAR2(INT4)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT4)
 RETURNS NVARCHAR2
-AS $$  select CAST(int4out($1) AS NVARCHAR2)  $$
+AS $$  select CAST(pg_catalog.int4out($1) AS NVARCHAR2)  $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_NVARCHAR2(INT8)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(INT8)
 RETURNS NVARCHAR2
-AS $$ select CAST(int8out($1) AS NVARCHAR2) $$
+AS $$ select CAST(pg_catalog.int8out($1) AS NVARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_NVARCHAR2(FLOAT4)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT4)
 RETURNS NVARCHAR2
-AS $$ select CAST(float4out($1) AS NVARCHAR2) $$
+AS $$ select CAST(pg_catalog.float4out($1) AS NVARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE OR REPLACE FUNCTION TO_NVARCHAR2(FLOAT8)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT8)
 RETURNS NVARCHAR2
-AS $$ select CAST(float8out($1) AS NVARCHAR2) $$
+AS $$ select CAST(pg_catalog.float8out($1) AS NVARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
-CREATE CAST (INT2 AS NVARCHAR2) WITH FUNCTION TO_NVARCHAR2(INT2) AS IMPLICIT;
-CREATE CAST (INT4 AS NVARCHAR2) WITH FUNCTION TO_NVARCHAR2(INT4) AS IMPLICIT;
-CREATE CAST (INT8 AS NVARCHAR2) WITH FUNCTION TO_NVARCHAR2(INT8) AS IMPLICIT;
-CREATE CAST (NUMERIC AS NVARCHAR2) WITH FUNCTION TO_NVARCHAR2(NUMERIC) AS IMPLICIT;
-CREATE CAST (FLOAT4 AS NVARCHAR2) WITH FUNCTION TO_NVARCHAR2(FLOAT4) AS IMPLICIT;
-CREATE CAST (FLOAT8 AS NVARCHAR2) WITH FUNCTION TO_NVARCHAR2(FLOAT8) AS IMPLICIT;
+CREATE CAST (INT2 AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(INT2) AS IMPLICIT;
+CREATE CAST (INT4 AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(INT4) AS IMPLICIT;
+CREATE CAST (INT8 AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(INT8) AS IMPLICIT;
+CREATE CAST (NUMERIC AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(NUMERIC) AS IMPLICIT;
+CREATE CAST (FLOAT4 AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT4) AS IMPLICIT;
+CREATE CAST (FLOAT8 AS NVARCHAR2) WITH FUNCTION pg_catalog.TO_NVARCHAR2(FLOAT8) AS IMPLICIT;
 
-CREATE OR REPLACE FUNCTION TO_TS(NVARCHAR2)
+CREATE OR REPLACE FUNCTION pg_catalog.TO_TS(NVARCHAR2)
 RETURNS TIMESTAMP WITHOUT TIME ZONE
-AS $$  select timestamp_in(nvarchar2out($1), 0::Oid, -1)  $$
+AS $$  select pg_catalog.timestamp_in(pg_catalog.nvarchar2out($1), 0::Oid, -1)  $$
 LANGUAGE SQL IMMUTABLE STRICT NOT FENCED;
-CREATE CAST (NVARCHAR2 AS TIMESTAMP WITHOUT TIME ZONE) WITH FUNCTION TO_TS(NVARCHAR2) AS IMPLICIT;
+CREATE CAST (NVARCHAR2 AS TIMESTAMP WITHOUT TIME ZONE) WITH FUNCTION pg_catalog.TO_TS(NVARCHAR2) AS IMPLICIT;
 
-create or replace function regex_like_m(text,text) returns boolean
+create or replace function pg_catalog.regex_like_m(text,text) returns boolean
 as $$
 declare
         source_line integer := 1;
@@ -2406,46 +2408,46 @@ declare
         source_array array_text := array_text();
         regex_array array_text := array_text();
 begin
-	if left($2,1) <> '^' and right($2,1) <> '$' then
+	if pg_catalog.left($2,1) <> '^' and pg_catalog.right($2,1) <> '$' then
 		return $1 ~ $2;
 	end if;
 	--source string to source_array
-	for i in 1..length($1) loop
+	for i in 1..pg_catalog.length($1) loop
 		if substr($1,i,1) ~ '\n' then
 			if position = i then
 				source_array(source_line) := '\n';
 			else
-				source_array(source_line) := substr($1,position,i - position);
+				source_array(source_line) := pg_catalog.substr($1,position,i - position);
 			end if;
 			position := i + 1;
 			source_line := source_line + 1;
 		end if;
 	end loop;
-	if position <= length($1) or position = 1 then
-		source_array(source_line) := substr($1,position);
+	if position <= pg_catalog.length($1) or position = 1 then
+		source_array(source_line) := pg_catalog.substr($1,position);
 	else 
-		if position > length($1) then
+		if position > pg_catalog.length($1) then
 			source_line := source_line - 1;
 		end if;
 	end if;
 		
 	--regexp string to regex_array
 	position := 1;
-	for i in 1..length($2) loop
-		if substr($2,i,1) ~ '\n' then
+	for i in 1..pg_catalog.length($2) loop
+		if pg_catalog.substr($2,i,1) ~ '\n' then
 			if position = i then
 				regex_array(regex_line) := '\n';
 			else
-				regex_array(regex_line) := substr($2,position,i - position);
+				regex_array(regex_line) := pg_catalog.substr($2,position,i - position);
 			end if;
 			position := i + 1;
 			regex_line := regex_line + 1;
 		end if;
 	end loop;
-		if position <= length($2) or position = 1 then
-			regex_array(regex_line) := substr($2,position);
+		if position <= pg_catalog.length($2) or position = 1 then
+			regex_array(regex_line) := pg_catalog.substr($2,position);
 		else
-			if position > length($2) then
+			if position > pg_catalog.length($2) then
 				regex_line := regex_line - 1;
 			end if;
 		end if;
@@ -2468,12 +2470,12 @@ begin
 		end if;
 	end loop;
 	if left($2,1) = '^' then
-		regex_temp := substr($2,2);
+		regex_temp := pg_catalog.substr($2,2);
 	else
 		regex_temp := $2;
 	end if;
 	if right($2,1) = '$' then
-		regex_temp := substr(regex_temp,1,length(regex_temp)-1);
+		regex_temp := pg_catalog.substr(regex_temp,1,pg_catalog.length(regex_temp)-1);
 	end if;
 	if flag then
  		flag := $1 ~ regex_temp;
@@ -2482,14 +2484,14 @@ begin
 end;
 $$ LANGUAGE plpgsql shippable NOT FENCED;
 
-create or replace function regexp_like(text,text,text) 
+create or replace function pg_catalog.regexp_like(text,text,text) 
 returns boolean
 as $$
 declare
 	regex_char varchar(1);
 begin
-	for i in 1..length($3) loop
-		regex_char := substr($3,i,1);
+	for i in 1..pg_catalog.length($3) loop
+		regex_char := pg_catalog.substr($3,i,1);
 		if regex_char <> 'i' and  regex_char <> 'm' and  regex_char <> 'c' then
 			raise info 'illegal argument for function';
 			return false;
@@ -2498,20 +2500,20 @@ begin
 	case right($3, 1) 
 		when 'i' then return $1 ~* $2;
 		when 'c' then return $1 ~ $2;
-		when 'm' then return regex_like_m($1,$2);
+		when 'm' then return pg_catalog.regex_like_m($1,$2);
 	end case;
 end;
 $$ LANGUAGE plpgsql shippable NOT FENCED;
 
 
-create or replace function rawtohex(text)
+create or replace function pg_catalog.rawtohex(text)
 returns text
 AS '$libdir/plpgsql','rawtohex'
 LANGUAGE C STRICT IMMUTABLE NOT FENCED;
 /*
  * login_audit_messages
  */
-CREATE OR REPLACE FUNCTION login_audit_messages(in flag boolean) returns table (username text, database text, logintime timestamp with time zone, mytype text, result text, client_conninfo text) AUTHID DEFINER
+CREATE OR REPLACE FUNCTION pg_catalog.login_audit_messages(in flag boolean) returns table (username text, database text, logintime timestamp with time zone, mytype text, result text, client_conninfo text) AUTHID DEFINER
 AS $$
 DECLARE
 user_id text;
@@ -2521,13 +2523,13 @@ SQL_STMT VARCHAR2(500);
 fail_cursor REFCURSOR;
 success_cursor REFCURSOR;
 BEGIN
-	SELECT text(oid) FROM pg_authid WHERE rolname=SESSION_USER INTO user_id;
+	SELECT text(oid) FROM pg_catalog.pg_authid WHERE rolname=SESSION_USER INTO user_id;
 	SELECT SESSION_USER INTO user_name;
-	SELECT CURRENT_DATABASE() INTO db_name;
+	SELECT pg_catalog.CURRENT_DATABASE() INTO db_name;
 	IF flag = true THEN 
-		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo FROM pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
+		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo FROM pg_catalog.pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
 					type IN (''login_success'') AND username =' || quote_literal(user_name) || 
-					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';		
+					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';
 		OPEN success_cursor FOR EXECUTE SQL_STMT;		
 		--search bottom up for all the success login info
 		FETCH LAST FROM success_cursor into username, database, logintime, mytype, result, client_conninfo;
@@ -2537,9 +2539,9 @@ BEGIN
 		END IF;
 		CLOSE success_cursor;
 	ELSE 
-		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo FROM pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
+		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo FROM pg_catalog.pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
 					type IN (''login_success'', ''login_failed'') AND username =' || quote_literal(user_name) || 
-					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';		
+					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';
 		OPEN fail_cursor FOR EXECUTE SQL_STMT;
 		--search bottom up 
 		FETCH LAST FROM fail_cursor into username, database, logintime, mytype, result, client_conninfo;
@@ -2565,7 +2567,7 @@ LANGUAGE plpgsql NOT FENCED;
  * This is a special API for DataStudio, not the common behavrior. 
  * Highly suggest to use the login_audit_messages instead of this.
  */
-CREATE OR REPLACE FUNCTION login_audit_messages_pid(flag boolean)
+CREATE OR REPLACE FUNCTION pg_catalog.login_audit_messages_pid(flag boolean)
  RETURNS TABLE(username text, database text, logintime timestamp with time zone, mytype text, result text, client_conninfo text, backendid bigint) AUTHID DEFINER
 AS $$
 DECLARE
@@ -2578,15 +2580,15 @@ success_cursor REFCURSOR;
 mybackendid bigint;
 curSessionFound boolean;
 BEGIN
-	SELECT text(oid) FROM pg_authid WHERE rolname=SESSION_USER INTO user_id;
+	SELECT text(oid) FROM pg_catalog.pg_authid WHERE rolname=SESSION_USER INTO user_id;
 	SELECT SESSION_USER INTO user_name;
-	SELECT CURRENT_DATABASE() INTO db_name;
-	SELECT pg_backend_pid() INTO mybackendid;
+	SELECT pg_catalog.CURRENT_DATABASE() INTO db_name;
+	SELECT pg_catalog.pg_backend_pid() INTO mybackendid;
 	curSessionFound = false;	
 	IF flag = true THEN 
-		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo, split_part(thread_id,''@'',1) backendid FROM pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
+		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo, pg_catalog.split_part(thread_id,''@'',1) backendid FROM pg_catalog.pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
 					type IN (''login_success'') AND username =' || quote_literal(user_name) || 
-					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';	
+					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';
 		OPEN success_cursor FOR EXECUTE SQL_STMT;		
 		--search bottom up for all the success login info
 		FETCH LAST FROM success_cursor into username, database, logintime, mytype, result, client_conninfo, backendid;
@@ -2606,9 +2608,9 @@ BEGIN
 			END IF;
 		END IF;
 	ELSE 
-		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo, split_part(thread_id,''@'',1) backendid FROM pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
-					type IN (''login_success'', ''login_failed'') AND username =' || quote_literal(user_name) || 
-					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';	
+		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo, pg_catalog.split_part(thread_id,''@'',1) backendid FROM pg_catalog.pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
+					type IN (''login_success'', ''login_failed'') AND username =' || pg_catalog.quote_literal(user_name) || 
+					' AND database =' || pg_catalog.quote_literal(db_name) || ' AND userid =' || pg_catalog.quote_literal(user_id) || ';';
 		OPEN fail_cursor FOR EXECUTE SQL_STMT;
 		--search bottom up 
 		FETCH LAST FROM fail_cursor into username, database, logintime, mytype, result, client_conninfo, backendid;
@@ -2644,7 +2646,7 @@ LANGUAGE plpgsql NOT FENCED;
  * local way to fetch all thread wait status in local node.
  */
 CREATE VIEW pg_thread_wait_status AS
-	SELECT * FROM pg_stat_get_status(NULL);
+	SELECT * FROM pg_catalog.pg_stat_get_status(NULL);
 
 /*
  * pgxc_thread_wait_status
@@ -2652,7 +2654,7 @@ CREATE VIEW pg_thread_wait_status AS
  * parallel way to fetch global thread wait status.
  */
 CREATE VIEW pgxc_thread_wait_status AS
-	SELECT * FROM pgxc_get_thread_wait_status();
+	SELECT * FROM pg_catalog.pgxc_get_thread_wait_status();
 
 /*
  *gs_sql_count
@@ -2685,7 +2687,7 @@ CREATE VIEW gs_sql_count AS
 			avg_delete_elapse,
 			max_delete_elapse,
 			min_delete_elapse
-	FROM pg_stat_get_sql_count();
+	FROM pg_catalog.pg_stat_get_sql_count();
 
 CREATE VIEW pg_os_threads AS
     SELECT
@@ -2694,7 +2696,7 @@ CREATE VIEW pg_os_threads AS
 			S.lwpid,
 			S.thread_name,
 			S.creation_time
-    FROM pg_stat_get_thread() AS S;
+    FROM pg_catalog.pg_stat_get_thread() AS S;
 	
 CREATE VIEW pg_node_env AS
     SELECT
@@ -2705,13 +2707,13 @@ CREATE VIEW pg_node_env AS
 			S.installpath,
 			S.datapath,
 			S.log_directory
-    FROM pg_stat_get_env() AS S;
+    FROM pg_catalog.pg_stat_get_env() AS S;
 	
 /*
  * PGXC system view to look for libcomm stat
  */
 CREATE VIEW pg_comm_status AS
-    SELECT * FROM pg_comm_status();
+    SELECT * FROM pg_catalog.pg_comm_status();
 /*
  * PGXC system view to look for libcomm recv stream status
  */
@@ -2734,7 +2736,7 @@ CREATE VIEW pg_comm_recv_stream AS
 			S.speed,
 			S.quota,
 			S.buff_usize
-	FROM pg_comm_recv_stream() AS S;
+	FROM pg_catalog.pg_comm_recv_stream() AS S;
 
 /*
  * PGXC system view to look for libcomm send stream status
@@ -2758,22 +2760,22 @@ CREATE VIEW pg_comm_send_stream AS
 			S.speed,
 			S.quota,
 			S.wait_quota
-	FROM pg_comm_send_stream() AS S;
+	FROM pg_catalog.pg_comm_send_stream() AS S;
 /*
  * PGXC sytem view to show running transctions on node
  */
 CREATE VIEW pg_running_xacts AS                                            
 SELECT                                                                     
 		*                                                          
-FROM pg_get_running_xacts(); 
+FROM pg_catalog.pg_get_running_xacts(); 
 	                                                                   
 /*
  * PGXC sytem view to show variable cache on node
  */
 CREATE VIEW pg_variable_info AS
-SELECT * FROM pg_get_variable_info();
+SELECT * FROM pg_catalog.pg_get_variable_info();
 --Test distribute situation 
-create or replace function table_skewness(table_name text, column_name text,
+create or replace function pg_catalog.table_skewness(table_name text, column_name text,
                         OUT seqNum text, OUT Num text, OUT Ratio text, row_num text default '0')
 RETURNS setof record
 AS $$
@@ -2797,14 +2799,14 @@ DECLARE
         if tolal_num = 0 then
             seqNum = 0;
             Num = 0;
-            Ratio = ROUND(0, 3) || '%';
+            Ratio = pg_catalog.ROUND(0, 3) || '%';
             return;
         end if;
 
         for row_data in EXECUTE execute_query loop
             seqNum = row_data.seqNum;
             Num = row_data.num;
-            Ratio = ROUND(row_data.num / tolal_num * 100, 3) || '%';
+            Ratio = pg_catalog.ROUND(row_data.num / tolal_num * 100, 3) || '%';
             RETURN next;
         end loop;
     END;
@@ -2819,7 +2821,7 @@ CREATE VIEW pg_get_invalid_backends AS
 			S.datname AS dbname,
 			S.backend_start,
 			S.query
-	FROM pg_pool_validate(false, ' ') AS C LEFT JOIN pg_stat_activity AS S
+	FROM pg_catalog.pg_pool_validate(false, ' ') AS C LEFT JOIN pg_stat_activity AS S
 		ON (C.pid = S.sessionid);
 
 /*
@@ -2835,7 +2837,7 @@ CREATE VIEW pg_get_senders_catchup_time AS
 			'Wal' AS type,
 			W.catchup_start,
 			W.catchup_end
-	FROM pg_stat_get_wal_senders() AS W
+	FROM pg_catalog.pg_stat_get_wal_senders() AS W
 	UNION ALL
 	SELECT
 			D.pid,
@@ -2846,9 +2848,9 @@ CREATE VIEW pg_get_senders_catchup_time AS
 			'Data' AS type,
 			D.catchup_start,
 			D.catchup_end
-	FROM pg_stat_get_data_senders() AS D;
+	FROM pg_catalog.pg_stat_get_data_senders() AS D;
 
-CREATE OR REPLACE FUNCTION pg_stat_session_cu(OUT mem_hit int, OUT hdd_sync_read int, OUT hdd_asyn_read int)
+CREATE OR REPLACE FUNCTION pg_catalog.pg_stat_session_cu(OUT mem_hit int, OUT hdd_sync_read int, OUT hdd_asyn_read int)
 RETURNS setof record
 AS $$
 DECLARE
@@ -2856,7 +2858,7 @@ DECLARE
 	query_str text;
 	statname text;
 	BEGIN
-		query_str := 'select statname, sum(value) as value from gs_session_stat group by statname;';
+		query_str := 'select statname, pg_catalog.sum(value) as value from gs_session_stat group by statname;';
 		FOR stat_result IN EXECUTE(query_str) LOOP
 			statname := stat_result.statname;
 			IF statname = 'n_cu_mem_hit' THEN
@@ -2872,27 +2874,27 @@ DECLARE
 LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW gs_stat_session_cu AS
-    SELECT DISTINCT * from pg_stat_session_cu();
+    SELECT DISTINCT * from pg_catalog.pg_stat_session_cu();
 
 /*
  * PGXC system view to look for libcomm delay information
  */
 CREATE VIEW pg_comm_delay AS
-    SELECT DISTINCT * from pg_comm_delay();
+    SELECT DISTINCT * from pg_catalog.pg_comm_delay();
 
 CREATE VIEW gs_comm_proxy_thread_status AS
-    SELECT DISTINCT * from gs_comm_proxy_thread_status();
+    SELECT DISTINCT * from pg_catalog.gs_comm_proxy_thread_status();
 
 ALTER TEXT SEARCH CONFIGURATION ngram ADD MAPPING
         FOR zh_words, en_word, numeric, alnum, grapsymbol, multisymbol
         WITH simple;
 
 CREATE VIEW gs_all_control_group_info AS
-    SELECT DISTINCT * from gs_all_control_group_info();
+    SELECT DISTINCT * from pg_catalog.gs_all_control_group_info();
 
 CREATE VIEW mpp_tables AS
     SELECT n.nspname AS schemaname, c.relname AS tablename, 
-        pg_get_userbyid(c.relowner) AS tableowner, t.spcname AS tablespace, x.pgroup,x.nodeoids
+        pg_catalog.pg_get_userbyid(c.relowner) AS tableowner, t.spcname AS tablespace, x.pgroup,x.nodeoids
     FROM pg_class c
     LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
     LEFT JOIN pg_tablespace t ON t.oid = c.reltablespace
@@ -2929,15 +2931,15 @@ create table gs_wlm_operator_info
 --real time operator-level view in single CN
 CREATE VIEW gs_wlm_operator_statistics AS
 SELECT t.*
-FROM pg_stat_activity AS s, pg_stat_get_wlm_realtime_operator_info(NULL) as t
+FROM pg_stat_activity AS s, pg_catalog.pg_stat_get_wlm_realtime_operator_info(NULL) as t
 where s.query_id = t.queryid;
 
 --history operator-level view for DM in single CN
 CREATE VIEW gs_wlm_operator_history AS
-SELECT * FROM pg_stat_get_wlm_operator_info(0);
+SELECT * FROM pg_catalog.pg_stat_get_wlm_operator_info(0);
 
 --function used to get history table from hash table
-CREATE OR REPLACE FUNCTION create_wlm_operator_info(IN flag int)
+CREATE OR REPLACE FUNCTION pg_catalog.create_wlm_operator_info(IN flag int)
 RETURNS int
 AS $$
 DECLARE
@@ -3006,10 +3008,10 @@ create table gs_wlm_plan_operator_info
 );
 
 CREATE VIEW gs_wlm_plan_operator_history AS
-SELECT * FROM gs_stat_get_wlm_plan_operator_info(0);
+SELECT * FROM pg_catalog.gs_stat_get_wlm_plan_operator_info(0);
 
 --perf hist encoder
-CREATE OR REPLACE FUNCTION encode_feature_perf_hist
+CREATE OR REPLACE FUNCTION pg_catalog.encode_feature_perf_hist
 (
 IN datname text,
 OUT queryid bigint,
@@ -3078,7 +3080,7 @@ CREATE TABLE gs_wlm_plan_encoding_table
     encode text
 );
 
-CREATE OR REPLACE FUNCTION gather_encoding_info(IN datname text)
+CREATE OR REPLACE FUNCTION pg_catalog.gather_encoding_info(IN datname text)
 RETURNS int
 AS $$
 DECLARE
@@ -3086,12 +3088,12 @@ DECLARE
         EXECUTE 'INSERT INTO gs_wlm_plan_encoding_table
                     (queryid, plan_node_id, parent_node_id, encode, startup_time, total_time, rows, peak_memory)
                  SELECT queryid, plan_node_id, parent_node_id, encode, startup_time, total_time, rows, peak_memory
-                 FROM encode_feature_perf_hist('''|| datname ||''') order by queryid, plan_node_id;';
+                 FROM pg_catalog.encode_feature_perf_hist('''|| datname ||''') order by queryid, plan_node_id;';
         RETURN 0;
     END;$$
 LANGUAGE plpgsql NOT FENCED;
 
-CREATE OR REPLACE FUNCTION pg_catalog.copy_error_log_create()
+CREATE OR REPLACE FUNCTION pg_catalog.pg_catalog.copy_error_log_create()
 RETURNS bool
 AS $$
 DECLARE
@@ -3143,9 +3145,9 @@ DECLARE
         query_str_nodes := 'SELECT group_name,group_kind FROM pgxc_group WHERE group_kind = ''v'' OR group_kind = ''i'' ';
         FOR row_name IN EXECUTE(query_str_nodes) LOOP
             IF row_name.group_kind = 'i' THEN
-                query_str := 'SELECT *,CAST(''' || row_name.group_name || ''' AS TEXT) AS nodegroup,CAST(''' || row_name.group_kind || ''' AS TEXT) AS group_kind FROM gs_all_nodegroup_control_group_info(''installation'')';
+                query_str := 'SELECT *,CAST(''' || row_name.group_name || ''' AS TEXT) AS nodegroup,CAST(''' || row_name.group_kind || ''' AS TEXT) AS group_kind FROM pg_catalog.gs_all_nodegroup_control_group_info(''installation'')';
             ELSE
-                query_str := 'SELECT *,CAST(''' || row_name.group_name || ''' AS TEXT) AS nodegroup,CAST(''' || row_name.group_kind || ''' AS TEXT) AS group_kind FROM gs_all_nodegroup_control_group_info(''' ||row_name.group_name||''')';
+                query_str := 'SELECT *,CAST(''' || row_name.group_name || ''' AS TEXT) AS nodegroup,CAST(''' || row_name.group_kind || ''' AS TEXT) AS group_kind FROM pg_catalog.gs_all_nodegroup_control_group_info(''' ||row_name.group_name||''')';
             END IF;
             FOR row_data IN EXECUTE(query_str) LOOP
                 return next row_data;
@@ -3156,11 +3158,11 @@ DECLARE
 LANGUAGE 'plpgsql' NOT FENCED;
 
 -- the view for function gs_total_nodegroup_memory_detail.
-CREATE VIEW pg_catalog.gs_total_nodegroup_memory_detail AS SELECT * FROM gs_total_nodegroup_memory_detail();
+CREATE VIEW pg_catalog.gs_total_nodegroup_memory_detail AS SELECT * FROM pg_catalog.gs_total_nodegroup_memory_detail();
 
 -- the view for function gs_get_control_group_info.
 CREATE VIEW pg_catalog.gs_get_control_group_info AS
-    SELECT * from gs_get_control_group_info() AS
+    SELECT * from pg_catalog.gs_get_control_group_info() AS
     (
          name         text,
          type         text,
@@ -3189,7 +3191,7 @@ SELECT
 	t.ec_query,
 	t.ec_libodbc_type,
 	t.ec_fetch_count
-FROM pg_stat_activity AS s, pg_stat_get_wlm_realtime_ec_operator_info(NULL) as t
+FROM pg_stat_activity AS s, pg_catalog.pg_stat_get_wlm_realtime_ec_operator_info(NULL) as t
 where s.query_id = t.queryid and t.ec_operator > 0;
 
 --ec history operator-level view for DM in single CN
@@ -3209,7 +3211,7 @@ SELECT
 	ec_username,
 	ec_query,
 	ec_libodbc_type
-FROM pg_stat_get_wlm_ec_operator_info(0) where ec_operator > 0;
+FROM pg_catalog.pg_stat_get_wlm_ec_operator_info(0) where ec_operator > 0;
 
 --table definition for ec history info 
 create table gs_wlm_ec_operator_info
@@ -3232,10 +3234,10 @@ create table gs_wlm_ec_operator_info
 
 -- create view pg_tde_info
 CREATE VIEW pg_catalog.pg_tde_info AS 
-SELECT * from pg_tde_info();
+SELECT * from pg_catalog.pg_tde_info();
 
 --get delta infomation in single DN
-CREATE OR REPLACE FUNCTION pg_get_delta_info(IN rel TEXT, IN schema_name TEXT, OUT part_name TEXT, OUT live_tuple INT8, OUT data_size INT8, OUT blockNum INT8)
+CREATE OR REPLACE FUNCTION pg_catalog.pg_get_delta_info(IN rel TEXT, IN schema_name TEXT, OUT part_name TEXT, OUT live_tuple INT8, OUT data_size INT8, OUT blockNum INT8)
 RETURNS setof record
 AS $$
 DECLARE
@@ -3255,7 +3257,7 @@ DECLARE
 			EXECUTE(query_str) INTO row_data;
 			query_select_str := 'select count(*) from cstore.' || row_data.relname || '';
 			EXECUTE (query_select_str) INTO live_tuple;
-			query_size_str := 'select * from pg_relation_size(' || row_data.oid || ')';
+			query_size_str := 'select * from pg_catalog.pg_relation_size(' || row_data.oid || ')';
 			EXECUTE (query_size_str) INTO data_size;
 			blockNum := data_size/8192;
 			part_name := 'non partition table';
@@ -3268,7 +3270,7 @@ DECLARE
 				FOR row_data IN EXECUTE(query_str) LOOP
 					query_select_str := 'select count(*) from cstore.' || row_data.relname || '';
 					EXECUTE (query_select_str) INTO live_tuple;
-					query_size_str := 'select * from pg_relation_size(' || row_data.oid || ')';
+					query_size_str := 'select * from pg_catalog.pg_relation_size(' || row_data.oid || ')';
 					EXECUTE (query_size_str) INTO data_size;
 				END LOOP;
 				blockNum := data_size/8192;
@@ -3280,9 +3282,9 @@ DECLARE
 LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW pg_catalog.pg_stat_bad_block AS
-	SELECT DISTINCT * from pg_stat_bad_block();
+	SELECT DISTINCT * from pg_catalog.pg_stat_bad_block();
 
-CREATE OR REPLACE FUNCTION lock_cluster_ddl()
+CREATE OR REPLACE FUNCTION pg_catalog.lock_cluster_ddl()
 RETURNS boolean                    
 AS $$                                                                      
 DECLARE                                                                                                   
@@ -3294,7 +3296,7 @@ DECLARE
 	BEGIN                                                                   
 		query_database_oid := 'SELECT datname FROM pg_database WHERE datallowconn = true order by datname';
 		for databse_name in EXECUTE(query_database_oid) LOOP
-			lock_str = format('SELECT * FROM pgxc_lock_for_sp_database(''%s'')', databse_name.datname);
+			lock_str = pg_catalog.format('SELECT * FROM pg_catalog.pgxc_lock_for_sp_database(''%s'')', databse_name.datname);
 			begin
 				EXECUTE(lock_str) into lock_result;
 				if lock_result = 'f' then
@@ -3307,7 +3309,7 @@ DECLARE
 	END; $$                                                            
 LANGUAGE 'plpgsql' NOT FENCED;
 
-CREATE OR REPLACE FUNCTION unlock_cluster_ddl()
+CREATE OR REPLACE FUNCTION pg_catalog.unlock_cluster_ddl()
 RETURNS bool                    
 AS $$                                                                      
 DECLARE                                                                                                   
@@ -3319,7 +3321,7 @@ DECLARE
 	BEGIN                                                                   	
 		query_database_oid := 'SELECT datname FROM pg_database WHERE datallowconn = true order by datname';
 		for databse_name in EXECUTE(query_database_oid) LOOP
-			unlock_str = format('SELECT * FROM pgxc_unlock_for_sp_database(''%s'')', databse_name.datname);
+			unlock_str = format('SELECT * FROM pg_catalog.pgxc_unlock_for_sp_database(''%s'')', databse_name.datname);
 			begin
 				EXECUTE(unlock_str) into unlock_result;
 				if unlock_result = 'f' then
@@ -3343,17 +3345,19 @@ CREATE TABLE PLAN_TABLE_DATA(
 	object_name	    name,
 	object_type	    varchar2(30),
 	object_owner    name,
-	projection	    varchar2(4000)
+	projection	    varchar2(4000),
+    cost            float8,
+    cardinality     float8
 );
 
 CREATE VIEW PLAN_TABLE AS
-SELECT statement_id,plan_id,id,operation,options,object_name,object_type,object_owner,projection
+SELECT statement_id,plan_id,id,operation,options,object_name,object_type,object_owner,projection,cost,cardinality
 FROM PLAN_TABLE_DATA
-WHERE session_id=pg_current_sessionid()
-AND user_id=pg_current_userid();
+WHERE session_id=pg_catalog.pg_current_sessionid()
+AND user_id=pg_catalog.pg_current_userid();
 
 -- get pgxc dirty tables stat
-CREATE OR REPLACE FUNCTION pgxc_get_stat_dirty_tables(in dirty_percent int4, in n_tuples int4, out relid oid, out relname name, out schemaname name, out n_tup_ins int8, out n_tup_upd int8, out n_tup_del int8, out n_live_tup int8, out n_dead_tup int8, out dirty_page_rate numeric(5,2))
+CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_stat_dirty_tables(in dirty_percent int4, in n_tuples int4, out relid oid, out relname name, out schemaname name, out n_tup_ins int8, out n_tup_upd int8, out n_tup_del int8, out n_live_tup int8, out n_dead_tup int8, out dirty_page_rate numeric(5,2))
 RETURNS setof record
 AS $$
 DECLARE
@@ -3362,8 +3366,8 @@ DECLARE
 	BEGIN
 		query_str := 'SELECT oid relid, s.relname,s.schemaname,s.n_tup_ins,s.n_tup_upd,s.n_tup_del,s.n_live_tup,s.n_dead_tup,s.dirty_page_rate
 						FROM pg_class p,
-						(SELECT  relname, schemaname, SUM(n_tup_ins) n_tup_ins, SUM(n_tup_upd) n_tup_upd, SUM(n_tup_del) n_tup_del, SUM(n_live_tup) n_live_tup, SUM(n_dead_tup) n_dead_tup, CAST((SUM(n_dead_tup) / SUM(n_dead_tup + n_live_tup + 0.00001) * 100) 
-						AS NUMERIC(5,2)) dirty_page_rate FROM pgxc_stat_dirty_tables('||dirty_percent||','||n_tuples||') GROUP BY (relname,schemaname)) s
+						(SELECT  relname, schemaname, pg_catalog.SUM(n_tup_ins) n_tup_ins, pg_catalog.SUM(n_tup_upd) n_tup_upd, pg_catalog.SUM(n_tup_del) n_tup_del, pg_catalog.SUM(n_live_tup) n_live_tup, pg_catalog.SUM(n_dead_tup) n_dead_tup, CAST((pg_catalog.SUM(n_dead_tup) / pg_catalog.SUM(n_dead_tup + n_live_tup + 0.00001) * 100) 
+						AS pg_catalog.NUMERIC(5,2)) dirty_page_rate FROM pg_catalog.pgxc_stat_dirty_tables('||dirty_percent||','||n_tuples||') GROUP BY (relname,schemaname)) s
 						WHERE p.relname = s.relname AND p.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname) ORDER BY dirty_page_rate DESC';
 		FOR row_data IN EXECUTE(query_str) LOOP
 			relid = row_data.relid;
@@ -3380,7 +3384,7 @@ DECLARE
 	END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
 
-CREATE OR REPLACE FUNCTION pgxc_get_stat_dirty_tables(in dirty_percent int4, in n_tuples int4,in schema text, out relid oid, out relname name, out schemaname name, out n_tup_ins int8, out n_tup_upd int8, out n_tup_del int8, out n_live_tup int8, out n_dead_tup int8, out dirty_page_rate numeric(5,2))
+CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_stat_dirty_tables(in dirty_percent int4, in n_tuples int4,in schema text, out relid oid, out relname name, out schemaname name, out n_tup_ins int8, out n_tup_upd int8, out n_tup_del int8, out n_live_tup int8, out n_dead_tup int8, out dirty_page_rate numeric(5,2))
 RETURNS setof record
 AS $$
 DECLARE
@@ -3389,8 +3393,8 @@ DECLARE
 	BEGIN
 		query_str := 'SELECT oid relid, s.relname,s.schemaname,s.n_tup_ins,s.n_tup_upd,s.n_tup_del,s.n_live_tup,s.n_dead_tup,s.dirty_page_rate
 						FROM pg_class p,
-						(SELECT  relname, schemaname, SUM(n_tup_ins) n_tup_ins, SUM(n_tup_upd) n_tup_upd, SUM(n_tup_del) n_tup_del, SUM(n_live_tup) n_live_tup, SUM(n_dead_tup) n_dead_tup, CAST((SUM(n_dead_tup) / SUM(n_dead_tup + n_live_tup + 0.00001) * 100) 
-						AS NUMERIC(5,2)) dirty_page_rate FROM pgxc_stat_dirty_tables('||dirty_percent||','||n_tuples||','''||schema||''') GROUP BY (relname,schemaname)) s
+						(SELECT  relname, schemaname, pg_catalog.SUM(n_tup_ins) n_tup_ins, pg_catalog.SUM(n_tup_upd) n_tup_upd, pg_catalog.SUM(n_tup_del) n_tup_del, pg_catalog.SUM(n_live_tup) n_live_tup, pg_catalog.SUM(n_dead_tup) n_dead_tup, CAST((pg_catalog.SUM(n_dead_tup) / pg_catalog.SUM(n_dead_tup + n_live_tup + 0.00001) * 100) 
+						AS pg_catalog.NUMERIC(5,2)) dirty_page_rate FROM pg_catalog.pgxc_stat_dirty_tables('||dirty_percent||','||n_tuples||','''||schema||''') GROUP BY (relname,schemaname)) s
 						WHERE p.relname = s.relname AND p.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname) ORDER BY dirty_page_rate DESC';
 		FOR row_data IN EXECUTE(query_str) LOOP
 			relid = row_data.relid;
@@ -3409,11 +3413,11 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE OR REPLACE VIEW pg_catalog.get_global_prepared_xacts AS
 		SELECT p.transaction, p.gid, p.prepared, u.rolname AS owner, d.datname AS database, p.node_name
-		FROM get_local_prepared_xact() p
+		FROM pg_catalog.get_local_prepared_xact() p
 		LEFT JOIN pg_authid u ON p.ownerid = u.oid
 		LEFT JOIN pg_database d ON p.dbid = d.oid
 		UNION ALL
-		SELECT * FROM get_remote_prepared_xacts();
+		SELECT * FROM pg_catalog.get_remote_prepared_xacts();
 
 CREATE unlogged table statement_history(
     db_name name,
@@ -3466,7 +3470,8 @@ CREATE unlogged table statement_history(
     lwlock_time bigint,
     lwlock_wait_time bigint,
     details bytea,
-    is_slow_sql bool
+    is_slow_sql bool,
+    trace_id text
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
@@ -3504,6 +3509,35 @@ GRANT SELECT ON TABLE SYS_DUMMY TO PUBLIC;
 
 CREATE TYPE pg_catalog.bulk_exception as (error_index integer, error_code integer, error_message text);
 
+CREATE VIEW pg_catalog.gs_db_privileges AS
+    SELECT
+        pg_catalog.pg_get_userbyid(roleid) AS rolename,
+        privilege_type AS privilege_type,
+        CASE
+            WHEN admin_option THEN
+                'yes'
+            ELSE
+                'no'
+        END AS admin_option
+    FROM pg_catalog.gs_db_privilege;
+
+CREATE OR REPLACE VIEW pg_catalog.gs_gsc_memory_detail AS
+    SELECT db_id, sum(totalsize) AS totalsize, sum(freesize) AS freesize, sum(usedsize) AS usedsize 
+    FROM (
+        SELECT 
+        	CASE WHEN contextname like '%GlobalSysDBCacheEntryMemCxt%' THEN substring(contextname, 29)
+        	ELSE substring(parent, 29) END AS db_id,
+        	totalsize,
+        	freesize,
+        	usedsize
+        FROM pg_catalog.pg_shared_memory_detail()  
+        WHERE contextname LIKE '%GlobalSysDBCacheEntryMemCxt%' OR parent LIKE '%GlobalSysDBCacheEntryMemCxt%'
+        )a 
+    GROUP BY db_id;
+
+CREATE OR REPLACE VIEW pg_catalog.gs_lsc_memory_detail AS
+SELECT * FROM pg_catalog.pv_thread_memory_detail() WHERE contextname LIKE '%LocalSysCache%' OR parent LIKE '%LocalSysCache%';
+
 CREATE VIEW pg_publication_tables AS
     SELECT
         P.pubname AS pubname,
@@ -3511,7 +3545,7 @@ CREATE VIEW pg_publication_tables AS
         C.relname AS tablename
     FROM pg_publication P, pg_class C
          JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.oid IN (SELECT relid FROM pg_get_publication_tables(P.pubname));
+    WHERE C.oid IN (SELECT relid FROM pg_catalog.pg_get_publication_tables(P.pubname));
 
 CREATE VIEW pg_stat_subscription AS
     SELECT
@@ -3524,11 +3558,13 @@ CREATE VIEW pg_stat_subscription AS
             st.latest_end_lsn,
             st.latest_end_time
     FROM pg_subscription su
-            LEFT JOIN pg_stat_get_subscription(NULL) st
+            LEFT JOIN pg_catalog.pg_stat_get_subscription(NULL) st
                       ON (st.subid = su.oid);
 
 CREATE VIEW pg_replication_origin_status AS
     SELECT *
-    FROM pg_show_replication_origin_status();
+    FROM pg_catalog.pg_show_replication_origin_status();
 
 REVOKE ALL ON pg_replication_origin_status FROM public;
+
+REVOKE ALL ON pg_subscription FROM public;

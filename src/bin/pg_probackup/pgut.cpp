@@ -198,11 +198,12 @@ static const internalPQconninfoOption PQconninfoOptions[] = {
     *    * support.
     *   */
 
+#ifdef KRB5
     /* Kerberos and GSSAPI authentication support specifying the service name */
     {(const char *)"krbsrvname", (const char *)"PGKRBSRVNAME", (const char *)PG_KRB_SRVNAM, NULL,
         (const char *)"Kerberos-service-name", (const char *)"", 20,
     offsetof(struct pg_conn, krbsrvname)},
-
+#endif
 
     {(const char *)"replication", NULL, NULL, NULL,
         (const char *)"Replication", (const char *)"D", 5,

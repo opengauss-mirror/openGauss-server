@@ -144,3 +144,17 @@ char* pg_strtolower(char* str)
     }
     return str;
 }
+
+char* pg_strtoupper(char* str)
+{
+    char* ptrout = str;
+
+    if (str == NULL) {
+        return NULL;
+    }
+    while (*ptrout) {
+        *ptrout = pg_toupper(*ptrout);
+        ptrout++;
+    }
+    return str;
+}

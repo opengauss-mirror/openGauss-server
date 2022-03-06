@@ -1721,6 +1721,7 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
                 /* Look up the function within the library */
                 flinfo->fn_addr = (PGFunction)pg_dlsym(libHandle, flinfo->fnName);
             } else if (flinfo->fn_languageId == JavalanguageId){
+#ifndef ENABLE_LITE_MODE
                 /* Load libpljava.so to support Java UDF */
                 char pathbuf[MAXPGPATH];
                 get_lib_path(my_exec_path, pathbuf);
@@ -1742,6 +1743,9 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
                             errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                             errmsg("load java_call_handler failed.")));
                 flinfo->fn_addr = pljava_call_handler;
+#else
+                FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
             } else {
                 char pathbuf[MAXPGPATH];
                 get_lib_path(my_exec_path, pathbuf);

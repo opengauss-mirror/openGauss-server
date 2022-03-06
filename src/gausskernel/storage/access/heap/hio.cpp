@@ -48,7 +48,7 @@ void RelationPutHeapTuple(Relation relation, Buffer buffer, HeapTuple tuple, Tra
     page_header = BufferGetPage(buffer);
 
     tuple->t_data->t_choice.t_heap.t_xmin = NormalTransactionIdToShort(
-        PageIs8BXidHeapVersion(page_header) ? ((HeapPageHeader)(page_header))->pd_xid_base : 0, xid);
+        ((HeapPageHeader)(page_header))->pd_xid_base, xid);
 
     offnum = PageAddItem(page_header, (Item)tuple->t_data, tuple->t_len, InvalidOffsetNumber, false, true);
     if (offnum == InvalidOffsetNumber)
@@ -379,6 +379,7 @@ Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer other_buffe
     Size save_free_space = 0;
     BlockNumber target_block, other_block;
     bool need_lock = false;
+    bool last_page_tested = false;
     Size extralen = 0;
     HeapPageHeader phdr;
 
@@ -453,6 +454,7 @@ Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer other_buffe
             if (nblocks > 0) {
                 target_block = nblocks - 1;
             }
+            last_page_tested = true;
         }
     }
     /* When in append mode, cannot use cached block which smaller than rel end block */
@@ -542,24 +544,11 @@ loop:
         page = BufferGetPage(buffer);
         page_free_space = PageGetHeapFreeSpace(page);
         if (len + save_free_space <= page_free_space) {
-            if (PageIs4BXidVersion(page)) {
-                if (page_free_space - save_free_space - len >= SizeOfHeapPageUpgradeData) {
-                    /* If the page is upgraded unsuccessfully, get a new page */
-                    if (!heap_page_upgrade(relation, buffer)) {
-                        use_fsm = false;
-                        goto newpage;
-                    }
-                } else {
-                    /* Find the page with enough space to upgrade */
-                    extralen = SizeOfHeapPageUpgradeData;
-                    goto newpage;
-                }
-            }
             /* use this page as future insert target, too */
             RelationSetTargetBlock(relation, target_block);
             return buffer;
         }
-    newpage:
+
         /*
          * Not enough space, so we must give up our page locks and pin (if
          * any) and prepare to look elsewhere.	We don't care which order we
@@ -587,6 +576,21 @@ loop:
         ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
                          errmsg("RelationGetBufferForTuple, get target block %u from FSM, nblocks in relation is %u",
                                 target_block, smgrnblocks(relation->rd_smgr, MAIN_FORKNUM))));
+
+        /*
+         * If the FSM knows nothing of the rel, try the last page before we
+         * give up and extend. This's intend to use pages that are extended
+         * one by one and not recorded in FSM as possible.
+         *
+         * The best is to record all pages into FSM using bulk-extend in later.
+         */
+        if (target_block == InvalidBlockNumber && !last_page_tested) {
+            BlockNumber nblocks = RelationGetNumberOfBlocks(relation);
+            if (nblocks > 0) {
+                target_block = nblocks - 1;
+            }
+            last_page_tested = true;
+        }
     }
 
     /*

@@ -30,8 +30,6 @@ ifdef TEMP_CONFIG
 TEMP_CONF += --temp-config=$(TEMP_CONFIG)
 endif
 
-ud=4
-uc=1
 d=1
 c=0
 p=25632
@@ -49,16 +47,12 @@ sk='FiqwtDDeUCtsieCbOCWzrQ3fwJHFJetzzXbdLHEh'
 abs_gausshome='$(GAUSSHOME)'
 keep_last_data=false
 inplace_data_base_dir=../upgrade
-grayscale_data_base_dir=../grayscale_upgrade
+grayscale_data_base_dir=../../../../privategauss/test/grayscale_upgrade
 old_bin_dir='./tmp_check/bin'
 cpu_bit=$(shell uname -m)
 aie_host='None'
 aie_port='None'
-ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
-	upgrade_from=92011
-else
-	upgrade_from=92023
-endif
+upgrade_from=92497
 inplace_upgrade_script_dir=../upgrade
 grayscale_upgrade_script_dir=../grayscale_upgrade
 
@@ -272,8 +266,7 @@ fastcheck_initdb: all tablespace-setup
 	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
-	$(call exception_arm_cases) && \
-        $(pg_regress_check) $(REGRESS_OPTS) -d $(d) -c $(c) -p $(p) -r 0 -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --schedule=$(srcdir)/parallel_schedule$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf --init_database $(EXTRA_TESTS) $(REG_CONF)
+        $(pg_regress_check) $(REGRESS_OPTS) -d $(d) -c $(c) -p $(p) -r 0 -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome)  --single_node --schedule=$(srcdir)/parallel_schedule$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf --init_database $(EXTRA_TESTS) $(REG_CONF)
 
 fastcheck_inplace: all tablespace-setup
 	$(call hotpatch_check_func)
@@ -287,6 +280,38 @@ fastcheck_single: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
+
+fastcheck_lite: all tablespace-setup
+	$(call hotpatch_check_func)
+	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+	$(call hotpatch_setup_func) && \
+	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule.lite$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
+
+upgradecheck_single: all tablespace-setup
+	$(call hotpatch_check_func)
+	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+	$(call hotpatch_setup_func) && \
+	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
+    --data_base_dir=$(grayscale_data_base_dir) --platform=$(PLAT_FORM_STR) \
+    --upgrade_script_dir=$(grayscale_upgrade_script_dir) \
+    --old_bin_dir=$(old_bin_dir) --grayscale_full_mode \
+    --upgrade_from=$(upgrade_from)
+
+fastcheck_ce_single: all tablespace-setup
+	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+        $(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --schedule=$(srcdir)/c
+
+execute_fastcheck_ce_jdbc_tool:
+	$(MAKE) -j 10 -C jdbc_client
+
+execute_fastcheck_ce_single_jdbc: execute_fastcheck_ce_jdbc_tool
+ifdef NO_BUILD
+	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+	 $(pg_regress_installcheck) --schedule=$(srcdir)/ce_sched_jdbc $(REG_CONF) --jdbc || true
+else
+	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+	 $(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --schedule=$(srcdir)/ce_sched_jdbc --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf --data_base_dir=$(data_base_dir) $(REG_CONF) --jdbc || true
+endif
 
 fastcheck_single_segment: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \

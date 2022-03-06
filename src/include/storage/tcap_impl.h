@@ -53,7 +53,7 @@ typedef struct TrObjDesc {
     Oid dbid;
     Oid relid;
     char name[NAMEDATALEN];
-    char originname[NAMEDATALEN];
+    char originname[2 * NAMEDATALEN];
     TrObjOperType operation;
     TrObjType type;
     int64 recyclecsn;
@@ -87,9 +87,11 @@ extern void TrUpdateBaseid(const TrObjDesc *desc);
 extern Oid TrDescWrite(TrObjDesc *desc);
 extern void TrDescInit(Relation rel, TrObjDesc *desc, TrObjOperType operType, 
     TrObjType objType, bool canpurge, bool isBaseObj = false);
+extern void TrPartDescInit(Relation rel, Partition part, TrObjDesc *desc, TrObjOperType operType,
+                        TrObjType objType, bool canpurge, bool isBaseObj = false);
 extern void TrFindAllRefObjs(Relation depRel, const ObjectAddress *subobj,
     ObjectAddresses *refobjs, bool ignoreObjSubId = false);
-extern void TrOperFetch(const RangeVar *purobj, TrObjType objtype,
-    TrObjDesc *desc, TrOperMode operMode);
+extern void TrOperFetch(const RangeVar *purobj, TrObjType objtype, TrObjDesc *desc, TrOperMode operMode);
 extern void TrOperPrep(TrObjDesc *desc, TrOperMode operMode);
-extern void TrSwapRelfilenode(Relation rbRel, HeapTuple rbTup);
+extern void TrSwapRelfilenode(Relation rbRel, HeapTuple rbTup, bool isPart);
+extern bool TrFetchName(const char *rcyname, TrObjType type, TrObjDesc *desc, TrOperMode operMode);

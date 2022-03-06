@@ -4,9 +4,9 @@
  *	  prototypes for utility.c.
  *
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/tcop/utility.h
  *
@@ -89,6 +89,7 @@ typedef enum {
     ARQ_TYPE_SAMPLE, /* include sample rows or sample table. */
 } ANALYZE_RQTYPE;
 
+extern bool pg_try_advisory_lock_for_redis(Relation rel);
 extern void pgxc_lock_for_utility_stmt(Node* parsetree, bool is_temp);
 extern void ExecUtilityStmtOnNodes(const char* queryString, ExecNodes* nodes, bool sentToRemote, bool force_autocommit,
     RemoteQueryExecType exec_type, bool is_temp, Node* parsetree = NULL);
@@ -121,6 +122,8 @@ extern bool ObjectsInSameNodeGroup(List* objects, NodeTag stmttype);
 extern void EstIdxMemInfo(
     Relation rel, RangeVar* relation, UtilityDesc* desc, IndexInfo* info, const char* accessMethod);
 extern void AdjustIdxMemInfo(AdaptMem* operatorMem, UtilityDesc* desc);
+extern void AlterGlobalConfig(AlterGlobalConfigStmt *stmt);
+extern void DropGlobalConfig(DropGlobalConfigStmt *stmt);
 
 /*
  * @hdfs The struct HDFSTableAnalyze is used to store datanode work infomation

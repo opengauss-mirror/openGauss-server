@@ -20,6 +20,27 @@ SELECT has_cek_privilege(session_user, 'MyCEK', 'USAGE');
 DROP TABLE IF EXISTS acltest1;
 CREATE TABLE acltest1 (x int, x2 varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC));
 DROP TABLE acltest1;
+
+CREATE USER user_check PASSWORD '1234567i*';
+SELECT has_cmk_privilege('user_check','mycmk','USAGE');
+SELECT has_cmk_privilege('mycmk','USAGE');
+SELECT has_cmk_privilege('user_check',(select oid from gs_client_global_keys where global_key_name='mycmk'),'USAGE');
+SELECT has_cmk_privilege((select oid from gs_client_global_keys where global_key_name='mycmk'),'USAGE');
+SELECT has_cmk_privilege((select oid from pg_authid where rolname='user_check'),'mycmk','USAGE');
+SELECT has_cmk_privilege((select oid from pg_authid where rolname='user_check'),(select oid from gs_client_global_keys where global_key_name='mycmk'),'USAGE');
+
+SELECT has_cek_privilege('user_check','mycek','USAGE');
+SELECT has_cek_privilege('mycek','USAGE');
+SELECT has_cek_privilege('user_check',(select oid from gs_column_keys where column_key_name='mycek'),'USAGE');
+SELECT has_cek_privilege((select oid from gs_column_keys where column_key_name='mycek'),'USAGE');
+SELECT has_cek_privilege((select oid from pg_authid where rolname='user_check'),'mycek','USAGE');
+SELECT has_cek_privilege((select oid from pg_authid where rolname='user_check'),(select oid from gs_column_keys where column_key_name='mycek'),'USAGE');
+
+GRANT ALL ON CLIENT_MASTER_KEY mycmk to user_check;
+GRANT ALL ON COLUMN_ENCRYPTION_KEY mycek to user_check;
+DROP OWNED BY user_check CASCADE;
+DROP USER user_check;
+
 DROP CLIENT MASTER KEY IF EXISTS MyCMK CASCADE;
 
 \! gs_ktool -d all

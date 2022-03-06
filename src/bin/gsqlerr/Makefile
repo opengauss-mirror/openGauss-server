@@ -29,13 +29,13 @@ endif
 OBJS1=   scanEreport.o $(WIN32RES)
 
 ifeq ($(enable_memory_check), yes)
-LIBS = -lsecurec -l$(MEMCHECK_LIB_NAME_ASAN) -pthread -D_REENTRANT -ldl -lm -lrt
+LIBS = -l$(SECURE_C_CHECK) -l$(MEMCHECK_LIB_NAME_ASAN) -pthread -D_REENTRANT -ldl -lm -lrt
 else
-LIBS = -lsecurec
+LIBS = -l$(SECURE_C_CHECK)
 endif
 
 ifeq ($(enable_thread_check), yes)
-LIBS = -lsecurec -l$(MEMCHECK_LIB_NAME_TSAN) -pthread -D_REENTRANT -ldl -lm -lrt
+LIBS = -l$(SECURE_C_CHECK) -l$(MEMCHECK_LIB_NAME_TSAN) -pthread -D_REENTRANT -ldl -lm -lrt
 endif
 
 all:    
@@ -50,7 +50,7 @@ ifeq ($(enable_multiple_nodes), yes)
 endif
 	$(top_builddir)/$(subdir)/scanEreport $(top_srcdir) ereport.txt $(top_srcdir)/src/common/backend/utils/errcodes.txt escan.txt
 utscanEreport: $(OBJS1) | submake-libpgport
-	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS1) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutscanEreport.so -lsecurec
+	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS1) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutscanEreport.so -l$(SECURE_C_CHECK)
 	mv libutscanEreport.so $(top_builddir)/../distribute/test/ut/lib
 
 OBJS=   gsqlerr.o $(WIN32RES)
@@ -59,7 +59,7 @@ gsqlerr: $(OBJS) | submake-libpgport
 	$(CC) $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
 
 utgsqlerr: $(OBJS) | submake-libpgport
-	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutgsqlerr.so -lsecurec
+	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutgsqlerr.so -l$(SECURE_C_CHECK)
 	mv libutgsqlerr.so $(top_builddir)/../distribute/test/ut/lib
 
 ifeq ($(enable_multiple_nodes), yes)

@@ -346,7 +346,7 @@ void sepgsql_relation_drop(Oid relOid)
 
         attrList = SearchSysCacheList1(ATTNUM, ObjectIdGetDatum(relOid));
         for (i = 0; i < attrList->n_members; i++) {
-            atttup = &attrList->members[i]->tuple;
+            atttup = t_thrd.lsc_cxt.FetchTupleFromCatCList(attrList, i);
             attForm = (Form_pg_attribute)GETSTRUCT(atttup);
 
             if (attForm->attisdropped)
@@ -360,7 +360,7 @@ void sepgsql_relation_drop(Oid relOid)
             sepgsql_avc_check_perms(&object, SEPG_CLASS_DB_COLUMN, SEPG_DB_COLUMN__DROP, audit_name, true);
             pfree(audit_name);
         }
-        ReleaseCatCacheList(attrList);
+        ReleaseSysCacheList(attrList);
     }
 }
 

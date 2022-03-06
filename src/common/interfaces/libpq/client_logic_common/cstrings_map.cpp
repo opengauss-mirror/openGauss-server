@@ -68,7 +68,7 @@ void CStringsMap::set(const char *key, const char *value, size_t valsize)
 {
     Assert(key && value);
     size_t key_index = index(key);
-    if (valsize == 0) {
+    if (valsize == SIZE_MAX) {
         valsize = strlen(value);
     }
     if (valsize > MAX_VAL_LEN) {

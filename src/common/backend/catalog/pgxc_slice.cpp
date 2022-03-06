@@ -77,7 +77,7 @@ static void AddReferencedSlices(Oid relid, DistributeBy *distributeby)
 
     relation = heap_open(PgxcSliceRelationId, RowExclusiveLock);
     for (i = 0; i < slicelist->n_members; i++) {
-        tup = &slicelist->members[i]->tuple;
+        tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(slicelist, i);
         bool isnull = false;
         Datum val = fastgetattr(tup, Anum_pgxc_slice_type, RelationGetDescr(relation), &isnull);
         if (DatumGetChar(val) == PGXC_SLICE_TYPE_TABLE) {
@@ -299,7 +299,7 @@ void RemovePgxcSlice(Oid relid)
 
     CatCList *slicelist = SearchSysCacheList1(PGXCSLICERELID, ObjectIdGetDatum(relid));
     for (int i = 0; i < slicelist->n_members; i++) {
-        tup = &slicelist->members[i]->tuple;
+        tup = t_thrd.lsc_cxt.FetchTupleFromCatCList(slicelist, i);
         simple_heap_delete(relation, &tup->t_self);
     }
     ReleaseSysCacheList(slicelist);

@@ -893,6 +893,9 @@ NON_EXEC_STATIC void RbCleanerMain()
          */
         AbortCurrentTransaction();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
+
         LWLockReleaseAll();
 
         /*
@@ -1129,6 +1132,9 @@ NON_EXEC_STATIC void RbWorkerMain()
          * Abort the current transaction in order to recover.
          */
         AbortCurrentTransaction();
+
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
 
         LWLockReleaseAll();
 

@@ -25,23 +25,16 @@
 
 #include "pg_config.h"
 
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS) && (!defined(ENABLE_LITE_MODE))))
 #define ENABLE_GS_KTOOL
 #define ENABLE_HUAWEI_KMS
+
+#ifdef ENABLE_UT
+#define ENABLE_LOCAL_KMS
+#endif /* ENABLE_UT */
+
 #else
 #define ENABLE_LOCAL_KMS
 #endif
-
-#ifdef ENABLE_UT
-#ifndef ENABLE_GS_KTOOL
-#define ENABLE_GS_KTOOL
-#endif
-#ifndef ENABLE_HUAWEI_KMS
-#define ENABLE_HUAWEI_KMS
-#endif
-#ifndef ENABLE_LOCAL_KMS
-#define ENABLE_LOCAL_KMS
-#endif
-#endif /* ENABLE_UT */
 
 #endif /* CMKEM_VERSION_CONTROL_H */

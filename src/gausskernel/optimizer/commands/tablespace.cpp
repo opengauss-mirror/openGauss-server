@@ -3065,5 +3065,6 @@ Oid ConvertToPgclassRelTablespaceOid(Oid tblspc)
  */
 Oid ConvertToRelfilenodeTblspcOid(Oid tblspc)
 {
-    return (InvalidOid == tblspc) ? u_sess->proc_cxt.MyDatabaseTableSpace : tblspc;
+    Assert(CheckMyDatabaseMatch());
+    return (InvalidOid == tblspc) ? GetMyDatabaseTableSpace() : tblspc;
 }

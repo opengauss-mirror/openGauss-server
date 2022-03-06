@@ -642,10 +642,12 @@ Oid get_pgxc_logic_groupoid(const char* rolename)
  * NodeGroupCallback
  *		Syscache inval callback function
  */
-static void NodeGroupCallback(Datum arg, int cacheid, uint32 hashvalue)
+static void SessionNodeGroupCallback(Datum arg, int cacheid, uint32 hashvalue)
 {
     u_sess->misc_cxt.current_nodegroup_mode = NG_UNKNOWN;
-    RelationCacheInvalidateBuckets();
+    if (!EnableLocalSysCache()) {
+        RelationCacheInvalidateBuckets();
+    }
 }
 
 /*
@@ -655,7 +657,7 @@ static void NodeGroupCallback(Datum arg, int cacheid, uint32 hashvalue)
 static void RegisterNodeGroupCacheCallback()
 {
     if (IS_PGXC_COORDINATOR && !u_sess->misc_cxt.nodegroup_callback_registered) {
-        CacheRegisterSyscacheCallback(PGXCGROUPOID, NodeGroupCallback, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(PGXCGROUPOID, SessionNodeGroupCallback, (Datum)0);
         u_sess->misc_cxt.nodegroup_callback_registered = true;
     }
 }
@@ -790,7 +792,7 @@ bool has_rolvcadmin(Oid roleid)
 
 static void DecreaseUserCountReuse(Oid roleid, bool ispoolerreuse)
 {
-    if (ispoolerreuse == true && ENABLE_THREAD_POOL) {
+    if (ispoolerreuse == true && IS_THREAD_POOL_WORKER) {
         DecreaseUserCount(roleid);
     }
 }
@@ -906,7 +908,7 @@ void InitializeSessionUserId(const char* rolename, bool ispoolerreuse, Oid usero
 
     /* Also mark our PGPROC entry with the authenticated user id */
     /* (We assume this is an atomic store so no lock is needed) */
-    DecreaseUserCountReuse(roleid, ispoolerreuse);
+    DecreaseUserCountReuse(t_thrd.proc->roleId, ispoolerreuse);
     t_thrd.proc->roleId = roleid;
 
     /*
@@ -918,7 +920,7 @@ void InitializeSessionUserId(const char* rolename, bool ispoolerreuse, Oid usero
         /*
          * Is role allowed to login at all?
          */
-        if (ENABLE_THREAD_POOL) {
+        if (IS_THREAD_POOL_WORKER) {
             IncreaseUserCount(roleid);
         }
 
@@ -967,11 +969,12 @@ void InitializeSessionUserIdStandalone(void)
 #ifdef ENABLE_MULTIPLE_NODES
     AssertState(!IsUnderPostmaster || IsAutoVacuumWorkerProcess() || IsJobSchedulerProcess() || IsJobWorkerProcess() ||
         AM_WAL_SENDER || IsTxnSnapCapturerProcess() || IsTxnSnapWorkerProcess() || IsUndoWorkerProcess() ||
-        CompactionProcess::IsTsCompactionProcess() || IsRbCleanerProcess() || IsRbWorkerProcess());
+        CompactionProcess::IsTsCompactionProcess() || IsRbCleanerProcess() || IsRbWorkerProcess() ||
+        t_thrd.role == PARALLEL_DECODE || t_thrd.role == LOGICAL_READ_RECORD);
 #else   /* ENABLE_MULTIPLE_NODES */
     AssertState(!IsUnderPostmaster || IsAutoVacuumWorkerProcess() || IsJobSchedulerProcess() || IsJobWorkerProcess() ||
         AM_WAL_SENDER || IsTxnSnapCapturerProcess() || IsTxnSnapWorkerProcess() || IsUndoWorkerProcess() || IsRbCleanerProcess() ||
-        IsRbWorkerProcess());
+        IsRbWorkerProcess() || t_thrd.role == PARALLEL_DECODE || t_thrd.role == LOGICAL_READ_RECORD);
 #endif   /* ENABLE_MULTIPLE_NODES */
 
     /* In pooler stateless reuse mode, to reset session userid */
@@ -1140,6 +1143,37 @@ static void UnlinkLockFile(int status, Datum filename)
 }
 
 /*
+ * proc_exit callback to unlock a lockfile.
+ */
+static void UnLockPidLockFile(int status, Datum fileDes)
+{
+    int fd = DatumGetInt32(fileDes);
+
+    if (fd != -1) {
+        close(fd);
+    }
+}
+
+static void CreatePidLockFile(const char* filename)
+{
+    int fd = -1;
+    char pid_lock_file[MAXPGPATH] = {0};
+    int rc = snprintf_s(pid_lock_file, MAXPGPATH, MAXPGPATH - 1, "%s.lock", filename);
+    securec_check_ss(rc, "", "");
+
+    if ((fd = open(pid_lock_file, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR)) == -1) {
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not create or open lock file \"%s\": %m", pid_lock_file)));
+    }
+
+    if (flock(fd, LOCK_EX | LOCK_NB) == -1) {
+        close(fd);
+        ereport(FATAL, (errcode_for_file_access(), errmsg("could not lock file \"%s\": %m", pid_lock_file)));
+    }
+
+    on_proc_exit(UnLockPidLockFile, Int32GetDatum(fd));
+}
+
+/*
  * Create a lockfile.
  *
  * filename is the name of the lockfile to create.
@@ -1156,6 +1190,11 @@ static void CreateLockFile(const char* filename, bool amPostmaster, bool isDDLoc
     pid_t other_pid;
     pid_t my_pid, my_p_pid, my_gp_pid;
     const char* envvar = NULL;
+
+    /* Grab a file lock to establish our priority to process postmaster.pid */
+    if (isDDLock) {
+        CreatePidLockFile(filename);
+    }
 
     /*
      * If the PID in the lockfile is our own PID or our parent's or

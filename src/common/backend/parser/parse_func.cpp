@@ -1398,32 +1398,66 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
 
     if (ncandidates == 1)
         return candidates;
-#ifndef ENABLE_MULTIPLE_NODES
-    Oid caller_pkg_oid = InvalidOid;
-    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
-        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
-        caller_pkg_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
-    } else {
-        caller_pkg_oid = u_sess->plsql_cxt.running_pkg_oid;
-    }
-    nbestMatch = 0;
-    ncandidates = 0;
-    last_candidate = NULL;
-    for (current_candidate = candidates; current_candidate != NULL; current_candidate = current_candidate->next) {
-        nmatch = 0;
 
-        if (current_candidate->packageOid == caller_pkg_oid) {
-            nmatch++;
-        }
-        keep_candidate(nmatch, nbestMatch, current_candidate, last_candidate, candidates, ncandidates);
-    }
-    if (last_candidate) /* terminate rebuilt list */
-        last_candidate->next = NULL;
-    if (ncandidates == 1)
-        return candidates;
-#endif
     return NULL; /* failed to select a best candidate */
 } /* func_select_candidate() */
+
+
+/*
+ * sort_candidate_func_list
+ *
+ * sort the candidate functions by function's all param num.
+ */
+FuncCandidateList sort_candidate_func_list(FuncCandidateList oldCandidates)
+{
+    if (oldCandidates == NULL || oldCandidates->next == NULL) {
+        return oldCandidates;
+    }
+
+    FuncCandidateList cur = oldCandidates;
+    int size = 0;
+    while (cur) {
+        size++;
+        cur = cur->next;
+    }
+
+    cur = oldCandidates;
+    FuncCandidateList* candidates = (FuncCandidateList*)palloc0(sizeof(FuncCandidateList) * size);
+    int index = 0;
+    while (cur) {
+        candidates[index++] = cur;
+        cur = cur->next;
+    }
+	
+    FuncCandidateList sortedCandidates = NULL;
+    FuncCandidateList lastCandidate = NULL;
+    for (int i = 0; i < size; i++) {
+        if (candidates[i] == NULL) {
+            continue;
+        }
+        int smallestIndex = i;
+        for (int j = 0; j < size; j++) {
+            FuncCandidateList cur2 = candidates[j];
+            if (cur2 != NULL && candidates[smallestIndex]->allArgNum > cur2->allArgNum) {
+                smallestIndex = j;
+            }
+        }
+
+        FuncCandidateList smallest = candidates[smallestIndex];
+        if (lastCandidate == NULL) {
+            lastCandidate = smallest;
+            sortedCandidates = smallest;
+        } else {
+            lastCandidate->next = smallest;
+            lastCandidate = lastCandidate->next;
+            smallest->next = NULL;
+        }
+        candidates[smallestIndex] = NULL;
+    }
+
+    pfree(candidates);
+    return sortedCandidates;
+}
 
 /* func_get_detail()
  *
@@ -1510,6 +1544,8 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
             }
         }
     }
+
+    raw_candidates = sort_candidate_func_list(raw_candidates);
 #else
     /* Get list of possible candidates from namespace search */
     raw_candidates = FuncnameGetCandidates(funcname, nargs, fargnames, expand_variadic, expand_defaults, false);
@@ -1532,6 +1568,7 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
         }
     }
 #endif	
+
 
     /*
      * Quickly check if there is an exact match to the input datatypes (there
@@ -1969,7 +2006,7 @@ Oid LookupFuncName(List* funcname, int nargs, const Oid* argtypes, bool noError)
                 clist->args[i] = cl_get_input_param_original_type(clist->oid, i);
             }
         }
-        if (memcmp(argtypes, clist->args, nargs * sizeof(Oid)) == 0)
+        if (memcmp(argtypes, clist->args, nargs * sizeof(Oid)) == 0 && OidIsValid(clist->oid))
             return clist->oid;
         clist = clist->next;
     }

@@ -1,0 +1,58 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_varchar(id INT, name varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),address varchar(50) ENCRYPTED WITH  (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (1, 'MyName1', 'MyAddress1');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (2, 'MyName2', 'MyAddress2');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (3, 'MyName3', 'MyAddress3');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (4, 'MyName4', 'MyAddress4');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (5, 'MyName5', 'MyAddress5');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (6, 'MyName6', 'MyAddress6');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (7, 'MyName7', 'MyAddress7');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (8, 'MyName8', 'MyAddress8');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (9, 'MyName9', 'MyAddress9');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (10, 'MyName10', 'MyAddress10');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (11, 'MyName11', 'MyAddress11');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (12, 'MyName12', 'MyAddress12');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (13, 'MyName13', 'MyAddress13');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (14, 'MyName14', 'MyAddress14');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (15, 'MyName15', 'MyAddress15');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (16, 'MyName16', 'MyAddress16');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (17, 'MyName17', 'MyAddress17');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (18, 'MyName18', 'MyAddress18');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (19, 'MyName19', 'MyAddress19');
+added to batch INSERT INTO t_varchar (id, name, address) VALUES (20, 'MyName20', 'MyAddress20');
+executing batch ...
+select * from t_varchar order by id;
+ id |   name   |   address   
+----+----------+-------------
+  1 | MyName1  | MyAddress1
+  2 | MyName2  | MyAddress2
+  3 | MyName3  | MyAddress3
+  4 | MyName4  | MyAddress4
+  5 | MyName5  | MyAddress5
+  6 | MyName6  | MyAddress6
+  7 | MyName7  | MyAddress7
+  8 | MyName8  | MyAddress8
+  9 | MyName9  | MyAddress9
+ 10 | MyName10 | MyAddress10
+ 11 | MyName11 | MyAddress11
+ 12 | MyName12 | MyAddress12
+ 13 | MyName13 | MyAddress13
+ 14 | MyName14 | MyAddress14
+ 15 | MyName15 | MyAddress15
+ 16 | MyName16 | MyAddress16
+ 17 | MyName17 | MyAddress17
+ 18 | MyName18 | MyAddress18
+ 19 | MyName19 | MyAddress19
+ 20 | MyName20 | MyAddress20
+(20 rows)
+
+DROP table t_varchar;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;

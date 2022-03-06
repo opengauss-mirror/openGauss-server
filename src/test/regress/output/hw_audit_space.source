@@ -1,0 +1,37 @@
+-- 修改guc参数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_resource_policy = 1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_space_limit = 512MB" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state =1" > /dev/null 2>&1
+-- 获取pg_audit 中最早建立的adt文件编号
+\! echo $(echo $(ls @abs_srcdir@/tmp_check/datanode1/pg_audit -tr | head -2 | xargs) | tr -cd "[0-9]")
+
+-- 生成 dml_action 审计日志
+CREATE TABLE T_TEST_SPACE
+(
+    COL1    int4            DEFAULT 1,
+    COL2     VARCHAR(1024) DEFAULT 'test_space');
+CREATE OR REPLACE PROCEDURE TRANSACTION_TEST_SPACE()
+AS
+BEGIN
+FOR i IN 0..3500000 LOOP
+INSERT INTO T_TEST_SPACE(COL1, COL2) VALUES (i, 'a');
+COMMIT;
+END LOOP;
+END;
+/
+CALL TRANSACTION_TEST_SPACE();
+ transaction_test_space 
+------------------------
+ 
+(1 row)
+
+-- 获取 pg_audit 中最早建立的adt文件编号 与原编号 0_adt 比较 观察是否删除了最早的日志文件
+\!  [[ $(echo $(ls @abs_srcdir@/tmp_check/datanode1/pg_audit -tr | head -2 | xargs) | tr -cd "[0-9]") > 1 ]] && echo 'delete oldest files' || echo 'fail to delete oldest files'
+delete oldest files
+-- 查看pg_audit 文件总大小 是否超过设置的512M
+\! [[ $(du -h --exclude=done @abs_srcdir@/tmp_check/datanode1/pg_audit | grep -oP '\d*M') > '530M' ]] && echo 'size of total logs exceeds upper limit' || echo 'size of total logs not exceeds upper limit'
+size of total logs not exceeds upper limit
+-- 恢复guc参数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_resource_policy" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_space_limit" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state" > /dev/null 2>&1

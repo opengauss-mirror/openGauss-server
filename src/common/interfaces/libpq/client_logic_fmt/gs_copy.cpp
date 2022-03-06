@@ -46,6 +46,10 @@
 #define OCTVALUE(c) ((c) - '0')
 #define INTEGER_SIZE 64
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 /* non-export function prototypes */
 static CopyStateData *begin_copy(bool is_from, bool is_rel, Node *raw_query, const char *query_string,
     List *attnamelist, List *options);
@@ -114,11 +118,16 @@ int deprocess_copy_line(PGconn *conn, const char *in_buffer, int msg_length, cha
 
         msg_length = remove_line_end(cstate, in_buffer, msg_length);
 
+        int decrypted_msg_length = 0;
         if (cstate->csv_mode) {
-            return deprocess_csv_line(conn, entry, in_buffer, msg_length, buffer);
+            decrypted_msg_length = deprocess_csv_line(conn, entry, in_buffer, msg_length, buffer);
         } else {
-            return deprocess_txt_line(conn, entry, in_buffer, msg_length, buffer);
+            decrypted_msg_length = deprocess_txt_line(conn, entry, in_buffer, msg_length, buffer);
         }
+        if (decrypted_msg_length < 0) {
+            libpq_free(*buffer);
+        }
+        return decrypted_msg_length;
     }
 }
 
@@ -176,6 +185,9 @@ int process_copy_chunk(PGconn *conn, const char *in_buffer, int msg_length, char
             ret = process_csv_chunk(conn, entry, in_buffer, msg_length, buffer);
         } else {
             ret = process_txt_chunk(conn, entry, in_buffer, msg_length, buffer);
+        }
+        if (ret < 0) {
+            libpq_free(*buffer);
         }
         if (full_chunk != NULL) {
             free(full_chunk);
@@ -392,9 +404,7 @@ static int deprocess_txt_line(PGconn *conn, PreparedStatement *entry, const char
         /* Make sure there is enough space for the next value */
         if (cstate->fieldno >= (int)entry->original_data_types_oids_size) {
             free(data);
-            free(*buffer);
             data = NULL;
-            *buffer = NULL;
             return -1;
         }
 
@@ -540,9 +550,7 @@ static int deprocess_txt_line(PGconn *conn, PreparedStatement *entry, const char
         } else {
             if (!deprocess_and_replace(conn, entry, data, data_size, false, buffer, written, res_length)) {
                 free(data);
-                free(*buffer);
                 data = NULL;
-                *buffer = NULL;
                 return -1;
             }
             if (!append_buffer(buffer, res_length, written, end_ptr, cur_ptr - end_ptr)) {
@@ -580,6 +588,7 @@ static int deprocess_txt_line(PGconn *conn, PreparedStatement *entry, const char
 static int process_txt_chunk(PGconn *conn, PreparedStatement *entry, const char *in_buffer, int msg_length,
     char **buffer)
 {
+    *buffer = NULL;
     if (!entry) {
         return -1;
     }
@@ -592,7 +601,6 @@ static int process_txt_chunk(PGconn *conn, PreparedStatement *entry, const char 
     }
     size_t data_size = 0;
 
-    *buffer = NULL;
     CopyStateData *cstate = entry->copy_state;
 
     char delimc = cstate->delim;
@@ -788,9 +796,7 @@ static int process_txt_chunk(PGconn *conn, PreparedStatement *entry, const char 
             /* process */
             if (!process_and_replace(conn, entry, data, data_size, false, buffer, written, res_length)) {
                 free(data);
-                free(*buffer);
                 data = NULL;
-                *buffer = NULL;
                 return -1;
             }
             if (!append_buffer(buffer, res_length, written, end_ptr, cur_ptr - end_ptr)) {
@@ -897,9 +903,7 @@ static int deprocess_csv_line(PGconn *conn, PreparedStatement *entry, const char
         /* Make sure there is enough space for the next value */
         if (cstate->fieldno >= (int)entry->original_data_types_oids_size) {
             free(data);
-            free(*buffer);
             data = NULL;
-            *buffer = NULL;
             return -1;
         }
 
@@ -954,9 +958,7 @@ static int deprocess_csv_line(PGconn *conn, PreparedStatement *entry, const char
                 end_ptr = cur_ptr;
                 if (cur_ptr >= line_end_ptr) {
                     free(data);
-                    free(*buffer);
                     data = NULL;
-                    *buffer = NULL;
                     return -1;
                 }
 
@@ -1027,9 +1029,7 @@ static int deprocess_csv_line(PGconn *conn, PreparedStatement *entry, const char
         } else {
             if (!deprocess_and_replace(conn, entry, data, data_size, saw_quote, buffer, written, res_length)) {
                 free(data);
-                free(*buffer);
                 data = NULL;
-                *buffer = NULL;
                 return -1;
             }
             if (!append_buffer(buffer, res_length, written, end_ptr, cur_ptr - end_ptr)) {
@@ -1167,10 +1167,8 @@ int process_csv_chunk(PGconn *conn, PreparedStatement *entry, const char *in_buf
                 end_ptr = cur_ptr;
                 if (cur_ptr >= line_end_ptr) {
                     free(data);
-                    free(*buffer);
                     data = NULL;
-                    *buffer = NULL;
-                    return 0;
+                    return -1;
                 }
 
                 c = *cur_ptr++;
@@ -1236,15 +1234,13 @@ int process_csv_chunk(PGconn *conn, PreparedStatement *entry, const char *in_buf
             if (!append_buffer(buffer, res_length, written, start_ptr, cur_ptr - start_ptr)) {
                 free(data);
                 data = NULL;
-                return 0;
+                return -1;
             }
         } else if (found_delim || found_eol || (end_ptr == line_end_ptr)) {
             /* process */
             if (!process_and_replace(conn, entry, data, data_size, false, buffer, written, res_length)) {
                 free(data);
-                free(*buffer);
                 data = NULL;
-                *buffer = NULL;
                 return -1;
             }
             if (!append_buffer(buffer, res_length, written, end_ptr, cur_ptr - end_ptr)) {

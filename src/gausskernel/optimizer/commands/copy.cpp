@@ -983,7 +983,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         }
 
         /* @Online expansion: check if the table is in redistribution read only mode */
-        if (rel != NULL && is_from && RelationInClusterResizingReadOnly(rel))
+        if (rel != NULL && is_from && RelationInClusterResizingWriteErrorMode(rel))
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPERATION),
                     errmsg("%s is redistributing, please retry later.", rel->rd_rel->relname.data)));
@@ -2076,6 +2076,7 @@ static void ProcessCopyNotAllowedOptions(CopyState cstate)
             (errcode(ERRCODE_SYNTAX_ERROR), errmsg("out_fix_alignment is only allowed in write-only foreign tables")));
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
     /*
      *  We could not make CopyGetDataDefault to respond to cancel signal. As a result
      *  subtransactions that include COPY statement would be able to rollback or trigger exception
@@ -2084,8 +2085,8 @@ static void ProcessCopyNotAllowedOptions(CopyState cstate)
     if (IsInLiveSubtransaction()) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("COPY does not support subtransactions or exceptions.")));
     }
+#endif
 }
-
 /*
  * ProcessCopyErrorLogSetUps is used to set up necessary structures used for copy from error logging.
  */
@@ -2262,7 +2263,6 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
     ProcessCopyOptions(cstate, is_from, options);
     if (is_copy)
         ProcessCopyNotAllowedOptions(cstate);
-
     /* Process the source/target relation or query */
     if (rel) {
         Assert(!raw_query);
@@ -2560,6 +2560,43 @@ static char* FindFileName(const char* path)
     return (name_start == NULL) ? (char*)path : (name_start + 1);
 }
 
+static void CopyToCheck(Relation rel)
+{
+    if (rel->rd_rel->relkind == RELKIND_VIEW)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot copy from view \"%s\"", RelationGetRelationName(rel)),
+                errhint("Try the COPY (SELECT ...) TO variant.")));
+    else if (rel->rd_rel->relkind == RELKIND_CONTQUERY)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot copy from contview \"%s\"", RelationGetRelationName(rel)),
+                errhint("Try the COPY (SELECT ...) TO variant.")));
+    else if (rel->rd_rel->relkind == RELKIND_MATVIEW)
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot copy from materialized view \"%s\"", RelationGetRelationName(rel)),
+                errhint("Try the COPY (SELECT ...) TO variant.")));
+    else if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+            ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("cannot copy from foreign table \"%s\"", RelationGetRelationName(rel)),
+                    errhint("Try the COPY (SELECT ...) TO variant.")));
+    } else if (rel->rd_rel->relkind == RELKIND_STREAM) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot copy from stream \"%s\"", RelationGetRelationName(rel)),
+                errhint("Try the COPY (SELECT ...) TO variant.")));
+    } else if (RELKIND_IS_SEQUENCE(rel->rd_rel->relkind))
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot copy from (large) sequence \"%s\"", RelationGetRelationName(rel))));
+    else
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot copy from non-table relation \"%s\"", RelationGetRelationName(rel))));
+
+}
 /*
  * Setup CopyState to read tuples from a table or a query for COPY TO.
  */
@@ -2572,39 +2609,7 @@ CopyState BeginCopyTo(
     bool flag = rel != NULL && rel->rd_rel->relkind != RELKIND_RELATION;
 
     if (flag) {
-        if (rel->rd_rel->relkind == RELKIND_VIEW)
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy from view \"%s\"", RelationGetRelationName(rel)),
-                    errhint("Try the COPY (SELECT ...) TO variant.")));
-        else if (rel->rd_rel->relkind == RELKIND_CONTQUERY)
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy from contview \"%s\"", RelationGetRelationName(rel)),
-                    errhint("Try the COPY (SELECT ...) TO variant.")));
-        else if (rel->rd_rel->relkind == RELKIND_MATVIEW)
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy from materialized view \"%s\"", RelationGetRelationName(rel)),
-                    errhint("Try the COPY (SELECT ...) TO variant.")));
-        else if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("cannot copy from foreign table \"%s\"", RelationGetRelationName(rel)),
-                        errhint("Try the COPY (SELECT ...) TO variant.")));
-        } else if (rel->rd_rel->relkind == RELKIND_STREAM) {
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy from stream \"%s\"", RelationGetRelationName(rel)),
-                    errhint("Try the COPY (SELECT ...) TO variant.")));
-        } else if (RELKIND_IS_SEQUENCE(rel->rd_rel->relkind))
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy from (large) sequence \"%s\"", RelationGetRelationName(rel))));
-        else
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy from non-table relation \"%s\"", RelationGetRelationName(rel))));
+        CopyToCheck(rel);
     }
 
     cstate = BeginCopy(false, rel, query, queryString, attnamelist, options);
@@ -4209,6 +4214,7 @@ static uint64 CopyFrom(CopyState cstate)
         (void)MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
 
         if (IS_PGXC_COORDINATOR) {
+#ifdef ENABLE_MULTIPLE_NODES
             PG_TRY();
             {
                 is_EOF = !NextCopyFrom(cstate, econtext, values, nulls, &loaded_oid);
@@ -4227,7 +4233,7 @@ static uint64 CopyFrom(CopyState cstate)
             }
 
             PG_END_TRY();
-
+#endif
             if (unlikely(is_EOF))
                 break;
         } else {
@@ -6446,65 +6452,20 @@ static void append_defvals(Datum* values, CopyState cstate)
     if (cstate->num_defaults <= 0) {
         return;
     }
-    /* if sql has default column, do with the line_buf and */
-    /* make the col name and value one to one. */
-    ListCell* cur = NULL;
-    char *tmpLineBuf = pg_strdup(cstate->line_buf.data);
-    char *originHead = tmpLineBuf;
-    resetStringInfo(&(cstate->line_buf));
-    char *token = NULL;
-    int attNums=0, tokenNum=0;
-    bool first = true;
-
-    foreach (cur, cstate->attnumlist) {
-        attNums++;
-    }
-
-    /*
-     * When copy from text or csv that one col is self-incremental col,
-     * and there are more columns in the text than the columns to be imported,
-     * you must set ignore_extra_data 'on'. In this case, we choose the number
-     * of columns we want from front to back in the text, discarding the last
-     * unwanted values.
-     */
-    for (tokenNum=1, token = strsep(&tmpLineBuf, cstate->delim);
-        token != NULL && tokenNum <= attNums;
-        token = strsep(&tmpLineBuf, cstate->delim), ++tokenNum) {
-        if (first) {
-            appendBinaryStringInfo(&cstate->line_buf, token, strlen(token));
-            first = false;
-        } else {
-            appendBinaryStringInfo(&cstate->line_buf, cstate->delim, strlen(cstate->delim));
-            appendBinaryStringInfo(&cstate->line_buf, token, strlen(token));
-        }
-    }
-
-    /*
-     * If the text contains fewer columns of data than the columns to
-     * be imported and fill_missing_field is 'on', populate the data
-     * with delimiters.
-     */
-    if (attNums - tokenNum >= 0) {
-        for (; tokenNum <= attNums; ++tokenNum) {
-            appendBinaryStringInfo(&cstate->line_buf, cstate->delim, strlen(cstate->delim));
-        }
-    }
-    free(originHead);
-    originHead = NULL;
-    tmpLineBuf = NULL;
+    /* In binary format, the first two bytes indicate the number of columns */
+    int binaryColBytesSize = 2;
 
     CopyStateData new_cstate = *cstate;
     int i;
 
     new_cstate.fe_msgbuf = makeStringInfo();
+    if(IS_BINARY(cstate)) {
+        appendBinaryStringInfo(new_cstate.fe_msgbuf, cstate->line_buf.data, binaryColBytesSize);
+     }
 
     for (i = 0; i < cstate->num_defaults; i++) {
         int attindex = cstate->defmap[i];
         Datum defvalue = values[attindex];
-
-        if (!IS_BINARY(cstate)) {
-            CopySendString(&new_cstate, new_cstate.delim);
-        }
 
         /*
          * For using the values in their output form, it is not sufficient
@@ -6537,11 +6498,19 @@ static void append_defvals(Datum* values, CopyState cstate)
                     false /* there's at least one user-supplied attribute */);
             else
                 CopyAttributeOutText(&new_cstate, string);
+            CopySendString(&new_cstate, new_cstate.delim);
         }
     }
 
-    /* Append the generated default values to the user-supplied data-row */
-    appendBinaryStringInfo(&cstate->line_buf, new_cstate.fe_msgbuf->data, new_cstate.fe_msgbuf->len);
+    if(IS_BINARY(cstate)) {
+        appendBinaryStringInfo(new_cstate.fe_msgbuf, cstate->line_buf.data + binaryColBytesSize, new_cstate.line_buf.len - binaryColBytesSize);
+    } else {
+        appendBinaryStringInfo(new_cstate.fe_msgbuf, cstate->line_buf.data, new_cstate.line_buf.len);
+    }
+     /* reset */
+     resetStringInfo(&cstate->line_buf);
+     /* append all to line_buf */
+     appendBinaryStringInfo(&cstate->line_buf, new_cstate.fe_msgbuf->data, new_cstate.fe_msgbuf->len);
 }
 #endif
 
@@ -6596,10 +6565,14 @@ retry:
 
         if (cstate->mode == MODE_NORMAL) {
             if (cstate->filename && is_obs_protocol(cstate->filename)) {
+#ifndef ENABLE_LITE_MODE
                 if (getNextOBS(cstate)) {
                     cstate->eol_type = EOL_UNKNOWN;
                     goto retry;
                 }
+#else
+                FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
             } else {
                 if (getNextGDS<true>(cstate)) {
                     if (cstate->eol_type != EOL_UD)
@@ -9265,12 +9238,16 @@ void bulkloadFuncFactory(CopyState cstate)
     switch (mode) {
         case MODE_NORMAL: /* for GDS oriented dist import */
             if (is_obs_protocol(cstate->filename)) {
+#ifndef ENABLE_LITE_MODE
                 /* Attache working house routines for OBS oriented dist import */
                 func.initBulkLoad = initOBSModeState;
                 func.endBulkLoad = endOBSModeBulkLoad;
                 copyGetDataFunc = NULL;
                 readlineFunc = CopyGetNextLineFromOBS;
                 getNextCopyFunc = getNextOBS;
+#else
+                FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
             } else {
                 /* Attache working house routines for GDS oriented dist import */
                 func.initBulkLoad = initNormalModeState<true>;
@@ -9336,6 +9313,7 @@ CopyState beginExport(
             cstate->writelineFunc = RemoteExportWriteOut;
 
             if (is_obs_protocol(filename)) {
+#ifndef ENABLE_LITE_MODE
                 /* Fetch OBS write only table related attribtues */
                 getOBSOptions(&cstate->obs_copy_options, options);
 
@@ -9352,6 +9330,9 @@ CopyState beginExport(
                 }
 
                 initOBSModeState(cstate, object_path, tasklist);
+#else
+                FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
             } else {
                 initNormalModeState<false>(cstate, filename, tasklist);
             }
@@ -9506,6 +9487,7 @@ void endExport(CopyState cstate)
             endRoachBulkLoad(cstate);
         }
     } else if (cstate->copy_dest == COPY_OBS) {
+#ifndef ENABLE_LITE_MODE
         if (IS_PGXC_DATANODE) {
             if (cstate->outBuffer->len > 0)
                 RemoteExportFlushData(cstate);
@@ -9513,6 +9495,9 @@ void endExport(CopyState cstate)
             cstate->io_stream->Flush();
             endOBSModeBulkLoad(cstate);
         }
+#else
+        FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
     } else
         exportDeinitOutBuffer(cstate);
     MemoryContextDelete(cstate->rowcontext);
@@ -10056,18 +10041,15 @@ static bool IfCopyLineMatchWhenPositionExpr(CopyState cstate, LoadWhenExpr *when
             return (whenpostion_strcmp(rawfield, rawfieldlen, when->val, strlen(when->val)) == 0);
         else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN oper error")));
-            return false;
         }
     } else if (strlen(when->oper) == 2) {
         if (strncmp(when->oper, "<>", 2) == 0)
             return (whenpostion_strcmp(rawfield, rawfieldlen, when->val, strlen(when->val)) != 0);
         else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN oper error")));
-            return false;
         }
     } else {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN oper error")));
-        return false;
     }
     return false;
 }
@@ -10080,13 +10062,11 @@ static void CopyGetWhenExprAttFieldno(CopyState cstate, LoadWhenExpr *when, List
     }
     if (when->attname == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("WHEN no field name")));
-        return;
     }
 
     if (attnamelist == NULL) {
         if (cstate->rel == NULL) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("WHEN no relation")));
-            return;
         }
         tupDesc = RelationGetDescr(cstate->rel);
         for (int i = 0; i < tupDesc->natts; i++) {
@@ -10111,7 +10091,6 @@ static void CopyGetWhenExprAttFieldno(CopyState cstate, LoadWhenExpr *when, List
         }
         ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("WHEN field name not find")));
     }
-    return;
 }
 
 static bool IfCopyLineMatchWhenFieldExpr(CopyState cstate, LoadWhenExpr *when)
@@ -10137,18 +10116,15 @@ static bool IfCopyLineMatchWhenFieldExpr(CopyState cstate, LoadWhenExpr *when)
             return (strcmp(cstate->raw_fields[attnum], when->val) == 0);
         else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field oper error")));
-            return false;
         }
     } else if (strlen(when->oper) == 2){
         if (strncmp(when->oper, "<>", 2) == 0)
             return (strcmp(cstate->raw_fields[attnum], when->val) != 0);
         else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field oper error")));
-            return false;
         }
     } else {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field oper error")));
-        return false;
     }
     return false;
 }
@@ -10200,13 +10176,11 @@ static int CopyGetColumnListIndex(CopyState cstate, List *attnamelist, const cha
     int index = 0;
     if (colname == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("Column name is NULL")));
-        return InvalidAttrNumber;
     }
 
     if (attnamelist == NULL) {
         if (cstate->rel == NULL) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("Column list no relation")));
-            return InvalidAttrNumber;
         }
         tupDesc = RelationGetDescr(cstate->rel);
         for (int i = 0; i < tupDesc->natts; i++) {

@@ -53,6 +53,7 @@ extern PLpgSQL_package* plpgsql_pkg_HashTableLookup(PLpgSQL_pkg_hashkey* pkg_key
 extern void plpgsql_compile_error_callback(void* arg);
 
 static Node* plpgsql_bind_variable_column_ref(ParseState* pstate, ColumnRef* cref);
+static Node* plpgsql_describe_ref(ParseState* pstate, ColumnRef* cref);
 
 /*
  * plpgsql_parser_setup_bind		set up parser hooks for dynamic parameters
@@ -61,7 +62,7 @@ static Node* plpgsql_bind_variable_column_ref(ParseState* pstate, ColumnRef* cre
 void plpgsql_parser_setup_bind(struct ParseState* pstate, List** expr)
 {
     pstate->p_bind_variable_columnref_hook = plpgsql_bind_variable_column_ref;
-    pstate->p_ref_hook_state = (void*)expr;
+    pstate->p_bind_hook_state = (void*)expr;
 }
 
 /*
@@ -70,7 +71,7 @@ void plpgsql_parser_setup_bind(struct ParseState* pstate, List** expr)
  */
 static Node* plpgsql_bind_variable_column_ref(ParseState* pstate, ColumnRef* cref)
 {
-    List** expr = (List**)pstate->p_ref_hook_state;
+    List** expr = (List**)pstate->p_bind_hook_state;
 
     /* get column name */
     Node* field1 = (Node*)linitial(cref->fields);
@@ -106,6 +107,34 @@ static Node* plpgsql_bind_variable_column_ref(ParseState* pstate, ColumnRef* cre
     param->paramtype = argtypes;
     param->paramtypmod = -1;
     param->paramcollid = get_typcollation(param->paramtype);
+    param->location = cref->location;
+    return (Node*)param;
+}
+
+/*
+ * plpgsql_parser_setup_describe		set up parser hooks for dynamic parameters
+ * only support DBE_SQL.
+ */
+void plpgsql_parser_setup_describe(struct ParseState* pstate, List** expr)
+{
+    pstate->p_bind_describe_hook = plpgsql_describe_ref;
+    pstate->p_describeco_hook_state = (void*)expr;
+}
+
+/*
+ * plpgsql_describe_ref		parser callback after parsing a ColumnRef
+ * only support DBE_SQL.
+ */
+static Node* plpgsql_describe_ref(ParseState* pstate, ColumnRef* cref)
+{
+    Assert(pstate);
+    /* Generate param and Fill by index(len) */
+    Param* param = NULL;
+    param = makeNode(Param);
+    param->paramkind = PARAM_EXTERN;
+    param->paramid = 0;
+    param->paramtype = 20;
+    param->paramtypmod = -1;
     param->location = cref->location;
     return (Node*)param;
 }
@@ -628,13 +657,16 @@ void plpgsql_pkg_HashTableDelete(PLpgSQL_package* pkg)
 
 void delete_package(PLpgSQL_package* pkg)
 {
-    pkg->use_count--;
     if (pkg->use_count > 0)
         return;
     ListCell* l = NULL;
     foreach(l, pkg->proc_compiled_list) {
+        if (((PLpgSQL_function*)lfirst(l))->use_count > 0)
+            return;
+    }
+    foreach(l, pkg->proc_compiled_list) {
         PLpgSQL_function* func = (PLpgSQL_function*)lfirst(l);
-        delete_function(func);
+        delete_function(func, true);
     }
     /* free package memory,*/
     plpgsql_pkg_HashTableDelete(pkg);
@@ -657,6 +689,7 @@ static void plpgsql_pkg_append_dlcell(plpgsql_pkg_HashEnt* entity)
         pkg = head_entity->package;
 
         /* delete from the hash and delete the function's compile */
+        CheckCurrCompileDependOnPackage(pkg->pkg_oid);
         delete_package(pkg);
         pfree_ext(pkg);
     }
@@ -692,7 +725,6 @@ static void plpgsql_pkg_HashTableInsert(PLpgSQL_package* pkg, PLpgSQL_pkg_hashke
     hentry->package = pkg;
     /* prepare back link from function to hashtable key */
     pkg->pkg_hashkey = &hentry->key;
-    pkg->use_count++;
 }
 
 extern PLpgSQL_package* plpgsql_pkg_HashTableLookup(PLpgSQL_pkg_hashkey* pkg_key)
@@ -789,6 +821,7 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
         pkg->pkg_tid = pkg_tup->t_self;
         pkg->proc_list = NULL;
         pkg->invalItems = NIL;
+        pkg->use_count = 0;
     }
     saved_pseudo_current_userId = u_sess->misc_cxt.Pseudo_CurrentUserId;
     u_sess->misc_cxt.Pseudo_CurrentUserId = &pkg->pkg_owner;
@@ -898,6 +931,8 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
     /* This is short-lived, so needn't allocate in function's cxt */
     curr_compile->plpgsql_Datums = (PLpgSQL_datum**)MemoryContextAlloc(
         curr_compile->compile_tmp_cxt, sizeof(PLpgSQL_datum*) * curr_compile->datums_pkg_alloc);
+    curr_compile->datum_need_free = (bool*)MemoryContextAlloc(
+        curr_compile->compile_tmp_cxt, sizeof(bool) * curr_compile->datums_pkg_alloc);
     curr_compile->datums_last = 0;
     PushOverrideSearchPath(pkg->pkg_searchpath);
     plpgsql_ns_init();
@@ -949,8 +984,11 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
     u_sess->plsql_cxt.have_error = saved_flag;
     pkg->ndatums = curr_compile->plpgsql_pkg_nDatums;
     pkg->datums = (PLpgSQL_datum**)palloc(sizeof(PLpgSQL_datum*) * curr_compile->plpgsql_pkg_nDatums);
+    pkg->datum_need_free = (bool*)palloc(sizeof(bool) * curr_compile->plpgsql_pkg_nDatums);
+    pkg->datums_alloc = pkg->ndatums;
     for (i = 0; i < curr_compile->plpgsql_pkg_nDatums; i++) {
         pkg->datums[i] = curr_compile->plpgsql_Datums[i];
+        pkg->datum_need_free[i] = curr_compile->datum_need_free[i];
         if (pkg->datums[i]->dtype == PLPGSQL_DTYPE_VAR) {
             PLpgSQL_var* var = reinterpret_cast<PLpgSQL_var*>(pkg->datums[i]);
             if (var->pkg == NULL) {
@@ -981,6 +1019,7 @@ static PLpgSQL_package* do_pkg_compile(Oid pkgOid, HeapTuple pkg_tup, PLpgSQL_pa
     if (isSpec) {
         pkg->public_ns = curr_compile->ns_top;
         pkg->is_bodycompiled = false;
+        pkg->public_ndatums = curr_compile->plpgsql_pkg_nDatums;
     } else  {
         pkg->private_ns = curr_compile->ns_top;
         pkg->is_bodycompiled = true;
@@ -1017,6 +1056,15 @@ List* GetPackageListName(const char* pkgName, const Oid nspOid)
     List* nameList = NULL;
     initStringInfo(&nameData);
     char* schemaName = get_namespace_name(nspOid);
+    if (schemaName == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_PLPGSQL_ERROR),
+             errmsg("failed to find package schema name"),
+             errdetail("when compile package \"%s\", failed to find its schema name,"\
+                       "the schema maybe dropped by other session", pkgName),
+             errcause("excessive concurrency"),
+             erraction("reduce concurrency and retry")));
+    }
     appendStringInfoString(&nameData, schemaName);
     appendStringInfoString(&nameData, ".");
     appendStringInfoString(&nameData, pkgName);
@@ -1064,7 +1112,7 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
                 pkg_valid = true;
         } else {
             /* need reuse pkg slot in hash table later, we need clear all refcount for this pkg and delete it here */
-            plpgsql_HashTableDeleteAndCheckFunc(PACKAGEOID, pkgOid);
+            delete_package_and_check_invalid_item(pkgOid);
             pkg_valid = false;
         }
     }
@@ -1074,7 +1122,9 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
         if (!pkg_valid) {
             pkg = NULL;
             pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, true);
+#ifndef ENABLE_MULTIPLE_NODES
             PackageInit(pkg, isCreate);
+#endif
             if (!isSpec && pkg != NULL) {
                 pkg = do_pkg_compile(pkgOid, pkg_tup, pkg, &hashkey, false);
                 if (pkg == NULL) {
@@ -1083,7 +1133,9 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
                 }
                 ReleaseSysCache(pkg_tup);
                 pkg_tup = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
                 PackageInit(pkg, isCreate);
+#endif
             } else if(!isSpec && pkg == NULL) {
                 ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                     errmsg("package spec %u not found", pkgOid)));
@@ -1094,18 +1146,22 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
             }
         
             /* package must be compiled befor init */
+#ifndef ENABLE_MULTIPLE_NODES
             if (pkg != NULL) {
                 PackageInit(pkg, isCreate);
             } else {
                 ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                     errmsg("package spec %u not found", pkgOid))); 
             }
+#endif
         }
     }
     PG_CATCH();
     {
 #ifndef ENABLE_MULTIPLE_NODES
-        if (u_sess->attr.attr_common.plsql_show_all_error && isCreate) {
+        bool insertError = u_sess->attr.attr_common.plsql_show_all_error ||
+                                !u_sess->attr.attr_sql.check_function_bodies;
+        if (insertError) {
             InsertError(pkgOid);
         }
 #endif
@@ -1285,22 +1341,20 @@ int GetProcedureLineNumberInPackage(const char* procedureStr, int loc)
 */
 void InsertError(Oid objId) 
 {
-    if (u_sess->attr.attr_common.upgrade_mode != 0 || u_sess->plsql_cxt.errorList == NULL) {
-        return;
-    }
 #ifdef ENABLE_MULTIPLE_NODES
     return;
-#else 
+#else
+    if (u_sess->plsql_cxt.errorList == NULL || 
+            (!u_sess->attr.attr_common.plsql_show_all_error &&
+            u_sess->attr.attr_sql.check_function_bodies)) {
+        return;
+    } 
     Oid id = InvalidOid;
     Oid nspid = InvalidOid;
     char* name = NULL;
     char* type = NULL;
     Oid userId = (Oid)u_sess->misc_cxt.CurrentUserId;
     int rc = CompileWhich();
-    if (u_sess->plsql_cxt.errorList == NULL || 
-        !u_sess->attr.attr_common.plsql_show_all_error || IsTransactionBlock()) {
-        return;
-    }
     if (rc == PLPGSQL_COMPILE_PROC) {
         id = objId;
         HeapTuple tuple;
@@ -1384,7 +1438,6 @@ void InsertError(Oid objId)
                 userId, nspid, name, type, line, errmsg);
         }
     }
-    appendStringInfo(&ds, "EXCEPTION WHEN OTHERS THEN NULL; \n");
     appendStringInfo(&ds, "end;");
     List* rawParserList = NULL;
     rawParserList = raw_parser(ds.data);
@@ -1410,11 +1463,14 @@ void InsertError(Oid objId)
         }
         (void)CompileStatusSwtichTo(save_compile_status);
         u_sess->plsql_cxt.curr_compile_context = save_compile_context;
-        clearCompileContextList(save_compile_list_length);
+        u_sess->plsql_cxt.isCreateFunction = false;
         PG_RE_THROW();
     }
     PG_END_TRY();
     u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+    if (rc != PLPGSQL_COMPILE_PACKAGE_PROC) {
+        clearCompileContextList(save_compile_list_length);
+    }
     (void)CompileStatusSwtichTo(save_compile_status);
     if (temp != NULL) {
         MemoryContextSwitchTo(temp);
@@ -1431,7 +1487,7 @@ void InsertError(Oid objId)
 */
 void DropErrorByOid(int objtype, Oid objoid) 
 {
-    bool notInsert = u_sess->attr.attr_common.upgrade_mode != 0 || SKIP_GS_SOURCE || IsTransactionBlock();
+    bool notInsert = u_sess->attr.attr_common.upgrade_mode != 0 || SKIP_GS_SOURCE;
     if (notInsert) {
         return;
     }
@@ -1582,7 +1638,7 @@ void InsertErrorMessage(const char* message, int yyloc, bool isQueryString, int 
 #else 
     int rc = CompileWhich();
     if (rc == PLPGSQL_COMPILE_NULL || 
-        !u_sess->attr.attr_common.plsql_show_all_error) {
+        (!u_sess->attr.attr_common.plsql_show_all_error && u_sess->attr.attr_sql.check_function_bodies)) {
         return;
     }
 #endif

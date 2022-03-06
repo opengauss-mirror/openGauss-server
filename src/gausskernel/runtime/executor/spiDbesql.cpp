@@ -123,6 +123,9 @@ void GetColumnDescribe(SPIPlanPtr plan, ArrayType** resDescribe, MemoryContext m
                     SPIDescColumn->resno = descColumns->resno;
                     SPIDescColumn->resorigtbl = descColumns->resorigtbl;
                     SPIDescColumn->resname = (char *)palloc(NAMEDATALEN);
+                    if (!descColumns->resname) {
+                        continue;
+                    }
                     rc = strcpy_s(SPIDescColumn->resname, NAMEDATALEN, (char*)descColumns->resname);
                     securec_check(rc, "", "");
 
@@ -133,10 +136,7 @@ void GetColumnDescribe(SPIPlanPtr plan, ArrayType** resDescribe, MemoryContext m
                     attTuple = SearchSysCache2(ATTNAME, ObjectIdGetDatum(SPIDescColumn->resorigtbl),
                                                PointerGetDatum(SPIDescColumn->resname));
                     if (!HeapTupleIsValid(attTuple)) {
-                        ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_UNDEFINED_COLUMN),
-                                errmsg("column \"%s\" does not exist", SPIDescColumn->resname),
-                                errdetail("N/A"), errcause("column does not exist"),
-                                erraction("check column type")));
+                        continue;
                     }
                     attForm = ((Form_pg_attribute)GETSTRUCT(attTuple));
                     attNum = attForm->attnum;
@@ -160,7 +160,8 @@ void GetColumnDescribe(SPIPlanPtr plan, ArrayType** resDescribe, MemoryContext m
         }
     }
 }
-void SpiGetColumnFromPlan(const char *src, ArrayType** resDescribe, MemoryContext memctx)
+void SpiGetColumnFromPlan(const char *src, ArrayType** resDescribe, MemoryContext memctx,
+    ParserSetupHook parserSetup, void *parserSetupArg)
 {
     _SPI_plan plan;
     if (src == NULL) {
@@ -179,13 +180,15 @@ void SpiGetColumnFromPlan(const char *src, ArrayType** resDescribe, MemoryContex
     plan.stmt_list = NIL;
     plan.spi_key = INVALID_SPI_KEY;
     plan.id = (uint32)-1;
-
+    plan.parserSetup = parserSetup;
+    plan.parserSetupArg = parserSetupArg;
     _SPI_prepare_plan(src, &plan);
     GetColumnDescribe(&plan, resDescribe, memctx);
     _SPI_end_call(true);
 }
 
-void SpiDescribeColumnsCallback(CommandDest dest, const char *src, ArrayType** resDescribe, MemoryContext memctx)
+void SpiDescribeColumnsCallback(CommandDest dest, const char *src, ArrayType** resDescribe,
+    MemoryContext memctx, ParserSetupHook parserSetup, void *parserSetupArg)
 {
     bool connected = false;
 
@@ -199,7 +202,7 @@ void SpiDescribeColumnsCallback(CommandDest dest, const char *src, ArrayType** r
         }
         connected = true;
         /* Do the query. */
-        SpiGetColumnFromPlan(src, resDescribe, memctx);
+        SpiGetColumnFromPlan(src, resDescribe, memctx,parserSetup, parserSetupArg);
         
         connected = false;
         (void)SPI_finish();

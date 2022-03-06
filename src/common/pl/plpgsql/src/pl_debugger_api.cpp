@@ -330,6 +330,7 @@ static Datum get_info_local_data(const char* var_name, const int frameno, Functi
  */
 Datum debug_client_info_code(PG_FUNCTION_ARGS)
 {
+    InterfaceCheck("info_code", false);
     Oid funcid = PG_GETARG_OID(0);
 
     const int DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM = 3;
@@ -385,7 +386,15 @@ Datum debug_client_info_code(PG_FUNCTION_ARGS)
         } else {
             nulls[i++] = true;
         }
-        values[i++] = CStringGetTextDatum(entry->code);
+        if (entry->code != NULL) {
+            char* maskcode = maskPassword(entry->code);
+            char* code = (maskcode == NULL) ? entry->code : maskcode;
+            values[i++] = CStringGetTextDatum(code);
+            if (code != maskcode)
+                pfree_ext(maskcode);
+        } else {
+            nulls[i++] = true;
+        }
         values[i++] = BoolGetDatum(entry->canBreak);
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));

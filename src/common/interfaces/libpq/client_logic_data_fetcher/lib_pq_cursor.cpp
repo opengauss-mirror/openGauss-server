@@ -24,6 +24,8 @@
 #include "lib_pq_cursor.h"
 #include "stdio.h"
 #include "libpq/libpq-fe.h"
+#include "libpq/libpq-int.h"
+
 
 /* *
  * Constructor
@@ -54,6 +56,11 @@ bool LibPQCursor::load(const char *query)
 {
     m_conn->client_logic->disable_once = true;
     m_data_handler = PQexec(m_conn, query);
+    if (!m_data_handler) {
+        printfPQExpBuffer(&m_conn->errorMessage, libpq_gettext("Client encryption cache query: '%s' failed\n"), query);
+        m_data_handler = NULL;
+        return false;
+    }
     /* check status */
     if (PQresultStatus(m_data_handler) != PGRES_TUPLES_OK) {
         fprintf(stderr, "Client encryption cache query: '%s' failed with error : %d, '%s'\n", query,

@@ -144,6 +144,9 @@ extern const unsigned short protoVersionList[][2];
 #define PG_PROTOCOL_LATEST PG_PROTOCOL(3, 51)
 #define PG_PROTOCOL_GAUSS_BASE 50
 
+/* Buffer length of error message for connection fail information */
+#define INITIAL_EXPBUFFER_SIZE 256
+
 typedef uint32 ProtocolVersion; /* FE/BE protocol version number */
 
 typedef ProtocolVersion MsgType;
@@ -199,8 +202,11 @@ typedef struct StartupPacket {
 
 #define AUTH_REQ_SHA256 10     /* sha256 password */
 #define AUTH_REQ_MD5_SHA256 11 /* md5_auth_sha256_stored password */
-#define AUTH_REQ_IAM 12        /* iam token authenication */
+#ifdef ENABLE_LITE_MODE
+#define AUTH_REQ_SHA256_RFC 12 /* sha256 auth for RFC5802 */
+#endif
 #define AUTH_REQ_SM3 13        /* sm3 password */
+#define AUTH_REQ_IAM 14        /* iam token authenication */
 
 typedef uint32 AuthRequest;
 

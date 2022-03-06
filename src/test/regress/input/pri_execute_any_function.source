@@ -1,0 +1,157 @@
+CREATE USER test_execute_any_function_role PASSWORD 'Gauss@1234';
+GRANT execute any function to test_execute_any_function_role;
+CREATE TABLESPACE pri_execute_fun_tsp LOCATION '@testtablespace@/exe_fun_tsp';
+CREATE SCHEMA exe_fun_schema;
+set search_path=exe_fun_schema;
+
+
+--定义函数为SQL查询。
+CREATE FUNCTION exe_fun_schema.exe_fun_func_add_sql(integer, integer) RETURNS integer
+    AS 'select $1 + $2;'
+    LANGUAGE SQL
+    IMMUTABLE
+    RETURNS NULL ON NULL INPUT;
+REVOKE EXECUTE ON FUNCTION exe_fun_schema.exe_fun_func_add_sql(integer, integer) FROM public;
+--利用参数名用 PL/pgSQL 自增一个整数。
+CREATE OR REPLACE FUNCTION exe_fun_schema.exe_fun_func_increment_plsql(i integer) RETURNS integer AS $$
+        BEGIN
+                RETURN i + 1;
+        END;
+$$ LANGUAGE plpgsql;
+REVOKE EXECUTE ON FUNCTION exe_fun_schema.exe_fun_func_increment_plsql(integer) FROM public;
+--返回RECORD类型
+CREATE OR REPLACE FUNCTION exe_fun_schema.exe_fun_compute(i int, out result_1 bigint, out result_2 bigint)
+returns SETOF RECORD
+as $$
+begin
+    result_1 = i + 1;
+    result_2 = i * 10;
+return next;
+end;
+$$language plpgsql;
+REVOKE EXECUTE ON FUNCTION exe_fun_schema.exe_fun_compute(int) FROM public;
+--返回一个包含多个输出参数的记录。
+CREATE FUNCTION exe_fun_schema.exe_fun_func_dup_sql(in int, out f1 int, out f2 text)
+    AS $$ SELECT $1, CAST($1 AS text) || ' is text' $$
+    LANGUAGE SQL;
+REVOKE EXECUTE ON FUNCTION exe_fun_schema.exe_fun_func_dup_sql(int) FROM public;
+
+--计算两个整数的和，并返回结果。若果输入为null，则返回null。
+CREATE FUNCTION exe_fun_schema.exe_fun_func_add_sql2(num1 integer, num2 integer) RETURN integer
+AS
+BEGIN 
+RETURN num1 + num2;
+END;
+/
+REVOKE EXECUTE ON FUNCTION exe_fun_schema.exe_fun_func_add_sql2(integer, integer) FROM public;
+--创建package属性的重载函数
+create or replace function exe_fun_schema.exe_fun_get_sal(NAME VARCHAR2) RETURN NUMBER package
+IS
+  BEGIN
+    RETURN 1;
+  END;
+  /
+
+create or replace function exe_fun_schema.exe_fun_get_sal(NAME int) RETURN NUMBER package
+IS
+  BEGIN
+    RETURN 1;
+  END;
+  /
+REVOKE EXECUTE ON FUNCTION exe_fun_schema.exe_fun_get_sal(VARCHAR2) FROM public;
+REVOKE EXECUTE ON FUNCTION exe_fun_schema.exe_fun_get_sal(int) FROM public;
+SET ROLE test_execute_any_function_role PASSWORD 'Gauss@1234';
+select exe_fun_schema.exe_fun_func_add_sql(1,2);
+select exe_fun_schema.exe_fun_func_increment_plsql(1);
+select exe_fun_schema.exe_fun_func_dup_sql(1);
+select exe_fun_schema.exe_fun_func_add_sql2(1,2);
+select exe_fun_schema.exe_fun_compute(1);
+select exe_fun_schema.exe_fun_get_sal('name');
+select exe_fun_schema.exe_fun_get_sal(1);
+
+reset role;
+--删除函数。
+DROP FUNCTION  exe_fun_schema.exe_fun_func_add_sql(integer, integer);
+DROP FUNCTION  exe_fun_schema.exe_fun_func_increment_plsql(integer);
+DROP FUNCTION  exe_fun_schema.exe_fun_func_dup_sql(int);
+DROP FUNCTION  exe_fun_schema.exe_fun_func_add_sql2(integer, integer);
+DROP FUNCTION  exe_fun_schema.exe_fun_compute(int);
+DROP FUNCTION  exe_fun_schema.exe_fun_get_sal(VARCHAR2);
+DROP FUNCTION  exe_fun_schema.exe_fun_get_sal(int);
+SET ROLE test_execute_any_function_role PASSWORD 'Gauss@1234';
+--存储过程
+CREATE OR REPLACE PROCEDURE exe_fun_schema.prc_add
+(
+    param1    IN   INTEGER,
+    param2    IN OUT  INTEGER
+)
+AS
+BEGIN
+   param2:= param1 + param2;
+END;
+/
+
+reset role;
+CREATE OR REPLACE PROCEDURE exe_fun_schema.prc_add
+(
+    param1    IN   INTEGER,
+    param2    IN OUT  INTEGER
+)
+AS
+BEGIN
+   param2:= param1 + param2;
+END;
+/
+REVOKE EXECUTE ON PROCEDURE exe_fun_schema.prc_add(INTEGER,INTEGER) FROM public;
+
+CREATE OR REPLACE PROCEDURE exe_fun_schema.pri_autonomous(out res int)  AS 
+DECLARE 
+    PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    res := 55;
+END;
+/
+REVOKE EXECUTE ON PROCEDURE exe_fun_schema.pri_autonomous() FROM public;
+
+CREATE TABLE exe_fun_schema.creditcard_info (id_number  int, name text, credit_card  varchar(19));
+CREATE OR REPLACE PROCEDURE exe_fun_schema.pri_autonomous_1()  AS 
+BEGIN
+  insert into exe_fun_schema.creditcard_info values(66, 66,66);
+  select * from exe_fun_schema.creditcard_info;
+  commit;
+  insert into exe_fun_schema.creditcard_info values(77, 77,77);
+  rollback;
+END;
+/
+REVOKE EXECUTE ON PROCEDURE exe_fun_schema.pri_autonomous_1() FROM public;
+
+--  CREATE TABLE in procedure
+create or replace procedure exe_fun_schema.pri_test_proc_create(i in integer)
+as
+begin
+    create table exe_fun_schema.pri_t11(id int) tablespace pri_execute_fun_tsp;
+end;
+/
+REVOKE EXECUTE ON PROCEDURE exe_fun_schema.pri_test_proc_create(integer) FROM public;
+
+SET ROLE test_execute_any_function_role PASSWORD 'Gauss@1234';
+SELECT exe_fun_schema.prc_add(2,3);
+select exe_fun_schema.pri_autonomous();
+call exe_fun_schema.pri_autonomous_1();
+select exe_fun_schema.pri_test_proc_create(1);
+
+DROP PROCEDURE exe_fun_schema.prc_add(INTEGER,INTEGER);
+DROP PROCEDURE exe_fun_schema.pri_autonomous();
+DROP PROCEDURE exe_fun_schema.apri_autonomous_1();
+DROP PROCEDURE exe_fun_schema.pri_test_proc_create(integer);
+
+reset role;
+DROP PROCEDURE exe_fun_schema.prc_add(INTEGER,INTEGER);
+DROP PROCEDURE exe_fun_schema.pri_autonomous();
+DROP PROCEDURE exe_fun_schema.pri_autonomous_1();
+DROP PROCEDURE exe_fun_schema.pri_test_proc_create(integer);
+DROP table creditcard_info cascade;
+DROP SCHEMA exe_fun_schema cascade;
+DROP TABLESPACE pri_execute_fun_tsp;
+\! rm -rf @testtablespace@/pri/exe_fun_tsp
+DROP user test_execute_any_function_role cascade;

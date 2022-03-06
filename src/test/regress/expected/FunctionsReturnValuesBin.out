@@ -1,0 +1,167 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_num_non_cl(id INT, num int)
+INSERT INTO t_num_non_cl (id, num) VALUES (1, 5555)
+INSERT INTO t_num_non_cl (id, num) VALUES (2, 6666)
+SELECT * from t_num_non_cl order by id
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+CREATE TABLE IF NOT EXISTS t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+INSERT INTO t_num (id, num) VALUES (1, 5555)
+INSERT INTO t_num (id, num) VALUES (2, 6666)
+SELECT * from t_num order by id
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+CREATE FUNCTION reffunc(refcursor) RETURNS refcursor AS 'BEGIN OPEN $1 FOR SELECT * FROM t_num;  RETURN $1; END; ' LANGUAGE plpgsql;
+CREATE FUNCTION f_processed_return_table() RETURNS TABLE(val_p int, val2_p int) 
+as 
+$BODY$ 
+begin 
+return query (SELECT id, num from t_num); 
+end; 
+$BODY$ 
+language plpgsql ;
+
+CREATE FUNCTION select1 () RETURNS t_num LANGUAGE SQL AS 'SELECT * from t_num;'
+Invoking select1 using simple query:
+call select1();
+ id | num  
+----+------
+  1 | 5555
+(1 row)
+
+Invoking select1 using CallableStatement:
+select1 value of index 0 Type is java.lang.Integer value is 1
+select1 value of index 1 Type is java.lang.Integer value is 5555
+CREATE FUNCTION select2 () RETURNS t_num LANGUAGE SQL AS 'SELECT id, num from t_num;';
+Invoking select2 using simple query:
+call select2();
+ id | num  
+----+------
+  1 | 5555
+(1 row)
+
+Invoking select2 using CallableStatement:
+select2 value of index 0 Type is java.lang.Integer value is 1
+select2 value of index 1 Type is java.lang.Integer value is 5555
+CREATE FUNCTION select3 () RETURNS setof t_num LANGUAGE SQL AS 'SELECT * from t_num;'
+Invoking select3 using simple query:
+call select3();
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+Invoking select3 using CallableStatement:
+select3 value of index 0 Type is java.lang.Integer value is 1
+select3 value of index 1 Type is java.lang.Integer value is 5555
+CREATE FUNCTION select4 () RETURNS setof t_num LANGUAGE SQL AS 'SELECT id, num from t_num;'
+call select4();
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+Invoking select4 using CallableStatement:
+select4 value of index 0 Type is java.lang.Integer value is 1
+select4 value of index 1 Type is java.lang.Integer value is 5555
+CREATE FUNCTION select5 () RETURNS int LANGUAGE SQL AS 'SELECT num from t_num;'
+Invoking select5 using simple query:
+call select5();
+ select5 
+---------
+    5555
+(1 row)
+
+Invoking select5 using CallableStatement:
+select5 value of index 0 Type is java.lang.Integer value is 5555
+CREATE FUNCTION select6 () RETURNS setof int LANGUAGE SQL AS 'SELECT  num from t_num;';
+call select6();
+ select6 
+---------
+    5555
+    6666
+(2 rows)
+
+Invoking select6 using CallableStatement:
+select6 value of index 0 Type is java.lang.Integer value is 5555
+CREATE FUNCTION select7 () RETURNS TABLE(a INT, b INT) LANGUAGE SQL AS 'SELECT id, num from t_num;';
+call select7();
+ a |  b   
+---+------
+ 1 | 5555
+ 2 | 6666
+(2 rows)
+
+CREATE OR REPLACE FUNCTION get_rows_setof() RETURNS SETOF t_num AS 
+$BODY$ 
+DECLARE 
+r t_num%rowtype; 
+BEGIN 
+FOR r IN 
+SELECT * FROM t_num 
+LOOP 
+-- can do some processing here 
+RETURN NEXT r; -- return current row of SELECT 
+END LOOP; 
+RETURN; 
+END 
+$BODY$ 
+LANGUAGE plpgsql;
+call get_rows_setof()
+ id | num  
+----+------
+  1 | 5555
+  2 | 6666
+(2 rows)
+
+CALL f_processed_return_table();
+ val_p | val2_p 
+-------+--------
+     1 |   5555
+     2 |   6666
+(2 rows)
+
+DROP FUNCTION select1;
+DROP FUNCTION select2;
+DROP FUNCTION select3;
+DROP FUNCTION select4;
+DROP FUNCTION select5;
+DROP FUNCTION select6;
+DROP FUNCTION select7;
+DROP FUNCTION reffunc(refcursor);
+DROP FUNCTION get_rows_setof();
+DROP FUNCTION f_processed_return_table();
+DROP TABLE t_num CASCADE;
+SELECT COUNT(*) FROM gs_encrypted_proc;
+ count 
+-------
+     0
+(1 row)
+
+SELECT proname, prorettype, proallargtypes FROM gs_encrypted_proc JOIN pg_proc ON pg_proc.Oid = gs_encrypted_proc.func_id;
+ proname | prorettype | proallargtypes 
+---------+------------+----------------
+(0 rows)
+
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1

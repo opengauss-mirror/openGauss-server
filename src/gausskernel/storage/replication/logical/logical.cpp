@@ -49,6 +49,7 @@
 #include "storage/proc.h"
 #include "storage/procarray.h"
 
+#include "utils/builtins.h"
 #include "utils/memutils.h"
 /* data for errcontext callback */
 typedef struct LogicalErrorCallbackState {
@@ -57,15 +58,30 @@ typedef struct LogicalErrorCallbackState {
     XLogRecPtr report_location;
 } LogicalErrorCallbackState;
 
+typedef struct ParallelLogicalErrorCallbackState {
+    ParallelLogicalDecodingContext *ctx;
+    const char *callback_name;
+    XLogRecPtr report_location;
+} ParallelLogicalErrorCallbackState;
+
+LogicalDispatcher g_Logicaldispatcher[20];
+
 /* wrappers around output plugin callbacks */
 static void output_plugin_error_callback(void *arg);
 static void startup_cb_wrapper(LogicalDecodingContext *ctx, OutputPluginOptions *opt, bool is_init);
-static void shutdown_cb_wrapper(LogicalDecodingContext *ctx);
+void shutdown_cb_wrapper(LogicalDecodingContext *ctx);
 static void begin_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn);
 static void commit_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
+static void abort_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn);
+static void prepare_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn);
+
 static void change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation,
                               ReorderBufferChange *change);
+static void parallel_change_cb_wrapper(ParallelReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation,
+    ParallelReorderBufferChange *change);
+
 static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin);
+static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const char *plugin);
 
 /*
  * Make sure the current settings & environment are capable of doing logical
@@ -157,6 +173,109 @@ static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_option
     ctx->out = makeStringInfo();
     ctx->prepare_write = prepare_write;
     ctx->write = do_write;
+
+    ctx->output_plugin_options = output_plugin_options;
+    ctx->fast_forward = fast_forward;
+
+    (void)MemoryContextSwitchTo(old_context);
+
+    return ctx;
+}
+
+static LogicalDecodingContext *StartupDecodingContextForArea(List *output_plugin_options, XLogRecPtr start_lsn,
+                                                      TransactionId xmin_horizon, bool need_full_snapshot,
+                                                      bool fast_forward, XLogPageReadCB read_page,
+                                                      LogicalOutputPluginWriterPrepareWrite prepare_write,
+                                                      LogicalOutputPluginWriterWrite do_write)
+{
+    MemoryContext context, old_context;
+    LogicalDecodingContext *ctx = NULL;
+
+    context = AllocSetContextCreate(CurrentMemoryContext, "Changeset Extraction Context", ALLOCSET_DEFAULT_MINSIZE,
+                                    ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    old_context = MemoryContextSwitchTo(context);
+    ctx = (LogicalDecodingContext *)palloc0(sizeof(LogicalDecodingContext));
+
+    ctx->context = context;
+
+    ctx->reader = XLogReaderAllocate(read_page, ctx);
+    if (unlikely(ctx->reader == NULL))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                        errmsg("memory is temporarily unavailable while allocate xlog reader")));
+
+    ctx->reader->private_data = ctx;
+
+    ctx->reorder = ReorderBufferAllocate();
+
+    ctx->reorder->private_data = ctx;
+
+    /* wrap output plugin callbacks, so we can add error context information */
+    ctx->reorder->begin = begin_cb_wrapper;
+    ctx->reorder->apply_change = change_cb_wrapper;
+    ctx->reorder->commit = commit_cb_wrapper;
+    ctx->reorder->abort = abort_cb_wrapper;
+    ctx->reorder->prepare = prepare_cb_wrapper;
+
+
+    ctx->out = makeStringInfo();
+    ctx->prepare_write = prepare_write;
+    ctx->write = do_write;
+
+    ctx->output_plugin_options = output_plugin_options;
+    ctx->fast_forward = fast_forward;
+
+    (void)MemoryContextSwitchTo(old_context);
+
+    return ctx;
+}
+
+
+static ParallelLogicalDecodingContext *ParallelStartupDecodingContext(List *output_plugin_options, XLogRecPtr start_lsn,
+    TransactionId xmin_horizon, bool need_full_snapshot, bool fast_forward, XLogPageReadCB read_page, int slotId)
+{
+    ReplicationSlot *slot = NULL;
+    MemoryContext old_context;
+    ParallelLogicalDecodingContext *ctx = NULL;
+
+    /* shorter lines... */
+    slot = t_thrd.slot_cxt.MyReplicationSlot;
+
+    old_context = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
+    ctx = (ParallelLogicalDecodingContext *)palloc0(sizeof(ParallelLogicalDecodingContext));
+
+    ctx->context = g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx;
+
+    /* (re-)load output plugins, so we detect a bad (removed) output plugin now. */
+    if (!fast_forward && slot != NULL)
+        LoadOutputPlugin(&ctx->callbacks, NameStr(slot->data.plugin));
+
+    /*
+     * Now that the slot's xmin has been set, we can announce ourselves as a
+     * logical decoding backend which doesn't need to be checked individually
+     * when computing the xmin horizon because the xmin is enforced via
+     * replication slots.
+     */
+    (void)LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+    t_thrd.pgxact->vacuumFlags |= PROC_IN_LOGICAL_DECODING;
+    LWLockRelease(ProcArrayLock);
+
+    ctx->reader = XLogReaderAllocate(read_page, ctx);
+    if (unlikely(ctx->reader == NULL))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                        errmsg("memory is temporarily unavailable while allocate xlog reader")));
+
+    ctx->reader->private_data = ctx;
+    ctx->slot = slot;
+
+    ctx->reorder = ParallelReorderBufferAllocate(slotId);
+    ctx->reorder->private_data = ctx;
+
+    /* wrap output plugin callbacks, so we can add error context information */
+    ctx->reorder->begin = begin_cb_wrapper;
+    ctx->reorder->apply_change = parallel_change_cb_wrapper;
+    ctx->reorder->commit = commit_cb_wrapper;
+
+    ctx->out = makeStringInfo();
 
     ctx->output_plugin_options = output_plugin_options;
     ctx->fast_forward = fast_forward;
@@ -402,6 +521,45 @@ LogicalDecodingContext *CreateDecodingContext(XLogRecPtr start_lsn, List *output
     return ctx;
 }
 
+
+LogicalDecodingContext *CreateDecodingContextForArea(XLogRecPtr start_lsn, const char* plugin, List *output_plugin_options, bool fast_forward,
+                                              XLogPageReadCB read_page,
+                                              LogicalOutputPluginWriterPrepareWrite prepare_write,
+                                              LogicalOutputPluginWriterWrite do_write)
+{
+    LogicalDecodingContext *ctx = NULL;
+    MemoryContext old_context = NULL;
+
+    ctx = StartupDecodingContextForArea(output_plugin_options, start_lsn, InvalidTransactionId, false, fast_forward, read_page,
+                                 prepare_write, do_write);
+    LoadOutputPlugin(&ctx->callbacks, plugin);
+
+    /* call output plugin initialization callback */
+    old_context = MemoryContextSwitchTo(ctx->context);
+    if (ctx->callbacks.startup_cb != NULL)
+        startup_cb_wrapper(ctx, &ctx->options, false);
+    (void)MemoryContextSwitchTo(old_context);
+
+
+    return ctx;
+}
+
+ParallelLogicalDecodingContext *ParallelCreateDecodingContext(XLogRecPtr start_lsn, List *output_plugin_options,
+    bool fast_forward, XLogPageReadCB read_page, int slotId)
+{
+    ParallelLogicalDecodingContext *ctx = NULL;
+
+    ctx = ParallelStartupDecodingContext(output_plugin_options, start_lsn, InvalidTransactionId, false, fast_forward,
+        read_page, slotId);
+
+    if (!RecoveryInProgress()) {
+        ereport(LOG, (errmsg("starting logical decoding for slot "),
+                      errdetail("streaming transactions committing after")));
+    }
+
+    return ctx;
+}
+
 /*
  * Returns true if an consistent initial decoding snapshot has been built.
  */
@@ -492,12 +650,22 @@ void OutputPluginWrite(struct LogicalDecodingContext *ctx, bool last_write)
     ctx->prepared_write = false;
 }
 
+static void CheckLogicalAllowedPlugin(const char *plugin)
+{
+    bool have_slash = (first_dir_separator(plugin) != NULL);
+    if (have_slash) {
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("The path cannot be specified for the decoding plugin.")));
+    }
+}
+
 /*
  * Load the output plugin, lookup its output plugin init function, and check
  * that it provides the required callbacks.
  */
 static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugin)
 {
+    CheckLogicalAllowedPlugin(plugin);
     LogicalOutputPluginInit plugin_init;
     CFunInfo tmpCF = load_external_function(plugin, "_PG_output_plugin_init", false, false);
     plugin_init = (LogicalOutputPluginInit)tmpCF.user_fn;
@@ -518,20 +686,91 @@ static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugi
     if (callbacks->commit_cb == NULL)
         ereport(ERROR,
                 (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a commit callback")));
+    if (callbacks->abort_cb == NULL)
+        ereport(WARNING,
+                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a abort callback")));
+}
+
+static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const char *plugin)
+{
+    CheckLogicalAllowedPlugin(plugin);
+    ParallelLogicalOutputPluginInit plugin_init;
+    CFunInfo tmpCF = load_external_function(plugin, "_PG_output_plugin_init", false, false);
+    plugin_init = (ParallelLogicalOutputPluginInit)tmpCF.user_fn;
+
+    if (plugin_init == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                        errmsg("output plugins have to declare the _PG_output_plugin_init symbol")));
+    }
+
+    /* ask the output plugin to fill the callback struct */
+    plugin_init(callbacks);
+
+    if (callbacks->begin_cb == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a begin callback")));
+    }
+    if (callbacks->change_cb == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a change callback")));
+    }
+    if (callbacks->commit_cb == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a commit callback")));
+    }
 }
 
 static void output_plugin_error_callback(void *arg)
 {
     LogicalErrorCallbackState *state = (LogicalErrorCallbackState *)arg;
     /* not all callbacks have an associated LSN  */
-    if (!XLByteEQ(state->report_location, InvalidXLogRecPtr)) {
-        (void)errcontext("slot \"%s\", output plugin \"%s\", in the %s callback, associated LSN %X/%X",
-                         NameStr(state->ctx->slot->data.name), NameStr(state->ctx->slot->data.plugin),
-                         state->callback_name, (uint32)(state->report_location >> 32), (uint32)state->report_location);
+    if (!t_thrd.logical_cxt.IsAreaDecode) {
+        if (!XLByteEQ(state->report_location, InvalidXLogRecPtr)) {
+            (void)errcontext("slot \"%s\", output plugin \"%s\", in the %s callback, associated LSN %X/%X",
+                             NameStr(state->ctx->slot->data.name), NameStr(state->ctx->slot->data.plugin),
+                             state->callback_name, (uint32)(state->report_location >> 32), (uint32)state->report_location);
+        } else {
+            (void)errcontext("slot \"%s\", output plugin \"%s\", in the %s callback", NameStr(state->ctx->slot->data.name),
+                             NameStr(state->ctx->slot->data.plugin), state->callback_name);
+        }
     } else {
-        (void)errcontext("slot \"%s\", output plugin \"%s\", in the %s callback", NameStr(state->ctx->slot->data.name),
-                         NameStr(state->ctx->slot->data.plugin), state->callback_name);
+        if (!XLByteEQ(state->report_location, InvalidXLogRecPtr)) {
+            (void)errcontext("Area decode:in the %s callback, associated LSN %X/%X",
+                             state->callback_name, (uint32)(state->report_location >> 32), (uint32)state->report_location);
+        } else {
+            (void)errcontext("Area decode:in the %s callback",
+                             state->callback_name);
+        }
     }
+}
+
+static void parallel_change_cb_wrapper(ParallelReorderBuffer *cache, ReorderBufferTXN *txn, Relation relation,
+    ParallelReorderBufferChange *change)
+{
+    ParallelLogicalDecodingContext *ctx = (ParallelLogicalDecodingContext *)cache->private_data;
+    ParallelLogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+    Assert(!ctx->fast_forward);
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "change";
+    state.report_location = change->lsn;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *)&state;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+    /* set output state */
+    ctx->accept_writes = true;
+    /*
+     * report this change's lsn so replies from clients can give an up2date
+     * answer. This won't ever be enough (and shouldn't be!) to confirm
+     * receipt of this transaction, but it might allow another transaction's
+     * commit to be confirmed with one message.
+     */
+    ctx->write_location = change->lsn;
+    ctx->callbacks.change_cb(ctx, txn, relation, change);
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
 }
 
 static void startup_cb_wrapper(LogicalDecodingContext *ctx, OutputPluginOptions *opt, bool is_init)
@@ -559,7 +798,7 @@ static void startup_cb_wrapper(LogicalDecodingContext *ctx, OutputPluginOptions 
     t_thrd.log_cxt.error_context_stack = errcallback.previous;
 }
 
-static void shutdown_cb_wrapper(LogicalDecodingContext *ctx)
+void shutdown_cb_wrapper(LogicalDecodingContext *ctx)
 {
     LogicalErrorCallbackState state;
     ErrorContextCallback errcallback;
@@ -583,6 +822,67 @@ static void shutdown_cb_wrapper(LogicalDecodingContext *ctx)
     /* Pop the error context stack */
     t_thrd.log_cxt.error_context_stack = errcallback.previous;
 }
+
+static void abort_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "abort";
+    state.report_location = txn->final_lsn; /* beginning of abort record */
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *)&state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    ctx->write_xid = txn->xid;
+    ctx->write_location = txn->end_lsn; /* points to the end of the record */
+
+    /* do the actual work: call callback */
+    ctx->callbacks.abort_cb(ctx, txn);
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
+}
+
+static void prepare_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn)
+{
+    LogicalDecodingContext *ctx = (LogicalDecodingContext *)cache->private_data;
+    LogicalErrorCallbackState state;
+    ErrorContextCallback errcallback;
+
+    Assert(!ctx->fast_forward);
+
+    /* Push callback + info on the error context stack */
+    state.ctx = ctx;
+    state.callback_name = "prepare";
+    state.report_location = txn->final_lsn; /* beginning of abort record */
+    errcallback.callback = output_plugin_error_callback;
+    errcallback.arg = (void *)&state;
+    errcallback.previous = t_thrd.log_cxt.error_context_stack;
+    t_thrd.log_cxt.error_context_stack = &errcallback;
+
+    /* set output state */
+    ctx->accept_writes = true;
+    ctx->write_xid = txn->xid;
+    ctx->write_location = txn->end_lsn; /* points to the end of the record */
+
+    /* do the actual work: call callback */
+    if (ctx->callbacks.prepare_cb) {
+        ctx->callbacks.prepare_cb(ctx, txn);
+    }
+
+    /* Pop the error context stack */
+    t_thrd.log_cxt.error_context_stack = errcallback.previous;
+}
+
 
 /*
  * Callbacks for ReorderBuffer which add in some more information and then call
@@ -665,7 +965,9 @@ static void change_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn, Relat
 
     /* set output state */
     ctx->accept_writes = true;
-    ctx->write_xid = txn->xid;
+    if (txn != NULL) {
+        ctx->write_xid = txn->xid;
+    }
     /*
      * report this change's lsn so replies from clients can give an up2date
      * answer. This won't ever be enough (and shouldn't be!) to confirm
@@ -1115,3 +1417,50 @@ void NotifyPrimaryAdvance(XLogRecPtr restart, XLogRecPtr flush)
 
     PQclear(res);
 }
+
+/* Check a boolean option with a default value */
+void CheckBooleanOption(DefElem *elem, bool *booleanOption, bool defaultValue)
+{
+    if (elem->arg == NULL) {
+        *booleanOption = defaultValue;
+    } else if (!parse_bool(strVal(elem->arg), booleanOption)) {
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("could not parse value \"%s\" for parameter \"%s\"", strVal(elem->arg), elem->defname),
+            errdetail("N/A"),  errcause("Wrong input value"), erraction("Input \"on\" or \"off\"")));
+    }
+}
+
+/* parse each decoding option */
+void ParseDecodingOptionPlugin(ListCell* option, PluginTestDecodingData* data, OutputPluginOptions* opt)
+{
+    DefElem* elem = (DefElem*)lfirst(option);
+
+    Assert(elem->arg == NULL || IsA(elem->arg, String));
+
+    if (strncmp(elem->defname, "force-binary", sizeof("force-binary")) == 0) {
+        bool force_binary = false;
+        CheckBooleanOption(elem, &force_binary, false);
+        if (force_binary) {
+            opt->output_type = OUTPUT_PLUGIN_BINARY_OUTPUT;
+        }
+    } else if (strncmp(elem->defname, "include-xids", sizeof("include-xids")) == 0) {
+        /* if option does not provide a value, it means its value is true */
+        CheckBooleanOption(elem, &data->include_xids, true);
+    } else if (strncmp(elem->defname, "include-timestamp", sizeof("include-timestamp")) == 0) {
+        CheckBooleanOption(elem, &data->include_timestamp, false);
+    } else if (strncmp(elem->defname, "skip-empty-xacts", sizeof("skip-empty-xacts")) == 0) {
+        CheckBooleanOption(elem, &data->skip_empty_xacts, false);
+    } else if (strncmp(elem->defname, "only-local", sizeof("only-local"))== 0) {
+        CheckBooleanOption(elem, &data->only_local, true);
+    } else if (strncmp(elem->defname, "white-table-list", sizeof("white-table-list")) == 0) {
+        ParseWhiteList(&data->tableWhiteList, elem);
+    } else if (strncmp(elem->defname, "standby-connection", sizeof("standby-connection")) == 0 &&
+        t_thrd.role != WORKER) {
+        CheckBooleanOption(elem, &t_thrd.walsender_cxt.standbyConnection, false);
+    } else if (strncmp(elem->defname, "parallel-decode-num", sizeof("parallel-decode-num")) != 0) {
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("option \"%s\" = \"%s\" is unknown", elem->defname, elem->arg ? strVal(elem->arg) : "(null)"),
+            errdetail("N/A"),  errcause("Wrong input option"), erraction("Please check documents for help")));
+    }
+}
+

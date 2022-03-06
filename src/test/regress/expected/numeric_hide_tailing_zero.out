@@ -1,0 +1,27 @@
+set behavior_compat_options='';
+select cast(123.123 as numeric(15,10));
+    numeric     
+----------------
+ 123.1230000000
+(1 row)
+
+set behavior_compat_options='hide_tailing_zero';
+select cast(123.123 as numeric(15,10));
+ numeric 
+---------
+ 123.123
+(1 row)
+
+select cast(0 as numeric(15,10));
+ numeric 
+---------
+       0
+(1 row)
+
+select cast(009.0000 as numeric(15,10));
+ numeric 
+---------
+       9
+(1 row)
+
+set behavior_compat_options='';

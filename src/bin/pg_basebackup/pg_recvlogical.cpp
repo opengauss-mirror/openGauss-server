@@ -35,6 +35,8 @@
 /* Time to sleep between reconnection attempts */
 #define RECONNECT_SLEEP_TIME 5
 
+static const uint64 upperPart = 32;
+
 /* Global Options */
 static char* outfile = NULL;
 static int verbose = 0;
@@ -44,6 +46,10 @@ static XLogRecPtr startpos = InvalidXLogRecPtr;
 static bool do_create_slot = false;
 static bool do_start_slot = false;
 static bool do_drop_slot = false;
+static bool g_parallel_decode = false;
+static char g_decode_style = 'b';
+static bool g_batch_sending = false;
+static bool g_raw = false;
 
 /* filled pairwise with option, value. value may be NULL */
 static char** options;
@@ -92,6 +98,7 @@ static void usage(void)
              "                         time between status packets sent to server (in seconds, defaults to 10)\n"));
     printf(_("  -S, --slot=SLOT        use existing replication slot SLOT instead of starting a new one\n"));
     printf(_("  -I, --startpos=PTR     Where in an existing slot should the streaming start\n"));
+    printf(_("  -r, --raw              parallel decoding output raw results without converting to text format\n"));
     printf(_("\nAction to be performed:\n"));
     printf(_("      --create           create a new replication slot (for the slotname see --slot)\n"));
     printf(_("      --start            start streaming in a replication slot (for the slotname see --slot)\n"));
@@ -154,13 +161,14 @@ static bool sendFeedback(PGconn* conn, int64 now, bool force, bool replyRequeste
 
     if (verbose)
         fprintf(stderr,
-            _("%s: confirming write up to %X/%X, flush to %X/%X (slot %s)\n"),
+            _("%s: confirming write up to %X/%X, flush to %X/%X (slot %s) %ld\n"),
             progname,
             (uint32)(output_written_lsn >> 32),
             (uint32)output_written_lsn,
             (uint32)(output_fsync_lsn >> 32),
             (uint32)output_fsync_lsn,
-            replication_slot);
+            replication_slot,
+            now);
 
     replybuf[len] = 'r';
     len += 1;
@@ -277,11 +285,224 @@ static int sendStartReplicationCmd()
 }
 
 /*
+ * append comma as seperator
+ */
+static inline void AppendSeperator(PQExpBuffer res, uint16 attr, uint16 maxAttr)
+{
+    if (attr < maxAttr - 1) {
+        appendPQExpBufferStr(res, ", ");
+    }
+}
+
+/*
+ * decode binary style tuple to text
+ */
+static void ResolveTuple(const char* stream, uint32* curpos, PQExpBuffer res, bool newTup)
+{
+    uint16 attrnum = ntohs(*(uint16 *)(stream + *curpos));
+    *curpos += sizeof(attrnum);
+    if (newTup) {
+        appendPQExpBufferStr(res, "new_tuple: {");
+    } else {
+        appendPQExpBufferStr(res, "old_value: {");
+    }
+    for (uint16 i = 0; i < attrnum; i++) {
+        uint16 colLen = ntohs(*(uint16 *)(stream + *curpos));
+        *curpos += sizeof(colLen);
+        assert(colLen != 0);
+        appendBinaryPQExpBuffer(res, stream + *curpos, colLen);
+        *curpos += colLen;
+        Oid typid = ntohl(*(Oid *)(stream + *curpos));
+        *curpos += sizeof(Oid);
+        appendPQExpBuffer(res, "[typid = %u]: ", typid);
+
+        uint32 dataLen = ntohl(*(uint32 *)(stream + *curpos));
+        *curpos += sizeof(dataLen);
+        const uint32 nullTag = 0XFFFFFFFF;
+        if (dataLen == nullTag) {
+            appendPQExpBufferStr(res, "\"NULL\"");
+        } else if (dataLen == 0) {
+            appendPQExpBufferStr(res, "\"\"");
+        } else {
+            appendPQExpBufferChar(res, '\"');
+            appendBinaryPQExpBuffer(res, stream + *curpos, dataLen);
+            appendPQExpBufferChar(res, '\"');
+            *curpos += dataLen;
+        }
+        AppendSeperator(res, i, attrnum);
+    }
+    appendPQExpBufferChar(res, '}');
+}
+
+/*
+ * decode binary style DML to text
+ */
+static void DMLToText(const char* stream, uint32 *curPos, PQExpBuffer res)
+{
+    char dtype = stream[*curPos];
+    if (dtype == 'I') {
+        appendPQExpBufferStr(res, "INSERT INTO ");
+    } else if (dtype == 'U') {
+        appendPQExpBufferStr(res, "UPDATE ");
+    } else {
+        appendPQExpBufferStr(res, "DELETE FROM ");
+    }
+    *curPos += 1;
+    uint16 schemaLen = ntohs(*(uint16 *)(stream + *curPos));
+    *curPos += sizeof(schemaLen);
+    appendBinaryPQExpBuffer(res, stream + *curPos, schemaLen);
+    *curPos += schemaLen;
+    appendPQExpBufferChar(res, '.');
+    uint16 tableLen = ntohs(*(uint16 *)(stream + *curPos));
+    *curPos += sizeof(tableLen);
+    appendBinaryPQExpBuffer(res, stream + *curPos, tableLen);
+    *curPos += tableLen;
+
+    if (stream[*curPos] == 'N') {
+        *curPos += 1;
+        appendPQExpBufferChar(res, ' ');
+        ResolveTuple(stream, curPos, res, true);
+    }
+    if (stream[*curPos] == 'O') {
+        *curPos += 1;
+        appendPQExpBufferChar(res, ' ');
+        ResolveTuple(stream, curPos, res, false);
+    }
+}
+
+/*
+ * decode binary style begin message to text
+ */
+static void BeginToText(const char* stream, uint32 *curPos, PQExpBuffer res)
+{
+    appendPQExpBufferStr(res, "BEGIN ");
+    *curPos += 1;
+    uint32 CSNupper = ntohl(*(uint32 *)(&stream[*curPos]));
+    *curPos += sizeof(CSNupper);
+    uint32 CSNlower = ntohl(*(uint32 *)(&stream[*curPos]));
+    uint64 CSN = ((uint64)(CSNupper) << upperPart) + CSNlower;
+    *curPos += sizeof(CSNlower);
+    appendPQExpBuffer(res, "CSN: %lu ", CSN);
+
+    uint32 LSNupper = ntohl(*(uint32 *)(&stream[*curPos]));
+    *curPos += sizeof(LSNupper);
+    uint32 LSNlower = ntohl(*(uint32 *)(&stream[*curPos]));
+    *curPos += sizeof(LSNlower);
+    appendPQExpBuffer(res, "commit_lsn: %X/%X", LSNupper, LSNlower);
+
+    if (stream[*curPos] == 'T') {
+        *curPos += 1;
+        uint32 timeLen = ntohl(*(uint32 *)(&stream[*curPos]));
+        *curPos += sizeof(uint32);
+        appendPQExpBufferStr(res, " commit_time: ");
+        appendBinaryPQExpBuffer(res, &stream[*curPos], timeLen);
+        *curPos += timeLen;
+    }
+}
+
+/*
+ * decode binary style commit message to text
+ */
+static void CommitToText(const char* stream, uint32 *curPos, PQExpBuffer res)
+{
+    appendPQExpBufferStr(res, "COMMIT ");
+    *curPos += 1;
+    if (stream[*curPos] == 'X') {
+        *curPos += 1;
+        uint32 xidupper = ntohl(*(uint32 *)(&stream[*curPos]));
+        *curPos += sizeof(xidupper);
+        uint32 xidlower = ntohl(*(uint32 *)(&stream[*curPos]));
+        *curPos += sizeof(xidlower);
+        uint64 xid = ((uint64)(xidupper) << upperPart) + xidlower;
+        appendPQExpBuffer(res, "xid: %lu", xid);
+    }
+    if (stream[*curPos] == 'T') {
+        *curPos += 1;
+        uint32 timeLen = ntohl(*(uint32 *)(&stream[*curPos]));
+        *curPos += sizeof(uint32);
+        appendPQExpBufferStr(res, " commit_time: ");
+        appendBinaryPQExpBuffer(res, &stream[*curPos], timeLen);
+        *curPos += timeLen;
+    }
+}
+
+/*
+ * decode binary style log stream to text
+ */
+static void StreamToText(const char* stream, PQExpBuffer res)
+{
+    uint32 pos = 0;
+    uint32 dmlLen = ntohl(*(uint32 *)(&stream[pos]));
+    /* if this is the end of stream, return */
+    if (dmlLen == 0) {
+        return;
+    }
+
+    pos += sizeof(dmlLen);
+    uint32 LSNupper = ntohl(*(uint32 *)(&stream[pos]));
+    pos += sizeof(LSNupper);
+    uint32 LSNlower = ntohl(*(uint32 *)(&stream[pos]));
+    pos += sizeof(LSNlower);
+    appendPQExpBuffer(res, "current_lsn: %X/%X ", LSNupper, LSNlower);
+    if (stream[pos] == 'B') {
+        BeginToText(stream, &pos, res);
+    } else if (stream[pos] == 'C') {
+        CommitToText(stream, &pos, res);
+    } else if (stream[pos] != 'P' && stream[pos] != 'F') {
+        DMLToText(stream, &pos, res);
+    }
+    if (stream[pos] == 'P') {
+        pos++;
+        appendPQExpBufferChar(res, '\n');
+        StreamToText(stream + pos, res);
+    } else if (stream[pos] == 'F') {
+        appendPQExpBufferChar(res, '\n');
+    }
+}
+
+/*
+ * decode batch sending result stream to text.
+ */
+static void BatchStreamToText(const char* stream, PQExpBuffer res)
+{
+    uint32 pos = 0;
+    uint32 changeLen = ntohl(*(uint32 *)(&stream[pos]));
+    /* if this is the end of stream, return */
+    if (changeLen == 0) {
+        return;
+    }
+    pos += sizeof(changeLen);
+    pos += sizeof(XLogRecPtr);
+    appendBinaryPQExpBuffer(res, stream + pos, changeLen - sizeof(XLogRecPtr));
+    appendPQExpBufferChar(res, '\n');
+
+    BatchStreamToText(stream + sizeof(changeLen) + changeLen, res);
+}
+
+/*
+ * Check stream connection.
+ */
+static bool StreamCheckConn()
+{
+    PGresult* res = NULL;
+    res = PQgetResult(conn);
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        fprintf(stderr, _("%s: unexpected termination of replication stream: %s"), progname, PQresultErrorMessage(res));
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return false;
+    }
+    PQclear(res);
+    res = NULL;
+    return true;
+}
+
+/*
  * Start the log streaming
  */
 static void StreamLogicalLog(void)
 {
-    PGresult* res = NULL;
     char* copybuf = NULL;
     int64 last_status = -1;
 
@@ -433,6 +654,9 @@ static void StreamLogicalLog(void)
             walEnd = keepalive_message.walEnd;
             output_written_lsn = Max(walEnd, output_written_lsn);
             replyRequested = keepalive_message.replyRequested;
+            if (!g_parallel_decode) {
+                fprintf(stderr, _("%s: written_lsn = %lu, current time = %ld \n"), progname, output_written_lsn, now);
+            }
 
             /* If the server requested an immediate reply, send one. */
             if (replyRequested) {
@@ -501,17 +725,23 @@ static void StreamLogicalLog(void)
         /* signal that a fsync is needed */
         output_unsynced = true;
 
+        PQExpBuffer res = createPQExpBuffer();
+        char *resultStream = copybuf + hdr_len;
+        if (g_parallel_decode && !g_raw && g_decode_style == 'b') {
+            StreamToText(copybuf +  hdr_len, res);
+            bytes_left = res->len;
+            resultStream = res->data;
+        } else if (g_parallel_decode && g_batch_sending && !g_raw) {
+            BatchStreamToText(copybuf +  hdr_len, res);
+            bytes_left = res->len;
+            resultStream = res->data;
+        }
         while (bytes_left) {
-            int ret;
-
-            ret = write(outfd, copybuf + hdr_len + bytes_written, bytes_left);
+            int ret = write(outfd, resultStream + bytes_written, bytes_left);
             if (ret < 0) {
                 fprintf(stderr,
                     _("%s: could not write %d bytes to log file \"%s\": %s\n"),
-                    progname,
-                    bytes_left,
-                    outfile,
-                    strerror(errno));
+                    progname, bytes_left, outfile, strerror(errno));
                 goto error;
             }
 
@@ -520,26 +750,20 @@ static void StreamLogicalLog(void)
             bytes_left -= ret;
         }
 
+        if (g_parallel_decode && (g_decode_style == 'b' || g_batch_sending)) {
+            continue;
+        }
         if (write(outfd, "\n", 1) != 1) {
             fprintf(stderr,
                 _("%s: could not write %d bytes to log file \"%s\": %s\n"),
-                progname,
-                1,
-                outfile,
-                strerror(errno));
+                progname, 1, outfile, strerror(errno));
             goto error;
         }
     }
 
-    res = PQgetResult(conn);
-    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, _("%s: unexpected termination of replication stream: %s"), progname, PQresultErrorMessage(res));
-        if (res != NULL)
-            PQclear(res);
+    if (!StreamCheckConn()) {
         goto error;
     }
-    PQclear(res);
-    res = NULL;
 
     if (outfd != -1 && strcmp(outfile, "-") != 0) {
         int64 t = feGetCurrentTimestamp();
@@ -602,6 +826,24 @@ static bool checkIsDigit(const char* arg)
     return 1;
 }
 
+static void CheckParallelDecoding(const char *data, const char *val)
+{
+    if (strncmp(data, "parallel-decode-num", sizeof("parallel-decode-num")) == 0) {
+        int parallelDecodeNum = atoi(val);
+        g_parallel_decode = parallelDecodeNum == 1 ? false : true;
+    } else if (strncmp(data, "decode-style", sizeof("decode-style")) == 0) {
+        g_decode_style = *val;
+    }
+}
+
+static void CheckBatchSending(const char *data, const char *val)
+{
+    if (strncmp(data, "sending-batch", sizeof("sending-batch")) == 0) {
+        int batchSending = atoi(val);
+        g_batch_sending = batchSending == 0 ? false : true;
+    }
+}
+
 /**
  * Get options.
  */
@@ -613,7 +855,7 @@ static int getOptions(const int argc, char* const* argv)
         {"verbose", no_argument, NULL, 'v'},
         {"version", no_argument, NULL, 'V'},
         {"help", no_argument, NULL, '?'},
-        /* connnection options */
+        /* connection options */
         {"dbname", required_argument, NULL, 'd'},
         {"host", required_argument, NULL, 'h'},
         {"port", required_argument, NULL, 'p'},
@@ -627,6 +869,7 @@ static int getOptions(const int argc, char* const* argv)
         {"fsync-interval", required_argument, NULL, 'F'},
         {"slot", required_argument, NULL, 'S'},
         {"startpos", required_argument, NULL, 'I'},
+        {"raw", no_argument, NULL, 'r'},
         /* action */
         {"create", no_argument, NULL, 1},
         {"start", no_argument, NULL, 2},
@@ -636,9 +879,12 @@ static int getOptions(const int argc, char* const* argv)
     int c;
     int option_index;
     uint32 hi, lo;
-    while ((c = getopt_long(argc, argv, "f:F:nvd:h:o:p:U:wWP:s:S:I:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:F:nvd:h:o:p:U:wWP:rs:S:I:", long_options, &option_index)) != -1) {
         switch (c) {
             /* general options */
+            case 'r':
+                g_raw = true;
+                break;
             case 'f':
                 check_env_value_c(optarg);
                 if (outfile) {
@@ -705,6 +951,8 @@ static int getOptions(const int argc, char* const* argv)
 
                 options[(noptions - 1) * 2] = data;
                 options[(noptions - 1) * 2 + 1] = val;
+                CheckParallelDecoding(data, val);
+                CheckBatchSending(data, val);
             }
 
             break;

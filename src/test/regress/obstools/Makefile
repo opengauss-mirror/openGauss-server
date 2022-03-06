@@ -6,7 +6,7 @@ endif
 EXTRA_LIB_DIR=-L../lib
 EXTRA_INCLUDE_DIR=-I../include
 
-LIB=-leSDKOBS -lsecurec
+LIB=-leSDKOBS -l$(SECURE_C_CHECK)
 LINKOPT=$(EXTRA_LIB_DIR) $(LIB)
 
 TARGET_TOOL=obstool

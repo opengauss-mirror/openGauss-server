@@ -477,7 +477,13 @@ static bool normal_open_segment(SMgrRelation reln, int forknum, bool create)
     open_segment(reln, MAIN_FORKNUM, false);
     main_buffer = ReadSegmentBuffer(reln->seg_space, reln->seg_desc[MAIN_FORKNUM]->head_blocknum);
     main_head = (SegmentHead *)PageGetContents(BufferGetBlock(main_buffer));
-    SegmentCheck(IsNormalSegmentHead(main_head));
+    if (unlikely(!IsNormalSegmentHead(main_head))) {
+        ereport(PANIC, (errmodule(MOD_SEGMENT_PAGE), errmsg("Segment head magic value 0x%lx is invalid,"
+            "head lsn 0x%lx(maybe wrong). Rnode [%u, %u, %u, %d], head blocknum %u.",
+            main_head->magic, main_head->lsn, reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode,
+            reln->smgr_rnode.node.relNode, reln->smgr_rnode.node.bucketNode,
+            reln->seg_desc[MAIN_FORKNUM]->head_blocknum)));
+    }
 
     /*
      * For non-main fork, the segment head is stored in the main fork segment head.
@@ -534,7 +540,7 @@ CREATE_DESC:
      * Initialize the segment descriptor in SMgrRelationData.
      */
     SegmentDesc *fork_desc =
-        (SegmentDesc *)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(SegmentDesc));
+        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(), sizeof(SegmentDesc));
     fork_desc->head_blocknum = fork_head_blocknum;
     fork_desc->timeline = seg_get_drop_timeline();
     SegmentCheck(fork_head_blocknum >= DF_MAP_GROUP_SIZE);
@@ -872,7 +878,7 @@ static bool bucket_open_segment(SMgrRelation reln, int forknum, bool create, XLo
     }
 
     SegmentDesc *seg_desc =
-        (SegmentDesc *)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(SegmentDesc));
+        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(), sizeof(SegmentDesc));
     seg_desc->head_blocknum = head_blocknum;
     seg_desc->timeline = seg_get_drop_timeline();
     SegmentCheck(head_blocknum >= DF_MAP_GROUP_SIZE);
@@ -1427,7 +1433,7 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
         XLogRegisterBuffer(0, seg_buffer, REGBUF_KEEP_DATA);
         XLogRegisterBufData(0, (char *)&xlog_data, sizeof(xlog_data));
         XLogRegisterBuffer(1, buf, REGBUF_WILL_INIT);
-        XLogRecPtr xlog_rec = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_SEGMENT_EXTEND, false, SegmentBktId);
+        XLogRecPtr xlog_rec = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_SEGMENT_EXTEND, SegmentBktId);
         END_CRIT_SECTION();
 
         PageSetLSN(BufferGetPage(seg_buffer), xlog_rec);

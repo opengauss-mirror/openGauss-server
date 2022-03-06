@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * double_write.h
  *        Define some inline function of double write and export some interfaces.
- * 
- * 
+ *
+ *
  * IDENTIFICATION
  *        src/include/access/double_write.h
  *
@@ -31,8 +31,7 @@
 
 typedef enum BufTagVer {
     ORIGIN_TAG = 0,
-    HASHBUCKET_TAG,
-    PAGE_COMPRESS_TAG
+    HASHBUCKET_TAG
 } BufTagVer;
 
 typedef struct st_dw_batch {
@@ -124,6 +123,10 @@ const uint16 SINGLE_BLOCK_TAG_NUM = BLCKSZ / sizeof(dw_single_flush_item);
 static const uint32 DW_BOOTSTRAP_VERSION = 91261;
 const uint32 DW_SUPPORT_SINGLE_FLUSH_VERSION = 92266;
 const uint32 DW_SUPPORT_NEW_SINGLE_FLUSH = 92433;
+const uint32 DW_SUPPORT_MULTIFILE_FLUSH = 92568;
+const uint32 DW_SUPPORT_BCM_VERSION = 92550;
+const uint32 DW_SUPPORT_REABLE_DOUBLE_WRITE = 92590;
+
 
 /* dw single flush file information, version is DW_SUPPORT_SINGLE_FLUSH_VERSION */
 /* file head + storage buffer tag page + data page */
@@ -169,6 +172,15 @@ inline bool dw_verify_file_head(dw_file_head_t* file_head)
 {
     return file_head->head.dwn == file_head->tail.dwn && dw_verify_file_head_checksum(file_head);
 }
+
+inline void dw_calc_meta_checksum(dw_batch_meta_file* meta)
+{
+    uint32 checksum;
+    meta->checksum = 0;
+    checksum = pg_checksum_block((char*)meta, sizeof(dw_batch_meta_file));
+    meta->checksum = REDUCE_CKS2UINT16(checksum);
+}
+
 
 inline void dw_calc_file_head_checksum(dw_file_head_t* file_head)
 {
@@ -264,7 +276,7 @@ inline bool dw_enabled()
  * @param buf_id_arr the buffer id array which is used to get page from global buffer
  * @param size the array size
  */
-void dw_perform_batch_flush(uint32 size, CkptSortItem *dirty_buf_list, ThrdDwCxt* thrd_dw_cxt);
+void dw_perform_batch_flush(uint32 size, CkptSortItem *dirty_buf_list, int thread_id, ThrdDwCxt* thrd_dw_cxt);
 
 /**
  * truncate the pages in double write file after ckpt or before exit
@@ -291,6 +303,19 @@ inline bool dw_page_writer_running()
 
 extern bool free_space_enough(int buf_id);
 
+extern void dw_generate_single_file();
+extern void dw_recovery_partial_write_single();
+extern void dw_single_file_truncate(bool is_first);
+extern void dw_generate_new_single_file();
+extern void dw_cxt_init_single();
+
+extern bool dw_verify_pg_checksum(PageHeader page_header, BlockNumber blockNum, bool dw_file);
+extern void dw_log_recovery_page(int elevel, const char *state, BufferTag buf_tag);
+extern bool dw_read_data_page(BufferTag buf_tag, SMgrRelation reln, char* data_block);
+extern void dw_log_page_header(PageHeader page);
+extern int buftag_compare(const void *pa, const void *pb);
+extern void dw_encrypt_page(BufferTag tag, char* buf);
+
 extern uint16 first_version_dw_single_flush(BufferDesc *buf_desc);
 extern void dw_single_file_recycle(bool is_first);
 extern bool backend_can_flush_dirty_page();
@@ -298,9 +323,10 @@ extern void dw_force_reset_single_file();
 extern void reset_dw_pos_flag();
 extern void clean_proc_dw_buf();
 extern void init_proc_dw_buf();
-extern void dw_generate_new_single_file();
 extern void dw_prepare_file_head(char *file_head, uint16 start, uint16 dwn, int32 dw_version = -1);
 extern void dw_set_pg_checksum(char *page, BlockNumber blockNum);
+extern void dw_extend_file(int fd, const void *buf, int buf_size, int64 size,
+    int64 file_expect_size, bool single, char* file_name);
 
 extern void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag);
 uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr page_lsn,
@@ -312,5 +338,17 @@ extern void wait_all_single_dw_finish_flush_old();
 extern uint16 dw_single_flush_internal_old(BufferTag tag, Block block, XLogRecPtr page_lsn,
     BufferTag phy_tag, bool *dw_flush);
 extern void dw_single_old_file_truncate();
+
+extern void dw_recover_batch_meta_file(int fd, dw_batch_meta_file *batch_meta_file);
+extern void dw_fetch_batch_file_name(int i, char* buf);
+extern void wait_all_dw_page_finish_flush();
+extern void dw_generate_meta_file(dw_batch_meta_file* batch_meta_file);
+extern void dw_generate_batch_files(int batch_file_num, uint64 dw_file_size);
+extern void dw_cxt_init_batch();
+extern void dw_remove_file(const char* file_name);
+extern int dw_open_file(const char* file_name);
+extern void dw_upgrade_renable_double_write();
+
+extern int g_stat_file_id;
 
 #endif /* DOUBLE_WRITE_H */

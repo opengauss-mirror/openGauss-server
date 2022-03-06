@@ -1,7 +1,7 @@
 /.gitee/
 /.vscode/
 /.idea/
-
+/cmake-build-debug/
 *.a
 *.o
 *.so

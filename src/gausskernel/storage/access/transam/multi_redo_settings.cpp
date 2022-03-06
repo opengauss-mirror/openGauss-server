@@ -23,16 +23,20 @@
  */
 #include <stdio.h>
 #include <unistd.h>
-
+#ifdef __USE_NUMA
+    #include <numa.h>
+#endif
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "utils/guc.h"
 
 #include "access/multi_redo_settings.h"
 #include "access/multi_redo_api.h"
+#include "threadpool/threadpool_controler.h"
 
 static uint32 ComputeRecoveryParallelism(int);
 static uint32 GetCPUCount();
+static const int bufSize = 1024;
 
 void ConfigRecoveryParallelism()
 {
@@ -126,3 +130,141 @@ static uint32 GetCPUCount()
     return DEFAULT_CPU_COUNT;
 #endif
 }
+
+void ParseBindCpuInfo(RedoCpuBindControl *control)
+{
+    char* attr = TrimStr(g_instance.attr.attr_storage.redo_bind_cpu_attr);
+    if (attr == NULL) {
+        return;
+    }
+
+    char* ptoken = NULL;
+    char* psave = NULL;
+    const char* pdelimiter = ":";
+
+    ptoken = TrimStr(strtok_r(attr, pdelimiter, &psave));
+    ptoken = pg_strtolower(ptoken);
+
+    int bindNum = 0;
+    if (strncmp("nobind", ptoken, strlen("nobind")) == 0) {
+        control->bindType = REDO_NO_CPU_BIND;
+        return;
+    } else if (strncmp("cpubind", ptoken, strlen("cpubind")) == 0) {
+        control->bindType = REDO_CPU_BIND;
+        control->isBindCpuArr = (bool*)palloc0(sizeof(bool) * control->totalCpuNum);
+        bindNum = ThreadPoolControler::ParseRangeStr(psave, control->isBindCpuArr, control->totalCpuNum, "cpubind");
+    } else if (strncmp("nodebind", ptoken, strlen("nodebind")) == 0) {
+        control->bindType = REDO_NODE_BIND;
+        control->isBindNumaArr = (bool*)palloc0(sizeof(bool) * control->totalCpuNum);
+        bindNum = ThreadPoolControler::ParseRangeStr(psave, control->isBindNumaArr, control->totalNumaNum, "nodebind");
+    } else {
+        ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM), errmsg("Invalid attribute for multi redo."),
+            errdetail("redo bind config Only support 'nobind', 'cpubind', and 'nodebind'.")));
+    }
+
+    if (bindNum == 0) {
+        ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM), errmsg("Invalid attribute for multi redo."),
+            errdetail("Can not find valid CPU for thread binding, there are two possible reasons:\n"
+                      "1. These CPUs are not active, use lscpu to check On-line CPU(s) list.\n"
+                      "2. The process has been bind to other CPUs and there is no intersection,"
+                      "use taskset -pc to check process CPU bind info.\n")));
+    }
+}
+
+bool CpuCanConfiged(RedoCpuBindControl *contrl, int cpuid, int numaid)
+{
+    switch (contrl->bindType) {
+        case REDO_NODE_BIND:
+            return (contrl->isBindNumaArr[numaid] && contrl->isMcsCpuArr[cpuid] && CPU_ISSET(cpuid, &contrl->cpuSet));
+        case REDO_CPU_BIND:
+            return (contrl->isBindCpuArr[cpuid] && contrl->isMcsCpuArr[cpuid] && CPU_ISSET(cpuid, &contrl->cpuSet));
+        default:
+            return false;
+    }
+    return false;
+}
+
+void ConfigBindCpuInfo(RedoCpuBindControl *contrl)
+{
+    contrl->isMcsCpuArr = ThreadPoolControler::GetMcsCpuInfo(contrl->totalCpuNum);
+
+    NumaCpuId *sysNumaCpuIdList = (NumaCpuId*)palloc0(sizeof(NumaCpuId) * contrl->totalCpuNum);
+    int sysNumaCpuIdNum = 0;
+    ThreadPoolControler::GetActiveCpu(sysNumaCpuIdList, &sysNumaCpuIdNum);
+
+    if (sysNumaCpuIdNum == 0) {
+        return;
+    }
+
+    contrl->cpuArr = (int*)palloc0(sizeof(int) * contrl->totalCpuNum);
+
+    for (int i = 0; i < sysNumaCpuIdNum; ++i) {
+        int cpuid = sysNumaCpuIdList[i].cpuId;
+        int numaid = sysNumaCpuIdList[i].numaId;
+        if (CpuCanConfiged(contrl, cpuid, numaid)) {
+            contrl->cpuArr[contrl->activeCpuNum++] = cpuid;
+        }
+    }
+
+    pfree_ext(sysNumaCpuIdList);
+    ereport(LOG, (errmsg("ConfigBindCpuInfo redo bind cpu num: %d.", contrl->activeCpuNum)));
+
+    CPU_ZERO(&contrl->configCpuSet);
+    for (int i = 0; i < contrl->activeCpuNum; ++i) {
+        CPU_SET(contrl->cpuArr[i], &contrl->configCpuSet);
+    }
+}
+
+bool CheckRedoBindConfigValid(RedoCpuBindControl *contrl)
+{
+    if (contrl->bindType == REDO_NO_CPU_BIND) {
+        return false;
+    }
+
+    if (contrl->totalNumaNum == 0 || contrl->totalCpuNum == 0) {
+        ereport(WARNING, (errmsg("CheckRedoBindConfigValid: Fail to read cpu num(%d) or numa num(%d).",
+            contrl->totalNumaNum, contrl->totalCpuNum)));
+        return false;
+    }
+#ifdef __USE_NUMA
+    int numaNodeNum = numa_max_node() + 1;
+    if (numaNodeNum <= 1) {
+        ereport(WARNING, (errmsg("CheckRedoBindConfigValid No multiple NUMA nodes available: %d.", numaNodeNum)));
+        return false;
+    } else if (contrl->totalNumaNum != numaNodeNum) {
+        ereport(WARNING, (errmsg("Cannot activate NUMA distribute because NUMA nodes are unavailable.")));
+        return false;
+    } else {
+        return true;
+    }
+#endif
+    return false;
+}
+
+void ProcessRedoCpuBindInfo()
+{
+    RedoCpuBindControl *contrl = &g_instance.comm_cxt.predo_cxt.redoCpuBindcontrl;
+    ThreadPoolControler::GetInstanceBind(&contrl->cpuSet);
+    ThreadPoolControler::GetCpuAndNumaNum(&contrl->totalCpuNum, &contrl->totalNumaNum);
+    ParseBindCpuInfo(contrl);
+    if (CheckRedoBindConfigValid(contrl)) {
+        ConfigBindCpuInfo(contrl);
+    }
+}
+
+void BindRedoThreadToSpecifiedCpu(knl_thread_role thread_role)
+{
+#ifdef __USE_NUMA
+    if (thread_role == STARTUP || thread_role == PAGEREDO) {
+        RedoCpuBindControl *contrl = &g_instance.comm_cxt.predo_cxt.redoCpuBindcontrl;
+        if (contrl->activeCpuNum > 0) {
+            int ret = pthread_setaffinity_np(gs_thread_self(), sizeof(cpu_set_t), &contrl->configCpuSet);
+            if (ret != 0) {
+                ereport(WARNING, (errmsg("Fail to attach %d thread %lu active cpu num %d, %d", (int)thread_role,
+                    gs_thread_self(), contrl->activeCpuNum, ret)));
+            }
+        }
+    }
+#endif
+}
+

@@ -52,6 +52,7 @@
 #include "commands/dbcommands.h"
 #include "access/twophase.h"
 #include "access/redo_common.h"
+#include "access/extreme_rto/page_redo.h"
 
 THR_LOCAL RedoParseManager *g_parseManager = NULL;
 THR_LOCAL RedoBufferManager *g_bufferManager = NULL;
@@ -59,6 +60,7 @@ THR_LOCAL RedoBufferManager *g_bufferManager = NULL;
 #ifdef BUILD_ALONE
 THR_LOCAL bool assert_enabled = true;
 #endif
+const int XLOG_LSN_SWAP = 32;
 
 static const ReadBufferMethod G_BUFFERREADMETHOD = WITH_NORMAL_CACHE;
 
@@ -86,7 +88,8 @@ static FORCE_INLINE bool XLogLsnCheckLogInvalidPage(const RedoBufferInfo *buffer
     return false;
 }
 
-bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr lastLsn, const XLogPhyBlock *pblk)
+bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr lastLsn, const XLogPhyBlock *pblk,
+    bool *needRepair)
 {
     XLogRecPtr lsn = bufferinfo->lsn;
     Page page = (Page)bufferinfo->pageinfo.page;
@@ -128,12 +131,20 @@ bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr last
         } else if (pageCurLsn == InvalidXLogRecPtr && PageIsEmpty(page) && PageUpperIsInitNew(page)) {
             return XLogLsnCheckLogInvalidPage(bufferinfo, LSN_CHECK_ERROR, pblk);
         } else {
-            ereport(PANIC, (errmsg("lsn check error, lsn in record (%X/%X) ,lsn in current page %X/%X, "
-                                   "page info:%u/%u/%u forknum %d blknum:%u lsn %X/%X",
-                                   (uint32)(lastLsn >> 32), (uint32)(lastLsn), (uint32)(pageCurLsn >> 32),
-                                   (uint32)(pageCurLsn), blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
-                                   blockinfo->rnode.relNode, blockinfo->forknum, blockinfo->blkno, (uint32)(lsn >> 32),
-                                   (uint32)(lsn))));
+            int elevel = PANIC;
+            if (CheckVerionSupportRepair() && IsPrimaryClusterStandbyDN() && g_instance.repair_cxt.support_repair) {
+                elevel = WARNING;
+                *needRepair = true;
+                XLogLsnCheckLogInvalidPage(bufferinfo, LSN_CHECK_ERROR, pblk);
+            }
+            ereport(elevel,
+                (errmsg("lsn check error, record last lsn (%X/%X) ,lsn in current page %X/%X, "
+                        "page info:%u/%u/%u forknum %d blknum:%u lsn %X/%X",
+                        (uint32)(lastLsn >> XLOG_LSN_SWAP), (uint32)(lastLsn), (uint32)(pageCurLsn >> XLOG_LSN_SWAP),
+                        (uint32)(pageCurLsn), blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
+                        blockinfo->rnode.relNode, blockinfo->forknum, blockinfo->blkno, (uint32)(lsn >> XLOG_LSN_SWAP),
+                        (uint32)(lsn))));
+            return false;
         }
     }
     return true;
@@ -185,9 +196,6 @@ bool XLogBlockRefreshRedoBufferInfo(XLogBlockHead *blockhead, RedoBufferInfo *bu
     if (bufferinfo->blockinfo.rnode.relNode != XLogBlockHeadGetRelNode(blockhead)) {
         return false;
     }
-    if (bufferinfo->blockinfo.rnode.opt != XLogBlockHeadGetCompressOpt(blockhead)) {
-        return false;
-    }
     if (bufferinfo->blockinfo.forknum != XLogBlockHeadGetForkNum(blockhead)) {
         return false;
     }
@@ -211,7 +219,6 @@ void XLogBlockInitRedoBlockInfo(XLogBlockHead *blockhead, RedoBufferTag *blockin
     blockinfo->rnode.dbNode = XLogBlockHeadGetDbNode(blockhead);
     blockinfo->rnode.relNode = XLogBlockHeadGetRelNode(blockhead);
     blockinfo->rnode.bucketNode = XLogBlockHeadGetBucketId(blockhead);
-    blockinfo->rnode.opt = XLogBlockHeadGetCompressOpt(blockhead);
     blockinfo->forknum = XLogBlockHeadGetForkNum(blockhead);
     blockinfo->blkno = XLogBlockHeadGetBlockNum(blockhead);
     blockinfo->pblk = XLogBlockHeadGetPhysicalBlock(blockhead);
@@ -253,9 +260,23 @@ XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse *datadecode, Redo
                 return BLK_DONE;
             } else {
                 if (EnalbeWalLsnCheck && bufferinfo->blockinfo.forknum == MAIN_FORKNUM) {
+                    bool needRepair = false;
                     bool willinit = (XLogBlockDataGetBlockFlags(datadecode) & BKPBLOCK_WILL_INIT);
                     bool notSkip = DoLsnCheck(bufferinfo, willinit, XLogBlockDataGetLastBlockLSN(datadecode), 
-                        (bufferinfo->blockinfo.pblk.relNode != InvalidOid) ? &bufferinfo->blockinfo.pblk : NULL);
+                        (bufferinfo->blockinfo.pblk.relNode != InvalidOid) ? &bufferinfo->blockinfo.pblk : NULL,
+                        &needRepair);
+                    if (needRepair) {
+                        XLogRecPtr pageCurLsn = PageGetLSN(bufferinfo->pageinfo.page);
+                        UnlockReleaseBuffer(bufferinfo->buf);
+                        extreme_rto::RecordBadBlockAndPushToRemote(datadecode, LSN_CHECK_FAIL, pageCurLsn,
+                            bufferinfo->blockinfo.pblk);
+                        bufferinfo->buf = InvalidBuffer;
+                        bufferinfo->pageinfo = {0};
+#ifdef USE_ASSERT_CHECKING
+                        bufferinfo->pageinfo.ignorecheck = true;
+#endif
+                        return BLK_NOTFOUND;
+                    }
                     if (!notSkip) {
                         return BLK_DONE;
                     }
@@ -284,7 +305,7 @@ void XLogRecSetBlockCommonState(XLogReaderState *record, XLogBlockParseEnum bloc
     blockparse->blockhead.spcNode = filenode.rnode.node.spcNode;
     blockparse->blockhead.dbNode = filenode.rnode.node.dbNode;
     blockparse->blockhead.bucketNode = filenode.rnode.node.bucketNode;
-    blockparse->blockhead.opt = filenode.rnode.node.opt;
+
     blockparse->blockhead.blkno = filenode.segno;
     blockparse->blockhead.forknum = filenode.forknumber;
 
@@ -318,8 +339,25 @@ void DoRecordCheck(XLogRecParseState *recordstate, XLogRecPtr pageLsn, bool repl
 }
 #endif
 
+static void AddReadBlock(XLogRecParseState *recordstate, uint32 readblocks)
+{
+    if (recordstate->refrecord == NULL) {
+        return;
+    }
+
+    if (recordstate->blockparse.blockhead.block_valid != BLOCK_DATA_MAIN_DATA_TYPE) {
+        return;
+    }
+
+    RedoParseManager *manager = recordstate->manager;
+    if (manager->refOperate != NULL) {
+        manager->refOperate->addReadBlock(recordstate->refrecord, readblocks);
+    }
+}
+
 static void DereferenceSrcRecord(RedoParseManager *parsemanager, void *record)
 {
+    Assert(parsemanager != NULL);
     if (parsemanager->refOperate != NULL) {
         parsemanager->refOperate->DerefCount(record);
     }
@@ -366,7 +404,8 @@ void XLogRecSetBlockDataStateContent(XLogReaderState *record, uint32 blockid, XL
     blockdatarec->main_data_len = XLogRecGetDataLen(record);
 }
 
-void XLogRecSetBlockDataState(XLogReaderState *record, uint32 blockid, XLogRecParseState *recordblockstate)
+void XLogRecSetBlockDataState(XLogReaderState *record, uint32 blockid, XLogRecParseState *recordblockstate,
+    XLogBlockParseEnum type)
 {
     Assert(XLogRecHasBlockRef(record, blockid));
     DecodedBkpBlock *decodebkp = &(record->blocks[blockid]);
@@ -379,7 +418,7 @@ void XLogRecSetBlockDataState(XLogReaderState *record, uint32 blockid, XLogRecPa
 
     RelFileNodeForkNum filenode =
         RelFileNodeForkNumFill(&decodebkp->rnode, InvalidBackendId, decodebkp->forknum, decodebkp->blkno);
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_MAIN_DATA_TYPE, filenode, recordblockstate, &pblk);
+    XLogRecSetBlockCommonState(record, type, filenode, recordblockstate, &pblk);
 
     XLogBlockDataParse *blockdatarec = &(recordblockstate->blockparse.extra_rec.blockdatarec);
 
@@ -776,12 +815,11 @@ void XLogUpdateCopyedBlockState(XLogRecParseState *recordblockstate, XLogBlockPa
     recordblockstate->blockparse.blockhead.bucketNode = bucketNode;
 }
 
-void XLogRecSetBlockDdlState(XLogBlockDdlParse *blockddlstate, uint32 blockddltype, uint32 columnrel, char *mainData,
-                             Oid ownerid)
+void XLogRecSetBlockDdlState(XLogBlockDdlParse *blockddlstate, uint32 blockddltype, char *mainData, int rels)
 {
+    Assert(blockddlstate != NULL);
     blockddlstate->blockddltype = blockddltype;
-    blockddlstate->columnrel = columnrel;
-    blockddlstate->ownerid = ownerid;
+    blockddlstate->rels = rels;
     blockddlstate->mainData = mainData;
 }
 
@@ -871,6 +909,20 @@ void XLogRecSetPinVacuumState(XLogBlockVacuumPinParse *blockvacuum, BlockNumber 
     blockvacuum->lastBlockVacuumed = lastblknum;
 }
 
+void XLogRecSetSegFullSyncState(XLogBlockSegFullSyncParse *state, void *childState)
+{
+    Assert(state != NULL);
+    state->childState = childState;
+}
+
+void XLogRecSetSegNewPageInfo(XLogBlockSegNewPage *state, char *mainData, Size len)
+{
+    Assert(state != NULL);
+    state->mainData = mainData;
+    state->dataLen = len;
+}
+
+
 static inline bool AtomicCompareExchangeBuffer(volatile Buffer *ptr, Buffer *expected, Buffer newval)
 {
     bool ret = false;
@@ -884,6 +936,11 @@ static inline bool AtomicCompareExchangeBuffer(volatile Buffer *ptr, Buffer *exp
 static inline Buffer AtomicReadBuffer(volatile Buffer *ptr)
 {
     return *ptr;
+}
+
+static inline void AtomicWriteBuffer(volatile Buffer* ptr, Buffer val)
+{
+    *ptr = val;
 }
 
 static inline Buffer AtomicExchangeBuffer(volatile Buffer *ptr, Buffer newval)
@@ -933,6 +990,7 @@ RedoMemSlot *XLogMemAlloc(RedoMemManager *memctl)
     do {
         if (memctl->firstfreeslot == InvalidBuffer) {
             memctl->firstfreeslot = AtomicExchangeBuffer(&memctl->firstreleaseslot, InvalidBuffer);
+            pg_read_barrier();
         }
 
         if (memctl->firstfreeslot != InvalidBuffer) {
@@ -961,9 +1019,10 @@ void XLogMemRelease(RedoMemManager *memctl, Buffer bufferid)
     }
     bufferslot = &(memctl->memslot[bufferid - 1]);
     Assert(bufferslot->freeNext == InvalidBuffer);
-    Buffer oldFirst = memctl->firstreleaseslot;
+    Buffer oldFirst = AtomicReadBuffer(&memctl->firstreleaseslot);
+    pg_memory_barrier();
     do {
-        bufferslot->freeNext = oldFirst;
+        AtomicWriteBuffer(&bufferslot->freeNext, oldFirst);
     } while (!AtomicCompareExchangeBuffer(&memctl->firstreleaseslot, &oldFirst, bufferid));
 }
 
@@ -1145,20 +1204,18 @@ XLogRecParseState *XLogParseBufferAllocList(RedoParseManager *parsemanager, XLog
 
     allocslot = XLogMemAlloc(memctl);
     if (allocslot == NULL) {
-        ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+        ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                           errmsg("XLogParseBufferAlloc Allocated buffer failed!, taoalblknum:%u, usedblknum:%u",
                                  memctl->totalblknum, memctl->usedblknum)));
-        while (blkstatehead != NULL) {
-            recordstate = blkstatehead;
-            blkstatehead = (XLogRecParseState *)blkstatehead->nextrecord;
-            XLogParseBufferRelease(recordstate); /* release all recordstate, keep the xlog atomic */
-        }
         return NULL;
     }
+
+    pg_read_barrier();
     Assert(allocslot->buf_id != InvalidBuffer);
     Assert(memctl->itemsize == (sizeof(XLogRecParseState) + sizeof(ParseBufferDesc)));
     descstate = (ParseBufferDesc *)((char *)parsemanager->parsebuffers + memctl->itemsize * (allocslot->buf_id - 1));
     descstate->buff_id = allocslot->buf_id;
+    Assert(descstate->state == 0);
     descstate->state = 1;
     recordstate = (XLogRecParseState *)((char *)descstate + sizeof(ParseBufferDesc));
     recordstate->nextrecord = NULL;
@@ -1183,15 +1240,6 @@ XLogRecParseState *XLogParseBufferCopy(XLogRecParseState *srcState)
     errno_t rc = memcpy_s(&newState->blockparse, sizeof(newState->blockparse), &srcState->blockparse,
                           sizeof(srcState->blockparse));
     securec_check(rc, "\0", "\0");
-    
-    if (newState->blockparse.blockhead.block_valid == BLOCK_DATA_DDL_TYPE &&
-        newState->blockparse.extra_rec.blockddlrec.blockddltype == BLOCK_DDL_DROP_BKTLIST) {
-        uint32* bucketList = (uint32 *)palloc(BktBitMaxMapCnt * sizeof(uint32));
-        rc = memcpy_s(bucketList, BktBitMaxMapCnt * sizeof(uint32),
-                      srcState->blockparse.extra_rec.blockddlrec.mainData, BktBitMaxMapCnt * sizeof(uint32));
-        securec_check(rc, "\0", "\0");
-        newState->blockparse.extra_rec.blockddlrec.mainData = (char *)bucketList;
-    }
 
     newState->isFullSync = srcState->isFullSync;
     return newState;
@@ -1203,19 +1251,14 @@ void XLogParseBufferRelease(XLogRecParseState *recordstate)
     ParseBufferDesc *descstate = NULL;
 
     descstate = (ParseBufferDesc *)((char *)recordstate - sizeof(ParseBufferDesc));
-    if (!RedoMemIsValid(memctl, descstate->buff_id)) {
+    if (!RedoMemIsValid(memctl, descstate->buff_id) || descstate->state == 0) {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                         errmsg("XLogParseBufferRelease failed!, taoalblknum:%u, buf_id:%u", memctl->totalblknum,
                                descstate->buff_id)));
         /* panic */
     }
-    Assert(descstate->state != 0);
-    descstate->state = 0;
 
-    if (recordstate->blockparse.blockhead.block_valid == BLOCK_DATA_DDL_TYPE &&
-        recordstate->blockparse.extra_rec.blockddlrec.blockddltype == BLOCK_DDL_DROP_BKTLIST) {
-        pfree_ext(recordstate->blockparse.extra_rec.blockddlrec.mainData);
-    }
+    descstate->state = 0;
 
     XLogMemRelease(memctl, descstate->buff_id);
 }
@@ -1239,9 +1282,6 @@ void XLogBlockDataCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoB
             break;
         case RM_BTREE_ID:
             BtreeRedoDataBlock(blockhead, blockdatarec, bufferinfo);
-            break;
-        case RM_HASH_ID:
-            HashRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
         case RM_UBTREE_ID:
             UBTreeRedoDataBlock(blockhead, blockdatarec, bufferinfo);
@@ -1271,6 +1311,9 @@ void XLogBlockDataCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoB
             break;
         case RM_UHEAPUNDO_ID:
             RedoUndoActionBlock(blockhead, blockdatarec, bufferinfo);
+            break;
+        case RM_SEGPAGE_ID:
+            SegPageRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
         default:
             ereport(PANIC, (errmsg("XLogBlockDataCommonRedo: unknown rmid %u", rmid)));
@@ -1374,7 +1417,7 @@ void XLogBlockDdlCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoBu
     rnode.dbNode = blockhead->dbNode;
     rnode.relNode = blockhead->relNode;
     rnode.bucketNode = blockhead->bucketNode;
-    rnode.opt = blockhead->opt;
+
     switch (blockddlrec->blockddltype) {
         case BLOCK_DDL_CREATE_RELNODE:
             smgr_redo_create(rnode, blockhead->forknum, blockddlrec->mainData);
@@ -1443,7 +1486,7 @@ void XLogBlockSegDdlDoRealAction(XLogBlockHead* blockhead, void* blockrecbody, R
     rnode.dbNode = blockhead->dbNode;
     rnode.relNode = blockhead->relNode;
     rnode.bucketNode = blockhead->bucketNode;
-    rnode.opt = blockhead->opt;
+
     switch (segddlrec->blockddlrec.blockddltype) {
         case BLOCK_DDL_TRUNCATE_RELNODE:
             xlog_block_segpage_redo_truncate(rnode, blockhead, segddlrec);
@@ -1468,7 +1511,7 @@ void XLogBlockDdlDoSmgrAction(XLogBlockHead *blockhead, void *blockrecbody, Redo
     rnode.dbNode = blockhead->dbNode;
     rnode.relNode = blockhead->relNode;
     rnode.bucketNode = blockhead->bucketNode;
-    rnode.opt = blockhead->opt;
+
     switch (blockddlrec->blockddltype) {
         case BLOCK_DDL_CREATE_RELNODE:
             smgr_redo_create(rnode, blockhead->forknum, blockddlrec->mainData);
@@ -1477,9 +1520,15 @@ void XLogBlockDdlDoSmgrAction(XLogBlockHead *blockhead, void *blockrecbody, Redo
             xlog_block_smgr_redo_truncate(rnode, blockhead->blkno, blockhead->end_ptr);
             break;
         case BLOCK_DDL_DROP_RELNODE: {
-            SMgrRelation reln = smgropen(bufferinfo->blockinfo.rnode, InvalidBackendId,
-                                         GetColumnNum(bufferinfo->blockinfo.forknum));
-            smgrclose(reln);
+            ColFileNodeRel *xnodes = (ColFileNodeRel *)blockddlrec->mainData;
+            for (int i = 0; i < blockddlrec->rels; ++i) {
+                ColFileNodeRel *colFileNodeRel = xnodes + i;
+                ColFileNode colFileNode;
+                ColFileNodeCopy(&colFileNode, colFileNodeRel);
+                if (!IsValidColForkNum(colFileNode.forknum)) {
+                    XlogDropRowReation(colFileNode.filenode);
+                }
+            }
             break;
         }
         default:
@@ -1679,19 +1728,23 @@ void XLogSynAllBuffer()
     }
 }
 
-bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo *bufferinfo, bool notfound)
+bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo *bufferinfo,  bool notfound,
+    RedoTimeCost &readBufCost, RedoTimeCost &redoCost)
 {
     XLogRedoAction redoaction;
     uint16 block_valid;
     void *blockrecbody;
     XLogBlockHead *blockhead;
+    long readcount = u_sess->instr_cxt.pg_buffer_usage->shared_blks_read;
 
     /* decode blockdata body */
     blockhead = &redoblocktate->blockparse.blockhead;
     blockrecbody = &redoblocktate->blockparse.extra_rec;
     block_valid = XLogBlockHeadGetValidInfo(blockhead);
 
+    GetRedoStartTime(readBufCost);
     redoaction = XLogBlockGetOperatorBuffer(blockhead, blockrecbody, bufferinfo, notfound, G_BUFFERREADMETHOD);
+    CountRedoTime(readBufCost);
     if (redoaction == BLK_NOTFOUND) {
 #ifdef USE_ASSERT_CHECKING
         ereport(WARNING, (errmsg("XLogBlockRedoForExtremeRTO:lsn %X/%X, page %u/%u/%u %u not found",
@@ -1707,12 +1760,16 @@ bool XLogBlockRedoForExtremeRTO(XLogRecParseState *redoblocktate, RedoBufferInfo
         ereport(PANIC, (errmsg("XLogBlockRedoForExtremeRTO: redobuffer checkfailed")));
     }
     if (block_valid <= BLOCK_DATA_FSM_TYPE) {
+        GetRedoStartTime(redoCost);
         Assert(block_valid == g_xlogExtRtoRedoTable[block_valid].block_valid);
         g_xlogExtRtoRedoTable[block_valid].xlog_redoextrto(blockhead, blockrecbody, bufferinfo);
+        CountRedoTime(redoCost);
 #ifdef USE_ASSERT_CHECKING
-        if (block_valid != BLOCK_DATA_UNDO_TYPE)
+        if (block_valid != BLOCK_DATA_UNDO_TYPE && !bufferinfo->pageinfo.ignorecheck) {
             DoRecordCheck(redoblocktate, PageGetLSN(bufferinfo->pageinfo.page), true);
+        }
 #endif
+        AddReadBlock(redoblocktate, (u_sess->instr_cxt.pg_buffer_usage->shared_blks_read - readcount));
     } else {
         ereport(WARNING, (errmsg("XLogBlockRedoForExtremeRTO: unsuport type %u, lsn %X/%X", (uint32)block_valid,
                                  (uint32)(blockhead->end_ptr >> 32), (uint32)(blockhead->end_ptr))));

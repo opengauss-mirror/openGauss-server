@@ -95,19 +95,6 @@ void CloseGTM(void)
     }
 }
 
-void ResetGtmHandleXmin(GTM_TransactionKey txnKey)
-{
-    /* in Single_Node mode, txnKey.txnHandle must be inValid, and t_thrd.xact_cxt.conn must be NULL, */
-    /* so, just return here. */
-    return;
-}
-
-int SetGTMVacuumFlag(GTM_TransactionKey txnKey, bool is_vacuum)
-{
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return GTM_RESULT_ERROR;
-}
-
 GTM_TransactionKey BeginTranGTM(GTM_Timestamp *timestamp)
 {
     GTM_TransactionKey txn;

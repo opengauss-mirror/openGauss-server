@@ -69,6 +69,46 @@ static void desc_recompress_leaf(StringInfo buf, ginxlogRecompressDataLeaf *inse
     }
 }
 
+const char* gin_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    switch (info) {
+        case XLOG_GIN_CREATE_INDEX:
+            return "gin_create_index";
+            break;
+        case XLOG_GIN_CREATE_PTREE:
+            return "gin_create_ptree";
+            break;
+        case XLOG_GIN_INSERT:
+            return "gin_insert";
+            break;
+        case XLOG_GIN_SPLIT:
+            return "gin_split";
+            break;
+        case XLOG_GIN_VACUUM_PAGE:
+            return "gin_vacuum";
+            break;
+        case XLOG_GIN_VACUUM_DATA_LEAF_PAGE:
+            return "gin_vacuum_leaf";
+            break;
+        case XLOG_GIN_DELETE_PAGE:
+            return "gin_delete_page";
+            break;
+        case XLOG_GIN_UPDATE_META_PAGE:
+            return "gin_update_metapage";
+            break;
+        case XLOG_GIN_INSERT_LISTPAGE:
+            return "gin_insert_listpage";
+            break;
+        case XLOG_GIN_DELETE_LISTPAGE:
+            return "gin_delete_listpage";
+            break;
+        default:
+            return "unknow_type";
+            break;
+    }
+}
+
 void gin_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

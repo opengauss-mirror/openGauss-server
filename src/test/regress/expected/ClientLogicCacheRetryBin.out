@@ -1,0 +1,357 @@
+
+********************************************************
+* Validate cache retry when creating a column settings *
+********************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+
+********************************************************************
+* Validate cache retry when using 2nd connection to create a table *
+********************************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+DROP TABLE t_num
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+
+***************************************************************
+* Validate cache retry when inserting data using simple query *
+***************************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+INSERT INTO t_num (id, num) VALUES (1, 555)
+select * from t_num
+ id | num 
+----+-----
+  1 | 555
+(1 row)
+
+INSERT INTO t_num (id, num) VALUES (1, 666)
+select * from t_num
+ id | num 
+----+-----
+  1 | 666
+  1 | 555
+(2 rows)
+
+DROP TABLE t_num
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+
+*********************************************************************************************
+* Validate the cache retry mechanism when inserting data to a table using prepare statement *
+*********************************************************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+INSERT INTO t_num (id, num) VALUES (?,?)
+1,2
+select * from t_num
+ id | num 
+----+-----
+  1 |   2
+(1 row)
+
+DROP TABLE t_num
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+
+**************************************************************
+* Validate cache retry when updating data using simple query *
+**************************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+INSERT INTO t_num (id, num) VALUES (1, 555)
+INSERT INTO t_num (id, num) VALUES (1, 666)
+select * from t_num
+ id | num 
+----+-----
+  1 | 666
+  1 | 555
+(2 rows)
+
+update t_num set num = 7000
+select * from t_num
+ id | num  
+----+------
+  1 | 7000
+  1 | 7000
+(2 rows)
+
+DROP TABLE t_num
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+
+*************************************************************************************************
+* Validate cache retry when applying where clause on client logic field using prepare statament *
+*************************************************************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+INSERT INTO t_num (id, num) VALUES (?,?)
+1,2
+select * from t_num
+ id | num 
+----+-----
+  1 |   2
+(1 row)
+
+SELECT * FROM t_num where num = ?
+2
+ id | num 
+----+-----
+  1 |   2
+(1 row)
+
+select * from t_num
+ id | num 
+----+-----
+  1 |   2
+(1 row)
+
+DROP TABLE t_num
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+
+**********************************************************************************************
+* Validate cache retry when applying where clause on client logic field Using simple queries *
+**********************************************************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+INSERT INTO t_num (id, num) VALUES (?,?)
+1,2
+select * from t_num
+ id | num 
+----+-----
+  1 |   2
+(1 row)
+
+SELECT * FROM t_num where num = 2
+ id | num 
+----+-----
+  1 |   2
+(1 row)
+
+select * from t_num
+ id | num 
+----+-----
+  1 |   2
+(1 row)
+
+DROP TABLE t_num
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+
+*******************************************************
+* Validate the cache refresh when trying to read data *
+*******************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+INSERT INTO t_num (id, num) VALUES (1, 555)
+select * from t_num
+ id | num 
+----+-----
+  1 | 555
+(1 row)
+
+select * from t_num
+ id | num 
+----+-----
+  1 | 555
+(1 row)
+
+DROP TABLE t_num
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+
+**********************************************************
+* Cache retry for functions with client logic parameters *
+**********************************************************
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_processed (name text, val INT ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), val2 INT)
+insert into t_processed values('one',1,10),('two',2,20),('three',3,30),('four',4,40),('five',5,50),('six',6,60),('seven',7,70),('eight',8,80),('nine',9,90),('ten',10,100)
+CREATE  FUNCTION f_out_only(out1 OUT int, out2 OUT int) AS 'SELECT val, val2 from t_processed ORDER BY name LIMIT 1' LANGUAGE SQL
+SELECT f_out_only ()
+ f_out_only 
+------------
+ (8,80)
+(1 row)
+
+SELECT f_out_only ()
+                                                                          f_out_only                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?.*
+(1 row)
+
+Trying SELECT f_out_only () again after calling to isValid method:
+SELECT f_out_only()
+ f_out_only 
+------------
+ (8,80)
+(1 row)
+
+conn2, which is to be used now have refreshClientEncryption set to zero
+SELECT f_out_only()
+                                                                          f_out_only                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?.*
+(1 row)
+
+SELECT f_out_only()
+                                                                          f_out_only                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+--?.*
+(1 row)
+
+CREATE FUNCTION f_plaintext_out(out1 INOUT int, out2 INOUT int) AS 'SELECT val, val2 from t_processed where val=out1 AND val2=out2 ORDER BY name LIMIT 1' LANGUAGE SQL
+CALL f_plaintext_out (3, 30)
+ out1 | out2 
+------+------
+    3 |   30
+(1 row)
+
+SELECT f_plaintext_out (3, 30)
+ f_plaintext_out 
+-----------------
+ (3,30)
+(1 row)
+
+SELECT f_plaintext_out (3, 30)
+ f_plaintext_out 
+-----------------
+ (3,30)
+(1 row)
+
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+INSERT INTO t_num (id, num) VALUES (1, 5555)
+INSERT INTO t_num (id, num) VALUES (2, 6666)
+SELECT * from t_num
+ id | num  
+----+------
+  2 | 6666
+  1 | 5555
+(2 rows)
+
+CREATE FUNCTION select1 () RETURNS t_num LANGUAGE SQL AS 'SELECT * from t_num;';
+call select1()
+ id | num  
+----+------
+  1 | 5555
+(1 row)
+
+call select1()
+ id | num  
+----+------
+  1 | 5555
+(1 row)
+
+CREATE FUNCTION f_processed_in_out_plpgsql(in1 int, out out1 int, in2 int, out out2 int)as $$ begin select val, val2 INTO out1, out2 from t_processed where val = in2 or val = in1 limit 1; end;$$ LANGUAGE plpgsql
+SELECT f_processed_in_out_plpgsql(17,3)
+ f_processed_in_out_plpgsql 
+----------------------------
+ (3,30)
+(1 row)
+
+SELECT f_processed_in_out_plpgsql(17,3)
+ f_processed_in_out_plpgsql 
+----------------------------
+ (3,30)
+(1 row)
+
+DROP function f_out_only
+DROP function f_plaintext_out;
+DROP function select1
+DROP function f_processed_in_out_plpgsql
+DROP TABLE t_num CASCADE
+DROP TABLE t_processed CASCADE
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1

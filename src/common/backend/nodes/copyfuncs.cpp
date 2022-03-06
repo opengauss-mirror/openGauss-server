@@ -312,6 +312,7 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(updateTlist);
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelRTIndex);
+    COPY_NODE_FIELD(upsertWhere);
 
     return newnode;
 }
@@ -569,6 +570,8 @@ static void CopyScanFields(const Scan* from, Scan* newnode)
     newnode->pruningInfo = copyPruningResult(from->pruningInfo);
     COPY_SCALAR_FIELD(scan_qual_optimized);
     COPY_SCALAR_FIELD(predicate_pushdown_optimized);
+    COPY_SCALAR_FIELD(scanBatchMode);
+    COPY_SCALAR_FIELD(tableRows);
 
     /* partition infos */
     COPY_NODE_FIELD(bucketInfo);
@@ -1273,6 +1276,7 @@ static HashJoin* _copyHashJoin(const HashJoin* from)
     COPY_SCALAR_FIELD(rebuildHashTable);
     COPY_SCALAR_FIELD(isSonicHash);
     CopyMemInfoFields(&from->mem_info, &newnode->mem_info);
+    COPY_SCALAR_FIELD(joinRows);
 
     return newnode;
 }
@@ -1547,6 +1551,9 @@ static PlanRowMark* _copyPlanRowMark(const PlanRowMark* from)
     COPY_SCALAR_FIELD(rowmarkId);
     COPY_SCALAR_FIELD(markType);
     COPY_SCALAR_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        COPY_SCALAR_FIELD(waitSec);
+    }
     COPY_SCALAR_FIELD(isParent);
     COPY_SCALAR_FIELD(numAttrs);
     COPY_BITMAPSET_FIELD(bms_nodeids);
@@ -2367,6 +2374,7 @@ static Var* _copyVar(const Var* from)
 {
     Var* newnode = makeNode(Var);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(varno);
     COPY_SCALAR_FIELD(varattno);
     COPY_SCALAR_FIELD(vartype);
@@ -2387,6 +2395,7 @@ static Const* _copyConst(const Const* from)
 {
     Const* newnode = makeNode(Const);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(consttype);
     COPY_SCALAR_FIELD(consttypmod);
     COPY_SCALAR_FIELD(constcollid);
@@ -2421,6 +2430,7 @@ static Param* _copyParam(const Param* from)
 {
     Param* newnode = makeNode(Param);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(paramkind);
     COPY_SCALAR_FIELD(paramid);
     COPY_SCALAR_FIELD(paramtype);
@@ -2440,6 +2450,7 @@ static Rownum* _copyRownum(const Rownum* from)
 {
     Rownum* newnode = (Rownum*)makeNode(Rownum);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(rownumcollid);
     COPY_LOCATION_FIELD(location);
 
@@ -2453,6 +2464,7 @@ static Aggref* _copyAggref(const Aggref* from)
 {
     Aggref* newnode = makeNode(Aggref);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(aggfnoid);
     COPY_SCALAR_FIELD(aggtype);
 #ifdef PGXC
@@ -2482,6 +2494,7 @@ static GroupingFunc* _copyGroupingFunc(const GroupingFunc* from)
 {
     GroupingFunc* newnode = makeNode(GroupingFunc);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(args);
     COPY_NODE_FIELD(refs);
     COPY_NODE_FIELD(cols);
@@ -2509,6 +2522,7 @@ static WindowFunc* _copyWindowFunc(const WindowFunc* from)
 {
     WindowFunc* newnode = makeNode(WindowFunc);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(winfnoid);
     COPY_SCALAR_FIELD(wintype);
     COPY_SCALAR_FIELD(wincollid);
@@ -2529,6 +2543,7 @@ static ArrayRef* _copyArrayRef(const ArrayRef* from)
 {
     ArrayRef* newnode = makeNode(ArrayRef);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(refarraytype);
     COPY_SCALAR_FIELD(refelemtype);
     COPY_SCALAR_FIELD(reftypmod);
@@ -2548,6 +2563,7 @@ static FuncExpr* _copyFuncExpr(const FuncExpr* from)
 {
     FuncExpr* newnode = makeNode(FuncExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(funcid);
     COPY_SCALAR_FIELD(funcresulttype);
     COPY_SCALAR_FIELD(funcresulttype_orig);
@@ -2570,6 +2586,7 @@ static NamedArgExpr* _copyNamedArgExpr(const NamedArgExpr* from)
 {
     NamedArgExpr* newnode = makeNode(NamedArgExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_STRING_FIELD(name);
     COPY_SCALAR_FIELD(argnumber);
@@ -2581,6 +2598,7 @@ static NamedArgExpr* _copyNamedArgExpr(const NamedArgExpr* from)
 template <typename T>
 static void _copyCommonOpExprPart(const T* from, T* newnode)
 {
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(opno);
     COPY_SCALAR_FIELD(opfuncid);
     COPY_SCALAR_FIELD(opresulttype);
@@ -2627,6 +2645,7 @@ static ScalarArrayOpExpr* _copyScalarArrayOpExpr(const ScalarArrayOpExpr* from)
 {
     ScalarArrayOpExpr* newnode = makeNode(ScalarArrayOpExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(opno);
     COPY_SCALAR_FIELD(opfuncid);
     COPY_SCALAR_FIELD(useOr);
@@ -2644,6 +2663,7 @@ static BoolExpr* _copyBoolExpr(const BoolExpr* from)
 {
     BoolExpr* newnode = makeNode(BoolExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(boolop);
     COPY_NODE_FIELD(args);
     COPY_LOCATION_FIELD(location);
@@ -2658,6 +2678,7 @@ static SubLink* _copySubLink(const SubLink* from)
 {
     SubLink* newnode = makeNode(SubLink);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(subLinkType);
     COPY_NODE_FIELD(testexpr);
     COPY_NODE_FIELD(operName);
@@ -2674,6 +2695,7 @@ static SubPlan* _copySubPlan(const SubPlan* from)
 {
     SubPlan* newnode = makeNode(SubPlan);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(subLinkType);
     COPY_NODE_FIELD(testexpr);
     COPY_NODE_FIELD(paramIds);
@@ -2700,6 +2722,7 @@ static AlternativeSubPlan* _copyAlternativeSubPlan(const AlternativeSubPlan* fro
 {
     AlternativeSubPlan* newnode = makeNode(AlternativeSubPlan);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(subplans);
 
     return newnode;
@@ -2712,6 +2735,7 @@ static FieldSelect* _copyFieldSelect(const FieldSelect* from)
 {
     FieldSelect* newnode = makeNode(FieldSelect);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(fieldnum);
     COPY_SCALAR_FIELD(resulttype);
@@ -2728,6 +2752,7 @@ static FieldStore* _copyFieldStore(const FieldStore* from)
 {
     FieldStore* newnode = makeNode(FieldStore);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_NODE_FIELD(newvals);
     COPY_NODE_FIELD(fieldnums);
@@ -2743,6 +2768,7 @@ static RelabelType* _copyRelabelType(const RelabelType* from)
 {
     RelabelType* newnode = makeNode(RelabelType);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(resulttype);
     COPY_SCALAR_FIELD(resulttypmod);
@@ -2760,6 +2786,7 @@ static CoerceViaIO* _copyCoerceViaIO(const CoerceViaIO* from)
 {
     CoerceViaIO* newnode = makeNode(CoerceViaIO);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(resulttype);
     COPY_SCALAR_FIELD(resultcollid);
@@ -2776,6 +2803,7 @@ static ArrayCoerceExpr* _copyArrayCoerceExpr(const ArrayCoerceExpr* from)
 {
     ArrayCoerceExpr* newnode = makeNode(ArrayCoerceExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(elemfuncid);
     COPY_SCALAR_FIELD(resulttype);
@@ -2795,6 +2823,7 @@ static ConvertRowtypeExpr* _copyConvertRowtypeExpr(const ConvertRowtypeExpr* fro
 {
     ConvertRowtypeExpr* newnode = makeNode(ConvertRowtypeExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(resulttype);
     COPY_SCALAR_FIELD(convertformat);
@@ -2810,6 +2839,7 @@ static CollateExpr* _copyCollateExpr(const CollateExpr* from)
 {
     CollateExpr* newnode = makeNode(CollateExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(collOid);
     COPY_LOCATION_FIELD(location);
@@ -2824,6 +2854,7 @@ static CaseExpr* _copyCaseExpr(const CaseExpr* from)
 {
     CaseExpr* newnode = makeNode(CaseExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(casetype);
     COPY_SCALAR_FIELD(casecollid);
     COPY_NODE_FIELD(arg);
@@ -2841,6 +2872,7 @@ static CaseWhen* _copyCaseWhen(const CaseWhen* from)
 {
     CaseWhen* newnode = makeNode(CaseWhen);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(expr);
     COPY_NODE_FIELD(result);
     COPY_LOCATION_FIELD(location);
@@ -2855,6 +2887,7 @@ static CaseTestExpr* _copyCaseTestExpr(const CaseTestExpr* from)
 {
     CaseTestExpr* newnode = makeNode(CaseTestExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(typeId);
     COPY_SCALAR_FIELD(typeMod);
     COPY_SCALAR_FIELD(collation);
@@ -2869,6 +2902,7 @@ static ArrayExpr* _copyArrayExpr(const ArrayExpr* from)
 {
     ArrayExpr* newnode = makeNode(ArrayExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(array_typeid);
     COPY_SCALAR_FIELD(array_collid);
     COPY_SCALAR_FIELD(element_typeid);
@@ -2886,6 +2920,7 @@ static RowExpr* _copyRowExpr(const RowExpr* from)
 {
     RowExpr* newnode = makeNode(RowExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(args);
     COPY_SCALAR_FIELD(row_typeid);
     COPY_SCALAR_FIELD(row_format);
@@ -2902,6 +2937,7 @@ static RowCompareExpr* _copyRowCompareExpr(const RowCompareExpr* from)
 {
     RowCompareExpr* newnode = makeNode(RowCompareExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(rctype);
     COPY_NODE_FIELD(opnos);
     COPY_NODE_FIELD(opfamilies);
@@ -2919,6 +2955,7 @@ static CoalesceExpr* _copyCoalesceExpr(const CoalesceExpr* from)
 {
     CoalesceExpr* newnode = makeNode(CoalesceExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(coalescetype);
     COPY_SCALAR_FIELD(coalescecollid);
     COPY_NODE_FIELD(args);
@@ -2936,6 +2973,7 @@ static MinMaxExpr* _copyMinMaxExpr(const MinMaxExpr* from)
 {
     MinMaxExpr* newnode = makeNode(MinMaxExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(minmaxtype);
     COPY_SCALAR_FIELD(minmaxcollid);
     COPY_SCALAR_FIELD(inputcollid);
@@ -2953,6 +2991,7 @@ static XmlExpr* _copyXmlExpr(const XmlExpr* from)
 {
     XmlExpr* newnode = makeNode(XmlExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(op);
     COPY_STRING_FIELD(name);
     COPY_NODE_FIELD(named_args);
@@ -2973,6 +3012,7 @@ static NullTest* _copyNullTest(const NullTest* from)
 {
     NullTest* newnode = makeNode(NullTest);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(nulltesttype);
     COPY_SCALAR_FIELD(argisrow);
@@ -2987,6 +3027,7 @@ static HashFilter* _copyHashFilter(const HashFilter* from)
 {
     HashFilter* newnode = makeNode(HashFilter);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_NODE_FIELD(typeOids);
     COPY_NODE_FIELD(nodeList);
@@ -3001,6 +3042,7 @@ static BooleanTest* _copyBooleanTest(const BooleanTest* from)
 {
     BooleanTest* newnode = makeNode(BooleanTest);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(booltesttype);
 
@@ -3014,6 +3056,7 @@ static CoerceToDomain* _copyCoerceToDomain(const CoerceToDomain* from)
 {
     CoerceToDomain* newnode = makeNode(CoerceToDomain);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_NODE_FIELD(arg);
     COPY_SCALAR_FIELD(resulttype);
     COPY_SCALAR_FIELD(resulttypmod);
@@ -3031,6 +3074,7 @@ static CoerceToDomainValue* _copyCoerceToDomainValue(const CoerceToDomainValue* 
 {
     CoerceToDomainValue* newnode = makeNode(CoerceToDomainValue);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(typeId);
     COPY_SCALAR_FIELD(typeMod);
     COPY_SCALAR_FIELD(collation);
@@ -3046,6 +3090,7 @@ static SetToDefault* _copySetToDefault(const SetToDefault* from)
 {
     SetToDefault* newnode = makeNode(SetToDefault);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(typeId);
     COPY_SCALAR_FIELD(typeMod);
     COPY_SCALAR_FIELD(collation);
@@ -3061,6 +3106,7 @@ static CurrentOfExpr* _copyCurrentOfExpr(const CurrentOfExpr* from)
 {
     CurrentOfExpr* newnode = makeNode(CurrentOfExpr);
 
+    COPY_SCALAR_FIELD(xpr.selec);
     COPY_SCALAR_FIELD(cvarno);
     COPY_STRING_FIELD(cursor_name);
     COPY_SCALAR_FIELD(cursor_param);
@@ -3154,6 +3200,7 @@ static PartitionState* _copyPartitionState(const PartitionState* from)
     COPY_NODE_FIELD(partitionList);
     COPY_SCALAR_FIELD(rowMovement);
     COPY_NODE_FIELD(subPartitionState);
+    COPY_NODE_FIELD(partitionNameList);
 
     return newnode;
 }
@@ -3229,6 +3276,17 @@ static AddPartitionState* _copyAddPartitionState(const AddPartitionState* from)
     return newnode;
 }
 
+static AddSubPartitionState* _copyAddSubPartitionState(const AddSubPartitionState* from)
+{
+    AddSubPartitionState* newnode = makeNode(AddSubPartitionState);
+
+    COPY_STRING_FIELD(partitionName);
+    COPY_NODE_FIELD(subPartitionList);
+
+    return newnode;
+}
+
+
 static RangePartitionStartEndDefState* _copyRangePartitionStartEndDefState(const RangePartitionStartEndDefState* from)
 {
     RangePartitionStartEndDefState* newnode = makeNode(RangePartitionStartEndDefState);
@@ -3262,6 +3320,7 @@ static RangePartitionindexDefState* _copyRangePartitionindexDefState(const Range
 
     COPY_STRING_FIELD(name);
     COPY_STRING_FIELD(tablespace);
+    COPY_NODE_FIELD(sublist);
 
     return newnode;
 }
@@ -3345,7 +3404,6 @@ static RestrictInfo* _copyRestrictInfo(const RestrictInfo* from)
     COPY_SCALAR_FIELD(hashjoinoperator);
     COPY_SCALAR_FIELD(left_bucketsize);
     COPY_SCALAR_FIELD(right_bucketsize);
-    COPY_SCALAR_FIELD(converted);
     return newnode;
 }
 
@@ -3508,6 +3566,7 @@ static RangeTblEntry* _copyRangeTblEntry(const RangeTblEntry* from)
     COPY_SCALAR_FIELD(isexcluded);
     COPY_SCALAR_FIELD(sublink_pull_up);
     COPY_SCALAR_FIELD(is_ustore);
+    COPY_SCALAR_FIELD(pulled_from_subquery);
 
     return newnode;
 }
@@ -3587,6 +3646,9 @@ static RowMarkClause* _copyRowMarkClause(const RowMarkClause* from)
     COPY_SCALAR_FIELD(rti);
     COPY_SCALAR_FIELD(forUpdate);
     COPY_SCALAR_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        COPY_SCALAR_FIELD(waitSec);
+    }
     COPY_SCALAR_FIELD(pushedDown);
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(strength);
@@ -3614,6 +3676,7 @@ static UpsertClause* _copyUpsertClause(const UpsertClause* from)
 
     COPY_NODE_FIELD(targetList);
     COPY_LOCATION_FIELD(location);
+    COPY_NODE_FIELD(whereClause);
 
     return newnode;
 }
@@ -3626,6 +3689,7 @@ static UpsertExpr* _copyUpsertExpr(const UpsertExpr* from)
     COPY_NODE_FIELD(updateTlist);
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelIndex);
+    COPY_NODE_FIELD(upsertWhere);
 
     return newnode;
 }
@@ -4110,6 +4174,9 @@ static LockingClause* _copyLockingClause(const LockingClause* from)
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(strength);
     }
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        COPY_SCALAR_FIELD(waitSec);
+    }
 
     return newnode;
 }
@@ -4181,6 +4248,24 @@ static NoGPCHint* _copyNoGPCHint(const NoGPCHint* from)
 static PredpushHint* _copyPredpushHint(const PredpushHint* from)
 {
     PredpushHint* newnode = makeNode(PredpushHint);
+
+    CopyBaseHintFilelds((const Hint*)from, (Hint*)newnode);
+    COPY_SCALAR_FIELD(negative);
+    COPY_STRING_FIELD(dest_name);
+    COPY_SCALAR_FIELD(dest_id);
+    COPY_BITMAPSET_FIELD(candidates);
+
+    return newnode;
+}
+
+/*
+ * @Description: Copy hint filelds.
+ * @in from: Source hint.
+ * @out newnode: Target hint.
+ */
+static PredpushSameLevelHint* _copyPredpushSameLevelHint(const PredpushSameLevelHint* from)
+{
+    PredpushSameLevelHint* newnode = makeNode(PredpushSameLevelHint);
 
     CopyBaseHintFilelds((const Hint*)from, (Hint*)newnode);
     COPY_SCALAR_FIELD(negative);
@@ -4421,6 +4506,7 @@ static HintState* _copyHintState(const HintState* from)
     COPY_NODE_FIELD(set_hint);
     COPY_NODE_FIELD(cache_plan_hint);
     COPY_NODE_FIELD(no_gpc_hint);
+    COPY_NODE_FIELD(predpush_same_level_hint);
 
     return newnode;
 }
@@ -4724,6 +4810,27 @@ static GrantRoleStmt* _copyGrantRoleStmt(const GrantRoleStmt* from)
     COPY_SCALAR_FIELD(admin_opt);
     COPY_STRING_FIELD(grantor);
     COPY_SCALAR_FIELD(behavior);
+
+    return newnode;
+}
+
+static DbPriv* _copyDbPriv(const DbPriv* from)
+{
+    DbPriv* newnode = makeNode(DbPriv);
+
+    COPY_STRING_FIELD(db_priv_name);
+
+    return newnode;
+}
+
+static GrantDbStmt* _copyGrantDbStmt(const GrantDbStmt* from)
+{
+    GrantDbStmt* newnode = makeNode(GrantDbStmt);
+
+    COPY_SCALAR_FIELD(is_grant);
+    COPY_NODE_FIELD(privileges);
+    COPY_NODE_FIELD(grantees);
+    COPY_SCALAR_FIELD(admin_opt);
 
     return newnode;
 }
@@ -5956,6 +6063,10 @@ static LockStmt* _copyLockStmt(const LockStmt* from)
     COPY_NODE_FIELD(relations);
     COPY_SCALAR_FIELD(mode);
     COPY_SCALAR_FIELD(nowait);
+    COPY_SCALAR_FIELD(cancelable);
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        COPY_SCALAR_FIELD(waitSec);
+    }
 
     return newnode;
 }
@@ -6212,6 +6323,16 @@ static DropSubscriptionStmt *_copyDropSubscriptionStmt(const DropSubscriptionStm
     return newnode;
 }
 
+static PredictByFunction *_copyPredictByFunctionStmt(const PredictByFunction *from)
+{
+    PredictByFunction* newnode = makeNode(PredictByFunction);
+    COPY_STRING_FIELD(model_name);
+    COPY_SCALAR_FIELD(model_name_location);
+    COPY_NODE_FIELD(model_args);
+    COPY_SCALAR_FIELD(model_args_location);
+    return newnode;
+}
+
 /* ****************************************************************
  *					pg_list.h copy functions
  * ****************************************************************
@@ -6403,6 +6524,24 @@ static DropResourcePoolStmt* _copyDropResourcePoolStmt(const DropResourcePoolStm
 
     COPY_SCALAR_FIELD(missing_ok);
     COPY_STRING_FIELD(pool_name);
+
+    return newnode;
+}
+
+static AlterGlobalConfigStmt* _copyAlterGlobalConfigStmt(const AlterGlobalConfigStmt* from)
+{
+    AlterGlobalConfigStmt* newnode = makeNode(AlterGlobalConfigStmt);
+
+    COPY_NODE_FIELD(options);
+
+    return newnode;
+}
+
+static DropGlobalConfigStmt* _copyDropGlobalConfigStmt(const DropGlobalConfigStmt* from)
+{
+    DropGlobalConfigStmt* newnode = makeNode(DropGlobalConfigStmt);
+
+    COPY_NODE_FIELD(options);
 
     return newnode;
 }
@@ -7065,6 +7204,9 @@ void* copyObject(const void* from)
         case T_AddPartitionState:
             retval = _copyAddPartitionState((AddPartitionState*)from);
             break;
+        case T_AddSubPartitionState:
+            retval = _copyAddSubPartitionState((AddSubPartitionState*)from);
+            break;
         case T_RangePartitionStartEndDefState:
             retval = _copyRangePartitionStartEndDefState((RangePartitionStartEndDefState*)from);
             break;
@@ -7164,6 +7306,9 @@ void* copyObject(const void* from)
             break;
         case T_GrantRoleStmt:
             retval = _copyGrantRoleStmt((GrantRoleStmt*)from);
+            break;
+        case T_GrantDbStmt:
+            retval = _copyGrantDbStmt((GrantDbStmt*)from);
             break;
         case T_AlterDefaultPrivilegesStmt:
             retval = _copyAlterDefaultPrivilegesStmt((AlterDefaultPrivilegesStmt*)from);
@@ -7501,6 +7646,12 @@ void* copyObject(const void* from)
         case T_DropResourcePoolStmt:
             retval = _copyDropResourcePoolStmt((DropResourcePoolStmt*)from);
             break;
+        case T_AlterGlobalConfigStmt:
+            retval = _copyAlterGlobalConfigStmt((AlterGlobalConfigStmt*)from);
+            break;
+        case T_DropGlobalConfigStmt:
+            retval = _copyDropGlobalConfigStmt((DropGlobalConfigStmt*)from);
+            break;
         case T_CreateWorkloadGroupStmt:
             retval = _copyCreateWorkloadGroupStmt((CreateWorkloadGroupStmt*)from);
             break;
@@ -7694,6 +7845,9 @@ void* copyObject(const void* from)
         case T_AccessPriv:
             retval = _copyAccessPriv((AccessPriv*)from);
             break;
+        case T_DbPriv:
+            retval = _copyDbPriv((DbPriv*)from);
+            break;
         case T_XmlSerialize:
             retval = _copyXmlSerialize((XmlSerialize*)from);
             break;
@@ -7801,6 +7955,9 @@ void* copyObject(const void* from)
         case T_PredpushHint:
             retval = _copyPredpushHint((PredpushHint*)from);
             break;
+        case T_PredpushSameLevelHint:
+            retval = _copyPredpushSameLevelHint((PredpushSameLevelHint*)from);
+            break;
         case T_RewriteHint:
             retval = _copyRewriteHint((RewriteHint*)from);
             break;
@@ -7839,6 +7996,9 @@ void* copyObject(const void* from)
             break;
         case T_AlterSubscriptionStmt:
             retval = _copyAlterSubscriptionStmt((AlterSubscriptionStmt *)from);
+            break;
+        case T_PredictByFunction:
+            retval = _copyPredictByFunctionStmt((PredictByFunction *)from);
             break;
         case T_DropSubscriptionStmt:
             retval = _copyDropSubscriptionStmt((DropSubscriptionStmt *)from);

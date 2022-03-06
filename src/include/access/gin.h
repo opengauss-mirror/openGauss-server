@@ -71,6 +71,7 @@ extern void ginUpdateStats(Relation index, const GinStatsData *stats);
 /* ginxlog.c */
 extern void gin_redo(XLogReaderState *record);
 extern void gin_desc(StringInfo buf, XLogReaderState *record);
+extern const char* gin_type_name(uint8 subtype);
 extern void gin_xlog_startup(void);
 extern void gin_xlog_cleanup(void);
 extern bool IsGinVacuumPages(XLogReaderState *record);

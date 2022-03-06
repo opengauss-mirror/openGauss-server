@@ -31,7 +31,9 @@ LIBEDIT_LIB_PATH = $(LIBEDIT_HOME)/lib
 override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump -DHAVE_CE -I$(LIBEDIT_INCLUDE_PATH) $(CPPFLAGS)
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+  ifneq ($(enable_lite_mode), yes)
+    CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+  endif
 endif
 
 $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/stmt_processor.o:
@@ -41,7 +43,10 @@ describe.o:  $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/
 
 CFLAGS += -Wl,-z,relro,-z,now -I$(CJSON_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH)
 LDFLAGS += -L$(CJSON_LIB_PATH) -L$(LIBCURL_LIB_PATH) -L$(LIBEDIT_LIB_PATH)
-LIBS += -ledit -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -lcjson -lcurl
+LIBS += -ledit -lcjson -lcurl
+ifeq ($(enable_lite_mode), no)
+    LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+endif
 
 ##############################################################################
 # memory checking component
@@ -80,7 +85,9 @@ all: submake-aes gsql
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+  ifneq ($(enable_lite_mode), yes)
+    libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+  endif
 endif
 
 $(top_builddir)/src/lib/elog/elog.a:

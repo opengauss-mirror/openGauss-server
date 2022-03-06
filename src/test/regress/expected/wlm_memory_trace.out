@@ -1,0 +1,41 @@
+\c postgres
+select * from gs_get_shared_memctx_detail('CBBTopMemoryContext') limit 1;
+--?.*
+--?.*
+--?.*
+--?.*
+
+select * from gs_get_shared_memctx_detail('AbnormalContext');
+ file | line | size 
+------+------+------
+(0 rows)
+
+select * from gs_get_shared_memctx_detail(NULL);
+ERROR:  NULL input for detoast datum packed
+select * from gs_get_session_memctx_detail('CBBTopMemoryContext') limit 1;
+--?.*
+--?.*
+--?.*
+--?.*
+
+select * from gs_get_session_memctx_detail('AbnormalContext');
+ file | line | size 
+------+------+------
+(0 rows)
+
+select * from gs_get_session_memctx_detail(NULL);
+ERROR:  NULL input for detoast datum packed
+select * from gs_get_thread_memctx_detail(100, 'CBBTopMemoryContext');
+ERROR:  can not find pid 100
+
+select * from gs_get_thread_memctx_detail(100, NULL);
+ERROR:  NULL input for detoast datum packed
+select gs_get_thread_memctx_detail(tid, 'CBBTopMemoryContext') from pv_thread_memory_context where contextname = 'CBBTopMemoryContext' limit 1;
+--?.*
+--?.*
+--?.*
+--?.*
+
+select gs_get_thread_memctx_detail(tid, NULL) from pv_thread_memory_context where contextname = 'CBBTopMemoryContext';
+--?.*
+--?.*

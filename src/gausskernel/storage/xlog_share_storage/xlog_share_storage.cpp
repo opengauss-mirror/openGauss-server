@@ -138,7 +138,7 @@ void LocalXLogRead(char *buf, XLogRecPtr startptr, Size count)
             }
 
             XLByteToSeg(recptr, t_thrd.sharestoragexlogcopyer_cxt.readSegNo);
-            XLogFilePath(path, t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.sharestoragexlogcopyer_cxt.readSegNo);
+            XLogFilePath(path, MAXPGPATH, t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.sharestoragexlogcopyer_cxt.readSegNo);
 
             t_thrd.sharestoragexlogcopyer_cxt.readFile = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
             if (t_thrd.sharestoragexlogcopyer_cxt.readFile < 0) {
@@ -251,7 +251,7 @@ static inline int CalcWriteLen(XLogRecPtr startWrite, XLogRecPtr endPtr)
     Assert((startWrite % XLOG_BLCKSZ) == 0);
     XLogRecPtr alignWriteEnd = startWrite - startWrite % ShareStorageBufSize + ShareStorageBufSize;
     if (alignWriteEnd > endPtr) {
-        XLogRecPtr ActualCopyEnd = endPtr - endPtr % XLOG_BLCKSZ + XLOG_BLCKSZ;
+        XLogRecPtr ActualCopyEnd = TYPEALIGN(XLOG_BLCKSZ, endPtr);
         return static_cast<int>(ActualCopyEnd - startWrite);
     } else {
         return static_cast<int>(alignWriteEnd - startWrite);
@@ -477,7 +477,7 @@ void CheckShareStorageCtlInfo(XLogRecPtr localEnd)
         char path[MAXPGPATH];
         XLogSegNo sendSegNo;
         XLByteToSeg(ctlInfo->insertHead, sendSegNo);
-        XLogFilePath(path, t_thrd.xlog_cxt.ThisTimeLineID, sendSegNo);
+        XLogFilePath(path, MAXPGPATH, t_thrd.xlog_cxt.ThisTimeLineID, sendSegNo);
         struct stat stat_buf;
 
         if (stat(path, &stat_buf) != 0) {
@@ -523,12 +523,14 @@ void UpdateShareStorageCtlInfo()
         changed = true;
     }
 
-    if (ctlInfo->xlogFileSize != g_instance.xlog_cxt.shareStorageopCtl.xlogFileSize) {
+    if (ctlInfo->xlogFileSize != (uint64)g_instance.attr.attr_storage.xlog_file_size) {
+        Assert(g_instance.xlog_cxt.shareStorageopCtl.xlogFileSize == ctlInfo->xlogFileSize);
         if (!FileSizeCanUpdate()) {
             ereport(FATAL, (errmsg("could not update share storage size."),
                             errdetail("current size:%lu, new size:%lu", ctlInfo->xlogFileSize,
-                                      g_instance.xlog_cxt.shareStorageopCtl.xlogFileSize)));
+                                      g_instance.attr.attr_storage.xlog_file_size)));
         }
+        g_instance.xlog_cxt.shareStorageopCtl.xlogFileSize = g_instance.attr.attr_storage.xlog_file_size;
         ctlInfo->xlogFileSize = g_instance.xlog_cxt.shareStorageopCtl.xlogFileSize;
         changed = true;
     }

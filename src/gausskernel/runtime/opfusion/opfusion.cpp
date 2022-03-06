@@ -210,7 +210,8 @@ FusionType OpFusion::getFusionType(CachedPlan *plan, ParamListInfo params, List 
     } else if (plantree_list && plan == NULL) {
         plist = plantree_list;
     } else {
-        Assert(0);
+        /* sql has no plan, do nothing */
+        return NONE_FUSION;
     }
 
     /* check stmt num */
@@ -471,7 +472,7 @@ void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLeve
         PG_RE_THROW();
     }
     PG_END_TRY();
-    
+
     UpdateSingleNodeByPassUniqueSQLStat(isTopLevel);
 }
 
@@ -517,17 +518,14 @@ bool OpFusion::process(int op, StringInfo msg, char *completionTag, bool isTopLe
 
 void OpFusion::CheckLogDuration()
 {
-    char msec_str[32];
+    char msec_str[PRINTF_DST_MAX];
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(LOG, (errmsg("duration: %s ms, queryid %lu, unique id %lu", msec_str, u_sess->debug_query_id,
-                u_sess->slow_query_cxt.slow_query.unique_sql_id),
-                errhidestmt(true)));
+            Assert(false);
             break;
         case 2: {
             ereport(LOG, (errmsg("duration: %s ms queryid %lu unique id %lu", msec_str, u_sess->debug_query_id,
-                u_sess->slow_query_cxt.slow_query.unique_sql_id),
-                errhidestmt(true)));
+                u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         }
         default:

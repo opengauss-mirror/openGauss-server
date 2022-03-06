@@ -363,56 +363,6 @@ Datum byteain(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(result);
 }
 
-static bytea* sub_blob(bytea* data, int32 amount)
-{
-    int32 len = 0;
-    int32 length = 0;
-    bytea* result = NULL;
-    char* ptr = NULL;
-    int offset = 0;
-    errno_t rc = EOK;
-    const int MAX_BATCH_SIZE = 32767;
-    length = VARSIZE_ANY_EXHDR(data);
-    if (amount < 1 || amount > MAX_BATCH_SIZE) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("argument  is null, invalid, or out of range")));
-    }
-    if (offset > length) {
-        return NULL;
-    }
-    if (length < amount) {
-        len = length + VARHDRSZ;
-    } else {
-        len = amount + VARHDRSZ;
-    }
-    /* Avoid the memcpy exceeding */
-    if (len > ((length - offset) + VARHDRSZ + 1)) {
-        len = (length - offset) + VARHDRSZ + 1;
-    }
-    result = (bytea*)palloc0(len);
-    SET_VARSIZE(result, len);
-    ptr = VARDATA(result);
-    rc = memcpy_s(ptr, (len - VARHDRSZ), VARDATA_ANY(data) + (offset - 1), (len - VARHDRSZ));
-    securec_check(rc, "\0", "\0");
-    return result;
-}
-static text* sub_text(text* t1, int32 amount)
-{
-    int32 len;
-    int32 offset = 0;
-    const int MAX_BATCH_SIZE = 32767;
-    int32 len1 = text_length(PointerGetDatum(t1));
-    if (amount < 1 || amount > MAX_BATCH_SIZE) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("argument  is null, invalid, or out of range")));
-    }
-    len = len1 < (amount + offset - 1) ? (len1 - offset + 1) : amount;
-    return text_substring(PointerGetDatum(t1), Int32GetDatum(offset), Int32GetDatum(len), false);
-}
-
-
 /*
  *		byteaout		- converts to printable representation of byte array
  *
@@ -422,12 +372,6 @@ static text* sub_text(text* t1, int32 amount)
 Datum byteaout(PG_FUNCTION_ARGS)
 {
     bytea* vlena = PG_GETARG_BYTEA_PP(0);
-
-    if (u_sess->attr.attr_sql.for_print_tuple && u_sess->attr.attr_common.pset_lob_length != 0) {
-        bytea* tmp = NULL;
-        tmp = sub_blob(vlena, u_sess->attr.attr_common.pset_lob_length);
-        vlena = tmp;
-    }
     char* result = NULL;
     char* rp = NULL;
 
@@ -524,12 +468,6 @@ Datum rawout(PG_FUNCTION_ARGS)
         fcinfo->fncollation = DEFAULT_COLLATION_OID;
 
     bytea* data = PG_GETARG_BYTEA_P(0);
-
-    if (u_sess->attr.attr_sql.for_print_tuple && u_sess->attr.attr_common.pset_lob_length != 0) {
-        bytea* tmp = NULL;
-        tmp = sub_blob(data, u_sess->attr.attr_common.pset_lob_length);
-        data = tmp;
-    }
     text* ans = NULL;
     int datalen = 0;
     int resultlen = 0;
@@ -575,6 +513,10 @@ Datum rawtotext(PG_FUNCTION_ARGS)
 Datum texttoraw(PG_FUNCTION_ARGS)
 {
     Datum arg1 = PG_GETARG_DATUM(0);
+    if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg1))) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("texttoraw could not support more than 1GB clob/blob data")));
+    }
     Datum result;
     Datum cstring_arg1;
 
@@ -689,12 +631,13 @@ Datum textin(PG_FUNCTION_ARGS)
 Datum textout(PG_FUNCTION_ARGS)
 {
     Datum txt = PG_GETARG_DATUM(0);
-
-    if (u_sess->attr.attr_sql.for_print_tuple && u_sess->attr.attr_common.pset_lob_length != 0) {
-        text* outputText = sub_text((text*)DatumGetPointer(txt), u_sess->attr.attr_common.pset_lob_length);
-        PG_RETURN_CSTRING(text_to_cstring(outputText));
+    if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(txt))) {
+        int len = strlen("<CLOB>") + 1;
+        char *res = (char *)palloc(len);
+        errno_t rc = strcpy_s(res, len, "<CLOB>");
+        securec_check_c(rc, "\0", "\0");
+        PG_RETURN_CSTRING(res);
     }
-
     PG_RETURN_CSTRING(TextDatumGetCString(txt));
 }
 
@@ -778,6 +721,22 @@ Datum unknownsend(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
+static Datum text_length_huge(Datum str)
+{
+    if (pg_database_encoding_max_length() == 1) {
+        PG_RETURN_INT64(toast_raw_datum_size(str) - VARHDRSZ);
+    } else {
+        int64 result = 0;
+        text* t = DatumGetTextPP(str);
+        result = calculate_huge_length(t);
+
+        if ((Pointer)(t) != (Pointer)(str))
+            pfree_ext(t);
+
+        PG_RETURN_INT64(result);
+    }
+}
+
 /* ========== PUBLIC ROUTINES ========== */
 
 /*
@@ -789,8 +748,12 @@ Datum textlen(PG_FUNCTION_ARGS)
 {
     Datum str = PG_GETARG_DATUM(0);
 
-    /* try to avoid decompressing argument */
-    PG_RETURN_INT32(text_length(str));
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)DatumGetTextPP(str))) {
+        return text_length_huge(str);
+    } else {
+        /* try to avoid decompressing argument */
+        PG_RETURN_INT32(text_length(str));
+    }
 }
 
 /*
@@ -882,12 +845,27 @@ Datum textcat(PG_FUNCTION_ARGS)
 static text* text_catenate(text* t1, text* t2)
 {
     text* result = NULL;
-    int len1, len2, len;
+    int64 len1, len2, len;
     char* ptr = NULL;
     int rc = 0;
 
-    len1 = VARSIZE_ANY_EXHDR(t1);
-    len2 = VARSIZE_ANY_EXHDR(t2);
+    if (VARATT_IS_HUGE_TOAST_POINTER(t1)) {
+        struct varatt_lob_external large_toast_pointer;
+
+        VARATT_EXTERNAL_GET_HUGE_POINTER(large_toast_pointer, t1);
+        len1 = large_toast_pointer.va_rawsize;
+    } else {
+        len1 = VARSIZE_ANY_EXHDR(t1);
+    }
+
+    if (VARATT_IS_HUGE_TOAST_POINTER(t2)) {
+        struct varatt_lob_external large_toast_pointer;
+
+        VARATT_EXTERNAL_GET_HUGE_POINTER(large_toast_pointer, t2);
+        len2 = large_toast_pointer.va_rawsize;
+    } else {
+        len2 = VARSIZE_ANY_EXHDR(t2);
+    }
 
     /* paranoia ... probably should throw error instead? */
     if (len1 < 0)
@@ -896,20 +874,29 @@ static text* text_catenate(text* t1, text* t2)
         len2 = 0;
 
     len = len1 + len2 + VARHDRSZ;
-    result = (text*)palloc(len);
+    if (len > MAX_TOAST_CHUNK_SIZE + VARHDRSZ) {
+#ifdef ENABLE_MULTIPLE_NODES
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Un-support clob/blob type more than 1GB for distributed system")));
+#endif
+        Oid toastOid = get_toast_oid();
+        result = text_catenate_huge(t1, t2, toastOid);
+    } else {
+        result = (text*)palloc(len);
 
-    /* Set size of result string... */
-    SET_VARSIZE(result, len);
+        /* Set size of result string... */
+        SET_VARSIZE(result, len);
 
-    /* Fill data field of result string... */
-    ptr = VARDATA(result);
-    if (len1 > 0) {
-        rc = memcpy_s(ptr, len1, VARDATA_ANY(t1), len1);
-        securec_check(rc, "\0", "\0");
-    }
-    if (len2 > 0) {
-        rc = memcpy_s(ptr + len1, len2, VARDATA_ANY(t2), len2);
-        securec_check(rc, "\0", "\0");
+        /* Fill data field of result string... */
+        ptr = VARDATA(result);
+        if (len1 > 0) {
+            rc = memcpy_s(ptr, len1, VARDATA_ANY(t1), len1);
+            securec_check(rc, "\0", "\0");
+        }
+        if (len2 > 0) {
+            rc = memcpy_s(ptr + len1, len2, VARDATA_ANY(t2), len2);
+            securec_check(rc, "\0", "\0");
+        }
     }
 
     return result;
@@ -1283,6 +1270,12 @@ Datum text_substr_orclcompat(PG_FUNCTION_ARGS)
     mblen_converter fun_mblen;
     fun_mblen = *pg_wchar_table[GetDatabaseEncoding()].mblen;
 
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)DatumGetPointer(str))) {
+        struct varlena* dest_ptr = (struct varlena*)DatumGetPointer(str);
+        struct varlena* res_ptr = heap_tuple_untoast_attr_slice(dest_ptr, start, length);
+        return PointerGetDatum(res_ptr);
+    }
+
     is_compress = (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str)));
     // orclcompat is true, withlen is true
     baseIdx = 6 + (int)is_compress + (eml - 1) * 8;
@@ -1309,6 +1302,11 @@ Datum text_substr_no_len_orclcompat(PG_FUNCTION_ARGS)
     bool is_null = false;
     mblen_converter fun_mblen;
     fun_mblen = *pg_wchar_table[GetDatabaseEncoding()].mblen;
+
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)DatumGetPointer(str))) {
+        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            errmsg("The data is lob that larger than 1GB, you must use a substr with len(substr(str, start, len))")));
+    }
 
     is_compress = (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str)));
     // orclcompat is true, withlen is false
@@ -1866,6 +1864,10 @@ Datum texteq(PG_FUNCTION_ARGS)
 {
     Datum arg1 = PG_GETARG_DATUM(0);
     Datum arg2 = PG_GETARG_DATUM(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg1)) && VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg2))) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("texteq could not support more than 1GB clob/blob data")));
+    }
     bool result = false;
     Size len1, len2;
 
@@ -1897,6 +1899,10 @@ Datum textne(PG_FUNCTION_ARGS)
 {
     Datum arg1 = PG_GETARG_DATUM(0);
     Datum arg2 = PG_GETARG_DATUM(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg1)) || VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg2))) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("textne could not support more than 1GB clob/blob data")));
+    }
     bool result = false;
     Size len1, len2;
 
@@ -2003,6 +2009,10 @@ Datum text_lt(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_lt could not support more than 1GB clob/blob data")));
+    }
     bool result = false;
 
     result = (text_cmp(arg1, arg2, PG_GET_COLLATION()) < 0);
@@ -2017,6 +2027,10 @@ Datum text_le(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_le could not support more than 1GB clob/blob data")));
+    }
     bool result = false;
 
     result = (text_cmp(arg1, arg2, PG_GET_COLLATION()) <= 0);
@@ -2031,6 +2045,10 @@ Datum text_gt(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_gt could not support more than 1GB clob/blob data")));
+    }
     bool result = false;
 
     result = (text_cmp(arg1, arg2, PG_GET_COLLATION()) > 0);
@@ -2045,6 +2063,10 @@ Datum text_ge(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_ge could not support more than 1GB clob/blob data")));
+    }
     bool result = false;
 
     result = (text_cmp(arg1, arg2, PG_GET_COLLATION()) >= 0);
@@ -2059,6 +2081,10 @@ Datum bttextcmp(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("bttextcmp could not support more than 1GB clob/blob data")));
+    }
     int32 result;
 
     result = text_cmp(arg1, arg2, PG_GET_COLLATION());
@@ -2763,6 +2789,10 @@ Datum text_larger(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_larger could not support more than 1GB clob/blob data")));
+    }
     text* result = NULL;
 
     result = ((text_cmp(arg1, arg2, PG_GET_COLLATION()) > 0) ? arg1 : arg2);
@@ -2774,6 +2804,10 @@ Datum text_smaller(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_smaller could not support more than 1GB clob/blob data")));
+    }
     text* result = NULL;
 
     result = ((text_cmp(arg1, arg2, PG_GET_COLLATION()) < 0) ? arg1 : arg2);
@@ -2811,6 +2845,10 @@ Datum text_pattern_lt(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_pattern_lt could not support more than 1GB clob/blob data")));
+    }
     int result;
 
     result = internal_text_pattern_compare(arg1, arg2);
@@ -2825,6 +2863,10 @@ Datum text_pattern_le(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_pattern_le could not support more than 1GB clob/blob data")));
+    }
     int result;
 
     result = internal_text_pattern_compare(arg1, arg2);
@@ -2839,6 +2881,10 @@ Datum text_pattern_ge(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_pattern_ge could not support more than 1GB clob/blob data")));
+    }
     int result;
 
     result = internal_text_pattern_compare(arg1, arg2);
@@ -2853,6 +2899,10 @@ Datum text_pattern_gt(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_pattern_gt could not support more than 1GB clob/blob data")));
+    }
     int result;
 
     result = internal_text_pattern_compare(arg1, arg2);
@@ -2867,6 +2917,10 @@ Datum bttext_pattern_cmp(PG_FUNCTION_ARGS)
 {
     text* arg1 = PG_GETARG_TEXT_PP(0);
     text* arg2 = PG_GETARG_TEXT_PP(1);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg1) || VARATT_IS_HUGE_TOAST_POINTER((varlena *)arg2)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("bttext_pattern_cmp could not support more than 1GB clob/blob data")));
+    }
     int result;
 
     result = internal_text_pattern_compare(arg1, arg2);
@@ -2919,8 +2973,23 @@ static bytea* bytea_catenate(bytea* t1, bytea* t2)
     char* ptr = NULL;
     int rc = 0;
 
-    len1 = VARSIZE_ANY_EXHDR(t1);
-    len2 = VARSIZE_ANY_EXHDR(t2);
+    if (VARATT_IS_HUGE_TOAST_POINTER(t1)) {
+        struct varatt_lob_external large_toast_pointer;
+
+        VARATT_EXTERNAL_GET_HUGE_POINTER(large_toast_pointer, t1);
+        len1 = large_toast_pointer.va_rawsize;
+    } else {
+        len1 = VARSIZE_ANY_EXHDR(t1);
+    }
+
+    if (VARATT_IS_HUGE_TOAST_POINTER(t2)) {
+        struct varatt_lob_external large_toast_pointer;
+
+        VARATT_EXTERNAL_GET_HUGE_POINTER(large_toast_pointer, t2);
+        len2 = large_toast_pointer.va_rawsize;
+    } else {
+        len2 = VARSIZE_ANY_EXHDR(t2);
+    }
 
     /* paranoia ... probably should throw error instead? */
     if (len1 < 0)
@@ -2929,20 +2998,30 @@ static bytea* bytea_catenate(bytea* t1, bytea* t2)
         len2 = 0;
 
     len = len1 + len2 + VARHDRSZ;
-    result = (bytea*)palloc(len);
 
-    /* Set size of result string... */
-    SET_VARSIZE(result, len);
+    if (len > MAX_TOAST_CHUNK_SIZE + VARHDRSZ) {
+#ifdef ENABLE_MULTIPLE_NODES
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Un-support clob/blob type more than 1GB for distributed system")));
+#endif
+        Oid toastOid = get_toast_oid();
+        result = text_catenate_huge(t1, t2, toastOid);
+    } else {
+        result = (bytea*)palloc(len);
 
-    /* Fill data field of result string... */
-    ptr = VARDATA(result);
-    if (len1 > 0) {
-        rc = memcpy_s(ptr, len1, VARDATA_ANY(t1), len1);
-        securec_check(rc, "\0", "\0");
-    }
-    if (len2 > 0) {
-        rc = memcpy_s(ptr + len1, len2, VARDATA_ANY(t2), len2);
-        securec_check(rc, "\0", "\0");
+        /* Set size of result string... */
+        SET_VARSIZE(result, len);
+
+        /* Fill data field of result string... */
+        ptr = VARDATA(result);
+        if (len1 > 0) {
+            rc = memcpy_s(ptr, len1, VARDATA_ANY(t1), len1);
+            securec_check(rc, "\0", "\0");
+        }
+        if (len2 > 0) {
+            rc = memcpy_s(ptr + len1, len2, VARDATA_ANY(t2), len2);
+            securec_check(rc, "\0", "\0");
+        }
     }
     return result;
 }
@@ -4071,6 +4150,12 @@ Datum replace_text(PG_FUNCTION_ARGS)
     if (!PG_ARGISNULL(2))
         to_sub_text = PG_GETARG_TEXT_PP(2);
 
+    if (VARATT_IS_HUGE_TOAST_POINTER(src_text) || VARATT_IS_HUGE_TOAST_POINTER(from_sub_text)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("replace() arguments cannot exceed 1GB")));
+    }
+
     text_position_setup(src_text, from_sub_text, &state);
 
     /*
@@ -4254,8 +4339,9 @@ static void appendStringInfoRegexpSubstr(
  *
  * Note: to avoid having to include regex.h in builtins.h, we declare
  * the regexp argument as void *, but really it's regex_t *.
+ * occur : the n-th matched occurrence, start from 1.
  */
-text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool glob)
+text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, int position, int occur)
 {
     text* ret_text = NULL;
     regex_t* re = (regex_t*)regexp;
@@ -4264,8 +4350,10 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
     regmatch_t pmatch[REGEXP_REPLACE_BACKREF_CNT];
     pg_wchar* data = NULL;
     size_t data_len;
-    int search_start;
+    int search_start = position - 1;
     int data_pos;
+    int count = 0;
+    int replace_len;
     char* start_ptr = NULL;
     bool have_escape = false;
 
@@ -4274,7 +4362,9 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
     /* Convert data string to wide characters. */
     data = (pg_wchar*)palloc((src_text_len + 1) * sizeof(pg_wchar));
     data_len = pg_mb2wchar_with_len(VARDATA_ANY(src_text), data, src_text_len);
-
+    if ((unsigned int)(position) > data_len) {
+        return src_text;
+    }
     /* Check whether replace_text has escape char. */
     if (replace_text != NULL)
         have_escape = check_replace_text_has_escape_char(replace_text);
@@ -4283,7 +4373,6 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
     start_ptr = (char*)VARDATA_ANY(src_text);
     data_pos = 0;
 
-    search_start = 0;
     while ((unsigned int)(search_start) <= data_len) {
         int regexec_result;
 
@@ -4327,24 +4416,27 @@ text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool
             data_pos = pmatch[0].rm_so;
         }
 
-        /*
-         * Copy the replace_text. Process back references when the
-         * replace_text has escape characters.
-         */
-        if (replace_text != NULL && have_escape)
-            appendStringInfoRegexpSubstr(&buf, replace_text, pmatch, start_ptr, data_pos);
-        else if (replace_text != NULL)
-            appendStringInfoText(&buf, replace_text);
+        count++;
+
+        replace_len = charlen_to_bytelen(start_ptr, pmatch[0].rm_eo - data_pos);
+
+        if (occur == 0 || count == occur) {
+            /*
+             * Copy the replace_text. Process back references when the
+             * replace_text has escape characters.
+             */
+            if (replace_text != NULL && have_escape)
+                appendStringInfoRegexpSubstr(&buf, replace_text, pmatch, start_ptr, data_pos);
+            else if (replace_text != NULL)
+                appendStringInfoText(&buf, replace_text);
+        } else {
+            /* not the n-th matched occurrence */
+            appendBinaryStringInfo(&buf, start_ptr, replace_len);
+        }
 
         /* Advance start_ptr and data_pos over the matched text. */
-        start_ptr += charlen_to_bytelen(start_ptr, pmatch[0].rm_eo - data_pos);
+        start_ptr += replace_len;
         data_pos = pmatch[0].rm_eo;
-
-        /*
-         * When global option is off, replace the first instance only.
-         */
-        if (!glob)
-            break;
 
         /*
          * Advance search position.	Normally we start the next search at the
@@ -5719,6 +5811,15 @@ Datum interval_list_agg_noarg2_transfn(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(state);
 }
 
+static void check_huge_toast_pointer(Datum value, Oid valtype)
+{
+    if ((valtype == TEXTOID || valtype == CLOBOID || valtype == BLOBOID) &&
+        VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(value))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("concat could not support more than 1GB clob/blob data")));
+    }
+}
+
 /*
  * Implementation of both concat() and concat_ws().
  *
@@ -5779,6 +5880,7 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
 
             /* call the appropriate type output function, append the result */
             valtype = get_fn_expr_argtype(fcinfo->flinfo, i);
+            check_huge_toast_pointer(value, valtype);
             if (!OidIsValid(valtype))
                 ereport(ERROR, (errcode(ERRCODE_INDETERMINATE_DATATYPE),
                         errmsg("could not determine data type of concat() input")));
@@ -5834,6 +5936,10 @@ Datum text_concat_ws(PG_FUNCTION_ARGS)
 Datum text_left(PG_FUNCTION_ARGS)
 {
     text* str = PG_GETARG_TEXT_PP(0);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)str)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_left could not support more than 1GB clob/blob data")));
+    }
     const char* p = VARDATA_ANY(str);
     int len = VARSIZE_ANY_EXHDR(str);
     int n = PG_GETARG_INT32(1);
@@ -5867,6 +5973,10 @@ Datum text_left(PG_FUNCTION_ARGS)
 Datum text_right(PG_FUNCTION_ARGS)
 {
     text* str = PG_GETARG_TEXT_PP(0);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)str)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_right could not support more than 1GB clob/blob data")));
+    }
     const char* p = VARDATA_ANY(str);
     int len = VARSIZE_ANY_EXHDR(str);
     int n = PG_GETARG_INT32(1);
@@ -5900,6 +6010,10 @@ Datum text_right(PG_FUNCTION_ARGS)
 Datum text_reverse(PG_FUNCTION_ARGS)
 {
     text* str = PG_GETARG_TEXT_PP(0);
+    if (VARATT_IS_HUGE_TOAST_POINTER((varlena *)str)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_reverse could not support more than 1GB clob/blob data")));
+    }
     const char* p = VARDATA_ANY(str);
     int len = VARSIZE_ANY_EXHDR(str);
     const char* endp = p + len;

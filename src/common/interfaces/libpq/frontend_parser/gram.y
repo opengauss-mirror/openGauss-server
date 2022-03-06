@@ -291,7 +291,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <typnam>	func_type
 
 %type <boolean>  opt_nowait
-%type <ival>	 OptTemp
+%type <ival>	 OptTemp opt_wait
 %type <oncommit> OnCommitOption
 
 %type <node>	for_locking_item
@@ -499,7 +499,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLANKS BLOB_P BLOCKCHAIN BODY_P BOGUS
 	BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
-	CACHE CALL CALLED CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHAR_P
+	CACHE CALL CALLED CANCELABLE CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHAR_P
 	CHARACTER CHARACTERISTICS CHARACTERSET CHECK CHECKPOINT CLASS CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
 	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COMMENT COMMENTS COMMIT
 	CONNECT COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPRESS CONDITION CONCURRENTLY CONFIGURATION CONNECTBY CONNECTION CONSTANT CONSTRAINT CONSTRAINTS
@@ -548,7 +548,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
 	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER
 
-	PACKAGE PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
+	PACKAGE PACKAGES PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
 /* PGXC_BEGIN */
 	POOL PRECEDING PRECISION
 /* PGXC_END */
@@ -581,7 +581,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
 	VERBOSE VERIFY VERSION_P VIEW VOLATILE
 
-	WEAK WHEN WHERE WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
+	WAIT WEAK WHEN WHERE WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
 
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
@@ -7339,6 +7339,22 @@ for_locking_item:
 					n->lockedRels = $3;
 					n->forUpdate = TRUE;
 					n->noWait = $4;
+					n->waitSec = 0;
+					$$ = (Node *) n;
+				}
+			| FOR UPDATE locked_rels_list opt_wait
+				{
+					LockingClause *n = makeNode(LockingClause);
+					n->lockedRels = $3;
+					n->forUpdate = TRUE;
+					n->noWait = false;
+					n->waitSec = $4;
+					/* When the delay time is 0, the processing is based on the nowait logic. */
+					if (n->waitSec == 0) {
+						n->noWait = true;
+					} else {
+						n->noWait = false;
+					}
 					$$ = (Node *) n;
 				}
 			| FOR SHARE locked_rels_list opt_nowait
@@ -7347,6 +7363,7 @@ for_locking_item:
 					n->lockedRels = $3;
 					n->forUpdate = FALSE;
 					n->noWait = $4;
+					n->waitSec = 0;
 					$$ = (Node *) n;
 				}
 		;
@@ -7354,6 +7371,9 @@ for_locking_item:
 opt_nowait: NOWAIT                          { $$ = TRUE; }
             | /*EMPTY*/                     { $$ = FALSE; }
         ;
+
+opt_wait:	WAIT Iconst						{ $$ = $2; }
+		;
 
 locked_rels_list:
 			OF qualified_name_list					{ $$ = $2; }
@@ -8215,7 +8235,7 @@ character:	CHARACTER opt_varying
 			| CHAR_P opt_varying
 										{ $$ = (char *)($2 ? "varchar": "bpchar"); }
 			| NVARCHAR
-                                                                                { $$ = "nvarchar2"; }
+										{ $$ = "nvarchar2"; }
 			| NVARCHAR2
 										{ $$ = "nvarchar2"; }
 			| VARCHAR
@@ -11024,6 +11044,7 @@ unreserved_keyword:
 			| CACHE
 			| CALL
 			| CALLED
+			| CANCELABLE
 			| CASCADE
 			| CASCADED
 			| CATALOG_P
@@ -11393,6 +11414,7 @@ unreserved_keyword:
 			| VERSION_P
 			| VIEW
 			| VOLATILE
+			| WAIT
             | WEAK
 			| WHITESPACE_P
 			| WITHIN

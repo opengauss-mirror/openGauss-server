@@ -48,10 +48,13 @@ my %replace_string = (
 	'INCLUDING_ALL'   => 'including all',
 	'RENAME_PARTITION'   => 'rename partition',
 	'PARTITION_FOR'   => 'partition for',
+	'SUBPARTITION_FOR'   => 'subpartition for',
 	'ADD_PARTITION'   => 'add partition',
 	'DROP_PARTITION'   => 'drop partition',
 	'REBUILD_PARTITION'   => 'rebuild partition',
 	'MODIFY_PARTITION'   => 'modify partition',
+	'ADD_SUBPARTITION'   => 'add subpartition',
+	'DROP_SUBPARTITION'   => 'drop subpartition',
 	'TYPECAST'     => '::',
 	'DOT_DOT'      => '..',
 	'COLON_EQUALS' => ':=',);

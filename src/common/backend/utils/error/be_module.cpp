@@ -51,6 +51,7 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_EXECUTOR, "EXECUTOR"},
     {MOD_OPFUSION, "OPFUSION"},
     {MOD_GPC, "GPC"},
+    {MOD_GSC, "GSC"},
     {MOD_VEC_EXECUTOR, "VEC_EXECUTOR"},
     {MOD_STREAM, "STREAM"},
     {MOD_LLVM, "LLVM"},
@@ -122,6 +123,8 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_SPI, "SPI"},
     {MOD_NEST_COMPILE, "NEST_COMPILE"},
     {MOD_RESOWNER, "RESOWNER"},
+    {MOD_LOGICAL_DECODE, "LOGICAL_DECODE"},
+    {MOD_GPRC, "GPRC"},
 
     /* add your module name above */
     {MOD_MAX, "BACKEND"}};

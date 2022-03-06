@@ -283,7 +283,6 @@ bool CheckExecDirectPrivilege(const char* query)
 static void cacheSuperOrSysadmin(Oid roleid)
 {
     HeapTuple rtup = NULL;
-
     u_sess->sec_cxt.last_roleid_is_super = false;
     u_sess->sec_cxt.last_roleid_is_sysdba = false;
     u_sess->sec_cxt.last_roleid_is_auditadmin = false;
@@ -343,7 +342,7 @@ static void cacheSuperOrSysadmin(Oid roleid)
 
     /* If first time through, set up callback for cache flushes */
     if (!u_sess->sec_cxt.roleid_callback_registered) {
-        CacheRegisterSyscacheCallback(AUTHOID, RoleidCallback, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(AUTHOID, RoleidCallback, (Datum)0);
         u_sess->sec_cxt.roleid_callback_registered = true;
     }
 

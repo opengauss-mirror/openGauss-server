@@ -5,7 +5,6 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -44,6 +43,7 @@
 #include "utils/pl_package.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
+#include "knl/knl_session.h"
 
 #include <limits.h>
 
@@ -113,7 +113,9 @@ static	void			cword_is_not_variable(PLcword *cword, int location);
 static	void			current_token_is_not_variable(int tok);
 static void yylex_inparam(StringInfoData* func_inparam,
                                             int *params,
-                                            int * tok);
+                                            int * tok,
+                                            int *tableof_func_dno,
+                                            int *tableof_var_dno);
 static int   	yylex_outparam(char** fieldnames,
                                int *varnos,
                                int nfields,
@@ -124,12 +126,12 @@ static int   	yylex_outparam(char** fieldnames,
                                bool overload = false);
 
 static bool is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNameList = NULL);
-static bool is_logfunction(ScanKeyword* keyword, bool no_parenthesis, const char *name);
+static bool is_unreservedkeywordfunction(ScanKeyword* keyword, bool no_parenthesis, const char *name);
 static bool is_paren_friendly_datatype(TypeName *name);
 static void 	plpgsql_parser_funcname(const char *s, char **output,
                                         int numidents);
 static PLpgSQL_stmt 	*make_callfunc_stmt(const char *sqlstart,
-                                int location, bool is_assign, bool eaten_first_token, List* funcNameList = NULL, int arrayFuncDno = -1);
+                                int location, bool is_assign, bool eaten_first_token, List* funcNameList = NULL, int arrayFuncDno = -1, bool isCallFunc = false);
 static PLpgSQL_stmt 	*make_callfunc_stmt_no_arg(const char *sqlstart, int location, bool withsemicolon = false, List* funcNameList = NULL);
 static PLpgSQL_expr 	*read_sql_construct6(int until,
                                              int until2,
@@ -208,8 +210,6 @@ static	PLpgSQL_expr	*read_cursor_args(PLpgSQL_var *cursor,
                                           int until, const char *expected);
 static	List			*read_raise_options(void);
 static  int             errstate = ERROR;
-static  bool            pragma_autonomous;
-static  bool            pragma_exception_init;
 static char* get_proc_str(int tok);
 static char* get_init_proc(int tok);
 static char* get_attrname(int tok);
@@ -219,7 +219,7 @@ static void checkFuncName(List* funcname);
 static void IsInPublicNamespace(char* varname);
 static void SetErrorState();
 static void AddNamespaceIfNeed(int dno, char* ident);
-static void AddNamespaceIfPkgVar(const char* ident);
+static void AddNamespaceIfPkgVar(const char* ident, IdentifierLookup save_IdentifierLookup);
 bool plpgsql_is_token_keyword(int tok);
 static void check_bulk_into_type(PLpgSQL_row* row);
 static void check_table_index(PLpgSQL_datum* datum, char* funcName);
@@ -243,14 +243,21 @@ static int read_assignlist(bool is_push_back, int* token);
 static void plpgsql_cast_reference_list(List* idents, StringInfoData* ds, bool isPkgVar);
 static bool PkgVarNeedCast(List* idents);
 static void CastArrayNameToArrayFunc(StringInfoData* ds, List* idents, bool needDot = true);
-static Oid get_table_index_type(PLpgSQL_datum* datum);
+static Oid get_table_index_type(PLpgSQL_datum* datum, int *tableof_func_dno);
+static int get_nest_tableof_layer(PLpgSQL_var *var, const char *typname, int errstate);
 static void SetErrorState();
 static void CheckDuplicateFunctionName(List* funcNameList);
+static void check_autonomous_nest_tablevar(PLpgSQL_var* var);
 #ifndef ENABLE_MULTIPLE_NODES
 static PLpgSQL_type* build_type_from_cursor_var(PLpgSQL_var* var);
 static bool checkAllAttrName(TupleDesc tupleDesc);
+static void BuildForQueryVariable(PLpgSQL_expr* expr, PLpgSQL_row **row, PLpgSQL_rec **rec,
+    const char* refname, int lineno);
 #endif
 static Oid createCompositeTypeForCursor(PLpgSQL_var* var, PLpgSQL_expr* expr);
+static void check_record_nest_tableof_index(PLpgSQL_datum* datum);
+static void check_tableofindex_args(int tableof_var_dno, Oid argtype);
+static bool need_build_row_for_func_arg(PLpgSQL_rec **rec, PLpgSQL_row **row, int out_arg_num, int all_arg, int *varnos, char *p_argmodes);
 %}
 
 %expect 0
@@ -373,6 +380,7 @@ static Oid createCompositeTypeForCursor(PLpgSQL_var* var, PLpgSQL_expr* expr);
 %type <recattr>	record_attr
 %type <boolean> opt_save_exceptions
 
+%type <keyword> unreserved_keyword_func
 
 /*
  * Basic non-keyword token types.  These are hard-wired into the core lexer.
@@ -673,8 +681,8 @@ decl_sect		: opt_block_label
                         $$.label	  = $1;
                         /* Remember variables declared in decl_stmts */
                         $$.n_initvars = plpgsql_add_initdatums(&($$.initvarnos));
-                        $$.isAutonomous = pragma_autonomous;
-                        pragma_autonomous = false;
+                        $$.isAutonomous = u_sess->plsql_cxt.pragma_autonomous;
+                        u_sess->plsql_cxt.pragma_autonomous = false;
                     }
                 ;
 
@@ -682,7 +690,7 @@ decl_start		: K_DECLARE
                     {
                         /* Forget any variables created before block */
                         plpgsql_add_initdatums(NULL);
-                        pragma_autonomous = false;
+                        u_sess->plsql_cxt.pragma_autonomous = false;
                         /*
                          * Disable scanner lookup of identifiers while
                          * we process the decl_stmts
@@ -1024,6 +1032,22 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                     }
                 |   K_TYPE decl_varname as_is K_TABLE K_OF decl_datatype decl_notnull ';'
                     {
+#ifdef ENABLE_MULTIPLE_NODES
+                        ereport(ERROR,
+                            (errmodule(MOD_PLSQL),
+                                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("table of is not support in distribute database"),
+                                errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                                erraction("Modify SQL statement according to the manual.")));
+#endif
+                        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                            ereport(ERROR,
+                                (errmodule(MOD_PLSQL),
+                                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("table of is only support in A-format database."),
+                                    errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                                    erraction("Modify SQL statement according to the manual.")));
+                        }
                         IsInPublicNamespace($2.name);
 
                         $6->collectionType = PLPGSQL_COLLECTION_TABLE;
@@ -1057,17 +1081,17 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                 |   K_TYPE decl_varname as_is K_TABLE K_OF table_var decl_notnull ';'
                     {
                         IsInPublicNamespace($2.name);
-
-                        PLpgSQL_type *var_type = ((PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6])->datatype;
+                        PLpgSQL_var *check_var = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
+                        /* get and check nest tableof's depth */
+                        int depth = get_nest_tableof_layer(check_var, $2.name, errstate);
                         PLpgSQL_type *nest_type = plpgsql_build_nested_datatype();
                         nest_type->tableOfIndexType = INT4OID;
                         nest_type->collectionType = PLPGSQL_COLLECTION_TABLE;
                         PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_tableType($2.name, $2.lineno, nest_type, true);
                         /* nested table type */
                         var->nest_table = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
-                        if (IS_PACKAGE) {
-                            plpgsql_build_package_array_type($2.name, var_type->typoid, TYPCATEGORY_TABLEOF);
-                        }
+                        var->nest_layers = depth;
+                        var->isIndexByTblOf = false;
                         pfree_ext($2.name);
                     }
                 |   K_TYPE decl_varname as_is K_TABLE K_OF record_var decl_notnull ';'
@@ -1082,6 +1106,15 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                                 erraction("check define of table type")));
                         u_sess->plsql_cxt.have_error = true;
 #endif
+                        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                            ereport(ERROR,
+                                (errmodule(MOD_PLSQL),
+                                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("table of is only support in A-format database."),
+                                    errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                                    erraction("Modify SQL statement according to the manual.")));
+                        }
+
                         if (IS_ANONYMOUS_BLOCK) {
                             ereport(errstate,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1156,6 +1189,22 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
 
                 |   K_TYPE decl_varname as_is K_TABLE K_OF decl_datatype decl_notnull K_INDEX K_BY decl_datatype ';'
                     {
+#ifdef ENABLE_MULTIPLE_NODES
+                        ereport(ERROR,
+                            (errmodule(MOD_PLSQL),
+                                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("table of is not support in distribute database"),
+                                errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                                erraction("Modify SQL statement according to the manual.")));
+#endif
+                        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                            ereport(ERROR,
+                                (errmodule(MOD_PLSQL),
+                                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("table of is only support in A-format database."),
+                                    errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                                    erraction("Modify SQL statement according to the manual.")));
+                        }
                         IsInPublicNamespace($2.name);
 
                         $6->collectionType = PLPGSQL_COLLECTION_TABLE;
@@ -1188,12 +1237,14 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                                     erraction("check define of table type")));
                             u_sess->plsql_cxt.have_error = true;
                         }
-                        plpgsql_build_tableType($2.name, $2.lineno, $6, true);
+                        PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_tableType($2.name, $2.lineno, $6, true);
+                        var->isIndexByTblOf = true;
+
                         if (IS_PACKAGE) {
                             if ($10->typoid == VARCHAROID) {
                                 plpgsql_build_package_array_type($2.name, $6->typoid, TYPCATEGORY_TABLEOF_VARCHAR);
                             } else {
-                                plpgsql_build_package_array_type($2.name, $6->typoid, TYPTYPE_TABLEOF);
+                                plpgsql_build_package_array_type($2.name, $6->typoid, TYPCATEGORY_TABLEOF_INTEGER);
                             }
                         }
                         pfree_ext($2.name);
@@ -1210,21 +1261,17 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                                      errmsg("unsupported table index type")));
                             u_sess->plsql_cxt.have_error = true;
                         }
-                        PLpgSQL_type *var_type = ((PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6])->datatype;
-                        var_type->tableOfIndexType = $10->typoid;
+                        PLpgSQL_var *check_var = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
+                        /* get and check nest tableof's depth */
+                        int depth = get_nest_tableof_layer(check_var, $2.name, errstate);
                         PLpgSQL_type *nest_type = plpgsql_build_nested_datatype();
                         nest_type->tableOfIndexType = $10->typoid;
                         nest_type->collectionType = PLPGSQL_COLLECTION_TABLE;
                         PLpgSQL_var* var = (PLpgSQL_var*)plpgsql_build_tableType($2.name, $2.lineno, nest_type, true);
                         /* nested table type */
                         var->nest_table = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[$6];
-                        if (IS_PACKAGE) {
-                            if ($10->typoid == VARCHAROID) {
-                                plpgsql_build_package_array_type($2.name, $10->typoid, TYPCATEGORY_TABLEOF_VARCHAR);
-                            } else {
-                                plpgsql_build_package_array_type($2.name, $10->typoid, TYPTYPE_TABLEOF);
-                            }
-                        }
+                        var->nest_layers = depth;
+                        var->isIndexByTblOf = true;
                         pfree_ext($2.name);
                     }
                 |   K_TYPE decl_varname as_is K_TABLE K_OF record_var decl_notnull K_INDEX K_BY decl_datatype ';'
@@ -1239,6 +1286,14 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                                 erraction("check define of table type")));
                         u_sess->plsql_cxt.have_error = true;
 #endif
+                        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+                            ereport(ERROR,
+                                (errmodule(MOD_PLSQL),
+                                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("table of is only support in A-format database."),
+                                    errdetail("N/A"), errcause("PL/SQL uses unsupported feature."),
+                                    erraction("Modify SQL statement according to the manual.")));
+                        }
                         if (IS_ANONYMOUS_BLOCK) {
                             ereport(errstate,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1263,12 +1318,14 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                             u_sess->plsql_cxt.have_error = true;
                         }
                         newp->tableOfIndexType = $10->typoid;
-                        plpgsql_build_tableType($2.name, $2.lineno, newp, true);
+                        PLpgSQL_var *var = (PLpgSQL_var*)plpgsql_build_tableType($2.name, $2.lineno, newp, true);
+                        var->isIndexByTblOf = true;
+
                         if (IS_PACKAGE) {
                             if ($10->typoid == VARCHAROID) {
-                                plpgsql_build_package_array_type($2.name, $10->typoid, TYPCATEGORY_TABLEOF_VARCHAR);
+                                plpgsql_build_package_array_type($2.name, newp->typoid, TYPCATEGORY_TABLEOF_VARCHAR);
                             } else {
-                                plpgsql_build_package_array_type($2.name, $10->typoid, TYPTYPE_TABLEOF);
+                                plpgsql_build_package_array_type($2.name, newp->typoid, TYPCATEGORY_TABLEOF_INTEGER);
                             }
                         }
                         pfree_ext($2.name);
@@ -1302,6 +1359,7 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
 
                         if (table_type->nest_table != NULL) {
                             newp->nest_table = plpgsql_build_nested_variable(table_type->nest_table, $2, $1.name, $1.lineno);
+                            newp->nest_layers = table_type->nest_layers;
                         }
                         pfree_ext($1.name);
                     }
@@ -1368,8 +1426,12 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                     }
                 |	K_PRAGMA any_identifier ';'
                     {
-                        if (pg_strcasecmp($2, "autonomous_transaction") == 0)
-                            pragma_autonomous = true;
+                        if (pg_strcasecmp($2, "autonomous_transaction") == 0) {
+                            u_sess->plsql_cxt.pragma_autonomous = true;
+                            if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile !=NULL) {
+                                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->is_autonomous = true;
+                            }
+                        }
                         else {
                             elog(errstate, "invalid pragma");
                             u_sess->plsql_cxt.have_error = true;
@@ -1378,7 +1440,6 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                 |   K_PRAGMA any_identifier '(' any_identifier ',' error_code ')' ';'
                     {
                         if (pg_strcasecmp($2, "exception_init") == 0) {
-                            pragma_exception_init = true;
                             if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
                                 plpgsql_set_variable($4, $6);
                             }
@@ -2016,14 +2077,24 @@ label_stmt		: stmt_assign
                         { $$ = $1; }
                 ;
 
-stmt_perform	: K_PERFORM expr_until_semi
+stmt_perform	: K_PERFORM {
+#ifndef ENABLE_MULTIPLE_NODES
+                        if (enable_out_param_override()) {
+                            const char* message = "not support perform when behavior_compat_options=\"proc_outparam_override\"";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(errstate,
+                                    (errcode(ERRCODE_SYNTAX_ERROR),
+                                     errmsg("not support perform when behavior_compat_options=\"proc_outparam_override\""),
+                                     parser_errposition(@1)));
+                        }
+#endif
+                    } expr_until_semi
                     {
                         PLpgSQL_stmt_perform *newp;
-
                         newp = (PLpgSQL_stmt_perform *)palloc0(sizeof(PLpgSQL_stmt_perform));
                         newp->cmd_type = PLPGSQL_STMT_PERFORM;
                         newp->lineno   = plpgsql_location_to_lineno(@1);
-                        newp->expr  = $2;
+                        newp->expr  = $3;
                         newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
@@ -2292,6 +2363,9 @@ assign_var
                 | T_TABLE_VAR assign_list
                     {
                         check_assignable($1.datum, @1);
+                        if ($1.datum->dtype == PLPGSQL_DTYPE_VAR) {
+                            check_autonomous_nest_tablevar((PLpgSQL_var*)$1.datum);
+                        }
                         if ($2 == NIL) {
                             $$ = $1.dno;
                         } else {
@@ -2322,6 +2396,7 @@ assign_var
                     {
                         check_assignable($1.datum, @1);
                         if ($2 == NIL) {
+                            check_record_nest_tableof_index($1.datum);
                             $$ = $1.dno;
                         } else {
                             if(IsA((Node*)linitial($2), A_Indices) && list_length($2) == 1) {
@@ -2376,6 +2451,7 @@ assign_var
                             plpgsql_adddatum((PLpgSQL_datum *) newptr);
                             $$ = newptr->dno;
                         } else {
+                            check_record_nest_tableof_index($1.datum);
                             $$ = $1.dno;
                         }
                   }
@@ -2711,7 +2787,7 @@ for_control		: for_variable K_IN
 
                             $$ = (PLpgSQL_stmt *) newp;
                         }
-                        else if (tok == T_DATUM &&
+                        else if ((tok == T_DATUM || tok == T_PACKAGE_VARIABLE) &&
                                  yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_VAR &&
                                  ((PLpgSQL_var *) yylval.wdatum.datum)->datatype->typoid == REFCURSOROID)
                         {
@@ -2881,35 +2957,61 @@ for_control		: for_variable K_IN
                                 newp->cmd_type = PLPGSQL_STMT_FORS;
                                 if ($1.rec)
                                 {
+#ifndef ENABLE_MULTIPLE_NODES
+                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && IMPLICIT_FOR_LOOP_VARIABLE) {
+                                        BuildForQueryVariable(expr1, &newp->row, &newp->rec, $1.name, $1.lineno);
+                                        check_assignable((PLpgSQL_datum *)newp->rec ?
+                                            (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
+                                    } else {
+                                        newp->rec = $1.rec;
+                                        check_assignable((PLpgSQL_datum *) newp->rec, @1);
+                                    }
+#else
                                     newp->rec = $1.rec;
                                     check_assignable((PLpgSQL_datum *) newp->rec, @1);
+#endif
                                 }
                                 else if ($1.row)
                                 {
+#ifndef ENABLE_MULTIPLE_NODES
+                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && IMPLICIT_FOR_LOOP_VARIABLE) {
+                                        BuildForQueryVariable(expr1, &newp->row, &newp->rec, $1.name, $1.lineno);
+                                        check_assignable((PLpgSQL_datum *)newp->rec ?
+                                            (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
+                                    } else {
+                                        newp->row = $1.row;
+                                        check_assignable((PLpgSQL_datum *) newp->row, @1);
+                                    }
+#else
                                     newp->row = $1.row;
                                     check_assignable((PLpgSQL_datum *) newp->row, @1);
+#endif
                                 }
                                 else if ($1.scalar)
                                 {
+#ifndef ENABLE_MULTIPLE_NODES
+                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && IMPLICIT_FOR_LOOP_VARIABLE) {
+                                        BuildForQueryVariable(expr1, &newp->row, &newp->rec, $1.name, $1.lineno);
+                                        check_assignable((PLpgSQL_datum *)newp->rec ?
+                                            (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
+                                    } else {
+                                        /* convert single scalar to list */
+                                        newp->row = make_scalar_list1($1.name, $1.scalar, $1.dno, $1.lineno, @1);
+                                        /* no need for check_assignable */
+                                    }
+#else
                                     /* convert single scalar to list */
                                     newp->row = make_scalar_list1($1.name, $1.scalar, $1.dno, $1.lineno, @1);
                                     /* no need for check_assignable */
+#endif
                                 }
                                 else
                                 {
-#ifndef ENABLE_MULTIPLE_NODES 
-                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
-                                        TupleDesc desc = getCursorTupleDesc(expr1, true);
-                                        if (desc == NULL || desc->natts == 0 || checkAllAttrName(desc)) {
-                                            PLpgSQL_type dtype;
-                                            dtype.ttype = PLPGSQL_TTYPE_REC;
-                                            newp->rec = (PLpgSQL_rec *)
-                                            plpgsql_build_variable($1.name,$1.lineno, &dtype, true);
-                                            check_assignable((PLpgSQL_datum *) newp->rec, @1);
-                                        } else {
-                                            newp->row = build_row_from_tuple_desc($1.name, $1.lineno, desc);
-                                            check_assignable((PLpgSQL_datum*)newp->row, @1);
-                                        }
+#ifndef ENABLE_MULTIPLE_NODES
+                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK) {
+                                        BuildForQueryVariable(expr1, &newp->row, &newp->rec, $1.name, $1.lineno);
+                                        check_assignable((PLpgSQL_datum *)newp->rec ?
+                                            (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
                                     } else {
                                         PLpgSQL_type dtype;
                                         dtype.ttype = PLPGSQL_TTYPE_REC;
@@ -3178,6 +3280,9 @@ for_variable	: T_DATUM
                             int			tok;
 
                             $$.scalar = $1.datum;
+                            if ($1.datum->dtype == PLPGSQL_DTYPE_VAR) {
+                                check_autonomous_nest_tablevar((PLpgSQL_var*)$1.datum);
+                            }
                             $$.rec = NULL;
                             $$.row = NULL;
                             $$.dno = $1.dno;
@@ -3622,7 +3727,7 @@ stmt_execsql			: K_ALTER
                     }
                 }
             }
-        | K_LOG
+        | unreserved_keyword_func
             {
                 int tok = -1;
                 bool isCallFunc = false;
@@ -3888,7 +3993,7 @@ stmt_execsql			: K_ALTER
         | T_ARRAY_DELETE
             {
                 StringInfoData sqlBuf;
-                Oid indexType = get_table_index_type(yylval.wdatum.datum);
+                Oid indexType = get_table_index_type(yylval.wdatum.datum, NULL);
                 List* idents = yylval.wdatum.idents;
                 int dno = yylval.wdatum.dno;
                 initStringInfo(&sqlBuf);
@@ -3897,9 +4002,16 @@ stmt_execsql			: K_ALTER
 
                 if (';' == tok)
                 {
-                    appendStringInfo(&sqlBuf, "array_delete(");
-                    CastArrayNameToArrayFunc(&sqlBuf, idents, false);
-                    appendStringInfo(&sqlBuf, ")");
+                    if (indexType == VARCHAROID || indexType == INT4OID) {
+                        appendStringInfo(&sqlBuf, "array_indexby_delete(");
+                        CastArrayNameToArrayFunc(&sqlBuf, idents, false);
+                        appendStringInfo(&sqlBuf, ")");
+                    } else {
+                        appendStringInfo(&sqlBuf, "array_delete(");
+                        CastArrayNameToArrayFunc(&sqlBuf, idents, false);
+                        appendStringInfo(&sqlBuf, ")");
+                    }
+                    
                     $$ = make_callfunc_stmt(sqlBuf.data, @1, false, false, NULL, dno);
                 } else {
                     if('(' == tok) {
@@ -3907,82 +4019,137 @@ stmt_execsql			: K_ALTER
                         if (tok1 == ')') {
                             int tok2 = yylex();
                             if (tok2 == ';') {
-                                appendStringInfo(&sqlBuf, "array_delete(");
-                                CastArrayNameToArrayFunc(&sqlBuf, idents, false);
-                                appendStringInfo(&sqlBuf, ")");
+                                if (indexType == VARCHAROID || indexType == INT4OID) {
+                                    appendStringInfo(&sqlBuf, "array_indexby_delete(");
+                                    CastArrayNameToArrayFunc(&sqlBuf, idents, false);
+                                    appendStringInfo(&sqlBuf, ")");
+                                } else {
+                                    appendStringInfo(&sqlBuf, "array_delete(");
+                                    CastArrayNameToArrayFunc(&sqlBuf, idents, false);
+                                    appendStringInfo(&sqlBuf, ")");
+                                }
+                                
                                 $$ = make_callfunc_stmt(sqlBuf.data, @1, false, false, NULL, dno);
                             } else {
                                 plpgsql_push_back_token(tok);
                                 $$ = NULL;
                                 yyerror("syntax error");
                             }
-                        } else if (tok1 != ICONST && tok1 != T_WORD && tok1 != SCONST && tok1 != T_DATUM) {
+                        } else if (tok1 != ICONST && tok1 != T_WORD && tok1 != SCONST && tok1 != T_DATUM && tok1 != '-') {
                             plpgsql_push_back_token(tok);
                             $$ = NULL;
                             yyerror("syntax error");
                         } else {
-                            if (ICONST == tok1) {
+                            if (tok1 == '-') {
                                 if (indexType == VARCHAROID) {
-                                    appendStringInfo(&sqlBuf, "array_varchar_delete(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "\'%d\')", yylval.ival);
-                                } else if (indexType == INT4OID) {
-                                    appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "\'%d\')", yylval.ival);
-                                } else {
-                                    appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "%d)", yylval.ival);
-                                }
-                            } else if (SCONST == tok1) {
-                                if (indexType == VARCHAROID) {
-                                    appendStringInfo(&sqlBuf, "array_varchar_delete(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "\'%s\')", yylval.str);
-                                } else if (indexType == INT4OID) {
-                                    appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "\'%s\')", yylval.str);
-                                } else {
-                                    appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "%s)", yylval.str);
-                                }
-                                
-                            } else if (T_WORD == tok1) {
-                                if (indexType == VARCHAROID) {
-                                    appendStringInfo(&sqlBuf, "array_varchar_delete(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "\'%s\')", yylval.word.ident);
-                                } else if (indexType == INT4OID) {
-                                    appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "\'%s\')", yylval.word.ident);
-                                } else {
-                                    appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "%s)", yylval.word.ident);
-                                }
-                                
-                            } else {
-                                char *datName = NameOfDatum(&yylval.wdatum);
-                                if (indexType == VARCHAROID) {
-                                    appendStringInfo(&sqlBuf, "array_varchar_delete(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "\'%s\')", datName);
-                                } else if (indexType == INT4OID) {
-                                    appendStringInfo(&sqlBuf, "array_integer_delete(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "\'%s\')", datName);
-                                } else {
-                                    appendStringInfo(&sqlBuf, "array_deleteidx(");
-                                    CastArrayNameToArrayFunc(&sqlBuf, idents);
-                                    appendStringInfo(&sqlBuf, "%s)", datName);
+                                    yyerror("syntax error");
                                 }
 
-                                pfree_ext(datName);
+                                int tok3 = yylex();
+                                if (tok3 != ICONST && tok3 != T_WORD && tok3 != T_DATUM) {
+                                    yyerror("syntax error");
+                                }
+
+                                if (ICONST == tok3) {
+                                    if (indexType == INT4OID) {
+                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'-%d\')", yylval.ival);
+                                    } else {
+                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "-%d)", yylval.ival);
+                                    }
+                                } else if (T_WORD == tok3) {
+                                    if (indexType == INT4OID) {
+                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'-%s\')", yylval.word.ident);
+                                    } else {
+                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "-%s)", yylval.word.ident);
+                                    }
+
+                                } else {
+                                    char *datName = NameOfDatum(&yylval.wdatum);
+                                    if (indexType == INT4OID) {
+                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'-%s\')", datName);
+                                    } else {
+                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "-%s)", datName);
+                                    }
+
+                                    pfree_ext(datName);
+                                }
+                            } else {
+                                if (ICONST == tok1) {
+                                    if (indexType == VARCHAROID) {
+                                        appendStringInfo(&sqlBuf, "array_varchar_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'%d\')", yylval.ival);
+                                    } else if (indexType == INT4OID) {
+                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'%d\')", yylval.ival);
+                                    } else {
+                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "%d)", yylval.ival);
+                                    }
+                                } else if (SCONST == tok1) {
+                                    if (indexType == VARCHAROID) {
+                                        appendStringInfo(&sqlBuf, "array_varchar_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'%s\')", yylval.str);
+                                    } else if (indexType == INT4OID) {
+                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'%s\')", yylval.str);
+                                    } else {
+                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "%s)", yylval.str);
+                                    }
+
+                                } else if (T_WORD == tok1) {
+                                    if (indexType == VARCHAROID) {
+                                        appendStringInfo(&sqlBuf, "array_varchar_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'%s\')", yylval.word.ident);
+                                    } else if (indexType == INT4OID) {
+                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'%s\')", yylval.word.ident);
+                                    } else {
+                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "%s)", yylval.word.ident);
+                                    }
+
+                                } else {
+                                    char *datName = NameOfDatum(&yylval.wdatum);
+                                    if (indexType == VARCHAROID) {
+                                        appendStringInfo(&sqlBuf, "array_varchar_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'%s\')", datName);
+                                    } else if (indexType == INT4OID) {
+                                        appendStringInfo(&sqlBuf, "array_integer_delete(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "\'%s\')", datName);
+                                    } else {
+                                        appendStringInfo(&sqlBuf, "array_deleteidx(");
+                                        CastArrayNameToArrayFunc(&sqlBuf, idents);
+                                        appendStringInfo(&sqlBuf, "%s)", datName);
+                                    }
+
+                                    pfree_ext(datName);
+                                }
                             }
+                            
                             int tok2 = yylex();
                             if (tok2 != ')') {
                                 plpgsql_push_back_token(tok);
@@ -4159,7 +4326,6 @@ stmt_open		: K_OPEN cursor_variable
                                     read_sql_expression2(K_USING, ';',
                                                          "USING or ;",
                                                          &endtoken);
-                                    
                                     /* If we found "USING", collect argument(s) */
                                     if(K_USING == endtoken)
                                     {
@@ -4176,6 +4342,13 @@ stmt_open		: K_OPEN cursor_variable
                                         yyerror("syntax error");
                                 }
                             }
+			    if (newp->query != NULL && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK) {
+                                (void)getCursorTupleDesc(newp->query, false, true);
+			    }
+                            else if (newp->dynquery != NULL && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK)
+			    {
+                                (void)getCursorTupleDesc(newp->dynquery, false, true);
+			    }
                         }
                         else
                         {
@@ -4456,6 +4629,20 @@ cursor_variable	: T_DATUM
                                             ((PLpgSQL_var *) $1.datum)->refname),
                                      parser_errposition(@1)));
                         }
+                        if (((PLpgSQL_var *) $1.datum)->ispkg) {
+                            if ((u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
+                                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->is_autonomous) ||
+                                u_sess->is_autonomous_session) {
+                                const char* message =
+                                    "package cursor referenced in autonomous procedure is not supported yet";
+                                InsertErrorMessage(message, plpgsql_yylloc);
+                                ereport(errstate,
+                                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                     errmsg("cursor referenced by \"%s\" in autonomous procedure is not supported yet",
+                                         $1.ident),
+                                     parser_errposition(@1)));
+                            }
+                        }
                         $$ = $1.dno;
                     }
                 | T_PACKAGE_VARIABLE
@@ -4476,6 +4663,28 @@ cursor_variable	: T_DATUM
                                     (errcode(ERRCODE_DATATYPE_MISMATCH),
                                      errmsg("variable \"%s\" must be of type cursor or refcursor",
                                             ((PLpgSQL_var *) $1.datum)->refname),
+                                     parser_errposition(@1)));
+                        }
+                        if (list_length($1.idents) == 3) {
+                            const char* message =
+                                "cursor referenced in schema.package.cursor format is not supported yet";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(errstate,
+                                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                     errmsg("cursor referenced by \"%s\" is not supported yet",
+                                            $1.ident),
+                                     parser_errposition(@1)));
+                        }
+                        if ((u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
+                            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->is_autonomous) ||
+                            u_sess->is_autonomous_session) {
+                            const char* message =
+                                "package cursor referenced in autonomous procedure is not supported yet";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(errstate,
+                                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                     errmsg("cursor referenced by \"%s\" in autonomous procedure is not supported yet",
+                                            $1.ident),
                                      parser_errposition(@1)));
                         }
                         $$ = $1.dno;
@@ -4653,7 +4862,7 @@ expr_until_semi :
 
                         if (isCallFunc)
                         {
-                            stmt = make_callfunc_stmt(name, yylloc, true, false, funcNameList);
+                            stmt = make_callfunc_stmt(name, yylloc, true, false, funcNameList, -1, isCallFunc);
                             if (PLPGSQL_STMT_EXECSQL == stmt->cmd_type)
                                 expr = ((PLpgSQL_stmt_execsql*)stmt)->sqlstmt;
                             else if (PLPGSQL_STMT_PERFORM == stmt->cmd_type)
@@ -4746,6 +4955,54 @@ any_identifier	: T_WORD
                     }
                 ;
 
+unreserved_keyword_func :
+	 K_ABSOLUTE
+         | K_ALIAS
+         | K_BACKWARD
+         | K_CONSTANT
+         | K_CURRENT
+         | K_DEBUG
+         | K_DETAIL
+         | K_DUMP
+         | K_ERRCODE
+         | K_ERROR
+         | K_EXCEPTIONS
+         | K_FIRST
+         | K_FORWARD
+         | K_HINT
+         | K_INDEX
+         | K_INFO
+         | K_LAST
+         | K_LOG
+         | K_MESSAGE
+         | K_MESSAGE_TEXT
+         | K_MULTISET
+         | K_NEXT
+         | K_NO
+         | K_NOTICE
+         | K_OPTION
+         | K_PACKAGE
+         | K_INSTANTIATION
+         | K_PG_EXCEPTION_CONTEXT
+         | K_PG_EXCEPTION_DETAIL
+         | K_PG_EXCEPTION_HINT 
+         | K_QUERY
+         | K_RECORD
+         | K_RELATIVE
+         | K_RESULT_OID
+         | K_RETURNED_SQLSTATE
+         | K_REVERSE
+         | K_ROW_COUNT
+         | K_SCROLL
+         | K_SLICE
+         | K_STACKED
+         | K_SYS_REFCURSOR
+         | K_USE_COLUMN
+         | K_USE_VARIABLE
+         | K_VARIABLE_CONFLICT
+         | K_VARRAY
+         | K_WARNING 
+         ;
 unreserved_keyword	:
                 K_ABSOLUTE
                 | K_ALIAS
@@ -4907,7 +5164,9 @@ current_token_is_not_variable(int tok)
 static void 
 yylex_inparam(StringInfoData* func_inparam, 
               int *nparams,
-              int * tok)
+              int * tok,
+              int *tableof_func_dno,
+              int *tableof_var_dno)
 {
     PLpgSQL_expr * expr =   NULL;
 
@@ -4935,6 +5194,13 @@ yylex_inparam(StringInfoData* func_inparam,
         expr = read_sql_construct(',', ')', 0, ",|)", "", true, false, false, NULL, tok);
     }
 
+    if (*tableof_func_dno != -1 && *tableof_func_dno != expr->tableof_func_dno) {
+        yyerror("do not support more than 2 table of index by variables call functions in function");
+    } else {
+        *tableof_func_dno = expr->tableof_func_dno;
+    }
+
+    *tableof_var_dno = expr->tableof_var_dno;
     /* 
      * handle the problem that the function 
      * arguments can only be variable. After revising, the arguments can be any
@@ -5280,7 +5546,7 @@ static int get_func_out_arg_num(char* p_argmodes, int all_arg)
  * Notes		:
  */ 
 static PLpgSQL_stmt *
-make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eaten_first_token, List* funcNameList, int arrayFuncDno)
+make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eaten_first_token, List* funcNameList, int arrayFuncDno, bool isCallFunc)
 {
     int nparams = 0;
     int nfields = 0;
@@ -5296,10 +5562,12 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
     int pos_outer = 0;
     /* pos_inner is the position got by its real postion in function invoke */
     int pos_inner = -1;
-    int	varnos[FUNC_MAX_ARGS];
+    int	varnos[FUNC_MAX_ARGS] = {-1};
     bool	namedarg[FUNC_MAX_ARGS];
     char*	namedargnamses[FUNC_MAX_ARGS];
     char *fieldnames[FUNC_MAX_ARGS];
+    bool outParamInvalid = false;
+    bool is_plpgsql_func_with_outparam = false;
 
     List *funcname = NIL;
     PLpgSQL_row *row = NULL;
@@ -5315,10 +5583,12 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
     int j = 0;
     int placeholders = 0;
     char *quoted_sqlstart = NULL;
+    bool is_have_tableof_index_func = false;
 
     MemoryContext oldCxt = NULL;
     bool	multi_func = false;
     const char *varray_delete = "array_delete(\"";
+    const char *varray_indexby_delete = "array_indexby_delete(\"";
     const char *varray_deleteidx = "array_deleteidx(\"";
     const char *varray_deletevarchar = "array_varchar_delete(\"";
     const char *varray_deleteinteger = "array_integer_delete(\"";
@@ -5331,6 +5601,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
     cp[2] = NULL;
 
     if (sqlstart != NULL && (strncmp(sqlstart, varray_delete, strlen(varray_delete)) == 0
+        || strncmp(sqlstart, varray_indexby_delete, strlen(varray_indexby_delete)) == 0
         || strncmp(sqlstart, varray_deleteidx, strlen(varray_deleteidx)) == 0
         || strncmp(sqlstart, varray_extend, strlen(varray_extend)) == 0
         || strncmp(sqlstart, varray_trim, strlen(varray_trim)) == 0
@@ -5340,12 +5611,17 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
 
         if (strncmp(sqlstart, varray_delete, strlen(varray_delete)) == 0) {
             chIdx = strlen(varray_delete);
+        } else if (strncmp(sqlstart, varray_indexby_delete, strlen(varray_indexby_delete)) == 0) {
+            chIdx = strlen(varray_indexby_delete);
+            is_have_tableof_index_func = true;
         } else if (strncmp(sqlstart, varray_deleteidx, strlen(varray_deleteidx)) == 0) {
             chIdx = strlen(varray_deleteidx);
         } else if (strncmp(sqlstart, varray_deletevarchar, strlen(varray_deletevarchar)) == 0) {
             chIdx = strlen(varray_deletevarchar);
+            is_have_tableof_index_func = true;
         } else if (strncmp(sqlstart, varray_deleteinteger, strlen(varray_deleteinteger)) == 0) {
             chIdx = strlen(varray_deleteinteger);
+            is_have_tableof_index_func = true;
         } else if (strncmp(sqlstart, varray_trim, strlen(varray_trim)) == 0) {
             chIdx = strlen(varray_trim);
         } else {
@@ -5360,13 +5636,15 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             return NULL;
         }
 
-        expr = (PLpgSQL_expr *)palloc(sizeof(PLpgSQL_expr));
+        expr = (PLpgSQL_expr *)palloc0(sizeof(PLpgSQL_expr));
         expr->dtype = PLPGSQL_DTYPE_EXPR;
         expr->query = pstrdup(func_inparas.data);
         expr->plan = NULL;
         expr->paramnos = NULL;
         expr->ns = plpgsql_ns_top();
         expr->idx = (uint32)-1;
+        expr->out_param_dno = -1;
+        expr->is_have_tableof_index_func = is_have_tableof_index_func;
 
         PLpgSQL_stmt_assign *perform = (PLpgSQL_stmt_assign*)palloc0(sizeof(PLpgSQL_stmt_assign));
         perform->cmd_type = PLPGSQL_STMT_ASSIGN;;
@@ -5472,6 +5750,10 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
     }
     plpgsql_push_back_token(tok);
 
+    if (isCallFunc && is_function_with_plpgsql_language_and_outparam(clist->oid)) {
+        is_assign = false;
+        is_plpgsql_func_with_outparam = true;
+    }
     /* has any "out" parameters, user execsql stmt */
     if (is_assign)
     {
@@ -5482,6 +5764,8 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
         appendStringInfoString(&func_inparas, "CALL ");
     }
 
+    int tableof_func_dno = -1;
+    int tableof_var_dno = -1;
     /*
      * Properly double-quote schema name and function name to handle uppercase
      * and special characters when making 'CALL func_name;' statement.
@@ -5527,6 +5811,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                      * search the p_argnames to match the right argname with current arg,
                      * so the real postion of current arg can be determined 
                      */
+                    bool argMatch = false;
                     for (j = 0; j < narg; j++)
                     {
                         if ('o' == p_argmodes[j] || 'b' == p_argmodes[j])
@@ -5540,7 +5825,8 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                             switch (p_argmodes[j])
                             {
                                 case 'i':
-                                    yylex_inparam(&func_inparas, &nparams, &tok);
+                                    yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
+                                    check_tableofindex_args(tableof_var_dno, p_argtypes[j]);
                                     break;
                                 case 'o':
                                 case 'b':
@@ -5571,12 +5857,17 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                     /* pass => */
                                     (void)yylex();
                                     yylex_outparam(fieldnames, varnos, pos_outer, &row, &rec, &tok, true);
-                                    if (T_DATUM == tok || T_VARRAY_VAR == tok || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok)
+                                    if ((!enable_out_param_override() && p_argmodes[j] == 'b') 
+                                            || T_DATUM == tok || T_VARRAY_VAR == tok 
+                                            || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok)
                                     {
                                         nfields++;
                                         plpgsql_push_back_token(tok);
                                         /* don't need inparam add ',' */
-                                        yylex_inparam(&func_inparas, NULL, &tok);
+                                        yylex_inparam(&func_inparas, NULL, &tok, &tableof_func_dno, &tableof_var_dno);
+                                        check_tableofindex_args(tableof_var_dno, p_argtypes[j]);
+                                    } else {
+                                        outParamInvalid = true;
                                     }
                                     nparams++;
                                     break;
@@ -5587,8 +5878,23 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                             (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
                                              errmsg("parameter mode %c doesn't exist", p_argmodes[j])));
                             }
+                            argMatch = true;
                             break;
                         }
+                    }
+                    if (!argMatch) {
+                        const char* message = "invoking function error,check function";
+                        InsertErrorMessage(message, plpgsql_yylloc);
+                        ereport(errstate,
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                             errmsg("when invoking function %s, no argments match \"%s\"", sqlstart, argname.data)));
+                    }
+                    if (outParamInvalid) {
+                        const char* message = "invoking function error,check function";
+                        InsertErrorMessage(message, plpgsql_yylloc);
+                        ereport(errstate,
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                             errmsg("when invoking function %s, no destination for argments \"%s\"", sqlstart, argname.data)));
                     }
                 }
                 else
@@ -5601,7 +5907,8 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                             if (T_PLACEHOLDER == tok)
                                 placeholders++;
                             plpgsql_push_back_token(tok);
-                            yylex_inparam(&func_inparas, &nparams, &tok);
+                            yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
+                            check_tableofindex_args(tableof_var_dno, p_argtypes[i]);
                             break;
                         case 'o':
                             /*
@@ -5610,7 +5917,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                              */
                             if (is_assign)
                             {
-                                if (T_DATUM == tok || T_PLACEHOLDER == tok)
+                                if (T_DATUM == tok || T_VARRAY_VAR == tok || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok || T_PLACEHOLDER == tok)
                                 {
                                     plpgsql_push_back_token(tok);
                                     (void)read_sql_expression2(',', ')', ",|)", &tok);
@@ -5624,27 +5931,29 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                             {
                                 placeholders++;
                             }
-                            else if (T_DATUM == tok || T_VARRAY_VAR == tok || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok)
+                            else if (T_DATUM == tok || T_VARRAY_VAR == tok || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok || T_PLACEHOLDER == tok)
                             {
                                 nfields++;
+                            } else {
+                                outParamInvalid = true;
                             }
 
                             plpgsql_push_back_token(tok);
                             yylex_outparam(fieldnames, varnos, pos_inner, &row, &rec, &tok, true);
                             plpgsql_push_back_token(tok);
-                            yylex_inparam(&func_inparas, &nparams, &tok);
+                            yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
+                            check_tableofindex_args(tableof_var_dno, p_argtypes[i]);
                             break;
                         case 'b':
                             if (is_assign)
                             {
-                                /*
-                                 * if the function is in an assign expr, read the inout
-                                 * parameters.
-                                 */
-                                if (T_DATUM == tok)
+                                if (!enable_out_param_override() 
+                                        || (enable_out_param_override() 
+                                               && (T_DATUM == tok || T_VARRAY_VAR == tok 
+                                                      || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok)))
                                 {
                                     plpgsql_push_back_token(tok);
-                                    yylex_inparam(&func_inparas, &nparams, &tok);
+                                    yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
                                 }
                                 else
                                     yyerror("syntax error");
@@ -5657,11 +5966,14 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                             yylex_outparam(fieldnames, varnos, pos_inner, &row, &rec, &tok, true);
                             if (T_DATUM == tok || T_VARRAY_VAR == tok || T_TABLE_VAR == tok || T_PACKAGE_VARIABLE == tok) {
                                 nfields++;
+                            } else {
+                                outParamInvalid = true;
                             }
                             
                             plpgsql_push_back_token(tok);
                             
-                            yylex_inparam(&func_inparas, &nparams, &tok);
+                            yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
+                            check_tableofindex_args(tableof_var_dno, p_argtypes[i]);
                             break;
                         default:
                             const char* message = "parameter mode  not exist";
@@ -5670,6 +5982,14 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                     (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
                                      errmsg("parameter mode %c doesn't exist", p_argmodes[i])));
                     }
+                    if (is_plpgsql_func_with_outparam && outParamInvalid) {
+                        const char* message = "invoking function error,check function";
+                        InsertErrorMessage(message, plpgsql_yylloc);
+                        ereport(errstate,
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                             errmsg("when invoking function %s, no destination for argments \"%s\"", sqlstart, argname.data)));
+                    }
+
                 }
 
                 if (')' == tok)
@@ -5705,7 +6025,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                     placeholders++;
                 plpgsql_push_back_token(tok);
         
-                yylex_inparam(&func_inparas, &nparams, &tok);
+                yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
         
                 if (')' == tok)
                 {
@@ -5750,6 +6070,31 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                 (void)yylex();
                 
                 int loc = yylex_outparam(fieldnames, varnos, nfields, &row, &rec, &tok, false, true);
+                if (tok == '(') {
+                   int brackets = 1;
+                   int syntaxErr = false;
+                   // ignore record const value.
+                   while(brackets != 0 && !syntaxErr) {
+                       tok = yylex();
+                       switch(tok) {
+                           case '(':
+                               brackets++;
+                               break;
+                           case ')':
+                               brackets--;
+                               break;
+                           case 0:
+                               syntaxErr = true;
+                               break;
+                           default:
+                               ;
+                       }  
+                   }
+
+                   if (syntaxErr) {
+                       yyerror("Record/Composite type format error, brackets does't match.");
+                   }
+                }
                 tok = yylex();
                 int curloc = yylloc;
                 plpgsql_push_back_token(tok);
@@ -5763,7 +6108,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             {
                 yylex_outparam(fieldnames, varnos, nfields, &row, &rec, &tok, true, true);
                 plpgsql_push_back_token(tok);
-                yylex_inparam(&func_inparas, &nparams, &tok);
+                yylex_inparam(&func_inparas, &nparams, &tok, &tableof_func_dno, &tableof_var_dno);
                 namedarg[nfields] = false;
                 namedargnamses[nfields] = NULL;
             }
@@ -5816,6 +6161,8 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
     expr->paramnos 		= NULL;
     expr->ns			= plpgsql_ns_top();
     expr->idx			= (uint32)-1;
+    expr->out_param_dno	= -1;
+    expr->is_have_tableof_index_func = tableof_func_dno != -1 ? true : false;
 
     if (multi_func)
     {
@@ -5872,6 +6219,10 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             narg = procStruct->pronargs;
             ReleaseSysCache(proctup);
 
+            for (int k = 0; k < all_arg; k++)  {
+                check_tableofindex_args(varnos[k], p_argtypes[k]);
+            }
+
             /* if there is no "out" parameters ,use perform stmt,others use exesql */
             if ((0 == all_arg || NULL == p_argmodes))
             {
@@ -5886,22 +6237,13 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
             else if (all_arg >= narg)
             {
                 int out_arg_num = get_func_out_arg_num(p_argmodes, all_arg);
-                /* In multiset function, row maybe not the out arg */
-                if (all_arg > 1 && out_arg_num == 1 && row != NULL) {
-                    for (int k = 0; k < all_arg; k++)
-                    {
-                        if (p_argmodes[k] == 'i' && row->dno == varnos[k]) {
-                            row = NULL;
-                            break;
-                        }
-                    }
-                }
-
                 /* out arg number > 1 should build a row */
-                if ((NULL == rec &&  NULL == row) || out_arg_num > 1)
+                bool need_build_row = need_build_row_for_func_arg(&rec, &row, out_arg_num, all_arg, varnos, p_argmodes);
+                if (need_build_row)
                 {
                     int new_nfields = 0;
                     int i = 0, j = 0;
+                    bool varnosInvalid = false;
                     for (i = 0; i < all_arg; i++)
                     {
                         if (p_argmodes[i] == 'i')
@@ -5931,6 +6273,8 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                 row->fieldnames[j] = fieldnames[i];
                                 row->varnos[j] = varnos[i];
                                 j++;
+                            } else {
+                                varnosInvalid = true;
                             }
                         }
                         else
@@ -5979,15 +6323,25 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                                 (errcode(ERRCODE_SYNTAX_ERROR),
                                     errmsg("parameter \"%s\" is assigned more than once", row->fieldnames[pos_outer])));
                             }
-                            
                             if (varnos[i] >= 0)
                             {
                                 row->fieldnames[pos_outer] = fieldnames[i];
                                 row->varnos[pos_outer] = varnos[i];
+                            } else {
+                                varnosInvalid = true;
                             }
                         }
                     }
-                    plpgsql_adddatum((PLpgSQL_datum *)row);
+                    if (varnosInvalid) {
+                        pfree_ext(row->refname);
+                        pfree_ext(row->fieldnames);
+                        pfree_ext(row->varnos);
+                        pfree_ext(row);
+                    } else if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                        expr->out_param_dno = plpgsql_adddatum((PLpgSQL_datum *)row);
+                    } else {
+                        plpgsql_adddatum((PLpgSQL_datum *)row);
+                    }
                 }
 
                 PLpgSQL_stmt_execsql * execsql = NULL;
@@ -6021,8 +6375,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
          * if have out parameters and no row/rec, generate row type to store the results.
          * if have row/rec and more than 2 out parameters , also generate row type.
          */
-        if ((nfields && NULL == rec &&  NULL == row) ||
-            nfields > 1)
+        if (((nfields && NULL == rec &&  NULL == row) || nfields > 1) && !outParamInvalid)
         {
             row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
             row->dtype = PLPGSQL_DTYPE_ROW;
@@ -6038,7 +6391,17 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
                 row->fieldnames[nfields] = fieldnames[nfields];
                 row->varnos[nfields] = varnos[nfields];
             }
-            plpgsql_adddatum((PLpgSQL_datum *)row);
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                expr->out_param_dno = plpgsql_adddatum((PLpgSQL_datum *)row);
+            } else {
+                plpgsql_adddatum((PLpgSQL_datum *)row);
+            }
+        }
+        /* has invalid out param, set it to null */
+        if ((rec != NULL || row != NULL) && outParamInvalid)
+        {
+            rec = NULL;
+            row = NULL;
         }
         
         /* if there is no "out" parameters ,use perform stmt,others use exesql */
@@ -6076,6 +6439,19 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
     return NULL;
 }
 
+
+static bool
+is_unreserved_keyword_func(const char *name)
+{
+    int i;
+    char *func_name[] = {"absolute", "alias", "backward", "constant","current", "debug", "detail","dump" ,"errcode","error", "exceptions", "first", "forward", "hint", "index", "info", "last", "log","message", "message_text", "multiset", "next", "no", "notice", "option", "package", "instantiation","pg_exception_context", "pg_exception_detail", "pg_exception_hint", "query", "record", "relative", "result_oid", "returned_sqlstate", "reverse","row_count","sroll", "slice", "stacked","sys_refcursor","use_column","use_variable","variable_conflict","varray","warning"};
+    for (i = 0; i <= 45; i++) {
+        if (pg_strcasecmp(func_name[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 /*
  * Brief                : check if it is an log function invoke
  * Description  : 
@@ -6086,9 +6462,9 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eate
  * Notes                : 
  */
 static bool
-is_logfunction(ScanKeyword* keyword, bool no_parenthesis, const char *name)
+is_unreservedkeywordfunction(ScanKeyword* keyword, bool no_parenthesis, const char *name)
 {
-    if (keyword && no_parenthesis && UNRESERVED_KEYWORD == keyword->category && pg_strcasecmp("log", name) != 0)
+    if (keyword && no_parenthesis && UNRESERVED_KEYWORD == keyword->category && !is_unreserved_keyword_func(name))
         return false;
     else
         return true;
@@ -6110,6 +6486,7 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
     List *funcname = NIL;
     FuncCandidateList clist = NULL;
     bool have_outargs = false;
+    bool have_inoutargs = false;
     char **p_argnames = NULL;
     char *p_argmodes = NULL;
     Oid *p_argtypes = NULL;
@@ -6145,7 +6522,7 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
         if (keyword && RESERVED_KEYWORD == keyword->category)
             return false;
         /* function name can not be unreserved keyword when no-parenthesis function is called. except log function*/
-        if (!is_logfunction(keyword, no_parenthesis, cp[0]))
+        if (!is_unreservedkeywordfunction(keyword, no_parenthesis, cp[0]))
 	{
             return false;
         }
@@ -6208,10 +6585,20 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
                         break;
                     }
                 }
+                for (i = 0; i < narg; i++)
+                {
+                    if ('b' == p_argmodes[i])
+                    {
+                        have_inoutargs = true;
+                        break;
+                    }
+                }
             }
             ReleaseSysCache(proctup);
         }
 
+        if (have_inoutargs && is_function_with_plpgsql_language_and_outparam(clist->oid))
+            return true;
         if (!have_outargs && is_assign)
             return false;
         
@@ -6265,10 +6652,20 @@ is_function(const char *name, bool is_assign, bool no_parenthesis, List* funcNam
                         break;
                     }
                 }
+                for (i = 0; i < narg; i++)
+                {
+                    if ('b' == p_argmodes[i])
+                    {
+                        have_inoutargs = true;
+                        break;
+                    }
+                }
             }
             ReleaseSysCache(proctup);
         }
 
+        if (have_inoutargs && is_function_with_plpgsql_language_and_outparam(clist->oid))
+            return true;
         if (!have_outargs && is_assign)
             return false;
         
@@ -6324,7 +6721,8 @@ static bool is_paren_friendly_datatype(TypeName *name)
     char category = TYPCATEGORY_INVALID;
     get_type_category_preferred(typoid, &category, &preferred);
     if (category != TYPCATEGORY_ARRAY && category != TYPCATEGORY_COMPOSITE
-        && category != TYPCATEGORY_TABLEOF && category != TYPCATEGORY_TABLEOF_VARCHAR) {
+        && category != TYPCATEGORY_TABLEOF && category != TYPCATEGORY_TABLEOF_VARCHAR
+        && category != TYPCATEGORY_TABLEOF_INTEGER) {
         return false;
     }
     return true;
@@ -6650,6 +7048,11 @@ read_sql_construct6(int until,
     int					loc = 0;
     int					curloc = 0;
     int					brack_cnt = 0;
+     /* mark if there are 2 table of index by var call functions in an expr */
+    int tableof_func_dno = -1;
+    int tableof_var_dno = -1;
+    bool is_have_tableof_index_var = false;
+    List* tableof_index_list = NIL;
 
     PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     /*
@@ -6782,7 +7185,7 @@ read_sql_construct6(int until,
             case T_VARRAY_VAR:
                 idents = yylval.wdatum.idents;
                 if (idents == NIL) {
-                    AddNamespaceIfPkgVar(yylval.wdatum.ident);
+                    AddNamespaceIfPkgVar(yylval.wdatum.ident, save_IdentifierLookup);
                 }
                 tok = yylex();
                 if (tok == '(' || tok == '[') {
@@ -6801,7 +7204,7 @@ read_sql_construct6(int until,
                 }
             case T_ARRAY_FIRST:
             {
-                Oid indexType = get_table_index_type(yylval.wdatum.datum);
+                Oid indexType = get_table_index_type(yylval.wdatum.datum, &tableof_func_dno);
                 if (indexType == VARCHAROID) {
                     appendStringInfo(&ds, "ARRAY_VARCHAR_FIRST(");
                     CastArrayNameToArrayFunc(&ds, yylval.wdatum.idents, false);
@@ -6829,7 +7232,7 @@ read_sql_construct6(int until,
             }
             case T_ARRAY_LAST:
             {
-                Oid indexType = get_table_index_type(yylval.wdatum.datum);
+                Oid indexType = get_table_index_type(yylval.wdatum.datum, &tableof_func_dno);
                 if (indexType == VARCHAROID) {
                     appendStringInfo(&ds, "ARRAY_VARCHAR_LAST(");
                     CastArrayNameToArrayFunc(&ds, yylval.wdatum.idents, false);
@@ -6857,7 +7260,7 @@ read_sql_construct6(int until,
             }
             case T_ARRAY_COUNT:
             {
-                Oid indexType = get_table_index_type(yylval.wdatum.datum);
+                Oid indexType = get_table_index_type(yylval.wdatum.datum, &tableof_func_dno);
                 if (indexType == VARCHAROID || indexType == INT4OID) {
                     appendStringInfo(&ds, "ARRAY_INDEXBY_LENGTH(");
                     CastArrayNameToArrayFunc(&ds, yylval.wdatum.idents);
@@ -6883,7 +7286,7 @@ read_sql_construct6(int until,
             }
             case T_ARRAY_EXISTS:
             {
-                Oid indexType = get_table_index_type(yylval.wdatum.datum);
+                Oid indexType = get_table_index_type(yylval.wdatum.datum, &tableof_func_dno);
                 if (indexType == VARCHAROID) {
                     appendStringInfo(&ds, "ARRAY_VARCHAR_EXISTS(");
                     CastArrayNameToArrayFunc(&ds, yylval.wdatum.idents);
@@ -6909,7 +7312,7 @@ read_sql_construct6(int until,
             }
             case T_ARRAY_PRIOR:
             {
-                Oid indexType = get_table_index_type(yylval.wdatum.datum);
+                Oid indexType = get_table_index_type(yylval.wdatum.datum, &tableof_func_dno);
                 if (indexType == VARCHAROID) {
                     appendStringInfo(&ds, "ARRAY_VARCHAR_PRIOR(");
                     CastArrayNameToArrayFunc(&ds, yylval.wdatum.idents);
@@ -6935,7 +7338,7 @@ read_sql_construct6(int until,
             }
             case T_ARRAY_NEXT:
             {
-                Oid indexType = get_table_index_type(yylval.wdatum.datum);
+                Oid indexType = get_table_index_type(yylval.wdatum.datum, &tableof_func_dno);
                 if (indexType == VARCHAROID) {
                     appendStringInfo(&ds, "ARRAY_VARCHAR_NEXT(");
                     CastArrayNameToArrayFunc(&ds, yylval.wdatum.idents);
@@ -7083,19 +7486,35 @@ read_sql_construct6(int until,
                 char tableName1[tablevar_namelen] = {0};
                 idents = yylval.wdatum.idents;
                 if (idents == NIL) {
-                    AddNamespaceIfPkgVar(yylval.wdatum.ident);
+                    AddNamespaceIfPkgVar(yylval.wdatum.ident, save_IdentifierLookup);
                 }
                 copy_table_var_indents(tableName1, yylval.wdatum.ident, tablevar_namelen);
                 PLpgSQL_datum* datum = yylval.wdatum.datum;
+                int var_dno = yylval.wdatum.dno;
+                if (datum->dtype == PLPGSQL_DTYPE_VAR) {
+                    check_autonomous_nest_tablevar((PLpgSQL_var*)datum);
+                }
                 tok = yylex();
                 if('(' == tok) {
                     push_array_parse_stack(&context, parenlevel, ARRAY_ACCESS);
+                    tableof_index_list = lappend_int(tableof_index_list, ((PLpgSQL_var*)datum)->dno);
                 } else if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && K_MULTISET == tok) {
                     Oid typeOid = get_table_type(datum);
                     read_multiset(&ds, tableName1, typeOid);
                     ds_changed = true;
                     break;
+                } else {
+                    PLpgSQL_var* var = (PLpgSQL_var*)datum;
+                    if (OidIsValid(var->datatype->tableOfIndexType) && 
+                        (',' == tok || ')' == tok || ';' == tok)) {
+                        is_have_tableof_index_var = true;
+                        /* tableof_var_dno is  only used for args */
+                        if (',' == tok || ')' == tok) {
+                            tableof_var_dno = var_dno;
+                        }
+                    }
                 }
+
                 curloc = yylloc;
                 plpgsql_push_back_token(tok);
                 if (list_length(idents) >= 3) {
@@ -7174,6 +7593,36 @@ read_sql_construct6(int until,
                 }
             }
             case T_TABLE:
+            {
+                int dno = yylval.wdatum.datum->dno;
+                PLpgSQL_var *var = (PLpgSQL_var *)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[dno];
+                /* table of index by only support: a = a(); */
+                if ((OidIsValid(var->datatype->tableOfIndexType) && var->nest_table == NULL) ||
+                   	(var->nest_table != NULL && var->isIndexByTblOf)) {
+                    TokenData* temptokendata = build_token_data(tok);
+                    int first_tok = yylex();
+                    DList* tokenstack = NULL;
+                    TokenData* temptokendata1 = build_token_data(first_tok);
+                    tokenstack = dlappend(tokenstack, temptokendata1);
+                    if (first_tok != '(') {
+                        yyerror("table of index by does not support syntax");
+                    }
+
+                    int second_tok = yylex();
+                    temptokendata1 = build_token_data(second_tok);
+                    if (second_tok != ')') {
+                        yyerror("table of index by does not support syntax");
+                    }
+                    tokenstack = dlappend(tokenstack, temptokendata1);
+                    /* restore yylex */
+                    push_back_token_stack(tokenstack);
+                    yylloc = temptokendata->lloc;
+                    yylval = temptokendata->lval;
+                    u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng = temptokendata->leng;
+                }
+                ds_changed = construct_array_start(&ds, &context, var->datatype, &tok, parenlevel, loc);
+                break;
+            }
             case T_VARRAY:
             {
                 if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
@@ -7210,7 +7659,7 @@ read_sql_construct6(int until,
                     break;
                 }
             case T_WORD:
-                AddNamespaceIfPkgVar(yylval.word.ident);
+                AddNamespaceIfPkgVar(yylval.word.ident, save_IdentifierLookup);
                 ds_changed = construct_word(&ds, &context, &tok, parenlevel, loc);
                 break;
             case T_CWORD:
@@ -7298,6 +7747,17 @@ read_sql_construct6(int until,
         oldCxt = MemoryContextSwitchTo(curr_compile->compile_cxt);
     }
 
+    if (tableof_index_list != NULL && tableof_func_dno != -1) {
+        ListCell* cell = NULL;
+        foreach (cell, tableof_index_list) {
+            int dno = lfirst_int(cell);
+            if (dno != tableof_func_dno) {
+                yyerror("do not support more than 2 table of index by variables call functions in an expr");
+            }
+        }
+    }
+    list_free_ext(tableof_index_list);
+
     expr = (PLpgSQL_expr *)palloc0(sizeof(PLpgSQL_expr));
     expr->dtype			= PLPGSQL_DTYPE_EXPR;
     expr->query			= pstrdup(ds.data);
@@ -7306,6 +7766,11 @@ read_sql_construct6(int until,
     expr->ns			= plpgsql_ns_top();
     expr->isouttype 		= false;
     expr->idx			= (uint32)-1;
+    expr->out_param_dno = -1;
+    expr->is_have_tableof_index_var = is_have_tableof_index_var;
+    expr->tableof_var_dno = tableof_var_dno;
+    expr->is_have_tableof_index_func = tableof_func_dno != -1 ? true : false;
+    expr->tableof_func_dno = tableof_func_dno;
 
     pfree_ext(ds.data);
 
@@ -7835,7 +8300,6 @@ read_datatype(int tok)
     plpgsql_append_source_text(&ds, startlocation, yylloc);
     type_name = ds.data;
 
-    // do such change just for DTS2021090817171
     if (type_name[0] == '\0') {
 #ifndef ENABLE_MULTIPLE_NODES
         if (u_sess->attr.attr_common.plsql_show_all_error) {
@@ -8059,6 +8523,10 @@ make_execsql_stmt(int firsttoken, int location)
                     continue;
                 } else if (PLPGSQL_DTYPE_REC == datum->dtype) {
                     rec_data = (PLpgSQL_rec*)datum;
+                    if (rec_data->tupdesc == NULL) {
+                        yyerror("unsupported insert into table from record type without desc, "
+                                "may need set behavior_compat_options to allow_procedure_compile_check.");
+                    }
                     continue;
                 }
 
@@ -8301,10 +8769,13 @@ make_execsql_stmt(int firsttoken, int location)
     expr->paramnos		= NULL;
     expr->ns			= plpgsql_ns_top();
     expr->idx			= (uint32)-1;
+    expr->out_param_dno = -1;
     pfree_ext(ds.data);
 
     check_sql_expr(expr->query, location, 0);
-
+    if (firsttoken == K_SELECT && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ALLOW_PROCEDURE_COMPILE_CHECK) {
+        (void)getCursorTupleDesc(expr, false, true);
+    }
     execsql = (PLpgSQL_stmt_execsql *)palloc(sizeof(PLpgSQL_stmt_execsql));
     execsql->cmd_type = PLPGSQL_STMT_EXECSQL;
     execsql->lineno  = plpgsql_location_to_lineno(location);
@@ -8411,7 +8882,7 @@ read_fetch_direction(void)
         /* empty direction */
         check_FROM = false;
     }
-    else if (tok == T_DATUM)
+    else if (tok == T_DATUM || tok == T_PACKAGE_VARIABLE)
     {
         /* Assume there's no direction clause and tok is a cursor name */
         plpgsql_push_back_token(tok);
@@ -8580,7 +9051,13 @@ make_return_stmt(int location)
              * Note that a well-formed expression is _required_ here;
              * anything else is a compile-time error.
              */
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                newp->retvarno = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->out_param_varno;
+            }
             newp->expr = read_sql_expression(';', ";");
+            if (newp->expr->is_have_tableof_index_var) {
+                yyerror("table of index type is not supported as function return type.");
+            }
         }
     }
 
@@ -8627,6 +9104,7 @@ make_return_next_stmt(int location)
         {
             case T_DATUM:
                 if (yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_ROW ||
+                    yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_RECORD ||
                     yylval.wdatum.datum->dtype == PLPGSQL_DTYPE_REC)
                     newp->retvarno = yylval.wdatum.dno;
                 else {
@@ -8732,6 +9210,28 @@ CopyNameOfDatum(PLwdatum *wdatum)
     return NameListToString(wdatum->idents);
 }
 
+static void check_record_nest_tableof_index(PLpgSQL_datum* datum)
+{
+    if (datum->dtype == PLPGSQL_DTYPE_RECORD || datum->dtype == PLPGSQL_DTYPE_ROW) {
+        PLpgSQL_row* row = (PLpgSQL_row*)datum;
+        for (int i = 0; i < row->nfields; i++) {
+            PLpgSQL_datum* row_element = NULL; 
+            if (row->ispkg) {
+                row_element = (PLpgSQL_datum*)(row->pkg->datums[row->varnos[i]]);
+            } else {
+                row_element = (PLpgSQL_datum*)(u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[row->varnos[i]]);
+            }
+            /* Notice: do not deal record nest record nest table of index, because table of index type can not get */
+            if (row_element->dtype == PLPGSQL_DTYPE_VAR) {
+                PLpgSQL_var* var_element = (PLpgSQL_var*)row_element;
+                if (OidIsValid(var_element->datatype->tableOfIndexType)) {
+                    yyerror("record nested table of index variable do not support entire assign");
+                }
+            } 
+        }
+    }
+}
+
 static void
 check_assignable(PLpgSQL_datum *datum, int location)
 {
@@ -8791,9 +9291,17 @@ check_assignable(PLpgSQL_datum *datum, int location)
     }
 }
 
-static Oid get_table_index_type(PLpgSQL_datum* datum)
+static Oid get_table_index_type(PLpgSQL_datum* datum, int *tableof_func_dno)
 {
     PLpgSQL_var* var = (PLpgSQL_var*)datum;
+    if (OidIsValid(var->datatype->tableOfIndexType) && tableof_func_dno != NULL) {
+        if (*tableof_func_dno == -1) {
+            *tableof_func_dno = var->dno;
+        } else if (*tableof_func_dno != var->dno) {
+            yyerror("do not support more than 2 table of index by variables call functions in an expr");
+        }
+    }
+   
     return var->datatype->tableOfIndexType;
 }
 
@@ -8819,6 +9327,30 @@ static void check_bulk_into_type(PLpgSQL_row* row)
             yyerror(errormsg);
         }
     }
+}
+
+static void check_tableofindex_args(int tableof_var_dno, Oid argtype)
+{
+    if (tableof_var_dno < 0 || u_sess->plsql_cxt.curr_compile_context == NULL) {
+        return ;
+    }
+    PLpgSQL_datum* tableof_var_datum = u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[tableof_var_dno];
+    if (tableof_var_datum == NULL) {
+        return ;
+    } else if (tableof_var_datum->dtype == PLPGSQL_DTYPE_VAR) {
+        PLpgSQL_var* var = (PLpgSQL_var*)tableof_var_datum;
+        Oid base_oid = InvalidOid;
+        Oid indexby_oid = InvalidOid;
+        
+        if (isTableofType(argtype, &base_oid, &indexby_oid)) {
+            if (var->datatype->tableOfIndexType != indexby_oid ||
+                var->datatype->typoid != base_oid) {
+                yyerror("procedure table of arg types not match");
+            }
+        }
+    } else if (tableof_var_datum->dtype == PLPGSQL_DTYPE_RECORD) {
+        check_record_nest_tableof_index(tableof_var_datum);
+    }  
 }
 
 static void check_table_index(PLpgSQL_datum* datum, char* funcName)
@@ -8948,14 +9480,13 @@ static AttrNumber get_assign_attrno(PLpgSQL_datum* target,  char* attrname)
     if (elemtupledesc == NULL){
         const char* message = "array element type is not composite in assignment";
         InsertErrorMessage(message, plpgsql_yylloc);
-        ereport(errstate,
+        ereport(ERROR,
             (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
                 errmodule(MOD_PLSQL),
                 errmsg("array element type is not composite in assignment"),
                 errdetail("array variable \"%s\" must be composite when assign value to attibute", var->refname),
                 errcause("incorrectly referencing variables"),
                 erraction("modify assign variable")));
-        u_sess->plsql_cxt.have_error = true;
     }
 
 	/* search the matched attribute */
@@ -9143,6 +9674,9 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, bool bulk_c
     {
         *strict = true;
         tok = yylex();
+    } else if (strict && bulk_collect) {
+        /* bulk into target can be assigned null */
+        *strict = false;
     }
 
     /*
@@ -9909,10 +10443,31 @@ static PLpgSQL_var* plpgsql_build_nested_variable(PLpgSQL_var *nest_table, bool 
     build_nest_table = (PLpgSQL_var *)plpgsql_build_variable(nestname, lineno, new_var_type, true);
     build_nest_table->isconst = isconst;
     build_nest_table->default_val = NULL;
+    build_nest_table->nest_layers = nest_table->nest_layers;
     if (nest_table->nest_table != NULL) {
         build_nest_table->nest_table = plpgsql_build_nested_variable(nest_table->nest_table, isconst, name, lineno);
     }
     return build_nest_table;
+}
+
+static int get_nest_tableof_layer(PLpgSQL_var *var, const char *typname, int errstate)
+{
+    int depth = 0;
+    while (var != NULL) {
+        depth++;
+        var = var->nest_table;
+    }
+    if (depth + 1 > MAXDIM) {
+        ereport(errstate,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmodule(MOD_PLSQL),
+                errmsg("Layer number of nest tableof type exceeds the maximum allowed."),
+                errdetail("Define nest tableof type \"%s\" layers (%d) exceeds the maximum allowed (%d).", typname, depth + 1, MAXDIM),
+                errcause("too many nested layers"),
+                erraction("check define of table of type")));
+        u_sess->plsql_cxt.have_error = true;
+    }
+    return depth + 1;
 }
 
 static void getPkgFuncTypeName(char* typname, char** functypname, char** pkgtypname)
@@ -10246,6 +10801,10 @@ static PLpgSQL_type* build_type_from_record_var(int dno)
         /* we have already build one, just take it from datums. */
         if (ns->itemtype == PLPGSQL_NSTYPE_COMPOSITE) {
             newp = (PLpgSQL_type*)(u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno]);
+            /* build a new one, avoid conflict by array or table of */
+            newp = plpgsql_build_datatype(newp->typoid, -1, InvalidOid);
+            newp->dtype = PLPGSQL_DTYPE_COMPOSITE;
+            newp->ttype = PLPGSQL_TTYPE_ROW;
         } else {
             ereport(errstate,
                 (errcode(ERRCODE_DUPLICATE_OBJECT),
@@ -10387,18 +10946,26 @@ static void  plpgsql_build_package_array_type(const char* typname,Oid elemtypoid
         }
     }
 
-    if (arraytype == TYPCATEGORY_TABLEOF || arraytype == TYPCATEGORY_TABLEOF_VARCHAR) {
+    if (arraytype == TYPCATEGORY_TABLEOF ||
+        arraytype == TYPCATEGORY_TABLEOF_VARCHAR ||
+        arraytype == TYPCATEGORY_TABLEOF_INTEGER) {
         elemtypoid = get_array_type(elemtypoid);
         typtyp = TYPTYPE_TABLEOF;
     } else {
         typtyp = TYPTYPE_BASE;
     }
+    Oid ownerId = InvalidOid;
+    ownerId = GetUserIdFromNspId(pkgNamespaceOid);
+    if (!OidIsValid(ownerId)) {
+        ownerId = GetUserId();
+    }
+
     Oid typoid = TypeCreate(InvalidOid, /* force the type's OID to this */
         casttypename,               /* Array type name */
         pkgNamespaceOid,               /* Same namespace as parent */
         InvalidOid,                 /* Not composite, no relationOid */
         0,                          /* relkind, also N/A here */
-        GetUserId(),                    /* owner's ID */
+        ownerId,                    /* owner's ID */
         -1,                         /* Internal size (varlena) */
         typtyp,               /* Not composite - typelem is */
         arraytype,          /* type-category (array or table of) */
@@ -10651,10 +11218,30 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
                  parser_errposition(yylloc)));
     }
 
+    bool isPkgCur = cursor->ispkg &&
+        (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL
+        || u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid != cursor->pkg->pkg_oid);
+    if (isPkgCur) {
+        ereport(errstate,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("package cursor with arguments is only supported to be opened in the same package."),
+            errdetail("cursor \"%s.%s\" is only supported to be opened in the package \"%s\"",
+                cursor->pkg->pkg_signature,
+                cursor->varname == NULL ? cursor->refname : cursor->varname,
+                cursor->pkg->pkg_signature),
+            errcause("feature not supported"),
+            erraction("define this cursor without arguments or open this cursor in same package"),
+            parser_errposition(yylloc)));
+    }
+
     /*
      * Read the arguments, one by one.
      */
-    row = (PLpgSQL_row *) u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[cursor->cursor_explicit_argrow];
+    if (cursor->ispkg) {
+        row = (PLpgSQL_row *) cursor->pkg->datums[cursor->cursor_explicit_argrow];
+    } else {
+        row = (PLpgSQL_row *) u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[cursor->cursor_explicit_argrow];
+    }
     argv = (char **) palloc0(row->nfields * sizeof(char *));
 
     for (argc = 0; argc < row->nfields; argc++)
@@ -10787,6 +11374,7 @@ read_cursor_args(PLpgSQL_var *cursor, int until, const char *expected)
     expr->paramnos		= NULL;
     expr->ns            = plpgsql_ns_top();
     expr->idx			= (uint32)-1;
+    expr->out_param_dno = -1;
     pfree_ext(ds.data);
 
     /* Next we'd better find the until token */
@@ -11026,6 +11614,7 @@ make_callfunc_stmt_no_arg(const char *sqlstart, int location, bool withsemicolon
     expr->paramnos = NULL;
     expr->ns = plpgsql_ns_top();
     expr->idx = (uint32)-1;
+    expr->out_param_dno = -1;
 
     PLpgSQL_stmt_perform *perform = NULL;
     perform = (PLpgSQL_stmt_perform*)palloc0(sizeof(PLpgSQL_stmt_perform));
@@ -11101,6 +11690,7 @@ parse_lob_open_close(int location)
 		expr->paramnos = NULL;
 		expr->ns = plpgsql_ns_top();
         expr->idx = (uint32)-1;
+        expr->out_param_dno = -1;
 
 		perform = (PLpgSQL_stmt_perform*)palloc0(sizeof(PLpgSQL_stmt_perform));
 		perform->cmd_type = PLPGSQL_STMT_PERFORM;
@@ -11219,12 +11809,16 @@ static void AddNamespaceIfNeed(int dno, char* ident)
     return;
 }
 
-static void AddNamespaceIfPkgVar(const char* ident)
+static void AddNamespaceIfPkgVar(const char* ident, IdentifierLookup save_IdentifierLookup)
 {
     if (getCompileStatus() != COMPILIE_PKG_FUNC) {
         return;
     }
 
+    /* only declare session need to add */
+    if (save_IdentifierLookup != IDENTIFIER_LOOKUP_DECLARE) {
+        return;
+    }
 
     if (ident == NULL) {
         yyerror("null string when add package variable to procedure namespace");
@@ -11373,6 +11967,17 @@ static bool PkgVarNeedCast(List* idents)
 
 }
 
+static void check_autonomous_nest_tablevar(PLpgSQL_var* var)
+{
+    if (unlikely(var->ispkg && var->nest_table != NULL &&
+                 u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL &&
+                 u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->is_autonomous)) {
+        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                           errmsg("Un-support feature: nest tableof variable %s not support pass through autonm function",
+                                  var->varname)));
+    }
+}
+
 static void SetErrorState() 
 {
 #ifndef ENABLE_MULTIPLE_NODES
@@ -11384,4 +11989,85 @@ static void SetErrorState()
 #else
         errstate = ERROR;
 #endif
-} 
+}
+
+static bool need_build_row_for_func_arg(PLpgSQL_rec **rec, PLpgSQL_row **row, int out_arg_num, int all_arg, int *varnos, char *p_argmodes)
+{
+    /* out arg number > 1 should build a row */
+    if (out_arg_num > 1) {
+        return true;
+    }
+
+    /* no row or rec, should build a row */
+    if (*rec == NULL && *row == NULL) {
+        return true;
+    }
+
+    /* no out arg, need not build */
+    if (out_arg_num == 0) {
+        return false;
+    }
+  
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
+    PLpgSQL_datum *tempDatum = NULL;
+    for (int i = 0; i < all_arg; i++) {
+        if (p_argmodes[i] == 'i') {
+            continue;
+        }
+
+        /* out param no destination */
+        if (varnos[i] == -1) {
+            *rec = NULL;
+            *row = NULL;
+            return false;
+        }
+
+        tempDatum = curr_compile->plpgsql_Datums[varnos[i]];
+        /* the out param is the rec or row */
+        if (tempDatum == (PLpgSQL_datum*)(*rec) || tempDatum == (PLpgSQL_datum*)(*row)) {
+            return false;
+        }
+        /* the out param is scalar, need build row */
+        if (tempDatum->dtype == PLPGSQL_DTYPE_VAR
+            || tempDatum->dtype == PLPGSQL_DTYPE_RECFIELD
+            || tempDatum->dtype == PLPGSQL_DTYPE_ASSIGNLIST) {
+            return true;
+        }
+
+        /* need not build a new row, but need to replace the correct row */
+        if (tempDatum->dtype == PLPGSQL_DTYPE_ROW || tempDatum->dtype == PLPGSQL_DTYPE_RECORD) {
+            *row = (PLpgSQL_row *)tempDatum;
+            return false;
+        }
+        if (tempDatum->dtype == PLPGSQL_DTYPE_REC) {
+            *rec = (PLpgSQL_rec *)tempDatum;
+            return false;
+        }
+
+        /* arrive here, means out param invalid, set row and rec to null*/
+        *rec = NULL;
+        *row = NULL;
+        return false;
+    }
+
+    /* should not arrive here */
+    *rec = NULL;
+    *row = NULL;
+    return false;
+}
+
+#ifndef ENABLE_MULTIPLE_NODES
+static void BuildForQueryVariable(PLpgSQL_expr* expr, PLpgSQL_row **row, PLpgSQL_rec **rec,
+    const char* refname, int lineno)
+{
+    TupleDesc desc = getCursorTupleDesc(expr, true);
+    if (desc == NULL || desc->natts == 0 || checkAllAttrName(desc)) {
+        PLpgSQL_type dtype;
+        dtype.ttype = PLPGSQL_TTYPE_REC;
+        *rec = (PLpgSQL_rec *)
+        plpgsql_build_variable(refname, lineno, &dtype, true);
+    } else {
+        *row = build_row_from_tuple_desc(refname, lineno, desc);
+    }
+}
+#endif

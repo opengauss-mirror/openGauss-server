@@ -24,6 +24,7 @@
 #include "codegen/gscodegen.h"
 #include <unordered_set>
 
+#ifdef ENABLE_LLVM_COMPILE
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
@@ -50,6 +51,7 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm-c/Core.h"
+#endif
 
 #include "pgxc/pgxc.h"
 #include "utils/memutils.h"
@@ -552,7 +554,11 @@ PointerType* GsCodeGen::getPtrType(Oid TypeID)
 Type* GsCodeGen::getType(const char* name)
 {
     Assert(NULL != m_currentModule && NULL != name);
+#if LLVM_MAJOR_VERSION == 12
+    return StructType::getTypeByName(context(), StringRef(name, strlen(name)));
+#else
     return m_currentModule->getTypeByName(StringRef(name, strlen(name)));
+#endif
 }
 
 PointerType* GsCodeGen::getPtrType(const char* name)
@@ -982,7 +988,6 @@ void CodeGenProcessInitialize()
         PG_END_TRY();
     }
 }
-
 
 /**
  * @Description : Clean up LLVM enviroment resource

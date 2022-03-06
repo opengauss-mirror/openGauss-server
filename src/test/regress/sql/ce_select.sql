@@ -50,6 +50,8 @@ INSERT INTO creditcard_info3 VALUES (3, 'xiaoli','xiaoli', 621187780);
 explain INSERT INTO creditcard_info3 VALUES (3, 'xiaoli','xiaoli', 621187780);
 
 --支持
+select * from creditcard_info2 where regression.public.creditcard_info2.name1 = (select name1 from creditcard_info3 order by id_number limit 1);
+select * from creditcard_info2 where public.creditcard_info2.name1 = (select name1 from creditcard_info3 order by id_number limit 1);
 select * from creditcard_info2 where name1 = (select name1 from creditcard_info3 order by id_number limit 1);
 select * from (select * from creditcard_info3) where credit_card = 62176500;
 select name2 from (select * from creditcard_info3) group by name1 ,name2 having name1 = 'joe';

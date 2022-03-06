@@ -139,6 +139,7 @@ typedef struct tupleDesc {
     int32 tdtypmod;             /* typmod for tuple type */
     bool tdhasoid;              /* tuple has oid attribute in its header */
     int tdrefcount;             /* reference count, or -1 if not counting */
+    bool tdhasuids;             /* tuple has uid attribute in its header */
 } * TupleDesc;
 
 /* Accessor for the i'th attribute of tupdesc. */
@@ -191,5 +192,7 @@ extern void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute sou
 
 extern char GetGeneratedCol(TupleDesc tupdesc, int atti);
 
+extern TupleConstr *TupleConstrCopy(const TupleDesc tupdesc);
+extern TupInitDefVal *tupInitDefValCopy(TupInitDefVal *pInitDefVal, int nAttr);
 #endif /* TUPDESC_H */
 

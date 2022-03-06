@@ -54,7 +54,6 @@ void CKMSMessage::init()
         tde_message_mem = AllocSetContextCreate(g_instance.cache_cxt.global_cache_mem, "TDE_MESSAGE_CONTEXT",
             ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
     }
-    load_user_info();
 }
 
 void CKMSMessage::clear()
@@ -107,6 +106,7 @@ char* CKMSMessage::read_kms_info_from_file()
     char* buffer = NULL;
     int path_len = 0;
     int json_len = 0;
+    int max_json_len = 1024;
     errno_t rc = EOK;
 
     data_directory = g_instance.attr.attr_common.data_directory;
@@ -129,6 +129,14 @@ char* CKMSMessage::read_kms_info_from_file()
 
     json_file.seekg(0, ios::end);
     json_len = json_file.tellg();
+    if (json_len > max_json_len) {
+        json_file.close();
+        ereport(ERROR,
+            (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FILE_READ_FAILED),
+                errmsg("kms_iam_info.json file length is bigger than max_len"),
+                    errdetail("file path: $TDE_PATH/tde_config/kms_iam_info.json"), errcause("file context is wrong"),
+                        erraction("check the kms_iam_info.json file")));
+    }
     json_file.seekg(0, ios::beg);
     buffer = (char*)palloc0(json_len + 1);
     json_file.read(buffer, json_len + 1);

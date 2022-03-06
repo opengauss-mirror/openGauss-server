@@ -1,0 +1,1487 @@
+create or replace function test_without_commit() return void
+as
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+	insert into test_commit select 2;
+end;
+/
+call test_without_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_without_commit() line 3 at SQL statement
+ test_without_commit 
+---------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a 
+---
+ 2
+(1 row)
+
+create or replace function test_empty_sp() return void
+as
+begin
+	insert into test_commit select 1;
+	insert into test_commit select 2;
+	insert into test_commit select 3;
+end;
+/
+call test_empty_sp();
+ test_empty_sp 
+---------------
+ 
+(1 row)
+
+select * from test_commit;
+ a 
+---
+ 2
+ 1
+ 2
+ 3
+(4 rows)
+
+drop table test_commit;
+create or replace function test_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	commit;
+end;
+/
+call test_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit() line 3 at SQL statement
+ test_commit 
+-------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_option() return void
+shippable
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	commit;
+end;
+/
+call test_commit_insert_option();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_option() line 3 at SQL statement
+ test_commit_insert_option 
+---------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_delete() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	commit;
+end;
+/
+call test_commit_insert_delete();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_delete() line 3 at SQL statement
+ test_commit_insert_delete 
+---------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 2 | 2
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_update() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	update test_commit set b = 3 where a = 1;
+	commit;
+end;
+/
+call test_commit_insert_update();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_update() line 3 at SQL statement
+ test_commit_insert_update 
+---------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 3
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_update_delete() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	update test_commit set b = 3 where a = 1;
+	delete from test_commit where a = 1;
+	commit;
+end;
+/
+call test_commit_insert_update_delete();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_update_delete() line 3 at SQL statement
+ test_commit_insert_update_delete 
+----------------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+(0 rows)
+
+drop table test_commit;
+create or replace function test_commit_insert_delete_update() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	update test_commit set b = 3 where a = 2;
+	commit;
+end;
+/
+call test_commit_insert_delete_update();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_delete_update() line 3 at SQL statement
+ test_commit_insert_delete_update 
+----------------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 2 | 3
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	commit;
+	insert into test_commit select 2, 2;
+	commit;
+end;
+/
+call test_commit_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_commit() line 3 at SQL statement
+ test_commit_commit 
+--------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+(2 rows)
+
+drop table test_commit;
+create or replace function test_commit_commit1() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	commit;
+	update test_commit set b = 3 where a = 2;
+	delete from test_commit where a = 1;
+	commit;
+end;
+/
+call test_commit_commit1();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_commit1() line 3 at SQL statement
+ test_commit_commit1 
+---------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 2 | 3
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_rollback() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	commit;
+	insert into test_commit select 2, 2;
+	rollback;
+end;
+/
+call test_commit_rollback();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_rollback() line 3 at SQL statement
+ test_commit_rollback 
+----------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_rollback1() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	commit;
+	update test_commit set b = 3 where a = 2;
+	delete from test_commit where a = 1;
+	rollback;
+end;
+/
+call test_commit_rollback1();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_rollback1() line 3 at SQL statement
+ test_commit_rollback1 
+-----------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+(2 rows)
+
+drop table test_commit;
+create or replace function test_rollback_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	rollback;
+	drop table if exists test_commit;
+	create table test_commit(a int, b int);
+	insert into test_commit select 3, 3;
+	insert into test_commit select 4, 4;
+	insert into test_commit select 5, 5;
+	update test_commit set b = 6 where a = 5;
+	delete from test_commit where a = 3;
+	commit;
+end;
+/
+call test_rollback_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_rollback_commit() line 3 at SQL statement
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_rollback_commit() line 8 at SQL statement
+ test_rollback_commit 
+----------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 4 | 4
+ 5 | 6
+(2 rows)
+
+drop table test_commit;
+create or replace function test_commit_insert_exception_rollback() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	commit;
+	raise exception 'raise exception after commit';
+exception
+    when others then
+	insert into test_commit select 2, 2;
+	rollback;
+end;
+/
+call test_commit_insert_exception_rollback();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_exception_rollback() line 3 at SQL statement
+ test_commit_insert_exception_rollback 
+---------------------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_exception_commit_rollback() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	commit;
+	raise exception 'raise exception after commit';
+exception
+    when others then
+	insert into test_commit select 2, 2;
+	commit;
+	rollback;
+end;
+/
+call test_commit_insert_exception_commit_rollback();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_exception_commit_rollback() line 3 at SQL statement
+ test_commit_insert_exception_commit_rollback 
+----------------------------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+(2 rows)
+
+drop table test_commit;
+create or replace function test_commit_insert_raise_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	commit;
+	RAISE EXCEPTION 'After commit'; 
+end;
+/
+call test_commit_insert_raise_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_raise_commit() line 3 at SQL statement
+ERROR:  After commit
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_delete_raise_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	commit;
+	RAISE EXCEPTION 'After commit'; 
+end;
+/
+call test_commit_insert_delete_raise_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_delete_raise_commit() line 3 at SQL statement
+ERROR:  After commit
+select * from test_commit;
+ a | b 
+---+---
+ 2 | 2
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_update_raise_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	update test_commit set b = 3 where a = 1;
+	commit;
+	RAISE EXCEPTION 'After commit'; 
+end;
+/
+call test_commit_insert_update_raise_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_update_raise_commit() line 3 at SQL statement
+ERROR:  After commit
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 3
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_update_delete_raise_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	update test_commit set b = 3 where a = 1;
+	delete from test_commit where a = 1;
+	commit;
+	RAISE EXCEPTION 'After commit'; 
+end;
+/
+call test_commit_insert_update_delete_raise_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_update_delete_raise_commit() line 3 at SQL statement
+ERROR:  After commit
+select * from test_commit;
+ a | b 
+---+---
+(0 rows)
+
+drop table test_commit;
+create or replace function test_commit_insert_delete_update_raise_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	update test_commit set b = 3 where a = 2;
+	commit;
+	RAISE EXCEPTION 'After commit'; 
+end;
+/
+call test_commit_insert_delete_update_raise_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_delete_update_raise_commit() line 3 at SQL statement
+ERROR:  After commit
+select * from test_commit;
+ a | b 
+---+---
+ 2 | 3
+(1 row)
+
+drop table test_commit;
+create or replace function test_commit_insert_commit_raise() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	RAISE EXCEPTION 'Before commit'; 
+	commit;
+end;
+/
+call test_commit_insert_commit_raise();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_commit_raise() line 3 at SQL statement
+ERROR:  Before commit
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_commit_insert_delete_commit_raise() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	RAISE EXCEPTION 'Before commit'; 
+	commit;
+end;
+/
+call test_commit_insert_delete_commit_raise();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_delete_commit_raise() line 3 at SQL statement
+ERROR:  Before commit
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_commit_insert_update_commit_raise() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	update test_commit set b = 3 where a = 1;
+	RAISE EXCEPTION 'Before commit'; 
+	commit; 
+end;
+/
+call test_commit_insert_update_commit_raise();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_update_commit_raise() line 3 at SQL statement
+ERROR:  Before commit
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_commit_insert_update_delete_commit_raise() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	update test_commit set b = 3 where a = 1;
+	delete from test_commit where a = 1;
+	RAISE EXCEPTION 'Before commit'; 
+	commit;
+end;
+/
+call test_commit_insert_update_delete_commit_raise();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_update_delete_commit_raise() line 3 at SQL statement
+ERROR:  Before commit
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_commit_insert_delete_update_commit_raise() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	update test_commit set b = 3 where a = 2;
+	RAISE EXCEPTION 'Before commit'; 
+	commit;
+end;
+/
+call test_commit_insert_delete_update_commit_raise();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_insert_delete_update_commit_raise() line 3 at SQL statement
+ERROR:  Before commit
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_exception_commit() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	update test_commit set b = 3 where a = 2;
+	commit;
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_exception_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_exception_commit() line 3 at SQL statement
+ test_exception_commit 
+-----------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 2 | 3
+(1 row)
+
+drop table test_commit;
+create or replace function test_exception_commit_commit_raise() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	update test_commit set b = 3 where a = 2;
+	commit;
+	RAISE EXCEPTION 'After commit'; 
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_exception_commit_commit_raise();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_exception_commit_commit_raise() line 3 at SQL statement
+ERROR:  (After commit)
+select * from test_commit;
+ a | b 
+---+---
+ 2 | 3
+(1 row)
+
+drop table test_commit;
+create or replace function test_exception_commit_raise_commit() return void
+as
+begin
+drop table if exists test_commit; 
+create table test_commit(a int, b int);
+insert into test_commit select 1, 1;
+insert into test_commit select 2, 2;
+delete from test_commit where a = 1;
+update test_commit set b = 3 where a = 2;
+RAISE EXCEPTION 'After commit'; 
+commit;
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_exception_commit_raise_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_exception_commit_raise_commit() line 3 at SQL statement
+ERROR:  (After commit)
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_gg_1() return void
+as
+begin
+	drop table if exists test_commit; 
+	create table test_commit(a int, b int);
+	insert into test_commit select 1, 1;
+	insert into test_commit select 2, 2;
+	delete from test_commit where a = 1;
+	update test_commit set b = 3 where a = 2;
+	commit;
+	insert into test_commit select 3, 3;
+	RAISE EXCEPTION 'After commit'; 
+EXCEPTION
+    when raise_exception then
+		rollback;
+		insert into test_commit select 4, 4;
+        commit;		
+end;
+/
+call test_gg_1();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_gg_1() line 3 at SQL statement
+ test_gg_1 
+-----------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 2 | 3
+ 4 | 4
+(2 rows)
+
+drop table test_commit;
+create or replace function test_commit_exception() return void
+is
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+	insert into test_commit select 1;
+	commit;
+	delete from test_commit;
+	commit;
+	update test_commit set a=3;
+	commit;
+exception
+	WHEN OTHERS THEN    
+		insert into test_commit select 2;
+		commit;
+end;
+/
+call test_commit_exception();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_exception() line 3 at SQL statement
+ test_commit_exception 
+-----------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a 
+---
+(0 rows)
+
+drop table test_commit;
+create or replace function test_commit2() return void
+is
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+    FOR i IN REVERSE 3..0 LOOP
+	insert into test_commit select i;
+	commit;
+    END LOOP;
+    FOR i IN REVERSE 2..4 LOOP
+	update test_commit set a=i;
+	commit;
+    END LOOP;
+exception
+WHEN OTHERS THEN   
+--    FOR i IN REVERSE 200...101 LOOP
+	insert into test_commit select 4;
+--    END LOOP; 
+    commit;
+end;
+/
+call test_commit2();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit2() line 3 at SQL statement
+ test_commit2 
+--------------
+ 
+(1 row)
+
+select * from test_commit;
+ a 
+---
+ 3
+ 2
+ 1
+ 0
+(4 rows)
+
+drop table test_commit;
+create or replace function test_commit3() return void
+is
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+	insert into test_commit select 1;
+	commit;
+    call test_commit2();
+	update test_commit set a=2;
+	commit;
+exception
+WHEN OTHERS THEN   
+	insert into test_commit select 3;
+    commit;
+end;
+/
+call test_commit3();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit3() line 3 at SQL statement
+ test_commit3 
+--------------
+ 
+(1 row)
+
+select * from test_commit;
+ a 
+---
+ 3
+ 2
+ 1
+ 0
+ 3
+(5 rows)
+
+drop table test_commit;
+create or replace function test_rollback_with_exception() return void
+as
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+	insert into test_commit select 1;
+	rollback;
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_rollback_with_exception();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_rollback_with_exception() line 3 at SQL statement
+ test_rollback_with_exception 
+------------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_nest_function_without_commit() return void
+as
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+    insert into test_commit select 3;
+	commit;
+    test_without_commit();
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_nest_function_without_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_nest_function_without_commit() line 3 at SQL statement
+ test_nest_function_without_commit 
+-----------------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a 
+---
+ 2
+(1 row)
+
+drop table test_commit;
+create or replace function test_nest_function() return void
+as
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+    insert into test_commit select 3;
+	commit;
+    test_commit();
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_nest_function();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_nest_function() line 3 at SQL statement
+ test_nest_function 
+--------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+drop table test_commit;
+create or replace function test_nest_function1() return void
+as
+begin
+    test_commit();
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_nest_function1();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit() line 3 at SQL statement
+SQL statement "CALL test_commit()"
+PL/pgSQL function test_nest_function1() line 3 at PERFORM
+ test_nest_function1 
+---------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+drop table test_commit;
+create or replace function test_nest_function2() return void
+as
+begin
+    test_commit();
+end;
+/
+call test_nest_function2();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit() line 3 at SQL statement
+SQL statement "CALL test_commit()"
+PL/pgSQL function test_nest_function2() line 3 at PERFORM
+ test_nest_function2 
+---------------------
+ 
+(1 row)
+
+select * from test_commit;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+drop table test_commit;
+create or replace function test_nest_function_rollback() return void
+as
+begin
+    test_without_commit();
+	rollback;
+end;
+/
+call test_nest_function_rollback();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_without_commit() line 3 at SQL statement
+SQL statement "CALL test_without_commit()"
+PL/pgSQL function test_nest_function_rollback() line 3 at PERFORM
+ test_nest_function_rollback 
+-----------------------------
+ 
+(1 row)
+
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_nest_function_select() return void
+as
+begin
+    insert into tx select 3;
+	commit;
+    select test_commit();
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_nest_function_select();
+ERROR:  relation "tx" does not exist on datanode1
+LINE 1: insert into tx select 3
+                    ^
+QUERY:  insert into tx select 3
+CONTEXT:  PL/pgSQL function test_nest_function_select() line 3 at SQL statement
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_nest_function_calll() return void
+as
+begin
+    insert into tx select 3;
+	commit;
+    call test_commit();
+EXCEPTION
+    when raise_exception then
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_nest_function_calll();
+ERROR:  relation "tx" does not exist on datanode1
+LINE 1: insert into tx select 3
+                    ^
+QUERY:  insert into tx select 3
+CONTEXT:  PL/pgSQL function test_nest_function_calll() line 3 at SQL statement
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_commit_exception_commit() return void
+as
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+	insert into test_commit select 1;
+	raise exception 'Exception rollback';
+	insert into test_commit select 2;
+EXCEPTION
+    when raise_exception then
+        insert into test_commit select 3;
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_commit_exception_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_exception_commit() line 3 at SQL statement
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: insert into test_commit select 3
+                    ^
+QUERY:  insert into test_commit select 3
+CONTEXT:  PL/pgSQL function test_commit_exception_commit() line 10 at SQL statement
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_commit_exception_commit_commit() return void
+as
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+	insert into test_commit select 1;
+	raise exception 'Exception rollback';
+	insert into test_commit select 2;
+EXCEPTION
+    when raise_exception then
+        insert into test_commit select 3;
+		commit;
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_commit_exception_commit_commit();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_exception_commit_commit() line 3 at SQL statement
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: insert into test_commit select 3
+                    ^
+QUERY:  insert into test_commit select 3
+CONTEXT:  PL/pgSQL function test_commit_exception_commit_commit() line 10 at SQL statement
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_commit_exception_commit_rollback() return void
+as
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+	insert into test_commit select 1;
+	raise exception 'Exception rollback';
+	insert into test_commit select 2;
+EXCEPTION
+    when raise_exception then
+        insert into test_commit select 3;
+		rollback;
+		RAISE EXCEPTION '(%)', SQLERRM; 
+end;
+/
+call test_commit_exception_commit_rollback();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_commit_exception_commit_rollback() line 3 at SQL statement
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: insert into test_commit select 3
+                    ^
+QUERY:  insert into test_commit select 3
+CONTEXT:  PL/pgSQL function test_commit_exception_commit_rollback() line 10 at SQL statement
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_rollback return void
+as
+begin
+    drop table if exists test_commit;
+    create table test_commit(a int);
+	insert into test_commit select 1;
+	rollback;
+	insert into test_commit select 2;
+end;
+/
+call test_rollback();
+NOTICE:  table "test_commit" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists test_commit"
+PL/pgSQL function test_rollback() line 3 at SQL statement
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: insert into test_commit select 2
+                    ^
+QUERY:  insert into test_commit select 2
+CONTEXT:  PL/pgSQL function test_rollback() line 7 at SQL statement
+select * from test_commit;
+ERROR:  relation "test_commit" does not exist on datanode1
+LINE 1: select * from test_commit;
+                      ^
+drop table test_commit;
+ERROR:  table "test_commit" does not exist
+create or replace function test_commit_inout(p inout int) return void
+as
+declare
+begin
+	p = 3;
+	commit;
+	--DBE_OUTPUT.print_line('Cursor status:' + p);
+end;
+/
+select test_commit_inout(1);
+ test_commit_inout 
+-------------------
+ 
+(1 row)
+
+create or replace function test_rollback_inout(p inout int) return void
+as
+declare
+begin
+	p = 3;
+	rollback;
+	--DBE_OUTPUT.print_line('Cursor status:' + p);
+end;
+/
+select test_rollback_inout(1);
+ test_rollback_inout 
+---------------------
+ 
+(1 row)
+
+create or replace function test_rollback_out(p out int) return void
+as
+declare
+begin
+	p = 3;
+	rollback;
+	--DBE_OUTPUT.print_line('Cursor status:' + p);
+end;
+/
+select test_rollback_out();
+ test_rollback_out 
+-------------------
+ 
+(1 row)
+
+create or replace function test_rollback1() return void
+as
+declare
+begin
+	create table test1(col1 int);
+	insert into test1 values(1);
+	rollback;
+end;
+/
+call test_rollback1();
+ test_rollback1 
+----------------
+ 
+(1 row)
+
+create type func_type_04 as ( v_tablefield character varying, v_tablefield2 character varying, v_tablename character varying, v_cur refcursor);
+create table test_cursor_table(c1 int,c2 varchar);
+insert into test_cursor_table values(1,'Jack'),(2,'Rose');
+CREATE or replace function func_base13_03(v_tablefield character varying, v_tablefield2 character varying,v_tablename character varying) return refcursor
+AS
+v_cur refcursor;
+begin
+	open v_cur for
+		'select '||v_tablefield||' as tablecode, '||v_tablefield2||' as tablename from '||v_tablename|| ' order by 1,2;';
+	return v_cur;
+end;
+/
+CREATE or replace function func_base13_04(v_tablefield character varying, v_tablefield2 character varying, v_tablename character varying) return void
+AS
+	v_record func_type_04;
+	v_cur refcursor;
+	num int;
+begin
+	num := 0;
+	v_cur := func_base13_03(v_tablefield, v_tablefield2, v_tablename);
+	loop
+		fetch v_cur into v_record; 
+		num := num+1;
+		raise notice 'the num is %(%)', num,v_record;
+		EXIT WHEN v_cur%notfound;
+	end loop;
+end;
+/
+call func_base13_04('c1','c2','test_cursor_table');
+NOTICE:  the num is 1((1,Jack,,))
+NOTICE:  the num is 2((2,Rose,,))
+NOTICE:  the num is 3((2,Rose,,))
+ func_base13_04 
+----------------
+ 
+(1 row)
+
+CREATE or replace function func_base13_05(v_tablefield character varying, v_tablefield2 character varying,v_tablename character varying) return refcursor
+AS
+v_cur refcursor;
+begin
+	open v_cur for
+		'select '||v_tablefield||' as tablecode, '||v_tablefield2||' as tablename from '||v_tablename|| ' order by 1,2;';
+	commit;
+	return v_cur;
+end;
+/
+CREATE or replace function func_base13_06(v_tablefield character varying, v_tablefield2 character varying, v_tablename character varying) return void
+AS
+	v_record func_type_04;
+	v_cur refcursor;
+begin
+	select func_base13_05(v_tablefield, v_tablefield2, v_tablename) into v_cur;
+	loop
+		fetch v_cur into v_record;  
+		raise notice '(%)', v_record;
+		EXIT WHEN v_cur%notfound;
+	end loop;
+end;
+/
+call func_base13_06('c1','c2','test_cursor_table');
+NOTICE:  ((1,Jack,,))
+NOTICE:  ((2,Rose,,))
+NOTICE:  ((2,Rose,,))
+ func_base13_06 
+----------------
+ 
+(1 row)
+
+CREATE or replace function func_base13_07(v_tablefield character varying, v_tablefield2 character varying,v_tablename character varying) return refcursor
+AS
+v_cur refcursor;
+begin
+	open v_cur for
+		'select '||v_tablefield||' as tablecode, '||v_tablefield2||' as tablename from '||v_tablename|| ' order by 1,2;';
+	commit;
+	return v_cur;
+end;
+/
+CREATE or replace function func_base13_08(v_tablefield character varying, v_tablefield2 character varying, v_tablename character varying) return void
+AS
+	v_record func_type_04;
+	v_cur refcursor;
+begin
+	select func_base13_07(v_tablefield, v_tablefield2, v_tablename) into v_cur;
+
+	loop
+		fetch v_cur into v_record; 
+		raise notice 'before commit(%)', v_record;
+		commit; 
+		raise notice 'after commit(%)', v_record;
+		EXIT WHEN v_cur%notfound;
+	end loop;
+	return;
+end;
+/
+call func_base13_08('c1','c2','test_cursor_table');
+NOTICE:  before commit((1,Jack,,))
+NOTICE:  after commit((1,Jack,,))
+NOTICE:  before commit((2,Rose,,))
+NOTICE:  after commit((2,Rose,,))
+NOTICE:  before commit((2,Rose,,))
+NOTICE:  after commit((2,Rose,,))
+ func_base13_08 
+----------------
+ 
+(1 row)
+
+select * from test_cursor_table;
+ c1 |  c2  
+----+------
+  1 | Jack
+  2 | Rose
+(2 rows)
+
+drop table if exists test_cursor_table;
+CREATE TABLE EXAMPLE1(COL1 INT);
+CREATE OR REPLACE FUNCTION FUNCTION_EXAMPLE1 RETURN INT
+AS
+BEGIN
+    FOR i IN 0..20 LOOP
+        INSERT INTO EXAMPLE1 VALUES(i);
+        IF mod(i,2) = 0 THEN
+            COMMIT;
+        ELSE
+            ROLLBACK;
+        END IF;
+    END LOOP;
+    RETURN 1;
+END;
+/
+select FUNCTION_EXAMPLE1();
+ function_example1 
+-------------------
+                 1
+(1 row)
+
+select * from FUNCTION_EXAMPLE1() where 1=1;
+ERROR:  can not use commit rollback in Complex SQL
+CONTEXT:  PL/pgSQL function function_example1() line 6 at COMMIT
+update EXAMPLE1 set COL1=666 where COL1=2 and FUNCTION_EXAMPLE1();
+ERROR:  can not use commit rollback in Complex SQL
+CONTEXT:  PL/pgSQL function function_example1() line 6 at COMMIT
+select (select FUNCTION_EXAMPLE1());
+ function_example1 
+-------------------
+                 1
+(1 row)
+
+select (select * from FUNCTION_EXAMPLE1() where 1=1);
+ERROR:  can not use commit rollback in Complex SQL
+CONTEXT:  PL/pgSQL function function_example1() line 6 at COMMIT
+referenced column: function_example1
+create or replace function func1() return void
+as
+declare
+a int;
+begin
+a := 1/0;
+exception
+    WHEN division_by_zero THEN
+        raise notice '%   %   %',sqlstate,SQLCODE,sqlerrm;
+end;
+/
+call func1();
+NOTICE:  22012   22012   division by zero
+ func1 
+-------
+ 
+(1 row)
+
+drop function func1;
+drop table if exists EXAMPLE1;
+drop function FUNCTION_EXAMPLE1;
+drop function test_without_commit;
+drop function test_empty_sp;
+drop function test_commit;
+drop function test_commit_insert_option;
+drop function test_commit_insert_delete;
+drop function test_commit_insert_update;
+drop function test_commit_insert_update_delete;
+drop function test_commit_insert_delete_update;
+drop function test_commit_commit;
+drop function test_commit_commit1;
+drop function test_commit_rollback;
+drop function test_commit_rollback1;
+drop function test_rollback_commit;
+drop function test_commit_insert_exception_rollback;
+drop function test_commit_insert_exception_commit_rollback;
+drop function test_commit_insert_raise_commit;
+drop function test_commit_insert_delete_raise_commit;
+drop function test_commit_insert_update_raise_commit;
+drop function test_commit_insert_update_delete_raise_commit;
+drop function test_commit_insert_delete_update_raise_commit;
+drop function test_commit_insert_commit_raise;
+drop function test_commit_insert_delete_commit_raise;
+drop function test_commit_insert_update_commit_raise;
+drop function test_commit_insert_update_delete_commit_raise;
+drop function test_commit_insert_delete_update_commit_raise;
+drop function test_exception_commit;
+drop function test_exception_commit_commit_raise;
+drop function test_exception_commit_raise_commit;
+drop function test_gg_1;
+drop function test_commit_exception;
+drop function test_commit2;
+drop function test_commit3;
+drop function test_rollback_with_exception;
+drop function test_nest_function_without_commit;
+drop function test_nest_function;
+drop function test_nest_function1;
+drop function test_nest_function2;
+drop function test_nest_function_rollback;
+drop function test_nest_function_select;
+drop function test_nest_function_calll;
+drop function test_commit_exception_commit;
+drop function test_commit_exception_commit_commit;
+drop function test_commit_exception_commit_rollback;
+drop function test_rollback;
+drop function test_commit_inout;
+drop function test_rollback_inout;
+drop function test_rollback_out;
+drop function test_rollback1;
+drop function func_base13_03;
+drop function func_base13_04;
+drop function func_base13_05;
+drop function func_base13_06;
+drop function func_base13_07;
+drop function func_base13_08;

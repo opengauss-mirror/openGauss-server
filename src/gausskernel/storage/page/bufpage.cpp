@@ -145,7 +145,6 @@ bool PageHeaderIsValid(PageHeader page)
     /* Check normal case */
     if (PageGetPageSize(page) == BLCKSZ &&
         (PageGetPageLayoutVersion(page) == PG_COMM_PAGE_LAYOUT_VERSION ||
-            PageGetPageLayoutVersion(page) == PG_PAGE_4B_LAYOUT_VERSION ||
             PageGetPageLayoutVersion(page) == PG_HEAP_PAGE_LAYOUT_VERSION ||
             PageGetPageLayoutVersion(page) == PG_SEGMENT_PAGE_LAYOUT_VERSION) &&
         (page->pd_flags & ~PD_VALID_FLAG_BITS) == 0 && page->pd_lower >= headersize &&
@@ -267,42 +266,6 @@ Size PageGetExactFreeSpace(Page page)
     }
 
     return (Size)(uint32)space;
-}
-
-
-static void upgrade_page_ver_4_to_5(Page page)
-{
-    HeapPageHeader phdr = (HeapPageHeader)page;
-
-    PageSetPageSizeAndVersion(page, BLCKSZ, PG_HEAP_PAGE_LAYOUT_VERSION);
-
-    phdr->pd_xid_base = 0;
-    phdr->pd_multi_base = 0;
-    ereport(DEBUG1, (errmsg("The page has been upgraded to version %d ", phdr->pd_pagesize_version)));
-    return;
-}
-
-/* Upgrade the page from PG_PAGE_4B_LAYOUT_VERSION(4) to PG_PAGE_LAYOUT_VERSION(5) */
-void PageLocalUpgrade(Page page)
-{
-    PageHeader phdr = (PageHeader)page;
-    errno_t rc = EOK;
-    Size movesize = phdr->pd_lower - SizeOfPageHeaderData;
-
-    Assert(PageIs4BXidVersion(page));
-
-    if (movesize > 0) {
-        rc = memmove_s((char*)page + SizeOfHeapPageHeaderData,
-            phdr->pd_upper - SizeOfHeapPageHeaderData,
-            (char*)page + SizeOfPageHeaderData,
-            phdr->pd_lower - SizeOfPageHeaderData);
-
-        securec_check(rc, "", "");
-    }
-
-    /* Update PageHeaderInfo */
-    phdr->pd_lower += SizeOfHeapPageUpgradeData;
-    upgrade_page_ver_4_to_5(page);
 }
 
 static inline void AllocPageCopyMem()
@@ -472,29 +435,4 @@ void PageSetChecksumInplace(Page page, BlockNumber blkno)
     PageSetChecksumByFNV1A(page);
 
     ((PageHeader)page)->pd_checksum = pg_checksum_page((char*)page, blkno);
-}
-
-/*
- * PageGetFreeSpaceForMultipleTuples
- *	 Returns the size of the free (allocatable) space on a page,
- *	 reduced by the space needed for multiple new line pointers.
- *
- * Note: this should usually only be used on index pages.  Use
- * PageGetHeapFreeSpace on heap pages.
- */
-Size PageGetFreeSpaceForMultipleTuples(Page page, int ntups)
-{
-    int space;
-
-    /*
-     * Use signed arithmetic here so that we behave sensibly if pd_lower >
-     * pd_upper.
-     */
-    space = (int)((PageHeader)page)->pd_upper - (int)((PageHeader)page)->pd_lower;
-
-    if (space < (int)(ntups * sizeof(ItemIdData)))
-        return 0;
-    space -= ntups * sizeof(ItemIdData);
-
-    return (Size) space;
 }

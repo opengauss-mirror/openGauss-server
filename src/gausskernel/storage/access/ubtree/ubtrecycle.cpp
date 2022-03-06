@@ -27,31 +27,28 @@
 #include "commands/tablespace.h"
 #include "storage/lmgr.h"
 #include "utils/aiomem.h"
+#include "utils/builtins.h"
 
 static uint32 BlockGetMaxItems(BlockNumber blkno);
-static UBTRecycleQueueHeader GetRecycleQueueHeader(Page page, BlockNumber blkno);
 static void UBTreeInitRecycleQueuePage(Relation rel, Page page, Size size, BlockNumber blkno);
 static void UBTreeRecycleQueueDiscardPage(Relation rel, UBTRecycleQueueAddress addr);
 static void UBTreeRecycleQueueAddPage(Relation rel, UBTRecycleForkNumber forkNumber,
     BlockNumber blkno, TransactionId xid);
 static Buffer StepNextPage(Relation rel, Buffer buf);
 static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
-    TransactionId oldestXmin, UBTRecycleQueueAddress *addr, bool *continueScan);
+    TransactionId waterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan);
 static Buffer MoveToEndpointPage(Relation rel, Buffer buf, bool needHead, int access);
 static uint16 PageAllocateItem(Buffer buf);
 static void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf);
 static bool QueuePageIsEmpty(Buffer buf);
 static Buffer AcquireNextAvailableQueuePage(Relation rel, Buffer buf, UBTRecycleForkNumber forkNumber);
-static Buffer RecycleQueueGetEndpointPage(Relation rel, UBTRecycleForkNumber forkNumber, bool needHead, int access);
 static void InsertOnRecycleQueuePage(Relation rel, Buffer buf, uint16 offset, BlockNumber blkno, TransactionId xid);
 static void RemoveOneItemFromPage(Relation rel, Buffer buf, uint16 offset);
 
 const BlockNumber FirstBlockNumber = 0;
 const BlockNumber FirstNormalBlockNumber = 2;      /* 0 and 1 are pages which include meta data */
 const uint16 FirstNormalOffset = 0;
-const uint16 InvalidOffset = ((uint16)0) - 1;
 const uint16 OtherBlockOffset = ((uint16)0) - 2;   /* indicate that previous or next item is in other block */
-const BlockNumber minRecycleQueueBlockNumber = 6;
 
 #define IsMetaPage(blkno) (blkno < FirstNormalBlockNumber)
 #define IsNormalOffset(offset) (offset < OtherBlockOffset)
@@ -65,7 +62,7 @@ static uint32 BlockGetMaxItems(BlockNumber blkno)
     return freeSpace / sizeof(UBTRecycleQueueItemData);
 }
 
-static UBTRecycleQueueHeader GetRecycleQueueHeader(Page page, BlockNumber blkno)
+UBTRecycleQueueHeader GetRecycleQueueHeader(Page page, BlockNumber blkno)
 {
     if (!IsMetaPage(blkno)) {
         return (UBTRecycleQueueHeader)PageGetContents(page);
@@ -222,7 +219,7 @@ static void InitRecycleQueueInitialPage(Relation rel, Buffer buf)
     END_CRIT_SECTION();
 }
 
-static Buffer ReadRecycleQueueBuffer(Relation rel, BlockNumber blkno)
+Buffer ReadRecycleQueueBuffer(Relation rel, BlockNumber blkno)
 {
     Buffer buf = ReadBufferExtended(rel, FSM_FORKNUM, blkno, RBM_NORMAL, NULL);
     /* initial pages may not initialized correctly, before return it we need to check */
@@ -290,7 +287,8 @@ static bool UBTreeTryRecycleEmptyPageInternal(Relation rel)
         return false; /* no available page to recycle */
     }
     Page page = BufferGetPage(buf);
-    if (_bt_page_recyclable(page)) {
+    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    if (P_ISDELETED(opaque)) {
         /* deleted by other routine earlier, skip */
         _bt_relbuf(rel, buf);
         UBTreeRecycleQueueDiscardPage(rel, addr);
@@ -349,7 +347,7 @@ static Buffer StepNextPage(Relation rel, Buffer buf)
 }
 
 static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
-    TransactionId oldestXmin, UBTRecycleQueueAddress *addr, bool *continueScan)
+    TransactionId WaterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan)
 {
     Page page = BufferGetPage(buf);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
@@ -357,7 +355,7 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
     uint16 curOffset = header->head;
     while (IsNormalOffset(curOffset)) {
         UBTRecycleQueueItem item = HeaderGetItem(header, curOffset);
-        if (TransactionIdFollowsOrEquals(item->xid, oldestXmin)) {
+        if (TransactionIdFollowsOrEquals(item->xid, WaterLevelXid)) {
             *continueScan = false;
             return InvalidBuffer;
         }
@@ -369,7 +367,7 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
         _bt_checkbuffer_valid(rel, targetBuf);
         if (ConditionalLockBuffer(targetBuf)) {
             _bt_checkpage(rel, targetBuf);
-            if (forkNumber == RECYCLE_EMPTY_FORK || _bt_page_recyclable(BufferGetPage(targetBuf))) {
+            if (forkNumber == RECYCLE_EMPTY_FORK || UBTreePageRecyclable(BufferGetPage(targetBuf))) {
                 WHITEBOX_TEST_STUB("GetAvailablePageOnPage-got", WhiteboxDefaultErrorEmit);
 
                 *continueScan = false;
@@ -396,13 +394,17 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
 
 Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress *addr)
 {
-    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    TransactionId frozenXid = g_instance.undo_cxt.oldestFrozenXid;
+    TransactionId recycleXid = g_instance.undo_cxt.oldestXidInUndo;
+
+    TransactionId waterLevelXid = ((forkNumber == RECYCLE_EMPTY_FORK) ? recycleXid : frozenXid);
+
     Buffer queueBuf = RecycleQueueGetEndpointPage(rel, forkNumber, true, BT_READ);
 
     Buffer indexBuf = InvalidBuffer;
     bool continueScan = false;
     for (;;) {
-        indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, oldestXmin, addr, &continueScan);
+        indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, waterLevelXid, addr, &continueScan);
         if (!continueScan) {
             break;
         }
@@ -704,7 +706,7 @@ static void TryFixMetaData(Buffer metaBuf, int32 oldval, int32 newval, bool isHe
     }
 }
 
-static Buffer RecycleQueueGetEndpointPage(Relation rel, UBTRecycleForkNumber forkNumber, bool needHead, int access)
+Buffer RecycleQueueGetEndpointPage(Relation rel, UBTRecycleForkNumber forkNumber, bool needHead, int access)
 {
     if (!RecycleQueueInitialized(rel)) {
         UBTreeInitializeRecycleQueue(rel);
@@ -988,3 +990,101 @@ static void UBTreeRecycleQueueDiscardPage(Relation rel, UBTRecycleQueueAddress a
 
     UnlockReleaseBuffer(buf);
 }
+
+static void UBTRecyleQueueRecordOutput(BlockNumber blkno, uint16 offset, UBTRecycleQueueItem item,
+    TupleDesc *tupleDesc, Tuplestorestate *tupstore, uint32 cols)
+{
+    if (item == NULL) {
+        return;
+    }
+
+    Assert(cols == UBTREE_RECYCLE_OUTPUT_PARAM_CNT);
+    bool nulls[cols] = {false};
+    Datum values[cols];
+    char xidStr[UBTREE_RECYCLE_OUTPUT_XID_STR_LEN] = {'\0'};
+    errno_t ret = snprintf_s(xidStr, sizeof(xidStr), sizeof(xidStr) - 1, "%lu", item->xid);
+    securec_check_ss(ret, "\0", "\0");
+    values[ARR_0] = ObjectIdGetDatum((Oid) blkno);
+    values[ARR_1] = ObjectIdGetDatum((Oid) offset);
+    values[ARR_2] = CStringGetTextDatum(xidStr);
+    values[ARR_3] = ObjectIdGetDatum((Oid) item->blkno);
+    values[ARR_4] = ObjectIdGetDatum((Oid) item->prev);
+    values[ARR_5] = ObjectIdGetDatum((Oid) item->next);
+    tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
+}
+/*
+ * call UBTreeVerifyRecordError() only when recordEachItem is false.
+ *
+ * recordEachItem:
+ *      true - dump this page
+ *      false - verfiy this page
+ */
+uint32 UBTreeRecycleQueuePageDump(Relation rel, Buffer buf, bool recordEachItem,
+    TupleDesc *tupleDesc, Tuplestorestate *tupstore, uint32 cols)
+{
+    uint32 errVerified = 0;
+    TransactionId maxXid = ReadNewTransactionId();
+    Page page = BufferGetPage(buf);
+    UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
+    uint16 offset = header->head;
+    while (IsNormalOffset(offset)) {
+        UBTRecycleQueueItem item = NULL;
+        if (offset >= 0 && offset <= UBTRecycleMaxItems) {
+            item = HeaderGetItem(header, offset);
+        } else {
+            if (!recordEachItem) {
+                errVerified++;
+                UBTreeVerifyRecordOutput(VERIFY_RECYCLE_QUEUE_PAGE, BufferGetBlockNumber(buf),
+                    VERIFY_RECYCLE_QUEUE_OFFSET_ERROR, tupleDesc, tupstore, cols);
+            }
+            break;
+        }
+        if (recordEachItem) {
+            UBTRecyleQueueRecordOutput(BufferGetBlockNumber(buf), offset, item, tupleDesc, tupstore, cols);
+        } else if (TransactionIdFollows(item->xid, maxXid)) {
+            errVerified++;
+            UBTreeVerifyRecordOutput(VERIFY_RECYCLE_QUEUE_PAGE, BufferGetBlockNumber(buf),
+                VERIFY_RECYCLE_QUEUE_XID_TOO_LARGE, tupleDesc, tupstore, cols);
+        }
+        offset = item->next;
+    }
+    if (recordEachItem) {
+        return 0;
+    }
+    /* dump work is already done, the following is pure verify logic */
+    if (IsNormalOffset(header->head) && header->tail == InvalidOffset && (header->flags & URQ_TAIL_PAGE) == 0) {
+        /* head is normal, but tail is invalid. this should be a tail page, but it's not */
+        errVerified++;
+        UBTreeVerifyRecordOutput(VERIFY_RECYCLE_QUEUE_PAGE, BufferGetBlockNumber(buf),
+            VERIFY_RECYCLE_QUEUE_UNEXPECTED_TAIL, tupleDesc, tupstore, cols);
+    }
+
+    if (header->freeListHead != InvalidOffset) {
+        /* free list is valid, verify it */
+        offset = header->freeListHead;
+        while (offset != InvalidOffset) {
+            if (offset == OtherBlockOffset) {
+                if (!recordEachItem) {
+                    errVerified++;
+                    UBTreeVerifyRecordOutput(VERIFY_RECYCLE_QUEUE_PAGE, BufferGetBlockNumber(buf),
+                        VERIFY_RECYCLE_QUEUE_FREE_LIST_ERROR, tupleDesc, tupstore, cols);
+                }
+                break;
+            }
+            if (offset >= 0 && offset <= UBTRecycleMaxItems) {
+                UBTRecycleQueueItem item = HeaderGetItem(header, offset);
+                offset = item->next;
+            } else {
+                if (!recordEachItem) {
+                    errVerified++;
+                    UBTreeVerifyRecordOutput(VERIFY_RECYCLE_QUEUE_PAGE, BufferGetBlockNumber(buf),
+                        VERIFY_RECYCLE_QUEUE_FREE_LIST_INVALID_OFFSET, tupleDesc, tupstore, cols);
+                }
+                break;
+            }
+        }
+    }
+
+    return errVerified;
+}
+

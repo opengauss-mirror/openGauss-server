@@ -3,7 +3,7 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION file_fdw" to load this file. \quit
 
-CREATE FUNCTION file_fdw_handler()
+CREATE FUNCTION pg_catalog.file_fdw_handler()
 RETURNS fdw_handler
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT NOT FENCED; 

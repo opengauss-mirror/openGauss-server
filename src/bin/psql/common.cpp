@@ -2268,10 +2268,8 @@ static bool do_one_parallel(char* query, int fd)
         if (decode_pwd != NULL) {
             rc = memset_s(decode_pwd, strlen(decode_pwd), 0, strlen(decode_pwd));
             securec_check_c(rc, "\0", "\0");
-            if (decode_pwd != NULL) {
-                OPENSSL_free(decode_pwd);
-                decode_pwd = NULL;
-            }
+            OPENSSL_free(decode_pwd);
+            decode_pwd = NULL;
 
             // Revert the old value for next retry connection.
             pset.connInfo.values[3] = old_conninfo_values;

@@ -27,9 +27,11 @@
 #include "pgxc/groupmgr.h"
 #include "pgxc/poolmgr.h"
 #include "pgxc/poolutils.h"
+#include "pgxc/nodemgr.h"
 #include "utils/syscache.h"
 #include "instruments/instr_statement.h"
- 
+#include "replication/walreceiver.h"
+
 /* only operator with qual supporting can use hashfilter */
 static int g_support_hashfilter_types[] = {
     T_SeqScan,
@@ -1056,6 +1058,57 @@ bool IsModifyTableForDfsTable(Plan* AppendNode)
     return false;
 }
 
+void disaster_read_array_init()
+{
+    Snapshot snapshot = GetActiveSnapshot();
+    if (snapshot == NULL) {
+        snapshot = GetTransactionSnapshot();
+    }
+
+    LWLockAcquire(MaxCSNArrayLock, LW_SHARED);
+    CommitSeqNo *maxcsn = t_thrd.xact_cxt.ShmemVariableCache->max_csn_array;
+    bool *mainstandby = t_thrd.xact_cxt.ShmemVariableCache->main_standby_array;
+    if (maxcsn == NULL) {
+        ereport(ERROR, (errmsg("max_csn_array is NULL")));
+    }
+    if (mainstandby == NULL) {
+        ereport(ERROR, (errmsg("main_standby_array is NULL")));
+    }
+    
+    int slice_num = u_sess->pgxc_cxt.NumDataNodes;
+    int slice_internal_num = u_sess->pgxc_cxt.standby_num + 1;
+
+    for (int i = 0; i < slice_num; i++) {
+        int j = 0;
+        for (; j < slice_internal_num; j++) {
+            int nodeIdx = i + j * slice_num;
+            bool set = false;
+            if (snapshot->snapshotcsn <= maxcsn[nodeIdx] + 1) {
+                u_sess->pgxc_cxt.disasterReadArray[i] = nodeIdx;
+                set = true;
+                ereport(LOG, (errmsg("select [%d, %d] node index %d, nodeid, %d, csn %lu, %s", 
+                    i, j,
+                    nodeIdx,
+                    u_sess->pgxc_cxt.poolHandle->dn_conn_oids[nodeIdx],
+                    maxcsn[nodeIdx],
+                    mainstandby[nodeIdx] ? "Main Standby" : "Cascade Standby")));
+            } else {
+                ereport(LOG, (errmsg("nodeid %d, snapshotcsn = %lu, max_csn_array = %lu",
+                                     u_sess->pgxc_cxt.poolHandle->dn_conn_oids[nodeIdx],
+                                     snapshot->snapshotcsn,
+                                     maxcsn[nodeIdx])));
+            }
+            if (set && !mainstandby[nodeIdx]) {
+                break;
+            }
+        }
+        if (j == (u_sess->pgxc_cxt.standby_num + 1))
+            ereport(LOG, (errmsg("current slice datanode is all invalid")));
+    }
+    LWLockRelease(MaxCSNArrayLock);
+    u_sess->pgxc_cxt.DisasterReadArrayInit = true;
+}
+
 NodeDefinition* get_all_datanodes_def()
 {
     Oid* dn_node_arr = NULL;
@@ -1064,27 +1117,45 @@ NodeDefinition* get_all_datanodes_def()
     NodeDefinition* nodeDefArray = NULL;
     int rc = 0;
 
-    PgxcNodeGetOids(NULL, &dn_node_arr, NULL, &dn_node_num, false);
+    if (IS_DISASTER_RECOVER_MODE) {
+        PgxcNodeGetOidsForInit(NULL, &dn_node_arr, NULL, &dn_node_num, NULL, false);
+    } else {
+        PgxcNodeGetOids(NULL, &dn_node_arr, NULL, &dn_node_num, false);
+    }
 
-    if (u_sess->pgxc_cxt.NumDataNodes != dn_node_num) {
+    int dnNum = Max(u_sess->pgxc_cxt.NumTotalDataNodes, u_sess->pgxc_cxt.NumDataNodes);
+    if (dnNum != dn_node_num) {
         ResetSessionExecutorInfo(true);
         if (dn_node_arr != NULL) {
             pfree_ext(dn_node_arr);
             dn_node_arr = NULL;
         }
-        PgxcNodeGetOids(NULL, &dn_node_arr, NULL, &dn_node_num, false);
-
-        if (u_sess->pgxc_cxt.NumDataNodes != dn_node_num)
+        if (IS_DISASTER_RECOVER_MODE) {
+            PgxcNodeGetOidsForInit(NULL, &dn_node_arr, NULL, &dn_node_num, NULL, false);
+        } else {
+            PgxcNodeGetOids(NULL, &dn_node_arr, NULL, &dn_node_num, false);
+        }
+        if (dnNum != dn_node_num)
             ereport(ERROR,
                 (errmodule(MOD_OPT),
                     errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
                     errmsg("total datanodes maybe be changed")));
     }
 
+    if (IS_CN_DISASTER_RECOVER_MODE) {
+        disaster_read_array_init();
+    }
+
     nodeDefArray = (NodeDefinition*)palloc(sizeof(NodeDefinition) * u_sess->pgxc_cxt.NumDataNodes);
-    for (i = 0; i < dn_node_num; i++) {
-        Oid current_primary_oid = PgxcNodeGetPrimaryDNFromMatric(dn_node_arr[i]);
-        NodeDefinition* res = PgxcNodeGetDefinition(current_primary_oid);
+    NodeDefinition* res = NULL;
+    for (i = 0; i < u_sess->pgxc_cxt.NumDataNodes; i++) {
+        if (!IS_DISASTER_RECOVER_MODE) {
+            Oid current_primary_oid = PgxcNodeGetPrimaryDNFromMatric(dn_node_arr[i]);
+            res = PgxcNodeGetDefinition(current_primary_oid);
+        } else {
+            int index = u_sess->pgxc_cxt.disasterReadArray[i];
+            res = PgxcNodeGetDefinition(dn_node_arr[index == -1 ? i : index]);
+        }
 
         rc = memcpy_s(&nodeDefArray[i], sizeof(NodeDefinition), res, sizeof(NodeDefinition));
         securec_check(rc, "\0", "\0");

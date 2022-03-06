@@ -9,6 +9,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS =  bufpage.o checksum.o itemptr.o pagecompress.o checksum_impl.o
+OBJS =  bufpage.o checksum.o itemptr.o pagecompress.o checksum_impl.o pageparse.o gs_xlogdump.o 
 
 include $(top_srcdir)/src/gausskernel/common.mk

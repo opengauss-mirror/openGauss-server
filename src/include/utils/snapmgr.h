@@ -42,7 +42,12 @@ extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotNowNoSyncData;
 
 extern bool XidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdStatus *hintstatus,
                                                         Buffer buffer, bool *sync);
+extern bool UHeapXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdStatus *hintstatus,
+    Buffer buffer, bool *sync);
+extern bool XidVisibleInDecodeSnapshot(TransactionId xid, Snapshot snapshot,
+    TransactionIdStatus* hintstatus, Buffer buffer);
 extern bool CommittedXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, Buffer buffer);
+extern bool CommittedXidVisibleInDecodeSnapshot(TransactionId xid, Snapshot snapshot, Buffer buffer);
 extern bool IsXidVisibleInGtmLiteLocalSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdStatus hint_status,
                                                                                     bool xmin_equal_xmax, Buffer buffer, bool *sync);
 /*
@@ -60,7 +65,7 @@ extern bool IsXidVisibleInGtmLiteLocalSnapshot(TransactionId xid, Snapshot snaps
 /* This macro encodes the knowledge of which snapshots are MVCC-safe */
 #define IsMVCCSnapshot(snapshot) \
     ((((snapshot)->satisfies) == SNAPSHOT_MVCC) || (((snapshot)->satisfies) == SNAPSHOT_HISTORIC_MVCC) || \
-        IsVersionMVCCSnapshot(snapshot))
+        (((snapshot)->satisfies) == SNAPSHOT_DECODE_MVCC) || IsVersionMVCCSnapshot(snapshot))
 
 extern Snapshot GetTransactionSnapshot(bool force_local_snapshot = false);
 extern Snapshot GetLatestSnapshot(void);

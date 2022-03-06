@@ -1,0 +1,894 @@
+-- FOR VARRAY INTERFACE --
+-- check compatibility --
+show sql_compatibility;  -- expect A --
+ sql_compatibility 
+-------------------
+ A
+(1 row)
+
+-- create new schema --
+drop schema if exists plpgsql_array_interface;
+NOTICE:  schema "plpgsql_array_interface" does not exist, skipping
+create schema plpgsql_array_interface;
+set current_schema = plpgsql_array_interface;
+-- test array interface count --
+create or replace procedure array_interface_p1()
+as
+declare
+    colors varchar[] := array['red','orange',null,'','green','blue','indigo','violet'];
+    colors1 int[] := array[1,2,null,3,'',4,null,5,6,null,null,7,8];
+    colors2 varchar[] := array['red','orange','null','green','blue',null,'indigo','violet'];
+begin
+    raise NOTICE '%', colors;
+    raise NOTICE '%', colors.count;
+    raise NOTICE '%', colors2;
+    raise NOTICE '%', colors2.count;
+    raise NOTICE '%', colors1;
+    raise NOTICE '%', colors1.count;
+end;
+/
+call array_interface_p1();
+NOTICE:  {red,orange,NULL,NULL,green,blue,indigo,violet}
+NOTICE:  8
+NOTICE:  {red,orange,"null",green,blue,NULL,indigo,violet}
+NOTICE:  8
+NOTICE:  {1,2,NULL,3,NULL,4,NULL,5,6,NULL,NULL,7,8}
+NOTICE:  13
+ array_interface_p1 
+--------------------
+ 
+(1 row)
+
+-- test array interface count --
+create or replace procedure array_interface_p2()
+as
+declare
+    colors varchar[] := array['red','orange','green','blue','indigo','violet'];
+    colors1 int[] := array[1,2,3,4,5,6,7,8];
+begin
+    raise NOTICE '%', colors;
+    colors[1] := null;
+    colors[4] := null;
+    colors[6] := '';
+    raise NOTICE '%', colors;
+    raise NOTICE '%', colors1;
+    colors1[1] := null;
+    colors1[4] := null;
+    colors1[6] := '';
+    raise NOTICE '%', colors1;
+end;
+/
+call array_interface_p2();
+NOTICE:  {red,orange,green,blue,indigo,violet}
+NOTICE:  {NULL,orange,green,NULL,indigo,NULL}
+NOTICE:  {1,2,3,4,5,6,7,8}
+NOTICE:  {NULL,2,3,NULL,5,NULL,7,8}
+ array_interface_p2 
+--------------------
+ 
+(1 row)
+
+-- test array interface exists --
+create or replace procedure array_interface_p3()
+as
+declare
+    colors varchar[] := array[null,'red','orange',null,'green','','blue',null,'indigo','violet',null];
+    ind int := 1;
+    colors1 varchar[] := array['null','red','orange',null,'green','blue',null,'indigo','violet',null];
+begin
+    raise NOTICE '--------------------colors--------------------------';
+    raise NOTICE '%', colors;
+    for ind in 1..colors.last
+    loop
+        raise NOTICE '%', colors[ind];
+        raise NOTICE '%', colors.exists(ind);
+        if colors.exists(ind) then
+            raise NOTICE '    exists';
+        else 
+            raise NOTICE '    not exists';
+        end if;
+        raise NOTICE '----------------';
+    end loop;
+
+    raise NOTICE '--------------------colors1--------------------------';
+    raise NOTICE '%', colors1;
+    for ind in 1 .. colors1.last
+    loop
+        raise NOTICE '%', colors1[ind];
+        raise NOTICE '%', colors1.exists(ind);
+        if colors1.exists(ind) then
+            raise NOTICE '    exists';
+        else 
+            raise NOTICE '    not exists';
+        end if;
+        raise NOTICE '----------------';
+    end loop;
+end;
+/
+call array_interface_p3();
+NOTICE:  --------------------colors--------------------------
+NOTICE:  {NULL,red,orange,NULL,green,NULL,blue,NULL,indigo,violet,NULL}
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  red
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  orange
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  green
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  blue
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  indigo
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  violet
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  --------------------colors1--------------------------
+NOTICE:  {"null",red,orange,NULL,green,blue,NULL,indigo,violet,NULL}
+NOTICE:  null
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  red
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  orange
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  green
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  blue
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  indigo
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  violet
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+ array_interface_p3 
+--------------------
+ 
+(1 row)
+
+-- test array interface exists --
+create or replace procedure array_interface_p4()
+as
+declare
+    colors int[] := array[1,2,'',3,4,null,5,6,7,8];
+    ind int := 1;
+    colors1 int[] := array[null,1,2,3,4,null,5,6,'',7,8,null];
+begin
+    raise NOTICE '--------------------colors--------------------------';
+    raise NOTICE '%', colors;
+    for ind in 1 .. colors.last
+    loop
+        raise NOTICE '%', colors[ind];
+        raise NOTICE '%', colors.exists(ind);
+        if colors.exists(ind) then
+            raise NOTICE '    exists';
+        else 
+            raise NOTICE '    not exists';
+        end if;
+        raise NOTICE '----------------';
+    end loop;
+
+    raise NOTICE '--------------------colors1--------------------------';
+    raise NOTICE '%', colors1;
+    for ind in 1 .. colors1.last
+    loop
+        raise NOTICE '%', colors1[ind];
+        raise NOTICE '%', colors1.exists(ind);
+        if colors1.exists(ind) then
+            raise NOTICE '    exists';
+        else 
+            raise NOTICE '    not exists';
+        end if;
+        raise NOTICE '----------------';
+    end loop;
+end;
+/
+call array_interface_p4();
+NOTICE:  --------------------colors--------------------------
+NOTICE:  {1,2,NULL,3,4,NULL,5,6,7,8}
+NOTICE:  1
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  2
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  3
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  4
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  5
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  6
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  7
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  8
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  --------------------colors1--------------------------
+NOTICE:  {NULL,1,2,3,4,NULL,5,6,NULL,7,8,NULL}
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  1
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  2
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  3
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  4
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  5
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  6
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  7
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  8
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+NOTICE:  <NULL>
+NOTICE:  t
+NOTICE:      exists
+NOTICE:  ----------------
+ array_interface_p4 
+--------------------
+ 
+(1 row)
+
+-- test array interface first and last --
+create or replace procedure array_interface_p5()
+as
+declare
+    colors1 varchar[] := array['red','orange',null,'green','','blue'];
+    colors2 varchar[] := array['red','orange',null,'green','blue',null];
+    colors3 varchar[] := array[null,'red','orange',null,'green','blue'];
+    colors4 int[] := array[null,1,2,3,4,null,5,6,7,8,null,''];
+begin
+    raise NOTICE '---------colors1---------';
+    raise NOTICE '%', colors1;
+    raise NOTICE 'colors1 first number: %', colors1.first;
+    raise NOTICE 'colors1 first: %', colors1[colors1.first];
+    raise NOTICE 'colors1 last number: %', colors1.last;
+    raise NOTICE 'colors1 last: %', colors1[colors1.last];
+
+    raise NOTICE '---------colors2---------';
+    raise NOTICE '%', colors2;
+    raise NOTICE 'colors2 first number: %', colors2.first;
+    raise NOTICE 'colors2 first: %', colors2[colors2.first];
+    raise NOTICE 'colors2 last number: %', colors2.last;
+    raise NOTICE 'colors2 last: %', colors2[colors2.last];
+
+    raise NOTICE '---------colors3---------';
+    raise NOTICE '%', colors3;
+    raise NOTICE 'colors3 first number: %', colors3.first;
+    raise NOTICE 'colors3 first: %', colors3[colors3.first];
+    raise NOTICE 'colors3 last number: %', colors3.last;
+    raise NOTICE 'colors3 last: %', colors3[colors3.last];
+
+    raise NOTICE '---------colors4---------';
+    raise NOTICE '%', colors4;
+    raise NOTICE 'colors4 first number: %', colors4.first;
+    raise NOTICE 'colors4 first: %', colors4[colors4.first];
+    raise NOTICE 'colors4 last number: %', colors4.last;
+    raise NOTICE 'colors4 last: %', colors4[colors4.last];
+end;
+/
+call array_interface_p5();
+NOTICE:  ---------colors1---------
+NOTICE:  {red,orange,NULL,green,NULL,blue}
+NOTICE:  colors1 first number: 1
+NOTICE:  colors1 first: red
+NOTICE:  colors1 last number: 6
+NOTICE:  colors1 last: blue
+NOTICE:  ---------colors2---------
+NOTICE:  {red,orange,NULL,green,blue,NULL}
+NOTICE:  colors2 first number: 1
+NOTICE:  colors2 first: red
+NOTICE:  colors2 last number: 6
+NOTICE:  colors2 last: <NULL>
+NOTICE:  ---------colors3---------
+NOTICE:  {NULL,red,orange,NULL,green,blue}
+NOTICE:  colors3 first number: 1
+NOTICE:  colors3 first: <NULL>
+NOTICE:  colors3 last number: 6
+NOTICE:  colors3 last: blue
+NOTICE:  ---------colors4---------
+NOTICE:  {NULL,1,2,3,4,NULL,5,6,7,8,NULL,NULL}
+NOTICE:  colors4 first number: 1
+NOTICE:  colors4 first: <NULL>
+NOTICE:  colors4 last number: 12
+NOTICE:  colors4 last: <NULL>
+ array_interface_p5 
+--------------------
+ 
+(1 row)
+
+-- next&prior
+create or replace procedure array_interface_p6()
+as
+declare
+    colors1 varchar[] := array['red','orange',null,'green','blue','','indigo','violet'];
+    colors2 int[]:=array[1,2,3,null,4,5,6,'',7,8];
+    colors3 int[]:=array[null,1,2,3,null,4,5,'',6,7,8,null];
+    ind int := 1;
+begin
+    raise NOTICE '--------------------colors1---------------------';
+    raise NOTICE '%', colors1;
+    for ind in  1 .. colors1.last
+    loop
+        raise NOTICE 'current is: %', colors1[ind];
+        raise NOTICE 'next number is: %', colors1.next(ind);
+        raise NOTICE 'next is: %', colors1[colors1.next(ind)];
+        raise NOTICE 'prior number is: %', colors1.prior(ind);
+        raise NOTICE 'prior is: %', colors1[colors1.prior(ind)];
+        raise NOTICE '-------';
+    end loop;
+
+    raise NOTICE '--------------------colors2---------------------';
+    raise NOTICE '%', colors2;
+    for ind in  1 .. colors2.last
+    loop
+        raise NOTICE 'current is: %', colors2[ind];
+        raise NOTICE 'next number is: %', colors2.next(ind);
+        raise NOTICE 'next is: %', colors2[colors2.next(ind)];
+        raise NOTICE 'prior number is: %', colors2.prior(ind);
+        raise NOTICE 'prior is: %', colors2[colors2.prior(ind)];
+        raise NOTICE '-------';
+    end loop;
+    raise NOTICE '--------------------colors3---------------------';
+    raise NOTICE '%', colors3;
+    for ind in  1 .. colors3.last
+    loop
+        raise NOTICE 'current is: %', colors3[ind];
+        raise NOTICE 'next number is: %', colors3.next(ind);
+        raise NOTICE 'next is: %', colors3[colors3.next(ind)];
+        raise NOTICE 'prior number is: %', colors3.prior(ind);
+        raise NOTICE 'prior is: %', colors3[colors3.prior(ind)];
+        raise NOTICE '-------';
+    end loop;
+end;
+/
+call array_interface_p6();
+NOTICE:  --------------------colors1---------------------
+NOTICE:  {red,orange,NULL,green,blue,NULL,indigo,violet}
+NOTICE:  current is: red
+NOTICE:  next number is: 2
+NOTICE:  next is: orange
+NOTICE:  prior number is: <NULL>
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: orange
+NOTICE:  next number is: 3
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 1
+NOTICE:  prior is: red
+NOTICE:  -------
+NOTICE:  current is: <NULL>
+NOTICE:  next number is: 4
+NOTICE:  next is: green
+NOTICE:  prior number is: 2
+NOTICE:  prior is: orange
+NOTICE:  -------
+NOTICE:  current is: green
+NOTICE:  next number is: 5
+NOTICE:  next is: blue
+NOTICE:  prior number is: 3
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: blue
+NOTICE:  next number is: 6
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 4
+NOTICE:  prior is: green
+NOTICE:  -------
+NOTICE:  current is: <NULL>
+NOTICE:  next number is: 7
+NOTICE:  next is: indigo
+NOTICE:  prior number is: 5
+NOTICE:  prior is: blue
+NOTICE:  -------
+NOTICE:  current is: indigo
+NOTICE:  next number is: 8
+NOTICE:  next is: violet
+NOTICE:  prior number is: 6
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: violet
+NOTICE:  next number is: <NULL>
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 7
+NOTICE:  prior is: indigo
+NOTICE:  -------
+NOTICE:  --------------------colors2---------------------
+NOTICE:  {1,2,3,NULL,4,5,6,NULL,7,8}
+NOTICE:  current is: 1
+NOTICE:  next number is: 2
+NOTICE:  next is: 2
+NOTICE:  prior number is: <NULL>
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: 2
+NOTICE:  next number is: 3
+NOTICE:  next is: 3
+NOTICE:  prior number is: 1
+NOTICE:  prior is: 1
+NOTICE:  -------
+NOTICE:  current is: 3
+NOTICE:  next number is: 4
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 2
+NOTICE:  prior is: 2
+NOTICE:  -------
+NOTICE:  current is: <NULL>
+NOTICE:  next number is: 5
+NOTICE:  next is: 4
+NOTICE:  prior number is: 3
+NOTICE:  prior is: 3
+NOTICE:  -------
+NOTICE:  current is: 4
+NOTICE:  next number is: 6
+NOTICE:  next is: 5
+NOTICE:  prior number is: 4
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: 5
+NOTICE:  next number is: 7
+NOTICE:  next is: 6
+NOTICE:  prior number is: 5
+NOTICE:  prior is: 4
+NOTICE:  -------
+NOTICE:  current is: 6
+NOTICE:  next number is: 8
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 6
+NOTICE:  prior is: 5
+NOTICE:  -------
+NOTICE:  current is: <NULL>
+NOTICE:  next number is: 9
+NOTICE:  next is: 7
+NOTICE:  prior number is: 7
+NOTICE:  prior is: 6
+NOTICE:  -------
+NOTICE:  current is: 7
+NOTICE:  next number is: 10
+NOTICE:  next is: 8
+NOTICE:  prior number is: 8
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: 8
+NOTICE:  next number is: <NULL>
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 9
+NOTICE:  prior is: 7
+NOTICE:  -------
+NOTICE:  --------------------colors3---------------------
+NOTICE:  {NULL,1,2,3,NULL,4,5,NULL,6,7,8,NULL}
+NOTICE:  current is: <NULL>
+NOTICE:  next number is: 2
+NOTICE:  next is: 1
+NOTICE:  prior number is: <NULL>
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: 1
+NOTICE:  next number is: 3
+NOTICE:  next is: 2
+NOTICE:  prior number is: 1
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: 2
+NOTICE:  next number is: 4
+NOTICE:  next is: 3
+NOTICE:  prior number is: 2
+NOTICE:  prior is: 1
+NOTICE:  -------
+NOTICE:  current is: 3
+NOTICE:  next number is: 5
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 3
+NOTICE:  prior is: 2
+NOTICE:  -------
+NOTICE:  current is: <NULL>
+NOTICE:  next number is: 6
+NOTICE:  next is: 4
+NOTICE:  prior number is: 4
+NOTICE:  prior is: 3
+NOTICE:  -------
+NOTICE:  current is: 4
+NOTICE:  next number is: 7
+NOTICE:  next is: 5
+NOTICE:  prior number is: 5
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: 5
+NOTICE:  next number is: 8
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 6
+NOTICE:  prior is: 4
+NOTICE:  -------
+NOTICE:  current is: <NULL>
+NOTICE:  next number is: 9
+NOTICE:  next is: 6
+NOTICE:  prior number is: 7
+NOTICE:  prior is: 5
+NOTICE:  -------
+NOTICE:  current is: 6
+NOTICE:  next number is: 10
+NOTICE:  next is: 7
+NOTICE:  prior number is: 8
+NOTICE:  prior is: <NULL>
+NOTICE:  -------
+NOTICE:  current is: 7
+NOTICE:  next number is: 11
+NOTICE:  next is: 8
+NOTICE:  prior number is: 9
+NOTICE:  prior is: 6
+NOTICE:  -------
+NOTICE:  current is: 8
+NOTICE:  next number is: 12
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 10
+NOTICE:  prior is: 7
+NOTICE:  -------
+NOTICE:  current is: <NULL>
+NOTICE:  next number is: <NULL>
+NOTICE:  next is: <NULL>
+NOTICE:  prior number is: 11
+NOTICE:  prior is: 8
+NOTICE:  -------
+ array_interface_p6 
+--------------------
+ 
+(1 row)
+
+-- test empty array exists interface return
+create or replace procedure array_interface_p7()
+as
+declare
+    colors1 varchar[] := array[]::varchar[];
+    colors2 integer[]:= array[]::integer[];
+    vi varchar2(32);
+begin
+    raise NOTICE 'colors1 is %', colors1;
+    raise NOTICE 'colors2 is %', colors2;
+    vi := 111;
+    raise NOTICE 'colors1[%] exists return %', vi, colors1.exists(vi);
+    vi := '1';
+    raise NOTICE 'colors1["%"] exists return %', vi, colors1.exists(vi);
+    vi := 123432;
+    raise NOTICE 'colors2[%] exists return %', vi, colors2.exists(vi);
+    vi := '43243442';
+    raise NOTICE 'colors2["%"] exists return %', vi, colors2.exists(vi);
+end;
+/
+call array_interface_p7();
+NOTICE:  colors1 is {}
+NOTICE:  colors2 is {}
+NOTICE:  colors1[111] exists return f
+NOTICE:  colors1["1"] exists return f
+NOTICE:  colors2[123432] exists return f
+NOTICE:  colors2["43243442"] exists return f
+ array_interface_p7 
+--------------------
+ 
+(1 row)
+
+-- test array exists interface string input parameter
+create or replace procedure array_interface_p8()
+as
+declare
+    colors1 varchar2[]  := array['11', '12', '13'];
+    line varchar[]:=array['--------------------------------'];
+    chk boolean := false;
+begin
+    raise NOTICE'%', colors1;
+    chk := colors.exists(2);
+    raise NOTICE'check exists return %', chk;
+end;
+/
+ERROR:  schema "colors" does not exist
+CONTEXT:  compilation of PL/pgSQL function "array_interface_p8" near line 7
+--call array_interface_p8();
+-- test array exists interface A.B input parameter
+create or replace procedure array_interface_p9()
+as
+declare
+    v_a  varchar2[] := array[]::varchar2[];
+begin
+    raise NOTICE 'v_a is %', v_a;
+    for rec in (select generate_series(1,10) x) loop
+        if v_a.exists(rec.x) then
+            raise NOTICE 'v_a[%] is exist', rec.x;
+        else
+            raise NOTICE 'v_a[%] is not exist', rec.x;
+        end if;
+    end loop;
+    v_a.extend(10);
+    for i in 1 .. 10 loop
+        v_a(i) := i;
+    end loop;
+    raise NOTICE 'v_a is %', v_a;
+    for rec in (select generate_series(1,10) x) loop
+        if v_a.exists(rec.x) then
+            raise NOTICE 'v_a[%] is exist', rec.x;
+        else
+            raise NOTICE 'v_a[%] is not exist', rec.x;
+        end if;
+    end loop;
+end;
+/
+call array_interface_p9();
+NOTICE:  v_a is {}
+NOTICE:  v_a[1] is not exist
+NOTICE:  v_a[2] is not exist
+NOTICE:  v_a[3] is not exist
+NOTICE:  v_a[4] is not exist
+NOTICE:  v_a[5] is not exist
+NOTICE:  v_a[6] is not exist
+NOTICE:  v_a[7] is not exist
+NOTICE:  v_a[8] is not exist
+NOTICE:  v_a[9] is not exist
+NOTICE:  v_a[10] is not exist
+NOTICE:  v_a is {1,2,3,4,5,6,7,8,9,10}
+NOTICE:  v_a[1] is exist
+NOTICE:  v_a[2] is exist
+NOTICE:  v_a[3] is exist
+NOTICE:  v_a[4] is exist
+NOTICE:  v_a[5] is exist
+NOTICE:  v_a[6] is exist
+NOTICE:  v_a[7] is exist
+NOTICE:  v_a[8] is exist
+NOTICE:  v_a[9] is exist
+NOTICE:  v_a[10] is exist
+ array_interface_p9 
+--------------------
+ 
+(1 row)
+
+create or replace procedure array_interface_p10() as
+declare
+    colors varchar2[];
+begin
+    colors := array['red','orange','yellow','green','blue','indigo','violet','c8','c9','c10','c11','c12','c13','c14','c15'];
+    if colors.exists(1+1) then
+        raise NOTICE 'array exist, element is %', colors[1+1];
+    else
+        raise NOTICE 'array not exist';
+    end if;
+	if colors.exists('1' || '2') then
+        raise NOTICE 'array exist, element is %', colors['1'||'2'];
+    else
+        raise NOTICE 'array not exist';
+    end if;
+end;
+/
+call array_interface_p10();
+NOTICE:  array exist, element is orange
+NOTICE:  array exist, element is c12
+ array_interface_p10 
+---------------------
+ 
+(1 row)
+
+create or replace procedure array_interface_p11() as
+declare
+    colors varchar2[];
+begin
+    colors := array['red','orange','yellow','green','blue','indigo','violet','c8','c9','c10','c11','c12','c13','c14','c15'];
+    if colors.exists(1+1) then
+        raise NOTICE 'array exist, element is %', colors[1+1];
+    else
+        raise NOTICE 'array not exist';
+    end if;
+	if colors.exists('1'||'2') then
+        raise NOTICE 'array exist, element is %', colors['1'||'2'];
+    else
+        raise NOTICE 'array not exist';
+    end if;
+end;
+/
+call array_interface_p11();
+NOTICE:  array exist, element is orange
+NOTICE:  array exist, element is c12
+ array_interface_p11 
+---------------------
+ 
+(1 row)
+
+create or replace procedure array_interface_p12() as
+declare
+    colors varchar2[];
+begin
+    colors := array['red','orange','yellow','green','blue','indigo','violet'];
+    raise NOTICE '%', colors;
+    raise NOTICE '%', colors.count;
+    raise NOTICE '%', colors.count();
+    raise NOTICE '%', colors.first;
+    raise NOTICE '%', colors.first();
+    raise NOTICE '%', colors.last;
+    raise NOTICE '%', colors.last();
+    for i in colors.first .. colors.last loop
+        raise NOTICE '%', colors[i];
+    end loop;
+    for i in 1 .. colors.count loop
+        raise NOTICE '%', colors[i];
+    end loop;
+    for i in colors.first() .. colors.last() loop
+        raise NOTICE '%', colors[i];
+    end loop;
+    for i in 1 .. colors.count() loop
+        raise NOTICE '%', colors[i];
+    end loop;
+    colors.extend;
+    raise NOTICE '%', colors;
+    colors.extend();
+    raise NOTICE '%', colors;
+    colors.extend(2);
+    raise NOTICE '%', colors;
+    colors.delete;
+    raise NOTICE '%', colors;
+    colors.extend();
+    raise NOTICE '%', colors;
+    colors.delete();
+    raise NOTICE '%', colors;
+end;
+/
+call array_interface_p12();
+NOTICE:  {red,orange,yellow,green,blue,indigo,violet}
+NOTICE:  7
+NOTICE:  7
+NOTICE:  1
+NOTICE:  1
+NOTICE:  7
+NOTICE:  7
+NOTICE:  red
+NOTICE:  orange
+NOTICE:  yellow
+NOTICE:  green
+NOTICE:  blue
+NOTICE:  indigo
+NOTICE:  violet
+NOTICE:  red
+NOTICE:  orange
+NOTICE:  yellow
+NOTICE:  green
+NOTICE:  blue
+NOTICE:  indigo
+NOTICE:  violet
+NOTICE:  red
+NOTICE:  orange
+NOTICE:  yellow
+NOTICE:  green
+NOTICE:  blue
+NOTICE:  indigo
+NOTICE:  violet
+NOTICE:  red
+NOTICE:  orange
+NOTICE:  yellow
+NOTICE:  green
+NOTICE:  blue
+NOTICE:  indigo
+NOTICE:  violet
+NOTICE:  {red,orange,yellow,green,blue,indigo,violet,NULL}
+NOTICE:  {red,orange,yellow,green,blue,indigo,violet,NULL,NULL}
+NOTICE:  {red,orange,yellow,green,blue,indigo,violet,NULL,NULL,NULL,NULL}
+NOTICE:  {}
+NOTICE:  {NULL}
+NOTICE:  {}
+ array_interface_p12 
+---------------------
+ 
+(1 row)
+
+-- clean up --
+drop schema if exists plpgsql_array_interface cascade;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to function array_interface_p1()
+drop cascades to function array_interface_p2()
+drop cascades to function array_interface_p3()
+drop cascades to function array_interface_p4()
+drop cascades to function array_interface_p5()
+drop cascades to function array_interface_p6()
+drop cascades to function array_interface_p7()
+drop cascades to function array_interface_p9()
+drop cascades to function array_interface_p10()
+drop cascades to function array_interface_p11()
+drop cascades to function array_interface_p12()

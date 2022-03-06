@@ -28,12 +28,17 @@
 #define AM_WAL_NORMAL_SENDER (t_thrd.role == WAL_NORMAL_SENDER)
 #define AM_WAL_STANDBY_SENDER (t_thrd.role == WAL_STANDBY_SENDER)
 #define AM_WAL_DB_SENDER (t_thrd.role == WAL_DB_SENDER)
+#define AM_PARALLEL_DECODE (t_thrd.role == PARALLEL_DECODE)
+#define AM_LOGICAL_READ_RECORD (t_thrd.role == LOGICAL_READ_RECORD)
 #define AM_WAL_HADR_SENDER (t_thrd.role == WAL_HADR_SENDER)
+#define AM_WAL_HADR_CN_SENDER (t_thrd.role == WAL_HADR_CN_SENDER)
 #define AM_WAL_SHARE_STORE_SENDER (t_thrd.role == WAL_SHARE_STORE_SENDER)
 #define AM_NOT_HADR_SENDER (AM_WAL_NORMAL_SENDER || AM_WAL_STANDBY_SENDER || AM_WAL_DB_SENDER)
+#define AM_WAL_HADR_DNCN_SENDER (AM_WAL_HADR_SENDER || AM_WAL_HADR_CN_SENDER)
 #define AM_WAL_SENDER \
     (AM_WAL_NORMAL_SENDER || AM_WAL_STANDBY_SENDER || AM_WAL_DB_SENDER || AM_WAL_HADR_SENDER || \
-    AM_WAL_SHARE_STORE_SENDER)
+    AM_WAL_HADR_CN_SENDER || AM_WAL_SHARE_STORE_SENDER)
+#define STANDBY_IN_BARRIER_PAUSE ((reply->replyFlags & IS_PAUSE_BY_TARGET_BARRIER) != 0)
 
 typedef struct WSXLogJustSendRegion {
     XLogRecPtr start_ptr;
@@ -68,6 +73,9 @@ extern bool WalSndAllInProgress(int type);
 extern bool WalSndQuorumInProgress(int type);
 extern XLogSegNo WalGetSyncCountWindow(void);
 extern void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd);
+extern void SendSignalToDecodeWorker(int signal, int slotId);
+extern void SendSignalToReaderWorker(int signal, int slotId);
+extern void XLogCompression(int *compressedSize, XLogRecPtr startPtr, Size nbytes);
 
 /*
  * Remember that we want to wakeup walsenders later

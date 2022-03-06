@@ -46,6 +46,7 @@
 #include "storage/tcap.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
+#include "utils/partitionkey.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
@@ -219,6 +220,19 @@ int setTargetTable(ParseState* pstate, RangeVar* relation, bool inh, bool alsoSo
      * Now build an RTE.
      */
     rte = addRangeTableEntryForRelation(pstate, pstate->p_target_relation, relation->alias, inh, false);
+
+    /* IUD contain partition. */
+    if (relation->ispartition) {
+        rte->isContainPartition = true;
+        rte->partitionOid = getPartitionOidForRTE(rte, relation, pstate, pstate->p_target_relation);
+    }
+    /* IUD contain subpartition. */
+    if (relation->issubpartition) {
+        rte->isContainSubPartition = true;
+        rte->subpartitionOid =
+            GetSubPartitionOidForRTE(rte, relation, pstate, pstate->p_target_relation, &rte->partitionOid);
+    }
+
     pstate->p_target_rangetblentry = rte;
 
     /* assume new rte is at end */

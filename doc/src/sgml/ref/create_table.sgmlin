@@ -18,12 +18,7 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
     [ COMPRESS | NOCOMPRESS ]
-    [ TABLESPACE tablespace_name ]
-    [ DISTRIBUTE BY { REPLICATION | { HASH ( column_name [,...] )
-    | RANGE ( column_name [,...] ) range_distribution_rules
-    | LIST ( column_name [,...] ) list_distribution_rules }
-    } ]
-    [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ];
+    [ TABLESPACE tablespace_name ];
 
 where column_constraint can be:
 [ CONSTRAINT constraint_name ]
@@ -54,19 +49,6 @@ where like_option can be:
 where index_parameters can be:
 [ WITH ( {storage_parameter = value} [, ... ] ) ]
 [ USING INDEX TABLESPACE tablespace_name ]
-where range_distribution_rules can be:
-[ ( SLICE name VALUES LESS THAN (expression | MAXVALUE [, ... ]) [DATANODE datanode_name]
- [, ... ] ) |
-  ( SLICE name START (expression) END (expression) EVERY (expression) [DATANODE datanode_name]
- [, ... ] ) |
-  SLICE REFERENCES table_name
-]
-where list_distribution_rules can be:
-[ ( SLICE name VALUES (expression [, ... ]) [DATANODE datanode_name]
- [, ... ] ) |
-  ( SLICE name VALUES (DEFAULT) [DATANODE datanode_name] ) |
-  SLICE REFERENCES table_name
-]
 </synopsis>
 </refsynopsisdiv>
 </refentry>

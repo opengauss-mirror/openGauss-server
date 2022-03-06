@@ -135,4 +135,7 @@ extern bool partitionHasToast(Oid partOid);
 
 extern void constCompare(Const* value1, Const* value2, int& compare);
 
+extern struct ListPartElement* CopyListElements(ListPartElement* src, int elementNum);
+extern struct HashPartElement* CopyHashElements(HashPartElement* src, int elementNum, int partkeyNum);
+
 #endif /* PARTITIONMAP_H_ */

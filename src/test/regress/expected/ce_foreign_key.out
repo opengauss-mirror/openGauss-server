@@ -10,11 +10,10 @@ CREATE CLIENT MASTER KEY MyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktoo
 CREATE COLUMN ENCRYPTION KEY MyCEK WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 CREATE COLUMN ENCRYPTION KEY MyCEK2 WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 CREATE TABLE so_headers (
-   id INTEGER unique ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
+   id INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
    customer_id INTEGER  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK2, ENCRYPTION_TYPE = DETERMINISTIC),
    ship_to VARCHAR (255)
 );
-NOTICE:  CREATE TABLE / UNIQUE will create implicit index "so_headers_id_key" for table "so_headers"
 CREATE TABLE so_items (
    item_id INTEGER NOT NULL,
    so_id INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
@@ -25,6 +24,7 @@ CREATE TABLE so_items (
    FOREIGN KEY (so_id) REFERENCES so_headers (id)
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "so_items_pkey" for table "so_items"
+ERROR:  there is no unique constraint matching given keys for referenced table "so_headers"
 CREATE TABLE so_items_r (
   item_id INTEGER NOT NULL,
   so_id int4  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC) REFERENCES so_headers(id) ON DELETE RESTRICT,
@@ -34,6 +34,7 @@ CREATE TABLE so_items_r (
   PRIMARY KEY (item_id,so_id)
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "so_items_r_pkey" for table "so_items_r"
+ERROR:  there is no unique constraint matching given keys for referenced table "so_headers"
 CREATE TABLE so_items_c (
   item_id int4 NOT NULL,   
   so_id int4  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC) REFERENCES so_headers(id) ON DELETE CASCADE,
@@ -43,14 +44,14 @@ CREATE TABLE so_items_c (
   PRIMARY KEY (item_id,so_id)
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "so_items_c_pkey" for table "so_items_c"
-ALTER TABLE IF EXISTS so_headers ADD CONSTRAINT so_headers_unique1 UNIQUE (id,customer_id);
-NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "so_headers_unique1" for table "so_headers"
+ERROR:  there is no unique constraint matching given keys for referenced table "so_headers"
 CREATE TABLE payments (
    pay_id int,
    so_id INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
    customer_id INTEGER  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK2, ENCRYPTION_TYPE = DETERMINISTIC),
    FOREIGN KEY (so_id, customer_id) REFERENCES so_headers (id, customer_id)
 );
+ERROR:  there is no unique constraint matching given keys for referenced table "so_headers"
 CREATE TABLE so_items_a (
   item_id INTEGER NOT NULL,
   so_id int4  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK, ENCRYPTION_TYPE = DETERMINISTIC),
@@ -63,32 +64,43 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "so_items_a_pkey"
 INSERT INTO so_headers VALUES (1,101, 'Vina');
 INSERT INTO so_headers VALUES (2,103, 'Paris');
 INSERT INTO so_items VALUES (10001, 1, 1001, 100, 37.28);
+ERROR:  relation "so_items" does not exist on datanode1
+LINE 1: INSERT INTO so_items VALUES (10001, 1, 1001, 100, 37.28);
+                    ^
 INSERT INTO so_items VALUES (10002, 6, 1001, 100, 37.28);
-ERROR:  insert or update on table "so_items" violates foreign key constraint "so_items_so_id_fkey"
-DETAIL:  Key (so_id)=(6) is not present in table "so_headers".
+ERROR:  relation "so_items" does not exist on datanode1
+LINE 1: INSERT INTO so_items VALUES (10002, 6, 1001, 100, 37.28);
+                    ^
 INSERT INTO so_items VALUES (10003, 2, 1001, 100, 37.28);
+ERROR:  relation "so_items" does not exist on datanode1
+LINE 1: INSERT INTO so_items VALUES (10003, 2, 1001, 100, 37.28);
+                    ^
 SELECT * from so_items ORDER BY item_id;
- item_id | so_id | product_id | qty | net_price 
----------+-------+------------+-----+-----------
-   10001 |     1 |       1001 | 100 |     37.28
-   10003 |     2 |       1001 | 100 |     37.28
-(2 rows)
-
+ERROR:  relation "so_items" does not exist on datanode1
+LINE 1: SELECT * from so_items ORDER BY item_id;
+                      ^
 INSERT INTO so_items_r VALUES (10001, 1, 1001, 100, 37.28);
+ERROR:  relation "so_items_r" does not exist on datanode1
+LINE 1: INSERT INTO so_items_r VALUES (10001, 1, 1001, 100, 37.28);
+                    ^
 INSERT INTO so_items_r VALUES (10002, 6, 1001, 100, 37.28);
-ERROR:  insert or update on table "so_items_r" violates foreign key constraint "so_items_r_so_id_fkey"
-DETAIL:  Key (so_id)=(6) is not present in table "so_headers".
+ERROR:  relation "so_items_r" does not exist on datanode1
+LINE 1: INSERT INTO so_items_r VALUES (10002, 6, 1001, 100, 37.28);
+                    ^
+INSERT INTO so_items VALUES (10003, 2, 1001, 100, 37.28);
+ERROR:  relation "so_items" does not exist on datanode1
+LINE 1: INSERT INTO so_items VALUES (10003, 2, 1001, 100, 37.28);
+                    ^
 SELECT * from so_items_r ORDER BY item_id;
- item_id | so_id | product_id | qty | net_price 
----------+-------+------------+-----+-----------
-   10001 |     1 |       1001 | 100 |     37.28
-(1 row)
-
+ERROR:  relation "so_items_r" does not exist on datanode1
+LINE 1: SELECT * from so_items_r ORDER BY item_id;
+                      ^
 INSERT INTO so_items_a VALUES (10001, 1, 1001, 100, 37.28);
 INSERT INTO so_items_a VALUES (10002, 6, 1001, 100, 37.28);
-INSERT INTO so_items_a VALUES (10001, 1, 1001, 110, 36.28);
-ERROR:  duplicate key value violates unique constraint "so_items_a_pkey"
---?.*
+INSERT INTO so_items VALUES (10003, 2, 1001, 100, 37.28);
+ERROR:  relation "so_items" does not exist on datanode1
+LINE 1: INSERT INTO so_items VALUES (10003, 2, 1001, 100, 37.28);
+                    ^
 SELECT * from so_items_a ORDER BY item_id;
  item_id | so_id | product_id | qty | net_price 
 ---------+-------+------------+-----+-----------
@@ -97,28 +109,26 @@ SELECT * from so_items_a ORDER BY item_id;
 (2 rows)
 
 INSERT INTO so_items_c VALUES (10001, 1, 1001, 100, 37.28);
+ERROR:  relation "so_items_c" does not exist on datanode1
+LINE 1: INSERT INTO so_items_c VALUES (10001, 1, 1001, 100, 37.28);
+                    ^
 INSERT INTO so_items_c VALUES (10002, 6, 1001, 100, 37.28);
-ERROR:  insert or update on table "so_items_c" violates foreign key constraint "so_items_c_so_id_fkey"
-DETAIL:  Key (so_id)=(6) is not present in table "so_headers".
-INSERT INTO so_items_c VALUES (10001, 1, 1011, 101, 36.28);
-ERROR:  duplicate key value violates unique constraint "so_items_c_pkey"
---?.*
+ERROR:  relation "so_items_c" does not exist on datanode1
+LINE 1: INSERT INTO so_items_c VALUES (10002, 6, 1001, 100, 37.28);
+                    ^
+INSERT INTO so_items VALUES (10003, 2, 1001, 100, 37.28);
+ERROR:  relation "so_items" does not exist on datanode1
+LINE 1: INSERT INTO so_items VALUES (10003, 2, 1001, 100, 37.28);
+                    ^
 SELECT * from so_items_c ORDER BY item_id;
- item_id | so_id | product_id | qty | net_price 
----------+-------+------------+-----+-----------
-   10001 |     1 |       1001 | 100 |     37.28
-(1 row)
-
-DELETE from so_headers where id = 2;
-ERROR:  update or delete on table "so_headers" violates foreign key constraint "so_items_so_id_fkey" on table "so_items"
-DETAIL:  Key (id)=(2) is still referenced from table "so_items".
+ERROR:  relation "so_items_c" does not exist on datanode1
+LINE 1: SELECT * from so_items_c ORDER BY item_id;
+                      ^
+DELETE from so_headers where id =2;
 SELECT * from so_items ORDER BY item_id;
- item_id | so_id | product_id | qty | net_price 
----------+-------+------------+-----+-----------
-   10001 |     1 |       1001 | 100 |     37.28
-   10003 |     2 |       1001 | 100 |     37.28
-(2 rows)
-
+ERROR:  relation "so_items" does not exist on datanode1
+LINE 1: SELECT * from so_items ORDER BY item_id;
+                      ^
 SELECT * from so_items_a ORDER BY item_id;
  item_id | so_id | product_id | qty | net_price 
 ---------+-------+------------+-----+-----------
@@ -127,33 +137,42 @@ SELECT * from so_items_a ORDER BY item_id;
 (2 rows)
 
 SELECT * from so_items_r ORDER BY item_id;
- item_id | so_id | product_id | qty | net_price 
----------+-------+------------+-----+-----------
-   10001 |     1 |       1001 | 100 |     37.28
-(1 row)
-
+ERROR:  relation "so_items_r" does not exist on datanode1
+LINE 1: SELECT * from so_items_r ORDER BY item_id;
+                      ^
 SELECT * from so_items_c ORDER BY item_id;
- item_id | so_id | product_id | qty | net_price 
----------+-------+------------+-----+-----------
-   10001 |     1 |       1001 | 100 |     37.28
-(1 row)
-
+ERROR:  relation "so_items_c" does not exist on datanode1
+LINE 1: SELECT * from so_items_c ORDER BY item_id;
+                      ^
 INSERT INTO payments VALUES (100001, 1, 101);
+ERROR:  relation "payments" does not exist on datanode1
+LINE 1: INSERT INTO payments VALUES (100001, 1, 101);
+                    ^
 INSERT INTO payments VALUES (100002, 1, 102);
-ERROR:  insert or update on table "payments" violates foreign key constraint "payments_so_id_fkey"
-DETAIL:  Key (so_id, customer_id)=(1, 102) is not present in table "so_headers".
-SELECT * from payments ORDER BY pay_id;
- pay_id | so_id | customer_id 
---------+-------+-------------
- 100001 |     1 |         101
-(1 row)
-
-DROP TABLE so_items;
-DROP TABLE so_items_r;
-DROP TABLE so_items_a;
-DROP TABLE so_items_c;
-DROP TABLE payments;
+ERROR:  relation "payments" does not exist on datanode1
+LINE 1: INSERT INTO payments VALUES (100002, 1, 102);
+                    ^
+ALTER TABLE so_items_a ADD CONSTRAINT fkey_a FOREIGN KEY (so_id) REFERENCES so_headers (id);
+ERROR:  there is no unique constraint matching given keys for referenced table "so_headers"
+ALTER TABLE so_items_a DROP CONSTRAINT fkey_a;
+ERROR:  constraint "fkey_a" of relation "so_items_a" does not exist
+ALTER TABLE so_items_a ADD CONSTRAINT constraint_fk
+FOREIGN KEY (so_id)
+REFERENCES so_headers (id)
+ON DELETE CASCADE;
+ERROR:  there is no unique constraint matching given keys for referenced table "so_headers"
 DROP TABLE so_headers;
+DROP TABLE so_items;
+ERROR:  table "so_items" does not exist
+DROP TABLE so_items_r;
+ERROR:  table "so_items_r" does not exist
+DROP TABLE so_items_a;
+DROP TABLE so_items_b;
+ERROR:  table "so_items_b" does not exist
+DROP TABLE so_items_c;
+ERROR:  table "so_items_c" does not exist
+DROP TABLE payments;
+ERROR:  table "payments" does not exist
 DROP CLIENT MASTER KEY MyCMK CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to column encryption key: mycek

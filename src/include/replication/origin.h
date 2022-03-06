@@ -90,6 +90,7 @@ extern void StartupReplicationOrigin(void);
 /* WAL logging */
 void replorigin_redo(XLogReaderState *record);
 void replorigin_desc(StringInfo buf, XLogReaderState *record);
+const char* replorigin_type_name(uint8 subtype);
 
 /* shared memory allocation */
 extern Size ReplicationOriginShmemSize(void);

@@ -1444,6 +1444,8 @@ pgxc_node_all_free(void)
     u_sess->pgxc_cxt.NumCoords = 0;
     u_sess->pgxc_cxt.dn_handles = NULL;
     u_sess->pgxc_cxt.NumDataNodes = 0;
+    u_sess->pgxc_cxt.NumTotalDataNodes = 0;
+    u_sess->pgxc_cxt.NumStandbyDataNodes = 0;
     u_sess->pgxc_cxt.primary_data_node = InvalidOid;
     u_sess->pgxc_cxt.num_preferred_data_nodes = 0;
 }

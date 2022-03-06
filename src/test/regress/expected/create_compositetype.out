@@ -1018,6 +1018,111 @@ CONTEXT:  referenced column: test_func_varray
  (0,1,2,a,abc)
 (1 row)
 
+--NULLTEST FOR AFORMAT
+set behavior_compat_options='aformat_null_test';
+explain (verbose, costs off)
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+                                                                                                            QUERY PLAN                                                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Values Scan on "*VALUES*"
+   Output: ROW("*VALUES*".column1, "*VALUES*".column2), (("*VALUES*".column1 IS NULL) AND ("*VALUES*".column2 IS NOT DISTINCT FROM NULL)), (NOT (("*VALUES*".column1 IS NULL) AND ("*VALUES*".column2 IS NOT DISTINCT FROM NULL)))
+(2 rows)
+
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+      r      | isnull | isnotnull 
+-------------+--------+-----------
+ (1,"(1,2)") | f      | t
+ (1,"(,)")   | f      | t
+ (1,)        | f      | t
+ (,"(1,2)")  | f      | t
+ (,"(,)")    | f      | t
+ (,)         | t      | f
+(6 rows)
+
+explain (verbose, costs off)
+with r(a,b) as
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+                                                                                                            QUERY PLAN                                                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Values Scan on "*VALUES*"
+   Output: ROW("*VALUES*".column1, "*VALUES*".column2), (("*VALUES*".column1 IS NULL) AND ("*VALUES*".column2 IS NOT DISTINCT FROM NULL)), (NOT (("*VALUES*".column1 IS NULL) AND ("*VALUES*".column2 IS NOT DISTINCT FROM NULL)))
+(2 rows)
+
+with r(a,b) as
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+      r      | isnull | isnotnull 
+-------------+--------+-----------
+ (1,"(1,2)") | f      | t
+ (1,"(,)")   | f      | t
+ (1,)        | f      | t
+ (,"(1,2)")  | f      | t
+ (,"(,)")    | f      | t
+ (,)         | t      | f
+(6 rows)
+
+explain (verbose, costs off)
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ CTE Scan on r
+   Output: r.*, (r.* IS NULL), (r.* IS NOT NULL)
+   CTE r
+     ->  Values Scan on "*VALUES*"
+           Output: "*VALUES*".column1, "*VALUES*".column2
+(5 rows)
+
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+      r      | isnull | isnotnull 
+-------------+--------+-----------
+ (1,"(1,2)") | f      | t
+ (1,"(,)")   | f      | t
+ (1,)        | f      | t
+ (,"(1,2)")  | f      | t
+ (,"(,)")    | f      | t
+ (,)         | t      | f
+(6 rows)
+
+declare
+type ta as record (a int, b int);
+va ta;
+begin
+va.b = 2;
+if va is not null then
+raise info '1111';
+else
+raise info '2222';
+end if;
+end;
+/
+INFO:  1111
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+      r      | isnull | isnotnull 
+-------------+--------+-----------
+ (1,"(1,2)") | f      | t
+ (1,"(,)")   | f      | t
+ (1,)        | f      | t
+ (,"(1,2)")  | f      | t
+ (,"(,)")    | f      | t
+ (,)         | t      | f
+(6 rows)
+
+reset behavior_compat_options;
 drop function avg_transfn1();
 drop function test_func_VARRAY();
 drop type avg_state cascade;

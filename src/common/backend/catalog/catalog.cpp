@@ -534,7 +534,10 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
 
         /* check tablespace version directory */
         token = strtok_r(NULL, "/", &tmptoken);
-        Assert(token != NULL);
+        if (NULL == token) {
+            pfree(parsepath);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid relation file path %s.", path)));
+        }
 
         char tblspcversiondir[MAXPGPATH];
         int errorno = snprintf_s(tblspcversiondir,
@@ -642,6 +645,14 @@ bool IsSystemClass(Form_pg_class reltuple)
     Oid relnamespace = reltuple->relnamespace;
 
     return IsSystemNamespace(relnamespace) || IsToastNamespace(relnamespace) || IsPackageSchemaOid(relnamespace);
+}
+
+bool IsSysSchema(Oid namespaceId)
+{
+    if (namespaceId == PG_PUBLIC_NAMESPACE) {
+        return false;
+    }
+    return namespaceId < FirstNormalObjectId;
 }
 
 /*
@@ -1018,7 +1029,7 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
 
     /* This logic should match RelationInitPhysicalAddr */
     rnode.node.spcNode = ConvertToRelfilenodeTblspcOid(reltablespace);
-    rnode.node.dbNode = (rnode.node.spcNode == GLOBALTABLESPACE_OID) ? InvalidOid : u_sess->proc_cxt.MyDatabaseId;
+    rnode.node.dbNode = (rnode.node.spcNode == GLOBALTABLESPACE_OID) ? InvalidOid : GetMyDatabaseId();
     rnode.node.bucketNode = InvalidBktId;
 
     /*

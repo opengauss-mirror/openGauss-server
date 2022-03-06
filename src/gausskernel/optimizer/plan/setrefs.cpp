@@ -845,6 +845,10 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                 itlist = build_tlist_index(splan->exclRelTlist);
                 splan->updateTlist = fix_join_expr(root, splan->updateTlist, NULL,
                     itlist, linitial_int(splan->resultRelations), rtoffset);
+                splan->upsertWhere = (Node*)fix_join_expr(root, (List*)splan->upsertWhere, NULL,
+                    itlist, linitial_int(splan->resultRelations), rtoffset);
+                splan->exclRelTlist =
+                        fix_scan_list(root, splan->exclRelTlist, rtoffset);
             }
 
             splan->exclRelRTIndex += rtoffset;

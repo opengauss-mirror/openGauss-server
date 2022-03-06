@@ -32,6 +32,7 @@
 #include "catalog/pg_aggregate.h"
 #include "catalog/gs_client_global_keys.h"
 #include "catalog/gs_column_keys.h"
+#include "catalog/gs_db_privilege.h"
 #include "catalog/gs_encrypted_columns.h"
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/gs_job_argument.h"
@@ -84,6 +85,7 @@
 #include "catalog/pg_ts_parser.h"
 #include "catalog/pg_ts_template.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_uid.h"
 #include "catalog/pg_user_mapping.h"
 #include "catalog/pg_extension_data_source.h"
 #include "catalog/pg_streaming_stream.h"
@@ -102,6 +104,7 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "catalog/pg_user_status.h"
+#include "lite/memory_lite.h"
 #include "catalog/pg_publication.h"
 #include "catalog/pg_publication_rel.h"
 #include "catalog/pg_replication_origin.h"
@@ -141,19 +144,13 @@
 /*
  *		struct cachedesc: information defining a single syscache
  */
-struct cachedesc {
-    Oid reloid;   /* OID of the relation being cached */
-    Oid indoid;   /* OID of index relation for this cache */
-    int nkeys;    /* # of keys needed for cache lookup */
-    int key[4];   /* attribute numbers of key attrs */
-    int nbuckets; /* number of hash buckets for this cache */
-};
 
-static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID */
-                                                 AggregateFnoidIndexId,
-                                                 1,
-                                                 {Anum_pg_aggregate_aggfnoid, 0, 0, 0},
-                                                 32},
+const cachedesc cacheinfo[] = {
+    {AggregateRelationId, /* AGGFNOID */
+        AggregateFnoidIndexId,
+        1,
+        {Anum_pg_aggregate_aggfnoid, 0, 0, 0},
+        32},
     {AccessMethodRelationId, /* AMNAME */
         AmNameIndexId,
         1,
@@ -458,24 +455,24 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         PartitionOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        1024},
+        PARTITION_OID_INDEX_ID_NBUCKETS},
 
     {PartitionRelationId, /* PARTPARTOID */
         PartitionPartOidIndexId,
         3,
         {Anum_pg_partition_relname, Anum_pg_partition_parttype, Anum_pg_partition_parentid, 0},
-        1024},
+        PARTITION_PART_OID_INDEX_ID_NBUCKETS},
     {PartitionRelationId, /* PARTINDEXTBLPARENTOID */
         PartitionIndexTableIdParentOidIndexId,
         3,
         {Anum_pg_partition_indextblid, Anum_pg_partition_parentid, ObjectIdAttributeNumber, 0},
-        1024},
+        PARTITION_INDEX_TABLE_ID_PARENT_OID_INDEX_ID_NBUCKETS},
 
     {PgJobRelationId, /* PGJOBID */
         PgJobIdIndexId,
         1,
         {Anum_pg_job_job_id, 0, 0, 0},
-        2048},
+        PG_JOB_ID_INDEX_ID_NBUCKETS},
     {PgJobProcRelationId, /* PGJOBPROCID */
         PgJobProcIdIndexId,
         1,
@@ -485,39 +482,39 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         PgObjectIndex,
         2,
         {Anum_pg_object_oid, Anum_pg_object_type, 0, 0},
-        2048},
+        PG_OBJECT_INDEX_NBUCKETS},
 
 #ifdef PGXC
     {PgxcClassRelationId, /* PGXCCLASSRELID */
         PgxcClassPgxcRelIdIndexId,
         1,
         {Anum_pgxc_class_pcrelid, 0, 0, 0},
-        1024},
+        PGXC_CLASS_PGXC_REL_ID_INDEX_ID_NBUCKETS},
     {PgxcGroupRelationId, /* PGXCGROUPNAME */
         PgxcGroupGroupNameIndexId,
         1,
         {Anum_pgxc_group_name, 0, 0, 0},
-        256},
+        PGXC_GROUP_GROUP_NAME_INDEX_ID_NBUCKETS},
     {PgxcGroupRelationId, /* PGXCGROUPOID */
         PgxcGroupOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        256},
+        PGXC_GROUP_OID_INDEX_ID_NBUCKETS},
     {PgxcNodeRelationId, /* PGXCNODENAMETYPE */
         PgxcNodeNodeNameIndexId,
         3,
         {Anum_pgxc_node_name, Anum_pgxc_node_type, ObjectIdAttributeNumber, 0},
-        256},
+        PGXC_NODE_NODE_NAME_INDEX_ID_NBUCKETS},
     {PgxcNodeRelationId, /* PGXCNODEOID */
         PgxcNodeOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        256},
+        PGXC_NODE_OID_INDEX_ID_NBUCKETS},
     {PgxcNodeRelationId, /* PGXCNODEIDENTIFIER */
         PgxcNodeNodeIdIndexId,
         1,
         {Anum_pgxc_node_id, 0, 0, 0},
-        256},
+        PGXC_NODE_NODE_ID_INDEX_ID_NBUCKETS},
     {ResourcePoolRelationId, /* PGXCRESOURCEPOOLNAME */
         ResourcePoolPoolNameIndexId,
         1,
@@ -532,12 +529,12 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         WorkloadGroupGroupNameIndexId,
         1,
         {Anum_pg_workload_group_wgname, 0, 0, 0},
-        256},
+        WORKLOAD_GROUP_GROUP_NAME_INDEX_ID_NBUCKETS},
     {WorkloadGroupRelationId, /* PGXCWORKLOADGROUPOID */
         WorkloadGroupOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        256},
+        WORKLOAD_GROUP_OID_INDEX_ID_NBUCKETS},
     {AppWorkloadGroupMappingRelationId, /* PGXCAPPWGMAPPINGNAME */
         AppWorkloadGroupMappingNameIndexId,
         1,
@@ -552,8 +549,20 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         PgxcSliceIndexId,
         4,
         {Anum_pgxc_slice_relid, Anum_pgxc_slice_type, Anum_pgxc_slice_relname, Anum_pgxc_slice_sindex},
-        1024},
+        PGXC_SLICE_INDEX_ID_NBUCKETS},
 #endif
+    {SubscriptionRelationId, /* SUBSCRIPTIONNAME */
+        SubscriptionNameIndexId,
+        2,
+        {Anum_pg_subscription_subdbid, Anum_pg_subscription_subname, 0, 0},
+        4
+    },
+    {SubscriptionRelationId, /* SUBSCRIPTIONOID */
+        SubscriptionObjectIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        4
+    },
 #ifndef ENABLE_MULTIPLE_NODES
     {ProcedureRelationId, /* PROCNAMEARGSNSP */
         ProcedureNameArgsNspNewIndexId,
@@ -604,7 +613,7 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
             Anum_pg_statistic_starelkind,
             Anum_pg_statistic_staattnum,
             Anum_pg_statistic_stainherit},
-        1024},
+        STATISTIC_RELID_KIND_ATTNUM_INH_INDEX_ID_NBUCKETS},
     {StatisticExtRelationId, /* STATEXTRELKINDKEYINH (For pg_statistic_ext multi-column stats) */
         StatisticExtRelidKindInhKeyIndexId,
         4,
@@ -612,57 +621,63 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
             Anum_pg_statistic_ext_starelkind,
             Anum_pg_statistic_ext_stainherit,
             Anum_pg_statistic_ext_stakey},
-        1024},
+        STATISTIC_EXT_RELID_KIND_INH_KEY_INDEX_ID_NBUCKETS},
     {StreamingContQueryRelationId, /* STREAMCQDEFRELID */
         StreamingContQueryDefrelidIndexId,
         1,
         {Anum_streaming_cont_query_defrelid, 0, 0, 0},
-        2048},
+        STREAMING_CONT_QUERY_DEFRELID_INDEX_ID_NBUCKETS},
     {StreamingContQueryRelationId, /* STREAMCQID */
         StreamingContQueryIdIndexId,
         1,
         {Anum_streaming_cont_query_id, 0, 0, 0},
-        2048},
+        STREAMING_CONT_QUERY_ID_INDEX_ID_NBUCKETS},
     {StreamingContQueryRelationId, /* STREAMCQLOOKUPID */
         StreamingContQueryLookupidxidIndexId,
         1,
         {Anum_streaming_cont_query_lookupidxid, 0, 0, 0},
-        2048},
+        STREAMING_CONT_QUERY_LOOKUP_ID_XID_INDEX_ID_NBUCKETS},
     {StreamingContQueryRelationId, /* STREAMCQMATRELID */
         StreamingContQueryMatrelidIndexId,
         1,
         {Anum_streaming_cont_query_matrelid, 0, 0, 0},
-        2048},
+        STREAMING_CONT_QUERY_MATRELID_INDEX_ID_NBUCKETS},
     {StreamingContQueryRelationId, /* STREAMCQOID */
         StreamingContQueryOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        2048},
+        STREAMING_CONT_QUERY_OID_INDEX_ID_NBUCKETS},
     {StreamingContQueryRelationId, /* STREAMCQRELID */
         StreamingContQueryRelidIndexId,
         1,
         {Anum_streaming_cont_query_relid, 0, 0, 0},
-        2048},
+        STREAMING_CONT_QUERY_RELID_INDEX_ID_NBUCKETS},
     {StreamingContQueryRelationId, /* STREAMCQSCHEMACHANGE */
         StreamingContQuerySchemaChangeIndexId,
         2,
         {Anum_streaming_cont_query_matrelid, Anum_streaming_cont_query_active, 0, 0},
-        2048},
+        STREAMING_CONT_QUERY_SCHEMA_CHANGE_INDEX_ID_NBUCKETS},
     {StreamingStreamRelationId, /* STREAMOID */
         StreamingStreamOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        2048},
+        STREAMING_STREAM_OID_INDEX_ID_NBUCKETS},
     {StreamingStreamRelationId, /* STREAMRELID */
         StreamingStreamRelidIndexId,
         1,
         {Anum_streaming_stream_relid, 0, 0, 0},
-        2048},
+        STREAMING_STREAM_RELID_INDEX_ID_NBUCKETS},
     {StreamingReaperStatusRelationId, /* REAPERCQOID */
         StreamingReaperStatusOidIndexId,
         1,
         {Anum_streaming_reaper_status_id, 0, 0, 0},
-        2048},
+        STREAMING_REAPER_STATUS_OID_INDEX_ID_NBUCKETS},
+    {PublicationRelRelationId, /* PUBLICATIONRELMAP */
+        PublicationRelMapIndexId,
+        2,
+        {Anum_pg_publication_rel_prrelid, Anum_pg_publication_rel_prpubid, 0, 0},
+        64
+    },
     {PgSynonymRelationId, /* SYNOID */
         SynonymOidIndexId,
         1,
@@ -768,12 +783,12 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         PackageOidIndexId,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
-        2048},
+        PACKAGE_OID_INDEX_ID_NBUCKETS},
     {PackageRelationId, /* PKGNAMENSP */
         PackageNameIndexId,
         2,
         {Anum_gs_package_pkgname, Anum_gs_package_pkgnamespace, 0, 0},
-        2048},
+        PACKAGE_NAME_INDEX_ID_NBUCKETS},
     {PublicationRelationId, /* PUBLICATIONNAME */
         PublicationNameIndexId,
         1,
@@ -783,8 +798,7 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
             0,
             0
         },
-        8
-    },
+        8},
     {PublicationRelationId, /* PUBLICATIONOID */
         PublicationObjectIndexId,
         1,
@@ -794,52 +808,27 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
             0,
             0
         },
-        8
-    },
-    {PublicationRelRelationId, /* PUBLICATIONREL */
-        PublicationRelObjectIndexId,
+        8},
+    {UidRelationId, /* UIDRELID */
+        UidRelidIndexId,
         1,
-        {
-            ObjectIdAttributeNumber,
-            0,
-            0,
-            0
-        },
-        64
-    },
-    {PublicationRelRelationId, /* PUBLICATIONRELMAP */
-        PublicationRelMapIndexId,
-        2,
-        {
-            Anum_pg_publication_rel_prrelid,
-            Anum_pg_publication_rel_prpubid,
-            0,
-            0
-        },
-        64
-    },
-    {SubscriptionRelationId, /* SUBSCRIPTIONNAME */
-        SubscriptionNameIndexId,
-        2,
-        {
-            Anum_pg_subscription_subdbid,
-            Anum_pg_subscription_subname,
-            0,
-            0
-        },
-        4
-    },
-    {SubscriptionRelationId, /* SUBSCRIPTIONOID */
-        SubscriptionObjectIndexId,
+        {Anum_gs_uid_relid, 0, 0, 0},
+        64},
+    {DbPrivilegeId, /* DBPRIVOID */
+        DbPrivilegeOidIndexId,
         1,
-        {
-            ObjectIdAttributeNumber,
-            0,
-            0,
-            0
-        },
-        4
-    }
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        128},
+    {DbPrivilegeId, /* DBPRIVROLE */
+        DbPrivilegeRoleidIndexId,
+        1,
+        {Anum_gs_db_privilege_roleid, 0, 0, 0},
+        1024},
+    {DbPrivilegeId, /* DBPRIVROLEPRIV */
+        DbPrivilegeRoleidPrivilegeTypeIndexId,
+        2,
+        {Anum_gs_db_privilege_roleid, Anum_gs_db_privilege_privilege_type, 0, 0},
+        128}
 };
 
 int SysCacheSize = lengthof(cacheinfo);
@@ -854,6 +843,12 @@ int SysCacheSize = lengthof(cacheinfo);
  */
 void InitCatalogCache(void)
 {
+    if (EnableLocalSysCache()) {
+        /* use global catcache */
+        Assert(!u_sess->syscache_cxt.CacheInitialized);
+        t_thrd.lsc_cxt.lsc->systabcache.Init();
+        return;
+    }
     int cacheId;
 
     Assert(!u_sess->syscache_cxt.CacheInitialized);
@@ -889,6 +884,8 @@ void InitCatalogCache(void)
  */
 void InitCatalogCachePhase2(void)
 {
+    /* gsc never do this work */
+    Assert(!EnableLocalSysCache());
     int cacheId;
 
     Assert(u_sess->syscache_cxt.CacheInitialized);
@@ -925,6 +922,10 @@ void InitCatalogCachePhase2(void)
  */
 HeapTuple SearchSysCache(int cacheId, Datum key1, Datum key2, Datum key3, Datum key4, int level)
 {
+    if (EnableLocalSysCache()) {
+        HeapTuple tmp = t_thrd.lsc_cxt.lsc->systabcache.SearchTuple(cacheId, key1, key2, key3, key4);
+        return tmp;
+    }
     Assert(cacheId >= 0);
     Assert(cacheId < SysCacheSize);
     Assert(PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]));
@@ -934,6 +935,10 @@ HeapTuple SearchSysCache(int cacheId, Datum key1, Datum key2, Datum key3, Datum 
 
 HeapTuple SearchSysCache1(int cacheId, Datum key1)
 {
+    if (EnableLocalSysCache()) {
+        HeapTuple tmp = t_thrd.lsc_cxt.lsc->systabcache.SearchTuple1(cacheId, key1);
+        return tmp;
+    }
     Assert(cacheId >= 0);
     Assert(cacheId < SysCacheSize);
     Assert(PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]));
@@ -944,6 +949,10 @@ HeapTuple SearchSysCache1(int cacheId, Datum key1)
 
 HeapTuple SearchSysCache2(int cacheId, Datum key1, Datum key2)
 {
+    if (EnableLocalSysCache()) {
+        HeapTuple tmp = t_thrd.lsc_cxt.lsc->systabcache.SearchTuple2(cacheId, key1, key2);
+        return tmp;
+    }
     Assert(cacheId >= 0);
     Assert(cacheId < SysCacheSize);
     Assert(PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]));
@@ -954,6 +963,10 @@ HeapTuple SearchSysCache2(int cacheId, Datum key1, Datum key2)
 
 HeapTuple SearchSysCache3(int cacheId, Datum key1, Datum key2, Datum key3)
 {
+    if (EnableLocalSysCache()) {
+        HeapTuple tmp = t_thrd.lsc_cxt.lsc->systabcache.SearchTuple3(cacheId, key1, key2, key3);
+        return tmp;
+    }
     Assert(cacheId >= 0);
     Assert(cacheId < SysCacheSize);
     Assert(PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]));
@@ -964,10 +977,18 @@ HeapTuple SearchSysCache3(int cacheId, Datum key1, Datum key2, Datum key3)
 
 HeapTuple SearchSysCache4(int cacheId, Datum key1, Datum key2, Datum key3, Datum key4)
 {
+    if (EnableLocalSysCache()) {
+        HeapTuple tmp = t_thrd.lsc_cxt.lsc->systabcache.SearchTuple4(cacheId, key1, key2, key3, key4);
+        return tmp;
+    }
     Assert(cacheId >= 0);
     Assert(cacheId < SysCacheSize);
     Assert(PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]));
     Assert(u_sess->syscache_cxt.SysCache[cacheId]->cc_nkeys == 4);
+#ifndef ENABLE_MULTIPLE_NODES
+    /* For PROCALLARGS we have a suit of specific functions! */
+    Assert(cacheId != PROCALLARGS);
+#endif
 
     return SearchCatCache4(u_sess->syscache_cxt.SysCache[cacheId], key1, key2, key3, key4);
 }
@@ -978,9 +999,25 @@ HeapTuple SearchSysCache4(int cacheId, Datum key1, Datum key2, Datum key3, Datum
  */
 void ReleaseSysCache(HeapTuple tuple)
 {
+    if (EnableLocalSysCache()) {
+        LocalCatCTup *ct = ResourceOwnerForgetLocalCatCTup(LOCAL_SYSDB_RESOWNER, tuple);
+        Assert(ct != NULL);
+        ct->Release();
+        return;
+    }
     ReleaseCatCache(tuple);
 }
 
+extern void ReleaseSysCacheList(catclist *cl)
+{
+    if (EnableLocalSysCache()) {
+        LocalCatCList *tuples = (LocalCatCList *)cl;
+        ResourceOwnerForgetLocalCatCList(LOCAL_SYSDB_RESOWNER, tuples);
+        tuples->Release();
+        return;
+    }
+    ReleaseCatCacheList(cl);
+}
 /*
  * SearchSysCacheCopy
  *
@@ -1010,6 +1047,11 @@ HeapTuple SearchSysCacheCopy(int cacheId, Datum key1, Datum key2, Datum key3, Da
  */
 bool SearchSysCacheExists(int cacheId, Datum key1, Datum key2, Datum key3, Datum key4)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    /* For PROCALLARGS we have a suit of specific functions! */
+    Assert(cacheId != PROCALLARGS);
+#endif
+    
     HeapTuple tuple;
 
     tuple = SearchSysCache(cacheId, key1, key2, key3, key4);
@@ -1126,15 +1168,25 @@ Datum SysCacheGetAttr(int cacheId, HeapTuple tup, AttrNumber attributeNumber, bo
      * valid (because the caller recently fetched the tuple via this same
      * cache), but there are cases where we have to initialize the cache here.
      */
-    if (cacheId < 0 || cacheId >= SysCacheSize || !PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId])) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid cache ID: %d", cacheId)));
-    }
-    if (!PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]->cc_tupdesc)) {
-        InitCatCachePhase2(u_sess->syscache_cxt.SysCache[cacheId], false);
-        Assert(PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]->cc_tupdesc));
-    }
+    if (EnableLocalSysCache()) {
+        if (cacheId < 0 || cacheId >= SysCacheSize) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid cache ID: %d", cacheId)));
+        }
+        if (!PointerIsValid(t_thrd.lsc_cxt.lsc->systabcache.GetCCTupleDesc(cacheId))) {
+            Assert(PointerIsValid(t_thrd.lsc_cxt.lsc->systabcache.GetCCTupleDesc(cacheId)));
+        }
+        return heap_getattr(tup, attributeNumber, t_thrd.lsc_cxt.lsc->systabcache.GetCCTupleDesc(cacheId), isNull);
+    } else {
+        if (cacheId < 0 || cacheId >= SysCacheSize || !PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId])) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid cache ID: %d", cacheId)));
+        }
+        if (!PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]->cc_tupdesc)) {
+            InitCatCachePhase2(u_sess->syscache_cxt.SysCache[cacheId], false);
+            Assert(PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId]->cc_tupdesc));
+        }
 
-    return heap_getattr(tup, attributeNumber, u_sess->syscache_cxt.SysCache[cacheId]->cc_tupdesc, isNull);
+        return heap_getattr(tup, attributeNumber, u_sess->syscache_cxt.SysCache[cacheId]->cc_tupdesc, isNull);
+    }
 }
 
 /*
@@ -1149,6 +1201,12 @@ Datum SysCacheGetAttr(int cacheId, HeapTuple tup, AttrNumber attributeNumber, bo
  */
 uint32 GetSysCacheHashValue(int cacheId, Datum key1, Datum key2, Datum key3, Datum key4)
 {
+    if (EnableLocalSysCache()) {
+        if (cacheId < 0 || cacheId >= SysCacheSize) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid cache ID: %d", cacheId)));
+        }
+        return t_thrd.lsc_cxt.lsc->systabcache.GetCatCacheHashValue(cacheId, key1, key2, key3, key4);
+    }
     if (cacheId < 0 || cacheId >= SysCacheSize || !PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId])) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid cache ID: %d", cacheId)));
     }
@@ -1161,10 +1219,27 @@ uint32 GetSysCacheHashValue(int cacheId, Datum key1, Datum key2, Datum key3, Dat
  */
 struct catclist* SearchSysCacheList(int cacheId, int nkeys, Datum key1, Datum key2, Datum key3, Datum key4)
 {
-    
+    if (EnableLocalSysCache()) {
+        catclist *cl = t_thrd.lsc_cxt.lsc->systabcache.SearchCatCList(cacheId, nkeys, key1, key2, key3, key4);
+        return cl;
+    }
     if (cacheId < 0 || cacheId >= SysCacheSize || !PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId])) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid cache ID: %d", cacheId)));
     }
 
     return SearchCatCacheList(u_sess->syscache_cxt.SysCache[cacheId], nkeys, key1, key2, key3, key4);
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+bool SearchSysCacheExistsForProcAllArgs(Datum key1, Datum key2, Datum key3, Datum key4, Datum proArgModes)
+{
+    HeapTuple tuple;
+
+    tuple = SearchSysCacheForProcAllArgs(key1, key2, key3, key4, proArgModes);
+    if (!HeapTupleIsValid(tuple)) {
+        return false;
+    }
+    ReleaseSysCache(tuple);
+    return true;
+}
+#endif

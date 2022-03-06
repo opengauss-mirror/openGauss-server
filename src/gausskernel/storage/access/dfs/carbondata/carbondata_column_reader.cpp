@@ -1456,7 +1456,11 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterByte(uint64_t numVal
                 isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
             } else if (m_checkPredicateOnRow) {
                 int64_t tmpValue = (int64_t)pData[rowId];
+#ifdef ENABLE_LLVM_COMPILE
                 isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(tmpValue, m_predicate);
+#else
+                isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(tmpValue, m_predicate);
+#endif
             }
         }
     }
@@ -1475,7 +1479,11 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterBoolean(uint64_t num
             if (isNullValue(rowId)) {
                 isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
             } else if (m_checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                 isSelected[i] = HdfsPredicateCheckValueIntForLlvm<BoolWrapper, bool>(tmpData[rowId], m_predicate);
+#else
+                isSelected[i] = HdfsPredicateCheckValue<BoolWrapper, bool>(tmpData[rowId], m_predicate);
+#endif
             }
         }
     }
@@ -1495,7 +1503,11 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterShort(uint64_t numVa
                 isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
             } else if (m_checkPredicateOnRow) {
                 int64_t intValue = (int64_t)tmpData[rowId];
+#ifdef ENABLE_LLVM_COMPILE
                 isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(intValue, m_predicate);
+#else
+                isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(intValue, m_predicate);
+#endif
             }
         }
     }
@@ -1515,7 +1527,11 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterInt(uint64_t numValu
                 isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
             } else if (m_checkPredicateOnRow) {
                 int64_t valueInt = (int64_t)pData[rowId];
+#ifdef ENABLE_LLVM_COMPILE
                 isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(valueInt, m_predicate);
+#else
+                isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(valueInt, m_predicate);
+#endif
             }
         }
     }
@@ -1534,7 +1550,11 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterLong(uint64_t numVal
             if (isNullValue(rowId)) {
                 isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
             } else if (m_checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                 isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(dataPtr[rowId], m_predicate);
+#else
+                isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(dataPtr[rowId], m_predicate);
+#endif
             }
         }
     }
@@ -1554,7 +1574,11 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterFloat(uint64_t numVa
                 isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
             } else if (m_checkPredicateOnRow) {
                 double tmpValue = static_cast<double>(tmpData[rowId]);
+#ifdef ENABLE_LLVM_COMPILE
                 isSelected[i] = HdfsPredicateCheckValueDoubleForLlvm<Float8Wrapper, double>(tmpValue, m_predicate);
+#else
+                isSelected[i] = HdfsPredicateCheckValue<Float8Wrapper, double>(tmpValue, m_predicate);
+#endif
             }
         }
     }
@@ -1574,7 +1598,11 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterDouble(uint64_t numV
                 isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
             } else if (m_checkPredicateOnRow) {
                 double doubleValue = tmpData[rowId];
+#ifdef ENABLE_LLVM_COMPILE
                 isSelected[i] = HdfsPredicateCheckValueDoubleForLlvm<Float8Wrapper, double>(doubleValue, m_predicate);
+#else
+                isSelected[i] = HdfsPredicateCheckValue<Float8Wrapper, double>(doubleValue, m_predicate);
+#endif
             }
         }
     }
@@ -1657,7 +1685,12 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterDecimal(uint64_t num
                 if (isNullValue(rowId)) {
                     isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
                 } else if (m_checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                     isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(tmpData[rowId],
+                                                                                             m_predicate);
+#else
+                    isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(tmpData[rowId], m_predicate);
+#endif
                 }
             }
         }
@@ -1672,7 +1705,12 @@ void CarbondataColumnReaderImpl<ReaderType>::PredicateFilterDecimal(uint64_t num
                 if (isNullValue(rowId)) {
                     isSelected[i] = HdfsPredicateCheckNull<NullWrapper>(m_predicate);
                 } else if (m_checkPredicateOnRow) {
+#ifdef ENABLE_LLVM_COMPILE
                     isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int128Wrapper, int128>(tmpData[rowId],
+                                                                                             m_predicate);
+#else
+                    isSelected[i] = HdfsPredicateCheckValue<Int128Wrapper, int128>(tmpData[rowId], m_predicate);
+#endif
                 }
             }
         }

@@ -64,7 +64,7 @@ create table accounts (
 NOTICE:  CREATE TABLE will create implicit sequence "accounts_id_seq" for serial column "accounts.id"
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "accounts_pkey" for table "accounts"
 CREATE OR REPLACE FUNCTION insert_func_2(name varchar(100), balance dec(15,2)) RETURNS VOID AS 'INSERT INTO accounts(name,balance) VALUES($1, $2);' LANGUAGE SQL;
-call insert_func_2('Bob', 101.30);
+call regression.public.insert_func_2('Bob', 101.30);
  insert_func_2 
 ---------------
  
@@ -97,7 +97,7 @@ select * from accounts order by id;
   4 | Donald | 1214.88
 (4 rows)
 
-drop FUNCTION f_processed_in_sql;
+drop FUNCTION f_processed_in_sql(int, int);
 drop FUNCTION f_processed_in_sql_named;
 drop FUNCTION insert_func_2;
 drop table t_processed;

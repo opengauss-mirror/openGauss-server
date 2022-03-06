@@ -13,3 +13,4 @@ test: ustore_rewrite
 test: ustore_spill
 test: ustore_xact
 test: ustore_replication_origin
+test: area

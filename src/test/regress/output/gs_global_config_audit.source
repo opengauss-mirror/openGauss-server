@@ -1,0 +1,56 @@
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_enabled=on" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=33554431" > /dev/null 2>&1
+show audit_enabled;
+ audit_enabled 
+---------------
+ on
+(1 row)
+
+show audit_system_object;
+ audit_system_object 
+---------------------
+ 33554431
+(1 row)
+
+SELECT object_name,detail_info FROM pg_query_audit('2022-02-01 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_globalconfig';
+ object_name | detail_info 
+-------------+-------------
+(0 rows)
+
+select * from gs_global_config;
+    name     | value 
+-------------+-------
+ buckets_len | 16384
+(1 row)
+
+ALTER GLOBAL CONFIGURATION with(lockwait_timeout=2000, lockwait_interval=2);
+ALTER GLOBAL CONFIGURATION with(last_catchup_threshold=5000);
+select * from gs_global_config;
+          name          | value 
+------------------------+-------
+ buckets_len            | 16384
+ lockwait_timeout       | 2000
+ lockwait_interval      | 2
+ last_catchup_threshold | 5000
+(4 rows)
+
+DROP GLOBAL CONFIGURATION lockwait_timeout;
+DROP GLOBAL CONFIGURATION last_catchup_threshold, lockwait_interval;
+select * from gs_global_config;
+    name     | value 
+-------------+-------
+ buckets_len | 16384
+(1 row)
+
+SELECT object_name,detail_info FROM pg_query_audit('2022-02-01 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_globalconfig';
+      object_name       |                                 detail_info                                  
+------------------------+------------------------------------------------------------------------------
+ lockwait_timeout       | ALTER GLOBAL CONFIGURATION with(lockwait_timeout=2000, lockwait_interval=2);
+ lockwait_interval      | ALTER GLOBAL CONFIGURATION with(lockwait_timeout=2000, lockwait_interval=2);
+ last_catchup_threshold | ALTER GLOBAL CONFIGURATION with(last_catchup_threshold=5000);
+ lockwait_timeout       | DROP GLOBAL CONFIGURATION lockwait_timeout;
+ last_catchup_threshold | DROP GLOBAL CONFIGURATION last_catchup_threshold, lockwait_interval;
+ lockwait_interval      | DROP GLOBAL CONFIGURATION last_catchup_threshold, lockwait_interval;
+(6 rows)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "reset audit_system_object" > /dev/null 2>&1

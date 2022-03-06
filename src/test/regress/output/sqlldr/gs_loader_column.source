@@ -176,7 +176,6 @@ select * from SQLLDR_COL_TBL where col_6 is null;
      2 | constant |       |       |  1234 |       | constant | c     |     2 |    999
 (1 row)
 
--- issue: DTS2021092327784 TIMESTAMP
 CREATE TABLE SQLLDR_COL_001(
     ID INTEGER,
     NAME VARCHAR2(20),

@@ -45,7 +45,12 @@ extern bool SharedStorageXlogReadCheck(XLogReaderState *xlogreader, XLogRecPtr r
     (t_thrd.postmaster_cxt.HaShmData->is_cascade_standby &&              \
      g_instance.attr.attr_storage.xlog_file_path != 0)
 
-#define IS_SHARED_STORAGE_STANBY_CLUSTER_MODE                            \
+#define IS_SHARED_STORAGE_STANDBY_CLUSTER                                    \
+        (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY && \
+         g_instance.attr.attr_storage.xlog_file_path != 0)
+
+
+#define IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE                   \
     (t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&                      \
      g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY && \
      g_instance.attr.attr_storage.xlog_file_path != 0)

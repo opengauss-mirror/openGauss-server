@@ -37,6 +37,7 @@
 #include "client_logic_cache/icached_column_manager.h"
 #include "client_logic_common/client_logic_utils.h"
 #include "client_logic_data_fetcher/data_fetcher_manager.h"
+ #include "client_logic/client_logic_enums.h"
 
 typedef struct pg_conn PGconn;
 
@@ -83,6 +84,7 @@ public:
     PreparedStatementsList *pendingStatements;
 
     char lastStmtName[NAMEDATALEN];
+
     ObjectFqdn *droppedSchemas;
     size_t droppedSchemas_size;
     size_t droppedSchemas_allocated;
@@ -92,7 +94,6 @@ public:
     size_t droppedColumnSettings_allocated;
     ExecStatusType m_lastResultStatus;
     bool isInvalidOperationOnColumn;
-    bool should_refresh_function;
     bool isDuringRefreshCacheOnError;
     bool is_external_err;
     CacheRefreshType cacheRefreshType;
@@ -102,8 +103,8 @@ public:
     GucParams gucParams;
     GucParams tmpGucParams;
     updateGucValues val_to_update;
-    RawValuesList *rawValuesForReplace;
-    RawValuesList raw_values_for_post_query;
+    RawValuesList *rawValuesForReplace; /* helper list for replacing raw values in query string on text mode */
+    RawValuesList raw_values_for_post_query; /* list of all raw values in the query for replacing in error response */
     ICachedColumnManager* m_cached_column_manager;
     char **called_functions_list;
     size_t called_functions_list_size;

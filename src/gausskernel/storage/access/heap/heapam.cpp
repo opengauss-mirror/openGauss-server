@@ -42,6 +42,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "access/csnlog.h"
 #include "access/heapam.h"
 #include "access/hio.h"
 #include "access/multixact.h"
@@ -62,6 +63,7 @@
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_uid_fn.h"
 #include "commands/dbcommands.h"
 #include "commands/verify.h"
 #include "commands/matview.h"
@@ -123,14 +125,16 @@ static void HeapParallelscanStartblockInit(HeapScanDesc scan);
 static BlockNumber HeapParallelscanNextpage(HeapScanDesc scan);
 static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId cid, int options);
 static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf, HeapTuple newtup,
-    HeapTuple old_key_tup, bool all_visible_cleared, bool new_all_visible_cleared);
+    HeapTuple old_key_tup, bool all_visible_cleared, bool new_all_visible_cleared, char relreplident);
 static void HeapSatisfiesHOTUpdate(Relation relation, Bitmapset* hot_attrs, Bitmapset* key_attrs, Bitmapset* id_attrs,
     bool* satisfies_hot, bool *satisfies_key, bool* satisfies_id, HeapTuple oldtup, HeapTuple newtup, char* page);
-static HeapTuple ExtractReplicaIdentity(Relation rel, HeapTuple tup, bool key_modified, bool* copy);
+static HeapTuple ExtractReplicaIdentity(Relation rel, HeapTuple tup, bool key_modified, bool* copy, char *relreplident);
 static void SkipToNewPage(
     HeapScanDesc scan, ScanDirection dir, BlockNumber page, bool* finished, bool* isValidRelationPage);
 static bool VerifyHeapGetTup(HeapScanDesc scan, ScanDirection dir);
 static XLogRecPtr log_heap_new_cid(Relation relation, HeapTuple tup);
+static HeapScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
+    uint32 flags, ParallelHeapScanDesc parallel_scan, RangeScanInRedis rangeScanInRedis = {false, 0, 0});
 extern void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_table_age, TransactionId *oldestXmin,
                                   TransactionId *freezeLimit, TransactionId *freezeTableLimit,
                                   MultiXactId* multiXactFrzLimit);
@@ -200,17 +204,6 @@ static inline void InitScanBlocks(HeapScanDesc scan, RangeScanInRedis rangeScanI
         scan->rs_base.rs_nblocks = nblocks;
     }
 }
-
-
-static HeapScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
-    uint32 flags, ParallelHeapScanDesc parallel_scan, RangeScanInRedis rangeScanInRedis = {false, 0, 0});
-static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId cid, int options);
-static HeapTuple ExtractReplicaIdentity(Relation rel, HeapTuple tup, bool key_modified, bool *copy);
-static void SkipToNewPage(HeapScanDesc scan, ScanDirection dir, BlockNumber page, bool* finished,
-                          bool* is_valid_relation_page);
-static bool VerifyHeapGetTup(HeapScanDesc scan, ScanDirection dir);
-static XLogRecPtr log_heap_new_cid(Relation relation, HeapTuple tup);
-extern void Start_Prefetch(TableScanDesc scan, SeqScanAccessor *pAccessor, ScanDirection dir);
 
 /* ----------------
  *		initscan - scan code common to heap_beginscan and heap_rescan
@@ -321,12 +314,13 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page)
     bool all_visible = false;
 
     HeapScanDesc scan = (HeapScanDesc) sscan;
+#ifdef USE_ASSERT_CHECKING
     if (!scan->rs_base.rs_rangeScanInRedis.isRangeScanInRedis) {
         Assert(page < scan->rs_base.rs_nblocks);
     } else {
         Assert(page < scan->rs_base.rs_nblocks + scan->rs_base.rs_startblock);
     }
-
+#endif
 
     /* release previous scan buffer, if any */
     if (BufferIsValid(scan->rs_base.rs_cbuf)) {
@@ -345,9 +339,6 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page)
     scan->rs_base.rs_cbuf = ReadBufferExtended(scan->rs_base.rs_rd, MAIN_FORKNUM, page, RBM_NORMAL, scan->rs_base.rs_strategy);
     scan->rs_base.rs_cblock = page;
 
-    /* We've pinned the buffer, nobody can prune this buffer, check whether snapshot is valid. */
-    CheckSnapshotIsValidException(scan->rs_base.rs_snapshot, "heapgetpage");
-
     if (!scan->rs_base.rs_pageatatime) {
         return;
     }
@@ -361,7 +352,10 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page)
      * since we use append mode and never look back holes in previous pages
      * anyway.
      */
-    if (!scan->rs_base.rs_rangeScanInRedis.isRangeScanInRedis) {
+#ifdef ENABLE_MULTIPLE_NODES
+    if (!scan->rs_base.rs_rangeScanInRedis.isRangeScanInRedis)
+#endif
+    {
         heap_page_prune_opt(scan->rs_base.rs_rd, buffer);
     }
 
@@ -385,7 +379,7 @@ void heapgetpage(TableScanDesc sscan, BlockNumber page)
      */
     all_visible = PageIsAllVisible(dp) && !snapshot->takenDuringRecovery;
 
-    for (line_off = FirstOffsetNumber, lpp = PageGetItemId(dp, line_off); line_off <= lines; line_off++, lpp++) {
+    for (line_off = FirstOffsetNumber, lpp = HeapPageGetItemId(dp, line_off); line_off <= lines; line_off++, lpp++) {
         if (ItemIdIsNormal(lpp)) {
             HeapTupleData loctup;
             bool valid = false;
@@ -886,26 +880,17 @@ static void heapgettup(HeapScanDesc scan, ScanDirection dir, int nkeys, ScanKey 
         dp = (Page)BufferGetPage(scan->rs_base.rs_cbuf);
         line_off = ItemPointerGetOffsetNumber(&(tuple->t_self));
 
-        /* Prevent concurrent page upgrades */
-        bool is_lock = false;
-        if (PageIs4BXidVersion(dp)) {
-            LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_SHARE);
-            is_lock = true;
-        }
-
-        lpp = PageGetItemId(dp, line_off);
+        lpp = HeapPageGetItemId(dp, line_off);
         Assert(ItemIdIsNormal(lpp));
         tuple->t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
         tuple->t_len = ItemIdGetLength(lpp);
 
         HeapTupleCopyBaseFromPage(tuple, dp);
-        if (is_lock) {
-            LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_UNLOCK);
-            is_lock = false;
-        }
 
-        DECOMPRESS_HEAP_TUPLE(
-            HEAP_TUPLE_IS_COMPRESSED(tuple->t_data), tuple, &(scan->rs_ctbuf_hdr), (scan->rs_tupdesc), dp);
+        if (scan->rs_base.rs_rd->is_compressed && HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
+            DECOMPRESS_HEAP_TUPLE(
+                true, tuple, &(scan->rs_ctbuf_hdr), (scan->rs_tupdesc), dp);
+        }
         return;
     }
 
@@ -913,7 +898,7 @@ static void heapgettup(HeapScanDesc scan, ScanDirection dir, int nkeys, ScanKey 
      * advance the scan until we find a qualifying tuple or run out of stuff
      * to scan
      */
-    lpp = PageGetItemId(dp, line_off);
+    lpp = HeapPageGetItemId(dp, line_off);
     for (;;) {
         while (lines_left > 0) {
             if (ItemIdIsNormal(lpp)) {
@@ -933,8 +918,10 @@ static void heapgettup(HeapScanDesc scan, ScanDirection dir, int nkeys, ScanKey 
                     snapshot);
                 if (valid) {
                     /* make sure this tuple is visible and then uncompress it */
-                    DECOMPRESS_HEAP_TUPLE(
-                        HEAP_TUPLE_IS_COMPRESSED(tuple->t_data), tuple, &(scan->rs_ctbuf_hdr), (scan->rs_tupdesc), dp);
+                    if (scan->rs_base.rs_rd->is_compressed && HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
+                        DECOMPRESS_HEAP_TUPLE(
+                        true, tuple, &(scan->rs_ctbuf_hdr), (scan->rs_tupdesc), dp);
+                    }
 
                     if (key != NULL) {
                         HeapKeyTest(tuple, (scan->rs_tupdesc), nkeys, key, valid);
@@ -1028,14 +1015,14 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
     int lines_left;
     ItemId lpp;
 
-
-    if (tuple != NULL)
-        Assert(TUPLE_IS_HEAP_TUPLE(tuple));
+    Assert(tuple != NULL && TUPLE_IS_HEAP_TUPLE(tuple));
 
     /* IO collector and IO scheduler for seqsan */
+#ifdef ENABLE_MULTIPLE_NODES
     if (ENABLE_WORKLOAD_CONTROL) {
         IOSchedulerAndUpdate(IO_TYPE_READ, 1, IO_TYPE_ROW);
     }
+#endif
 
     /*
      * calculate next starting line_index, given scan direction
@@ -1133,31 +1120,21 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
         /* Since the tuple was previously fetched, needn't lock page here */
         dp = (Page)BufferGetPage(scan->rs_base.rs_cbuf);
         line_off = ItemPointerGetOffsetNumber(&(tuple->t_self));
-
-        /* Prevent concurrent page upgrades */
-        bool is_lock = false;
-        if (PageIs4BXidVersion(dp)) {
-            LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_SHARE);
-            is_lock = true;
-        }
-        lpp = PageGetItemId(dp, line_off);
+        lpp = HeapPageGetItemId(dp, line_off);
         Assert(ItemIdIsNormal(lpp));
 
         tuple->t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
         tuple->t_len = ItemIdGetLength(lpp);
-
         HeapTupleCopyBaseFromPage(tuple, dp);
 
-        if (is_lock) {
-            LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_UNLOCK);
-            is_lock = false;
-        }
         /* check that rs_cindex is in sync */
         Assert(scan->rs_base.rs_cindex < scan->rs_base.rs_ntuples);
         Assert(line_off == scan->rs_base.rs_vistuples[scan->rs_base.rs_cindex]);
 
-        DECOMPRESS_HEAP_TUPLE(
-            HEAP_TUPLE_IS_COMPRESSED(tuple->t_data), tuple, &(scan->rs_ctbuf_hdr), (scan->rs_tupdesc), dp);
+        if (scan->rs_base.rs_rd->is_compressed && HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
+            DECOMPRESS_HEAP_TUPLE(
+                true, tuple, &(scan->rs_ctbuf_hdr), (scan->rs_tupdesc), dp);
+        }
         return;
     }
 
@@ -1165,17 +1142,10 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
      * advance the scan until we find a qualifying tuple or run out of stuff
      * to scan
      */
-    bool is_lock = false;
     for (;;) {
-        /* Prevent concurrent page upgrades */
-        if (PageIs4BXidVersion(dp) && is_lock == false) {
-            LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_SHARE);
-            is_lock = true;
-        }
-
         while (lines_left > 0) {
             line_off = scan->rs_base.rs_vistuples[line_index];
-            lpp = PageGetItemId(dp, line_off);
+            lpp = HeapPageGetItemId(dp, line_off);
             Assert(ItemIdIsNormal(lpp));
 
             tuple->t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
@@ -1188,9 +1158,10 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
              * 1. reduce the UNCOMPRESS number within HeapKeyTest();
              * 2. maybe reduce the number of palloc() within HeapKeyTest();
              */
-            DECOMPRESS_HEAP_TUPLE(
-                HEAP_TUPLE_IS_COMPRESSED(tuple->t_data), tuple, &(scan->rs_ctbuf_hdr), (scan->rs_tupdesc), dp);
-
+            if (scan->rs_base.rs_rd->is_compressed && HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
+                DECOMPRESS_HEAP_TUPLE(
+                    true, tuple, &(scan->rs_ctbuf_hdr), (scan->rs_tupdesc), dp);
+            }
             /*
              * if current tuple qualifies, return it.
              */
@@ -1201,18 +1172,10 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
 
                 if (valid) {
                     scan->rs_base.rs_cindex = line_index;
-                    if (is_lock) {
-                        LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_UNLOCK);
-                        is_lock = false;
-                    }
                     return;
                 }
             } else {
                 scan->rs_base.rs_cindex = line_index;
-                if (is_lock) {
-                    LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_UNLOCK);
-                    is_lock = false;
-                }
                 return;
             }
 
@@ -1225,10 +1188,6 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
             } else {
                 ++line_index;
             }
-        }
-        if (is_lock) {
-            LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_UNLOCK);
-            is_lock = false;
         }
         /*
          * if we get here, it means we've exhausted the items on this page and
@@ -1249,7 +1208,6 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
             return;
         }
 
-        heap_prefetch(scan, dir);
         heapgetpage((TableScanDesc)scan, page);
 
         dp = (Page)BufferGetPage(scan->rs_base.rs_cbuf);
@@ -1261,6 +1219,142 @@ static void heapgettup_pagemode(HeapScanDesc scan, ScanDirection dir, int nkeys,
             line_index = 0;
         }
     }
+}
+
+/*
+ * Scan one page for batch scan mode.
+ * Return false if early stop reading the current page, and return true if needs to read next page.
+ */
+static bool ScanOnePageForBatchMode(HeapScanDesc scan, Page& dp, BlockNumber& page, int& lineIndex, int& rows)
+{
+    int lines = scan->rs_base.rs_ntuples;
+    int linesLeft = lines - lineIndex;
+    HeapTuple tuple = &scan->rs_ctupBatch[rows];
+
+    while (linesLeft > 0) {
+        OffsetNumber lineoff = scan->rs_base.rs_vistuples[lineIndex];
+        ItemId lpp = PageGetItemId(dp, lineoff);
+
+        tuple->tupTableType = HEAP_TUPLE;
+        tuple->t_data = (HeapTupleHeader)PageGetItem((Page)dp, lpp);
+        tuple->t_len = ItemIdGetLength(lpp);
+        ItemPointerSet(&(tuple->t_self), page, lineoff);
+        HeapTupleCopyBaseFromPage(tuple, dp);
+        
+        /* if current tuple qualifies, return it */
+        if (scan->rs_base.rs_key != NULL) {
+            bool valid = false;
+            HeapKeyTest(tuple, (scan->rs_tupdesc), scan->rs_base.rs_nkeys, scan->rs_base.rs_key, valid);
+    
+            if (valid) {
+                scan->rs_base.rs_cindex = lineIndex;
+                rows++;
+            }
+        } else {
+            scan->rs_base.rs_cindex = lineIndex;
+            rows++;
+        }
+
+        if (rows == scan->rs_base.rs_maxScanRows) {
+            scan->rs_base.rs_ctupRows = rows;
+            return false;
+        }
+    
+        /* otherwise move to the next item on the page */
+        --linesLeft;
+        ++lineIndex;
+
+        tuple = &scan->rs_ctupBatch[rows];
+    }
+
+    if (rows > 0) {
+        scan->rs_base.rs_ctupRows = rows;
+        return false; /* only for one page */
+    }
+
+    return true;
+}
+
+/*
+ * Scan one page for batch scan mode.
+ * Return true if all the pages are exhausted.
+ */
+static bool ScanPagesForBatchMode(HeapScanDesc scan, BlockNumber page, int lineIndex)
+{
+    int lines, rows = 0;
+    bool continueScan, finished = false;
+    Page dp = (Page)BufferGetPage(scan->rs_base.rs_cbuf);
+    lines = scan->rs_base.rs_ntuples;
+
+    /* advance the scan until we find a qualifying tuple or run out of stuff to scan */
+    for (;;) {
+        continueScan = ScanOnePageForBatchMode(scan, dp, page, lineIndex, rows);
+
+        if (!continueScan) {
+            return false;
+        }
+        /*
+         * if we get here, it means we've exhausted the items on this page and
+         * it's time to move to the next.
+         */
+        finished = next_page(scan, ForwardScanDirection, page);
+
+        /* return NULL if we've exhausted all the pages */
+        if (finished) {
+            if (BufferIsValid(scan->rs_base.rs_cbuf)) {
+                ReleaseBuffer(scan->rs_base.rs_cbuf);
+            }
+            scan->rs_base.rs_cbuf = InvalidBuffer;
+            scan->rs_base.rs_cblock = InvalidBlockNumber;
+            scan->rs_ctupBatch[rows].t_data = NULL;
+            scan->rs_base.rs_inited = false;
+            scan->rs_base.rs_ctupRows = rows;
+            return true;
+        }
+
+        heapgetpage((TableScanDesc)scan, page);
+
+        dp = (Page)BufferGetPage(scan->rs_base.rs_cbuf);
+        lineIndex = 0;
+    }
+}
+
+static bool HeapGetTupPageBatchmode(HeapScanDesc scan)
+{
+    HeapTuple tuple = &scan->rs_ctupBatch[0];
+    BlockNumber page;
+
+    int lineIndex;
+
+    scan->rs_base.rs_ctupRows = 0;
+
+    /* IO collector and IO scheduler for seqsan */
+    if (ENABLE_WORKLOAD_CONTROL) {
+        IOSchedulerAndUpdate(IO_TYPE_READ, 1, IO_TYPE_ROW);
+    }
+
+    /* calculate next starting lineindex, given scan direction */
+    if (!scan->rs_base.rs_inited) {
+        /*
+         * return null immediately if relation is empty
+         */
+        if (scan->rs_base.rs_nblocks == 0) {
+            Assert(!BufferIsValid(scan->rs_base.rs_cbuf));
+            tuple->t_data = NULL;
+            scan->rs_base.rs_ctupRows = 0;
+            return true;
+        }
+        page = scan->rs_base.rs_startblock;
+        heapgetpage((TableScanDesc)scan, page);
+        lineIndex = 0;
+        scan->rs_base.rs_inited = true;
+    } else {
+        /* continue from previously returned page/tuple */
+        page = scan->rs_base.rs_cblock;
+        lineIndex = scan->rs_base.rs_cindex + 1;
+    }
+
+    return ScanPagesForBatchMode(scan, page, lineIndex);
 }
 
 #if defined(DISABLE_COMPLEX_MACRO)
@@ -1352,6 +1446,15 @@ Relation relation_open(Oid relationId, LOCKMODE lockmode, int2 bucketId)
         force_backtrace_messages = true;
         ereport(
             ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open relation with OID %u", relationId)));
+    }
+
+    if (r->xmin_csn != InvalidCommitSeqNo) {
+        Snapshot snapshot = GetActiveSnapshot();
+        if (snapshot == NULL || r->xmin_csn > snapshot->snapshotcsn) {
+            ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID), errmsg(
+                "current snapshot is invalid for this relation : %u, xmin->csn: %lu, snapshortcsn: %lu",
+                    relationId, r->xmin_csn, snapshot == NULL ? -1 : snapshot->snapshotcsn)));
+        }
     }
 
     if (RELATION_IS_GLOBAL_TEMP(r))
@@ -1727,12 +1830,14 @@ static HeapScanDesc heap_beginscan_internal(Relation relation, Snapshot snapshot
 
     scan->rs_base.rs_rd = relation;
     scan->rs_tupdesc = RelationGetDescr(relation);
+    scan->rs_base.rs_rd->is_compressed = RowRelationIsCompressed(relation);
     scan->rs_base.rs_snapshot = snapshot;
     scan->rs_base.rs_nkeys = nkeys;
     scan->rs_base.rs_flags = flags;
     scan->rs_base.rs_strategy = NULL; /* set in initscan */
     scan->rs_base.rs_rangeScanInRedis = rangeScanInRedis;
     scan->rs_parallel = parallel_scan;
+    scan->rs_ctupBatch = NULL;
 
     /*
      * we can use page-at-a-time mode if it's an MVCC-safe snapshot
@@ -1828,6 +1933,10 @@ void heap_endscan(TableScanDesc sscan)
 
     if (scan->rs_base.rs_strategy != NULL) {
         FreeAccessStrategy(scan->rs_base.rs_strategy);
+    }
+
+    if (scan->rs_ctupBatch != NULL) {
+        pfree_ext(scan->rs_ctupBatch);
     }
 
     pfree(scan);
@@ -2068,6 +2177,33 @@ HeapTuple heap_getnext(TableScanDesc sscan, ScanDirection direction)
     return &(scan->rs_ctup);
 }
 
+bool HeapamGetNextBatchMode(TableScanDesc sscan, ScanDirection direction)
+{
+    /* Note: no locking manipulations needed */
+    HeapScanDesc scan = (HeapScanDesc)sscan;
+    bool finished = false;
+    scan->rs_base.rs_ctupRows = 0;
+    Assert(ScanDirectionIsForward(direction));
+    if (likely(scan->rs_base.rs_pageatatime)) {
+        finished = HeapGetTupPageBatchmode(scan);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR),
+            errmsg("relation %s is temporarily unavalible", RelationGetRelationName(scan->rs_base.rs_rd))));
+    }
+
+    Assert(scan->rs_base.rs_ctupRows <= BatchMaxSize);
+    if (scan->rs_base.rs_ctupRows == 0) {
+        return true;
+    }
+
+    if ((scan->rs_base.rs_rd)->pgstat_info != NULL) {
+        (scan->rs_base.rs_rd)->pgstat_info->t_counts.t_tuples_returned += (scan->rs_base.rs_ctupRows);
+    }
+
+    return finished;
+}
+
+
 /*
  *	heap_fetch		- retrieve tuple with given tid
  *
@@ -2118,16 +2254,17 @@ bool heap_fetch(
     OffsetNumber offnum;
     bool valid = false;
 
-    /* another data space must be provided for decomperssing tuple. */
-    Assert(tuple && tuple->t_data);
+    /*
+     * another data space must be provided for decomperssing tuple. And
+     * it is possible for non-compressed tuple came from
+     * heap_lock_updated_tuple_rec that tuple->t_data is NULL.
+     */
+    Assert(tuple);
 
     /*
      * Fetch and pin the appropriate page of the relation.
      */
     buffer = ReadBuffer(relation, ItemPointerGetBlockNumber(tid));
-
-    /* We've pinned the buffer, nobody can prune this buffer, check whether snapshot is valid. */
-    CheckSnapshotIsValidException(snapshot, "heap_fetch");
 
     /*
      * Need share lock on buffer to examine tuple commit status.
@@ -2741,6 +2878,17 @@ void HeapInsertTsStore(Relation relation, ResultRelInfo *resultRelInfo, HeapTupl
 #endif /* ENABLE_MULTIPLE_NODES */
 
 /*
+ * Log CSN in xlog.
+ */
+void LogCSN(CommitSeqNo *curCSN)
+{
+    if (t_thrd.proc->workingVersionNum >= PARALLEL_DECODE_VERSION_NUM && XLogLogicalInfoActive()) {
+        (*curCSN) = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+        XLogRegisterData((char*)curCSN, sizeof(CommitSeqNo));
+    }
+}
+
+/*
  *	heap_insert		- insert tuple into a heap
  *
  * The new tuple is stamped with current transaction ID and the specified
@@ -2767,7 +2915,7 @@ void HeapInsertTsStore(Relation relation, ResultRelInfo *resultRelInfo, HeapTupl
  * TID where the tuple was stored.	But note that any toasting of fields
  * within the tuple data is NOT reflected into *tup.
  */
-Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, BulkInsertState bistate)
+Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, BulkInsertState bistate, bool istoast)
 {
     TransactionId xid = GetCurrentTransactionId();
     HeapTuple heaptup;
@@ -2775,10 +2923,11 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
     Buffer vmbuffer = InvalidBuffer;
     bool all_visible_cleared = false;
     BlockNumber rel_end_block = InvalidBlockNumber;
-
+#ifdef USE_ASSERT_CHECKING
     if (tup != NULL) {
         Assert(TUPLE_IS_HEAP_TUPLE(tup));
     }
+#endif
     /*
      * Fill in tuple header fields, assign an OID, and toast the tuple if
      * necessary.
@@ -2787,12 +2936,12 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
      * into the relation; tup is the caller's original untoasted data.
      */
     heaptup = heap_prepare_insert(relation, tup, cid, options);
-
+#ifdef USE_ASSERT_CHECKING
     /* All built-in functions are hard coded, and thus they should not be inserted into catalog.pg_proc */
     if (!IsBootstrapProcessingMode() && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         Assert(!(IsProcRelation(relation) && IsSystemObjOid(HeapTupleGetOid(heaptup))));
     }
-
+#endif
     /*
      * We're about to do the actual insert -- but check for conflict first, to
      * avoid possibly having to roll back work we've just done.
@@ -2804,12 +2953,12 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
      * buffer before making the call.
      */
     CheckForSerializableConflictIn(relation, NULL, InvalidBuffer);
-
+#ifdef ENABLE_MULTIPLE_NODES
     if (RelationInClusterResizing(relation) && !RelationInClusterResizingReadOnly(relation)) {
         options |= HEAP_INSERT_SKIP_FSM;
         rel_end_block = RelationGetEndBlock(relation);
     }
-
+#endif
     /*
      * Find buffer to insert this tuple into.  If the page is all visible,
      * this will also pin the requisite visibility map page.
@@ -2851,7 +3000,7 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
         Page page = BufferGetPage(buffer);
         uint8 info = XLOG_HEAP_INSERT;
         int bufflags = 0;
-        TdeInfo tdeinfo = {0};
+        TdeInfo* tdeinfo = NULL;
 
         /*
          * If this is a catalog, we need to transmit combocids to properly
@@ -2893,6 +3042,8 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
             XLogRegisterData((char*)&((HeapPageHeader)(page))->pd_xid_base, sizeof(TransactionId));
         }
         XLogRegisterData((char*)&xlrec, SizeOfHeapInsert);
+        CommitSeqNo curCSN = InvalidCommitSeqNo;
+        LogCSN(&curCSN);
 
         xlhdr.t_infomask2 = heaptup->t_data->t_infomask2;
         xlhdr.t_infomask = heaptup->t_data->t_infomask;
@@ -2901,14 +3052,15 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
          * For TDE relation, we intend to put the TdeoInfo(relevant to cipher, cmkid, etc.) after the pd_xid_base.
          */
         if (RelationisEncryptEnable(relation)) {
-            GetTdeInfoFromRel(relation, &tdeinfo);
+            tdeinfo = (TdeInfo*)palloc0(sizeof(TdeInfo));
+            GetTdeInfoFromRel(relation, tdeinfo);
         }
         /*
          * note we mark xlhdr as belonging to buffer; if XLogInsert decides to
          * write the whole page to the xlog, we don't need to store
          * xl_heap_header in the xlog.
          */
-        XLogRegisterBuffer(0, buffer, REGBUF_STANDARD | bufflags, &tdeinfo);
+        XLogRegisterBuffer(0, buffer, REGBUF_STANDARD | bufflags, tdeinfo);
         XLogRegisterBufData(0, (char*)&xlhdr, SizeOfHeapHeader);
         /* PG73FORMAT: write bitmap [+ padding] [+ oid] + data */
         XLogRegisterBufData(0,
@@ -2918,9 +3070,13 @@ Oid heap_insert(Relation relation, HeapTuple tup, CommandId cid, int options, Bu
         /* filtering by origin on a row level is much more efficient */
         XLogIncludeOrigin();
 
-        recptr = XLogInsert(RM_HEAP_ID, info);
+        recptr = XLogInsert(RM_HEAP_ID, info, InvalidBktId, istoast);
 
         PageSetLSN(page, recptr);
+
+        if (tdeinfo != NULL) {
+            pfree_ext(tdeinfo);
+        }
     }
 
     END_CRIT_SECTION();
@@ -3083,7 +3239,7 @@ void heap_abort_speculative(Relation relation, HeapTuple tuple)
     PageSetPrunable(page, xid);
 
     /* store transaction information of xact deleting the tuple */
-    tp.t_data->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+    tp.t_data->t_infomask &= ~HEAP_XMAX_BITS;
     tp.t_data->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
 
     /*
@@ -3118,6 +3274,8 @@ void heap_abort_speculative(Relation relation, HeapTuple tuple)
 
         XLogBeginInsert();
         XLogRegisterData((char *)&xlrec, useOldXlog ? SizeOfOldHeapDelete : SizeOfHeapDelete);
+        CommitSeqNo curCSN = InvalidCommitSeqNo;
+        LogCSN(&curCSN);
         XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 
         /* No replica identity & replication origin logged */
@@ -3669,19 +3827,6 @@ void heap_markpos(TableScanDesc sscan)
  */
 static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId cid, int options)
 {
-    /*
-     * Parallel operations are required to be strictly read-only in a parallel
-     * worker.  Parallel inserts are not safe even in the leader in the
-     * general case, because group locking means that heavyweight locks for
-     * relation extension or GIN page locks will not conflict between members
-     * of a lock group, but we don't prohibit that case here because there are
-     * useful special cases that we can safely allow, such as CREATE TABLE AS.
-     */
-    if (false) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TRANSACTION_STATE), errmsg("cannot insert tuples in a parallel worker")));
-    }
-
     if (relation->rd_rel->relhasoids) {
 #ifdef NOT_USED
         /* this is redundant with an Assert in HeapTupleSetOid */
@@ -3705,7 +3850,9 @@ static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId
         if (!OidIsValid(HeapTupleGetOid(tup))) {
             HeapTupleSetOid(tup, GetNewOid(relation));
         }
-    } else {
+    }
+#ifdef USE_ASSERT_CHECKING
+    else {
         /* check there is not space for an OID */
         Assert(!(tup->t_data->t_infomask & HEAP_HASOID));
     }
@@ -3713,11 +3860,11 @@ static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId
     if (tup != NULL) {
         Assert(TUPLE_IS_HEAP_TUPLE(tup));
     }
-
+#endif
     tup->t_data->t_infomask &= ~(HEAP_XACT_MASK);
     tup->t_data->t_infomask2 &= ~(HEAP2_XACT_MASK);
     tup->t_data->t_infomask |= HEAP_XMAX_INVALID;
-    HeapTupleSetXmin(tup, InvalidTransactionId);
+    tup->t_data->t_choice.t_heap.t_xmin = InvalidTransactionId;
     if (options & HEAP_INSERT_FROZEN) {
         HeapTupleHeaderSetXminFrozen(tup->t_data);
     }
@@ -3726,14 +3873,12 @@ static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId
     HeapTupleSetXmax(tup, 0); /* for cleanliness */
     tup->t_tableOid = RelationGetRelid(relation);
     tup->t_bucketId = RelationGetBktid(relation);
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     tup->t_xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
-#endif
-
     if (RelationIsRedistributeDest(relation)) {
         HeapTupleHeaderSetRedisColumns(tup->t_data);
     }
-
+#endif
     /*
      * If the new tuple is too big for storage or contains already toasted
      * out-of-line attributes from some other relation, invoke the toaster.
@@ -3858,9 +4003,11 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
         }
 
         /* IO collector and IO scheduler */
+#ifdef ENABLE_MULTIPLE_NODES
         if (ENABLE_WORKLOAD_CONTROL) {
             IOSchedulerAndUpdate(IO_TYPE_WRITE, 1, IO_TYPE_ROW);
         }
+#endif
 
         if (is_compressed) {
             buffer = RelationGetNewBufferForBulkInsert(relation, heap_tuples[ndone]->t_len, cmpr_size, bistate);
@@ -4084,6 +4231,8 @@ int heap_multi_insert(Relation relation, Relation parent, HeapTuple* tuples, int
             if (RelationisEncryptEnable(relation)) {
                 GetTdeInfoFromRel(relation, &tdeinfo);
             }
+            CommitSeqNo curCSN = InvalidCommitSeqNo;
+            LogCSN(&curCSN);
 
             XLogRegisterBuffer(0, buffer, REGBUF_STANDARD | bufflags, &tdeinfo);
 
@@ -4240,6 +4389,7 @@ TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid,
     OffsetNumber maxoff;
     HeapTuple old_key_tuple = NULL; /* replica identity of the tuple */
     bool old_key_copied = false;
+    char identity;
 
     Assert(ItemPointerIsValid(tid));
 
@@ -4270,10 +4420,6 @@ TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid,
     }
 
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-
-    if (PageIs4BXidVersion(page)) {
-        (void)heap_page_upgrade(relation, buffer);
-    }
 
     /*
      * If we didn't pin the visibility map page and the page has become all
@@ -4308,6 +4454,17 @@ TM_Result heap_delete(Relation relation, ItemPointer tid, CommandId cid,
     HeapTupleCopyBaseFromPage(&tp, page);
     tmfd->xmin = HeapTupleHeaderGetXmin(page, tp.t_data);
 
+    if (RELATION_HAS_UIDS(relation) && HeapTupleHeaderHasUid(tp.t_data)) {
+        uint64 tupleUid = HeapTupleGetUid(&tp);
+        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        LockTupleUid(relation, tupleUid, ExclusiveLock,
+            u_sess->attr.attr_common.allow_concurrent_tuple_update, false);
+        LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+	/* need to recompute xid base after release buffer lock */
+        HeapTupleCopyBaseFromPage(&tp, page);
+        tmfd->xmin = HeapTupleHeaderGetXmin(page, tp.t_data);
+    }
+
 l1:
     result = HeapTupleSatisfiesUpdate(&tp, cid, buffer, allow_delete_self);
 
@@ -4332,6 +4489,7 @@ l1:
         infomask2 = tp.t_data->t_infomask2;
 
         if (!u_sess->attr.attr_common.allow_concurrent_tuple_update) {
+            UnlockReleaseBuffer(buffer);
             ereport(ERROR,
                     (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("abort transaction due to concurrent update")));
         }
@@ -4472,7 +4630,7 @@ l1:
      * Compute replica identity tuple before entering the critical section so
      * we don't PANIC upon a memory allocation failure.
      */
-    old_key_tuple = ExtractReplicaIdentity(relation, &tp, true, &old_key_copied);
+    old_key_tuple = ExtractReplicaIdentity(relation, &tp, true, &old_key_copied, &identity);
 
     /*
      * If this is the first possibly-multixact-able operation in the
@@ -4518,7 +4676,7 @@ l1:
     }
 
     /* store transaction information of xact deleting the tuple */
-    tp.t_data->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+    tp.t_data->t_infomask &= ~HEAP_XMAX_BITS;
     tp.t_data->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
     tp.t_data->t_infomask |= new_infomask;
     tp.t_data->t_infomask2 |= new_infomask2;
@@ -4582,10 +4740,14 @@ l1:
             } else {
                 xlrec.flags |= XLH_DELETE_CONTAINS_OLD_KEY;
             }
+            heap_freetuple(tuple);
         }
 
         XLogBeginInsert();
         XLogRegisterData((char *)&xlrec, useOldXlog ? SizeOfOldHeapDelete : SizeOfHeapDelete);
+        CommitSeqNo curCSN = InvalidCommitSeqNo;
+        LogCSN(&curCSN);
+
         XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
 
         /*
@@ -4781,6 +4943,7 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
     bool rel_in_redis = RelationInClusterResizing(relation);
     OffsetNumber maxoff;
     BlockNumber rel_end_block = InvalidBlockNumber;
+    char relreplident;
     LockTupleMode mode;
     Assert(ItemPointerIsValid(otid));
 
@@ -4838,10 +5001,6 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
 
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
-    if (PageIs4BXidVersion(page)) {
-        (void)heap_page_upgrade(relation, buffer);
-    }
-
     lp = PageGetItemId(page, ItemPointerGetOffsetNumber(otid));
     maxoff = PageGetMaxOffsetNumber(page);
     /* check otid */
@@ -4891,7 +5050,7 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
          * afterwards.)
          */
         MultiXactIdSetOldestMember();
-    } else 
+    } else
 #endif
     {
         mode = LockTupleExclusive;
@@ -4900,6 +5059,14 @@ TM_Result heap_update(Relation relation, Relation parentRelation, ItemPointer ot
     }
     if (lockmode != NULL) {
         *lockmode = mode;
+    }
+
+    if (RELATION_HAS_UIDS(relation) && HeapTupleHeaderHasUid(oldtup.t_data)) {
+        uint64 tupleUid = HeapTupleGetUid(&oldtup);
+        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        LockTupleUid(relation, tupleUid, ExclusiveLock,
+            u_sess->attr.attr_common.allow_concurrent_tuple_update, false);
+        LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
     }
 
 l2:
@@ -4944,6 +5111,7 @@ l2:
         infomask2 = oldtup.t_data->t_infomask2;
 
         if (!u_sess->attr.attr_common.allow_concurrent_tuple_update) {
+            UnlockReleaseBuffer(buffer);
             ereport(ERROR,
                 (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("abort transaction due to concurrent update")));
         }
@@ -5202,16 +5370,32 @@ l2:
         }
     }
 
-    if (t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM
+#ifdef ENABLE_MULTIPLE_NODES
+        || true
+#endif
+    ) {
         /* if the only locker of old tuple is ourselves, xmax_new_tuple may be xid and it would be valid */
         if (TransactionIdIsValid(xmax_new_tuple) || !TransactionIdEquals(xmax_old_tuple, xid)) {
             ereport(DEBUG2, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
                 errmsg("New MultiXact feature isn't support in this version. Please upgrade to version: %d",
                        ENHANCED_TUPLE_LOCK_VERSION_NUM)));
         }
+        /* Reset xmax, infomask and infomask2 of old tuple and new one */
+        xmax_old_tuple = xid;
+        infomask_old_tuple = 0;
+        infomask2_old_tuple = 0;
+        infomask_new_tuple = HEAP_XMAX_INVALID;
+        infomask2_new_tuple = 0;
         xmax_new_tuple = 0;
-        infomask2_new_tuple &= ~(HEAP_KEYS_UPDATED | HEAP_XMAX_LOCK_ONLY);
     }
+
+    if (RELATION_HAS_UIDS(relation)) {
+        uint64 uid = HeapTupleHeaderHasUid(oldtup.t_data) ? HeapTupleGetUid(&oldtup)
+            : GetNewUidForTuple((parentRelation ? parentRelation : relation));
+        HeapTupleSetUid(newtup, uid, relation->rd_att->natts);
+    }
+
     /*
      * Prepare the new tuple with the appropriate initial values of Xmin and
      * Xmax, as well as initial infomask bits as computed above.
@@ -5234,7 +5418,7 @@ l2:
 
     HeapTupleSetXmin(newtup, xid);
     HeapTupleHeaderSetCmin(newtup->t_data, cid);
-    newtup->t_data->t_infomask |= HEAP_UPDATED | infomask_new_tuple;
+    newtup->t_data->t_infomask |= (HEAP_UPDATED | infomask_new_tuple);
     newtup->t_data->t_infomask2 |= infomask2_new_tuple;
     HeapTupleHeaderSetXmax(page, newtup->t_data, xmax_new_tuple); /* for cleanliness */
     newtup->t_tableOid = RelationGetRelid(relation);
@@ -5279,7 +5463,7 @@ l2:
     new_tup_size = MAXALIGN(newtup->t_len);
     if (need_toast || new_tup_size > pagefree || rel_in_redis) {
         /* Clear obsolete visibility flags ... */
-        oldtup.t_data->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+        oldtup.t_data->t_infomask &= ~HEAP_XMAX_BITS;
         oldtup.t_data->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
         Assert(TransactionIdIsValid(xmax_old_tuple));
         oldtup.t_data->t_infomask |= infomask_old_tuple;
@@ -5393,7 +5577,8 @@ l2:
      * ExtractReplicaIdentity() will return NULL if nothing needs to be
      * logged.
      */
-    old_key_tuple = ExtractReplicaIdentity(relation, &oldtup, !satisfies_id, &old_key_copied);
+    bool keyChanged = XLogLogicalInfoActive() ? true : !satisfies_id;
+    old_key_tuple = ExtractReplicaIdentity(relation, &oldtup, keyChanged, &old_key_copied, &relreplident);
 
     newpage = BufferGetPage(newbuf);
     if (newbuf != buffer) {
@@ -5444,7 +5629,7 @@ l2:
 
     if (!already_marked) {
         /* Clear obsolete visibility flags ... */
-        oldtup.t_data->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+        oldtup.t_data->t_infomask &= ~HEAP_XMAX_BITS;
         oldtup.t_data->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
         Assert(TransactionIdIsValid(xmax_old_tuple));
         oldtup.t_data->t_infomask |= infomask_old_tuple;
@@ -5485,6 +5670,7 @@ l2:
             (void)log_heap_new_cid(relation, &oldtup);
             (void)log_heap_new_cid(relation, heaptup);
         }
+
         recptr = log_heap_update(relation,
             buffer,
             &oldtup,
@@ -5492,7 +5678,8 @@ l2:
             heaptup,
             old_key_tuple,
             all_visible_cleared,
-            all_visible_cleared_new);
+            all_visible_cleared_new,
+            relreplident);
 
         if (newbuf != buffer) {
             PageSetLSN(BufferGetPage(newbuf), recptr);
@@ -5569,7 +5756,7 @@ static XLogRecPtr log_heap_new_cid_insert(xl_heap_new_cid *xlrec, int bucketid)
     XLogBeginInsert();
     XLogRegisterData((char *) xlrec, SizeOfHeapNewCid);
     /* will be looked at irrespective of origin */
-    recptr = XLogInsert(RM_HEAP3_ID, XLOG_HEAP3_NEW_CID, false, bucketid);
+    recptr = XLogInsert(RM_HEAP3_ID, XLOG_HEAP3_NEW_CID, bucketid);
     return recptr;
 }
 
@@ -5631,89 +5818,6 @@ static XLogRecPtr log_heap_new_cid(Relation relation, HeapTuple tup)
     return recptr;
 }
 
-bool heap_page_upgrade(Relation relation, Buffer buffer)
-{
-    TransactionId xid = GetCurrentTransactionId();
-    Page page = BufferGetPage(buffer);
-    Size page_free_space = 0;
-    Size save_free_space = 0;
-    bool is_upgrade = true;
-    int nline;
-
-    /* Compute desired extra freespace due to fillfactor option */
-    save_free_space = RelationGetTargetPageFreeSpace(relation, HEAP_DEFAULT_FILLFACTOR);
-    page_free_space = (int)((PageHeader)page)->pd_upper - (int)((PageHeader)page)->pd_lower;
-
-    if (page_free_space - save_free_space >= SizeOfHeapPageUpgradeData) {
-        if (!PageIs4BXidVersion(page)) {
-            return true;
-        }
-
-        START_CRIT_SECTION();
-        PageLocalUpgrade(page);
-    } else {
-        nline = PageGetMaxOffsetNumber(page);
-        if (nline == 1) {
-            if (xid > MaxShortTransactionId) {
-                if (BufferIsValid(buffer)) {
-                    UnlockReleaseBuffer(buffer);
-                }
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("relation \"%s\" has one big row which is not supported under 64bits XID system. "
-                               "Current xid is %lu",
-                            RelationGetRelationName(relation),
-                            xid)));
-            } else
-                ereport(WARNING,
-                    (errcode(ERRCODE_WARNING),
-                        errmsg("block number %u for relation \"%s\" has one big row which is not supported under "
-                               "64bits XID system. Current xid is %lu",
-                            BufferGetBlockNumber(buffer),
-                            RelationGetRelationName(relation),
-                            xid),
-                        handle_in_client(true)));
-        } else {
-            if (xid > MaxShortTransactionId) {
-                if (BufferIsValid(buffer)) {
-                    UnlockReleaseBuffer(buffer);
-                }
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("relation \"%s\" has no free space to upgrade. Current xid is %lu, please VACUUM FULL "
-                               "this relation!!!",
-                            RelationGetRelationName(relation),
-                            xid)));
-            } else
-                ereport(DEBUG1,
-                    (errmsg("block number %u for relation \"%s\" has no free space to upgrade. Current xid is %lu, it "
-                            "is safe before XID increased to 4294967296 !",
-                        BufferGetBlockNumber(buffer),
-                        RelationGetRelationName(relation),
-                        xid)));
-        }
-        is_upgrade = false;
-        return false;
-    }
-
-    /* xlog stuff */
-    if (is_upgrade) {
-        MarkBufferDirty(buffer);
-        if (RelationNeedsWAL(relation)) {
-            XLogRecPtr recptr;
-
-            XLogBeginInsert();
-            XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
-
-            recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_PAGE_UPGRADE);
-
-            PageSetLSN(BufferGetPage(buffer), recptr);
-        }
-        END_CRIT_SECTION();
-    }
-    return true;
-}
-
 /*
  * Check if the specified attribute's value is same in both given tuples.
  * Subroutine for HeapSatisfiesHOTUpdate.
@@ -5743,6 +5847,7 @@ static bool heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum, HeapTuple tup
         if (attrnum != ObjectIdAttributeNumber &&
 #ifdef PGXC
             attrnum != XC_NodeIdAttributeNumber && attrnum != BucketIdAttributeNumber &&
+            attrnum != UidAttributeNumber && /* may should remove this attr */
 #endif
             attrnum != TableOidAttributeNumber) {
             return false;
@@ -6050,8 +6155,9 @@ static void CheckInfomaskCompatilibilty(TransactionId xid, uint16 infomask)
  *
  * See README.tuplock for a thorough explanation of this mechanism.
  */
-TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, CommandId cid,
-    LockTupleMode mode, bool nowait, bool follow_updates, TM_FailureData *tmfd, bool allow_lock_self)
+TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, 
+    CommandId cid, LockTupleMode mode, bool nowait, bool follow_updates, TM_FailureData *tmfd, bool allow_lock_self,
+    int waitSec)
 {
     TM_Result result;
     ItemPointer tid = &(tuple->t_self);
@@ -6096,9 +6202,6 @@ TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, Co
     LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
     page = BufferGetPage(*buffer);
-    if (PageIs4BXidVersion(page)) {
-        (void)heap_page_upgrade(relation, *buffer);
-    }
 
     lp = PageGetItemId(page, ItemPointerGetOffsetNumber(tid));
     Assert(ItemIdIsNormal(lp));
@@ -6118,6 +6221,12 @@ TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, Co
     tuple->t_xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
 #endif
 
+    if (RELATION_HAS_UIDS(relation) && HeapTupleHeaderHasUid(tuple->t_data)) {
+        uint64 tupleUid = HeapTupleGetUid(tuple);
+        LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
+        LockTupleUid(relation, tupleUid, TupleLockExtraInfo[mode].hwlock, !nowait, true);
+        LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+    }
 l3:
     HeapTupleCopyBaseFromPage(tuple, page);
     result = HeapTupleSatisfiesUpdate(tuple, cid, *buffer, allow_lock_self);
@@ -6274,7 +6383,7 @@ l3:
                     }
                 }
 
-            LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+                LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
                 /*
                  * Make sure it's still an appropriate lock, else start over.
@@ -6391,7 +6500,7 @@ l3:
                                             RelationGetRelationName(relation))));
                     }
                 } else {
-                    LOCK_TUPLE_TUP_LOCK(relation, tid, mode);
+                    LockTuple(relation, tid, TupleLockExtraInfo[mode].hwlock, true, waitSec);
                 }
                 have_tuple_lock = true;
             }
@@ -6408,7 +6517,7 @@ l3:
                         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg(
                             "could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
                 } else {
-                    MultiXactIdWait((MultiXactId)xwait, status, NULL);
+                    MultiXactIdWait((MultiXactId)xwait, status, NULL, waitSec);
                 }
 
                 /*
@@ -6427,7 +6536,7 @@ l3:
                         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg(
                             "could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
                 } else {
-                    XactLockTableWait(xwait, true);
+                    XactLockTableWait(xwait, true, waitSec);
                 }
             }
 
@@ -7257,7 +7366,7 @@ static TM_Result heap_lock_updated_tuple(Relation rel, HeapTuple tuple, ItemPoin
  * tuple is an in-memory tuple structure containing the data to be written
  * over the target tuple.  Also, tuple->t_self identifies the target tuple.
  */
-void heap_inplace_update(Relation relation, HeapTuple tuple)
+void heap_inplace_update(Relation relation, HeapTuple tuple, bool waitFlush)
 {
     Buffer buffer;
     Page page;
@@ -7309,10 +7418,11 @@ void heap_inplace_update(Relation relation, HeapTuple tuple)
 
     MarkBufferDirty(buffer);
 
+    XLogRecPtr recptr = InvalidXLogRecPtr;
+
     /* XLOG stuff */
     if (RelationNeedsWAL(relation)) {
         xl_heap_inplace xlrec;
-        XLogRecPtr recptr;
 
         xlrec.offnum = ItemPointerGetOffsetNumber(&tuple->t_self);
 
@@ -7330,6 +7440,10 @@ void heap_inplace_update(Relation relation, HeapTuple tuple)
     END_CRIT_SECTION();
 
     UnlockReleaseBuffer(buffer);
+
+    if (waitFlush && (recptr != InvalidXLogRecPtr)) {
+        XLogWaitFlush(recptr);
+    }
 
     /*
      * Send out shared cache inval if necessary.  Note that because we only
@@ -7765,7 +7879,7 @@ XLogRecPtr log_heap_cleanup_info(const RelFileNode* rnode, TransactionId latest_
     XLogBeginInsert();
     XLogRegisterData((char*)&xlrec, SizeOfHeapCleanupInfo);
 
-    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_CLEANUP_INFO, false, rnode->bucketNode);
+    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_CLEANUP_INFO, rnode->bucketNode);
 
     return recptr;
 }
@@ -7911,7 +8025,7 @@ XLogRecPtr log_cu_bcm(const RelFileNode* rnode, int col, uint64 block, int statu
     XLogBeginInsert();
     XLogRegisterData((char*)&xlrec, SizeOfHeapBcm);
 
-    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_BCM, false, rnode->bucketNode);
+    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_BCM, rnode->bucketNode);
 
     return recptr;
 }
@@ -7937,7 +8051,7 @@ XLogRecPtr log_heap_bcm(const RelFileNode* rnode, int col, uint64 block, int sta
     XLogBeginInsert();
     XLogRegisterData((char*)&xlrec, SizeOfHeapBcm);
 
-    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_BCM, false, rnode->bucketNode);
+    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_BCM, rnode->bucketNode);
 
     return recptr;
 }
@@ -7990,7 +8104,8 @@ XLogRecPtr log_heap_visible(RelFileNode rnode, BlockNumber block, Buffer heap_bu
  * have modified the buffer(s) and marked them dirty.
  */
 static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf,
-    HeapTuple newtup, HeapTuple old_key_tuple, bool all_visible_cleared, bool new_all_visible_cleared)
+    HeapTuple newtup, HeapTuple old_key_tuple, bool all_visible_cleared, bool new_all_visible_cleared,
+    char relreplident)
 {
     xl_heap_update xlrec;
     xl_heap_header xlhdr;
@@ -8050,7 +8165,7 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup
     if (need_tuple_data) {
         xlrec.flags |= XLH_UPDATE_CONTAINS_NEW_TUPLE;
         if (old_key_tuple) {
-            if (reln->rd_rel->relreplident == REPLICA_IDENTITY_FULL)
+            if (relreplident == REPLICA_IDENTITY_FULL)
                 xlrec.flags |= XLH_UPDATE_CONTAINS_OLD_TUPLE;
             else
                 xlrec.flags |= XLH_UPDATE_CONTAINS_OLD_KEY;
@@ -8093,6 +8208,8 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup
     }
 
     XLogRegisterData((char *)&xlrec, useOldXlog ? SizeOfOldHeapUpdate : SizeOfHeapUpdate);
+    CommitSeqNo curCSN = InvalidCommitSeqNo;
+    LogCSN(&curCSN);
 
     /* We need to log a tuple identity */
     if (need_tuple_data && old_key_tuple) {
@@ -8140,18 +8257,19 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup
  * Returns NULL if there's no need to log an identity or if there's no suitable
  * key in the Relation relation.
  */
-static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool key_changed, bool* copy)
+static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool key_changed, bool* copy,
+    char *relreplident)
 {
     TupleDesc desc = RelationGetDescr(relation);
     Oid replidindex;
     Relation idx_rel;
-    char relreplident;
     HeapTuple key_tuple = NULL;
     bool nulls[MaxHeapAttributeNumber];
     Datum values[MaxHeapAttributeNumber];
     int natt;
     errno_t rc = 0;
     *copy = false;
+    *relreplident = REPLICA_IDENTITY_NOTHING;
 
     if (!RelationIsLogicallyLogged(relation)) {
         return NULL;
@@ -8175,16 +8293,16 @@ static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool ke
     heap_freetuple(tuple);
 
     if (is_null) {
-        relreplident = REPLICA_IDENTITY_NOTHING;
+        *relreplident = REPLICA_IDENTITY_NOTHING;
     } else {
-        relreplident = CharGetDatum(replident);
+        *relreplident = CharGetDatum(replident);
     }
 
-    if (replident == REPLICA_IDENTITY_NOTHING) {
+    if (*relreplident == REPLICA_IDENTITY_NOTHING) {
         return NULL;
     }
 
-    if (replident == REPLICA_IDENTITY_FULL) {
+    if (*relreplident == REPLICA_IDENTITY_FULL) {
         /*
          * When logging the entire old tuple, it very well could contain
          * toasted columns. If so, force them to be inlined.
@@ -8355,7 +8473,7 @@ XLogRecPtr log_logical_newpage(RelFileNode* rnode, ForkNumber forkNum, BlockNumb
      */
     XLogRegisterBuffer(0, buffer, REGBUF_NO_IMAGE);
 
-    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOGICAL_NEWPAGE, false, rnode->bucketNode);
+    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOGICAL_NEWPAGE, rnode->bucketNode);
 
     PageSetLSN(page, recptr);
     PageSetLogical(page);
@@ -8394,7 +8512,7 @@ XLogRecPtr log_logical_newcu(RelFileNode* rnode, ForkNumber forkNum, int attid, 
     if (cuData != NULL) {
         XLogRegisterData(cuData, size);
     }
-    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOGICAL_NEWPAGE, false, rnode->bucketNode);
+    recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOGICAL_NEWPAGE, rnode->bucketNode);
 
     END_CRIT_SECTION();
 
@@ -8935,6 +9053,9 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
     if (isinit) {
         rec_data += sizeof(TransactionId);
     }
+    if ((record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN) {
+        rec_data += sizeof(CommitSeqNo);
+    }
 
     xlrec = (xl_heap_update*)rec_data;
 
@@ -9039,19 +9160,6 @@ static void heap_xlog_update(XLogReaderState* record, bool hot_update)
      */
     if (newaction == BLK_NEEDS_REDO && !hot_update && freespace < BLCKSZ / 5) {
         XLogRecordPageWithFreeSpace(rnode, newblk, freespace);
-    }
-}
-
-void heap_xlog_page_upgrade(XLogReaderState* record)
-{
-    RedoBufferInfo buffer;
-
-    if (BLK_NEEDS_REDO == XLogReadBufferForRedo(record, HEAP_PAGE_UPDATE_ORIG_BLOCK_NUM, &buffer)) {
-        HeapXlogPageUpgradeOperatorPage(&buffer);
-        MarkBufferDirty(buffer.buf);
-    }
-    if (BufferIsValid(buffer.buf)) {
-        UnlockReleaseBuffer(buffer.buf);
     }
 }
 
@@ -9167,9 +9275,6 @@ void heap2_redo(XLogReaderState* record)
             break;
         case XLOG_HEAP2_LOGICAL_NEWPAGE:
             heap_xlog_logical_new_page(record);
-            break;
-        case XLOG_HEAP2_PAGE_UPGRADE:
-            heap_xlog_page_upgrade(record);
             break;
         default:
             ereport(PANIC, (errmsg("heap2_redo: unknown op code %hhu", info)));
@@ -9325,6 +9430,18 @@ void partition_sync(Relation rel, Oid partition_id, LOCKMODE partition_lockmode)
     partitionClose(rel, partition, NoLock);
 }
 
+static void ReportPartitionOpenError(Relation relation, Oid partition_id)
+{
+    ereport(
+        ERROR,
+        (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open partition with OID %u", partition_id),
+         errdetail("Check whether DDL operations exist on the current partition in the table %s, like "
+                   "drop/exchange/split/merge partition",
+                   RelationGetRelationName(relation)),
+         errcause("If there is a DDL operation, the cause is incorrect operation. Otherwise, it is a system error."),
+         erraction("Wait for DDL operation to complete or Contact engineer to support.")));
+}
+
 /*
  * If we are executing select for update/share operation,
  * directly hold RowShareLock to avoid deadlock with vacuum full
@@ -9336,6 +9453,18 @@ static LOCKMODE GetPartitionLockMode(LOCKMODE lockmode)
     } else {
         return lockmode;
     }
+}
+
+static Partition SubPartitionOidGetPartitionWithRetry(Relation rel, Oid subPartOid, LOCKMODE lockmode, const char *stmt)
+{
+    Oid parentOid = partid_get_parentid(subPartOid);
+    Partition part = partitionOpenWithRetry(rel, parentOid, lockmode, stmt);
+    Relation partRel = partitionGetRelation(rel, part);
+    Partition subPart = partitionOpenWithRetry(partRel, subPartOid, lockmode, stmt);
+    releaseDummyRelation(&partRel);
+    partitionClose(rel, part, NoLock);
+
+    return subPart;
 }
 
 /*
@@ -9353,6 +9482,13 @@ Partition partitionOpenWithRetry(Relation relation, Oid partition_id, LOCKMODE l
     Assert(lockmode >= NoLock && lockmode < MAX_LOCKMODES);
     Assert(PointerIsValid(relation));
     Assert(OidIsValid(partition_id));
+
+    if (RelationIsSubPartitioned(relation) && relation->rd_id != partid_get_parentid(partition_id)) {
+        /* partition_id is subpartition oid */
+        p = SubPartitionOidGetPartitionWithRetry(relation, partition_id, lockmode, stmt);
+        Assert(relation->rd_id == partid_get_parentid(p->pd_part->parentid));
+        return p;
+    }
 
     /*
      * If we are executing select for update/share operation,
@@ -9394,9 +9530,9 @@ Partition partitionOpenWithRetry(Relation relation, Oid partition_id, LOCKMODE l
     p = PartitionIdGetPartition(partition_id, RelationGetStorageType(relation));
 
     if (!PartitionIsValid(p)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open partition with OID %u", partition_id)));
+        ReportPartitionOpenError(relation, partition_id);
     }
+    Assert(relation->rd_id == p->pd_part->parentid);
 
     /* Insert TDE key to buffer cache for tde table */
     if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE && RelationisEncryptEnable(relation)) {
@@ -9438,6 +9574,13 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
     Assert(PointerIsValid(relation));
     Assert(bucket_id < SegmentBktId);
 
+    if (RelationIsSubPartitioned(relation) && relation->rd_id != partid_get_parentid(partition_id)) {
+        /* partition_id is subpartition oid */
+        p = SubPartitionOidGetPartition(relation, partition_id, lockmode);
+        Assert(relation->rd_id == partid_get_parentid(p->pd_part->parentid));
+        return p;
+    }
+
     /*
      * If we are executing select for update/share operation,
      * directly hold RowShareLock to avoid deadlock with vacuum full
@@ -9468,9 +9611,19 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
     p = PartitionIdGetPartition(partition_id, RelationGetStorageType(relation));
 
     if (!PartitionIsValid(p)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open partition with OID %u", partition_id)));
+        ReportPartitionOpenError(relation, partition_id);
     }
+
+    if (p->xmin_csn != InvalidCommitSeqNo) {
+        Snapshot snapshot = GetActiveSnapshot();
+        if (p->xmin_csn > snapshot->snapshotcsn) {
+            ereport(ERROR,
+            (errcode(ERRCODE_SNAPSHOT_INVALID),
+                    errmsg("current snapshot is invalid for this partition : %u.", partition_id)));
+        }
+
+    }
+    Assert(relation->rd_id == p->pd_part->parentid);
 
     /* Insert TDE key to buffer cache for tde table */
     if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE && RelationisEncryptEnable(relation)) {
@@ -9492,6 +9645,53 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
     return p;
 }
 
+static Partition TrySubPartitionOidGetPartition(Relation rel, Oid subPartOid, LOCKMODE lockmode)
+{
+    Oid parentOid = partid_get_parentid(subPartOid);
+    Assert(rel->rd_id == partid_get_parentid(parentOid));
+    Partition part = tryPartitionOpen(rel, parentOid, lockmode);
+    if (part == NULL) {
+        return NULL;
+    }
+    Relation partRel = partitionGetRelation(rel, part);
+    Partition subPart = tryPartitionOpen(partRel, subPartOid, lockmode);
+    releaseDummyRelation(&partRel);
+    partitionClose(rel, part, NoLock);
+
+    return subPart;
+}
+
+static void GetPartitionLockBeforeOpenPartition(Relation relation, Oid partition_id, LOCKMODE lockmode)
+{
+    if (lockmode == NoLock) {
+        return;
+    }
+
+    PartitionIdentifier* partID = NULL;
+    if (relation->rd_rel->relkind == RELKIND_RELATION) {
+        partID = partOidGetPartID(relation, partition_id);
+        switch (partID->partArea) {
+            case PART_AREA_RANGE:
+            case PART_AREA_LIST:
+            case PART_AREA_HASH:
+                LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
+                break;
+            case PART_AREA_INTERVAL:
+                LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
+                break;
+            default:
+                break;
+        }
+        pfree(partID);
+    } else if (relation->rd_rel->relkind == RELKIND_INDEX) {
+        LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR),
+                        errmsg("openning partition %u, but relation %s %u is neither table nor index", partition_id,
+                               RelationGetRelationName(relation), RelationGetRelid(relation))));
+    }
+}
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -9509,6 +9709,13 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
     Assert(PointerIsValid(relation));
     Assert(OidIsValid(partition_id));
 
+    if (RelationIsSubPartitioned(relation) && relation->rd_id != partid_get_parentid(partition_id)) {
+        /* partition_id is subpartition oid */
+        p = TrySubPartitionOidGetPartition(relation, partition_id, lockmode);
+        Assert(relation->rd_id == partid_get_parentid(p->pd_part->parentid));
+        return p;
+    }
+
     /*
      * If we are executing select for update/share operation,
      * directly hold RowShareLock to avoid deadlock with vacuum full
@@ -9516,33 +9723,7 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
     lockmode = GetPartitionLockMode(lockmode);
 
     /* Get the lock before trying to open the relcache entry */
-    if (lockmode != NoLock) {
-        if (relation->rd_rel->relkind == RELKIND_RELATION) {
-            partID = partOidGetPartID(relation, partition_id);
-            switch (partID->partArea) {
-                case PART_AREA_RANGE:
-                case PART_AREA_LIST:
-                case PART_AREA_HASH:
-                    LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
-                    break;
-                case PART_AREA_INTERVAL:
-                    LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
-                    break;
-                default:
-                    break;
-            }
-            pfree(partID);
-        } else if (relation->rd_rel->relkind == RELKIND_INDEX) {
-            LockPartition(relation->rd_id, partition_id, lockmode, PARTITION_LOCK);
-        } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_RELATION_OPEN_ERROR),
-                    errmsg("openning partition %u, but relation %s %u is neither table nor index",
-                        partition_id,
-                        RelationGetRelationName(relation),
-                        RelationGetRelid(relation))));
-        }
-    }
+    GetPartitionLockBeforeOpenPartition(relation, partition_id, lockmode);
 
     /*
      * Now that we have the lock, probe to see if the partition really exists
@@ -9583,8 +9764,7 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
     p = PartitionIdGetPartition(partition_id, RelationGetStorageType(relation));
 
     if (!PartitionIsValid(p)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open partition with OID %u", partition_id)));
+        ReportPartitionOpenError(relation, partition_id);
     }
     Assert(relation->rd_id == p->pd_part->parentid);
 
@@ -9627,14 +9807,28 @@ void partitionClose(Relation relation, Partition partition, LOCKMODE lockmode)
     Assert(PointerIsValid(relation));
     Assert(PointerIsValid(part));
 
-    /* The partcache does the real work... */
-    PartitionClose(part);
-
     /*
      * If we are executing select for update/share operation,
      * directly hold RowShareLock to avoid deadlock with vacuum full
      */
     lockmode = GetPartitionLockMode(lockmode);
+
+    if (RelationIsSubPartitioned(relation) && relation->rd_id != part->pd_part->parentid) {
+        Assert(relation->rd_id == partid_get_parentid(part->pd_part->parentid));
+        if (lockmode != NoLock) {
+            UnlockPartition(relation->rd_id, part->pd_part->parentid, lockmode, PARTITION_LOCK);
+        }
+        PartitionClose(part);
+        if (lockmode != NoLock) {
+            UnlockPartition(part->pd_part->parentid, part->pd_id, lockmode, PARTITION_LOCK);
+        }
+        return;
+    }
+
+    Assert(relation->rd_id == part->pd_part->parentid);
+
+    /* The partcache does the real work... */
+    PartitionClose(part);
 
     if (lockmode != NoLock) {
         if (relation->rd_rel->relkind == RELKIND_RELATION) {
@@ -9775,11 +9969,9 @@ HeapTuple heapam_index_fetch_tuple(IndexScanDesc scan, bool *all_dead)
          * replayed before the tid replayed. This is acceptable, so we return
          * null without reporting error.
          */
-#ifndef ENABLE_MULTIPLE_NODES
         if(!BufferIsValid(scan->xs_cbuf)) {
            return NULL;
         }
-#endif
 
         /*
          * Prune page, but only if we weren't already on this page

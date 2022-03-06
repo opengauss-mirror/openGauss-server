@@ -1612,44 +1612,5 @@ DROP FUNCTION func_increment_sql_1;
 DROP FUNCTION func_increment_sql_2;
 DROP FUNCTION fun_test_1;
 DROP FUNCTION fun_test_2;
-CREATE OR REPLACE PROCEDURE test_spi()
-AS DECLARE d_statement VARCHAR2(32767);
-BEGIN
-    d_statement := 'EXPLAIN PLAN FOR select 1';
-    BEGIN
-        EXECUTE IMMEDIATE d_statement;
-    END;
-
-    COMMIT;
-END;
-/
-select * from test_spi();
- test_spi 
-----------
- 
-(1 row)
-
-\d+ plan_table
-                        View "pg_catalog.plan_table"
-    Column    |          Type           | Modifiers | Storage  | Description 
---------------+-------------------------+-----------+----------+-------------
- statement_id | character varying(30)   |           | extended | 
- plan_id      | bigint                  |           | plain    | 
- id           | integer                 |           | plain    | 
- operation    | character varying(30)   |           | extended | 
- options      | character varying(255)  |           | extended | 
- object_name  | name                    |           | plain    | 
- object_type  | character varying(30)   |           | extended | 
- object_owner | name                    |           | plain    | 
- projection   | character varying(4000) |           | extended | 
-View definition:
- SELECT plan_table_data.statement_id, plan_table_data.plan_id, 
-    plan_table_data.id, plan_table_data.operation, plan_table_data.options, 
-    plan_table_data.object_name, plan_table_data.object_type, 
-    plan_table_data.object_owner, plan_table_data.projection
-   FROM plan_table_data
-  WHERE plan_table_data.session_id = pg_current_sessionid() AND plan_table_data.user_id = pg_current_userid();
-
-DROP PROCEDURE test_spi;
 \c regression;
 drop database IF EXISTS pl_test_funcion;

@@ -3,6 +3,7 @@ set(3RD_PATH $ENV{THIRD_BIN_PATH})
 set(VERSION_TYPE $ENV{DEBUG_TYPE})
 option(ENABLE_LLT "enable llt, current value is --enable-llt" OFF)
 option(ENABLE_UT "enable ut, current value is --enable-ut" OFF)
+option(WITH_OPENEULER_OS "Build openGauss rpm package on openEuler os" OFF)
 
 execute_process(COMMAND sh ${PROJECT_SRC_DIR}/get_PlatForm_str.sh OUTPUT_VARIABLE PLAT_FORM_STR OUTPUT_STRIP_TRAILING_WHITESPACE)
 
@@ -76,6 +77,7 @@ set(PROTOBUF_HOME ${DEPENDENCY_PATH}/protobuf/${SUPPORT_LLT})
 set(THRIFT_HOME ${DEPENDENCY_PATH}/thrift)
 set(SNAPPY_HOME ${DEPENDENCY_PATH}/snappy/${LIB_UNIFIED_SUPPORT})
 set(ZLIB_HOME ${DEPENDENCY_PATH}/zlib1.2.11/${SUPPORT_LLT})
+set(XGBOOST_HOME ${DEPENDENCY_PATH}/xgboost/${SUPPORT_LLT})
 set(ZSTD_HOME ${DEPENDENCY_PATH}/zstd)
 set(LICENSE_HOME ${PLATFORM_PATH}/AdaptiveLM_C_V100R005C01SPC002/${SUPPORT_LLT})
 set(HOTPATCH_HOME ${PLATFORM_PATH}/hotpatch)
@@ -157,6 +159,12 @@ else()
     else()
         set(JEMALLOC_LIB_NAME jemalloc)
     endif()
+endif()
+
+if(${WITH_OPENEULER_OS} STREQUAL "ON")
+    set(SECURE_C_CHECK boundscheck)
+else()
+    set(SECURE_C_CHECK securec)
 endif()
 
 #############################################################################
@@ -276,6 +284,12 @@ set(ZLIB_INCLUDE_PATH ${ZLIB_HOME}/include)
 set(ZLIB_LIB_PATH ${ZLIB_HOME}/lib)
 
 #############################################################################
+# xgboost component
+#############################################################################
+set(XGBOOST_INCLUDE_PATH ${XGBOOST_HOME}/include)
+set(XGBOOST_LIB_PATH ${XGBOOST_HOME}/lib64)
+
+#############################################################################
 # zstd component
 #############################################################################
 set(ZSTD_INCLUDE_PATH ${ZSTD_HOME}/include)
@@ -346,3 +360,15 @@ set(MOCKCPP_3RDPARTY_PATH ${MOCKCPP_HOME}/3rdparty)
 set(MASSTREE_INCLUDE_PATH ${MASSTREE_HOME}/include)
 set(MASSTREE_LIB_PATH ${MASSTREE_HOME}/lib)
 
+############################################################################
+# gtest component
+############################################################################
+set(GTEST_INCLUDE_PATH ${GTEST_HOME}/include)
+set(GTEST_LIB_PATH ${GTEST_HOME}/lib)
+
+############################################################################
+# mockcpp component
+############################################################################
+set(MOCKCPP_INCLUDE_PATH ${MOCKCPP_HOME}/include)
+set(MOCKCPP_LIB_PATH ${MOCKCPP_HOME}/lib)
+set(MOCKCPP_3RDPARTY_PATH ${MOCKCPP_HOME}/3rdparty)

@@ -239,9 +239,9 @@ SQLFunctionParseInfoPtr prepare_sql_fn_parse_info(HeapTuple procedure_tuple, Nod
 
     p_info->argtypes = arg_oid_vect;
 
-/*
-    * Collect names of arguments, too, if any
-    */
+    /*
+     * Collect names of arguments, too, if any
+     */
     Datum pro_arg_names;
     Datum pro_arg_modes;
     int n_arg_names;
@@ -730,7 +730,7 @@ static void init_sql_fcache(FmgrInfo* finfo, Oid collation, bool lazy_eval_ok)
      * coerce the returned rowtype to the desired form (unless the result type
      * is VOID, in which case there's nothing to coerce to).
      */
-    fcache->returnsTuple = check_sql_fn_retval(f_oid, ret_type, flat_query_list, NULL, &fcache->junkFilter);
+    fcache->returnsTuple = check_sql_fn_retval(f_oid, ret_type, flat_query_list, NULL, &fcache->junkFilter, false);
 
     if (fcache->returnsTuple) {
         /* Make sure output rowtype is properly blessed */
@@ -962,9 +962,7 @@ static void postquel_sub_params(SQLFunctionCachePtr fcache, FunctionCallInfo fci
             prm->isnull = fcinfo->argnull[i];
             prm->pflags = 0;
             prm->ptype = fcache->pinfo->argtypes[i];
-            prm->tableOfIndexType = InvalidOid;
-            prm->tableOfIndex = NULL;
-            prm->isnestedtable = false;
+            prm->tabInfo = NULL;
         }
     } else {
         fcache->paramLI = NULL;
@@ -1577,7 +1575,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
     ListCell* lc = NULL;
     bool gs_encrypted_proc_was_created = false;
     AssertArg(!IsPolymorphicType(ret_type));
-
+    CommandCounterIncrement();
     if (modify_target_list != NULL)
         *modify_target_list = false; /* initialize for no change */
     if (junk_filter != NULL)
@@ -1752,7 +1750,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
         col_index = 0;
         new_tlist = NIL; /* these are only used if modifyTargetList */
         junk_attrs = NIL;
-
+        Oid gsrelid = InvalidOid;
         foreach (lc, tlist) {
             TargetEntry* tle = (TargetEntry*)lfirst(lc);
             Form_pg_attribute attr;
@@ -1812,6 +1810,17 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
                 if (!gs_encrypted_proc_was_created) {
                     all_types_orig = (Datum*)palloc(tup_natts * sizeof(Datum));
                     all_types = (Datum*)palloc(tup_natts * sizeof(Datum));
+                    /* if the column result type is diffent than the function table reuslt type */
+                    if (attr->attrelid != tle->resorigtbl &&
+                       /* The colunm relation is not temporal */
+                       attr->attrelid != 0 &&
+                       /* The colunm relation is not temporal */
+                       attr->attnum == tle->resorigcol) {
+                        /* if all the above conditions are correct - than we might return real table
+                           with same structre but without client logic columns -  replace the data type */
+                        gsrelid = ObjectIdGetDatum(tle->resorigtbl);
+                    }
+
                     for (int j = 0; j < col_index - 1; j++) {
                         all_types_orig[j] = -1;
                         all_types[j] = ObjectIdGetDatum(tup_desc->attrs[j]->atttypid);
@@ -1847,7 +1856,7 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
             }
         }
         if (gs_encrypted_proc_was_created) {
-            add_allargtypes_orig(func_id, all_types_orig, all_types, tup_natts);
+            add_allargtypes_orig(func_id, all_types_orig, all_types, tup_natts, gsrelid);
         }
 
         /* remaining columns in tupdesc had better all be dropped */
@@ -1874,7 +1883,6 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
                     *modify_target_list = true;
             }
         }
-
         if (modify_target_list != NULL) {
             /* ensure resjunk columns are numbered correctly */
             foreach (lc, junk_attrs) {
@@ -2033,21 +2041,23 @@ void update_gs_encrypted_proc(const Oid func_id, SQLFunctionParseInfoPtr p_info,
     pfree_ext(allargs_orig);
 }
 
+static inline bool is_proargmode_any_input(char arg)
+{
+    return (arg == PROARGMODE_IN || arg == PROARGMODE_INOUT || arg == PROARGMODE_VARIADIC);
+}
+
 /*
  * Replace the parameters data types requested by the client with the encrypted "bytea" data types
  * add column setting oid info to gs_encrypted_proc data for stored procedure
  */
 bool sql_fn_cl_rewrite_params(const Oid func_id, SQLFunctionParseInfoPtr p_info, bool is_replace)
 {
-    bool nulls[Natts_pg_proc] = {0};
-    Datum values[Natts_pg_proc] = {0};
-    bool replaces[Natts_pg_proc] = {0};
-    Datum proallargtypes;
-    bool isNull = false;
-    Datum* allargs_orig = NULL;
-    int allnumargs = 0;
-    Relation rel = NULL;
-    Relation gs_rel = NULL;
+    bool is_supported_outparams_override = false;
+#ifndef ENABLE_MULTIPLE_NODES
+    is_supported_outparams_override = (t_thrd.proc->workingVersionNum >= 92470);
+#endif // ENABLE_MULTIPLE_NODES
+
+    CommandCounterIncrement(); // precaution
 
     HeapTuple tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_id));
     if (!HeapTupleIsValid(tuple)) {
@@ -2055,126 +2065,154 @@ bool sql_fn_cl_rewrite_params(const Oid func_id, SQLFunctionParseInfoPtr p_info,
             errmsg("cache lookup failed for function %u when initialize function cache.", func_id)));
     }
 
+    /* get tuple from pg_proc */
     Form_pg_proc oldproc = (Form_pg_proc)GETSTRUCT(tuple);
 
-    bool is_replaced = false;
+    /* get argmodes from tuple */
+    bool isNull = false;
+    Datum proargmodes = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_proargmodes, &isNull);
+    char *argmodes = NULL;
+    ArrayType *argmodes_arr = NULL;
+    int n_modes = 0;
+    if (!isNull) {
+        argmodes_arr = DatumGetArrayTypeP(proargmodes); /* ensure not toasted */
+        n_modes = ARR_DIMS(argmodes_arr)[0];
+        bool is_char_oid_array =
+            ARR_NDIM(argmodes_arr) != 1 || ARR_HASNULL(argmodes_arr) || ARR_ELEMTYPE(argmodes_arr) != CHAROID;
+        if (is_char_oid_array) {
+            ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
+        }
+
+        argmodes = (char *)ARR_DATA_PTR(argmodes_arr);
+    }
+
+    /* get allargs from tuple if available */
+    oidvector *tup_allargs = NULL;
+    if (is_supported_outparams_override) {
+        tup_allargs = (oidvector *)DatumGetPointer(ProcedureGetAllArgTypes(tuple, &isNull));
+    }
+
+    /* replace argtypes and allargs data types from original to real data types */
+    bool is_any_replacement = false;
+    int out_count = 0;
     for (int i = 0; i < p_info->nargs; i++) {
-        if (p_info->replaced_argtypes[i] != 0 && oldproc->proargtypes.values[i] != p_info->replaced_argtypes[i]) {
-            is_replaced = true;
-            oldproc->proargtypes.values[i] = p_info->replaced_argtypes[i];
+        if (p_info->replaced_argtypes[i] == 0 || oldproc->proargtypes.values[i] == p_info->replaced_argtypes[i]) {
+            continue;
+        }
+
+        is_any_replacement = true;
+        oldproc->proargtypes.values[i] = p_info->replaced_argtypes[i];
+
+        if (argmodes != NULL) { /* skip the out params here. Allargs will have nargs input params */
+            while (out_count <= (n_modes - p_info->nargs) && !is_proargmode_any_input(argmodes[i + out_count])) {
+                out_count++;
+            }
+        }
+
+        if (tup_allargs != NULL) {
+            tup_allargs->values[i + out_count] = p_info->replaced_argtypes[i];
         }
     }
-    if (!is_replaced) {
+    if (!is_any_replacement) {
         ReleaseSysCache(tuple);
         return false;
     }
-    /* support CREATE OR REPLACE with the same parameter types */
-#ifdef ENABLE_MULTIPLE_NODES
-    if (SearchSysCacheExists3(PROCNAMEARGSNSP, CStringGetDatum(NameStr(oldproc->proname)),
-        PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace))) {
-#else
-    Datum packageidDatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_packageid, &isNull);
-    Oid packageOid = ObjectIdGetDatum(packageidDatum);
-    if (!OidIsValid(packageOid)) {
-        packageidDatum = ObjectIdGetDatum(InvalidOid);
-    }
-    if (SearchSysCacheExists4(PROCALLARGS, CStringGetDatum(NameStr(oldproc->proname)),
-        PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace), ObjectIdGetDatum(packageidDatum))) {
-#endif
-        rel = heap_open(ProcedureRelationId, RowExclusiveLock);
-        HeapTuple oldtup = NULL;
-#ifndef ENABLE_MULTIPLE_NODES
-        if (t_thrd.proc->workingVersionNum < 92470) {
-            oldtup = SearchSysCache3(PROCNAMEARGSNSP, CStringGetDatum(NameStr(oldproc->proname)),
-                PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace));
 
-        } else {
-            Datum allargtypes = ProcedureGetAllArgTypes(tuple, &isNull);
-            oldtup = SearchSysCache4(PROCALLARGS, CStringGetDatum(NameStr(oldproc->proname)),
-                allargtypes, ObjectIdGetDatum(oldproc->pronamespace),
-                ObjectIdGetDatum(packageOid));
-        }
-#else
+    /*
+        check if tuple already exists.
+        if is_replace == true then remove old tuple
+        otherwise return error to client
+    */
+    HeapTuple oldtup = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    /* support CREATE OR REPLACE with the same parameter types */
+    Datum packageidDatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_packageid, &isNull);
+    if (!is_supported_outparams_override) {
         oldtup = SearchSysCache3(PROCNAMEARGSNSP, CStringGetDatum(NameStr(oldproc->proname)),
-            PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace));
-#endif        
-        
-        if (is_replace) {
-            if (HeapTupleIsValid(oldtup)) {
-                Assert(oldtup != tuple);
-                HeapTuple old_gs_tup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(HeapTupleGetOid(oldtup)));
-                deleteDependencyRecordsFor(ProcedureRelationId, HeapTupleGetOid(oldtup), true);
-                simple_heap_delete(rel, &oldtup->t_self);
-                ReleaseSysCache(oldtup);
-                if (HeapTupleIsValid(old_gs_tup)) {
-                    gs_rel = heap_open(ClientLogicProcId, RowExclusiveLock);
-                    deleteDependencyRecordsFor(ClientLogicProcId, HeapTupleGetOid(old_gs_tup), true);
-                    simple_heap_delete(gs_rel, &old_gs_tup->t_self);
-                    heap_close(gs_rel, RowExclusiveLock);
-                    ReleaseSysCache(old_gs_tup);
-                }
-            }
-        } else {
-            /* caller should handle this case - function already exists and it is not replaced */
-            return true;
-        }
+                                 PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace));
+    } else {
+        oldtup = SearchSysCacheForProcAllArgs(CStringGetDatum(NameStr(oldproc->proname)), PointerGetDatum(tup_allargs),
+            ObjectIdGetDatum(oldproc->pronamespace), packageidDatum, proargmodes);
     }
+#else
+    oldtup = SearchSysCache3(PROCNAMEARGSNSP, CStringGetDatum(NameStr(oldproc->proname)),
+        PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace));
+#endif  // ENABLE_MULTIPLE_NODES
+
+    Relation rel = NULL;
+    Relation gs_rel = NULL;
+    if (HeapTupleIsValid(oldtup) && is_replace == true) {
+        Assert(oldtup != tuple);
+
+        /* remove dependent record from gs_encrypted_proc */
+        HeapTuple old_gs_tup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(HeapTupleGetOid(oldtup)));
+        if (HeapTupleIsValid(old_gs_tup)) {
+            gs_rel = heap_open(ClientLogicProcId, RowExclusiveLock);
+            deleteDependencyRecordsFor(ClientLogicProcId, HeapTupleGetOid(old_gs_tup), true);
+            simple_heap_delete(gs_rel, &old_gs_tup->t_self);
+            heap_close(gs_rel, RowExclusiveLock);
+            ReleaseSysCache(old_gs_tup);
+        }
+
+        /* remove record from pg_proc */
+        rel = heap_open(ProcedureRelationId, RowExclusiveLock);
+        deleteDependencyRecordsFor(ProcedureRelationId, HeapTupleGetOid(oldtup), true);
+        simple_heap_delete(rel, &oldtup->t_self);
+        ReleaseSysCache(oldtup);
+    } else if (HeapTupleIsValid(oldtup) && is_replace == false) {
+        ReleaseSysCache(oldtup);
+        ReleaseSysCache(tuple);
+        /* caller should handle this case - function already exists and it is not replaced */
+        return true;
+    }
+
+    bool nulls[Natts_pg_proc] = {0};
+    Datum values[Natts_pg_proc] = {0};
+    bool replaces[Natts_pg_proc] = {0};
     values[Anum_pg_proc_proargtypes - 1] = PointerGetDatum(&oldproc->proargtypes);
     replaces[Anum_pg_proc_proargtypes - 1] = true;
     /* verify replace for allargtypes */
-    proallargtypes = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_proallargtypes, &isNull);
+    int proallargtypes_size = 0;
+    Datum *proallargtypes_oids_orig = NULL;
+    Datum proallargtypes = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_proallargtypes, &isNull);
     if (!isNull) {
-        char* argmodes = NULL;
-        Oid* allargtypes;
-        ArrayType* arr_all_types = DatumGetArrayTypeP(proallargtypes); /* ensure not toasted */
-        allnumargs = ARR_DIMS(arr_all_types)[0];
-        bool is_char_oid_array = ARR_NDIM(arr_all_types) != 1 || allnumargs < 0 || ARR_HASNULL(arr_all_types) ||
-            ARR_ELEMTYPE(arr_all_types) != OIDOID;
+        ArrayType* proallargtypes_arr = DatumGetArrayTypeP(proallargtypes); /* ensure not toasted */
+        proallargtypes_size = ARR_DIMS(proallargtypes_arr)[0];
+        Assert(proallargtypes_size >= p_info->nargs);
+
+        /* check proallargtypes is not an array */
+        bool is_char_oid_array = ARR_NDIM(proallargtypes_arr) != 1 || proallargtypes_size < 0 ||
+            ARR_HASNULL(proallargtypes_arr) || ARR_ELEMTYPE(proallargtypes_arr) != OIDOID;
         if (is_char_oid_array) {
             ereport(ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
         }
 
-        Assert(allnumargs >= p_info->nargs);
-        allargtypes = (Oid*)ARR_DATA_PTR(arr_all_types);
-        Datum proargmodes;
-#ifndef ENABLE_MULTIPLE_NODES
-        if (t_thrd.proc->workingVersionNum < 92470) {
-            proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tuple, Anum_pg_proc_proargmodes, &isNull);
-        } else {
-            proargmodes = SysCacheGetAttr(PROCALLARGS, tuple, Anum_pg_proc_proargmodes, &isNull);
+        if (argmodes_arr != NULL && proallargtypes_size != ARR_DIMS(argmodes_arr)[0]) {
+            ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
         }
-#else
-        proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tuple, Anum_pg_proc_proargmodes, &isNull);
-#endif
-        if (!isNull) {
-            ArrayType* arr = DatumGetArrayTypeP(proargmodes); /* ensure not toasted */
-            bool is_char_oid_array = ARR_NDIM(arr) != 1 || allnumargs != ARR_DIMS(arr)[0] || ARR_HASNULL(arr) ||
-                ARR_ELEMTYPE(arr) != CHAROID;
-            if (is_char_oid_array) {
-                ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
-            }
 
-            argmodes = (char*)ARR_DATA_PTR(arr);
-        }
-        allargs_orig = (Datum*)palloc(allnumargs * sizeof(Datum));
-        int in_n = 0;
-        for (int i = 0; i < allnumargs; i++) {
-            allargs_orig[i] = -1;
-            if (in_n >= p_info->nargs) {
+        Oid *proallargtypes_oids = (Oid *)ARR_DATA_PTR(proallargtypes_arr);
+        proallargtypes_oids_orig = (Datum *)palloc(proallargtypes_size * sizeof(Datum));
+        errno_t rc = memset_s(proallargtypes_oids_orig, proallargtypes_size * sizeof(Datum), -1,
+            proallargtypes_size * sizeof(Datum));
+        securec_check_c(rc, "\0", "\0");
+        int input_args_idx = 0;
+        for (int i = 0; i < proallargtypes_size && input_args_idx < p_info->nargs; i++) {
+            /* check if input argument */
+            if (argmodes == NULL || !is_proargmode_any_input(argmodes[i])) {
                 continue;
             }
-            bool is_input_params = argmodes == NULL || argmodes[i] == PROARGMODE_IN ||
-                argmodes[i] == PROARGMODE_INOUT || argmodes[i] == PROARGMODE_VARIADIC;
-            if (is_input_params) {
-                if (p_info->replaced_argtypes[in_n] != 0) {
-                    /* type has been replaced for input params */
-                    allargs_orig[i] = Int32GetDatum(allargtypes[i]);
-                    allargtypes[i] = p_info->replaced_argtypes[in_n];
-                }
-                in_n++;
+
+            /* check if data type needs to be replaced */
+            if (p_info->replaced_argtypes[input_args_idx] != 0) {
+                /* type has been replaced for input params */
+                proallargtypes_oids_orig[i] = Int32GetDatum(proallargtypes_oids[i]);
+                proallargtypes_oids[i] = p_info->replaced_argtypes[input_args_idx];
             }
+
+            input_args_idx++;
         }
-        values[Anum_pg_proc_proallargtypes - 1] = PointerGetDatum(arr_all_types);
+        values[Anum_pg_proc_proallargtypes - 1] = PointerGetDatum(proallargtypes_arr);
         replaces[Anum_pg_proc_proallargtypes - 1] = true;
     }
     if (values[Anum_pg_proc_proallargtypes - 1] != 0) {
@@ -2183,6 +2221,8 @@ bool sql_fn_cl_rewrite_params(const Oid func_id, SQLFunctionParseInfoPtr p_info,
         values[Anum_pg_proc_allargtypes - 1] = values[Anum_pg_proc_proargtypes - 1];
     }
     replaces[Anum_pg_proc_allargtypes - 1] = true;
+
+    /* update catalog tables pg_proc and gs_encrypted_proc */
     if (!rel) {
         rel = heap_open(ProcedureRelationId, RowExclusiveLock);
     }
@@ -2190,9 +2230,10 @@ bool sql_fn_cl_rewrite_params(const Oid func_id, SQLFunctionParseInfoPtr p_info,
     HeapTuple newtup = heap_modify_tuple(tuple, tupDesc, values, nulls, replaces);
     simple_heap_update(rel, &tuple->t_self, newtup);
     CatalogUpdateIndexes(rel, newtup);
+    heap_freetuple_ext(newtup);
     heap_close(rel, RowExclusiveLock);
     ReleaseSysCache(tuple);
-    update_gs_encrypted_proc(func_id, p_info, allargs_orig, allnumargs);
+    update_gs_encrypted_proc(func_id, p_info, proallargtypes_oids_orig, proallargtypes_size);
     return false;
 }
 

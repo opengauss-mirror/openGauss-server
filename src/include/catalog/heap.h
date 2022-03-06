@@ -80,14 +80,12 @@ extern Relation heap_create(const char *relname,
                                 bool mapped_relation,
                                 bool allow_system_table_mods,
                                 int8 row_compress,
-                                Datum reloptions,
                                 Oid ownerid,
                                 bool skip_create_storage,
                                 TableAmType tam_type,
                                 int8 relindexsplit = 0,
                                 StorageType storage_type = HEAP_DISK,
-                                bool newcbi = false,
-                                Oid accessMethodObjectId = 0);
+                                bool newcbi = false);
 
 extern bool heap_is_matview_init_state(Relation rel);
 
@@ -100,9 +98,7 @@ heapCreatePartition(const char* part_name,
                           Oid bucketOid,
                           Oid ownerid,
                           StorageType storage_type,
-                          bool newcbi = false,
-                          Datum reloptions = Datum(0));
-
+                          bool newcbi = false);
 
 extern Oid heap_create_with_catalog(const char *relname,
                          Oid relnamespace,
@@ -124,7 +120,7 @@ extern Oid heap_create_with_catalog(const char *relname,
 						 bool use_user_acl,
 						 bool allow_system_table_mods,
 						 PartitionState *partTableState,
-						 int8 row_compress,
+						 int8 row_compress,					 
 						 HashBucketInfo *bucketinfo,
 						 bool record_dependce = true,
 						 List* ceLst = NULL,
@@ -153,6 +149,12 @@ extern Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid,  Oid partT
 extern Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                 Oid bucketOid, HashPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
                                 const bool* isTimestamptz, StorageType storage_type, int2vector* subpartition_key = NULL, bool isSubPartition = false);
+extern Node *MakeDefaultSubpartition(PartitionState *partitionState, Node *partitionDefState);
+extern List *addNewSubPartitionTuplesForPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespace,
+    Oid bucketOid, Oid ownerid, Datum reloptions, const bool *isTimestamptz, StorageType storage_type,
+    PartitionState *partitionState, Node *partitionDefState, LOCKMODE partLockMode);
+
+extern Oid GetPartTablespaceOidForSubpartition(Oid reltablespace, const char* partTablespacename);
 
 extern void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId);
 extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, int2vector* pkey, oidvector *intablespace,
@@ -187,7 +189,7 @@ extern void RemoveAttrDefaultById(Oid attrdefId);
 template<char starelkind>
 extern void RemoveStatistics(Oid relid, AttrNumber attnum);
 
-extern Form_pg_attribute SystemAttributeDefinition(AttrNumber attno, bool relhasoids, bool relhasbucket);
+extern Form_pg_attribute SystemAttributeDefinition(AttrNumber attno, bool relhasoids, bool relhasbucket, bool relhasuids);
 extern Form_pg_attribute SystemAttributeByName(const char *attname, bool relhasoids);
 
 extern int GetSysAttLength(bool hasBucketAttr = true);
@@ -198,7 +200,7 @@ extern void CheckAttributeType(const char *attname, Oid atttypid, Oid attcollati
 #ifdef PGXC
 /* Functions related to distribution data of relations */
 extern void AddRelationDistribution(const char *relname, Oid relid, DistributeBy *distributeby, 
-	PGXCSubCluster *subcluster, List *parentOids, TupleDesc descriptor, bool isinstallationgroup,
+	PGXCSubCluster *subcluster, List *parentOids, TupleDesc descriptor, bool isinstallationgroup, 
         bool isbucket = false, int bucketmaplen = 0);
 extern void GetRelationDistributionItems(Oid relid, DistributeBy *distributeby, TupleDesc descriptor, char *locatortype,
     int *hashalgorithm, int *hashbuckets, AttrNumber *attnum);
@@ -238,4 +240,5 @@ extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple);
 
 extern int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple);
 
+extern void AddOrDropUidsAttr(Oid relOid, bool oldRelHasUids, bool newRelHasUids);
 #endif   /* HEAP_H */

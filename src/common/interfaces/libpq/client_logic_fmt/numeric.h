@@ -93,7 +93,7 @@ typedef struct NumericData *Numeric;
 typedef struct pg_conn PGconn;
 
 unsigned char *scan_numeric(const PGconn* conn, const char *num, int atttypmod, size_t *binary_size, char *err_msg);
-bool numerictoa(NumericChoice *num, char *ascii, size_t max_size);
+bool numerictoa(NumericData* num, char *ascii, size_t max_size);
 bool apply_typmod(NumericVar *var, int32 typmod, char *err_msg);
 unsigned char *make_result(NumericVar *var, size_t *binary_size, char *err_msg);
 

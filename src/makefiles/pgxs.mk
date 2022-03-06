@@ -55,11 +55,45 @@ $(error pgxs error: makefile variable PGXS or NO_PGXS must be set)
 endif
 endif
 
-
 ifdef PGXS
 # We assume that we are in src/makefiles/, so top is ...
 top_builddir := $(dir $(PGXS))../..
+
+ifneq (,$(wildcard $(top_builddir)/src/Makefile.global))
 include $(top_builddir)/src/Makefile.global
+else #cmake build no Makefile.global
+PORTNAME= linux
+enable_shared=yes
+CC=g++
+GCC=yes
+C=gcc
+host_cpu=@HOST_CPU@
+MKDIR_P = /usr/bin/mkdir -p
+LN_S    = ln -s
+DLSUFFIX = .so
+
+bindir := $(shell $(PG_CONFIG) --bindir)
+sysconfdir := $(shell $(PG_CONFIG) --sysconfdir)
+pkgincludedir := $(shell $(PG_CONFIG) --pkgincludedir)
+datadir := $(shell $(PG_CONFIG) --sharedir)
+pkglibdir := $(shell $(PG_CONFIG) --pkglibdir)
+localedir := $(shell $(PG_CONFIG) --localedir)
+
+includedir_server = $(pkgincludedir)/server
+includedir_internal = $(pkgincludedir)/internal
+
+# Installation.
+INSTALL = $(SHELL) $(top_srcdir)/config/install-sh -c
+INSTALL_SCRIPT_MODE     = 755
+INSTALL_DATA_MODE       = 644
+INSTALL_SCRIPT  = $(INSTALL) -m $(INSTALL_SCRIPT_MODE)
+INSTALL_DATA    = $(INSTALL) -m $(INSTALL_DATA_MODE)
+INSTALL_SHLIB   = $(INSTALL_SHLIB_ENV) $(INSTALL) $(INSTALL_SHLIB_OPTS) $(INSTALL_STRIP_FLAG)
+# Override in Makefile.port if necessary
+INSTALL_SHLIB_OPTS = -m 755
+
+override CPPFLAGS := -I$(includedir_server) -I$(includedir_internal) -I$(top_builddir)/src/lib/gstrace $(CPPFLAGS)
+endif
 
 top_srcdir = $(top_builddir)
 srcdir = .
@@ -74,8 +108,13 @@ endif
 ifeq ($(FLEX),)
 FLEX = flex
 endif
-endif
 
+else # not PGXS
+override CPPFLAGS := -I$(top_srcdir)/src/include -I$(top_builddir)/src/lib/gstrace -D_GNU_SOURCE $(CPPFLAGS)
+ifdef VPATH
+override CPPFLAGS := -I$(top_builddir)/src/include -I$(top_builddir)/src/lib/gstrace $(CPPFLAGS)
+endif
+endif
 
 override CPPFLAGS := -I. -I$(srcdir) $(CPPFLAGS)
 

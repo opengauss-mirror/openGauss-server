@@ -43,6 +43,7 @@
  */
 typedef struct RangeQueryClause {
     struct RangeQueryClause* next; /* next in linked list */
+    Expr* clause;                  /* the second clause for range-query */
     Node* var;                     /* The common variable of the clauses */
     bool have_lobound;             /* found a low-bound clause yet? */
     bool have_hibound;             /* found a high-bound clause yet? */
@@ -184,6 +185,7 @@ Selectivity clauselist_selectivity(
             rinfo = (RestrictInfo*)clause;
             if (rinfo->pseudoconstant) {
                 s1 = s1 * s2;
+                rinfo->clause->selec = s2;
                 continue;
             }
             clause = (Node*)rinfo->clause;
@@ -211,20 +213,26 @@ Selectivity clauselist_selectivity(
                     break;
                 default:
                     /* Just merge the selectivity in generically */
-                    if ((uint32)u_sess->attr.attr_sql.cost_param & COST_ALTERNATIVE_CONJUNCT)
+                    if ((uint32)u_sess->attr.attr_sql.cost_param & COST_ALTERNATIVE_CONJUNCT) {
                         s1 = MIN(s1, s2);
-                    else
+                        expr->xpr.selec = s1;
+                    } else {
                         s1 = s1 * s2;
+                        expr->xpr.selec = s2;
+                    }
                     break;
             }
             continue;
         }
 
         /* Not the right form, so treat it generically. */
-        if ((uint32)u_sess->attr.attr_sql.cost_param & COST_ALTERNATIVE_CONJUNCT)
+        if ((uint32)u_sess->attr.attr_sql.cost_param & COST_ALTERNATIVE_CONJUNCT) {
             s1 = MIN(s1, s2);
-        else
+            expr->xpr.selec = s1;
+        } else {
             s1 = s1 * s2;
+            expr->xpr.selec = s2;
+        }
     }
 
     /*
@@ -276,12 +284,16 @@ Selectivity clauselist_selectivity(
             }
             /* Merge in the selectivity of the pair of clauses */
             s1 *= s2;
+            rqlist->clause->selec = s2;
         } else {
             /* Only found one of a pair, merge it in generically */
-            if (rqlist->have_lobound)
+            if (rqlist->have_lobound) {
                 s1 *= rqlist->lobound;
-            else
+                rqlist->clause->selec = rqlist->lobound;
+            } else {
                 s1 *= rqlist->hibound;
+                rqlist->clause->selec = rqlist->hibound;
+            }
         }
         varlist = lappend(varlist, rqlist->var);
         /* release storage and advance */
@@ -365,6 +377,7 @@ static void addRangeClause(RangeQueryClause** rqlist, Node* clause, bool varonle
                     rqelem->hibound = s2;
             }
         }
+        rqelem->clause = (Expr*)clause;
         return;
     }
 
@@ -380,6 +393,8 @@ static void addRangeClause(RangeQueryClause** rqlist, Node* clause, bool varonle
         rqelem->have_hibound = true;
         rqelem->hibound = s2;
     }
+    rqelem->clause = (Expr*)clause;
+    rqelem->clause->selec = s2;
     rqelem->next = *rqlist;
     *rqlist = rqelem;
 }

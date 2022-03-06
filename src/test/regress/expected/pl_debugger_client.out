@@ -1119,6 +1119,19 @@ DETAIL:  execute func not attached before execute dbe_pldebugger.backtrace
 select funcname, lineno, query from dbe_pldebugger.continue();
 ERROR:  must attach a execute func before execute dbe_pldebugger.continue
 DETAIL:  execute func not attached before execute dbe_pldebugger.continue
+-- test_empty
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+--?.*
+--?.*
+--? (.*,test_empty,0,"[EXECUTION FINISHED]")
+(1 row)
+
 -- test set_var
 select pg_sleep(1);
  pg_sleep 
@@ -1423,18 +1436,18 @@ select * from dbe_pldebugger.info_locals();
    varname   |  vartype  |       value        | package_name | isconst 
 -------------+-----------+--------------------+--------------+---------
  b           | int4      | 2                  | z_pk         | f
- p1          | int4      | 1                  | z_pk         | f
- p2          | int4      | 2                  | z_pk         | f
- p3          | varchar   | +                  | z_pk         | f
- aa.c1       | varchar   | <UNKNOWN>          | z_pk         | f
- aa.c2       | int4      | 0                  | z_pk         | f
- aa          | Record    | [ (null), (null),] | z_pk         | f
+ p1          | int4      | 1                  |              | f
+ p2          | int4      | 2                  |              | f
+ p3          | varchar   | +                  |              | f
+ aa.c1       | varchar   | <UNKNOWN>          |              | f
+ aa.c2       | int4      | 0                  |              | f
+ aa          | Record    | [ (null), (null),] |              | f
 --?.*
 --?.*
- bb          | Row       | [ (null), (null),] | z_pk         | f
+ bb          | Row       | [ (null), (null),] |              | f
 --?.*
 --?.*
- p4          | int4      | 0                  | z_pk         | f
+ p4          | int4      | 0                  |              | f
  a           | int4      | 10                 | z_pk2        | f
 (14 rows)
 
@@ -1470,18 +1483,18 @@ SELECT * FROM DBE_PLDEBUGGER.info_locals();
    varname   |  vartype  |   value    | package_name | isconst 
 -------------+-----------+------------+--------------+---------
  b           | int4      | 2          | z_pk         | f
- p1          | int4      | 1          | z_pk         | f
- p2          | int4      | 2          | z_pk         | f
- p3          | varchar   | +          | z_pk         | f
- aa.c1       | varchar   | aa         | z_pk         | f
- aa.c2       | int4      | 2          | z_pk         | f
- aa          | Record    | [ aa, 2,]  | z_pk         | f
+ p1          | int4      | 1          |              | f
+ p2          | int4      | 2          |              | f
+ p3          | varchar   | +          |              | f
+ aa.c1       | varchar   | aa         |              | f
+ aa.c2       | int4      | 2          |              | f
+ aa          | Record    | [ aa, 2,]  |              | f
 --?.*
 --?.*
- bb          | Row       | [ bb, 2,]  | z_pk         | f
+ bb          | Row       | [ bb, 2,]  |              | f
 --?.*
 --?.*
- p4          | int4      | 0          | z_pk         | f
+ p4          | int4      | 0          |              | f
  a           | int4      | 10         | z_pk2        | f
 (14 rows)
 

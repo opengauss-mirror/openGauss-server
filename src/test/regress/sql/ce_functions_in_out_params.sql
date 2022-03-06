@@ -50,14 +50,14 @@ SELECT f_processed_in_out_b('ten','name70');
 SELECT f_processed_in_out_plpgsql(17,3);
 SELECT f_processed_in_out_plpgsql2(6);
 SELECT f_processed_in_out_aliases_plpgsql(4);
-DROP TABLE t_processed CASCADE;
-DROP TABLE t_processed_b CASCADE;
 DROP FUNCTION f_processed_in_out_1param;
-DROP FUNCTION f_processed_in_out;
+DROP FUNCTION f_processed_in_out(int);
 DROP FUNCTION f_processed_in_out_b;
 DROP FUNCTION f_processed_in_out_plpgsql;
 DROP FUNCTION f_processed_in_out_plpgsql2;
 DROP FUNCTION f_processed_in_out_aliases_plpgsql;
+DROP TABLE t_processed CASCADE;
+DROP TABLE t_processed_b CASCADE;
 DROP COLUMN ENCRYPTION KEY in_out_cek;
 DROP CLIENT MASTER KEY in_out_cmk;
 \! gs_ktool -d all

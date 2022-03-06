@@ -590,14 +590,36 @@ static void GPILookupFakeRelCache(GPIScanDesc gpiScan, PartRelIdCacheKey fakeRel
     FakeRelationIdCacheLookup(fakeRels, fakeRelKey, gpiScan->fakePartRelation, gpiScan->partition);
 }
 
+static void GPIInsertFakeParentRelCacheForSubpartition(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode)
+{
+    HTAB* fakeRels = gpiScan->fakeRelationTable;
+    Relation parentRel = gpiScan->parentRelation;
+    Oid parentPartOid = partid_get_parentid(gpiScan->currPartOid);
+    if (parentPartOid != parentRel->rd_id) {
+        PartRelIdCacheKey fakeRelKey = {parentPartOid, InvalidBktId};
+        Partition parentPartition = NULL;
+        FakeRelationIdCacheLookup(fakeRels, fakeRelKey, parentRel, parentPartition);
+        if (!RelationIsValid(parentRel)) {
+            /* add current parentRel into fakeRelationTable */
+            Oid baseRelOid = partid_get_parentid(parentPartOid);
+            Relation baseRel = relation_open(baseRelOid, lmode);
+            searchFakeReationForPartitionOid(fakeRels, cxt, baseRel, parentPartOid, parentRel, parentPartition, lmode);
+            relation_close(baseRel, NoLock);
+        }
+        gpiScan->parentRelation = parentRel;
+    }
+}
+
 /* Lookup partition information from hash table use key for global partition index scan */
 static void GPIInsertFakeRelCache(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode)
 {
     Oid currPartOid = gpiScan->currPartOid;
-    Relation parentRel = gpiScan->parentRelation;
     HTAB* fakeRels = gpiScan->fakeRelationTable;
     Partition partition = NULL;
 
+    GPIInsertFakeParentRelCacheForSubpartition(gpiScan, cxt, lmode);
+
+    Relation parentRel = gpiScan->parentRelation;
     /* Save search fake relation in gpiScan->fakeRelation */
     searchFakeReationForPartitionOid(
         fakeRels, cxt, parentRel, currPartOid, gpiScan->fakePartRelation, partition, lmode);
@@ -620,7 +642,8 @@ void GPIScanInit(GPIScanDesc* gpiScan)
 
     gpiInfo->currPartOid = InvalidOid;
     gpiInfo->fakePartRelation = NULL;
-    gpiInfo->invisiblePartTree = CreateOidRBTree();
+    gpiInfo->invisiblePartTree = NULL;
+    gpiInfo->invisiblePartTreeForVacuum = CreateOidRBTree();
     gpiInfo->parentRelation = NULL;
     gpiInfo->fakeRelationTable = NULL;
     gpiInfo->partition = NULL;
@@ -640,6 +663,7 @@ void GPIScanEnd(GPIScanDesc gpiScan)
     }
 
     DestroyOidRBTree(&gpiScan->invisiblePartTree);
+    DestroyOidRBTree(&gpiScan->invisiblePartTreeForVacuum);
     pfree_ext(gpiScan);
 }
 
@@ -678,6 +702,10 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
 
     if (!PointerIsValid(gpiScan->fakeRelationTable)) {
         GPIInitFakeRelTable(gpiScan, cxt);
+    }
+
+    if (!PointerIsValid(gpiScan->invisiblePartTree)) {
+        gpiScan->invisiblePartTree = CreateOidRBTree();
     }
 
     /* First check invisible partition oid's bitmapset */

@@ -1,0 +1,1360 @@
+set client_min_messages = error;
+SET CLIENT_ENCODING='UTF8';
+set current_schema=swtest;
+create table tsc_rtbl(c_int int,c_varchar1 varchar,c_varchar2 varchar);
+alter table tsc_rtbl drop column c_varchar2;
+alter table tsc_rtbl add column c_varchar2 varchar;
+select c_int,c_varchar1,c_varchar2 from tsc_rtbl
+start with c_int<10 connect by nocycle prior c_int=c_int;
+ c_int | c_varchar1 | c_varchar2 
+-------+------------+------------
+(0 rows)
+
+create table t1_area (id int4,name text, fatherid int4, name_desc text);
+insert into t1_area values (1, '中国',  0,  'China');
+insert into t1_area values (2, '湖南省',1 , 'Hunan');
+insert into t1_area values (3, '广东省',1 , 'Guangdong');
+insert into t1_area values (4, '海南省',1 , 'Hainan');
+insert into t1_area values (5, '河北省',1 , 'Hebei');
+insert into t1_area values (6, '河南省',1 , 'Henan');
+insert into t1_area values (7, '山东省',1 , 'Shandong');
+insert into t1_area values (8, '湖北省',1 , 'Hubei');
+insert into t1_area values (9, '江苏省',1 , 'Jiangsu');
+insert into t1_area values (10,'深圳市',3 , 'Shenzhen');
+insert into t1_area values (11,'长沙市',2 , 'Changsha');
+insert into t1_area values (22,'祁北县',13, 'Qibei');
+insert into t1_area values (12,'南山区',10, 'Nanshan');
+insert into t1_area values (21,'祁西县',13, 'Qixi');
+insert into t1_area values (13,'衡阳市',2 , 'Hengyang');
+insert into t1_area values (14,'耒阳市',13, 'Leiyang');
+insert into t1_area values (15,'龙岗区',10, 'Longgang');
+insert into t1_area values (16,'福田区',10, 'Futian');
+insert into t1_area values (17,'宝安区',10, 'Baoan');
+insert into t1_area values (19,'祁东县',13, 'Qidong');
+insert into t1_area values (18,'常宁市',13, 'Changning');
+insert into t1_area values (20,'祁南县',13, 'Qinan');
+SELECT *, connect_by_root(name_desc), sys_connect_by_path(name_desc, '->')
+FROM t1_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+ id |  name  | fatherid | name_desc | connect_by_root |        sys_connect_by_path        
+----+--------+----------+-----------+-----------------+-----------------------------------
+ 14 | 耒阳市 |       13 | Leiyang   | Leiyang         | ->Leiyang
+ 13 | 衡阳市 |        2 | Hengyang  | Leiyang         | ->Leiyang->Hengyang
+  2 | 湖南省 |        1 | Hunan     | Leiyang         | ->Leiyang->Hengyang->Hunan
+  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->Hengyang->Hunan->China
+(4 rows)
+
+--创建drop column并加回场景
+alter table t1_area drop column name_desc;
+alter table t1_area add column name_desc text;
+-- 原有备drop列为空
+SELECT *, connect_by_root(name_desc), sys_connect_by_path(name_desc, '->')
+FROM t1_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+ id |  name  | fatherid | name_desc | connect_by_root |   sys_connect_by_path    
+----+--------+----------+-----------+-----------------+--------------------------
+ 14 | 耒阳市 |       13 |           |                 | ->null
+ 13 | 衡阳市 |        2 |           |                 | ->null->null
+  2 | 湖南省 |        1 |           |                 | ->null->null->null
+  1 | 中国   |        0 |           |                 | ->null->null->null->null
+(4 rows)
+
+-- 新插入相同数据，原有drop列后的空值和当前有效值并存
+insert into t1_area values (1, '中国',  0,  'China');
+insert into t1_area values (2, '湖南省',1 , 'Hunan');
+insert into t1_area values (3, '广东省',1 , 'Guangdong');
+insert into t1_area values (4, '海南省',1 , 'Hainan');
+insert into t1_area values (5, '河北省',1 , 'Hebei');
+insert into t1_area values (6, '河南省',1 , 'Henan');
+insert into t1_area values (7, '山东省',1 , 'Shandong');
+insert into t1_area values (8, '湖北省',1 , 'Hubei');
+insert into t1_area values (9, '江苏省',1 , 'Jiangsu');
+insert into t1_area values (10,'深圳市',3 , 'Shenzhen');
+insert into t1_area values (11,'长沙市',2 , 'Changsha');
+insert into t1_area values (22,'祁北县',13, 'Qibei');
+insert into t1_area values (12,'南山区',10, 'Nanshan');
+insert into t1_area values (21,'祁西县',13, 'Qixi');
+insert into t1_area values (13,'衡阳市',2 , 'Hengyang');
+insert into t1_area values (14,'耒阳市',13, 'Leiyang');
+insert into t1_area values (15,'龙岗区',10, 'Longgang');
+insert into t1_area values (16,'福田区',10, 'Futian');
+insert into t1_area values (17,'宝安区',10, 'Baoan');
+insert into t1_area values (19,'祁东县',13, 'Qidong');
+insert into t1_area values (18,'常宁市',13, 'Changning');
+insert into t1_area values (20,'祁南县',13, 'Qinan');
+SELECT *, connect_by_root(name_desc), sys_connect_by_path(name_desc, '->')
+FROM t1_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+ id |  name  | fatherid | name_desc | connect_by_root |        sys_connect_by_path        
+----+--------+----------+-----------+-----------------+-----------------------------------
+ 14 | 耒阳市 |       13 |           |                 | ->null
+ 14 | 耒阳市 |       13 | Leiyang   | Leiyang         | ->Leiyang
+ 13 | 衡阳市 |        2 |           |                 | ->Leiyang->null
+ 13 | 衡阳市 |        2 |           |                 | ->null->null
+ 13 | 衡阳市 |        2 | Hengyang  | Leiyang         | ->Leiyang->Hengyang
+ 13 | 衡阳市 |        2 | Hengyang  | null            | ->null->Hengyang
+  2 | 湖南省 |        1 |           |                 | ->null->Hengyang->null
+  2 | 湖南省 |        1 |           |                 | ->Leiyang->Hengyang->null
+  2 | 湖南省 |        1 |           |                 | ->null->null->null
+  2 | 湖南省 |        1 |           |                 | ->Leiyang->null->null
+  2 | 湖南省 |        1 | Hunan     | null            | ->null->Hengyang->Hunan
+  2 | 湖南省 |        1 | Hunan     | Leiyang         | ->Leiyang->Hengyang->Hunan
+  2 | 湖南省 |        1 | Hunan     | null            | ->null->null->Hunan
+  2 | 湖南省 |        1 | Hunan     | Leiyang         | ->Leiyang->null->Hunan
+  1 | 中国   |        0 |           |                 | ->Leiyang->null->Hunan->null
+  1 | 中国   |        0 |           |                 | ->null->null->Hunan->null
+  1 | 中国   |        0 |           |                 | ->Leiyang->Hengyang->Hunan->null
+  1 | 中国   |        0 |           |                 | ->null->Hengyang->Hunan->null
+  1 | 中国   |        0 |           |                 | ->Leiyang->null->null->null
+  1 | 中国   |        0 |           |                 | ->null->null->null->null
+  1 | 中国   |        0 |           |                 | ->Leiyang->Hengyang->null->null
+  1 | 中国   |        0 |           |                 | ->null->Hengyang->null->null
+  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->null->Hunan->China
+  1 | 中国   |        0 | China     | null            | ->null->null->Hunan->China
+  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->Hengyang->Hunan->China
+  1 | 中国   |        0 | China     | null            | ->null->Hengyang->Hunan->China
+  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->null->null->China
+  1 | 中国   |        0 | China     | null            | ->null->null->null->China
+  1 | 中国   |        0 | China     | Leiyang         | ->Leiyang->Hengyang->null->China
+  1 | 中国   |        0 | China     | null            | ->null->Hengyang->null->China
+(30 rows)
+
+SELECT * FROM t1_area START WITH id in ('1','2') CONNECT BY PRIOR fatherid = id;
+ id |  name  | fatherid | name_desc 
+----+--------+----------+-----------
+  1 | 中国   |        0 | 
+  2 | 湖南省 |        1 | 
+  1 | 中国   |        0 | China
+  2 | 湖南省 |        1 | Hunan
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | China
+  1 | 中国   |        0 | China
+(8 rows)
+
+SELECT * FROM t1_area START WITH (cast(id as varchar) COLLATE "C") in (cast(+ (id) as varchar) COLLATE "C")  and id < 4 connect by id = prior fatherid;
+ id |  name  | fatherid | name_desc 
+----+--------+----------+-----------
+  1 | 中国   |        0 | 
+  2 | 湖南省 |        1 | 
+  3 | 广东省 |        1 | 
+  1 | 中国   |        0 | China
+  2 | 湖南省 |        1 | Hunan
+  3 | 广东省 |        1 | Guangdong
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | 
+  1 | 中国   |        0 | China
+  1 | 中国   |        0 | China
+  1 | 中国   |        0 | China
+  1 | 中国   |        0 | China
+(14 rows)
+
+SELECT * FROM t1_area, tsc_rtbl START WITH id = 1 CONNECT BY PRIOR fatherid = id;
+ id | name | fatherid | name_desc | c_int | c_varchar1 | c_varchar2 
+----+------+----------+-----------+-------+------------+------------
+(0 rows)
+
+SELECT *, connect_by_root(name_desc), sys_connect_by_path(name_desc, '->')
+FROM t1_area;
+ERROR:  Invalid function call.
+DETAIL:  START WITH CONNECT BY function found in non-hierarchical query.
+CONTEXT:  referenced column: connect_by_root
+/* fix start with in with clause */
+explain (costs off) WITH WITH_001 AS (SELECT 1 FROM offers_20050701 ,trait_value START WITH PARTY_ID=TRAIT_VAL CONNECT BY PRIOR TRAIT_VALUE_CD LIKE '%V%')
+SELECT mfg
+FROM brand ,trait_value ,WITH_001
+START WITH TRAIT_VALUE_CD=brand_name
+CONNECT BY PRIOR brand_cd=UOM_CD;
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_3
+           ->  Recursive Union
+                 ->  Nested Loop
+                       ->  CTE Scan on tmp_reuslt
+                             CTE tmp_reuslt
+                               ->  StartWith Operator
+                                     Start With pseudo atts: RUITR, array_key_4
+                                     ->  Recursive Union
+                                           ->  Hash Join
+                                                 Hash Cond: ((swtest.offers_20050701.party_id)::text = (swtest.trait_value.trait_val)::text)
+                                                 ->  Seq Scan on offers_20050701
+                                                 ->  Hash
+                                                       ->  Seq Scan on trait_value
+                                           ->  Nested Loop
+                                                 ->  Nested Loop
+                                                       ->  WorkTable Scan on tmp_reuslt
+                                                             Filter: (("trait_value@trait_value_cd")::text ~~ '%V%'::text)
+                                                       ->  Materialize
+                                                             ->  Seq Scan on trait_value
+                                                 ->  Materialize
+                                                       ->  Seq Scan on offers_20050701
+                       ->  Materialize
+                             ->  Hash Join
+                                   Hash Cond: ((swtest.brand.brand_name)::text = (swtest.trait_value.trait_value_cd)::text)
+                                   ->  Seq Scan on brand
+                                   ->  Hash
+                                         ->  Seq Scan on trait_value
+                 ->  Hash Join
+                       Hash Cond: ((tmp_reuslt."brand@brand_cd")::text = (swtest.trait_value.uom_cd)::text)
+                       ->  Nested Loop
+                             ->  WorkTable Scan on tmp_reuslt
+                             ->  Materialize
+                                   ->  Seq Scan on brand
+                       ->  Hash
+                             ->  Nested Loop
+                                   ->  CTE Scan on tmp_reuslt
+                                         CTE tmp_reuslt
+                                           ->  StartWith Operator
+                                                 Start With pseudo atts: RUITR, array_key_4
+                                                 ->  Recursive Union
+                                                       ->  Hash Join
+                                                             Hash Cond: ((swtest.offers_20050701.party_id)::text = (swtest.trait_value.trait_val)::text)
+                                                             ->  Seq Scan on offers_20050701
+                                                             ->  Hash
+                                                                   ->  Seq Scan on trait_value
+                                                       ->  Nested Loop
+                                                             ->  Nested Loop
+                                                                   ->  WorkTable Scan on tmp_reuslt
+                                                                         Filter: (("trait_value@trait_value_cd")::text ~~ '%V%'::text)
+                                                                   ->  Materialize
+                                                                         ->  Seq Scan on trait_value
+                                                             ->  Materialize
+                                                                   ->  Seq Scan on offers_20050701
+                                   ->  Materialize
+                                         ->  Seq Scan on trait_value
+(58 rows)
+
+WITH WITH_001 AS (SELECT 1 FROM offers_20050701 ,trait_value START WITH PARTY_ID=TRAIT_VAL CONNECT BY PRIOR TRAIT_VALUE_CD LIKE '%V%')
+SELECT mfg
+FROM brand ,trait_value ,WITH_001
+START WITH TRAIT_VALUE_CD=brand_name
+CONNECT BY PRIOR brand_cd=UOM_CD;
+ mfg 
+-----
+(0 rows)
+
+/* fix reference to level in connect by function calls */
+SELECT 1, level FROM t1_area CONNECT BY length(level) IS NULL;
+ ?column? | level 
+----------+-------
+(0 rows)
+
+/* prior params of procedure */
+create or replace function test_tmp1(out id int,out pid int,out name varchar,out level int) return SETOF RECORD
+IS
+declare
+CURSOR C1(sedid int) IS select t1.id,t1.pid,t1.name,level from test_hcb_ptb t1 start with id = sedid connect by prior pid=id;
+begin
+open C1(141);
+loop
+fetch C1 into id,pid,name,level;
+EXIT WHEN C1%NOTFOUND;
+return next;
+end loop;
+close C1;
+end;
+/
+select * from test_tmp1();
+ id  | pid |   name   | level 
+-----+-----+----------+-------
+ 141 | 131 | 江南摩卡 |     1
+ 131 | 121 | 东山街   |     2
+ 121 | 111 | 江宁区   |     3
+ 111 |  11 | 南京市   |     4
+  11 |   1 | 江苏省   |     5
+   1 |   0 | 中国     |     6
+(6 rows)
+
+drop procedure test_tmp1;
+drop table t1_area;
+drop table tsc_rtbl;
+-- 原问题单场景，connect_by_root(1)出现在在表达式中报错
+explain
+select t1.id,t1.pid,t1.name,LEVEL le,connect_by_root(1), connect_by_root(id)
+from test_hcb_ptb t1
+where connect_by_root(1) > 0
+start with id = 141
+connect by prior pid=id;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Result  (cost=37.12..39.89 rows=101 width=190)
+   One-Time Filter: ((connect_by_root('1'::text))::bigint > 0)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
+           Start With pseudo atts: RUITR, array_key_9, array_col_1
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.80 rows=1 width=102)
+                       Filter: (id = 141)
+                 ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                       Hash Cond: (t1.id = tmp_reuslt."t1@pid")
+                       ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
+                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+   ->  CTE Scan on tmp_reuslt  (cost=0.01..2.03 rows=101 width=190)
+(14 rows)
+
+select t1.id,t1.pid,t1.name,LEVEL le,connect_by_root(1), connect_by_root(id)
+from test_hcb_ptb t1
+where connect_by_root(1) > 0
+start with id = 141
+connect by prior pid=id;
+ id  | pid |   name   | le | connect_by_root | connect_by_root 
+-----+-----+----------+----+-----------------+-----------------
+ 141 | 131 | 江南摩卡 |  1 | 1               | 141
+ 131 | 121 | 东山街   |  2 | 1               | 141
+ 121 | 111 | 江宁区   |  3 | 1               | 141
+ 111 |  11 | 南京市   |  4 | 1               | 141
+  11 |   1 | 江苏省   |  5 | 1               | 141
+   1 |   0 | 中国     |  6 | 1               | 141
+(6 rows)
+
+-- 扩展场景, connect_by_root(id)报错找不到列
+explain
+select t1.id,t1.pid,t1.name,LEVEL le,connect_by_root(1), connect_by_root(id)
+from test_hcb_ptb t1
+where connect_by_root(id) > 0
+start with id = 141
+connect by prior pid=id;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=37.11..40.39 rows=34 width=190)
+   Filter: ((connect_by_root(("t1@id")::text))::bigint > 0)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
+           Start With pseudo atts: RUITR, array_key_9, array_col_1
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.80 rows=1 width=102)
+                       Filter: (id = 141)
+                 ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                       Hash Cond: (t1.id = tmp_reuslt."t1@pid")
+                       ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
+                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+(13 rows)
+
+select t1.id,t1.pid,t1.name,LEVEL le,connect_by_root(1), connect_by_root(id)
+from test_hcb_ptb t1
+where connect_by_root(id) > 0
+start with id = 141
+connect by prior pid=id;
+ id  | pid |   name   | le | connect_by_root | connect_by_root 
+-----+-----+----------+----+-----------------+-----------------
+ 141 | 131 | 江南摩卡 |  1 | 1               | 141
+ 131 | 121 | 东山街   |  2 | 1               | 141
+ 121 | 111 | 江宁区   |  3 | 1               | 141
+ 111 |  11 | 南京市   |  4 | 1               | 141
+  11 |   1 | 江苏省   |  5 | 1               | 141
+   1 |   0 | 中国     |  6 | 1               | 141
+(6 rows)
+
+-- 扩展场景，sys_connect_by_path(123, '-') is not null
+explain
+select t1.id,t1.pid,t1.name,LEVEL le,connect_by_root(1), connect_by_root(id), sys_connect_by_path(123, '-')
+from test_hcb_ptb t1
+where sys_connect_by_path(123, '-') is not null
+start with id = 141
+connect by prior pid=id;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Result  (cost=37.11..40.14 rows=101 width=190)
+   One-Time Filter: (sys_connect_by_path('123'::text, '-'::text) IS NOT NULL)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
+           Start With pseudo atts: RUITR, array_key_9, array_col_1
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.80 rows=1 width=102)
+                       Filter: (id = 141)
+                 ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                       Hash Cond: (t1.id = tmp_reuslt."t1@pid")
+                       ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
+                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+   ->  CTE Scan on tmp_reuslt  (cost=0.00..2.02 rows=101 width=190)
+(14 rows)
+
+create table ctI as select t1.id,t1.pid,t1.name,level as le from test_hcb_ptb t1 start with id=141 connect by prior id=pid;
+create table ctII as select t1.id,t1.pid,t1.name,level from test_hcb_ptb t1 start with id=141 connect by prior id=pid;
+\d ctI;
+             Table "swtest.cti"
+ Column |         Type          | Modifiers 
+--------+-----------------------+-----------
+ id     | integer               | 
+ pid    | integer               | 
+ name   | character varying(80) | 
+ le     | integer               | 
+
+\d ctII;
+            Table "swtest.ctii"
+ Column |         Type          | Modifiers 
+--------+-----------------------+-----------
+ id     | integer               | 
+ pid    | integer               | 
+ name   | character varying(80) | 
+ level  | integer               | 
+
+drop table ctI;
+drop table ctII;
+/*
+ * NOTE: need do upgrade change to have syc_conenct_by_path()/connect_by_root() to be volatile
+ */
+/*
+select t1.id,t1.pid,t1.name,LEVEL le,connect_by_root(1), connect_by_root(id), sys_connect_by_path(123, '-')
+from test_hcb_ptb t1
+where sys_connect_by_path(123, '-') is not null
+start with id = 141
+connect by prior pid=id;
+*/
+-- 扩展场景，sys_connect_by_path(123, '-') 验证能够被正确匹配
+explain
+select t1.id,t1.pid,t1.name,LEVEL le,connect_by_root(1), connect_by_root(id), sys_connect_by_path(123, '-')
+from test_hcb_ptb t1
+where sys_connect_by_path(123, '-') like '-123-123-123%'
+start with id = 141
+connect by prior pid=id;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Result  (cost=37.11..40.14 rows=101 width=190)
+   One-Time Filter: (sys_connect_by_path('123'::text, '-'::text) ~~ '-123-123-123%'::text)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..37.11 rows=101 width=102)
+           Start With pseudo atts: RUITR, array_key_9, array_col_1
+           ->  Recursive Union  (cost=0.00..37.11 rows=101 width=102)
+                 ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.80 rows=1 width=102)
+                       Filter: (id = 141)
+                 ->  Hash Join  (cost=0.33..3.23 rows=10 width=102)
+                       Hash Cond: (t1.id = tmp_reuslt."t1@pid")
+                       ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
+                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+   ->  CTE Scan on tmp_reuslt  (cost=0.01..2.02 rows=101 width=190)
+(14 rows)
+
+/*
+ * NOTE: need do upgrade change to have syc_conenct_by_path()/connect_by_root() to be volatile
+ */
+/*
+select t1.id,t1.pid,t1.name,LEVEL le,connect_by_root(1), connect_by_root(id), sys_connect_by_path(123, '-')
+from test_hcb_ptb t1
+where sys_connect_by_path(123, '-') like '-123-123-123%'
+start with id = 141
+connect by prior pid=id;
+*/
+/* testing distinct qualifier */
+select distinct id,pid,name,LEVEL from t1 start with id = 1 connect by prior pid=id order by 1;
+ id | pid | name | level 
+----+-----+------+-------
+  1 |   0 | 1    |     1
+(1 row)
+
+/* testing NOT expression */
+select t1.id, t1.pid, t1.name from t1 start with not id=1 connect by prior pid=id;
+ id | pid | name 
+----+-----+------
+  2 |   1 | 2
+  3 |   0 | 3
+  4 |   1 | 4
+  5 |   2 | 5
+  6 |   3 | 6
+  7 |   4 | 7
+  8 |   4 | 8
+  9 |   7 | 9
+  1 |   0 | 1
+  1 |   0 | 1
+  2 |   1 | 2
+  3 |   0 | 3
+  4 |   1 | 4
+  4 |   1 | 4
+  7 |   4 | 7
+  1 |   0 | 1
+  1 |   0 | 1
+  1 |   0 | 1
+  4 |   1 | 4
+  1 |   0 | 1
+(20 rows)
+
+/* testing func expr in connect by clause */
+explain select trim(t1.name) from test_hcb_ptb t1 connect by trim(t1.name) is not null;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=13471.92..22689.36 rows=409664 width=178)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..13471.92 rows=409664 width=102)
+           Start With pseudo atts: RUITR
+           ->  Recursive Union  (cost=0.00..13471.92 rows=409664 width=102)
+                 ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
+                 ->  Nested Loop  (cost=0.00..527.60 rows=40960 width=102)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..12.80 rows=640 width=0)
+                       ->  Materialize  (cost=0.00..2.96 rows=64 width=102)
+                             ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.64 rows=64 width=102)
+(10 rows)
+
+/* fix create table as with start with */
+create table ct as select t1.id,t1.pid,t1.name,level from test_hcb_ptb t1 start with id=141 connect by prior id=pid;
+drop table ct;
+set current_schema = public;
+create table t1(c1 int,c2 int,c3 int);
+insert into t1 values(1,1,1);
+insert into t1 values(2,2,2);
+select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2;
+ c1 | c2 | c3 | connect_by_iscycle 
+----+----+----+--------------------
+  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  1
+(2 rows)
+
+insert into t1 values(1,1,1);
+insert into t1 values(2,2,2);
+select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2;
+ c1 | c2 | c3 | connect_by_iscycle 
+----+----+----+--------------------
+  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  1
+(3 rows)
+
+insert into t1 values(1,NULL,1);
+select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls first;
+ c1 | c2 | c3 | connect_by_iscycle 
+----+----+----+--------------------
+  1 |    |  1 |                  0
+  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  1
+(4 rows)
+
+select *, connect_by_iscycle from t1 start with c1=1 connect by nocycle prior c1=c2 order siblings by 1,2 nulls last;
+ c1 | c2 | c3 | connect_by_iscycle 
+----+----+----+--------------------
+  1 |  1 |  1 |                  0
+  1 |  1 |  1 |                  0
+  1 |    |  1 |                  0
+  1 |  1 |  1 |                  1
+(4 rows)
+
+delete from t1 where c2 is null;
+select *, connect_by_iscycle from t1 start with c1<3 connect by nocycle prior c1<c2 order siblings by NLSSORT (c1, ' NLS_SORT = generic_m_ci ');
+ c1 | c2 | c3 | connect_by_iscycle 
+----+----+----+--------------------
+  1 |  1 |  1 |                  0
+  2 |  2 |  2 |                  0
+  2 |  2 |  2 |                  0
+  1 |  1 |  1 |                  0
+  2 |  2 |  2 |                  0
+  2 |  2 |  2 |                  0
+  2 |  2 |  2 |                  0
+  2 |  2 |  2 |                  0
+(8 rows)
+
+select max(c1) + level from t1 connect by prior c1 = c2;
+ERROR:  column "tmp_reuslt.level" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 1: select max(c1) + level from t1 connect by prior c1 = c2;
+                         ^
+DETAIL:  Please check your start with rewrite table's column.
+select * from t1 connect by cast(level as bigint) < 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+(20 rows)
+
+select * from t1 connect by cast(level as int4) < 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+(20 rows)
+
+explain select * from t1 connect by level is not null;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=12299132.73..19865221.62 rows=378304445 width=12)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..12299132.73 rows=378304445 width=12)
+           Start With pseudo atts: RUITR
+           ->  Recursive Union  (cost=0.00..12299132.73 rows=378304445 width=12)
+                 ->  Seq Scan on t1  (cost=0.00..29.45 rows=1945 width=12)
+                 ->  Nested Loop  (cost=0.00..473301.44 rows=37830250 width=12)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..389.00 rows=19450 width=0)
+                       ->  Materialize  (cost=0.00..39.17 rows=1945 width=12)
+                             ->  Seq Scan on t1  (cost=0.00..29.45 rows=1945 width=12)
+(10 rows)
+
+select * from t1 connect by level is not null and level < 3;
+ c1 | c2 | c3 
+----+----+----
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+  1 |  1 |  1
+  2 |  2 |  2
+(20 rows)
+
+select * from t1 connect by level;
+ERROR:  Unsupported expression found in CONNECT BY clause.
+DETAIL:  Pseudo column expects an operator
+select t1.id a.d jack from t1;
+ERROR:  Invalid use of identifiers.
+LINE 1: select t1.id a.d jack from t1;
+                     ^
+DETAIL:  Syntax error found near token "a"
+select t1.id bauer jack from t1;
+ERROR:  Invalid use of identifiers.
+LINE 1: select t1.id bauer jack from t1;
+                     ^
+DETAIL:  Syntax error found near token "bauer"
+drop table t1;
+CREATE TABLE log_part (
+    ts timestamp(6) without time zone DEFAULT now() NOT NULL,
+    op character(1),
+    act_no numeric(38,0),
+    old_blc numeric(38,0),
+    num numeric(38,0),
+    threadid bigint,
+    index integer,
+    tran integer
+)
+WITH (orientation=row, compression=no)
+PARTITION BY RANGE (ts)
+INTERVAL('1 day')
+(
+    PARTITION p_2020_05_21 VALUES LESS THAN ('2020-05-21') TABLESPACE pg_default
+)
+ENABLE ROW MOVEMENT;
+insert into log_part values('2021-09-24 10:12:19.451125','m',255, 10000000, -374929792,  39, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.451125','a',548, 10000000,  374929792,  39, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449826','m', 39, 10000000, -473910067,  97, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.451221','m',250, 10000000, -757146539,  63, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449643','m',916, 10000000, -418707874, 100, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.451052','m',510, 10000000, -868384331,  45, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.451039','m',541, 10000000, -782801693, 101, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.450232','m',  4, 10000000, -794225803,  33, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.450352','m',123, 10000000, -494836087,  58, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449622','m',876, 10000000,  -79442930,  60, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449785','m', 21, 10000000, -560326111,  65, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449828','m',484, 10000000, -571750221,  29, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449657','m',167, 10000000, -146895512, 106, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449826','a', 35, 10000000,  473910067,  97, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.451221','a',540, 10000000,  757146539,  63, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449706','m',118, 10000000, -318894193,  50, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.501816','m',105, 10000000, -997671676,  39, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.449602','m',858, 10000000, -207656402,  28, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.450566','m',607, 10000000, -479468765,  30, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.451052','a',132, 10000000,  868384331,  45, 0, 0);
+insert into log_part values('2021-09-24 10:12:19.451039','a',891, 10000000,  782801693, 101, 0, 0);
+explain
+select * from (select * from log_part where act_no=250)
+start with old_blc=10000000 connect by prior old_blc + prior num = old_blc and act_no=prior act_no limit 10;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=188.10..188.30 rows=10 width=122)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..188.10 rows=11 width=122)
+           Start With pseudo atts: RUITR, array_key_3, array_key_4, array_key_5
+           ->  Recursive Union  (cost=0.00..188.10 rows=11 width=122)
+                 ->  Partition Iterator  (cost=0.00..18.05 rows=1 width=122)
+                       Iterations: 2
+                       ->  Partitioned Seq Scan on log_part  (cost=0.00..18.05 rows=1 width=122)
+                             Filter: ((act_no = 250::numeric) AND (old_blc = 10000000::numeric))
+                             Selected Partitions:  1..2
+                 ->  Nested Loop  (cost=0.00..16.98 rows=1 width=122)
+                       Join Filter: ((tmp_reuslt."sw_subquery_0@old_blc" + tmp_reuslt."sw_subquery_0@num") = public.log_part.old_blc)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.22 rows=1 width=90)
+                             Filter: ("sw_subquery_0@act_no" = 250::numeric)
+                       ->  Partition Iterator  (cost=0.00..16.71 rows=3 width=122)
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on log_part  (cost=0.00..16.71 rows=3 width=122)
+                                   Filter: (act_no = 250::numeric)
+                                   Selected Partitions:  1..2
+   ->  Result  (cost=0.00..0.22 rows=11 width=122)
+         ->  CTE Scan on tmp_reuslt  (cost=0.00..0.22 rows=11 width=122)
+(21 rows)
+
+select * from (select * from log_part where act_no=250)
+start with old_blc=10000000 connect by prior old_blc + prior num = old_blc and act_no=prior act_no limit 10;
+               ts                | op | act_no | old_blc  |    num     | threadid | index | tran 
+---------------------------------+----+--------+----------+------------+----------+-------+------
+ Fri Sep 24 10:12:19.451221 2021 | m  |    250 | 10000000 | -757146539 |       63 |     0 |    0
+(1 row)
+
+explain
+select *, connect_by_root old_blc from (select * from log_part where act_no=250)
+start with old_blc=10000000 connect by prior old_blc + prior num = old_blc and act_no=prior act_no limit 10;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=188.10..188.35 rows=10 width=122)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..188.10 rows=11 width=122)
+           Start With pseudo atts: RUITR, array_key_3, array_key_4, array_key_5, array_col_4
+           ->  Recursive Union  (cost=0.00..188.10 rows=11 width=122)
+                 ->  Partition Iterator  (cost=0.00..18.05 rows=1 width=122)
+                       Iterations: 2
+                       ->  Partitioned Seq Scan on log_part  (cost=0.00..18.05 rows=1 width=122)
+                             Filter: ((act_no = 250::numeric) AND (old_blc = 10000000::numeric))
+                             Selected Partitions:  1..2
+                 ->  Nested Loop  (cost=0.00..16.98 rows=1 width=122)
+                       Join Filter: ((tmp_reuslt."sw_subquery_0@old_blc" + tmp_reuslt."sw_subquery_0@num") = public.log_part.old_blc)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.22 rows=1 width=90)
+                             Filter: ("sw_subquery_0@act_no" = 250::numeric)
+                       ->  Partition Iterator  (cost=0.00..16.71 rows=3 width=122)
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on log_part  (cost=0.00..16.71 rows=3 width=122)
+                                   Filter: (act_no = 250::numeric)
+                                   Selected Partitions:  1..2
+   ->  Result  (cost=0.00..0.28 rows=11 width=122)
+         ->  CTE Scan on tmp_reuslt  (cost=0.00..0.28 rows=11 width=122)
+(21 rows)
+
+select *, connect_by_root old_blc from (select * from log_part where act_no=250)
+start with old_blc=10000000 connect by prior old_blc + prior num = old_blc and act_no=prior act_no limit 10;
+               ts                | op | act_no | old_blc  |    num     | threadid | index | tran | connect_by_rootold_blc 
+---------------------------------+----+--------+----------+------------+----------+-------+------+------------------------
+ Fri Sep 24 10:12:19.451221 2021 | m  |    250 | 10000000 | -757146539 |       63 |     0 |    0 | 10000000
+(1 row)
+
+select *, connect_by_root old_blc alias_old_blc from (select * from log_part where act_no=250)
+start with old_blc=10000000 connect by prior old_blc + prior num = old_blc and act_no=prior act_no limit 10;
+               ts                | op | act_no | old_blc  |    num     | threadid | index | tran | alias_old_blc 
+---------------------------------+----+--------+----------+------------+----------+-------+------+---------------
+ Fri Sep 24 10:12:19.451221 2021 | m  |    250 | 10000000 | -757146539 |       63 |     0 |    0 | 10000000
+(1 row)
+
+SELECT *, CONNECT_BY_ROOT old_blc AS alias_old_blc FROM (SELECT * FROM log_part WHERE act_no=250)
+START WITH old_blc=10000000 CONNECT BY PRIOR old_blc + PRIOR num = old_blc AND act_no = PRIOR act_no LIMIT 10;
+               ts                | op | act_no | old_blc  |    num     | threadid | index | tran | alias_old_blc 
+---------------------------------+----+--------+----------+------------+----------+-------+------+---------------
+ Fri Sep 24 10:12:19.451221 2021 | m  |    250 | 10000000 | -757146539 |       63 |     0 |    0 | 10000000
+(1 row)
+
+explain
+select op , act_no , old_blc , num , threadid , index , tran ,level from log_part
+start with old_blc=10000000 connect by prior old_blc + prior num = old_blc and act_no=prior act_no
+order by 1,2,3,4 limit 10;
+                                                                                       QUERY PLAN                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=228.76..228.79 rows=10 width=118)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..228.26 rows=13 width=122)
+           Start With pseudo atts: RUITR, array_key_3, array_key_4, array_key_5
+           ->  Recursive Union  (cost=0.00..228.26 rows=13 width=122)
+                 ->  Partition Iterator  (cost=0.00..16.71 rows=3 width=122)
+                       Iterations: 2
+                       ->  Partitioned Seq Scan on log_part  (cost=0.00..16.71 rows=3 width=122)
+                             Filter: (old_blc = 10000000::numeric)
+                             Selected Partitions:  1..2
+                 ->  Hash Join  (cost=1.05..21.13 rows=1 width=122)
+                       Hash Cond: ((public.log_part.old_blc = (tmp_reuslt."log_part@old_blc" + tmp_reuslt."log_part@num")) AND (public.log_part.act_no = tmp_reuslt."log_part@act_no"))
+                       ->  Partition Iterator  (cost=0.00..15.37 rows=537 width=122)
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on log_part  (cost=0.00..15.37 rows=537 width=122)
+                                   Selected Partitions:  1..2
+                       ->  Hash  (cost=0.60..0.60 rows=30 width=90)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.60 rows=30 width=90)
+   ->  Sort  (cost=0.50..0.53 rows=13 width=118)
+         Sort Key: tmp_reuslt."log_part@op", tmp_reuslt."log_part@act_no", tmp_reuslt."log_part@old_blc", tmp_reuslt."log_part@num"
+         ->  CTE Scan on tmp_reuslt  (cost=0.00..0.26 rows=13 width=118)
+(21 rows)
+
+select op , act_no , old_blc , num , threadid , index , tran ,level from log_part
+start with old_blc=10000000 connect by prior old_blc + prior num = old_blc and act_no=prior act_no
+order by 1,2,3,4 limit 10;
+ op | act_no | old_blc  |    num     | threadid | index | tran | level 
+----+--------+----------+------------+----------+-------+------+-------
+ a  |     35 | 10000000 |  473910067 |       97 |     0 |    0 |     1
+ a  |    132 | 10000000 |  868384331 |       45 |     0 |    0 |     1
+ a  |    540 | 10000000 |  757146539 |       63 |     0 |    0 |     1
+ a  |    548 | 10000000 |  374929792 |       39 |     0 |    0 |     1
+ a  |    891 | 10000000 |  782801693 |      101 |     0 |    0 |     1
+ m  |      4 | 10000000 | -794225803 |       33 |     0 |    0 |     1
+ m  |     21 | 10000000 | -560326111 |       65 |     0 |    0 |     1
+ m  |     39 | 10000000 | -473910067 |       97 |     0 |    0 |     1
+ m  |    105 | 10000000 | -997671676 |       39 |     0 |    0 |     1
+ m  |    118 | 10000000 | -318894193 |       50 |     0 |    0 |     1
+(10 rows)
+
+drop table log_part;
+set current_schema=swtest;
+EXPLAIN SELECT * FROM test_area START WITH name = '中国' CONNECT BY PRIOR id = fatherid limit 10;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Limit  (cost=23.91..24.11 rows=10 width=72)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..23.91 rows=221 width=24)
+           Start With pseudo atts: RUITR, array_key_1
+           ->  Recursive Union  (cost=0.00..23.91 rows=221 width=24)
+                 ->  Seq Scan on test_area  (cost=0.00..1.27 rows=1 width=24)
+                       Filter: (name = '中国'::text)
+                 ->  Hash Join  (cost=0.33..1.82 rows=22 width=24)
+                       Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
+                       ->  Seq Scan on test_area  (cost=0.00..1.22 rows=22 width=24)
+                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+   ->  Result  (cost=0.00..4.42 rows=221 width=72)
+         ->  CTE Scan on tmp_reuslt  (cost=0.00..4.42 rows=221 width=72)
+(14 rows)
+
+SELECT * FROM test_area START WITH name = '中国' CONNECT BY PRIOR id = fatherid limit 10;
+ id |  name  | fatherid | name_desc 
+----+--------+----------+-----------
+  1 | 中国   |        0 | China
+  2 | 湖南省 |        1 | Hunan
+  3 | 广东省 |        1 | Guangdong
+  4 | 海南省 |        1 | Hainan
+  5 | 河北省 |        1 | Hebei
+  6 | 河南省 |        1 | Henan
+  7 | 山东省 |        1 | Shandong
+  8 | 湖北省 |        1 | Hubei
+  9 | 江苏省 |        1 | Jiangsu
+ 10 | 深圳市 |        3 | Shenzhen
+(10 rows)
+
+set max_recursive_times=1000;
+create table tt22(x int);
+create or replace view dual as select 'x' x;
+insert into tt22 select level from dual connect by level <=1000;
+select count(*) from tt22;
+ count 
+-------
+  1000
+(1 row)
+
+set max_recursive_times=200;
+insert into tt22 select level from dual connect by level <=1000;
+ERROR:  Current Start With...Connect by has exceeded max iteration times 200
+HINT:  Please check your connect by clause carefully
+drop table tt22;
+/* 修复RecursiveUnion的inner分支备planning成BaseResult节点 */
+explain select t1.id,t1.pid,t1.name from test_hcb_ptb t1 start with id=141 connect by (prior pid)=id and prior pid>10 and 1=0;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=3.12..3.34 rows=11 width=186)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..3.12 rows=11 width=102)
+           Start With pseudo atts: RUITR, array_key_9
+           ->  Recursive Union  (cost=0.00..3.12 rows=11 width=102)
+                 ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.80 rows=1 width=102)
+                       Filter: (id = 141)
+                 ->  Result  (cost=0.00..0.01 rows=1 width=0)
+                       One-Time Filter: false
+(9 rows)
+
+select t1.id,t1.pid,t1.name from test_hcb_ptb t1 start with id=141 connect by (prior pid)=id and prior pid>10 and 1=0;
+ id  | pid |   name   
+-----+-----+----------
+ 141 | 131 | 江南摩卡
+(1 row)
+
+explain select t1.id,t1.pid,t1.name from test_hcb_ptb t1 start with id=141 connect by (prior pid)=id and prior pid>10 and null;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=3.12..3.34 rows=11 width=186)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..3.12 rows=11 width=102)
+           Start With pseudo atts: RUITR, array_key_9
+           ->  Recursive Union  (cost=0.00..3.12 rows=11 width=102)
+                 ->  Seq Scan on test_hcb_ptb t1  (cost=0.00..2.80 rows=1 width=102)
+                       Filter: (id = 141)
+                 ->  Result  (cost=0.00..0.01 rows=1 width=0)
+                       One-Time Filter: false
+(9 rows)
+
+select t1.id,t1.pid,t1.name from test_hcb_ptb t1 start with id=141 connect by (prior pid)=id and prior pid>10 and null;
+ id  | pid |   name   
+-----+-----+----------
+ 141 | 131 | 江南摩卡
+(1 row)
+
+create table core_060(id varchar);
+insert into core_060 values ('a'),('b'),('c');
+SELECT id,level FROM core_060 CONNECT BY level in (1,2);
+ id | level 
+----+-------
+ a  |     1
+ b  |     1
+ c  |     1
+ a  |     2
+ b  |     2
+ c  |     2
+ a  |     2
+ b  |     2
+ c  |     2
+ a  |     2
+ b  |     2
+ c  |     2
+(12 rows)
+
+SELECT id,level FROM core_060 CONNECT BY not (level>2);
+ id | level 
+----+-------
+ a  |     1
+ b  |     1
+ c  |     1
+ a  |     2
+ b  |     2
+ c  |     2
+ a  |     2
+ b  |     2
+ c  |     2
+ a  |     2
+ b  |     2
+ c  |     2
+(12 rows)
+
+SELECT id,level FROM core_060 CONNECT BY cast(level as number(38,0))<3;
+ id | level 
+----+-------
+ a  |     1
+ b  |     1
+ c  |     1
+ a  |     2
+ b  |     2
+ c  |     2
+ a  |     2
+ b  |     2
+ c  |     2
+ a  |     2
+ b  |     2
+ c  |     2
+(12 rows)
+
+drop table core_060;
+create table t_customer(id int, pid int,num int,depth int);
+-- verify nestloop can be material-optimized
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain
+select * from ( select * from t_customer where id<1200040 and id>=1200000) start with id=1200010 connect by prior id=pid;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=423.43..423.65 rows=11 width=16)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..423.43 rows=11 width=16)
+           Start With pseudo atts: RUITR, array_key_1
+           ->  Recursive Union  (cost=0.00..423.43 rows=11 width=16)
+                 ->  Seq Scan on t_customer  (cost=0.00..41.08 rows=1 width=16)
+                       Filter: ((id < 1200040) AND (id >= 1200000) AND (id = 1200010))
+                 ->  Nested Loop  (cost=0.00..38.21 rows=1 width=16)
+                       Join Filter: (tmp_reuslt."sw_subquery_0@id" = swtest.t_customer.pid)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+                       ->  Materialize  (cost=0.00..36.69 rows=9 width=16)
+                             ->  Seq Scan on t_customer  (cost=0.00..36.64 rows=9 width=16)
+                                   Filter: ((id < 1200040) AND (id >= 1200000))
+(13 rows)
+
+select * from ( select * from t_customer where id<1200040 and id>=1200000) start with id=1200010 connect by prior id=pid;
+ id | pid | num | depth 
+----+-----+-----+-------
+(0 rows)
+
+reset enable_hashjoin;
+reset enable_mergejoin;
+-- verify nestloop can be material-optimized
+set enable_nestloop = off;
+set enable_mergejoin = off;
+explain
+select * from ( select * from t_customer where id<1200040 and id>=1200000) start with id=1200010 connect by prior id=pid;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=411.29..411.51 rows=11 width=16)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..411.29 rows=11 width=16)
+           Start With pseudo atts: RUITR, array_key_1
+           ->  Recursive Union  (cost=0.00..411.29 rows=11 width=16)
+                 ->  Seq Scan on t_customer  (cost=0.00..41.08 rows=1 width=16)
+                       Filter: ((id < 1200040) AND (id >= 1200000) AND (id = 1200010))
+                 ->  Hash Join  (cost=0.33..37.00 rows=1 width=16)
+                       Hash Cond: (swtest.t_customer.pid = tmp_reuslt."sw_subquery_0@id")
+                       ->  Materialize  (cost=0.00..36.64 rows=9 width=16)
+                             ->  Seq Scan on t_customer  (cost=0.00..36.64 rows=9 width=16)
+                                   Filter: ((id < 1200040) AND (id >= 1200000))
+                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+(14 rows)
+
+select * from ( select * from t_customer where id<1200040 and id>=1200000) start with id=1200010 connect by prior id=pid;
+ id | pid | num | depth 
+----+-----+-----+-------
+(0 rows)
+
+reset enable_nestloop;
+reset enable_mergejoin;
+-- verify mergejoin is no need to be material-optimized
+set enable_hashjoin = off;
+set enable_nestloop = off;
+explain
+select * from ( select * from t_customer where id<1200040 and id>=1200000) start with id=1200010 connect by prior id=pid;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=413.84..414.06 rows=11 width=16)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..413.84 rows=11 width=16)
+           Start With pseudo atts: RUITR, array_key_1
+           ->  Recursive Union  (cost=0.00..413.84 rows=11 width=16)
+                 ->  Seq Scan on t_customer  (cost=0.00..41.08 rows=1 width=16)
+                       Filter: ((id < 1200040) AND (id >= 1200000) AND (id = 1200010))
+                 ->  Merge Join  (cost=37.15..37.25 rows=1 width=16)
+                       Merge Cond: (tmp_reuslt."sw_subquery_0@id" = swtest.t_customer.pid)
+                       ->  Sort  (cost=0.37..0.39 rows=10 width=4)
+                             Sort Key: tmp_reuslt."sw_subquery_0@id"
+                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+                       ->  Sort  (cost=36.78..36.81 rows=9 width=16)
+                             Sort Key: swtest.t_customer.pid
+                             ->  Seq Scan on t_customer  (cost=0.00..36.64 rows=9 width=16)
+                                   Filter: ((id < 1200040) AND (id >= 1200000))
+(16 rows)
+
+select * from ( select * from t_customer where id<1200040 and id>=1200000) start with id=1200010 connect by prior id=pid;
+ id | pid | num | depth 
+----+-----+-----+-------
+(0 rows)
+
+reset enable_mergejoin;
+reset enable_nestloop;
+reset enable_hashjoin;
+drop table t_customer;
+-- test correlated sublink
+create table test_place as select id, name, tex from test_hcb_ptb;
+select t1.id,t1.pid,t1.name from test_hcb_ptb t1 start with not exists(select * from test_place where id=t1.id and id !=141) connect by prior pid=id;
+ id  | pid |   name   
+-----+-----+----------
+ 141 | 131 | 江南摩卡
+ 131 | 121 | 东山街
+ 121 | 111 | 江宁区
+ 111 |  11 | 南京市
+  11 |   1 | 江苏省
+   1 |   0 | 中国
+(6 rows)
+
+drop table test_place;
+-- test where quals pushdown
+drop table if exists brand_sw3 cascade;
+create table brand_sw3
+(
+mfg varchar(500) primary key ,
+brand_cd varchar(500) ,
+brand_name varchar(100) ,
+brand_party_id number(18,10) NULL,c1 serial
+);
+drop table if exists usview17_sw3 cascade;
+create table usview17_sw3
+(
+brand_party_id numeric(18,2) ,
+sales_tran_id numeric(12,5) ,
+item_qty numeric(5,0) ,
+mkb_cost_amt numeric(19,4) ,
+mkb_exp numeric
+);
+SELECT MAX(t2.brand_party_id)-COUNT(t2.sales_tran_id)
+FROM brand_sw3 t1,usview17_sw3 t2
+WHERE t1.brand_name=PRIOR t1.brand_name
+AND PRIOR t1.brand_cd IS NOT NULL
+START WITH t1.mfg=t1.brand_name
+CONNECT BY NOCYCLE PRIOR t1.mfg
+BETWEEN t1.brand_name
+AND PRIOR t1.brand_name ;
+ ?column? 
+----------
+         
+(1 row)
+
+SELECT MAX(t2.brand_party_id)-COUNT(t2.sales_tran_id)
+FROM brand_sw3 t1,usview17_sw3 t2
+where t1.brand_cd IS NOT NULL CONNECT BY rownum < 3;
+ ?column? 
+----------
+         
+(1 row)
+
+drop table if exists brand_sw3 cascade;
+drop table if exists usview17_sw3 cascade;
+-- check that order siblings by does not cause result consistency or performance issues
+SELECT id,pid,name,rownum,level FROM test_hcb_ptb START WITH id=1 CONNECT BY PRIOR id=pid AND level<4 ORDER SIBLINGS BY 1 DESC;
+ id  | pid |  name  | rownum | level 
+-----+-----+--------+--------+-------
+   1 |   0 | 中国   |      1 |     1
+  19 |   1 | 武汉省 |      2 |     2
+  18 |   1 | 贵州省 |      3 |     2
+  17 |   1 | 湖北省 |      4 |     2
+  16 |   1 | 湖南省 |      5 |     2
+  15 |   1 | 河北省 |      6 |     2
+  14 |   1 | 河南省 |      7 |     2
+  13 |   1 | 安徽省 |      8 |     2
+  12 |   1 | 山东省 |      9 |     2
+  11 |   1 | 江苏省 |     10 |     2
+ 119 |  11 | 泰州市 |     11 |     3
+ 118 |  11 | 连云港 |     12 |     3
+ 117 |  11 | 常州市 |     13 |     3
+ 116 |  11 | 无锡市 |     14 |     3
+ 115 |  11 | 盐城市 |     15 |     3
+ 114 |  11 | 苏州市 |     16 |     3
+ 113 |  11 | 徐州市 |     17 |     3
+ 112 |  11 | 宿迁市 |     18 |     3
+ 111 |  11 | 南京市 |     19 |     3
+(19 rows)
+
+SELECT id,pid,name,rownum,level FROM test_hcb_ptb START WITH id=1 CONNECT BY PRIOR id=pid AND level<4;
+ id  | pid |  name  | rownum | level 
+-----+-----+--------+--------+-------
+   1 |   0 | 中国   |      1 |     1
+  11 |   1 | 江苏省 |      2 |     2
+  12 |   1 | 山东省 |      3 |     2
+  13 |   1 | 安徽省 |      4 |     2
+  14 |   1 | 河南省 |      5 |     2
+  15 |   1 | 河北省 |      6 |     2
+  16 |   1 | 湖南省 |      7 |     2
+  17 |   1 | 湖北省 |      8 |     2
+  18 |   1 | 贵州省 |      9 |     2
+  19 |   1 | 武汉省 |     10 |     2
+ 111 |  11 | 南京市 |     11 |     3
+ 112 |  11 | 宿迁市 |     12 |     3
+ 113 |  11 | 徐州市 |     13 |     3
+ 114 |  11 | 苏州市 |     14 |     3
+ 115 |  11 | 盐城市 |     15 |     3
+ 117 |  11 | 常州市 |     16 |     3
+ 116 |  11 | 无锡市 |     17 |     3
+ 118 |  11 | 连云港 |     18 |     3
+ 119 |  11 | 泰州市 |     19 |     3
+(19 rows)
+
+SELECT id,pid,name,rownum,level FROM test_hcb_ptb START WITH id=1 CONNECT BY NOCYCLE PRIOR id=pid AND level<4;
+ id  | pid |  name  | rownum | level 
+-----+-----+--------+--------+-------
+   1 |   0 | 中国   |      1 |     1
+  11 |   1 | 江苏省 |      2 |     2
+ 111 |  11 | 南京市 |      3 |     3
+ 112 |  11 | 宿迁市 |      4 |     3
+ 113 |  11 | 徐州市 |      5 |     3
+ 114 |  11 | 苏州市 |      6 |     3
+ 115 |  11 | 盐城市 |      7 |     3
+ 117 |  11 | 常州市 |      8 |     3
+ 116 |  11 | 无锡市 |      9 |     3
+ 118 |  11 | 连云港 |     10 |     3
+ 119 |  11 | 泰州市 |     11 |     3
+  12 |   1 | 山东省 |     12 |     2
+  13 |   1 | 安徽省 |     13 |     2
+  14 |   1 | 河南省 |     14 |     2
+  15 |   1 | 河北省 |     15 |     2
+  16 |   1 | 湖南省 |     16 |     2
+  17 |   1 | 湖北省 |     17 |     2
+  18 |   1 | 贵州省 |     18 |     2
+  19 |   1 | 武汉省 |     19 |     2
+(19 rows)
+
+-- test sw dfx
+drop table if exists sw_dummy;
+create table sw_dummy(swid int);
+insert into sw_dummy values(1);
+explain performance select * from sw_dummy connect by level < 50;
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+ Start With Iteration Statistics: 
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+ 
+--?.*
+(42 rows)
+
+drop table sw_dummy;
+--test null pointers in connect by walker
+explain select * from t1 connect by exists(select distinct (select id from t1));
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt  (cost=293.65..455.83 rows=8109 width=40)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..293.64 rows=8109 width=10)
+           Start With pseudo atts: RUITR
+           ->  Recursive Union  (cost=0.00..293.64 rows=8109 width=10)
+                 ->  Seq Scan on t1  (cost=0.00..1.09 rows=9 width=10)
+                 ->  Nested Loop  (cost=0.00..13.04 rows=810 width=10)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..1.80 rows=90 width=0)
+                       ->  Materialize  (cost=0.00..1.14 rows=9 width=10)
+                             ->  Seq Scan on t1  (cost=0.00..1.09 rows=9 width=10)
+   InitPlan 2 (returns $2)
+     ->  Result  (cost=0.00..0.01 rows=1 width=0)
+(12 rows)
+
+--test join + where for start with .. connect by
+select t1.id,t1.pid,t2.id from test_hcb_ptb t1 join test_hcb_ptb t2 on t1.id=t2.id where t1.id>1 start with t1.id=141 connect by prior t2.id=t1.pid;
+ id  | pid | id  
+-----+-----+-----
+ 141 | 131 | 141
+ 151 | 141 | 151
+ 152 | 141 | 152
+ 153 | 141 | 153
+ 154 | 141 | 154
+ 155 | 141 | 155
+ 156 | 141 | 156
+ 157 | 141 | 157
+ 158 | 141 | 158
+ 159 | 141 | 159
+ 161 | 151 | 161
+ 162 | 151 | 162
+ 163 | 151 | 163
+ 164 | 151 | 164
+ 165 | 151 | 165
+ 166 | 151 | 166
+ 167 | 151 | 167
+ 168 | 151 | 168
+ 169 | 151 | 169
+(19 rows)
+
+create or replace function prior(id int) returns int
+        LANGUAGE plpgsql AS $$
+        begin
+        return id*3;
+        end;
+        $$;
+select id,pid,prior(level) from test_hcb_ptb where prior(id)>10 start
+        with id=141 connect by prior pid=id;
+ id  | pid | prior 
+-----+-----+-------
+ 141 | 131 |     3
+ 131 | 121 |     6
+ 121 | 111 |     9
+ 111 |  11 |    12
+  11 |   1 |    15
+(5 rows)
+
+select prior(1+1);
+ prior 
+-------
+     6
+(1 row)
+
+select prior(1);
+ prior 
+-------
+     3
+(1 row)
+
+select prior(1,1);
+ERROR:  function prior(integer, integer) does not exist
+LINE 1: select prior(1,1);
+        ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: prior
+drop function prior(int);
+--test dfs rownum
+SELECT id,pid,name,rownum,level FROM test_hcb_ptb START WITH id=1 CONNECT BY NOCYCLE PRIOR id=pid AND rownum<7;
+ id  | pid |   name   | rownum | level 
+-----+-----+----------+--------+-------
+   1 |   0 | 中国     |      1 |     1
+  11 |   1 | 江苏省   |      2 |     2
+ 111 |  11 | 南京市   |      3 |     3
+ 121 | 111 | 江宁区   |      4 |     4
+ 131 | 121 | 东山街   |      5 |     5
+ 141 | 131 | 江南摩卡 |      6 |     6
+(6 rows)
+
+--test subquery pushdown
+SELECT subq_0.c1 as c0
+from 
+ (SELECT  
+    30 as c0, 
+    ref_0.id as c1
+   from 
+    test_hcb_ptb as ref_0
+   WHERE false) as subq_0
+WHERE true CONNECT BY EXISTS (
+  SELECT  
+    pg_stat_get_partition_tuples_inserted(subq_0.c0) as c1
+    from 
+    test_hcb_ptb as ref_7
+) 
+LIMIT 169;
+ERROR:  Unsupported subquery found in connect by clause.

@@ -1,0 +1,141 @@
+CREATE TABLE IF NOT EXISTS t_varchar(id INT, name varchar(50), address varchar(50));
+INSERT INTO t_varchar (id, name, address) VALUES (0, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (1, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (2, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (3, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (4, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (5, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (6, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (7, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (8, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (9, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (10, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (11, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (12, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (13, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (14, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (15, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (16, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (17, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (18, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (19, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (20, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (21, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (22, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (23, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (24, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (25, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (26, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (27, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (28, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (29, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (30, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (31, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (32, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (33, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (34, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (35, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (36, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (37, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (38, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (39, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (40, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (41, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (42, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (43, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (44, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (45, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (46, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (47, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (48, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (49, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (50, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (51, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (52, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (53, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (54, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (55, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (56, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (57, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (58, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (59, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (60, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (61, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (62, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (63, 'MyName', 'MyAddress')
+INSERT INTO t_varchar (id, name, address) VALUES (64, 'MyName', 'MyAddress')
+ id |  name  |  address  
+----+--------+-----------
+  0 | MyName | MyAddress
+  1 | MyName | MyAddress
+  2 | MyName | MyAddress
+  3 | MyName | MyAddress
+  4 | MyName | MyAddress
+  5 | MyName | MyAddress
+  6 | MyName | MyAddress
+  7 | MyName | MyAddress
+  8 | MyName | MyAddress
+  9 | MyName | MyAddress
+ 10 | MyName | MyAddress
+ 11 | MyName | MyAddress
+ 12 | MyName | MyAddress
+ 13 | MyName | MyAddress
+ 14 | MyName | MyAddress
+ 15 | MyName | MyAddress
+ 16 | MyName | MyAddress
+ 17 | MyName | MyAddress
+ 18 | MyName | MyAddress
+ 19 | MyName | MyAddress
+ 20 | MyName | MyAddress
+ 21 | MyName | MyAddress
+ 22 | MyName | MyAddress
+ 23 | MyName | MyAddress
+ 24 | MyName | MyAddress
+ 25 | MyName | MyAddress
+ 26 | MyName | MyAddress
+ 27 | MyName | MyAddress
+ 28 | MyName | MyAddress
+ 29 | MyName | MyAddress
+ 30 | MyName | MyAddress
+ 31 | MyName | MyAddress
+ 32 | MyName | MyAddress
+ 33 | MyName | MyAddress
+ 34 | MyName | MyAddress
+ 35 | MyName | MyAddress
+ 36 | MyName | MyAddress
+ 37 | MyName | MyAddress
+ 38 | MyName | MyAddress
+ 39 | MyName | MyAddress
+ 40 | MyName | MyAddress
+ 41 | MyName | MyAddress
+ 42 | MyName | MyAddress
+ 43 | MyName | MyAddress
+ 44 | MyName | MyAddress
+ 45 | MyName | MyAddress
+ 46 | MyName | MyAddress
+ 47 | MyName | MyAddress
+ 48 | MyName | MyAddress
+ 49 | MyName | MyAddress
+ 50 | MyName | MyAddress
+ 51 | MyName | MyAddress
+ 52 | MyName | MyAddress
+ 53 | MyName | MyAddress
+ 54 | MyName | MyAddress
+ 55 | MyName | MyAddress
+ 56 | MyName | MyAddress
+ 57 | MyName | MyAddress
+ 58 | MyName | MyAddress
+ 59 | MyName | MyAddress
+ 60 | MyName | MyAddress
+ 61 | MyName | MyAddress
+ 62 | MyName | MyAddress
+ 63 | MyName | MyAddress
+ 64 | MyName | MyAddress
+(65 rows)
+
+DROP table t_varchar
+select * from gs_column_keys
+ column_key_name | column_key_distributed_id | global_key_id | key_namespace | key_owner | create_date | key_acl 
+--?.*
+(0 rows)
+

@@ -73,6 +73,11 @@ select sum(col_num3), avg(col_num3-(-0.25)) from llvm_vecagg_table_03 group by c
 reset analysis_options;
 
 ----
+--- test5 : test distinct in aggregate functions
+----
+select col_int, max(distinct col_num1 order by col_num1), min(col_num2 order by col_num2) from llvm_vecagg_table_03 group by col_int order by 1, 2, 3;
+
+----
 --- clean table and resource
 ----
 drop schema llvm_vecagg_engine3 cascade;

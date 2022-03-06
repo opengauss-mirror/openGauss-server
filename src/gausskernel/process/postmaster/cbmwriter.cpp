@@ -140,6 +140,8 @@ void CBMWriterMain(void)
         /* Report the error to the server log */
         EmitErrorReport();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
         /*
          * These operations are really just a minimal subset of
          * AbortTransaction().	We don't have very many resources to worry

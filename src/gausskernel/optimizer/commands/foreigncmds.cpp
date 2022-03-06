@@ -1040,7 +1040,11 @@ void AlterForeignServer(AlterForeignServerStmt* stmt)
     } else if (0 == pg_strcasecmp(typeName, HDFS)) {
         FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
     }else if (0 == pg_strcasecmp(typeName, OBS)) {
+#ifndef ENABLE_LITE_MODE
         (void)dfs::InvalidOBSConnectorCache(srvId);
+#else
+        FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
     } else if (0 == pg_strcasecmp(typeName, DUMMY_SERVER)) {
         InvalidDummyServerCache(srvId);
     }
@@ -1081,7 +1085,11 @@ void RemoveForeignServerById(Oid srvId)
     } else if (0 == pg_strcasecmp(typeName, HDFS)) {
         FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
     } else if (0 == pg_strcasecmp(typeName, OBS)) {
+#ifndef ENABLE_LITE_MODE
         (void)dfs::InvalidOBSConnectorCache(srvId);
+#else
+        FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
     } else if (0 == pg_strcasecmp(typeName, DUMMY_SERVER)) {
         InvalidDummyServerCache(srvId);
     }

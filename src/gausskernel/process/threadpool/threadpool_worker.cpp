@@ -86,6 +86,7 @@ ThreadPoolWorker::ThreadPoolWorker(uint idx, ThreadPoolGroup* group, pthread_mut
     m_cond = cond;
     m_waitState = STATE_WAIT_UNDEFINED;
     DLInitElem(&m_elem, this);
+    m_thrd = &t_thrd;
 }
 
 ThreadPoolWorker::~ThreadPoolWorker()
@@ -135,10 +136,12 @@ int ThreadPoolWorker::StartUp()
     if (m_tid == InvalidTid) {
         ReleasePostmasterChildSlot(bn->child_slot);
         bn->pid = 0;
+        bn->role = (knl_thread_role)0;
         return STATUS_ERROR;
     }
 
     bn->pid = m_tid;
+    bn->role = THREADPOOL_WORKER;
     Assert(bn->child_slot != 0);
     AddBackend(bn);
 
@@ -213,6 +216,8 @@ void ThreadPoolWorker::WaitMission()
             if (AmIProxyModeSockfd(m_currentSession->proc_cxt.MyProcPort->sock)) {
                 g_comm_controller->SetCommSockActive(m_currentSession->proc_cxt.MyProcPort->sock, m_idx);
             }
+
+            Assert(CheckMyDatabaseMatch());
 			
             break;
         }
@@ -367,6 +372,9 @@ void ThreadPoolWorker::SetSessionInfo()
 
 void ThreadPoolWorker::WaitNextSession()
 {
+    if (EnableLocalSysCache()) {
+        g_instance.global_sysdbcache.GSCMemThresholdCheck();
+    }
     /* Return worker to pool unless we can get a task right now. */
     ThreadPoolListener* lsn = m_group->GetListener();
     Assert(lsn != NULL);
@@ -510,12 +518,13 @@ void ThreadPoolWorker::DetachSessionFromThread()
     /* If some error occur at session initialization, we need to close it. */
     if (m_currentSession->status == KNL_SESS_UNINIT) {
         m_currentSession->status = KNL_SESS_CLOSERAW;
+        /* cache may be in wrong stat, rebuild is ok */
+        ReBuildLSC();
         CleanUpSession(false);
         m_currentSession = NULL;
         u_sess = NULL;
         return;
     }
-
     m_currentSession->status = KNL_SESS_DETACH;
     if (t_thrd.pgxact != NULL && m_currentSession->proc_cxt.Isredisworker) {
         LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
@@ -579,6 +588,7 @@ bool ThreadPoolWorker::AttachSessionToThread()
                     register_backend_version(t_thrd.proc->workingVersionNum);
                 }
                 m_currentSession->status = KNL_SESS_ATTACH;
+                Assert(CheckMyDatabaseMatch());
             } else {
                 m_currentSession->status = KNL_SESS_CLOSE;
                 /* clean up mess. */
@@ -591,8 +601,27 @@ bool ThreadPoolWorker::AttachSessionToThread()
         } break;
 
         case KNL_SESS_DETACH: {
+#ifdef ENABLE_LITE_MODE
+            char thr_name[16];
+            int rcs = 0;
+            Port *port = m_currentSession->proc_cxt.MyProcPort;
+
+            if (t_thrd.role == WORKER) {
+                rcs = snprintf_truncated_s(thr_name, sizeof(thr_name), "w:%s", port->user_name);
+                securec_check_ss(rcs, "\0", "\0");
+                (void)pthread_setname_np(gs_thread_self(), thr_name);
+            } else if (t_thrd.role == THREADPOOL_WORKER) {
+                rcs = snprintf_truncated_s(thr_name, sizeof(thr_name), "tw:%s", port->user_name);
+                securec_check_ss(rcs, "\0", "\0");
+                (void)pthread_setname_np(gs_thread_self(), thr_name);
+            }
+#endif
             pgstat_initialize_session();
             pgstat_couple_decouple_session(true);
+             /* Postgres init thread syscache. */
+            t_thrd.proc_cxt.PostInit->InitLoadLocalSysCache(u_sess->proc_cxt.MyDatabaseId, 
+                u_sess->proc_cxt.MyProcPort->database_name);
+            Assert(CheckMyDatabaseMatch());
             m_currentSession->status = KNL_SESS_ATTACH;
         } break;
 
@@ -608,6 +637,11 @@ bool ThreadPoolWorker::AttachSessionToThread()
             CleanUpSession(false);
             m_currentSession = NULL;
             u_sess = NULL;
+#ifdef ENABLE_LITE_MODE
+            if (EnableLocalSysCache()) {
+                t_thrd.lsc_cxt.lsc->LocalSysDBCacheReSet();
+            }
+#endif
         } break;
 
         default:
@@ -684,18 +718,14 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
     }
 
     /* clear pgstat slot */
+    pgstat_release_session_memory_entry();
     pgstat_deinitialize_session();
     pgstat_beshutdown_session(m_currentSession->session_ctr_index);
     localeconv_deinitialize_session();
 
     /* clean gpc refcount and plancache in shared memory */
-    if (!t_thrd.proc_cxt.proc_exit_inprogress) {
-        if (ENABLE_DN_GPC)
-            CleanSessGPCPtr(m_currentSession);
-        if (u_sess->pcache_cxt.unnamed_stmt_psrc && u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.InShareTable()) 
-            u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.SubRefCount();
-        CNGPCCleanUpSession();
-    }
+    if (ENABLE_DN_GPC)
+        CleanSessGPCPtr(m_currentSession);
 
     /*
      * clear invalid msg slot
@@ -810,6 +840,7 @@ static bool InitSession(knl_session_context* session)
     char* username = session->proc_cxt.MyProcPort->user_name;
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitSession();
+    Assert(CheckMyDatabaseMatch());
 
     SetProcessingMode(NormalProcessing);
 

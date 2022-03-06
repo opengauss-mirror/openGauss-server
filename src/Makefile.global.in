@@ -172,8 +172,8 @@ enable_jemalloc	= @enable_jemalloc@
 enable_jemalloc_debug	= @enable_jemalloc_debug@
 enable_privategauss             = @enable_privategauss@
 enable_multiple_nodes		= @enable_multiple_nodes@
+enable_lite_mode		= @enable_lite_mode@
 enable_mot			= @enable_mot@
-enable_llvm			= @enable_llvm@
 enable_mysql_fdw 		= @enable_mysql_fdw@
 enable_oracle_fdw		= @enable_oracle_fdw@
 enable_memory_check		= @enable_memory_check@
@@ -210,6 +210,7 @@ TCL_SHLIB_LD_LIBS	= @TCL_SHLIB_LD_LIBS@
 
 PTHREAD_CFLAGS		= @PTHREAD_CFLAGS@
 PTHREAD_LIBS		= @PTHREAD_LIBS@
+with_openeuler_os = @with_openeuler_os@
 
 
 #############################################################################
@@ -253,6 +254,11 @@ ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 else
     SUPPORT_HOTPATCH = no
 endif
+
+ifeq ($(enable_lite_mode), yes)
+    SUPPORT_HOTPATCH = no
+endif
+
 #############################################################################
 #############################################################################
 # I leave all this home path here because somewhere will it, e. llvm-config #
@@ -288,6 +294,7 @@ ifeq ($(with_3rd), NONE)
   LIBHOTPATCH_HOME = $(top_builddir)/$(PLATFORMPATH)/hotpatch
   LIBCGROUP_HOME = $(top_builddir)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
   LIBLLVM_HOME = $(top_builddir)/$(BINARYPATH)/llvm/comm
+  XGBOOST_HOME = $(top_builddir)/$(BINARYPATH)/xgboost/comm
   EVENT_HOME = $(top_builddir)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
   ZLIB_HOME = $(top_builddir)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
   LZ4_HOME  = $(top_builddir)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
@@ -329,6 +336,7 @@ else
   LIBCGROUP_HOME = $(with_3rd)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
   LIBHOTPATCH_HOME = $(with_3rd)/$(PLATFORMPATH)/hotpatch
   LIBLLVM_HOME = $(with_3rd)/$(BINARYPATH)/llvm/comm
+  XGBOOST_HOME = $(with_3rd)/$(BINARYPATH)/xgboost/$(LIB_SUPPORT_LLT)
   EVENT_HOME = $(with_3rd)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
   ZLIB_HOME = $(with_3rd)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
   LZ4_HOME  = $(with_3rd)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
@@ -339,8 +347,10 @@ else
   LIBORC_HOME = $(with_3rd)/$(BINARYPATH)/liborc/$(LIB_SUPPORT_LLT)
   SNAPPY_HOME = $(with_3rd)/$(BINARYPATH)/snappy/$(LIB_SUPPORT_LLT)
   LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
+ifneq ($(enable_lite_mode), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 LIBKMC_HOME = $(with_3rd)/$(PLATFORMPATH)/kmc/comm
+endif
 endif
   SECURE_HOME = $(with_3rd)/$(PLATFORMPATH)/Huawei_Secure_C/$(LIB_NOT_SUPPORT_LLT)
   SECUREDYNAMICLIB_HOME = $(with_3rd)/$(PLATFORMPATH)/Huawei_Secure_C/Dynamic_Lib
@@ -355,11 +365,24 @@ endif
   ZSTD_HOME = $(with_3rd)/$(BINARYPATH)/zstd
   LIBNANOMSG_HOME = $(with_3rd)/$(BINARYPATH)/nanomsg/comm
   PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
-  JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/openjdk8/jdk1.8.0_222
+  using_openjdk = $(shell if [ -d "$(with_3rd)/$(PLATFORMPATH)/openjdk8" ]; then echo "yes"; else echo "no"; fi;)
+  ifeq ($(using_openjdk), yes)
+    JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/openjdk8/jdk1.8.0_222
+  else
+    JAVA_HOME = $(with_3rd)/platform/huaweijdk8/x86_64/jdk
+  endif
   MASSTREE_HOME = $(with_3rd)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME = $(with_3rd)/dependency/mysql_fdw
   ORCFDW_HOME = $(with_3rd)/dependency/oracle_fdw
   DCF_HOME = $(with_3rd)/component/$(PLAT_FORM_STR)/dcf
+endif
+
+ifeq ($(with_openeuler_os), yes)
+  JAVA_HOME = /usr/lib/jvm/java/
+  LIBORC_HOME = $(with_3rd)/liborc/
+  ZLIB_HOME = $(with_3rd)/zlib/
+  CJSON_HOME = $(with_3rd)/cjson/
+  PROTOBUF_HOME = $(with_3rd)/protobuf/
 endif
 
 LIBCARBONDATA_HOME = $(top_builddir)/../contrib/carbondata
@@ -416,6 +439,15 @@ endif
 
 JEMALLOC_INCLUDE_PATH = $(JEMALLOC_HOME)/include
 JEMALLOC_LIB_PATH = $(JEMALLOC_HOME)/lib
+
+##############################################################################
+# secure_c bound check component
+##############################################################################
+ifeq ($(with_openeuler_os), yes)
+    SECURE_C_CHECK = boundscheck
+else
+    SECURE_C_CHECK = securec
+endif
 
 ##############################################################################
 # memory and thread checking component 
@@ -487,9 +519,15 @@ LIBLLVM_BIN = $(LIBLLVM_HOME)/bin
 LIBLLVM_INCLUDE_PATH = $(LIBLLVM_HOME)/include
 LIBLLVM_LIB_PATH = $(LIBLLVM_HOME)/lib
 LLVM_CONFIG = $(LIBLLVM_BIN)/llvm-config
-ifeq ($(enable_llvm), yes)
+ifneq ($(enable_lite_mode), yes)
   LLVM_LIBS = $(shell $(LLVM_CONFIG)    --libs)
 endif
+
+#############################################################################
+# xgboost component
+#############################################################################
+XGBOOST_INCLUDE_PATH = $(XGBOOST_HOME)/include
+XGBOOST_LIB_PATH = $(XGBOOST_HOME)/lib64
 
 #############################################################################
 # event component
@@ -591,12 +629,14 @@ LIBOPENSSL_LIB_PATH = $(LIBOPENSSL_HOME)/lib
 LIBOPENSSL_SSL_PATH = $(LIBOPENSSL_HOME)/ssl
 LIBOPENSSL_INCLUDE_PATH = $(LIBOPENSSL_HOME)/include
 
+ifneq ($(enable_lite_mode), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 #############################################################################
 # kmc component
 #############################################################################
 LIBKMC_LIB_PATH = $(LIBKMC_HOME)/lib
 LIBKMC_INCLUDE_PATH = $(LIBKMC_HOME)/include
+endif
 endif
 
 #############################################################################
@@ -721,7 +761,7 @@ else # not PGXS
   endif  
 endif
 
-override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${LIBPARQUET_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH)
+override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${LIBPARQUET_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH)
 
 # GDS links to libevent
 ifeq ($(enable_multiple_nodes), yes)
@@ -740,10 +780,9 @@ ifeq ($(enable_mot), yes)
   override CPPFLAGS := $(CPPFLAGS) -I$(MASSTREE_INCLUDE_PATH)
 endif
 
-ifeq ($(enable_llvm), yes)
-  override CPPFLAGS := $(CPPFLAGS) -DENABLE_LLVM_COMPILE
+ifeq ($(with_openeuler_os), yes)
+  override CPPFLAGS := $(CPPFLAGS) -DWITH_OPENEULER_OS
 endif
-
 CC = @CC@
 GCC = @GCC@
 C = gcc 
@@ -813,7 +852,7 @@ DLLWRAP = @DLLWRAP@
 LIBS = @LIBS@
 # append linking lib for OPENSSL
 LIBS += -lssl -lcrypto # append linking lib from Huawei_Secure_C
-LIBS += -lsecurec
+LIBS += -l$(SECURE_C_CHECK)
 # append linking lib for threading
 ifeq ($(enable_debug), no)
 LIBS += -pthread -D_REENTRANT -lrt -pie
@@ -855,9 +894,6 @@ endif
 # PGXC_END
 # append zlib for compression: zlib
 LDFLAGS += -L$(ZLIB_LIB_PATH) -I$(ZLIB_INCLUDE_PATH)
-
-#append zstd for compression: zstd
-LDFLAGS += -L$(ZSTD_LIB_PATH) -I$(ZSTD_INCLUDE_PATH)
 
 LDFLAGS += -L$(SECURE_LIB_PATH)
 LDFLAGS += -L$(LIBOPENSSL_LIB_PATH)
@@ -1070,7 +1106,9 @@ endif
 libpq = -L$(libpq_builddir) -lpq
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -lkmc
+  ifneq ($(enable_lite_mode), yes)
+    libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -l$(SECURE_C_CHECK) -lkmc
+  endif
 else
 libpq_ce = -L$(libpq_builddir) -lpq_ce
 endif
@@ -1226,7 +1264,7 @@ ifeq ($(enable_libnet), yes)
    LIBNET_INCLUDE_PATH = $(LIBNET_HOME)/include
    LIBNET_LIB_PATH = $(LIBNET_HOME)/lib64
    LIBNET_BIN_PATH = $(LIBNET_HOME)/bin
-   LIBNET_LIBS = -L$(SECURE_LIB_PATH) -lsecurec -L$(LIBNET_LIB_PATH) -llstack -lrte_eal -lrte_kvargs -ldl
+   LIBNET_LIBS = -L$(SECURE_LIB_PATH) -l$(SECURE_C_CHECK) -L$(LIBNET_LIB_PATH) -llstack -lrte_eal -lrte_kvargs -ldl
    override CPPFLAGS := $(CPPFLAGS) -DUSE_LIBNET
    override CXXFLAGS := $(CXXFLAGS) -DUSE_LIBNET
    override CFLAGS := $(CFLAGS) -DUSE_LIBNET

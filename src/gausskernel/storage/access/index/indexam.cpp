@@ -677,8 +677,10 @@ Tuple index_getnext(IndexScanDesc scan, ScanDirection direction)
 
     for (;;) {
         /* IO collector and IO scheduler */
+#ifdef ENABLE_MULTIPLE_NODES
         if (ENABLE_WORKLOAD_CONTROL)
             IOSchedulerAndUpdate(IO_TYPE_READ, 1, IO_TYPE_ROW);
+#endif
         if (likely(!scan->xs_continue_hot)) {
             /* Time to fetch the next TID from the index */
             tid = index_getnext_tid(scan, direction);
@@ -742,11 +744,15 @@ bool UHeapSysIndexGetnextSlot(SysScanDesc scan, ScanDirection direction, TupleTa
 bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *slot)
 {
     ItemPointer tid;
+    TupleTableSlot* tmpslot = NULL;
+    tmpslot = MakeSingleTupleTableSlot(RelationGetDescr(scan->heapRelation),
+        false, scan->heapRelation->rd_tam_type);
     for (;;) {
         /* IO collector and IO scheduler */
+#ifdef ENABLE_MULTIPLE_NODES
         if (ENABLE_WORKLOAD_CONTROL)
             IOSchedulerAndUpdate(IO_TYPE_READ, 1, IO_TYPE_ROW);
-
+#endif
 
         if (likely(!scan->xs_continue_hot)) {
             /* Time to fetch the next TID from the index */
@@ -782,13 +788,17 @@ bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlo
 
         if (IndexFetchUHeap(scan, slot)) {
             /* recheck IndexTuple when necessary */
-            if (scan->xs_recheck_itup && !RecheckIndexTuple(scan, slot)) {
-                continue;
+            if (scan->xs_recheck_itup) {
+                if (!IndexFetchUHeap(scan, tmpslot))
+                    ereport(PANIC, (errmsg("Failed to refetch UHeapTuple. This shouldn't happen.")));
+                if (!RecheckIndexTuple(scan, tmpslot))
+                    continue;
             }
+            ExecDropSingleTupleTableSlot(tmpslot);
             return true;
         }
     }
-
+    ExecDropSingleTupleTableSlot(tmpslot);
     return false; /* failure exit */
 }
 

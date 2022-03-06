@@ -59,6 +59,7 @@
 #include "fmgr.h"
 #include "utils/memutils.h"
 #include "utils/datum.h"
+#include "utils/knl_relcache.h"
 
 #define SAMESIGN(a, b) (((a) < 0) == ((b) < 0))
 #define overFlowCheck(arg)                                                                \
@@ -268,7 +269,6 @@
                 break;                                                                                                 \
         }                                                                                                              \
     } while (0)
-
 /*
  * @Description: partition value routing
  * @Param[IN] compare: returned value
@@ -397,8 +397,6 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
     Relation pg_partition, List* partition_list);
 static void BuildListPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
     Relation pg_partition, List* partition_list);
-static ListPartElement* CopyListElements(ListPartElement* src, int elementNum);
-static HashPartElement* CopyHashElements(HashPartElement* src, int elementNum, int partkeyNum);
 ValuePartitionMap* buildValuePartitionMap(Relation relation, Relation pg_partition, HeapTuple partitioned_tuple);
 
 /*
@@ -781,14 +779,13 @@ void RelationInitPartitionMap(Relation relation, bool isSubPartition)
             (errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("could not find tuple with partition OID %u.", relation->rd_id)));
     }
-
     partitioned_form = (Form_pg_partition)GETSTRUCT(partitioned_tuple);
     /*
      * For value based partition-table, we only have to retrieve partkeys
      */
     if (partitioned_form->partstrategy == PART_STRATEGY_VALUE) {
         /* create ValuePartitionMap */
-        (void)MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+        (void)MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
         relation->partMap = (PartitionMap*)buildValuePartitionMap(relation, pg_partition, partitioned_tuple);
 
@@ -939,6 +936,7 @@ void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap)
         }
     } else {
         oldMap->isDirty = true;
+        SetLocalRelCacheNeedEOXactWork(true);
         elog(LOG, "map refcount is not zero when RebuildPartitonMap ");
     }
 }
@@ -998,7 +996,7 @@ static void RebuildListPartitionMap(ListPartitionMap* oldMap, ListPartitionMap* 
     PARTITIONMAP_SWAPFIELD(Oid*, partitionKeyDataType);
 }
 
-static ListPartElement* CopyListElements(ListPartElement* src, int elementNum)
+ListPartElement* CopyListElements(ListPartElement* src, int elementNum)
 {
     int i = 0;
     int j = 0;
@@ -1171,7 +1169,7 @@ void RelationDestroyPartitionMap(PartitionMap* partMap)
     return;
 }
 
-static HashPartElement* CopyHashElements(HashPartElement* src, int elementNum, int partkeyNum)
+HashPartElement* CopyHashElements(HashPartElement* src, int elementNum, int partkeyNum)
 {
     int i = 0;
     int j = 0;
@@ -1324,7 +1322,7 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     partitionKey = getPartitionKeyAttrNo(
         &(partitionKeyDataType), partitioned_tuple, RelationGetDescr(pg_partition), RelationGetDescr(relation));
     /* copy the partitionKey */
-    old_context = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
     list_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
     rc = memcpy_s(
@@ -1374,7 +1372,7 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     }
 
     /* list element array back in RangePartitionMap */
-    old_context = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
     list_map->listElements = CopyListElements(list_eles, list_map->listElementsNum);
     relation->partMap = (PartitionMap*)palloc(sizeof(ListPartitionMap));
@@ -1433,7 +1431,7 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
     partitionKey = getPartitionKeyAttrNo(
         &(partitionKeyDataType), partitioned_tuple, RelationGetDescr(pg_partition), RelationGetDescr(relation));
     /* copy the partitionKey */
-    old_context = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
     hash_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
     rc = memcpy_s(
@@ -1487,8 +1485,7 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
     Assert(CheckHashPartitionMap(hash_eles, hash_map->hashElementsNum));
 
     /* hash element array back in RangePartitionMap */
-    old_context = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
-
+    old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
     hash_map->hashElements = CopyHashElements(hash_eles, hash_map->hashElementsNum, partitionKey->dim1);
     relation->partMap = (PartitionMap*)palloc(sizeof(HashPartitionMap));
     rc = memcpy_s(relation->partMap, sizeof(HashPartitionMap), hash_map, sizeof(HashPartitionMap));
@@ -1530,7 +1527,7 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
     partitionKey = getPartitionKeyAttrNo(
         &(partitionKeyDataType), partitioned_tuple, RelationGetDescr(pg_partition), RelationGetDescr(relation));
     /* copy the partitionKey */
-    old_context = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
     range_map->partitionKey = (int2vector*)palloc(Int2VectorSize(partitionKey->dim1));
     rc = memcpy_s(
@@ -1591,7 +1588,7 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
     qsort(range_eles, range_map->rangeElementsNum, sizeof(RangeElement), rangeElementCmp);
 
     /* range element array back in RangePartitionMap */
-    old_context = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
     range_map->rangeElements = copyRangeElements(range_eles, range_map->rangeElementsNum, partitionKey->dim1);
     relation->partMap = (PartitionMap*)palloc(sizeof(RangePartitionMap));
@@ -1666,6 +1663,7 @@ List* getRangePartitionBoundaryList(Relation rel, int sequence)
             result = lappend(result, (Const*)copyObject(srcBound[i]));
         }
     } else {
+        decre_partmap_refcount(rel->partMap);
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid partition sequence: %d of relation \"%s\", check whether the table name and partition "
@@ -1695,6 +1693,7 @@ List* getListPartitionBoundaryList(Relation rel, int sequence)
             result = lappend(result, (Const*)copyObject(srcBound[i]));
         }
     } else {
+        decre_partmap_refcount(rel->partMap);
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid partition sequence: %d of relation \"%s\", check whether the table name and partition "
@@ -1724,6 +1723,7 @@ List* getHashPartitionBoundaryList(Relation rel, int sequence)
             result = lappend(result, (Const*)copyObject(srcBound[i]));
         }
     } else {
+        decre_partmap_refcount(rel->partMap);
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid partition sequence: %d of relation \"%s\", check whether the table name and partition "
@@ -1745,6 +1745,12 @@ Oid partitionKeyValueListGetPartitionOid(Relation rel, List* partKeyValueList, b
 {
     ListCell* cell = NULL;
     int len = 0;
+
+    if (list_length(partKeyValueList) > PARTKEY_VALUE_MAXNUM) {
+        ereport(ERROR, (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+            (errmsg("too many partition keys, allowed is %d", PARTKEY_VALUE_MAXNUM), errdetail("N/A"),
+            errcause("too many partition keys for this syntax."), erraction("Please check the syntax is Ok"))));
+    }
 
     foreach (cell, partKeyValueList) {
         t_thrd.utils_cxt.valueItemArr[len++] = (Const*)lfirst(cell);

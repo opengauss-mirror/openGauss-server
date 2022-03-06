@@ -51,15 +51,16 @@ static double convert_to_numeric(Node *value);
 
 
 %type <node> join_hint_item join_order_hint join_method_hint stream_hint row_hint scan_hint skew_hint expr_const
-	pred_push_hint rewrite_hint gather_hint set_hint plancache_hint guc_value no_expand_hint no_gpc_hint
+	pred_push_hint pred_push_same_level_hint rewrite_hint gather_hint set_hint plancache_hint guc_value no_expand_hint
+	no_gpc_hint
 %type <list> relation_list join_hint_list relation_item relation_list_with_p ident_list skew_relist
              column_list_p column_list value_list_p value_list value_list_item value_type value_list_with_bracket
 %token <str>	IDENT FCONST SCONST BCONST XCONST
 %token <ival>	ICONST
 
 %token <keyword> NestLoop_P MergeJoin_P HashJoin_P No_P Leading_P Rows_P Broadcast_P Redistribute_P BlockName_P
-	TableScan_P IndexScan_P IndexOnlyScan_P Skew_P HINT_MULTI_NODE_P NULL_P TRUE_P FALSE_P Predpush_P Rewrite_P
-	Gather_P Set_P USE_CPLAN_P USE_GPLAN_P ON_P OFF_P No_expand_P NO_GPC_P
+	TableScan_P IndexScan_P IndexOnlyScan_P Skew_P HINT_MULTI_NODE_P NULL_P TRUE_P FALSE_P Predpush_P
+	PredpushSameLevel_P Rewrite_P Gather_P Set_P USE_CPLAN_P USE_GPLAN_P ON_P OFF_P No_expand_P NO_GPC_P
 
 %nonassoc	IDENT NULL_P
 
@@ -131,6 +132,10 @@ join_hint_item:
 		$$ = (Node *) multi_node_hint;
 	}
     | pred_push_hint
+    {
+        $$ = $1;
+    }
+	| pred_push_same_level_hint
     {
         $$ = $1;
     }
@@ -303,6 +308,20 @@ pred_push_hint:
         predpushHint->candidates = NULL;
         predpushHint->negative = true;
         $$ = (Node *) predpushHint;
+    }
+
+pred_push_same_level_hint:
+	PredpushSameLevel_P '(' ident_list ',' IDENT ')'
+    {
+        PredpushSameLevelHint *predpushSameLevelHint = makeNode(PredpushSameLevelHint);
+        predpushSameLevelHint->base.relnames = $3;
+        predpushSameLevelHint->base.hint_keyword = HINT_KEYWORD_PREDPUSH_SAME_LEVEL;
+        predpushSameLevelHint->base.state = HINT_STATE_NOTUSED;
+        predpushSameLevelHint->dest_name = $5;
+        predpushSameLevelHint->dest_id = 0;
+        predpushSameLevelHint->candidates = NULL;
+        predpushSameLevelHint->negative = false;
+        $$ = (Node *) predpushSameLevelHint;
     }
 
 join_order_hint:

@@ -64,12 +64,17 @@ extern GlobalNodeDefinition* global_node_definition;
  * Global authentication functions
  * ----------------------------------------------------------------
  */
+#ifndef ENABLE_UT
 static void sendAuthRequest(Port* port, AuthRequest areq);
 static void auth_failed(Port* port, int status);
 static char* recv_password_packet(Port* port);
 static int recv_and_check_password_packet(Port* port);
-static void clear_gss_info(pg_gssinfo* gss);
-static void clear_gssconn_info(GssConn *gss);
+#else
+void sendAuthRequest(Port* port, AuthRequest areq);
+void auth_failed(Port* port, int status);
+char* recv_password_packet(Port* port);
+int recv_and_check_password_packet(Port* port);
+#endif
 
 /* ----------------------------------------------------------------
  * Ident authentication
@@ -175,8 +180,15 @@ static int pg_krb5_recvauth(Port* port);
 #else
 #include <gssapi/gssapi.h>
 #endif
-
+#ifndef ENABLE_UT
 static int pg_GSS_recvauth(Port* port);
+static void clear_gss_info(pg_gssinfo* gss);
+static void clear_gssconn_info(GssConn *gss);
+#else
+int pg_GSS_recvauth(Port* port);
+void clear_gss_info(pg_gssinfo* gss);
+void clear_gssconn_info(GssConn *gss);
+#endif
 #endif /* ENABLE_GSS */
 
 /* ----------------------------------------------------------------
@@ -227,7 +239,10 @@ THR_LOCAL ClientAuthentication_hook_type ClientAuthentication_hook = NULL;
  * Note that many sorts of failure report additional information in the
  * postmaster log, which we hope is only readable by good guys.
  */
-static void auth_failed(Port* port, int status)
+#ifndef ENABLE_UT
+static
+#endif
+ void auth_failed(Port* port, int status)
 {
     const char* errstr = NULL;
     int errcode_return = ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION;
@@ -649,6 +664,12 @@ void ClientAuthentication(Port* port)
 
         case uaCert:
 #ifdef USE_SSL
+            /* Forbid remote connection with initial user. */
+            if (isRemoteInitialUser(port)) {
+                ereport(FATAL,
+                    (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                        errmsg("Forbid remote connection with initial user.")));
+            }
             status = CheckCertAuth(port);
 #else
             Assert(false);
@@ -791,7 +812,10 @@ void GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
 /*
  * Send an authentication request packet to the frontend.
  */
-static bool GsGenerateFakeEncryptString(char* encrypt_string, const Port* port, int len)
+#ifndef ENABLE_UT
+static
+#endif
+ bool GsGenerateFakeEncryptString(char* encrypt_string, const Port* port, int len)
 {
     int retval = 0;
     errno_t rc = EOK;
@@ -829,7 +853,10 @@ static bool GsGenerateFakeEncryptString(char* encrypt_string, const Port* port, 
     securec_check_ss(rc, "\0", "\0");
     return true;
 }
-static void sendAuthRequest(Port* port, AuthRequest areq)
+#ifndef ENABLE_UT
+static
+#endif
+ void sendAuthRequest(Port* port, AuthRequest areq)
 {
     /* Database Security:  Support SHA256.*/
     int32 stored_method = 0;
@@ -858,7 +885,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     t_thrd.int_cxt.ImmediateInterruptOK = false;
     
 #ifdef ENABLE_MULTIPLE_NODES
-    if (IsDSorHaWalSender()) {
+    if (IsDSorHaWalSender() && !AM_WAL_HADR_SENDER && !AM_WAL_HADR_CN_SENDER) {
 #else        
     if (IsDSorHaWalSender() && is_node_internal_connection(port) && !AM_WAL_HADR_SENDER) {
 #endif        
@@ -1168,7 +1195,10 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
  *
  * Returns NULL if couldn't get password, else palloc'd string.
  */
-static char* recv_password_packet(Port* port)
+#ifndef ENABLE_UT
+static
+#endif
+ char* recv_password_packet(Port* port)
 {
     StringInfoData buf;
 
@@ -1245,7 +1275,10 @@ static char* recv_password_packet(Port* port)
  * Called when we have sent an authorization request for a password.
  * Get the response and check it.
  */
-static int recv_and_check_password_packet(Port* port)
+#ifndef ENABLE_UT
+static
+#endif
+ int recv_and_check_password_packet(Port* port)
 {
     int result;
     int rcs = 0;
@@ -1480,7 +1513,10 @@ static GSS_DLLIMP gss_OID GSS_C_NT_USER_NAME = &GSS_C_NT_USER_NAME_desc;
  * Generate an error for GSSAPI authentication.  The caller should apply
  * _() to errmsg to make it translatable.
  */
-static void pg_GSS_error(int severity, char* errmsg, OM_uint32 maj_stat, OM_uint32 min_stat)
+#ifndef ENABLE_UT
+static
+#endif
+ void pg_GSS_error(int severity, char* errmsg, OM_uint32 maj_stat, OM_uint32 min_stat)
 {
     gss_buffer_desc gmsg;
     OM_uint32 lmin_s, msg_ctx;
@@ -1521,7 +1557,10 @@ static void pg_GSS_error(int severity, char* errmsg, OM_uint32 maj_stat, OM_uint
     ereport(severity, (errmsg_internal("%s", errmsg), errdetail_internal("%s: %s", msg_major, msg_minor)));
 }
 
-static int pg_GSS_recvauth(Port* port)
+#ifndef ENABLE_UT
+static
+#endif
+ int pg_GSS_recvauth(Port* port)
 {
     OM_uint32 maj_stat, min_stat, gflags;
     int mtype;
@@ -1813,7 +1852,10 @@ static int pg_GSS_recvauth(Port* port)
  * @in size : the size of data which need to be sent.
  * @return : the number of bytes sent or -1 for error.
  */
-static int GssInternalSend(int fd, const void* data, int size)
+#ifndef ENABLE_UT
+static
+#endif
+ int GssInternalSend(int fd, const void* data, int size)
 {
     ssize_t nbytes;
     ssize_t nSend = 0;
@@ -1850,7 +1892,10 @@ static int GssInternalSend(int fd, const void* data, int size)
  * @in size : the size of data which need recv.
  * @return : the number of bytes received or -1 for error.
  */
-static int GssInternalRecv(int fd, void* data, int size)
+#ifndef ENABLE_UT
+static
+#endif
+ int GssInternalRecv(int fd, void* data, int size)
 {
 #define MSG_NOTIFICATION 0x8000
 
@@ -1939,7 +1984,10 @@ static int GssSendWithType(GssConn* gss_conn, char type)
  * @in type : the data type need to recv.
  * @return : 0 for success and -1 for failed.
  */
-static int GssRecvWithType(GssConn* gss_conn, char type)
+#ifndef ENABLE_UT
+static
+#endif
+ int GssRecvWithType(GssConn* gss_conn, char type)
 {
 #define MSG_HEAD_LEN 5 /* sizeof(char)+sizeof(int) */
 
@@ -2094,7 +2142,10 @@ static char* GssGetKerberosHostName()
  * @in server_host : the server ip.
  * @return : 0 for success and -1 for error.
  */
-static int GssImportName(GssConn* gss_conn, char* server_host)
+#ifndef ENABLE_UT
+static
+#endif
+ int GssImportName(GssConn* gss_conn, char* server_host)
 {
 #define MAXENVLEN 1024
 
@@ -2139,6 +2190,7 @@ static int GssImportName(GssConn* gss_conn, char* server_host)
  * @in gss_conn : stored the messages used in authentication.
  * @return : 0 for success and -1 for error.
  */
+
 static int GssClientInit(GssConn* gss_conn)
 {
 #define MAX_KERBEROS_CAPACITY 3000      /* The max capacity of kerberos is 3000 per second */
@@ -2409,7 +2461,10 @@ static int GssServerAccept(GssConn* gss_conn)
  * @in gss_conn : to stored the messages used in gss authentication.
  * @return : 0 for success and -1 for error.
  */
-static int GssServerContinue(GssConn* gss_conn)
+#ifndef ENABLE_UT
+static
+#endif
+ int GssServerContinue(GssConn* gss_conn)
 {
     int re = -1;
 
@@ -2483,6 +2538,42 @@ int GssServerAuth(int socket, const char* krb_keyfile)
     return GssServerContinue(&gss_conn);
 }
 
+/*
+ * release kerberos gss connection info 
+ * if the handle to be released is specified GSS_C_NO_CREDENTIAL or GSS_C_NO_CONTEXT(which is initial status), 
+ * the function will complete successfully but do nothing, so that it's safe to invoke the function without pre-judge
+ */
+#ifndef ENABLE_UT
+static
+#endif
+ void clear_gss_info(pg_gssinfo* gss)
+{
+    /* status codes coming from gss interface */
+    OM_uint32 lmin_s = 0;
+    /* Release service principal credentials */
+    (void)gss_release_cred(&lmin_s, &gss->cred);
+    /* Release gss security context and name after server authentication finished */
+    (void)gss_delete_sec_context(&lmin_s, &gss->ctx, GSS_C_NO_BUFFER);
+    /* Release gss_name and gss_buf */
+    (void)gss_release_name(&lmin_s, &gss->name);
+}
+
+/*
+ * release kerberos gss stream connection info 
+ * the function will complete successfully but do nothing, so that it's safe to invoke the function without pre-judge
+ */
+#ifndef ENABLE_UT
+static
+#endif
+ void clear_gssconn_info(GssConn *gss)
+{
+    /* status codes coming from gss interface */
+    OM_uint32 lmin_s = 0;
+    /* Release gss security context and name after server authentication finished */
+    (void)gss_delete_sec_context(&lmin_s, &gss->gctx, GSS_C_NO_BUFFER);
+    /* Release gss_name and gss_buf */
+    (void)gss_release_name(&lmin_s, &gss->gtarg_nam);
+}
 #endif /* ENABLE_GSS */
 
 /* ----------------------------------------------------------------
@@ -3016,7 +3107,10 @@ ident_inet_done:
  */
 #ifdef HAVE_UNIX_SOCKETS
 
-static int auth_peer(hbaPort* port)
+#ifndef ENABLE_UT
+static
+#endif
+ int auth_peer(hbaPort* port)
 {
     char ident_user[IDENT_USERNAME_MAX + 1];
     uid_t uid;
@@ -3544,7 +3638,10 @@ static int CheckLDAPAuth(Port* port)
  * ----------------------------------------------------------------
  */
 #ifdef USE_SSL
-static int CheckCertAuth(Port* port)
+#ifndef ENABLE_UT
+static
+#endif
+ int CheckCertAuth(Port* port)
 {
     Assert(port->ssl);
 
@@ -3645,34 +3742,3 @@ static int CheckIAMAuth(Port* port)
     return STATUS_OK;
 }
 #endif
-
-/*
- * release kerberos gss connection info 
- * if the handle to be released is specified GSS_C_NO_CREDENTIAL or GSS_C_NO_CONTEXT(which is initial status), 
- * the function will complete successfully but do nothing, so that it's safe to invoke the function without pre-judge
- */
-static void clear_gss_info(pg_gssinfo* gss)
-{
-    /* status codes coming from gss interface */
-    OM_uint32 lmin_s = 0;
-    /* Release service principal credentials */
-    (void)gss_release_cred(&lmin_s, &gss->cred);
-    /* Release gss security context and name after server authentication finished */
-    (void)gss_delete_sec_context(&lmin_s, &gss->ctx, GSS_C_NO_BUFFER);
-    /* Release gss_name and gss_buf */
-    (void)gss_release_name(&lmin_s, &gss->name);
-}
-
-/*
- * release kerberos gss stream connection info 
- * the function will complete successfully but do nothing, so that it's safe to invoke the function without pre-judge
- */
-static void clear_gssconn_info(GssConn *gss)
-{
-    /* status codes coming from gss interface */
-    OM_uint32 lmin_s = 0;
-    /* Release gss security context and name after server authentication finished */
-    (void)gss_delete_sec_context(&lmin_s, &gss->gctx, GSS_C_NO_BUFFER);
-    /* Release gss_name and gss_buf */
-    (void)gss_release_name(&lmin_s, &gss->gtarg_nam);
-}

@@ -1,5 +1,4 @@
 #!/bin/sh
-#this test is based on the bug DTS2015042205639
 #If there is no data changed after the restart checkpoint LSN, and during failover
 #we received the data of that page
 

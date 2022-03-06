@@ -117,6 +117,8 @@ typedef struct RemoteQueryState {
     RemoteDataRowData currentRow; /* next data ro to be wrapped into a tuple */
     RowStoreManager row_store;    /* buffer where rows are stored when connection
                              should be cleaned for reuse by other RemoteQuery*/
+    CommitSeqNo maxCSN;
+    bool hadrMainStandby;
     /*
      * To handle special case - if this RemoteQuery is feeding sorted data to
      * Sort plan and if the connection fetching data from the Datanode
@@ -167,6 +169,7 @@ typedef struct RemoteQueryState {
     char* previousNodeName; /* previous DataNode that rowcount is different from current DataNode */
     char* serializedPlan;   /* the serialized plan tree */
     ParallelFunctionState* parallel_function_state;
+    bool has_stream_for_loop; /* has stream node in for loop sql which may cause hang. */
 } RemoteQueryState;
 
 extern RemoteQueryState* CreateResponseCombiner(int node_count, CombineType combine_type);

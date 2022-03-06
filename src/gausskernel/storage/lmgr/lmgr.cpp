@@ -85,7 +85,7 @@ void LockRelationOid(Oid relid, LOCKMODE lockmode)
      * modifies the rel, the relcache update happens via
      * CommandCounterIncrement, not here.)
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 }
 
@@ -114,7 +114,7 @@ bool ConditionalLockRelationOid(Oid relid, LOCKMODE lockmode)
      * Now that we have the lock, check for invalidation messages; see notes
      * in LockRelationOid.
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 
     return true;
@@ -168,7 +168,7 @@ void LockRelation(Relation relation, LOCKMODE lockmode)
      * Now that we have the lock, check for invalidation messages; see notes
      * in LockRelationOid.
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 }
 
@@ -194,7 +194,7 @@ bool ConditionalLockRelation(Relation relation, LOCKMODE lockmode)
      * Now that we have the lock, check for invalidation messages; see notes
      * in LockRelationOid.
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 
     return true;
@@ -256,7 +256,7 @@ bool ConditionalLockCStoreFreeSpace(Relation relation)
      * Now that we have the lock, check for invalidation messages; see notes
      * in LockRelationOid.
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 
     return true;
@@ -285,6 +285,17 @@ bool LockHasWaitersRelation(Relation relation, LOCKMODE lockmode)
 
     return LockHasWaiters(&tag, lockmode, false);
 }
+
+bool LockHasWaitersPartition(Relation relation, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+    Assert(RelationIsPartition(relation));
+
+    SET_LOCKTAG_PARTITION(tag, relation->rd_lockInfo.lockRelId.dbId, relation->parentId, relation->rd_id);
+
+    return LockHasWaiters(&tag, lockmode, false);
+}
+
 
 /*
  *		LockRelationIdForSession
@@ -470,7 +481,7 @@ void UnlockPage(Relation relation, BlockNumber blkno, LOCKMODE lockmode)
  * because we can't afford to keep a separate lock in shared memory for every
  * tuple.  See heap_lock_tuple before using this!
  */
-void LockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode, bool allow_con_update)
+void LockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode, bool allow_con_update, int waitSec)
 {
     LOCKTAG tag;
 
@@ -481,7 +492,28 @@ void LockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode, bool allow
                       ItemPointerGetBlockNumber(tid),
                       ItemPointerGetOffsetNumber(tid));
 
-    (void)LockAcquire(&tag, lockmode, false, false, allow_con_update);
+    (void)LockAcquire(&tag, lockmode, false, false, allow_con_update, waitSec);
+}
+
+#define UID_LOW_BIT (32)
+void LockTupleUid(Relation relation, uint64 uid, LOCKMODE lockmode, bool allow_con_update, bool lockTuple)
+{
+    LOCKTAG tag;
+
+    SET_LOCKTAG_UID(tag, relation->rd_lockInfo.lockRelId.dbId, relation->rd_lockInfo.lockRelId.relId,
+        (uint32)((uint64)uid >> UID_LOW_BIT), (uint32)uid);
+
+    if (allow_con_update) {
+        (void)LockAcquire(&tag, lockmode, false, false, allow_con_update);
+    } else if (LockAcquire(&tag, lockmode, false, true) != LOCKACQUIRE_NOT_AVAIL) {
+        if (lockTuple) {
+            ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+                errmsg("could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("abort transaction due to concurrent update")));
+        }
+    }
 }
 
 /*
@@ -565,7 +597,7 @@ void XactLockTableDelete(TransactionId xid)
  * successfully or unsuccessfully.	So we have to check if it's "still running"
  * and if so wait for its parent.
  */
-void XactLockTableWait(TransactionId xid, bool allow_con_update)
+void XactLockTableWait(TransactionId xid, bool allow_con_update, int waitSec)
 {
     LOCKTAG tag;
     CLogXidStatus status = CLOG_XID_STATUS_IN_PROGRESS;
@@ -579,7 +611,7 @@ void XactLockTableWait(TransactionId xid, bool allow_con_update)
 
         SET_LOCKTAG_TRANSACTION(tag, xid);
 
-        (void)LockAcquire(&tag, ShareLock, false, false, allow_con_update);
+        (void)LockAcquire(&tag, ShareLock, false, false, allow_con_update, waitSec);
 
         (void)LockRelease(&tag, ShareLock, false);
 
@@ -706,7 +738,7 @@ SubXactLockTableDelete(SubTransactionId subxid)
  * still in progress.
  */
 void
-SubXactLockTableWait(TransactionId xid, SubTransactionId subxid)
+SubXactLockTableWait(TransactionId xid, SubTransactionId subxid, int waitSec)
 {
     LOCKTAG         tag;
     Assert(TransactionIdIsValid(xid));
@@ -715,7 +747,7 @@ SubXactLockTableWait(TransactionId xid, SubTransactionId subxid)
 
     SET_LOCKTAG_SUBTRANSACTION(tag, xid, subxid);
 
-    (void) LockAcquire(&tag, ShareLock, false, false);
+    (void) LockAcquire(&tag, ShareLock, false, false, waitSec);
 
     LockRelease(&tag, ShareLock, false);
 }
@@ -890,6 +922,12 @@ void DescribeLockTag(StringInfo buf, const LOCKTAG *tag)
                              tag->locktag_field5,
                              tag->locktag_field1);
             break;
+        case LOCKTAG_UID:
+            appendStringInfo(buf,
+                             _("tuple uid %lu of (relation %u) of database %u"),
+                             (((uint64)tag->locktag_field3) << UID_LOW_BIT) + tag->locktag_field4,
+                             tag->locktag_field2,
+                             tag->locktag_field1);
         case LOCKTAG_TRANSACTION:
             appendStringInfo(buf, _("transaction %u"), tag->locktag_field1);
             break;
@@ -1013,7 +1051,7 @@ void LockPartitionOid(Oid relid, uint32 seq, LOCKMODE lockmode)
      * modifies the rel, the relcache update happens via
      * CommandCounterIncrement, not here.)
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 }
 
@@ -1032,7 +1070,7 @@ bool ConditionalLockPartitionOid(Oid relid, uint32 seq, LOCKMODE lockmode)
      * Now that we have the lock, check for invalidation messages; see notes
      * in LockRelationOid.
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 
     return true;
@@ -1076,7 +1114,7 @@ void LockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode)
      * modifies the rel, the relcache update happens via
      * CommandCounterIncrement, not here.)
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 }
 
@@ -1095,7 +1133,7 @@ bool ConditionalLockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode)
      * Now that we have the lock, check for invalidation messages; see notes
      * in LockRelationOid.
      */
-    if (res != LOCKACQUIRE_ALREADY_HELD || u_sess->inval_cxt.deepthInAcceptInvalidationMessage > 0)
+    if (res != LOCKACQUIRE_ALREADY_HELD || DeepthInAcceptInvalidationMessageNotZero())
         AcceptInvalidationMessages();
 
     return true;

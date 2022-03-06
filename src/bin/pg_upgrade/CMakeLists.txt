@@ -16,7 +16,7 @@ set(TGT_format_INC
 set(format_DEF_OPTIONS ${MACRO_OPTIONS})
 set(format_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(format_LINK_OPTIONS ${BIN_LINK_OPTIONS})
-set(format_LINK_LIBS libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -lsecurec -lrt -lz -lminiunz)
+set(format_LINK_LIBS libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz)
 add_bintarget(pg_format_cu TGT_format_SRC TGT_format_INC "${format_DEF_OPTIONS}" "${format_COMPILE_OPTIONS}" "${format_LINK_OPTIONS}" "${format_LINK_LIBS}")
 add_dependencies(pg_format_cu pgport_static)
 target_link_directories(pg_format_cu PUBLIC

@@ -709,6 +709,9 @@ static void _outScanInfo(StringInfo str, Scan* node)
     WRITE_NODE_FIELD(tablesample);
 
     out_mem_info(str, &node->mem_info);
+    if (t_thrd.proc->workingVersionNum >= SCAN_BATCH_MODE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(scanBatchMode);
+    }
 }
 
 /*
@@ -776,11 +779,15 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
         WRITE_NODE_FIELD(exclRelTlist);
         WRITE_INT_FIELD(exclRelRTIndex);
     }
+    if (t_thrd.proc->workingVersionNum >= UPSERT_WHERE_VERSION_NUM) {
+        WRITE_NODE_FIELD(upsertWhere);
+    }
 #else
     WRITE_ENUM_FIELD(upsertAction, UpsertAction);
     WRITE_NODE_FIELD(updateTlist);
     WRITE_NODE_FIELD(exclRelTlist);
     WRITE_INT_FIELD(exclRelRTIndex);
+    WRITE_NODE_FIELD(upsertWhere);
 #endif		
 }
 
@@ -790,6 +797,9 @@ static void _outUpsertClause(StringInfo str, const UpsertClause* node)
 
     WRITE_NODE_FIELD(targetList);
     WRITE_INT_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= UPSERT_WHERE_VERSION_NUM) {
+        WRITE_NODE_FIELD(whereClause);
+    }
 }
 
 static void _outUpsertExpr(StringInfo str, const UpsertExpr* node)
@@ -800,6 +810,7 @@ static void _outUpsertExpr(StringInfo str, const UpsertExpr* node)
     WRITE_NODE_FIELD(updateTlist);
     WRITE_NODE_FIELD(exclRelTlist);
     WRITE_INT_FIELD(exclRelIndex);
+    WRITE_NODE_FIELD(upsertWhere);
 }
 static void _outMergeWhenClause(StringInfo str, const MergeWhenClause* node)
 {
@@ -936,7 +947,7 @@ static void _outBitmapAnd(StringInfo str, BitmapAnd* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_NODE_FIELD(bitmapplans);
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
 }
@@ -948,7 +959,7 @@ static void _outBitmapOr(StringInfo str, BitmapOr* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_NODE_FIELD(bitmapplans);
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
 }
@@ -1015,7 +1026,7 @@ static void _outIndexScan(StringInfo str, IndexScan* node)
 {
     WRITE_NODE_TYPE("INDEXSCAN");
     _outCommonIndexScanPart<IndexScan>(str, node);
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
 }
@@ -1305,7 +1316,7 @@ static void _outBitmapIndexScan(StringInfo str, BitmapIndexScan* node)
         _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
     }
 #endif  // STREAMPLAN
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
 }
@@ -1969,6 +1980,9 @@ static void _outPlanRowMark(StringInfo str, PlanRowMark* node)
     WRITE_UINT_FIELD(rowmarkId);
     WRITE_ENUM_FIELD(markType, RowMarkType);
     WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        WRITE_INT_FIELD(waitSec);
+    }
     WRITE_BOOL_FIELD(isParent);
     WRITE_INT_FIELD(numAttrs);
     WRITE_BITMAPSET_FIELD(bms_nodeids);
@@ -2921,7 +2935,7 @@ static void _outIndexPath(StringInfo str, IndexPath* node)
     WRITE_ENUM_FIELD(indexscandir, ScanDirection);
     WRITE_FLOAT_FIELD(indextotalcost, "%.2f");
     WRITE_FLOAT_FIELD(indexselectivity, "%.4f");
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
 }
@@ -2943,7 +2957,7 @@ static void _outBitmapAndPath(StringInfo str, BitmapAndPath* node)
 
     WRITE_NODE_FIELD(bitmapquals);
     WRITE_FLOAT_FIELD(bitmapselectivity, "%.4f");
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
 }
@@ -2956,7 +2970,7 @@ static void _outBitmapOrPath(StringInfo str, BitmapOrPath* node)
 
     WRITE_NODE_FIELD(bitmapquals);
     WRITE_FLOAT_FIELD(bitmapselectivity, "%.4f");
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
 }
@@ -3507,6 +3521,8 @@ static void _outPartitionState(StringInfo str, PartitionState* node)
     WRITE_NODE_FIELD(partitionKey);
     WRITE_NODE_FIELD(partitionList);
     WRITE_ENUM_FIELD(rowMovement, RowMovementValue);
+    WRITE_NODE_FIELD(subPartitionState);
+    WRITE_NODE_FIELD(partitionNameList);
 }
 
 static void _outRangePartitionindexDefState(StringInfo str, RangePartitionindexDefState* node)
@@ -3515,6 +3531,7 @@ static void _outRangePartitionindexDefState(StringInfo str, RangePartitionindexD
 
     WRITE_STRING_FIELD(name);
     WRITE_STRING_FIELD(tablespace);
+    WRITE_NODE_FIELD(sublist);
 }
 
 static void _outRangePartitionStartEndDefState(StringInfo str, RangePartitionStartEndDefState* node)
@@ -3535,6 +3552,15 @@ static void _outAddPartitionState(StringInfo str, AddPartitionState* node)
     WRITE_NODE_FIELD(partitionList);
     WRITE_BOOL_FIELD(isStartEnd);
 }
+
+static void _outAddSubPartitionState(StringInfo str, const AddSubPartitionState* node)
+{
+    WRITE_NODE_TYPE("ADDSUBPARTITIONSTATE");
+
+    WRITE_STRING_FIELD(partitionName);
+    WRITE_NODE_FIELD(subPartitionList);
+}
+
 
 static void _outCreateStmt(StringInfo str, const CreateStmt* node)
 {
@@ -3723,6 +3749,9 @@ static void _outLockingClause(StringInfo str, LockingClause* node)
     WRITE_BOOL_FIELD(noWait);
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         WRITE_ENUM_FIELD(strength, LockClauseStrength);
+    }
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        WRITE_BOOL_FIELD(waitSec);
     }
 }
 
@@ -3996,6 +4025,21 @@ static void _outPredpushHint(StringInfo str, PredpushHint* node)
 }
 
 /*
+ * @Description: Predpush same level hint node to string.
+ * @out str: String buf.
+ * @in node: Predpush same level hint struct.
+ */
+static void _outPredpushSameLevelHint(StringInfo str, PredpushSameLevelHint* node)
+{
+    WRITE_NODE_TYPE("PREDPUSHSAMELEVELHINT");
+    _outBaseHint(str, (Hint*)node);
+    WRITE_BOOL_FIELD(negative);
+    WRITE_STRING_FIELD(dest_name);
+    WRITE_INT_FIELD(dest_id);
+    WRITE_BITMAPSET_FIELD(candidates);
+}
+
+/*
  * @Description: Rewrite hint node to string.
  * @out str: String buf.
  * @in node: Rewrite hint struct.
@@ -4207,13 +4251,18 @@ static void _outHintState(StringInfo str, HintState* node)
     if (t_thrd.proc->workingVersionNum >= PREDPUSH_VERSION_NUM) {
         WRITE_NODE_FIELD(predpush_hint);
     }
-    WRITE_NODE_FIELD(rewrite_hint);
-    WRITE_NODE_FIELD(gather_hint);
+    if (t_thrd.proc->workingVersionNum >= EXECUTE_DIRECT_ON_MULTI_VERSION_NUM) {
+        WRITE_NODE_FIELD(rewrite_hint);
+    }
     if (t_thrd.proc->workingVersionNum >= HINT_ENHANCEMENT_VERSION_NUM) {
+        WRITE_NODE_FIELD(gather_hint);
         WRITE_NODE_FIELD(no_expand_hint);
         WRITE_NODE_FIELD(set_hint);
         WRITE_NODE_FIELD(cache_plan_hint);
         WRITE_NODE_FIELD(no_gpc_hint);
+    }
+    if (t_thrd.proc->workingVersionNum >= PREDPUSH_SAME_LEVEL_VERSION_NUM) {
+        WRITE_NODE_FIELD(predpush_same_level_hint);
     }
 }
 
@@ -4366,6 +4415,9 @@ static void _outRowMarkClause(StringInfo str, RowMarkClause* node)
     WRITE_UINT_FIELD(rti);
     WRITE_BOOL_FIELD(forUpdate);
     WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
+        WRITE_INT_FIELD(waitSec);
+    }
     WRITE_BOOL_FIELD(pushedDown);
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         WRITE_ENUM_FIELD(strength, LockClauseStrength);
@@ -4618,7 +4670,7 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
         WRITE_BOOL_FIELD(sublink_pull_up);
     }
 
-    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+    if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
 
@@ -5504,31 +5556,58 @@ static void _outIndexVar(StringInfo str, IndexVar* node)
     WRITE_BOOL_FIELD(indexpath);
 }
 
-static void _outGradientDescent(StringInfo str, GradientDescent* node)
+static void _outTrainModel(StringInfo str, TrainModel* node)
 {
-    WRITE_NODE_TYPE("SGD");
+    AlgorithmAPI *api = get_algorithm_api(node->algorithm);
+    int num_hyperp;
+    const HyperparameterDefinition* definition = api->get_hyperparameters_definitions(api, &num_hyperp);
+
+    if (node->configurations != 1)
+        elog(ERROR, "TODO_DB4AI_API: more than one hyperparameter configuration");
+
+    WRITE_NODE_TYPE("TrainModel");
     _outPlanInfo(str, (Plan*)node);
     appendStringInfoString(str, " :algorithm ");
-    appendStringInfoString(str, gd_get_algorithm(node->algorithm)->name);
-    appendStringInfoString(str, " :optimizer ");
-    appendStringInfoString(str, gd_get_optimizer_name(node->optimizer));
-    WRITE_INT_FIELD(targetcol);
-    WRITE_INT_FIELD(max_iterations);
-    WRITE_INT_FIELD(max_seconds);
-    WRITE_INT_FIELD(batch_size);
-    WRITE_BOOL_FIELD(verbose);
-    WRITE_FLOAT_FIELD(learning_rate, "%.16g");
-    WRITE_FLOAT_FIELD(decay, "%.16g");
-    WRITE_FLOAT_FIELD(tolerance, "%.16g");
-    WRITE_INT_FIELD(seed);
-    WRITE_FLOAT_FIELD(lambda, "%.16g");
-}
+    appendStringInfoString(str, api->name);
 
-static void _outGradientDescentExpr(StringInfo str, GradientDescentExpr* node)
-{
-    WRITE_NODE_TYPE("GradientDescentExpr");
-    WRITE_UINT_FIELD(field);
-    WRITE_OID_FIELD(fieldtype);
+    HyperparametersGD *hyperp = (HyperparametersGD *)node->hyperparameters[0];
+    while (num_hyperp-- > 0) {
+        switch (definition->type) {
+            case INT4OID: {
+                int32_t *value_addr = (int32_t *)((char *)hyperp + definition->offset);
+                appendStringInfo(str, " : %s %d", definition->name, *value_addr);
+                break;
+            }
+            case INT8OID: {
+                int64_t *value_addr = (int64_t *)((char *)hyperp + definition->offset);
+                appendStringInfo(str, " : %s %ld", definition->name, *value_addr);
+                break;
+            }
+            case FLOAT8OID: {
+                double *value_addr = (double *)((char *)hyperp + definition->offset);
+                appendStringInfo(str, " : %s %.16g", definition->name, *value_addr);
+                break;
+            }
+            case BOOLOID: {
+                bool *value_addr = (bool *)((char *)hyperp + definition->offset);
+                appendStringInfo(str, " : %s %s", definition->name, booltostr(*value_addr));
+                break;
+            }
+            case CSTRINGOID: {
+                char **value_addr = (char **)((char *)hyperp + definition->offset);
+                appendStringInfo(str, " : %s %s", definition->name, *value_addr);
+                break;
+            }
+            case ANYENUMOID: {
+                void *value_addr = (void *)((char *)hyperp + definition->offset);
+                appendStringInfo(str, " : %s %s", definition->name, definition->validation.enum_getter(value_addr));
+                break;
+            }
+            default:
+                break;
+        }
+        definition++;
+    }
 }
 
 /*
@@ -6006,6 +6085,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_AddPartitionState:
                 _outAddPartitionState(str, (AddPartitionState*)obj);
                 break;
+            case T_AddSubPartitionState:
+                _outAddSubPartitionState(str, (AddSubPartitionState*)obj);
+                break;
             case T_CreateForeignTableStmt:
                 _outCreateForeignTableStmt(str, (CreateForeignTableStmt*)obj);
                 break;
@@ -6375,6 +6457,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_PredpushHint:
                 _outPredpushHint(str, (PredpushHint *)obj);
                 break;
+            case T_PredpushSameLevelHint:
+                _outPredpushSameLevelHint(str, (PredpushSameLevelHint *)obj);
+                break;
             case T_RewriteHint:
                 _outRewriteHint(str, (RewriteHint *)obj);
                 break;
@@ -6392,11 +6477,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_NoGPCHint:
                 _outNoGPCHint(str, (NoGPCHint*) obj);
-            case T_GradientDescent:
-                _outGradientDescent(str, (GradientDescent*)obj);
+            case T_TrainModel:
+                _outTrainModel(str, (TrainModel*)obj);
                 break;
-            case T_GradientDescentExpr:
-                _outGradientDescentExpr(str, (GradientDescentExpr*)obj);
             case T_PLDebug_variable:
                 _outPLDebug_variable(str, (PLDebug_variable*) obj);
                 break;

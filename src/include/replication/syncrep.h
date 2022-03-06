@@ -17,9 +17,9 @@
 #include "utils/guc.h"
 #include "replication/replicainternal.h"
 
-#define SyncRepRequested()                               \
+#define SyncRepRequested() \
     (g_instance.attr.attr_storage.max_wal_senders > 0 && \
-     u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH)
+    u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH)
 
 /* SyncRepWaitMode */
 #define SYNC_REP_NO_WAIT -1

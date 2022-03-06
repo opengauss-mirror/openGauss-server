@@ -65,24 +65,27 @@ CREATE MODEL houses_linregr_ngd USING linear_regression
        FROM db4ai_houses WITH seed = 1, optimizer='ngd',
             learning_rate=2.0;
 
--- linear regression with normalized data, pure stochastic gd 
+-- linear regression with normalized data, pure stochastic gd with arrays
 CREATE MODEL houses_linregr_gd USING linear_regression
-       FEATURES tax_n, bath_n, size_n TARGET price
-       FROM db4ai_houses WITH seed = 1, batch_size=1, learning_rate=1.0;
+       FEATURES feat_n TARGET price
+       FROM (SELECT price, ARRAY[tax_n, bath_n, size_n] AS feat_n FROM db4ai_houses)
+       WITH seed = 1, batch_size=1, learning_rate=1.0;
 
 -- just dump some residual
 SELECT id, abs(target-prediction) as residual
 FROM (
-    SELECT id, price AS target, PREDICT BY houses_linregr_gd (FEATURES tax_n, bath_n, size_n) AS prediction
+    SELECT id, price AS target, PREDICT BY houses_linregr_gd (FEATURES ARRAY[tax_n, bath_n, size_n]) AS prediction
     FROM db4ai_houses
 )
 ORDER BY residual DESC
 LIMIT 3;
 
 -- take a look at the model warehouse (skipping time-dependent columns)
-SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, modeldata, weight,
-       hyperparametersoids, coefnames, coefvalues, coefoids, trainingscoresname, trainingscoresvalue, modeldescribe
-  FROM gs_model_warehouse;
+SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, weight,
+       hyperparametersnames, hyperparametersoids, hyperparametersvalues,
+       trainingscoresname, trainingscoresvalue, length(modeldata) as model_data_len
+  FROM gs_model_warehouse
+  ORDER BY modelname;
 
 -- cleanup models in random order
 DROP MODEL houses_svm_gd;

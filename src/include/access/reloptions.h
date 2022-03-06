@@ -23,6 +23,7 @@
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "utils/rel.h"
+#include "utils/rel_gs.h"
 
 /* types supported by reloptions */
 typedef enum relopt_type {
@@ -129,22 +130,6 @@ typedef struct {
     relopt_type opttype; /* option's datatype */
     int offset;          /* offset of field in result struct */
 } relopt_parse_elt;
-
-struct TableCreateSupport {
-    bool compressType;
-    bool compressLevel;
-    bool compressChunkSize;
-    bool compressPreAllocChunks;
-    bool compressByteConvert;
-    bool compressDiffConvert;
-};
-
-inline bool HasCompressOption(TableCreateSupport *tableCreateSupport)
-{
-    return tableCreateSupport->compressLevel || tableCreateSupport->compressChunkSize ||
-           tableCreateSupport->compressPreAllocChunks || tableCreateSupport->compressByteConvert ||
-           tableCreateSupport->compressDiffConvert;
-}
 
 /* 
  * The following are the table append modes currently supported.
@@ -298,10 +283,7 @@ extern void ForbidUserToSetDefinedIndexOptions(List* options);
 extern bool CheckRelOptionValue(Datum options, const char* opt_name);
 extern void forbid_to_set_options_for_timeseries_tbl(List* options);
 extern List* RemoveRelOption(List* options, const char* optName, bool* removed);
-void RowTblCheckCompressionOption(List *options);
+void RowTblCheckCompressionOption(List *options, int8 rowCompress = REL_CMPRS_PAGE_PLAIN);
 void RowTblCheckHashBucketOption(List* options, StdRdOptions* std_opt);
-void ForbidUserToSetCompressedOptions(List *options);
-void SetOneOfCompressOption(const char *defname, TableCreateSupport *tableCreateSupport);
-void CheckCompressOption(TableCreateSupport *tableCreateSupport);
 #endif /* RELOPTIONS_H */
 

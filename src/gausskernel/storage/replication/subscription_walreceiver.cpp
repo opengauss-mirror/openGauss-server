@@ -43,10 +43,18 @@ bool sub_connect(char *conninfo, XLogRecPtr *startpoint, char *appname, int chan
     vals[i] = NULL;
 
     t_thrd.libwalreceiver_cxt.streamConn = PQconnectdbParams(keys, vals, true);
+    if ((t_thrd.libwalreceiver_cxt.streamConn != NULL) && (t_thrd.libwalreceiver_cxt.streamConn->pgpass != NULL)) {
+        /* clear password related memory to avoid leaks */
+        int rc = memset_s(t_thrd.libwalreceiver_cxt.streamConn->pgpass,
+            strlen(t_thrd.libwalreceiver_cxt.streamConn->pgpass),
+            0, strlen(t_thrd.libwalreceiver_cxt.streamConn->pgpass));
+        securec_check_c(rc, "\0", "\0");
+    }
     if (PQstatus(t_thrd.libwalreceiver_cxt.streamConn) != CONNECTION_OK) {
         ereport(WARNING, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
-            errmsg("apply worker could not connect to the remote server : %s",
-            PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+            errmsg("apply worker could not connect to the remote server")));
+        PQfinish(t_thrd.libwalreceiver_cxt.streamConn);
+        t_thrd.libwalreceiver_cxt.streamConn = NULL;
         return false;
     }
 

@@ -30,6 +30,7 @@
 #include "utils/elog.h"
 #include "replication/heartbeat/libpq/libpq.h"
 #include "replication/heartbeat/libpq/libpq-be.h"
+#include "replication/walreceiver.h"
 #include "replication/heartbeat/heartbeat_conn.h"
 
 static char *GetIp(struct sockaddr *addr)
@@ -39,7 +40,8 @@ static char *GetIp(struct sockaddr *addr)
     char *result = NULL;
 
     if (AF_INET6 == saddr->sin_family) {
-        result = inet_net_ntop(AF_INET6, &saddr->sin_addr, AF_INET6_MAX_BITS, ip, IP_LEN);
+        struct sockaddr_in6 *saddr6 = (sockaddr_in6 *)addr;
+        result = inet_net_ntop(AF_INET6, &saddr6->sin6_addr, AF_INET6_MAX_BITS, ip, IP_LEN);
         if (result == NULL) {
             ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
         }
@@ -62,13 +64,19 @@ static char *GetIp(struct sockaddr *addr)
 
 static bool IsIpInWhiteList(const char *ip)
 {
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
+
     for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
         ReplConnInfo *replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
         if (replconninfo == NULL) {
             continue;
         }
 
-        if (strncmp((char *)replconninfo->remotehost, ip, IP_LEN) == 0) {
+        /* remove any '%zone' part from an IPv6 address string */
+        ipNoZone = remove_ipv6_zone(replconninfo->remotehost, ipNoZoneData, IP_LEN);
+
+        if (strncmp((char *)ipNoZone, ip, IP_LEN) == 0) {
             return true;
         }
     }
@@ -168,6 +176,8 @@ void EventDel(int epollFd, HeartbeatConnection *con)
 void UpdateLastHeartbeatTime(const char *remoteHost, int remotePort, TimestampTz timestamp)
 {
     volatile heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
 
     ReplConnInfo* replconninfo = NULL;
     SpinLockAcquire(&stat->mutex);
@@ -180,7 +190,10 @@ void UpdateLastHeartbeatTime(const char *remoteHost, int remotePort, TimestampTz
             continue;
         }
 
-        if (strncmp((char *)replconninfo->remotehost, (char *)remoteHost, IP_LEN) == 0 &&
+        /* remove any '%zone' part from an IPv6 address string */
+        ipNoZone = remove_ipv6_zone(replconninfo->remotehost, ipNoZoneData, IP_LEN);
+
+        if (strncmp((char *)ipNoZone, (char *)remoteHost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == remotePort) {
             stat->channel_array[i].last_reply_timestamp = timestamp;
             ereport(DEBUG2, (errmsg("Update last heartbeat  time： remotehost:%s, port:%d, time:%ld", remoteHost,

@@ -25,11 +25,13 @@
 
 #include "catalog/storage_xlog.h"
 #include "commands/tablespace.h"
+#include "commands/verify.h"
 #include "executor/executor.h"
 #include "pgstat.h"
 #include "storage/smgr/fd.h"
 #include "storage/smgr/knl_usync.h"
 #include "storage/smgr/segment.h"
+#include "postmaster/pagerepair.h"
 
 static const mode_t SEGMENT_FILE_MODE = S_IWUSR | S_IRUSR;
 
@@ -48,12 +50,16 @@ static int dv_open_file(char *filename, uint32 flags, int mode)
 {
     int fd = -1;
     fd = BasicOpenFile(filename, flags, mode);
+    int err = errno;
+    ereport(LOG, (errmsg("dv_open_file filename: %s, flags is %u, mode is %d, fd is %d", filename, flags, mode, fd)));
+    errno = err;
     return fd;
 }
 
 static void dv_close_file(int fd)
 {
     close(fd);
+    ereport(LOG, (errmsg("dv_close_file fd is %d", fd)));
 }
 
 /* Return a palloc string, and callers should free it */
@@ -157,6 +163,32 @@ static SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, Block
     return spf;
 }
 
+void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks)
+{
+    int128 remainBlocks = nblocks;
+    while (remainBlocks > 0) {
+        BlockNumber nflush = remainBlocks;
+        int slice_start = blocknum / DF_FILE_SLICE_BLOCKS;
+        int slice_end = (blocknum + remainBlocks - 1) / DF_FILE_SLICE_BLOCKS;
+
+        /* cross slice */
+        if (slice_start != slice_end) {
+            nflush = DF_FILE_SLICE_BLOCKS - (blocknum % DF_FILE_SLICE_BLOCKS);
+        }
+
+        SegPhysicalFile spf = df_get_physical_file(sf, slice_start, blocknum);
+        if (spf.fd < 0) {
+            return;
+        }
+
+        off_t seekpos = (off_t)BLCKSZ * (blocknum % DF_FILE_SLICE_BLOCKS);
+        pg_flush_data(spf.fd, seekpos, (off_t)nflush * BLCKSZ);
+
+        remainBlocks -= nflush;
+        blocknum += nflush;
+    }
+}
+
 /*
  * Extend the file array in SegLogicFile
  */
@@ -178,6 +210,142 @@ void df_extend_file_vector(SegLogicFile *sf)
     sf->vector_capacity = new_capacity;
 }
 
+void df_close_all_file(RepairFileKey key, int32 max_sliceno)
+{
+    Oid relNode = key.relfilenode.relNode;
+    ForkNumber forknum = key.forknum;
+    struct stat statBuf;
+    SegSpace *spc = spc_init_space_node(key.relfilenode.spcNode, key.relfilenode.dbNode);
+
+    Assert(relNode <= EXTENT_8192 && relNode > 0);
+    AutoMutexLock spc_lock(&spc->lock);
+    spc_lock.lock();
+
+    SegExtentGroup *eg = &spc->extent_group[relNode - 1][forknum];
+    AutoMutexLock lock(&eg->lock);
+    lock.lock();
+
+    AutoMutexLock filelock(&eg->segfile->filelock);
+    filelock.lock();
+
+    char *tempfilename = NULL;
+    for (int i = 0; i <= max_sliceno; i++) {
+        tempfilename = slice_filename(eg->segfile->filename, i);
+        if (stat(tempfilename, &statBuf) < 0) {
+            /* ENOENT is expected after the last segment... */
+            if (errno != ENOENT) {
+                ereport(WARNING, (errcode_for_file_access(),
+                    errmsg("could not stat file \"%s\": %m", tempfilename)));
+            }
+        } else {
+            if (eg->segfile->segfiles[i].fd > 0) {
+                dv_close_file(eg->segfile->segfiles[i].fd);
+                eg->segfile->segfiles[i].fd = -1;
+            }
+        }
+        pfree(tempfilename);
+        eg->segfile->segfiles[i].fd = -1;
+        eg->segfile->segfiles[i].sliceno = i;
+    }
+    eg->segfile->file_num = 0;
+
+    filelock.unLock();
+    lock.unLock();
+    spc_lock.unLock();
+    return;
+}
+
+void df_clear_and_close_all_file(RepairFileKey key, int32 max_sliceno)
+{
+    Oid relNode = key.relfilenode.relNode;
+    ForkNumber forknum = key.forknum;
+    SegSpace *spc = spc_init_space_node(key.relfilenode.spcNode, key.relfilenode.dbNode);
+
+    Assert(relNode <= EXTENT_8192 && relNode > 0);
+    AutoMutexLock spc_lock(&spc->lock);
+    spc_lock.lock();
+
+    SegExtentGroup *eg = &spc->extent_group[relNode - 1][forknum];
+    AutoMutexLock lock(&eg->lock);
+    lock.lock();
+
+    AutoMutexLock filelock(&eg->segfile->filelock);
+    filelock.lock();
+
+    char *tempfilename = NULL;
+    for (int i = 0; i <= max_sliceno; i++) {
+        tempfilename = slice_filename(eg->segfile->filename, i);
+        int ret = unlink(tempfilename);
+        if (ret < 0 && errno != ENOENT) {
+            ereport(WARNING, (errcode_for_file_access(),
+                errmsg("could not remove file \"%s\": %m", tempfilename)));
+        }
+        if (ret >= 0) {
+            ereport(LOG, (errcode_for_file_access(),
+                errmsg("[file repair] clear segment file \"%s\"", tempfilename)));
+            if (eg->segfile->segfiles[i].fd > 0) {
+                dv_close_file(eg->segfile->segfiles[i].fd);
+                eg->segfile->segfiles[i].fd = -1;
+            }
+        }
+        pfree(tempfilename);
+        eg->segfile->segfiles[i].fd = -1;
+        eg->segfile->segfiles[i].sliceno = i;
+    }
+    eg->segfile->file_num = 0;
+
+    filelock.unLock();
+    lock.unLock();
+    spc_lock.unLock();
+    return;
+}
+
+void df_open_all_file(RepairFileKey key, int32 max_sliceno)
+{
+    int fd = -1;
+    char *filename = NULL;
+    uint32 flags = O_RDWR | PG_BINARY;
+    Oid relNode = key.relfilenode.relNode;
+    ForkNumber forknum = key.forknum;
+    SegSpace *spc = spc_init_space_node(key.relfilenode.spcNode, key.relfilenode.dbNode);
+
+    Assert(relNode <= EXTENT_8192 && relNode > 0);
+    AutoMutexLock spc_lock(&spc->lock);
+    spc_lock.lock();
+
+    SegExtentGroup *eg = &spc->extent_group[relNode - 1][forknum];
+    AutoMutexLock eg_lock(&eg->lock);
+    eg_lock.lock();
+
+    AutoMutexLock file_lock(&eg->segfile->filelock);
+    file_lock.lock();
+
+    for (int i = 0; i <= max_sliceno; i++) {
+        filename = slice_filename(eg->segfile->filename, i);
+        fd = dv_open_file(filename, flags, SEGMENT_FILE_MODE);
+        if (fd < 0) {
+            ereport(ERROR, (errmsg("[file repair] open segment file failed, %s", filename)));
+        }
+        eg->segfile->segfiles[i].fd = fd;
+        eg->segfile->segfiles[i].sliceno = i;
+        pfree(filename);
+    }
+
+    int maxopenslicefd = eg->segfile->segfiles[max_sliceno].fd;
+    eg->segfile->file_num = max_sliceno + 1;
+    off_t size = lseek(maxopenslicefd, 0L, SEEK_END);
+    if (max_sliceno == 0) {
+        eg->segfile->total_blocks = size;
+    } else {
+        eg->segfile->total_blocks = max_sliceno * RELSEG_SIZE + size / BLCKSZ;
+    }
+
+    file_lock.unLock();
+    eg_lock.unLock();
+    spc_lock.unLock();
+    return;
+}
+
 /*
  * sliceno == 0, means opening all files; otherwises open until the target slice.
  */
@@ -192,6 +360,9 @@ static void df_open_target_files(SegLogicFile *sf, int targetno)
         }
 
         char *filename = slice_filename(sf->filename, sliceno);
+        if (sliceno >= sf->vector_capacity) {
+            df_extend_file_vector(sf);
+        }
         int fd = dv_open_file(filename, flags, SEGMENT_FILE_MODE);
         if (fd < 0) {
             if (errno != ENOENT) {
@@ -202,9 +373,6 @@ static void df_open_target_files(SegLogicFile *sf, int targetno)
                     (errmodule(MOD_SEGMENT_PAGE), errmsg("File \"%s\" does not exist, stop read here.", filename)));
             pfree(filename);
             break;
-        }
-        if (sliceno >= sf->vector_capacity) {
-            df_extend_file_vector(sf);
         }
 
         sf->segfiles[sliceno].fd = fd;
@@ -246,13 +414,16 @@ void df_extend_internal(SegLogicFile *sf)
     if (last_file_size == DF_FILE_SLICE_SIZE) {
         int new_sliceno = sf->file_num;
         char *filename = slice_filename(sf->filename, new_sliceno);
-        int new_fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
-        pfree(filename);
-
         if (new_sliceno >= sf->vector_capacity) {
             df_extend_file_vector(sf);
         }
+        int new_fd = dv_open_file(filename, O_RDWR | O_CREAT, SEGMENT_FILE_MODE);
+        if (new_fd < 0) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("[segpage] could not create file \"%s\": %m", filename)));
+        }
+
         if (ftruncate(new_fd, DF_FILE_EXTEND_STEP_SIZE) != 0) {
+            dv_close_file(new_fd);
             ereport(ERROR,
                 (errmodule(MOD_SEGMENT_PAGE),
                     errcode_for_file_access(),
@@ -263,6 +434,7 @@ void df_extend_internal(SegLogicFile *sf)
         sf->segfiles[new_sliceno] = {.fd = new_fd, .sliceno = new_sliceno};
         sf->file_num++;
         sf->total_blocks += DF_FILE_EXTEND_STEP_BLOCKS;
+        pfree(filename);
     } else {
         ssize_t new_size;
         if (last_file_size % DF_FILE_EXTEND_STEP_SIZE == 0) {

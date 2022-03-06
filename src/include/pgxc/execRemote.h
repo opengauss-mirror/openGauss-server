@@ -47,7 +47,7 @@
 #define RESPONSE_PLANID_OK 6
 #define RESPONSE_ANALYZE_ROWCNT 7
 #define RESPONSE_SEQUENCE_OK 8
-
+#define RESPONSE_MAXCSN_RECEIVED 9
 
 #define REMOTE_CHECKMSG_LEN 8  /* it equals to the count of bytes added in AddCheckMessage when is_stream is false */
 #define STREAM_CHECKMSG_LEN 20 /* it equals to the count of bytes added in AddCheckMessage when is_stream is true */

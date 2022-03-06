@@ -46,6 +46,7 @@ enum LWLOCK_PARTITION_ID {
     CSNLOG_PART = 1,
     LOG2_LOCKTABLE_PART = 2,
     TWOPHASE_PART = 3,
+    FASTPATH_PART = 4,
     LWLOCK_PART_KIND
 };
 
@@ -94,6 +95,9 @@ typedef struct knl_instance_attr_storage {
     bool enable_delta_store;
     bool enableWalLsnCheck;
     bool gucMostAvailableSync;
+    bool enable_ustore;
+    bool auto_csn_barrier;
+    bool enable_wal_shipping_compression;
     int WalReceiverBufSize;
     int DataQueueBufSize;
     int NBuffers;
@@ -120,17 +124,16 @@ typedef struct knl_instance_attr_storage {
     int recovery_undo_workers;
     int recovery_redo_workers_per_paser_worker;
     int pagewriter_thread_num;
+    int dw_file_num;
+    int dw_file_size;
     int real_recovery_parallelism;
     int batch_redo_num;
     int remote_read_mode;
     int advance_xlog_file_num;
     int gtm_option;
     int max_undo_workers;
-    int auto_csn_barrier;
     int enable_update_max_page_flush_lsn;
     int max_keep_log_seg;
-    int undo_space_limit_size;
-    int undo_limit_size_transaction;
     int max_size_for_xlog_receiver;
 #ifdef EXTREME_RTO_DEBUG_AB
     int extreme_rto_ab_pos;
@@ -148,7 +151,10 @@ typedef struct knl_instance_attr_storage {
     int64 xlog_file_size;
     char* xlog_file_path;
     char* xlog_lock_file_path;
+    int wal_flush_timeout;
+    int wal_flush_delay;
     int max_logical_replication_workers;
+    char *redo_bind_cpu_attr;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

@@ -21,8 +21,10 @@
  *
  * -------------------------------------------------------------------------
  */
+#ifndef ENABLE_LITE_MODE
 #include "parquet/platform.h"
 #include "parquet/types.h"
+#endif
 #include "parquet_input_stream_adapter.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"

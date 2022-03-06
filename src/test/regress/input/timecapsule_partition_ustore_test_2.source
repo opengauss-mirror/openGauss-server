@@ -1,0 +1,97 @@
+set enable_default_ustore_table = on;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = on" > /dev/null 2>&1
+
+--parition table
+drop table if exists t1;
+purge table t1;
+create table t1 (id int)
+partition by range (id)
+(
+partition p1 values less than (10),
+partition p2 values less than (20)
+);
+insert into t1 values(1);
+select pg_sleep(1);
+drop table t1;
+timecapsule table t1 to before drop;
+select * from t1;
+drop table t1;
+purge table t1;
+
+--timecapsule truncate normal table
+drop table if exists t1;
+purge recyclebin;
+create table t1 (id int)
+partition by range (id)
+(
+partition p1 values less than (10),
+partition p2 values less than (20)
+);
+insert into t1 values(1);
+select pg_sleep(1);
+truncate table t1;
+select * from t1;
+timecapsule table t1 to before truncate;
+select * from t1;
+drop table t1;
+purge table t1;
+purge recyclebin;
+
+--truncate purge partition table
+create table t1 (id int)
+partition by range (id)
+(
+partition p1 values less than (10),
+partition p2 values less than (20)
+);
+insert into t1 values(1);
+select pg_sleep(1);
+truncate table t1;
+select rcyoriginname from gs_recyclebin;
+purge table t1;
+select pg_sleep(1);
+select * from gs_recyclebin;
+drop table t1;
+purge recyclebin;
+
+--truncate partition toast table
+create table SPLIT_PARTITION_TABLE_001
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double double precision,
+c_character_1 character varying(1024000),
+c_varchar varchar(100),
+c_character_2 character(100),
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date,
+c_tsvector tsvector,
+c_tsquery tsquery ,
+constraint SPLIT_PARTITION_TABLE_001_constraint primary key(c_smallint,c_integer,c_bigint,c_decimal,c_double)
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition SPLIT_PARTITION_TABLE_001_1 values less than (0,0,0,0),
+partition SPLIT_PARTITION_TABLE_001_2 values less than (30,30,300,400.3),
+partition SPLIT_PARTITION_TABLE_001_3 values less than (60,60,600,800.6),
+partition SPLIT_PARTITION_TABLE_001_4 values less than (100,100,1000,1100.2)
+);
+insert into SPLIT_PARTITION_TABLE_001 values(generate_series(-10,99),-10,100,100.3,10.3,10.2,1000.25,rpad('xy',4096,'ab'),'ABCD','ABC','DEF','A','A','HK','FVT_DATA_PARTITIONFVT_DATA_PARTITION','b','1954-2-6 00:00:30+8','1954-2-6 23:12:12.2356','1954-2-6 13:12:12.2356','abc db','ege');
+truncate table split_partition_table_001;
+timecapsule table split_partition_table_001 to before truncate;
+select count(*) from split_partition_table_001;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
+set enable_default_ustore_table = off;

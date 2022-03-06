@@ -40,19 +40,14 @@ void RawValuesList::clear()
 {
     if (m_should_free_values) {
         for (size_t i = 0; i < m_raw_values_size; ++i) {
-            if (m_raw_values[i] == NULL) {
-                continue;
-            }
-
-            m_raw_values[i]->dec_ref_count();
-            if (m_raw_values[i]->safe_to_delete()) {
-                delete m_raw_values[i];
-                m_raw_values[i] = NULL;
-            }
+            safe_delete(i);
         }
     }
-    free(m_raw_values);
-    m_raw_values = NULL;
+
+    if (m_raw_values != NULL) {
+        free(m_raw_values);
+        m_raw_values = NULL;
+    }
     m_raw_values_size = 0;
 }
 
@@ -126,17 +121,8 @@ bool RawValuesList::set(size_t pos, RawValue *raw_value)
     return true;
 }
 
-bool RawValuesList::erase(size_t pos, bool is_delete)
+void RawValuesList::safe_delete(size_t pos)
 {
-    if (pos >= m_raw_values_size) {
-        return false;
-    }
-
-    if (!is_delete) {
-        m_raw_values[pos] = NULL;
-        return true;
-    }
-
     if (m_raw_values[pos]) {
         m_raw_values[pos]->dec_ref_count();
         if (m_raw_values[pos]->safe_to_delete()) {
@@ -144,12 +130,25 @@ bool RawValuesList::erase(size_t pos, bool is_delete)
             m_raw_values[pos] = NULL;
         }
     }
+}
+
+bool RawValuesList::erase(size_t pos, bool is_delete)
+{
+    if (pos >= m_raw_values_size) {
+        return false;
+    }
+
+    safe_delete(pos);
+    if (!is_delete) {
+        m_raw_values[pos] = NULL;
+        return true;
+    }
+
     std::swap(m_raw_values[pos], m_raw_values[m_raw_values_size - 1]);
     m_raw_values[m_raw_values_size - 1] = NULL;
     --m_raw_values_size;
     return true;
 }
-
 
 int RawValuesList::partition_by_location(int lo, int hi)
 {

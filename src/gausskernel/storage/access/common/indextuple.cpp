@@ -127,6 +127,7 @@ IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, const boo
          * on outside storage.	This should be improved someday.
          */
         Pointer val = DatumGetPointer(values[i]);
+        checkHugeToastPointer((varlena *)val);
         if (VARATT_IS_EXTERNAL(val)) {
             untoasted_values[i] = PointerGetDatum(heap_tuple_fetch_attr((struct varlena*)DatumGetPointer(values[i])));
             untoasted_free[i] = true;

@@ -26,8 +26,12 @@
 #ifndef METACACHEMGR_H
 #define METACACHEMGR_H
 
+#include "pg_config.h"
+
 #include <string>
+#ifndef ENABLE_LITE_MODE
 #include "orc_proto.pb.h"
+#endif
 #include "storage/cache_mgr.h"
 #include "storage/smgr/relfilenode.h"
 
@@ -115,9 +119,11 @@ int CarbonMetaCacheGetBlockSize(CacheSlotId_t slotId);
 void MetaCacheSetBlockWithFileName(CacheSlotId_t slotId, const char* fileName);
 CacheSlotId_t MetaCacheAllocBlock(
     RelFileNodeOld* fileNode, int32 fileID, uint32 stripeOrBlocketID, uint32 columnID, bool& found, int type);
+#ifndef ENABLE_LITE_MODE
 void OrcMetaCacheSetBlock(CacheSlotId_t slotId, uint64 footerStart, const orc::proto::PostScript* postScript,
     const orc::proto::Footer* fileFooter, const orc::proto::StripeFooter* stripeFooter,
     const orc::proto::RowIndex* rowIndex, const char* fileName, const char* dataDNA);
+#endif
 void CarbonMetaCacheSetBlock(CacheSlotId_t slotId, uint64 headerSize, uint64 footerSize, unsigned char* fileHeader,
     unsigned char* fileFooter, const char* fileName, const char* dataDNA);
 
@@ -138,9 +144,11 @@ public:
     void MetaBlockCompleteIO(int slotId);
     int GetOrcMetaBlockSize(CacheSlotId_t slotId);
     int GetCarbonMetaBlockSize(CacheSlotId_t slotId);
+#ifndef ENABLE_LITE_MODE
     void SetOrcMetaBlockValue(CacheSlotId_t slotId, uint64 footerStart, const orc::proto::PostScript* postScript,
         const orc::proto::Footer* fileFooter, const orc::proto::StripeFooter* stripeFooter,
         const orc::proto::RowIndex* rowIndex, const char* fileName, const char* dataDNA);
+#endif
     void SetCarbonMetaBlockValue(CacheSlotId_t slotId, uint64 headerSize, uint64 footerSize, unsigned char* fileHeader,
         unsigned char* fileFooter, const char* fileName, const char* dataDNA);
 

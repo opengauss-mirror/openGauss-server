@@ -28,7 +28,6 @@
 
 typedef struct OptimizerMinibatch {
     OptimizerGD opt;
-    const GradientDescentState *gd_state;
     double learning_rate;
 } OptimizerMinibatch;
 
@@ -37,19 +36,25 @@ static void opt_gd_end_iteration(OptimizerGD *optimizer)
     OptimizerMinibatch *opt = (OptimizerMinibatch *)optimizer;
 
     // decay the learning rate with decay^iterations
-    opt->learning_rate *= gd_get_node(opt->gd_state)->decay;
+    opt->learning_rate *= opt->opt.hyperp->decay;
 }
 
 static void opt_gd_update_batch(OptimizerGD *optimizer, const Matrix *features, const Matrix *dep_var)
 {
     OptimizerMinibatch *opt = (OptimizerMinibatch *)optimizer;
+    GradientDescent *gd_algo = (GradientDescent*)opt->opt.gd_state->tms.algorithm;
 
     // clear gradients of the batch
     matrix_zeroes(&optimizer->gradients);
 
     // update gradients
-    opt->gd_state->algorithm->gradients_callback(gd_get_node(opt->gd_state), features, dep_var, &optimizer->weights,
-        &optimizer->gradients);
+    GradientsConfigGD cfg;
+    cfg.hdr.hyperp = optimizer->hyperp;
+    cfg.hdr.features = features;
+    cfg.hdr.weights = &optimizer->weights;
+    cfg.hdr.gradients = &optimizer->gradients;
+    cfg.dep_var = dep_var;
+    gd_algo->compute_gradients(&cfg.hdr);
 
     elog_matrix(DEBUG1, "optimizer gd: gradients", &optimizer->gradients);
 
@@ -65,14 +70,18 @@ static void opt_gd_release(OptimizerGD *optimizer)
     pfree(optimizer);
 }
 
-OptimizerGD *gd_init_optimizer_gd(const GradientDescentState *gd_state)
+OptimizerGD *gd_init_optimizer_gd(const GradientDescentState *gd_state, HyperparametersGD *hyperp)
 {
     OptimizerMinibatch *opt = (OptimizerMinibatch *)palloc0(sizeof(OptimizerMinibatch));
+    opt->opt.hyperp = hyperp;
     opt->opt.start_iteration = nullptr;
     opt->opt.end_iteration = opt_gd_end_iteration;
     opt->opt.update_batch = opt_gd_update_batch;
     opt->opt.release = opt_gd_release;
-    opt->gd_state = gd_state;
-    opt->learning_rate = gd_get_node(gd_state)->learning_rate;
+    opt->opt.finalize = nullptr;
+    opt->opt.gd_state = gd_state;
+    opt->learning_rate = hyperp->learning_rate;
+    matrix_init(&opt->opt.weights, gd_state->n_features);
+    matrix_init(&opt->opt.gradients, gd_state->n_features);
     return &opt->opt;
 }

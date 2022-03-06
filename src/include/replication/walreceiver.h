@@ -28,7 +28,7 @@
 #include "storage/latch.h"
 #include "storage/spin.h"
 #include "pgxc/barrier.h"
-
+#include "pgxc/pgxc.h"
 
 /*
  * MAXCONNINFO: maximum size of a connection string.
@@ -38,8 +38,24 @@
 #define MAXCONNINFO 1024
 #define HIGHEST_PERCENT 100
 #define STREAMING_START_PERCENT 90
+#define IS_PAUSE_BY_TARGET_BARRIER 0x00000001
+#define IS_CANCEL_LOG_CTRL 0x00000010
+
+#ifdef ENABLE_MULTIPLE_NODES
+#define AM_HADR_CN_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
+            t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && IS_PGXC_COORDINATOR)
+#endif
+
 #define AM_HADR_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
             t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby)
+
+#define IS_DISASTER_RECOVER_MODE \
+    (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
+    g_instance.attr.attr_common.stream_cluster_run_mode == RUN_MODE_STANDBY)
+
+#define IS_CN_DISASTER_RECOVER_MODE \
+    (IS_PGXC_COORDINATOR && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
+    g_instance.attr.attr_common.stream_cluster_run_mode == RUN_MODE_STANDBY)
 
 #define DUMMY_STANDBY_DATADIR "base/dummy_standby"
 
@@ -81,10 +97,8 @@ typedef struct WalRcvCtlBlock {
     XLogRecPtr writePtr;   /* last byte + 1 written out in the standby */
     XLogRecPtr flushPtr;   /* last byte + 1 flushed in the standby */
     XLogRecPtr walStart;
-	XLogRecPtr lastReadPtr;
     int64 walWriteOffset;
     int64 walFreeOffset;
-    int64 walReadOffset;
     bool walIsWriting;
     slock_t mutex;
 
@@ -206,10 +220,13 @@ typedef struct WalRcvData {
     char recoveryStopBarrierId[MAX_BARRIER_ID_LENGTH];
     char recoverySwitchoverBarrierId[MAX_BARRIER_ID_LENGTH];
     char lastRecoveredBarrierId[MAX_BARRIER_ID_LENGTH];
+    char lastReceivedBarrierId[MAX_BARRIER_ID_LENGTH];
     XLogRecPtr lastRecoveredBarrierLSN;
+    XLogRecPtr lastReceivedBarrierLSN;
     XLogRecPtr lastSwitchoverBarrierLSN;
     XLogRecPtr targetSwitchoverBarrierLSN;
     bool isFirstTimeAccessStorage;
+    bool isPauseByTargetBarrier;
     Latch* obsArchLatch;
     struct ArchiveSlotConfig *archive_slot;
     uint32 rcvDoneFromShareStorage;
@@ -221,7 +238,7 @@ typedef struct WalReceiverFunc {
     bool (*walrcv_receive)(int timeout, unsigned char* type, char** buffer, int* len);
     void (*walrcv_send)(const char *buffer, int nbytes);
     void (*walrcv_disconnect)();
-    bool (*walrcv_command)(const char *cmd, char **err);
+    bool (*walrcv_command)(const char *cmd, char **err, int *sqlstate);
     void (*walrcv_identify_system)();
     void (*walrcv_startstreaming)(const LibpqrcvConnectParam *options);
     void (*walrcv_create_slot)(const LibpqrcvConnectParam *options);
@@ -277,6 +294,7 @@ extern void CloseWSDataFileOnDummyStandby(void);
 extern void InitWSDataNumOnDummyStandby(void);
 
 extern WalRcvCtlBlock* getCurrentWalRcvCtlBlock(void);
+
 extern int walRcvWrite(WalRcvCtlBlock* walrcb);
 extern int WSWalRcvWrite(WalRcvCtlBlock* walrcb, char* buf, Size nbytes, XLogRecPtr start_ptr);
 extern void WalRcvXLogClose(void);
@@ -301,11 +319,13 @@ extern void get_failover_host_conninfo_for_dummy(int *repl);
 extern void set_wal_rcv_write_rec_ptr(XLogRecPtr rec_ptr);
 extern void ha_set_rebuild_connerror(HaRebuildReason reason, WalRcvConnError connerror);
 extern void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr);
-extern void XLogWalRcvReceiveInBuf(char *buf, Size nbytes, XLogRecPtr recptr);
 extern void wal_get_ha_rebuild_reason(char *buildReason, ServerMode local_role, bool isRunning);
 extern bool HasBuildReason();
 extern void GetMinLsnRecordsFromHadrCascadeStandby(void);
+extern void XLogWalRecordsPreProcess(char **buf, Size *len, WalDataMessageHeader *msghdr);
+extern int XLogDecompression(const char *buf, Size len, XLogRecPtr dataStart);
 void GetPasswordForHadrStreamingReplication(char user[], char password[]);
+extern char* remove_ipv6_zone(char* addr_src, char* addr_dest, int len);
 
 static inline void WalRcvCtlAcquireExitLock(void)
 {

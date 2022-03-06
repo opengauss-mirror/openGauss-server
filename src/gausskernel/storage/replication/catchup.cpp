@@ -285,6 +285,9 @@ NON_EXEC_STATIC void CatchupMain()
         /* Abort the current transaction in order to recover */
         AbortCurrentTransaction();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
+
         /*
          * Now return to normal top-level context and clear ErrorContext for
          * next time.

@@ -28,6 +28,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_proc.h"
 #include "db4ai/predict_by.h"
+#include "db4ai/explain_model.h"
 #include "access/transam.h"
 #include "storage/smgr/segment.h"
 #include "utils/fmgroids.h"

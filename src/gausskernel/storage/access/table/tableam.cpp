@@ -101,15 +101,19 @@ HeapTuple tableam_tslot_copy_heap_tuple(TupleTableSlot *slot)
     return g_tableam_routines[slot->tts_tupslotTableAm]->tslot_copy_heap_tuple(slot);
 }
 
-void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool should_free)
+void tableam_tslot_store_tuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode)
 {
-    g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tslot_store_tuple(tuple, slot, buffer, should_free);
+    g_tableam_routines[GetTabelAmIndexTuple(tuple)]->tslot_store_tuple(tuple, slot, buffer, shouldFree, batchMode);
 }
-
 
 void tableam_tslot_getsomeattrs(TupleTableSlot *slot, int natts)
 {
     g_tableam_routines[slot->tts_tupslotTableAm]->tslot_getsomeattrs(slot, natts);
+}
+
+void tableam_tslot_formbatch(TupleTableSlot* slot, VectorBatch* batch, int cur_rows, int natts)
+{
+    g_tableam_routines[slot->tts_tupslotTableAm]->tslot_formbatch(slot, batch, cur_rows, natts);
 }
 
 Datum tableam_tslot_getattr(TupleTableSlot *slot, int attnum, bool *isnull)
@@ -129,6 +133,7 @@ bool tableam_tslot_attisnull(TupleTableSlot *slot, int attnum)
 
 Tuple tableam_tslot_get_tuple_from_slot(Relation relation, TupleTableSlot *slot)
 {
+    slot->tts_tupleDescriptor->tdhasuids = RELATION_HAS_UIDS(relation);
     return g_tableam_routines[relation->rd_tam_type]->tslot_get_tuple_from_slot(slot);
 }
 
@@ -397,10 +402,12 @@ TM_Result tableam_tuple_update(Relation relation, Relation parentRelation, ItemP
 
 TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
     LockTupleMode mode, bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
-    Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid)
+    Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
+    int waitSec)
 {
     return g_tableam_routines[relation->rd_tam_type]->tuple_lock(relation, tuple, buffer, cid, mode, nowait, tmfd,
-        allow_lock_self, follow_updates, eval, snapshot, tid, isSelectForUpdate, isUpsert, conflictXid);
+        allow_lock_self, follow_updates, eval, snapshot, tid, isSelectForUpdate, isUpsert, conflictXid,
+        waitSec);
 }
 
 Tuple tableam_tuple_lock_updated(CommandId cid, Relation relation, int lockmode, ItemPointer tid,
@@ -466,6 +473,11 @@ TableScanDesc tableam_scan_begin_sampling(Relation relation, Snapshot snapshot, 
 Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction)
 {
     return g_tableam_routines[sscan->rs_rd->rd_tam_type]->scan_getnexttuple(sscan, direction);
+}
+
+bool tableam_scan_gettuplebatchmode(TableScanDesc sscan, ScanDirection direction)
+{
+    return g_tableam_routines[sscan->rs_rd->rd_tam_type]->scan_GetNextBatch(sscan, direction);
 }
 
 void tableam_scan_getpage(TableScanDesc sscan, BlockNumber page)
@@ -687,14 +699,19 @@ HeapTuple HeapamTslotCopyHeapTuple(TupleTableSlot *slot)
     return heap_slot_copy_heap_tuple(slot);
 }
 
-void HeapamTslotStoreHeapTuple(Tuple tuple, TupleTableSlot* slot, Buffer buffer, bool should_free)
+void HeapamTslotStoreHeapTuple(Tuple tuple, TupleTableSlot* slot, Buffer buffer, bool shouldFree, bool batchMode)
 {
-    heap_slot_store_heap_tuple((HeapTuple)tuple, slot, buffer, should_free);
+    heap_slot_store_heap_tuple((HeapTuple)tuple, slot, buffer, shouldFree, batchMode);
 }
 
 void HeapamTslotGetsomeattrs(TupleTableSlot *slot, int natts)
 {
     heap_slot_getsomeattrs(slot, natts);
+}
+
+void HeapamTslotFormBatch(TupleTableSlot *slot, VectorBatch* batch, int cur_rows, int natts)
+{
+    heap_slot_formbatch(slot, batch, cur_rows, natts);
 }
 
 Datum HeapamTslotGetattr(TupleTableSlot* slot, int attnum, bool* isnull)
@@ -712,7 +729,7 @@ bool HeapamTslotAttisnull(TupleTableSlot* slot, int attnum)
     return heap_slot_attisnull(slot, attnum);
 }
 
-Tuple HeapamTslotGetTupleFromSlot(TupleTableSlot* slot)
+FORCE_INLINE Tuple HeapamTslotGetTupleFromSlot(TupleTableSlot* slot)
 {
     HeapTuple tuple = ExecMaterializeSlot(slot);
     tuple->tupInfo = 0;
@@ -860,12 +877,13 @@ TM_Result HeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPoin
 }
 
 TM_Result HeapamTupleLock(Relation relation, Tuple tuple, Buffer *buffer,
-                            CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
-                            bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot, 
-                            ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid)
+    CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
+    bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
+    ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
+    int waitSec)
 {
     return heap_lock_tuple(relation, (HeapTuple)tuple, buffer, cid, mode, nowait, follow_updates, tmfd,
-        allow_lock_self);
+                           allow_lock_self, waitSec);
 }
 
 Tuple HeapamTupleLockUpdated(CommandId cid, Relation relation, int lockmode, ItemPointer tid,
@@ -991,6 +1009,9 @@ void HeapamTcapPromoteLock (Relation relation, LOCKMODE *lockmode)
 
 bool HeapamTcapValidateSnap(Relation relation, Snapshot snap)
 {
+    if (RelationIsUstoreIndex(relation)) {
+        return true;
+    }
     return snap->xmin >= GetGlobalOldestXmin();
 }
 
@@ -1018,6 +1039,7 @@ const TableAmRoutine g_heapam_methods = {
     tslot_copy_heap_tuple : HeapamTslotCopyHeapTuple,
     tslot_store_tuple : HeapamTslotStoreHeapTuple,
     tslot_getsomeattrs : HeapamTslotGetsomeattrs,
+    tslot_formbatch :  HeapamTslotFormBatch,
     tslot_getattr : HeapamTslotGetattr,
     tslot_getallattrs : HeapamTslotGetallattrs,
     tslot_attisnull : HeapamTslotAttisnull,
@@ -1075,6 +1097,7 @@ const TableAmRoutine g_heapam_methods = {
     scan_markpos : HeapamScanMarkpos,
     scan_init_parallel_seqscan : HeapamScanInitParallelSeqscan,
     scan_getnexttuple : HeapamScanGetnexttuple,
+    scan_GetNextBatch : HeapamGetNextBatchMode,
     scan_getpage : HeapamScanGetpage,
     scan_gettuple_for_verify : HeapamGetNextForVerify,
     scan_end : HeapamScanEnd,
@@ -1173,6 +1196,11 @@ void UHeapamTslotGetsomeattrs(TupleTableSlot *slot, int natts)
 void UHeapamTslotGetallattrs(TupleTableSlot *slot)
 {
     UHeapSlotGetAllAttrs(slot);
+}
+
+void UHeapamTslotFormBatch(TupleTableSlot *slot, VectorBatch* batch, int cur_rows, int natts)
+{
+    UHeapSlotFormBatch(slot, batch, cur_rows, natts);
 }
 
 Datum UHeapamTslotGetattr(TupleTableSlot *slot, int attnum, bool *isnull)
@@ -1474,12 +1502,12 @@ void UHeapamScanRescan(TableScanDesc sscan, ScanKey key)
 
 void UHeapamScanRestrpos(TableScanDesc sscan)
 {
-    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("not supported in ustore yet")));
+    return UHeapRestRpos(sscan);
 }
 
 void UHeapamScanMarkpos(TableScanDesc sscan)
 {
-    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("not supported in ustore yet")));
+    return UHeapMarkPos(sscan);
 }
 
 
@@ -1494,6 +1522,23 @@ Tuple UHeapamScanGetnexttuple(TableScanDesc sscan, ScanDirection direction)
     return (Tuple)UHeapGetNext(sscan, direction);
 }
 
+bool UHeapamGetNextBatchMode(TableScanDesc sscan, ScanDirection direction)
+{
+    /* Note: no locking manipulations needed */
+    bool finished = false;
+    UHeapScanDesc scan = (UHeapScanDesc)sscan;
+
+    scan->rs_base.rs_ctupRows = 0;
+    Assert(ScanDirectionIsForward(direction));
+    if (likely(scan->rs_base.rs_pageatatime)) {
+        finished = UHeapGetTupPageBatchmode(scan, direction);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR),
+            errmsg("relation %s is temporarily unavalible", RelationGetRelationName(scan->rs_base.rs_rd))));
+    }
+    return finished;
+}
+
 void UHeapamScanGetpage(TableScanDesc sscan, BlockNumber page)
 {
     ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("not supported in ustore yet")));
@@ -1504,9 +1549,9 @@ Tuple UHeapamGetNextForVerify(TableScanDesc sscan, ScanDirection direction, bool
     return (Tuple)UHeapGetNextForVerify(sscan, direction, isValidRelationPage);
 }
 
-void UHeapamTslotStoreUHeapTuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree)
+void UHeapamTslotStoreUHeapTuple(Tuple tuple, TupleTableSlot *slot, Buffer buffer, bool shouldFree, bool batchMode)
 {
-    UHeapSlotStoreUHeapTuple((UHeapTuple)tuple, slot, shouldFree);
+    UHeapSlotStoreUHeapTuple((UHeapTuple)tuple, slot, shouldFree, batchMode);
 }
 
 /* ------------------------------------------------------------------------
@@ -1610,16 +1655,17 @@ TM_Result UHeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPoi
     if (mode != NULL) {
         *mode = LockTupleExclusive;
     }
+
     return result;
 }
 
 
 TM_Result UHeapamTupleLock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid, LockTupleMode mode,
     bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
-    ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid)
+    ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid, int waitSec)
 {
     return UHeapLockTuple(relation, (UHeapTuple)tuple, buffer, cid, mode, nowait, tmfd, follow_updates, eval, snapshot,
-        isSelectForUpdate, allow_lock_self, isUpsert, conflictXid);
+        isSelectForUpdate, allow_lock_self, isUpsert, conflictXid, waitSec);
 }
 
 Tuple UHeapamTupleLockUpdated(CommandId cid, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax,
@@ -1690,6 +1736,7 @@ const TableAmRoutine g_ustoream_methods = {
     tslot_copy_heap_tuple : UHeapamTslotCopyHeapTuple,
     tslot_store_tuple : UHeapamTslotStoreUHeapTuple,
     tslot_getsomeattrs : UHeapSlotGetSomeAttrs,
+    tslot_formbatch :  UHeapamTslotFormBatch,
     tslot_getattr : UHeapamTslotGetattr,
     tslot_getallattrs : UHeapamTslotGetallattrs,
     tslot_attisnull : UHeapamTslotAttisnull,
@@ -1747,6 +1794,7 @@ const TableAmRoutine g_ustoream_methods = {
 
     scan_init_parallel_seqscan : HeapamScanInitParallelSeqscan,
     scan_getnexttuple : UHeapamScanGetnexttuple,
+    scan_GetNextBatch : UHeapamGetNextBatchMode,
     scan_getpage : UHeapamScanGetpage,
 
     scan_gettuple_for_verify : UHeapamGetNextForVerify,

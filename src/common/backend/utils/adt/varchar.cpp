@@ -142,6 +142,12 @@ static BpChar* bpchar_input(const char* s, size_t len, int32 atttypmod)
 
         maxlen = atttypmod - VARHDRSZ;
         if (len > maxlen) {
+
+            if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+                ereport(ERROR,
+                    (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                        errmsg("value too long for type character(%d)", (int)maxlen)));
+
             /* Verify that extra characters are spaces, and clip them off */
             size_t mbmaxlen = pg_mbcharcliplen(s, len, maxlen);
             size_t j;
@@ -282,6 +288,12 @@ Datum bpchar(PG_FUNCTION_ARGS)
         PG_RETURN_BPCHAR_P(source);
 
     if (len > maxlen) {
+
+        if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+            ereport(ERROR,
+                (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                    errmsg("value too long for type character(%d)", maxlen)));
+
         /* Verify that extra characters are spaces, and clip them off */
         size_t maxmblen;
 
@@ -436,6 +448,11 @@ static VarChar* varchar_input(const char* s, size_t len, int32 atttypmod)
 
     maxlen = atttypmod - VARHDRSZ;
 
+    if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+        ereport(ERROR,
+            (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                errmsg("value too long for type character varying(%d)", (int)maxlen)));
+
     if (atttypmod >= (int32)VARHDRSZ && len > maxlen) {
         /* Verify that extra characters are spaces, and clip them off */
         size_t mbmaxlen = pg_mbcharcliplen(s, len, maxlen);
@@ -578,6 +595,10 @@ Datum varchar(PG_FUNCTION_ARGS)
         PG_RETURN_VARCHAR_P(source);
 
     /* only reach here if string is too long... */
+    if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+        ereport(ERROR,
+            (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                errmsg("value too long for type character varying(%d)", maxlen)));
 
     /* truncate multibyte string preserving multibyte boundary */
     maxmblen = pg_mbcharcliplen(s_data, len, maxlen);
@@ -1071,6 +1092,11 @@ static NVarChar2* nvarchar2_input(const char* s, size_t len, int32 atttypmod)
 
     maxlen = atttypmod - VARHDRSZ;
 
+    if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+        ereport(ERROR,
+            (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                errmsg("value too long for type nvarchar2(%d)", (int)maxlen)));
+
     if (atttypmod >= (int32)VARHDRSZ && len > maxlen) {
         /* Verify that extra characters are spaces, and clip them off */
         size_t mbmaxlen = pg_mbcharcliplen_orig(s, len, maxlen);
@@ -1180,6 +1206,11 @@ Datum nvarchar2(PG_FUNCTION_ARGS)
     /* No work if typmod is invalid or supplied data fits it already */
     if (maxlen < 0 || len <= maxlen)
         PG_RETURN_NVARCHAR2_P(source);
+
+    if (len > maxlen && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT)
+        ereport(ERROR,
+            (errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                errmsg("value too long for type nvarchar2(%d)", maxlen)));
 
     /* only reach here if string is too long... */
 

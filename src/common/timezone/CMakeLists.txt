@@ -14,7 +14,7 @@ set(TGT_zic_INC
 set(zic_DEF_OPTIONS ${MACRO_OPTIONS})
 set(zic_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(zic_LINK_OPTIONS ${BIN_LINK_OPTIONS})
-set(zic_LINK_LIBS libpgport.a -ldl -lm -lssl -lcrypto -lsecurec -pthread -lrt -lz -lminiunz)
+set(zic_LINK_LIBS libpgport.a -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -pthread -lrt -lz -lminiunz)
 add_bintarget(zic TGT_zic_SRC TGT_zic_INC "${zic_DEF_OPTIONS}" "${zic_COMPILE_OPTIONS}" "${zic_LINK_OPTIONS}" "${zic_LINK_LIBS}")
 add_dependencies(zic pgport_static)
 target_link_directories(zic PUBLIC

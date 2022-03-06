@@ -17,6 +17,7 @@
 #include "access/xlogdefs.h"
 #include "datatype/timestamp.h"
 #include "replication/replicainternal.h"
+#include "pgxc/barrier.h"
 #define XLOG_NAME_LENGTH 24
 
 /*
@@ -221,6 +222,14 @@ typedef struct StandbyReplyMessage {
      * message, to avoid a timeout disconnect.
      */
     bool replyRequested;
+
+    /* flag array
+     * 0x00000001 flag IS_PAUSE_BY_TARGET_BARRIER
+     * 
+     * 0x00000010 flag IS_CANCEL_LOG_CTRL
+     * If this flag is true, the walsend will set
+     */
+    uint32 replyFlags;
 } StandbyReplyMessage;
 
 /*
@@ -259,12 +268,32 @@ typedef struct StandbySwitchRequestMessage {
  * switchover request message in the streaming dr (message type '').  This is wrapped within
  * a CopyData message at the FE/BE protocol level.
  *
- * Note that the data length is not specified here.
+ *
  */
 typedef struct {
     /* The barrier LSN used by the streaming dr switchover this time */
     XLogRecPtr switchoverBarrierLsn;
 } HadrSwitchoverMessage;
+
+/*
+ * Reply message from hadr standby (message type 'R').
+ *
+ * Note that the data length is not specified here.
+ */
+typedef struct HadrReplyMessage {
+    /* The target barrier Id in standby cluster */
+    char targetBarrierId[MAX_BARRIER_ID_LENGTH];
+    /* receiver's system clock at the time of transmission */
+    TimestampTz sendTime;
+    /* The target barrier LSN used by the streaming dr */
+    XLogRecPtr targetBarrierLsn;
+    /* reserved fields */
+    uint32 pad1;
+    uint32 pad2;
+    uint64 pad3;
+    uint64 pad4;
+} HadrReplyMessage;
+
 
 /*
  * Maximum data payload in a WAL data message.	Must be >= XLOG_BLCKSZ.

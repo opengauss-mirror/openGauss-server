@@ -40,67 +40,24 @@
 #include "access/extreme_rto/redo_item.h"
 #include "postmaster/postmaster.h"
 #include "access/xlog.h"
+#include "access/multi_redo_api.h"
 
 namespace extreme_rto {
-
-/* Run from the dispatcher thread. */
-RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 designatedWorker, List *expectedTLIs,
-                         TimestampTz recordXTime, bool buseoriginal, bool isForceAll)
+void DumpItem(RedoItem *item, const char *funcName)
 {
-    RedoItem *item = GetRedoItemPtr(record);
-    if (t_thrd.xlog_cxt.redoItemIdx == 0) {
-        /*
-         * Some blocks are optional and redo functions rely on the correct
-         * value of in_use to determine if optional blocks are present.
-         * Explicitly set all unused blocks' in_use to false.
-         */
-        for (int i = record->max_block_id + 1; i <= XLR_MAX_BLOCK_ID; i++)
-            item->record.blocks[i].in_use = false;
+    if (item == &g_redoEndMark || item == &g_terminateMark) {
+        return;
     }
-    if (buseoriginal && (t_thrd.xlog_cxt.redoItemIdx == 0)) {
-        t_thrd.xlog_cxt.redoItemIdx++;
-    } else {
-        /* if shareCount is 1, we should make a copy of record in NewReaderState function */
-        Assert(shareCount == 1);
-        /* not only need copy state, but also need copy data */
-        item = GetRedoItemPtr(NewReaderState(record, true));
-    }
-
-    item->oldVersion = t_thrd.xlog_cxt.redo_oldversion_xlog;
-    item->needImmediateCheckpoint = false;
-    item->needFullSyncCheckpoint = false;
-    item->shareCount = shareCount;
-    item->designatedWorker = designatedWorker;
-    item->expectedTLIs = expectedTLIs;
-    item->recordXTime = recordXTime;
-    item->freeNext = NULL;
-    item->syncXLogReceiptTime = t_thrd.xlog_cxt.XLogReceiptTime;
-    item->syncXLogReceiptSource = t_thrd.xlog_cxt.XLogReceiptSource;
-    item->RecentXmin = u_sess->utils_cxt.RecentXmin;
-    item->syncServerMode = GetServerMode();
-    item->isForceAll = isForceAll;
-    
-    pg_atomic_init_u32(&item->refCount, shareCount);
-    pg_atomic_init_u32(&item->replayed, 0);
-    pg_atomic_init_u32(&item->blkShareCount, 0);
-    pg_atomic_init_u32(&item->distributeCount, shareCount);
-    return item;
+    ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                     errmsg("[REDO_LOG_TRACE]DiagLogRedoRecord: %s, ReadRecPtr:%lu,EndRecPtr:%lu,"
+                            "imcheckpoint:%u, recordXTime:%lu,"
+                            "syncXLogReceiptSource:%d, RecentXmin:%lu, syncServerMode:%u",
+                            funcName, item->record.ReadRecPtr, item->record.EndRecPtr,
+                            item->needImmediateCheckpoint, item->recordXTime,
+                            item->syncXLogReceiptSource, item->RecentXmin, item->syncServerMode)));
+    DiagLogRedoRecord(&(item->record), funcName);
 }
 
-void ApplyRedoRecord(XLogReaderState *record, bool bOld)
-{
-    t_thrd.xlog_cxt.redo_oldversion_xlog = bOld;
-    ErrorContextCallback errContext;
-    errContext.callback = rm_redo_error_callback;
-    errContext.arg = (void *)record;
-    errContext.previous = t_thrd.log_cxt.error_context_stack;
-    t_thrd.log_cxt.error_context_stack = &errContext;
-    if (module_logging_is_on(MOD_REDO)) {
-        DiagLogRedoRecord(record, "ApplyRedoRecord");
-    }
-    RmgrTable[XLogRecGetRmid(record)].rm_redo(record);
 
-    t_thrd.log_cxt.error_context_stack = errContext.previous;
-    t_thrd.xlog_cxt.redo_oldversion_xlog = false;
-}
+
 }  // namespace extreme_rto

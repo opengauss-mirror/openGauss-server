@@ -118,7 +118,6 @@ static void cache_array_element_properties(TypeCacheEntry* typentry);
 static bool record_fields_have_equality(TypeCacheEntry* typentry);
 static bool record_fields_have_compare(TypeCacheEntry* typentry);
 static void cache_record_field_properties(TypeCacheEntry* typentry);
-static void TypeCacheRelCallback(Datum arg, Oid relid);
 static void load_enum_cache_data(TypeCacheEntry* tcache);
 static EnumItem* find_enumitem(TypeCacheEnumData* enum_data, Oid arg);
 static int enum_oid_cmp(const void* left, const void* right);
@@ -135,12 +134,19 @@ void init_type_cache()
     ctl.keysize = sizeof(Oid);
     ctl.entrysize = sizeof(TypeCacheEntry);
     ctl.hash = oid_hash;
-    ctl.hcxt = u_sess->cache_mem_cxt;
-    u_sess->tycache_cxt.TypeCacheHash =
-        hash_create("Type information cache", 64, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-
-    /* Also set up a callback for relcache SI invalidations */
-    CacheRegisterRelcacheCallback(TypeCacheRelCallback, (Datum)0);
+    if (EnableLocalSysCache()) {
+        ctl.hcxt = t_thrd.lsc_cxt.lsc->lsc_mydb_memcxt;
+        t_thrd.lsc_cxt.lsc->TypeCacheHash =
+            hash_create("Type information cache", 64, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        /* Also set up a callback for relcache SI invalidations */
+        CacheRegisterThreadRelcacheCallback(TypeCacheRelCallback, (Datum)0);
+    } else {
+        ctl.hcxt = u_sess->cache_mem_cxt;
+        u_sess->tycache_cxt.TypeCacheHash =
+            hash_create("Type information cache", 64, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        /* Also set up a callback for relcache SI invalidations */
+        CacheRegisterSessionRelcacheCallback(TypeCacheRelCallback, (Datum)0);
+    }
 }
 /*
  * lookup_type_cache
@@ -159,12 +165,12 @@ TypeCacheEntry* lookup_type_cache(Oid type_id, int flags)
     bool found = false;
     errno_t rc;
 
-    if (u_sess->tycache_cxt.TypeCacheHash == NULL) {
+    if (GetTypeCacheHash() == NULL) {
         init_type_cache();
     }
 
     /* Try to look up an existing entry */
-    typentry = (TypeCacheEntry*)hash_search(u_sess->tycache_cxt.TypeCacheHash, (void*)&type_id, HASH_FIND, NULL);
+    typentry = (TypeCacheEntry*)hash_search(GetTypeCacheHash(), (void*)&type_id, HASH_FIND, NULL);
     if (typentry == NULL) {
         /*
          * If we didn't find one, we want to make one.  But first look up the
@@ -187,7 +193,7 @@ TypeCacheEntry* lookup_type_cache(Oid type_id, int flags)
 
 
         /* Now make the typcache entry */
-        typentry = (TypeCacheEntry*)hash_search(u_sess->tycache_cxt.TypeCacheHash, (void*)&type_id, HASH_ENTER, &found);
+        typentry = (TypeCacheEntry*)hash_search(GetTypeCacheHash(), (void*)&type_id, HASH_ENTER, &found);
         Assert(!found); /* it wasn't there a moment ago */
 
         rc = memset_s(typentry, sizeof(TypeCacheEntry), 0, sizeof(TypeCacheEntry));
@@ -373,15 +379,15 @@ TypeCacheEntry* lookup_type_cache(Oid type_id, int flags)
 
         eq_opr_func = get_opcode(typentry->eq_opr);
         if (eq_opr_func != InvalidOid)
-            fmgr_info_cxt(eq_opr_func, &typentry->eq_opr_finfo, u_sess->cache_mem_cxt);
+            fmgr_info_cxt(eq_opr_func, &typentry->eq_opr_finfo, LocalMyDBCacheMemCxt());
     }
     if ((flags & TYPECACHE_CMP_PROC_FINFO) && typentry->cmp_proc_finfo.fn_oid == InvalidOid &&
         typentry->cmp_proc != InvalidOid) {
-        fmgr_info_cxt(typentry->cmp_proc, &typentry->cmp_proc_finfo, u_sess->cache_mem_cxt);
+        fmgr_info_cxt(typentry->cmp_proc, &typentry->cmp_proc_finfo, LocalMyDBCacheMemCxt());
     }
     if ((flags & TYPECACHE_HASH_PROC_FINFO) && typentry->hash_proc_finfo.fn_oid == InvalidOid &&
         typentry->hash_proc != InvalidOid) {
-        fmgr_info_cxt(typentry->hash_proc, &typentry->hash_proc_finfo, u_sess->cache_mem_cxt);
+        fmgr_info_cxt(typentry->hash_proc, &typentry->hash_proc_finfo, LocalMyDBCacheMemCxt());
     }
 
     /*
@@ -478,12 +484,12 @@ static void load_rangetype_info(TypeCacheEntry* typentry)
     }
 
     /* set up cached fmgrinfo structs */
-    fmgr_info_cxt(cmpFnOid, &typentry->rng_cmp_proc_finfo, u_sess->cache_mem_cxt);
+    fmgr_info_cxt(cmpFnOid, &typentry->rng_cmp_proc_finfo, LocalMyDBCacheMemCxt());
     if (OidIsValid(canonicalOid)) {
-        fmgr_info_cxt(canonicalOid, &typentry->rng_canonical_finfo, u_sess->cache_mem_cxt);
+        fmgr_info_cxt(canonicalOid, &typentry->rng_canonical_finfo, LocalMyDBCacheMemCxt());
     }
     if (OidIsValid(subdiffOid)) {
-        fmgr_info_cxt(subdiffOid, &typentry->rng_subdiff_finfo, u_sess->cache_mem_cxt);
+        fmgr_info_cxt(subdiffOid, &typentry->rng_subdiff_finfo, LocalMyDBCacheMemCxt());
     }
 
     /* Lastly, set up link to the element type --- this marks data valid */
@@ -815,13 +821,13 @@ void assign_record_type_typmod(TupleDesc tupDesc)
  * hashtable that indexes composite-type typcache entries by their typrelid.
  * But it's still not clear it's worth the trouble.
  */
-static void TypeCacheRelCallback(Datum arg, Oid relid)
+void TypeCacheRelCallback(Datum arg, Oid relid)
 {
     HASH_SEQ_STATUS status;
     TypeCacheEntry* typentry = NULL;
 
-    /* u_sess->tycache_cxt.TypeCacheHash must exist, else this callback wouldn't be registered */
-    hash_seq_init(&status, u_sess->tycache_cxt.TypeCacheHash);
+    /* GetTypeCacheHash() must exist, else this callback wouldn't be registered */
+    hash_seq_init(&status, GetTypeCacheHash());
     while ((typentry = (TypeCacheEntry*)hash_seq_search(&status)) != NULL) {
         if (typentry->typtype != TYPTYPE_COMPOSITE) {
             continue; /* skip non-composites */

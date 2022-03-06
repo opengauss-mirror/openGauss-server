@@ -9,91 +9,417 @@ ANALYZE t1;
 CREATE TABLE t2 (col1 int, col2 int);
 INSERT INTO t2 VALUES(generate_series(1, 1000),generate_series(1, 1000));
 ANALYZE t2;
+CREATE TEMP TABLE mytemp1 (col1 int, col2 int, col3 text);
+INSERT INTO mytemp1 VALUES(generate_series(1, 3000),generate_series(1, 3000),repeat( chr(int4(random()*26)+65),4));
+ANALYZE mytemp1;
 ---single query
 --test where
-SELECT  * FROM gs_index_advise('SELECT * FROM t1 WHERE col1 = 10');
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT * FROM t1 WHERE col1 = 10') as a;
  schema | table | column 
 --------+-------+--------
- public | t1    | (col1)
+ public | t1    | col1
 (1 row)
 
 --test join
-SELECT  * FROM gs_index_advise('SELECT * FROM t1 join t2 on t1.col1 = t2.col1');
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT * FROM t1 join t2 on t1.col1 = t2.col1') as a;
  schema | table | column 
 --------+-------+--------
- public | t1    | (col1)
+ public | t1    | col1
  public | t2    | 
 (2 rows)
 
 --test multi table
-SELECT  * FROM gs_index_advise('SELECT count(*), t2.col1 FROM t1 join t2 on t1.col2 = t2.col2 WHERE t2.col2 > 2 GROUP BY t2.col1 ORDER BY t2.col1');
+SELECT  a.schema, a.table, a.column  FROM gs_index_advise('SELECT count(*), t2.col1 FROM t1 join t2 on t1.col2 = t2.col2 WHERE t2.col2 > 2 GROUP BY t2.col1 ORDER BY t2.col1') as a;
  schema | table | column 
 --------+-------+--------
- public | t1    | (col2)
- public | t2    | (col1)
+ public | t1    | col2
+ public | t2    | col1
 (2 rows)
 
 --test order by
-SELECT  * FROM gs_index_advise('SELECT * FROM t1 ORDER BY 2');
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT * FROM t1 ORDER BY 2') as a;
  schema | table | column 
 --------+-------+--------
- public | t1    | (col2)
+ public | t1    | col2
 (1 row)
 
-SELECT  * FROM gs_index_advise('SELECT * FROM t1 as a WHERE a.col2 in (SELECT col1 FROM t2 ORDER BY 1) ORDER BY 2');
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT * FROM t1 as a WHERE a.col2 in (SELECT col1 FROM t2 ORDER BY 1) ORDER BY 2') as a;
  schema | table | column 
 --------+-------+--------
- public | t1    | (col2)
- public | t2    | 
+ public | t1    | col2
+ public | t2    | col1
 (2 rows)
 
-SELECT  * FROM gs_index_advise('SELECT * FROM t1 WHERE col1 > 10 ORDER BY 1,col2');
- schema | table |   column    
---------+-------+-------------
- public | t1    | (col1,col2)
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT * FROM t1 WHERE col1 > 10 ORDER BY 1,col2') as a;
+ schema | table |  column   
+--------+-------+-----------
+ public | t1    | col1,col2
 (1 row)
 
-SELECT  * FROM gs_index_advise('SELECT *, *FROM t1 ORDER BY 2, 4');
- schema | table |   column    
---------+-------+-------------
- public | t1    | (col2,col1)
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT *, *FROM t1 ORDER BY 2, 4') as a;
+ schema | table |  column   
+--------+-------+-----------
+ public | t1    | col2,col1
 (1 row)
 
-SELECT  * FROM gs_index_advise('SELECT *, col2 FROM t1 ORDER BY 1, 3');
- schema | table |   column    
---------+-------+-------------
- public | t1    | (col1,col3)
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT *, col2 FROM t1 ORDER BY 1, 3') as a;
+ schema | table |  column   
+--------+-------+-----------
+ public | t1    | col1,col3
 (1 row)
 
 --test string overlength
-SELECT  * FROM gs_index_advise('SELECT * FROM t1 where col3 in (''aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'',''bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'',''ccccccccccccccccccccccccccccccccccccccc'',''ddddddddddddddddddddddddddddddddddddddd'',''ffffffffffffffffffffffffffffffffffffffff'',''ggggggggggggggggggggggggggggggggggggggggggggggggggg'',''ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt'',''vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv'',''ggmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm'')');
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT * FROM t1 where col3 in (''aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'',''bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'',''ccccccccccccccccccccccccccccccccccccccc'',''ddddddddddddddddddddddddddddddddddddddd'',''ffffffffffffffffffffffffffffffffffffffff'',''ggggggggggggggggggggggggggggggggggggggggggggggggggg'',''ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt'',''vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv'',''ggmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm'')') as a;
  schema | table | column 
 --------+-------+--------
- public | t1    | (col3)
+ public | t1    | col3
 (1 row)
+
+--test union all
+SELECT a.schema, a.table, a.column FROM gs_index_advise('select * from ((select col1, col2 from t1 where col1=1) union all (select col1, col2 from t2 where col1=1))') as a;
+ schema | table | column 
+--------+-------+--------
+ public | t1    | col1
+ public | t2    | col1
+(2 rows)
+
+--test insert
+SELECT a.schema, a.table, a.column FROM gs_index_advise('INSERT INTO t2 (SELECT col1, col2 from t1 where col1=1)') as a;
+ERROR:  can not advise for the query because not found a select statement.
+--test delete
+SELECT a.schema, a.table, a.column FROM gs_index_advise('DELETE FROM t1 where col1 > (SELECT COUNT(*) from t1 where col1<1000)') as a;
+ERROR:  can not advise for the query because not found a select statement.
+--test update
+SELECT a.schema, a.table, a.column FROM gs_index_advise('UPDATE t1 SET col1=(SELECT col2 from t2 where col1=10)') as a;
+ERROR:  can not advise for the query because not found a select statement.
+--test nested select
+SELECT a.schema, a.table, a.column FROM gs_index_advise('select count(*) from (select t1.col1, t2.col2 from t1 join t2 on t1.col1 = t2.col1)') as a;
+ schema | table | column 
+--------+-------+--------
+ public | t1    | col1
+ public | t2    | 
+(2 rows)
+
+--test temp table
+SELECT  a.schema, a.table, a.column FROM gs_index_advise('SELECT * FROM mytemp1 WHERE col1 = 10') as a;
+WARNING:  can not advise for table mytemp1 due to invalid oid or irregular table.
+ERROR:  can not advise for the query because can not recognize involved tables.
+--test complex sql
+SELECT a.schema, a.table, a.column FROM gs_index_advise('select * from ((select t1.col1, t2.col2 from t1 join t2 on t1.col1 = t2.col1) union all (select col1, col2 from t1 where col1=col2 and col2>200 and col3 in (''aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'',''bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'',''ccccccccccccccccccccccccccccccccccccccc'',''ddddddddddddddddddddddddddddddddddddddd'',''ffffffffffffffffffffffffffffffffffffffff'',''ggggggggggggggggggggggggggggggggggggggggggggggggggg'',''ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt'',''vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv'',''ggmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm'') order by col3)) order by col2 limit 10') as a;
+ schema | table | column 
+--------+-------+--------
+ public | t1    | col1
+ public | t1    | col3
+ public | t2    | 
+(3 rows)
+
+SELECT a.schema, a.table, a.column FROM gs_index_advise('select * from ((SELECT t1.col1, t1.col2 from t1 where col1=col2 and col1<99) UNION ALL (select col2, col1 from t1 where col1=col2 and col2>200 order by col1 DESC)) as t3 join t2 on t3.col1 = t2.col1 where t2.col2=4 and t3.col1<100 and t2.col1=4 order by t3.col1, t2.col2 DESC limit 100') as a;
+ schema | table |  column   
+--------+-------+-----------
+ public | t2    | col2,col1
+ public | t1    | col1
+(2 rows)
 
 ---virtual index
 --test hypopg_create_index
 SELECT * FROM hypopg_create_index('CREATE INDEX ON t1(col1)');
  indexrelid |      indexname       
 ------------+----------------------
---? .*| .*btree_t1_col1
+--? .*|.*btree_t1_col1
 (1 row)
 
---test hypopg_display_index
+SELECT * FROM hypopg_create_index('CREATE INDEX ON t2(col1)');
+ indexrelid |      indexname       
+------------+----------------------
+--? .*|.*btree_t2_col1
+(1 row)
+
+SELECT * FROM hypopg_create_index('SELECT * from t1');
+ERROR:  hypopg: SQL order #1 is not a CREATE INDEX statement
+SELECT * FROM hypopg_create_index('UPDATE t2 SET col1=(SELECT col2 from t2 where col1=10)');
+ERROR:  hypopg: SQL order #1 is not a CREATE INDEX statement
+SELECT * FROM hypopg_create_index('DELETE from t2 where col1 <10');
+ERROR:  hypopg: SQL order #1 is not a CREATE INDEX statement
+SELECT * FROM hypopg_create_index('INSERT INTO t2 VALUES(generate_series(1001, 2000),generate_series(1001, 2000))');
+ERROR:  hypopg: SQL order #1 is not a CREATE INDEX statement
+--test explain
 set enable_hypo_index = on;explain SELECT * FROM t1 WHERE col1 = 100;
                                    QUERY PLAN                                   
 --------------------------------------------------------------------------------
---? Index Scan using .*btree_t1_col1 on t1 .*
+--? Index Scan using .*btree_t1_col1 on t1.*
    Index Cond: (col1 = 100)
 (2 rows)
 
---test hypopg_drop_index
-SELECT * FROM hypopg_display_index();
-      indexname       | indexrelid | table | column 
-----------------------+------------+-------+--------
---?.*btree_t1_col1 |.*| t1    | (col1)
+explain UPDATE t1 SET col1=0 where col1=2;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+--? Update on t1.*
+--?   ->  Index Scan using .*btree_t1_col1 on t1.*
+         Index Cond: (col1 = 2)
+(3 rows)
+
+explain UPDATE t1 SET col1=(SELECT col2 from t2 where col1=10);
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+--? Update on t1.*
+   InitPlan 1 (returns $0)
+--?     ->  Index Scan using .*btree_t2_col1 on t2.*
+           Index Cond: (col1 = 10)
+--?   ->  Seq Scan on t1.*
+(5 rows)
+
+explain INSERT INTO t1 SELECT * from t1 where col1=10;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+--? Insert on t1.*
+--?   ->  Index Scan using .*btree_t1_col1 on t1.*
+         Index Cond: (col1 = 10)
+(3 rows)
+
+explain DELETE FROM t1 where col1 > (SELECT COUNT(*) from t1 where col1<1000);
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+--? Delete on t1.*
+   InitPlan 1 (returns $0)
+--?     ->  Aggregate.*
+--?           ->  Index Only Scan using .*btree_t1_col1 on t1.*
+                 Index Cond: (col1 < 1000)
+--?   ->  Index Scan using .*btree_t1_col1 on t1.*
+         Index Cond: (col1 > $0)
+(7 rows)
+
+--test partition table
+create table range_part_a(
+stu_id varchar2(100),
+stu_name varchar2(100),
+sex varchar2(1),
+credit integer default 0
+)partition by range (credit)
+(partition p_range_1 values less than (60),
+partition p_range_2 values less than (120),
+partition p_range_3 values less than (180),
+partition p_range_4 values less than (240),
+partition p_range_6 values less than (maxvalue)
+);
+create table range_part_b(
+stu_id varchar2(100),
+stu_name varchar2(100),
+sex varchar2(1),
+credit integer default 0
+)partition by range (credit)
+(partition p_range_1 values less than (60),
+partition p_range_2 values less than (120),
+partition p_range_3 values less than (180),
+partition p_range_4 values less than (240),
+partition p_range_6 values less than (maxvalue)
+);
+CREATE TABLE range_subpart_a(
+col_1 int,
+col_2 int,
+col_3 VARCHAR2 ( 30 ) ,
+col_4 int
+)PARTITION BY RANGE (col_1) SUBPARTITION BY RANGE (col_2)
+(PARTITION p_range_1 VALUES LESS THAN( 1000 )
+  (SUBPARTITION p_range_1_1 VALUES LESS THAN( 50 ),
+  SUBPARTITION p_range_1_2 VALUES LESS THAN( MAXVALUE )
+  ),
+PARTITION p_range_2 VALUES LESS THAN( 2001 )
+  (SUBPARTITION p_range_2_1 VALUES LESS THAN( 50 ),
+  SUBPARTITION p_range_2_2 VALUES LESS THAN( MAXVALUE )
+  )
+);
+CREATE TABLE range_subpart_b(
+col_1 int,
+col_2 int,
+col_3 VARCHAR2 ( 30 ) ,
+col_4 int
+)PARTITION BY RANGE (col_1) SUBPARTITION BY RANGE (col_2)
+(PARTITION p_range_1 VALUES LESS THAN( 1000 )
+  (SUBPARTITION p_range_1_1 VALUES LESS THAN( 50 ),
+  SUBPARTITION p_range_1_2 VALUES LESS THAN( MAXVALUE )
+  ),
+PARTITION p_range_2 VALUES LESS THAN( 30001 )
+  (SUBPARTITION p_range_2_1 VALUES LESS THAN( 50 ),
+  SUBPARTITION p_range_2_2 VALUES LESS THAN( MAXVALUE )
+  )
+);
+INSERT INTO range_part_a VALUES(repeat( chr(int4(random()*26)+65),4),repeat( chr(int4(random()*26)+65),4),repeat( chr(int4(random()*26)+65),1),generate_series(1, 2000));
+ANALYZE range_part_a;
+INSERT INTO range_part_b VALUES(repeat( chr(int4(random()*26)+65),4),repeat( chr(int4(random()*26)+65),4),repeat( chr(int4(random()*26)+65),1),generate_series(1, 3000));
+ANALYZE range_part_b;
+INSERT INTO range_subpart_a VALUES(generate_series(1, 2000),generate_series(1, 2000),repeat( chr(int4(random()*26)+65),1),generate_series(1, 2000));
+ANALYZE range_subpart_a;
+INSERT INTO range_subpart_b VALUES(generate_series(1, 3000),generate_series(1, 3000),repeat( chr(int4(random()*26)+65),1),generate_series(1, 3000));
+ANALYZE range_subpart_b;
+--single query
+--test syntax error
+select * from gs_index_advise('select * from range_part_a  as a where a.stu_id in (select stu_id from range_part_a order by 4)order by 4');
+ERROR:  ORDER BY position 4 is not in select list
+LINE 1: ...m range_part_a  as a where a.stu_id in (select stu_id from r...
+                                                             ^
+--test local index
+--partion
+select * from gs_index_advise('select * from range_part_a where credit = 4');
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a | credit | local
 (1 row)
+
+select * from gs_index_advise('select * from range_part_a where stu_id = ''10'' and credit = 4');
+ schema |    table     |    column     | indextype 
+--------+--------------+---------------+-----------
+ public | range_part_a | stu_id,credit | local
+(1 row)
+
+select * from gs_index_advise('select * from range_part_a partition(p_range_1) where stu_id = ''10''');
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a | stu_id | local
+(1 row)
+
+--subpartition
+select * from gs_index_advise('select * from range_subpart_a partition(p_range_1) where col_2 = 2');
+ schema |      table      | column | indextype 
+--------+-----------------+--------+-----------
+ public | range_subpart_a | col_2  | local
+(1 row)
+
+select * from gs_index_advise('select * from range_subpart_a subpartition(p_range_1_1 ) where col_3 =''2''');
+ schema |      table      | column | indextype 
+--------+-----------------+--------+-----------
+ public | range_subpart_a | col_3  | local
+(1 row)
+
+select * from gs_index_advise('select * from range_subpart_a where col_1 =2 and col_2 = 3');
+ schema |      table      |   column    | indextype 
+--------+-----------------+-------------+-----------
+ public | range_subpart_a | col_1,col_2 | local
+(1 row)
+
+--test global index
+--partion
+select * from gs_index_advise('select * from range_part_a where stu_id = ''10''');
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a | stu_id | global
+(1 row)
+
+--subpartition
+select * from gs_index_advise('select * from range_subpart_a where col_1 = 10');
+ schema |      table      | column | indextype 
+--------+-----------------+--------+-----------
+ public | range_subpart_a | col_1  | global
+(1 row)
+
+--test subquery
+--partition
+select * from gs_index_advise('select * from range_part_a where stu_id = (select stu_id from range_part_a where stu_id=''10'') and credit = 2');
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a | credit | local
+ public | range_part_a | stu_id | global
+(2 rows)
+
+--subpartition
+select * from gs_index_advise('select * from range_subpart_a where col_1 = (select col_2 from range_part_a where col_3=''10'') and col_2 = 2');
+ schema |      table      | column | indextype 
+--------+-----------------+--------+-----------
+ public | range_subpart_a | col_2  | global
+ public | range_part_a    |        | 
+(2 rows)
+
+--test join
+--partition
+select * from gs_index_advise('select * from range_part_a join range_part_b on range_part_b.credit = range_part_a.credit  where range_part_a.stu_id = ''12''');
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a | stu_id | global
+ public | range_part_b | credit | local
+(2 rows)
+
+select * from gs_index_advise('select * from range_part_a join range_part_b partition(p_range_1) on range_part_a.stu_id = range_part_b.stu_id  where range_part_a.stu_id = ''12''');
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a | stu_id | global
+ public | range_part_b | stu_id | local
+(2 rows)
+
+select * from gs_index_advise('select * from range_part_a partition(p_range_1) join range_part_b partition(p_range_1) on range_part_a.stu_id = range_part_b.stu_id  where range_part_a.stu_id = ''12''');
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a | stu_id | local
+ public | range_part_b | stu_id | local
+(2 rows)
+
+--subpartition
+select * from gs_index_advise('select * from range_subpart_a join range_subpart_b on range_subpart_b.col_2 = range_subpart_a.col_2  where range_subpart_a.col_3 = ''12''');
+ schema |      table      | column | indextype 
+--------+-----------------+--------+-----------
+ public | range_subpart_a | col_3  | global
+ public | range_subpart_b | col_2  | global
+(2 rows)
+
+select * from gs_index_advise('select * from range_part_a join range_subpart_b on range_part_a.credit = range_subpart_b.col_2  where range_subpart_b.col_3 = ''12''');
+ schema |      table      | column | indextype 
+--------+-----------------+--------+-----------
+ public | range_part_a    | credit | local
+ public | range_subpart_b | col_3  | global
+(2 rows)
+
+select * from gs_index_advise('select * from range_subpart_a partition(p_range_1) join range_subpart_b subpartition(p_range_1_1) on range_subpart_a.col_3 = range_subpart_b.col_3  where range_subpart_a.col_3 = ''12''');
+ schema |      table      | column | indextype 
+--------+-----------------+--------+-----------
+ public | range_subpart_a | col_3  | global
+ public | range_subpart_b | col_3  | local
+(2 rows)
+
+--virtual index
+select * from hypopg_create_index('create index on range_part_a(credit) local');
+ indexrelid |               indexname                
+------------+----------------------------------------
+--?      .* | .*btree_local_range_part_a_credit
+(1 row)
+
+select * from hypopg_create_index('create index on range_subpart_a(col_2) local');
+ indexrelid |                indexname                 
+------------+------------------------------------------
+--?      .* | .*btree_local_range_subpart_a_col_2
+(1 row)
+
+explain select * from range_part_a where stu_id = '10' and credit = 2;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+--? Partition Iterator  (.*)
+--?   Iterations: .*
+--?   ->  Partitioned Index Scan using .*btree_local_range_part_a_credit on range_part_a  (.*)
+         Index Cond: (credit = 2)
+         Filter: ((stu_id)::text = '10'::text)
+         Selected Partitions:  1
+--?(.* rows)
+
+select * from hypopg_create_index('create index on range_part_a(credit)');
+ indexrelid |                indexname                
+------------+-----------------------------------------
+--?      .* | .*btree_global_range_part_a_credit
+(1 row)
+
+select * from hypopg_create_index('create index on range_subpart_a(col_2)');
+ indexrelid |                 indexname                 
+------------+-------------------------------------------
+--?      .* | .*btree_global_range_subpart_a_col_2
+(1 row)
+
+--test hypopg_display_index
+SELECT * FROM hypopg_display_index();
+                 indexname                 | indexrelid |      table      |  column  
+-------------------------------------------+------------+-----------------+----------
+--? .*btree_t1_col1                      |      .* | t1              | (col1)
+--? .*btree_t2_col1                      |      .* | t2              | (col1)
+--? .*btree_local_range_part_a_credit    |      .* | range_part_a    | (credit)
+--? .*btree_local_range_subpart_a_col_2  |      .* | range_subpart_a | (col_2)
+--? .*btree_global_range_part_a_credit   |      .* | range_part_a    | (credit)
+--? .*btree_global_range_subpart_a_col_2 |      .* | range_subpart_a | (col_2)
+(6 rows)
 
 --test hypopg_reset_index
 SELECT * FROM hypopg_reset_index();
@@ -104,5 +430,9 @@ SELECT * FROM hypopg_reset_index();
 
 DROP TABLE t1;
 DROP TABLE t2;
+DROP TABLE range_part_a;
+DROP TABLE range_part_b;
+DROP TABLE range_subpart_a;
+DROP TABLE range_subpart_b;
 \c regression;
 drop database IF EXISTS pl_test_ind_adv;

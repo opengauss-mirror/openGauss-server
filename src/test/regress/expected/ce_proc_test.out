@@ -1,0 +1,126 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS proc_cmk2 CASCADE;
+NOTICE:  client master key "proc_cmk2" does not exist
+CREATE CLIENT MASTER KEY proc_cmk2 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY proc_cek2 WITH VALUES (CLIENT_MASTER_KEY = proc_cmk2, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+-- function test1 ,we need to support the operator of insert, select, update,delete CLIENT_LOGIC data in function,and create CLIENT_LOGIC table, create cmk/cek(which will not frush the cache in function now) 
+create or replace function fun_001() returns void as $$
+declare
+begin
+    create table schema_tbl_001(a int, b int CLIENT_LOGIC WITH (COLUMN_SETTING = ImgCEK)) ;
+    insert into schema_tbl_001 values(1,1);
+end;
+$$ LANGUAGE plpgsql;
+ERROR:  syntax error at or near "CLIENT_LOGIC"
+LINE 4:     create table schema_tbl_001(a int, b int CLIENT_LOGIC WI...
+                                                     ^
+call fun_001();
+ERROR:  function "fun_001" doesn't exist 
+select * from schema_tbl_001;
+ERROR:  relation "schema_tbl_001" does not exist
+LINE 1: select * from schema_tbl_001;
+                      ^
+\d schema_tbl_001
+--function test2
+CREATE TABLE sbtest1(
+  a int,
+  b INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = proc_cek2, ENCRYPTION_TYPE = DETERMINISTIC) DEFAULT '0' NOT NULL,
+  c CHAR(120) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = proc_cek2, ENCRYPTION_TYPE = DETERMINISTIC) DEFAULT '' NOT NULL,
+  d CHAR(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = proc_cek2, ENCRYPTION_TYPE = DETERMINISTIC) DEFAULT '' NOT NULL);
+create function select_data() returns table(a int, b INTEGER, c CHAR(120), d CHAR(60))
+as
+$BODY$
+begin
+return query(select * from sbtest1);
+end;
+$BODY$
+LANGUAGE plpgsql;
+call select_data();
+ a | b | c | d 
+---+---+---+---
+(0 rows)
+
+--function test3
+--normal table
+CREATE TABLE basket_a (
+    id INT PRIMARY KEY,
+    fruit VARCHAR (100) NOT NULL,
+    age INT NOT NULL 
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "basket_a_pkey" for table "basket_a"
+CREATE TABLE basket_aa(
+    id INT,
+    fruit VARCHAR (100) NOT NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = proc_cek2, ENCRYPTION_TYPE = DETERMINISTIC), 
+    age INT NOT NULL ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = proc_cek2, ENCRYPTION_TYPE = DETERMINISTIC)
+);
+CREATE FUNCTION MyInsert1(_id integer, _fruit varchar, _age integer)
+  RETURNS void AS
+  $BODY$
+      BEGIN
+        INSERT INTO basket_a(id,fruit,age)
+        VALUES(_id, _fruit, _age);
+      END;
+  $BODY$
+  LANGUAGE 'plpgsql' VOLATILE
+  COST 100;
+CREATE FUNCTION MyInsert2(_id integer, _fruit varchar, _age integer)
+  RETURNS void AS
+  $BODY$
+      BEGIN
+        INSERT INTO basket_aa(id,fruit,age)
+        VALUES(_id, _fruit, _age);
+      END;
+  $BODY$
+  LANGUAGE 'plpgsql' VOLATILE
+  COST 100;
+select * from MyInsert1(1,'apple',1 );
+ myinsert1 
+-----------
+ 
+(1 row)
+
+select * from basket_a;
+ id | fruit | age 
+----+-------+-----
+  1 | apple |   1
+(1 row)
+
+select * from MyInsert2(1,'apple',1 );
+ myinsert2 
+-----------
+ 
+(1 row)
+
+select * from basket_a;
+ id | fruit | age 
+----+-------+-----
+  1 | apple |   1
+(1 row)
+
+-- procedure test1
+CREATE TABLE sbtest2(
+  id int,
+  k INTEGER ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = proc_cek2, ENCRYPTION_TYPE = DETERMINISTIC) DEFAULT '0' NOT NULL,
+  c CHAR(120) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = proc_cek2, ENCRYPTION_TYPE = DETERMINISTIC) DEFAULT '' NOT NULL,
+  pad CHAR(60) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = proc_cek2, ENCRYPTION_TYPE = DETERMINISTIC) DEFAULT '' NOT NULL);
+insert into sbtest2 values(1,1,1,1);
+CREATE OR REPLACE PROCEDURE select2
+(
+    id IN int,
+    k OUT int,
+    c OUT int
+)
+AS
+BEGIN
+   EXECUTE IMMEDIATE 'select k, c from sbtest2 where id = 1'
+       INTO k, c
+       USING IN id;
+END;
+/
+call select2(1,a,b);
+gsql: values_processor.cpp:412: static void ValuesProcessor::process_text_format(unsigned char**, size_t&, bool, int): Assertion `res != __null' failed.

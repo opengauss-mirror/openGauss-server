@@ -37,6 +37,7 @@
 #include "commands/dbcommands.h"
 #include "commands/extension.h"
 #include "commands/schemacmds.h"
+#include "commands/user.h"
 #include "executor/spi.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
@@ -545,6 +546,27 @@ void grant_user_authorization_internal(PG_FUNCTION_ARGS)
     pfree(DatumGetPointer(attribute_value[0]));
 }
 
+static char* get_current_username()
+{
+#ifndef WIN32
+    struct passwd* pw = NULL;
+    char* pRet = NULL;
+
+    (void)syscalllockAcquire(&getpwuid_lock);
+    pw = getpwuid(geteuid());
+    if (pw == NULL) {
+        (void)syscalllockRelease(&getpwuid_lock);
+        return NULL;
+    }
+    /* Allocate new memory because later getpwuid() calls can overwrite it. */
+    pRet = pstrdup(pw->pw_name);
+    (void)syscalllockRelease(&getpwuid_lock);
+    return pRet;
+#else
+    return NULL;
+#endif
+}
+
 /*
  * @brief check_credential_name_valid
  *  Check if a user input string is a valid username.
@@ -563,6 +585,23 @@ static void check_credential_name_valid(const Datum username)
                             erraction("Please enter a valid str")));
         }
     }
+    char *inital_user = get_current_username();
+    Assert(inital_user != NULL);
+    if (inital_user == NULL) {
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("inital_user username is invalid."),
+                errdetail("inital_user username is invalid."),
+                    errcause("inital_user is invalid"),
+                erraction("EXTERNAL_SCRIPT is not supported")));
+    }
+    if (strcmp(name_str, inital_user) == 0) {
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_NAME),
+                errmsg("Credential username is invalid."),
+                errdetail("Credential username is initialuser, which can not be credential user"),
+                    errcause("str is invalid"),
+                erraction("Please enter a valid str")));
+    }
+    pfree(inital_user);
     pfree(name_str);
 }
 
@@ -908,6 +947,10 @@ static char *create_inline_program(Datum job_name, Datum job_type, Datum job_act
     static const short nrgs_program = 6;
     FunctionCallInfoData fcinfo_program;
     InitFunctionCallInfoData(fcinfo_program, NULL, nrgs_program, InvalidOid, NULL, NULL);
+    rc = memset_s(fcinfo_program.arg, nrgs_program * sizeof(Datum), 0, nrgs_program * sizeof(Datum));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(fcinfo_program.argnull, nrgs_program * sizeof(bool), 0, nrgs_program * sizeof(bool));
+    securec_check(rc, "\0", "\0");
     fcinfo_program.arg[0] = CStringGetTextDatum(program_name);  /* program_name */
     fcinfo_program.arg[1] = job_type;                           /* program_type */
     fcinfo_program.arg[2] = job_action;                         /* program_action */
@@ -1094,6 +1137,10 @@ void create_job_1_internal(PG_FUNCTION_ARGS)
     static const short nrgs_job = 16;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(fcinfo_job.argnull, nrgs_job * sizeof(bool), 0, nrgs_job * sizeof(bool));
+    securec_check(rc, "\0", "\0");
 
     fcinfo_job.arg[0] = job_name;               /* job_name */
     fcinfo_job.arg[1] = program_name;           /* program_name */
@@ -1199,12 +1246,16 @@ void create_job_2_internal(PG_FUNCTION_ARGS)
     static const short nrgs_job = 16;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(fcinfo_job.argnull, nrgs_job * sizeof(bool), 0, nrgs_job * sizeof(bool));
+    securec_check(rc, "\0", "\0");
 
     fcinfo_job.arg[0] = PG_GETARG_DATUM(0);     /* job_name */
     fcinfo_job.arg[1] = program_name;           /* program_name */
     fcinfo_job.arg[2] = schedule_name;          /* schedule_name */
     fcinfo_job.arg[3] = PG_GETARG_DATUM(3);     /* job_class */
-    fcinfo_job.arg[4] = enabled;                /* enabled */
+    fcinfo_job.arg[4] = PG_GETARG_DATUM(4);     /* enabled */
     fcinfo_job.arg[5] = PG_GETARG_DATUM(5);     /* auto_drop */
     fcinfo_job.arg[6] = PG_ARGISNULL(6) ? Datum(0) : PG_GETARG_DATUM(6);     /* comments */
     fcinfo_job.arg[7] = PG_GETARG_DATUM(7);     /* job_style */
@@ -1246,6 +1297,10 @@ void create_job_3_internal(PG_FUNCTION_ARGS)
     static const short nrgs_job = 16;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
+    errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(fcinfo_job.argnull, nrgs_job * sizeof(bool), 0, nrgs_job * sizeof(bool));
+    securec_check(rc, "\0", "\0");
 
     fcinfo_job.arg[0] = job_name;               /* job_name */
     fcinfo_job.arg[1] = program_name;           /* program_name */

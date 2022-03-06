@@ -40,6 +40,11 @@ extern void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collatio
     Oid accessMethodId, bool amcanorder, bool isconstraint);
 extern List* ChooseIndexColumnNames(const List* indexElems);
 
+#ifdef ENABLE_MULTIPLE_NODES
+extern void mark_indisvalid_local(char* schname, char* idxname);
+extern void mark_indisvalid_all_cns(char* schname, char* idxname);
+#endif
+
 /* commands/functioncmds.c */
 extern bool PrepareCFunctionLibrary(HeapTuple tup);
 extern void InsertIntoPendingLibraryDelete(const char* filename, bool atCommit);
@@ -49,12 +54,12 @@ extern void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oi
 extern void RemoveFunctionById(Oid funcOid);
 extern void remove_encrypted_proc_by_id(Oid funcOid);
 extern void RemovePackageById(Oid pkgOid, bool isBody = false);
-extern void dropFunctionByPackageOid(Oid package_oid);
+extern void DeleteFunctionByPackageOid(Oid package_oid);
 extern void SetFunctionReturnType(Oid funcOid, Oid newRetType);
 extern void SetFunctionArgType(Oid funcOid, int argIndex, Oid newArgType);
 extern void RenameFunction(List* name, List* argtypes, const char* newname);
 extern void AlterFunctionOwner(List* name, List* argtypes, Oid newOwnerId);
-extern void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId);
+extern void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId, bool byPackage = false);
 extern bool IsFunctionTemp(AlterFunctionStmt* stmt);
 extern void AlterFunction(AlterFunctionStmt* stmt);
 extern void CreateCast(CreateCastStmt* stmt);
@@ -67,6 +72,8 @@ extern Oid get_cast_oid(Oid sourcetypeid, Oid targettypeid, bool missing_ok);
 /* commands/operatorcmds.c */
 extern void CreatePackageCommand(CreatePackageStmt* parsetree, const char* queryString);
 extern void CreatePackageBodyCommand(CreatePackageBodyStmt* parsetree, const char* queryString);
+extern void AlterPackageOwner(List* name, Oid newOwnerId);
+extern void AlterFunctionOwnerByPkg(Oid package_oid, Oid newOwnerId);
 
 extern void DefineOperator(List* names, List* parameters);
 extern void RemoveOperatorById(Oid operOid);

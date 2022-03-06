@@ -22,8 +22,10 @@
  * -------------------------------------------------------------------------
  */
 
+#ifndef ENABLE_LITE_MODE
 #include "parquet/platform.h"
 #include "parquet/types.h"
+#endif
 
 #include "parquet_reader.h"
 #include "parquet_file_reader.h"

@@ -526,13 +526,6 @@ static bool preSkipPLSQLParams(ParseState *pstate, ColumnRef *cref)
         }
     }
 
-    if (pstate->p_bind_variable_columnref_hook != NULL) {
-        node = (*pstate->p_bind_variable_columnref_hook)(pstate, cref);
-        if (node != NULL) {
-            return true;
-        }
-    }
-
     return false;
 }
 
@@ -776,6 +769,10 @@ static Node *replaceListFakeValue(List *lst)
 
 static Node *tryReplaceFakeValue(Node *node)
 {
+    if (node == NULL) {
+        return node;
+    }
+
     if (IsA(node, Rownum)) {
         node = makeIntConst(CONNECT_BY_ROWNUM_FAKEVALUE, -1);
     } else if (is_cref_by_name(node, "level")) {
@@ -1316,7 +1313,13 @@ static SelectStmt *CreateStartWithCTEInnerBranch(ParseState* pstate,
         if (whereClause != NULL) {
             JoinExpr *final_join = (JoinExpr *)origin_table;
             /* pushdown requires deep copying of the quals */
-            final_join->quals = (Node *)copyObject(whereClause);
+            Node *whereCopy = (Node *)copyObject(whereClause);
+            if (final_join->quals == NULL) {
+                final_join->quals = whereCopy;
+            } else {
+                final_join->quals =
+                    (Node *)makeA_Expr(AEXPR_AND, NULL, whereCopy, final_join->quals, -1);
+            }
         }
     }
 

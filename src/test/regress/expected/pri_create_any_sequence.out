@@ -1,0 +1,130 @@
+CREATE USER test_create_any_sequence_role PASSWORD 'Gauss@1234';
+GRANT create any sequence to test_create_any_sequence_role;
+CREATE SCHEMA pri_sequence_schema;
+set search_path=pri_sequence_schema;
+SET ROLE test_create_any_sequence_role PASSWORD 'Gauss@1234';
+set search_path=pri_sequence_schema;
+---
+--- test creation of SERIAL column
+---
+CREATE TABLE serialTest (f1 text, f2 serial);
+ERROR:  permission denied for schema pri_sequence_schema
+DETAIL:  N/A
+reset role;
+GRANT create any table to test_create_any_sequence_role;
+SET ROLE test_create_any_sequence_role PASSWORD 'Gauss@1234';
+set search_path=pri_sequence_schema;
+CREATE TABLE serialTest (f1 text, f2 serial);
+NOTICE:  CREATE TABLE will create implicit sequence "serialtest_f2_seq" for serial column "serialtest.f2"
+INSERT INTO serialTest VALUES ('foo');
+INSERT INTO serialTest VALUES ('bar');
+INSERT INTO serialTest VALUES ('force', 100);
+SELECT * FROM serialTest ORDER BY f1, f2;
+  f1   | f2  
+-------+-----
+ bar   |   2
+ foo   |   1
+ force | 100
+(3 rows)
+
+reset role;
+revoke create any table from test_create_any_sequence_role;
+SET ROLE test_create_any_sequence_role PASSWORD 'Gauss@1234';
+-- basic sequence operations using both text and oid references
+CREATE SEQUENCE sequence_test;
+SELECT setval('sequence_test'::text, 32);
+ setval 
+--------
+     32
+(1 row)
+
+SELECT nextval('sequence_test'::regclass);
+ nextval 
+---------
+      33
+(1 row)
+
+SELECT setval('sequence_test'::text, 99, false);
+ setval 
+--------
+     99
+(1 row)
+
+SELECT nextval('sequence_test'::regclass);
+ nextval 
+---------
+      99
+(1 row)
+
+SELECT setval('sequence_test'::regclass, 32);
+ setval 
+--------
+     32
+(1 row)
+
+SELECT nextval('sequence_test'::text);
+ nextval 
+---------
+      33
+(1 row)
+
+SELECT setval('sequence_test'::regclass, 99, false);
+ setval 
+--------
+     99
+(1 row)
+
+SELECT nextval('sequence_test'::text);
+ nextval 
+---------
+      99
+(1 row)
+
+CREATE SEQUENCE sequence_test1 START WITH 32;
+CREATE SEQUENCE sequence_test2 START WITH 24 INCREMENT BY 4 MAXVALUE 36 MINVALUE 5 CYCLE;
+SELECT nextval('sequence_test2');
+ nextval 
+---------
+      24
+(1 row)
+
+SELECT nextval('sequence_test2');
+ nextval 
+---------
+      28
+(1 row)
+
+create sequence seqCycle maxvalue 5 cycle;
+--normal case with cache
+create sequence seq maxvalue 100 cache 5 increment 2 start 2;
+NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
+DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
+select seq.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
+--failed
+CREATE TYPE pri_person_type1 AS (id int, name text); --permission denied
+ERROR:  permission denied for schema pri_sequence_schema
+DETAIL:  N/A
+CREATE TYPE pri_person_type2 AS (id int, name text); --permission denied
+ERROR:  permission denied for schema pri_sequence_schema
+DETAIL:  N/A
+CREATE FUNCTION pri_func_add_sql(integer, integer) RETURNS integer
+AS 'select $1 + $2;'
+LANGUAGE SQL
+IMMUTABLE
+RETURNS NULL ON NULL INPUT;
+ERROR:  permission denied for schema pri_sequence_schema
+DETAIL:  N/A
+reset role;
+drop table pri_sequence_schema.serialtest;
+DROP SEQUENCE pri_sequence_schema.sequence_test;
+DROP SEQUENCE pri_sequence_schema.sequence_test1;
+DROP SEQUENCE pri_sequence_schema.sequence_test2;
+DROP SEQUENCE pri_sequence_schema.seqCycle;
+DROP SEQUENCE pri_sequence_schema.seq;
+DROP SCHEMA pri_sequence_schema cascade;
+DROP USER test_create_any_sequence_role cascade;

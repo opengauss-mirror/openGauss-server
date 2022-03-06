@@ -12,6 +12,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/hstore
     ${CMAKE_CURRENT_SOURCE_DIR}/test_decoding
     ${CMAKE_CURRENT_SOURCE_DIR}/mppdb_decoding
+    ${CMAKE_CURRENT_SOURCE_DIR}/sql_decoding
     ${CMAKE_CURRENT_SOURCE_DIR}/spi
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_upgrade_support
     ${CMAKE_CURRENT_SOURCE_DIR}/postgres_fdw
@@ -28,6 +29,7 @@ set(CMAKE_MODULE_PATH
 add_subdirectory(hstore)
 add_subdirectory(test_decoding)
 add_subdirectory(mppdb_decoding)
+add_subdirectory(sql_decoding)
 add_subdirectory(spi)
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON" OR "${ENABLE_PRIVATEGAUSS}" STREQUAL "ON")
     add_subdirectory(pg_upgrade_support)

@@ -1,0 +1,78 @@
+CREATE TABLE area_example1(id SERIAL primary key, somedata int, text varchar(120))with(storage_type = ustore);
+NOTICE:  CREATE TABLE will create implicit sequence "area_example1_id_seq" for serial column "area_example1.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "area_example1_pkey" for table "area_example1"
+CREATE TABLE area_example2(a int primary key,b int,c int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "area_example2_pkey" for table "area_example2"
+CREATE TABLE area_example3(a int,b int,c int);
+CREATE OR REPLACE function decode_area_proc(plugin text) returns SETOF text
+LANGUAGE plpgsql
+AS
+$$
+declare o_ret text;
+        my_sql text;
+        param1 text;
+begin
+truncate table area_example1;
+truncate table area_example2;
+truncate table area_example3;
+EXECUTE('SELECT pg_current_xlog_location();') into o_ret;
+INSERT INTO area_example1(somedata, text) VALUES (1, 1);
+INSERT INTO area_example1(somedata, text) VALUES (1, 2);
+update area_example1 set somedata=somedata*10 where somedata=1;
+delete from area_example1 where somedata=10;
+
+INSERT INTO area_example2 VALUES (1, 1, 1);
+INSERT INTO area_example2 VALUES (2, 2, 2);
+update area_example2 set b=b*10 where a=1;
+delete from area_example2 where c=1;
+
+INSERT INTO area_example3 VALUES (1, 1, 1);
+INSERT INTO area_example3 VALUES (2, 2, 2);
+update area_example3 set b=b*10 where a=1;
+delete from area_example3 where c=1;
+my_sql = 'select data from pg_logical_get_area_changes(''' || o_ret || ''',NULL,NULL,''' || plugin || ''',NULL);';
+return query EXECUTE(my_sql);
+END;
+$$
+;
+call decode_area_proc('mppdb_decoding');
+                                                                                                                                                      decode_area_proc                                                                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"table_name":"public.area_example1","op_type":"INSERT","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["1","1","'1'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.area_example1","op_type":"INSERT","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["2","1","'2'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.area_example1","op_type":"UPDATE","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["1","10","'1'"],"old_keys_name":["id","somedata","text"],"old_keys_type":["integer","integer","character varying"],"old_keys_val":["1","1","'1'"]}
+ {"table_name":"public.area_example1","op_type":"UPDATE","columns_name":["id","somedata","text"],"columns_type":["integer","integer","character varying"],"columns_val":["2","10","'2'"],"old_keys_name":["id","somedata","text"],"old_keys_type":["integer","integer","character varying"],"old_keys_val":["2","1","'2'"]}
+ {"table_name":"public.area_example1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["id","somedata","text"],"old_keys_type":["integer","integer","character varying"],"old_keys_val":["1","10","'1'"]}
+ {"table_name":"public.area_example1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["id","somedata","text"],"old_keys_type":["integer","integer","character varying"],"old_keys_val":["2","10","'2'"]}
+ {"table_name":"public.area_example2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["1","1","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.area_example2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["2","2","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.area_example2","op_type":"UPDATE","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["1","10","1"],"old_keys_name":["a"],"old_keys_type":["integer"],"old_keys_val":["1"]}
+ {"table_name":"public.area_example2","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a"],"old_keys_type":["integer"],"old_keys_val":["1"]}
+ {"table_name":"public.area_example3","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["1","1","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.area_example3","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["2","2","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.area_example3","op_type":"UPDATE","columns_name":["a","b","c"],"columns_type":["integer","integer","integer"],"columns_val":["1","10","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.area_example3","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+(14 rows)
+
+call decode_area_proc('sql_decoding');
+                                                          decode_area_proc                                                           
+-------------------------------------------------------------------------------------------------------------------------------------
+ insert into public.area_example1 values (3, 1, '1');
+ insert into public.area_example1 values (4, 1, '2');
+ delete from public.area_example1 where id = 3 and somedata = 1 and text = '1';insert into public.area_example1 values (3, 10, '1');
+ delete from public.area_example1 where id = 4 and somedata = 1 and text = '2';insert into public.area_example1 values (4, 10, '2');
+ delete from public.area_example1 where id = 3 and somedata = 10 and text = '1';
+ delete from public.area_example1 where id = 4 and somedata = 10 and text = '2';
+ insert into public.area_example2 values (1, 1, 1);
+ insert into public.area_example2 values (2, 2, 2);
+ delete from public.area_example2 where a = 1;insert into public.area_example2 values (1, 10, 1);
+ delete from public.area_example2 where a = 1;
+ insert into public.area_example3 values (1, 1, 1);
+ insert into public.area_example3 values (2, 2, 2);
+ delete from public.area_example3 where  (no-tuple-data);insert into public.area_example3 values (1, 10, 1);
+ delete from public.area_example3 where  (no-tuple-data);
+(14 rows)
+
+drop table area_example1;
+drop table area_example2;
+drop table area_example3;

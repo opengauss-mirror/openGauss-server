@@ -1,0 +1,36 @@
+--clear audit log
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');
+--- prepare
+\! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.cipher
+\! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.rand
+\! echo $OLDGAUSSHOME | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o usermapping > /dev/null 2>&1 ; echo $?
+CREATE ROLE regress_usermapping_user LOGIN SYSADMIN PASSWORD 'Abcdef@123';
+SET SESSION AUTHORIZATION 'regress_usermapping_user' PASSWORD 'Abcdef@123';
+
+CREATE FOREIGN DATA WRAPPER dummy;
+CREATE SERVER dummy_srv FOREIGN DATA WRAPPER dummy;
+CREATE SERVER dummy_srv2 FOREIGN DATA WRAPPER dummy;
+CREATE USER MAPPING FOR current_user SERVER dummy_srv OPTIONS(username 'test', password 'shouldBeEncrypt');
+CREATE USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(username 'test');
+
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(ADD password 'shouldBeEncrypt');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(SET password 'shouldBeEncrypt2');
+ALTER USER MAPPING FOR current_user SERVER dummy_srv2 OPTIONS(DROP password);
+
+DROP USER MAPPING FOR current_user SERVER dummy_srv2;
+DROP USER MAPPING FOR current_user SERVER dummy_srv;
+
+DROP SERVER dummy_srv;
+DROP SERVER dummy_srv2;
+
+--DROP FOREIGN DATA WRAPPER is not supported now
+--DROP FOREIGN DATA WRAPPER dummy;
+
+RESET SESSION AUTHORIZATION;
+--can't drop role regress_usermapping_user, since FOREIGN DATA WRAPPER dummy depend on it
+--DROP ROLE regress_usermapping_user;
+
+SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_user' and object_name = 'current_user';
+
+--clear audit log
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');

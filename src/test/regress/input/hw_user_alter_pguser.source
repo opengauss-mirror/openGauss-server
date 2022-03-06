@@ -1,6 +1,3 @@
-/*-----------------------------------------------------------------
-		test alter user with pguser (DTS2017031606532)
------------------------------------------------------------------*/
 create or replace function ismd5(pwd text) returns bool as $$ begin return left(pwd, 3) = 'md5'; end; $$ language plpgsql;
 
 --alter with admin

@@ -52,12 +52,18 @@ extern Oid ProcedureCreate(const char *procedureName,
 
 extern bool function_parse_error_transpose(const char *prosrc);
 
-extern bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2);
-
 extern bool isSameParameterList(List* parameterList1, List* parameterList2);
 extern char* getFuncName(List* funcNameList);
 
-extern oidvector* MakeMd5HashArgTypes(oidvector* paramterTypes);
+#ifndef ENABLE_MULTIPLE_NODES
+extern char* ConvertArgModesToString(Datum proArgModes);
+extern bool IsProArgModesEqual(Datum argModes1, Datum argModes2);
+extern bool IsProArgModesEqualByTuple(HeapTuple tup, TupleDesc desc, oidvector* argModes);
+extern oidvector* ConvertArgModesToMd5Vector(Datum proArgModes);
+extern oidvector* MergeOidVector(oidvector* allArgTypes, oidvector* argModes);
+#endif
+
+extern oidvector* MakeMd5HashOids(oidvector* paramterTypes);
 
 extern oidvector* ProcedureGetArgTypes(HeapTuple tuple);
 

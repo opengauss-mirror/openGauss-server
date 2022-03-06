@@ -40,19 +40,18 @@ static inline int CalcMaxBlocksToScan(Relation relation)
     return Max(1, maxBlocks);
 }
 
-Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffer, int options, BulkInsertState bistate,
-    bool switchBuf)
+Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffer, int options, BulkInsertState bistate)
 {
     bool useFsm = !(options & UHEAP_INSERT_SKIP_FSM);
+    bool forceExtend = (options & UHEAP_INSERT_EXTEND);
     Buffer buffer = InvalidBuffer;
     Page page;
     Size pageFreeSpace = 0;
     Size saveFreeSpace = 0;
     BlockNumber     targetBlock;
     BlockNumber     otherBlock;
-    BlockNumber     prev = InvalidBlockNumber;
-    BlockNumber     curr = InvalidBlockNumber;
     bool            needLock = false;
+    bool last_page_tested = false;
 
     len = SHORTALIGN(len);
     /*
@@ -66,10 +65,11 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
     /* Compute desired extra freespace due to fillfactor option */
     saveFreeSpace = RelationGetTargetPageFreeSpace(relation, HEAP_DEFAULT_FILLFACTOR);
 
-    if (otherBuffer != InvalidBuffer)
+    if (otherBuffer != InvalidBuffer) {
         otherBlock = BufferGetBlockNumber(otherBuffer);
-    else
+    } else {
         otherBlock = InvalidBlockNumber; /* just to keep compiler quiet */
+    }
 
     if ((NULL != bistate) && BufferIsValid(bistate->current_buf)) {
         RelFileNode rnode;
@@ -82,15 +82,6 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
             ReleaseBuffer(bistate->current_buf);
             bistate->current_buf = InvalidBuffer;
         }
-    }
-
-    if (switchBuf) {
-        prev = RelationGetPrevTargetBlock(relation);
-        curr = RelationGetTargetBlock(relation);
-
-        Assert(curr != InvalidBlockNumber);
-        RelationSetTargetBlock(relation, prev);
-        RelationSetPrevTargetBlock(relation, curr);
     }
 
     /*
@@ -110,12 +101,15 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
         /* can't fit, don't bother asking FSM */
         targetBlock = InvalidBlockNumber;
         useFsm = false;
-    } else if (bistate && bistate->current_buf != InvalidBuffer)
+    } else if (bistate && bistate->current_buf != InvalidBuffer) {
         targetBlock = BufferGetBlockNumber(bistate->current_buf);
-    else
+    } else {
         targetBlock = RelationGetTargetBlock(relation);
+    }
 
-    if (targetBlock == InvalidBlockNumber && useFsm) {
+    if (unlikely(forceExtend)) {
+        targetBlock = InvalidBlockNumber;
+    } else if (targetBlock == InvalidBlockNumber && useFsm) {
         /*
          * We have no cached target page, so ask the FSM for an initial
          * target.
@@ -128,34 +122,15 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
          */
         if (targetBlock == InvalidBlockNumber) {
             BlockNumber nblocks = RelationGetNumberOfBlocks(relation);
-            if (nblocks > 0)
+            if (nblocks > 0) {
                 targetBlock = nblocks - 1;
+            }
+            last_page_tested = true;
         }
     }
 
 loop:
     while (targetBlock != InvalidBlockNumber) {
-        if (switchBuf) {
-            if (targetBlock == curr) {
-                buffer = ReadBufferBI(relation, targetBlock, bistate);
-                LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-                page = BufferGetPage(buffer);
-                pageFreeSpace = PageGetUHeapFreeSpace(page);
-                targetBlock = RecordAndGetPageWithFreeSpace(relation,
-                                                            targetBlock,
-                                                            0,
-                                                            len + saveFreeSpace);
-                RecordPageWithFreeSpace(relation, curr, pageFreeSpace);
-                elog(DEBUG5, "Post FSM hint - Buff: %d, Rel: %s, curr: %u, targetBlock: %u, nblocks: %u", buffer,
-                    RelationGetRelationName(relation), curr, targetBlock, RelationGetNumberOfBlocks(relation));
-                UnlockReleaseBuffer(buffer);
-                if ((targetBlock == curr) || (targetBlock == InvalidBlockNumber)) {
-                    elog(DEBUG5, "Rel: %s adding another block", RelationGetRelationName(relation));
-                    break;
-                }
-            }
-        }
-
         /*
          * Read and exclusive-lock the target block, as well as the other
          * block if one was given, taking suitable care with lock ordering and
@@ -175,7 +150,6 @@ loop:
             LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
         } else if (otherBlock == targetBlock) {
             buffer = otherBuffer;
-
             /* also easy case */
             LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
         } else if (otherBlock < targetBlock) {
@@ -238,14 +212,31 @@ loop:
          * to try.
          */
         targetBlock = RecordAndGetPageWithFreeSpace(relation, targetBlock, pageFreeSpace, len + saveFreeSpace);
+
+        /*
+         * If the FSM knows nothing of the rel, try the last page before we
+         * give up and extend. This's intend to use pages that are extended
+         * one by one and not recorded in FSM as possible.
+         *
+         * The best is to record all pages into FSM using bulk-extend in later.
+         */
+        if (targetBlock == InvalidBlockNumber && !last_page_tested) {
+            BlockNumber nblocks = RelationGetNumberOfBlocks(relation);
+            if (nblocks > 0) {
+                targetBlock = nblocks - 1;
+            }
+            last_page_tested = true;
+        }
     }
 
     /*
      * See if we can prune an existing block before extending the relation.
      */
-    targetBlock = RelationPruneOptional(relation, len + saveFreeSpace);
-    if (targetBlock != InvalidBlockNumber) {
-        goto loop;
+    if (useFsm && !forceExtend) {
+        targetBlock = RelationPruneOptional(relation, len + saveFreeSpace);
+        if (targetBlock != InvalidBlockNumber) {
+            goto loop;
+        }
     }
 
     /*
@@ -335,8 +326,9 @@ loop:
      * Release the file-extension lock; it's now OK for someone else to extend
      * the relation some more.
      */
-    if (needLock)
+    if (needLock) {
         UnlockRelationForExtension(relation, ExclusiveLock);
+    }
 
     /*
      * Lock the other buffer. It's guaranteed to be of a lower page number
@@ -587,7 +579,7 @@ BlockNumber RelationPruneBlockAndReturn(Relation relation, BlockNumber start_blo
         }
 
         freespace = PageGetUHeapFreeSpace(page);
-        if (UPageIsEmpty((UHeapPageHeaderData *)page, RelationGetInitTd(relation)) || required_size <= freespace) {
+        if (UPageIsEmpty((UHeapPageHeaderData *)page) || required_size <= freespace) {
             UnlockReleaseBuffer(buffer);
             RecordPageWithFreeSpace(relation, blkno, freespace);
             result = blkno;

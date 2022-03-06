@@ -49,6 +49,8 @@
 #include "utils/fmgrtab.h"
 #include "utils/hashutils.h"
 #include "utils/inval.h"
+#include "utils/knl_catcache.h"
+#include "utils/knl_relcache.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -94,21 +96,23 @@ static inline HeapTuple SearchCatCacheInternal(
 static HeapTuple SearchCatCacheMiss(
     CatCache* cache, int nkeys, uint32 hashValue, Index hashIndex, Datum v1, Datum v2, Datum v3, Datum v4, int level);
 
-static uint32 CatalogCacheComputeHashValue(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4);
-static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, HeapTuple tuple);
-static inline bool CatalogCacheCompareTuple(
-    const CatCache* cache, int nkeys, const Datum* cachekeys, const Datum* searchkeys);
-
 #ifdef CATCACHE_STATS
 static void CatCachePrintStats(int code, Datum arg);
 #endif
+static CatCList* SearchCatCacheListMiss(CatCache* cache, int nkeys, Datum* arguments, uint32 lHashValue);
 static void CatCacheRemoveCTup(CatCache* cache, CatCTup* ct);
 static void CatCacheRemoveCList(CatCache* cache, CatCList* cl);
 static void CatalogCacheInitializeCache(CatCache* cache);
 static CatCTup* CatalogCacheCreateEntry(CatCache* cache, HeapTuple ntp, Datum* arguments, uint32 hashValue,
     Index hashIndex, bool negative, bool isnailed = false);
-static void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* keys);
-static void CatCacheCopyKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* srckeys, Datum* dstkeys);
+
+
+#ifndef ENABLE_MULTIPLE_NODES
+#define PROCALLARGS_KEY_NUM 4
+static uint32 CatalogCacheComputeTupleHashValueForProcAllArgs(
+    int* cc_keyno, TupleDesc cc_tupdesc, CCHashFN *cc_hashfunc, Oid cc_reloid, int nkeys, HeapTuple tuple);
+#endif
+
 
 /*
  *					internal support functions
@@ -242,7 +246,7 @@ static uint32 uuidhashfast(Datum datum)
 }
 
 /* Lookup support functions for a type. */
-static void GetCCHashEqFuncs(Oid keytype, CCHashFN* hashfunc, RegProcedure* eqfunc, CCFastEqualFN* fasteqfunc)
+void GetCCHashEqFuncs(Oid keytype, CCHashFN* hashfunc, RegProcedure* eqfunc, CCFastEqualFN* fasteqfunc)
 {
     switch (keytype) {
         case BOOLOID:
@@ -327,30 +331,29 @@ static void GetCCHashEqFuncs(Oid keytype, CCHashFN* hashfunc, RegProcedure* eqfu
  *
  * Compute the hash value associated with a given set of lookup keys
  */
-static uint32 CatalogCacheComputeHashValue(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4)
+uint32 CatalogCacheComputeHashValue(CCHashFN *cc_hashfunc, int nkeys, Datum *arguments)
 {
     uint32 hashValue = 0;
     uint32 oneHash;
-    CCHashFN* cc_hashfunc = cache->cc_hashfunc;
 
     switch (nkeys) {
         case 4:
-            oneHash = (cc_hashfunc[3])(v4);
+            oneHash = (cc_hashfunc[3])(arguments[3]);
             hashValue ^= oneHash << 24;
             hashValue ^= oneHash >> 8;
             /* FALLTHROUGH */
         case 3:
-            oneHash = (cc_hashfunc[2])(v3);
+            oneHash = (cc_hashfunc[2])(arguments[2]);
             hashValue ^= oneHash << 16;
             hashValue ^= oneHash >> 16;
             /* FALLTHROUGH */
         case 2:
-            oneHash = (cc_hashfunc[1])(v2);
+            oneHash = (cc_hashfunc[1])(arguments[1]);
             hashValue ^= oneHash << 8;
             hashValue ^= oneHash >> 24;
             /* FALLTHROUGH */
         case 1:
-            oneHash = (cc_hashfunc[0])(v1);
+            oneHash = (cc_hashfunc[0])(arguments[0]);
             hashValue ^= oneHash;
             break;
         default:
@@ -361,18 +364,11 @@ static uint32 CatalogCacheComputeHashValue(CatCache* cache, int nkeys, Datum v1,
     return hashValue;
 }
 
-/*
- *		CatalogCacheComputeTupleHashValue
- *
- * Compute the hash value associated with a given tuple to be cached
- */
-static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, HeapTuple tuple)
+uint32 CatalogCacheComputeTupleHashValueInternal(
+    int* cc_keyno, TupleDesc cc_tupdesc, CCHashFN *cc_hashfunc, Oid cc_reloid, int nkeys, HeapTuple tuple)
 {
     Datum v1 = 0, v2 = 0, v3 = 0, v4 = 0;
     bool isNull = false;
-
-    int* cc_keyno = cache->cc_keyno;
-    TupleDesc cc_tupdesc = cache->cc_tupdesc;
 
     /* Now extract key fields from tuple, insert into scankey */
     switch (nkeys) {
@@ -380,7 +376,7 @@ static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, Heap
             v4 = (cc_keyno[3] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
                                                           : fastgetattr(tuple, cc_keyno[3], cc_tupdesc, &isNull);
 #ifndef ENABLE_MULTIPLE_NODES
-            Assert(!isNull || (cache->cc_reloid == ProcedureRelationId));
+            Assert(!isNull || ((cc_reloid == ProcedureRelationId) && v4 == 0));
 #else
             Assert(!isNull);
 #endif
@@ -393,10 +389,7 @@ static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, Heap
             v2 = (cc_keyno[1] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
                                                           : fastgetattr(tuple, cc_keyno[1], cc_tupdesc, &isNull);
 #ifndef ENABLE_MULTIPLE_NODES
-            if (unlikely(cache->cc_indexoid == ProcedureNameAllArgsNspIndexId && isNull)) {
-                v2 = 0;
-            }
-            Assert(!isNull || (cache->cc_reloid == ProcedureRelationId));
+            Assert(!isNull || ((cc_reloid == ProcedureRelationId) && v2 == 0));
 #else
             Assert(!isNull);
 #endif
@@ -411,7 +404,39 @@ static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, Heap
             break;
     }
 
-    return CatalogCacheComputeHashValue(cache, nkeys, v1, v2, v3, v4);
+    Datum arguments[CATCACHE_MAXKEYS];
+    arguments[0] = v1;
+    arguments[1] = v2;
+    arguments[2] = v3;
+    arguments[3] = v4;
+    return CatalogCacheComputeHashValue(cc_hashfunc, nkeys, arguments);
+}
+
+/*
+ *		CatalogCacheComputeTupleHashValue
+ *
+ * Compute the hash value associated with a given tuple to be cached
+ */
+uint32 CatalogCacheComputeTupleHashValue(
+    int cc_id, int* cc_keyno, TupleDesc cc_tupdesc, CCHashFN *cc_hashfunc, Oid cc_reloid, int cc_nkeys, HeapTuple tup)
+{
+    uint32 hashValue;
+
+    switch (cc_id) {
+#ifndef ENABLE_MULTIPLE_NODES
+        case PROCALLARGS: {
+            hashValue = CatalogCacheComputeTupleHashValueForProcAllArgs(
+                cc_keyno, cc_tupdesc, cc_hashfunc, cc_reloid, cc_nkeys, tup);
+            break;
+        }
+#endif
+        default:
+            hashValue = CatalogCacheComputeTupleHashValueInternal(
+                cc_keyno, cc_tupdesc, cc_hashfunc, cc_reloid, cc_nkeys, tup);
+            break;
+    }
+
+    return hashValue;
 }
 
 /*
@@ -419,10 +444,9 @@ static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, Heap
  *
  * Compare a tuple to the passed arguments.
  */
-static inline bool CatalogCacheCompareTuple(
-    const CatCache* cache, int nkeys, const Datum* cachekeys, const Datum* searchkeys)
+bool CatalogCacheCompareTuple(
+    const CCFastEqualFN *cc_fastequal, int nkeys, const Datum* cachekeys, const Datum* searchkeys)
 {
-    const CCFastEqualFN* cc_fastequal = cache->cc_fastequal;
     int i;
 
     for (i = 0; i < nkeys; i++) {
@@ -546,7 +570,7 @@ static void CatCacheRemoveCList(CatCache* cache, CatCList* cl)
 
     /* delink from member tuples */
     for (i = cl->n_members; --i >= 0;) {
-        CatCTup* ct = cl->members[i];
+        CatCTup* ct = cl->systups[i];
 
         Assert(ct->c_list == cl);
         ct->c_list = NULL;
@@ -587,6 +611,10 @@ static void CatCacheRemoveCList(CatCache* cache, CatCList* cl)
  */
 void CatalogCacheIdInvalidate(int cacheId, uint32 hashValue)
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->systabcache.CacheIdHashValueInvalidateLocal(cacheId, hashValue);
+        return;
+    }
     CatCache* ccp = NULL;
 
     CACHE3_elog(DEBUG2, "CatalogCacheIdInvalidate: called, cacheId %d, hashValue: %d", cacheId, hashValue);
@@ -674,6 +702,10 @@ void CatalogCacheIdInvalidate(int cacheId, uint32 hashValue)
  */
 void AtEOXact_CatCache(bool isCommit)
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->systabcache.AtEOXact_CatCache(isCommit);
+        return;
+    }
 #ifdef USE_ASSERT_CHECKING
     if (assert_enabled) {
         CatCache* ccp = NULL;
@@ -768,6 +800,10 @@ static void ResetCatalogCache(CatCache* cache)
  */
 void ResetCatalogCaches(void)
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->systabcache.ResetCatalogCaches();
+        return;
+    }
     CatCache* cache = NULL;
 
     if (!RecoveryInProgress()) {
@@ -796,6 +832,10 @@ void ResetCatalogCaches(void)
  */
 void CatalogCacheFlushCatalog(Oid catId)
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->systabcache.CatalogCacheFlushCatalogLocal(catId);
+        return;
+    }
     CatCache* cache = NULL;
 
     CACHE2_elog(DEBUG2, "CatalogCacheFlushCatalog called for %u", catId);
@@ -807,7 +847,7 @@ void CatalogCacheFlushCatalog(Oid catId)
             ResetCatalogCache(cache);
 
             /* Tell inval.c to call syscache callbacks for this cache */
-            CallSyscacheCallbacks(cache->id, 0);
+            CallSessionSyscacheCallbacks(cache->id, 0);
         }
     }
 
@@ -1121,9 +1161,9 @@ void InitCatCachePhase2(CatCache* cache, bool touch_index)
  *		pg_authid and pg_auth_members syscaches for authentication even if
  *		we don't yet have relcache entries for those catalogs' indexes.
  */
-static bool IndexScanOK(CatCache* cache, ScanKey cur_skey)
+bool IndexScanOK(int cache_id)
 {
-    switch (cache->id) {
+    switch (cache_id) {
         case INDEXRELID:
 
             /*
@@ -1132,7 +1172,7 @@ static bool IndexScanOK(CatCache* cache, ScanKey cur_skey)
              * just force all pg_index searches to be heap scans until we've
              * built the critical relcaches.
              */
-            if (!u_sess->relcache_cxt.criticalRelcachesBuilt)
+            if (!LocalRelCacheCriticalRelcachesBuilt())
                 return false;
             break;
 
@@ -1156,7 +1196,7 @@ static bool IndexScanOK(CatCache* cache, ScanKey cur_skey)
              * Protect authentication lookups occurring before relcache has
              * collected entries for shared indexes.
              */
-            if (!u_sess->relcache_cxt.criticalSharedRelcachesBuilt)
+            if (!LocalRelCacheCriticalSharedRelcachesBuilt())
                 return false;
             break;
         default:
@@ -1231,6 +1271,8 @@ void SearchCatCacheCheck(){
  */
 HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4, int level)
 {
+    /* dont call SearchCatCache , call SearchSysCache instead */
+    Assert(!EnableLocalSysCache());
     Datum arguments[CATCACHE_MAXKEYS];
     uint32 hashValue;
     Index hashIndex;
@@ -1260,7 +1302,7 @@ HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2,
     /*
      * find the hash bucket in which to look for the tuple
      */
-    hashValue = CatalogCacheComputeHashValue(cache, nkeys, v1, v2, v3, v4);
+    hashValue = CatalogCacheComputeHashValue(cache->cc_hashfunc, nkeys, arguments);
     hashIndex = HASH_INDEX(hashValue, (uint32)cache->cc_nbuckets);
 
     /*
@@ -1276,7 +1318,7 @@ HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2,
         if (ct->hash_value != hashValue)
             continue; /* quickly skip entry if wrong hash val */
 
-        if (!CatalogCacheCompareTuple(cache, nkeys, ct->keys, arguments))
+        if (!CatalogCacheCompareTuple(cache->cc_fastequal, nkeys, ct->keys, arguments))
             continue;
 
         /*
@@ -1327,7 +1369,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc);
  *  one buitin function if it exists. Then we create the heap tuple by the infomation we get from builtin
  *  function arrarys,and return it.
  */
-static HeapTuple SearchBuiltinProcByNameArgNsp(CatCache* cache, int nkeys, Datum* arguments)
+static HeapTuple SearchBuiltinProcByNameArgNsp(int nkeys, Datum* arguments)
 {
     char* funcname = NULL;
     oidvector* argtypes = NULL;
@@ -1390,7 +1432,7 @@ static HeapTuple SearchBuiltinProcByNameArgNsp(CatCache* cache, int nkeys, Datum
  *  oid is the unique index for builtin functions, so we can find only one buitin function if it exists.
  *  Then we create the heap tuple by the infomation we get from builtin function arrarys,and return it.
  */
-static HeapTuple SearchBuiltinProcByOid(CatCache* cache, int nkeys, Datum* arguments)
+static HeapTuple SearchBuiltinProcByOid(int nkeys, Datum* arguments)
 {
     const Builtin_func* bfunc = NULL;
 
@@ -1417,18 +1459,18 @@ static HeapTuple SearchBuiltinProcByOid(CatCache* cache, int nkeys, Datum* argum
  *  index for builtin functions. We can get the search mode infomation from cache to determine which
  *  function will be called for processing
  */
-static HeapTuple SearchBuiltinProcCacheMiss(CatCache* cache, int nkeys, Datum* arguments)
+HeapTuple SearchBuiltinProcCacheMiss(int cache_id, int nkeys, Datum* arguments)
 {
-    if (CacheIsProcNameArgNsp(cache)) {
-        return SearchBuiltinProcByNameArgNsp(cache, nkeys, arguments);
-    } else if (CacheIsProcOid(cache)) {
-        return SearchBuiltinProcByOid(cache, nkeys, arguments);
+    if (CacheIsProcNameArgNsp(cache_id)) {
+        return SearchBuiltinProcByNameArgNsp(nkeys, arguments);
+    } else if (CacheIsProcOid(cache_id)) {
+        return SearchBuiltinProcByOid(nkeys, arguments);
     } else {
         return NULL;
     }
 }
 
-static HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute attr)
+HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attribute attr)
 {
     Datum values[Natts_pg_attribute];
     bool isnull[Natts_pg_attribute];
@@ -1471,7 +1513,7 @@ static HeapTuple GetPgAttributeAttrTuple(TupleDesc tupleDesc, const Form_pg_attr
     return heap_form_tuple(tupleDesc, values, isnull);
 }
 
-static HeapTuple SearchPgAttributeCacheMiss(CatCache* cache, int nkeys, const Datum* arguments)
+HeapTuple SearchPgAttributeCacheMiss(int cache_id, TupleDesc cc_tupdesc, int nkeys, const Datum* arguments)
 {
     Assert(nkeys == 2);
     Oid relOid = DatumGetObjectId(arguments[0]);
@@ -1481,15 +1523,16 @@ static HeapTuple SearchPgAttributeCacheMiss(CatCache* cache, int nkeys, const Da
     }
     const FormData_pg_attribute* catlogAttrs = catalogDesc.attrs;
     FormData_pg_attribute tempAttr;
-    if (cache->id == ATTNUM) {
+    if (cache_id == ATTNUM) {
         int16 attNum = DatumGetInt16(arguments[1]);
         Form_pg_attribute attr;
         if (attNum < 0) {
-            /* The system table does not have the bucket column, so incoming false */
-            if ((attNum == ObjectIdAttributeNumber && !catalogDesc.hasoids) || attNum == BucketIdAttributeNumber) {
+            /* The system table does not have the bucket column or uids column, so incoming false */
+            if ((attNum == ObjectIdAttributeNumber && !catalogDesc.hasoids) || attNum == BucketIdAttributeNumber ||
+                attNum == UidAttributeNumber) {
                 return NULL;
             }
-            attr = SystemAttributeDefinition(attNum, catalogDesc.hasoids, false);
+            attr = SystemAttributeDefinition(attNum, catalogDesc.hasoids, false, false);
             attr->attrelid = relOid;
         } else if (attNum <= catalogDesc.natts && attNum > 0) {
             tempAttr = catlogAttrs[attNum - 1];
@@ -1497,14 +1540,14 @@ static HeapTuple SearchPgAttributeCacheMiss(CatCache* cache, int nkeys, const Da
         } else {
             return NULL;
         }
-        return GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
-    } else if (cache->id == ATTNAME) {
+        return GetPgAttributeAttrTuple(cc_tupdesc, attr);
+    } else if (cache_id == ATTNAME) {
         Form_pg_attribute attr;
         for (int16 attnum = 0; attnum < catalogDesc.natts; attnum++) {
             tempAttr = catlogAttrs[attnum];
             attr = &tempAttr;
             if (strcmp(NameStr(*DatumGetName(arguments[1])), NameStr(attr->attname)) == 0) {
-                return GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
+                return GetPgAttributeAttrTuple(cc_tupdesc, attr);
             }
         }
         attr = SystemAttributeByName(NameStr(*DatumGetName(arguments[1])), catalogDesc.hasoids);
@@ -1512,11 +1555,11 @@ static HeapTuple SearchPgAttributeCacheMiss(CatCache* cache, int nkeys, const Da
             return NULL;
         }
         attr->attrelid = relOid;
-        return GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
+        return GetPgAttributeAttrTuple(cc_tupdesc, attr);
     } else {
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                         errmsg("pg_attribute does not have syscache with id %d", cache->id)));
+                         errmsg("pg_attribute does not have syscache with id %d", cache_id)));
     }
     return NULL;
 }
@@ -1557,10 +1600,10 @@ static HeapTuple SearchCatCacheMiss(
     cur_skey[3].sk_argument = v4;
 
     /* For search a function, we firstly try to search it in built-in function list */
-    if (IsProcCache(cache) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsProcCache(cache->cc_reloid) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         CACHE2_elog(DEBUG2, "SearchCatCacheMiss(%d): function not found in pg_proc", cache->id);
 
-        ntp = SearchBuiltinProcCacheMiss(cache, nkeys, arguments);
+        ntp = SearchBuiltinProcCacheMiss(cache->id, nkeys, arguments);
         if (HeapTupleIsValid(ntp)) {
             CACHE2_elog(DEBUG2, "SearchCatCacheMiss(%d): match a built-in function", cache->id);
             ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
@@ -1573,9 +1616,9 @@ static HeapTuple SearchCatCacheMiss(
     }
 
     /* Insert hardcoded system catalogs' attributes into pg_attribute's syscache. */
-    if (IsAttributeCache(cache) && IsSystemObjOid(DatumGetObjectId(arguments[0]))) {
+    if (IsAttributeCache(cache->cc_reloid) && IsSystemObjOid(DatumGetObjectId(arguments[0]))) {
         CACHE2_elog(DEBUG2, "SearchCatCacheMiss: cat tuple not in cat cache %d", cache->id);
-        ntp = SearchPgAttributeCacheMiss(cache, nkeys, arguments);
+        ntp = SearchPgAttributeCacheMiss(cache->id, cache->cc_tupdesc, nkeys, arguments);
         if (HeapTupleIsValid(ntp)) {
             ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
             heap_freetuple(ntp);
@@ -1606,7 +1649,7 @@ static HeapTuple SearchCatCacheMiss(
         ereport(DEBUG1, (errmsg("cache->cc_reloid - %d", cache->cc_reloid)));
 
         scandesc = systable_beginscan(
-            relation, cache->cc_indexoid, IndexScanOK(cache, cur_skey), NULL, nkeys, cur_skey);
+            relation, cache->cc_indexoid, IndexScanOK(cache->id), NULL, nkeys, cur_skey);
 
         while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
             ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
@@ -1667,6 +1710,8 @@ static HeapTuple SearchCatCacheMiss(
     return &ct->tuple;
 }
 
+
+
 /*
  *	ReleaseCatCache
  *
@@ -1680,6 +1725,8 @@ static HeapTuple SearchCatCacheMiss(
  */
 void ReleaseCatCache(HeapTuple tuple)
 {
+    /* dont call ReleaseCatCache , call ReleaseSysCache instead */
+    Assert(!EnableLocalSysCache());
     CatCTup* ct = (CatCTup*)(((char*)tuple) - offsetof(CatCTup, tuple));
 
     /* Safety checks to ensure we were handed a cache entry */
@@ -1717,7 +1764,12 @@ uint32 GetCatCacheHashValue(CatCache* cache, Datum v1, Datum v2, Datum v3, Datum
     /*
      * calculate the hash value
      */
-    return CatalogCacheComputeHashValue(cache, cache->cc_nkeys, v1, v2, v3, v4);
+    Datum arguments[CATCACHE_MAXKEYS];
+    arguments[0] = v1;
+    arguments[1] = v2;
+    arguments[2] = v3;
+    arguments[3] = v4;
+    return CatalogCacheComputeHashValue(cache->cc_hashfunc, cache->cc_nkeys, arguments);
 }
 
 HeapTuple CreateHeapTuple4BuiltinFuncDesc(const Builtin_func* func, TupleDesc desc)
@@ -2054,7 +2106,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
              * generic arrays, but they support only one-dimensional arrays with no
              * nulls (and no null bitmap).
              */
-            oidvector* dummy = MakeMd5HashArgTypes((oidvector*)allParameterTypes);
+            oidvector* dummy = MakeMd5HashOids((oidvector*)allParameterTypes);
 
             values[Anum_pg_proc_allargtypes - 1] = PointerGetDatum(dummy);
             values[Anum_pg_proc_allargtypesext - 1] = PointerGetDatum(allParameterTypes);
@@ -2169,7 +2221,8 @@ CatCTup* CreateCatCTup(CatCache* cache, Datum* arguments, HeapTuple ntp)
     Index hashIndex;
     Dlelem* elt = NULL;
 
-    hashValue = CatalogCacheComputeTupleHashValue(cache, cache->cc_nkeys, ntp);
+    hashValue = CatalogCacheComputeTupleHashValue(cache->id, cache->cc_keyno, cache->cc_tupdesc, cache->cc_hashfunc,
+        cache->cc_reloid, cache->cc_nkeys, ntp);
     hashIndex = HASH_INDEX(hashValue, (uint32)cache->cc_nbuckets);
 
     for (elt = DLGetHead(&cache->cc_bucket[hashIndex]); elt; elt = DLGetSucc(elt)) {
@@ -2227,13 +2280,14 @@ List* SearchPgAttributeCacheList(CatCache* cache, int nkey, Datum* arguments, Li
                 if (!catalogDesc.hasoids && index == 1) {
                     continue;
                 }
-                /* The system table does not have the bucket column, so incoming false */
-                attr = SystemAttributeDefinition(-(index + 1), catalogDesc.hasoids, false);
+                /* The system table does not have the bucket column or uid column, so incoming false */
+                attr = SystemAttributeDefinition(-(index + 1), catalogDesc.hasoids, false, false);
                 attr->attrelid = relOid;
             }
             heapTuple = GetPgAttributeAttrTuple(cache->cc_tupdesc, attr);
             cTup = NULL;
-            hashValue = CatalogCacheComputeTupleHashValue(cache, cache->cc_nkeys, heapTuple);
+            hashValue = CatalogCacheComputeTupleHashValue(cache->id, cache->cc_keyno, cache->cc_tupdesc,
+                cache->cc_hashfunc, cache->cc_reloid, cache->cc_nkeys, heapTuple);
             hashIndex = HASH_INDEX(hashValue, static_cast<uint32>(cache->cc_nbuckets));
 
             for (dlelem = DLGetHead(&cache->cc_bucket[hashIndex]); dlelem; dlelem = DLGetSucc(dlelem)) {
@@ -2456,18 +2510,13 @@ void InsertBuiltinFuncDescInBootstrap()
  */
 CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Datum v3, Datum v4)
 {
+    /* dont call SearchCatCacheList , call SearchSysCacheList instead */
+    Assert(!EnableLocalSysCache());
+
     Datum arguments[CATCACHE_MAXKEYS];
     uint32 lHashValue;
     Dlelem* elt = NULL;
     CatCList* cl = NULL;
-    CatCTup* ct = NULL;
-    List* volatile ctlist = NULL;
-    ListCell* ctlist_item = NULL;
-    int nmembers;
-    bool ordered = false;
-    HeapTuple ntp;
-    MemoryContext oldcxt;
-    int i;
 
     SearchCatCacheCheck();
 
@@ -2490,12 +2539,11 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
     arguments[3] = v4;
 
     /*
-
      * compute a hash value of the given keys for faster search.  We don't
      * presently divide the CatCList items into buckets, but this still lets
      * us skip non-matching items quickly most of the time.
      */
-    lHashValue = CatalogCacheComputeHashValue(cache, nkeys, v1, v2, v3, v4);
+    lHashValue = CatalogCacheComputeHashValue(cache->cc_hashfunc, nkeys, arguments);
 
     /*
      * scan the items until we find a match or exhaust our list
@@ -2515,7 +2563,7 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
         if (cl->nkeys != nkeys)
             continue;
 
-        if (!CatalogCacheCompareTuple(cache, nkeys, cl->keys, arguments))
+        if (!CatalogCacheCompareTuple(cache->cc_fastequal, nkeys, cl->keys, arguments))
             continue;
 
         /*
@@ -2541,6 +2589,22 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
         return cl;
     }
 
+    return SearchCatCacheListMiss(cache, nkeys, arguments, lHashValue);
+}
+
+static CatCList* SearchCatCacheListMiss(CatCache* cache, int nkeys, Datum* arguments, uint32 lHashValue)
+{
+    Dlelem* elt = NULL;
+    CatCList* cl = NULL;
+    CatCTup* ct = NULL;
+    List* volatile ctlist = NULL;
+    ListCell* ctlist_item = NULL;
+    int nmembers;
+    bool ordered = false;
+    HeapTuple ntp;
+    MemoryContext oldcxt;
+    int i;
+
     /*
      * List was not found in cache, so we have to build it by reading the
      * relation.  For each matching tuple found in the relation, use an
@@ -2559,11 +2623,12 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
      * which has the same name with the one we want to find, lappend it
      * into the ctlist
      */
-    if (IsProcCache(cache) && CacheIsProcNameArgNsp(cache) && u_sess->attr.attr_common.IsInplaceUpgrade == false) {
+    if (IsProcCache(cache->cc_reloid) && CacheIsProcNameArgNsp(cache->id) &&
+        u_sess->attr.attr_common.IsInplaceUpgrade == false) {
         ctlist = SearchBuiltinProcCacheList(cache, nkeys, arguments, ctlist);
     }
 
-    if (IsAttributeCache(cache) && IsSystemObjOid(DatumGetObjectId(arguments[0]))) {
+    if (IsAttributeCache(cache->cc_reloid) && IsSystemObjOid(DatumGetObjectId(arguments[0]))) {
         ctlist = SearchPgAttributeCacheList(cache, nkeys, arguments, ctlist);
     }
 
@@ -2581,15 +2646,15 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
         rc = memcpy_s(
             cur_skey, sizeof(ScanKeyData) * CATCACHE_MAXKEYS, cache->cc_skey, sizeof(ScanKeyData) * cache->cc_nkeys);
         securec_check(rc, "", "");
-        cur_skey[0].sk_argument = v1;
-        cur_skey[1].sk_argument = v2;
-        cur_skey[2].sk_argument = v3;
-        cur_skey[3].sk_argument = v4;
+        cur_skey[0].sk_argument = arguments[0];
+        cur_skey[1].sk_argument = arguments[1];
+        cur_skey[2].sk_argument = arguments[2];
+        cur_skey[3].sk_argument = arguments[3];
 
         relation = heap_open(cache->cc_reloid, AccessShareLock);
 
         scandesc = systable_beginscan(
-            relation, cache->cc_indexoid, IndexScanOK(cache, cur_skey), NULL, nkeys, cur_skey);
+            relation, cache->cc_indexoid, IndexScanOK(cache->id), NULL, nkeys, cur_skey);
 
         /* The list will be ordered iff we are doing an index scan */
         ordered = (scandesc->irel != NULL);
@@ -2598,14 +2663,14 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
             uint32 hashValue;
             Index hashIndex;
 
-            if (IsProcCache(cache) && IsSystemObjOid(HeapTupleGetOid(ntp)) &&
+            if (IsProcCache(cache->cc_reloid) && IsSystemObjOid(HeapTupleGetOid(ntp)) &&
                 u_sess->attr.attr_common.IsInplaceUpgrade == false) {
                 continue;
             }
-            if (IsAttributeCache(cache)) {
+            if (IsAttributeCache(cache->cc_reloid)) {
                 bool attIsNull = false;
-                Oid attrelid = DatumGetObjectId(SysCacheGetAttr(cache->id, ntp,
-                                                Anum_pg_attribute_attrelid, &attIsNull));
+                Oid attrelid = DatumGetObjectId(
+                    SysCacheGetAttr(cache->id, ntp, Anum_pg_attribute_attrelid, &attIsNull));
                 if (IsSystemObjOid(attrelid) && IsValidCatalogParam(GetCatalogParam(attrelid))) {
                     continue;
                 }
@@ -2615,27 +2680,28 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
              * See if there's an entry for this tuple already.
              */
             ct = NULL;
-            hashValue = CatalogCacheComputeTupleHashValue(cache, cache->cc_nkeys, ntp);
+            hashValue = CatalogCacheComputeTupleHashValue(cache->id, cache->cc_keyno, cache->cc_tupdesc,
+                cache->cc_hashfunc, cache->cc_reloid, cache->cc_nkeys, ntp);
             hashIndex = HASH_INDEX(hashValue, static_cast<uint32>(cache->cc_nbuckets));
 
             for (elt = DLGetHead(&cache->cc_bucket[hashIndex]); elt; elt = DLGetSucc(elt)) {
                 ct = (CatCTup*)DLE_VAL(elt);
-
+                /* ignore dead and negative entries */
                 if (ct->dead || ct->negative)
-                    continue; /* ignore dead and negative entries */
-
+                    continue;
+                /* quickly skip entry if wrong hash val */
                 if (ct->hash_value != hashValue)
-                    continue; /* quickly skip entry if wrong hash val */
+                    continue;
 
                 /* A built-in function is all in pg_proc, in upgrade senario, we skip searching
                  * the builtin functions from builtin function array. In non-upgrade mode, the function
                  * found from heap must exist in builtin array.
                  */
-                if (IsProcCache(cache) && IsSystemObjOid(HeapTupleGetOid(&(ct->tuple))) &&
+                if (IsProcCache(cache->cc_reloid) && IsSystemObjOid(HeapTupleGetOid(&(ct->tuple))) &&
                     u_sess->attr.attr_common.IsInplaceUpgrade == false) {
                     continue;
                 }
-                if (IsAttributeCache(cache)) {
+                if (IsAttributeCache(cache->cc_reloid)) {
                     bool attIsNull = false;
                     Oid attrelid = DatumGetObjectId(SysCacheGetAttr(cache->id, &(ct->tuple),
                                    Anum_pg_attribute_attrelid, &attIsNull));
@@ -2684,7 +2750,8 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
          */
         oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
         nmembers = list_length(ctlist);
-        cl = (CatCList*)palloc(offsetof(CatCList, members) + (nmembers + 1) * sizeof(CatCTup*));
+        cl = (CatCList*)palloc(sizeof(CatCList) + (nmembers) * sizeof(CatCTup*));
+        cl->systups = (CatCTup**)(((char *)cl) + sizeof(CatCList));
 
         /* Extract key values */
         CatCacheCopyKeys(cache->cc_tupdesc, nkeys, cache->cc_keyno, arguments, cl->keys);
@@ -2718,7 +2785,7 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
 
     i = 0;
     foreach (ctlist_item, ctlist) {
-        cl->members[i++] = ct = (CatCTup*)lfirst(ctlist_item);
+        cl->systups[i++] = ct = (CatCTup*)lfirst(ctlist_item);
         Assert(ct->c_list == NULL);
         ct->c_list = cl;
         /* release the temporary refcount on the member */
@@ -2769,6 +2836,8 @@ ct->refcount == 0 && (ct->c_list == NULL || ct->c_list->refcount == 0))
  */
 void ReleaseCatCacheList(CatCList* list)
 {
+    /* dont call ReleaseCatCacheList , call ReleaseSysCacheList instead */
+    Assert(!EnableLocalSysCache());
     /* Safety checks to ensure we were handed a cache entry */
     Assert(list->cl_magic == CL_MAGIC);
     Assert(list->refcount > 0);
@@ -2884,7 +2953,7 @@ static CatCTup* CatalogCacheCreateEntry(
 /*
  * Helper routine that frees keys stored in the keys array.
  */
-static void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* keys)
+void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* keys)
 {
     int i;
 
@@ -2897,7 +2966,8 @@ static void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Da
         Assert(attnum > 0);
 
         if (!tupdesc->attrs[attnum - 1]->attbyval) {
-            pfree(DatumGetPointer(keys[i]));
+            void *ptr = DatumGetPointer(keys[i]);
+            pfree_ext(ptr);
             keys[i] = (Datum)NULL;
         }
     }
@@ -2908,7 +2978,7 @@ static void CatCacheFreeKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Da
  * one, guaranteeing that the datums are fully allocated in the current memory
  * context.
  */
-static void CatCacheCopyKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* srckeys, Datum* dstkeys)
+void CatCacheCopyKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Datum* srckeys, Datum* dstkeys)
 {
     int i;
 
@@ -2980,6 +3050,11 @@ static void CatCacheCopyKeys(TupleDesc tupdesc, int nkeys, const int* attnos, Da
 void PrepareToInvalidateCacheTuple(
     Relation relation, HeapTuple tuple, HeapTuple newtuple, void (*function)(int, uint32, Oid))
 {
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->systabcache.PrepareToInvalidateCacheTuple(
+            relation, tuple, newtuple, function);
+        return;
+    }
     CatCache* ccp = NULL;
     Oid reloid;
 
@@ -3015,7 +3090,8 @@ void PrepareToInvalidateCacheTuple(
         if (ccp->cc_tupdesc == NULL)
             CatalogCacheInitializeCache(ccp);
 
-        hashvalue = CatalogCacheComputeTupleHashValue(ccp, ccp->cc_nkeys, tuple);
+        hashvalue = CatalogCacheComputeTupleHashValue(ccp->id, ccp->cc_keyno, ccp->cc_tupdesc, ccp->cc_hashfunc,
+            ccp->cc_reloid, ccp->cc_nkeys, tuple);
         dbid = ccp->cc_relisshared ? (Oid)0 : u_sess->proc_cxt.MyDatabaseId;
 
         (*function)(ccp->id, hashvalue, dbid);
@@ -3023,7 +3099,8 @@ void PrepareToInvalidateCacheTuple(
         if (newtuple) {
             uint32 newhashvalue;
 
-            newhashvalue = CatalogCacheComputeTupleHashValue(ccp, ccp->cc_nkeys, newtuple);
+            newhashvalue = CatalogCacheComputeTupleHashValue(ccp->id, ccp->cc_keyno, ccp->cc_tupdesc,
+                ccp->cc_hashfunc, ccp->cc_reloid, ccp->cc_nkeys, newtuple);
 
             if (newhashvalue != hashvalue)
                 (*function)(ccp->id, newhashvalue, dbid);
@@ -3059,3 +3136,288 @@ void PrintCatCacheListLeakWarning(CatCList* list)
             list->my_cache->id,
             list->refcount)));
 }
+
+
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * Specific CatalogCacheComputeTupleHashValue Function to support ProcedureCreate!
+ */
+static uint32 CatalogCacheComputeTupleHashValueForProcAllArgs(
+    int* cc_keyno, TupleDesc cc_tupdesc, CCHashFN *cc_hashfunc, Oid cc_reloid, int nkeys, HeapTuple tuple)
+{
+    Assert(nkeys == PROCALLARGS_KEY_NUM);
+    Assert(HeapTupleIsValid(tuple));
+
+    Datum v1 = 0, v2 = 0, v3 = 0, v4 = 0;
+    uint32 hashValue;
+
+    bool isNull = false;
+
+    /* Extract key fields from tuple */
+    v1 = fastgetattr(tuple, cc_keyno[0], cc_tupdesc, &isNull);
+    Assert(!isNull);
+
+    v2 = fastgetattr(tuple, cc_keyno[1], cc_tupdesc, &isNull);
+    Assert(!isNull);
+
+    /*
+     * Comput hashvaule with concat key2 and argmodes
+     * Function with same paramterTypes and different argmodes
+     * should have different hashkeys.
+     */
+    oidvector* allArgTypes = (oidvector*)DatumGetPointer(v2);
+    Assert(allArgTypes != NULL);
+
+    Datum tmp = heap_getattr(tuple, Anum_pg_proc_proargmodes, cc_tupdesc, &isNull);
+
+    oidvector* argModes = ConvertArgModesToMd5Vector(tmp);
+    oidvector* v2WithArgModes = MergeOidVector(allArgTypes, argModes);
+
+    pfree_ext(argModes);
+
+    Datum newKey2 = PointerGetDatum(v2WithArgModes);
+
+    v3 = fastgetattr(tuple, cc_keyno[2], cc_tupdesc, &isNull);
+    Assert(!isNull);
+   
+    v4 = fastgetattr(tuple, cc_keyno[3], cc_tupdesc, &isNull);
+    Assert(!isNull);
+
+    Datum arguments[CATCACHE_MAXKEYS];
+    arguments[0] = v1;
+    arguments[1] = newKey2;
+    arguments[2] = v3;
+    arguments[3] = v4;
+    hashValue = CatalogCacheComputeHashValue(cc_hashfunc, nkeys, arguments);
+
+    pfree_ext(v2WithArgModes);
+    return hashValue;
+}
+
+static bool SearchHashBucketWithArgModes(
+    CatCache* cache, int nkeys, uint32 hashValue, const Datum* searchkeys, oidvector* argModes, HeapTuple *tuple)
+{
+    bool found = false;
+    Dlelem* elt = NULL;
+    CatCTup* ct = NULL;
+
+    Index hashIndex = HASH_INDEX(hashValue, (uint32)cache->cc_nbuckets);
+    /*
+     * scan the hash bucket until we find a match or exhaust our tuples
+     */
+    for (elt = DLGetHead(&cache->cc_bucket[hashIndex]); elt; elt = DLGetSucc(elt)) {
+
+        ct = (CatCTup*)DLE_VAL(elt);
+
+        if (ct->dead)
+            continue; /* ignore dead entries */
+
+        if (ct->hash_value != hashValue)
+            continue; /* quickly skip entry if wrong hash val */
+
+        if (!CatalogCacheCompareTuple(cache->cc_fastequal, nkeys, ct->keys, searchkeys))
+            continue;
+
+        /*
+         * The comparison of hashvalue and keys is not enough.
+         */
+        if (!IsProArgModesEqualByTuple(&ct->tuple, cache->cc_tupdesc, argModes)) {
+            continue;
+        }
+
+        /*
+         * We found a match in the cache.  Move it to the front of the list
+         * for its hashbucket, in order to speed subsequent searches.  (The
+         * most frequently accessed elements in any hashbucket will tend to be
+         * near the front of the hashbucket's list.)
+         */
+        DLMoveToFront(&ct->cache_elem);
+
+        /*
+         * If it's a positive entry, bump its refcount and return it. If it's
+         * negative, we can report failure to the caller.
+         */
+        if (!ct->negative && t_thrd.utils_cxt.CurrentResourceOwner != NULL) {
+            ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+            ct->refcount++;
+            ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
+
+            CACHE3_elog(DEBUG2, "SearchCatCache(%s): found in bucket %d", cache->cc_relname, hashIndex);
+
+#ifdef CATCACHE_STATS
+            cache->cc_hits++;
+#endif
+
+            *tuple = &ct->tuple;
+            found = true;
+            break;
+        }
+    }
+    return found;
+}
+
+/*
+ * Specific SearchCatCacheMiss Function to support ProcedureCreate!
+ */
+static HeapTuple SearchCatCacheMissWithArgModes(CatCache* cache, int nkeys, uint32 hashValue,
+    Datum* arguments, oidvector* argModes)
+{
+    Assert(cache->id == PROCALLARGS);
+
+    ScanKeyData cur_skey[CATCACHE_MAXKEYS];
+    Relation relation;
+    SysScanDesc scandesc;
+    HeapTuple ntp;
+    CatCTup* ct = NULL;
+    errno_t rc = EOK;
+
+    Index hashIndex = HASH_INDEX(hashValue, (uint32)cache->cc_nbuckets);
+
+    /*
+     * Ok, need to make a lookup in the relation, copy the scankey and fill
+     * out any per-call fields.
+     */
+    rc = memcpy_s(cur_skey, sizeof(ScanKeyData) * CATCACHE_MAXKEYS, cache->cc_skey, sizeof(ScanKeyData) * nkeys);
+    securec_check(rc, "", "");
+    cur_skey[0].sk_argument = arguments[0];
+    cur_skey[1].sk_argument = arguments[1];
+    cur_skey[2].sk_argument = arguments[2];
+    cur_skey[3].sk_argument = arguments[3];
+
+    relation = heap_open(cache->cc_reloid, AccessShareLock);
+
+    ereport(DEBUG1, (errmsg("cache->cc_reloid - %d", cache->cc_reloid)));
+
+    scandesc = systable_beginscan(
+        relation, cache->cc_indexoid, IndexScanOK(cache->id), NULL, nkeys, cur_skey);
+
+    while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
+
+        /*
+         * The key2 (pg_proc_allargtypes) can be duplicate in table.
+         * We need to compare the proargmodes to make sure the function is correct.
+         */
+        if (!IsProArgModesEqualByTuple(ntp, cache->cc_tupdesc, argModes)) {
+            continue;
+        }
+
+        ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
+
+        /* immediately set the refcount to 1 */
+        ResourceOwnerEnlargeCatCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+        ct->refcount++;
+        ResourceOwnerRememberCatCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, &ct->tuple);
+        break; /* assume only one match */
+    }
+
+    systable_endscan(scandesc);
+
+    heap_close(relation, AccessShareLock);
+    /*
+     * If tuple was not found, we need to build a negative cache entry
+     * containing a fake tuple.  The fake tuple has the correct key columns,
+     * but nulls everywhere else.
+     * However, in this specific function for procallargs, we no longer build
+     * negative entry any more, because when we create a overload pg-style
+     * function with the same number intype parameters and different outtype
+     * parameters (a in int) vs (a in int, b out int), syscache will find no
+     * suitable cache tuple and make a new negative cache entry, but error will
+     * raise in such case, and no one will free the negative cache entry!
+     * In fact, the case metioned above should find a suitable tuple to return
+     * the caller, but for the reason we adapt a suit of Specific Function
+     * to support ProcedureCreate, syscache couldn't find the tuple. Someone
+     * may find new methods to solve the problem and refactor this!
+     */
+    if (ct == NULL) {
+        return NULL;
+    }
+
+    CACHE4_elog(DEBUG2,
+        "SearchCatCacheMissWithArgModes(%s): Contains %d/%d tuples",
+        cache->cc_relname,
+        cache->cc_ntup,
+        u_sess->cache_cxt.cache_header->ch_ntup);
+    CACHE3_elog(DEBUG2, "SearchCatCacheMissWithArgModes(%s): put in bucket %d", cache->cc_relname, hashIndex);
+
+#ifdef CATCACHE_STATS
+    cache->cc_newloads++;
+#endif
+
+    return &ct->tuple;
+}
+
+/*
+ * Specific SearchCatCache Function to support ProcedureCreate!
+ */
+HeapTuple SearchSysCacheForProcAllArgs(Datum v1, Datum v2, Datum v3, Datum v4, Datum proArgModes)
+{
+
+    if (EnableLocalSysCache()) {
+        HeapTuple tmp = t_thrd.lsc_cxt.lsc->systabcache.SearchTupleForProcAllArgs(v1, v2, v3, v4, proArgModes);
+        return tmp;
+    }
+
+    Assert(PointerIsValid(u_sess->syscache_cxt.SysCache[PROCALLARGS]));
+    Assert(u_sess->syscache_cxt.SysCache[PROCALLARGS]->cc_nkeys == PROCALLARGS_KEY_NUM);
+
+    CatCache* cache = u_sess->syscache_cxt.SysCache[PROCALLARGS];
+    int nkeys = cache->cc_nkeys;
+    Datum arguments[CATCACHE_MAXKEYS];
+    uint32 hashValue;
+
+    SearchCatCacheCheck();
+
+    /*
+     * one-time startup overhead for each cache
+     */
+    if (unlikely(cache->cc_tupdesc == NULL))
+        CatalogCacheInitializeCache(cache);
+
+#ifdef CATCACHE_STATS
+    cache->cc_searches++;
+#endif
+
+    /*
+     * Comput hashvaule with concat key2 and argmodes
+     * Function with same paramterTypes and different argmodes
+     * should have different hashkeys.
+     */
+    oidvector* allArgTypes = (oidvector*)DatumGetPointer(v2);
+
+    Assert(allArgTypes != NULL);
+
+    /* remember free the oidvectors when we no longer use them */
+    oidvector* argModes = ConvertArgModesToMd5Vector(proArgModes);
+    oidvector* v2WithArgModes = MergeOidVector(allArgTypes, argModes);
+    Datum newKey2 = PointerGetDatum(v2WithArgModes);
+
+    /* Initialize local parameter array */
+    arguments[0] = v1;
+    arguments[1] = newKey2;
+    arguments[2] = v3;
+    arguments[3] = v4;
+
+    /*
+     * find the hash bucket in which to look for the tuple
+     */
+    hashValue = CatalogCacheComputeHashValue(cache->cc_hashfunc, nkeys, arguments);
+
+    /* reset parameter array */
+    pfree_ext(v2WithArgModes);
+    arguments[1] = v2;
+
+    HeapTuple ret_tuple = NULL;
+    bool found = false;
+    found = SearchHashBucketWithArgModes(cache, nkeys, hashValue, arguments, argModes, &ret_tuple);
+    if (found) {
+
+        pfree_ext(argModes);
+        return ret_tuple;
+    }
+
+    ret_tuple = SearchCatCacheMissWithArgModes(cache, nkeys, hashValue, arguments, argModes);
+
+    pfree_ext(argModes);
+    return ret_tuple;
+}
+#endif

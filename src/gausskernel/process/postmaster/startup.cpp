@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 #include "access/xlog.h"
+#include "access/multi_redo_api.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "postmaster/startup.h"
@@ -141,6 +142,8 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
         if (t_thrd.startup_cxt.failover_triggered && t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby) {
             t_thrd.startup_cxt.failover_triggered = false;
         }
+    } else if (CheckNotifySignal(NOTIFY_CASCADE_STANDBY)) {
+        t_thrd.startup_cxt.standby_triggered = true;
     } else if (CheckNotifySignal(NOTIFY_FAILOVER)) {
         t_thrd.startup_cxt.failover_triggered = true;
 #ifndef ENABLE_MULTIPLE_NODES
@@ -169,6 +172,17 @@ static void StartupProcSigHupHandler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+/* SIGINT: set flag to check repair page */
+static void StartupProcSigIntHandler(SIGNAL_ARGS)
+{
+    int save_errno = errno;
+
+    t_thrd.startup_cxt.check_repair = true;
+
+    errno = save_errno;
+}
+
+
 /* SIGTERM: set flag to abort redo and exit */
 static void StartupProcShutdownHandler(SIGNAL_ARGS)
 {
@@ -184,6 +198,14 @@ static void StartupProcShutdownHandler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+void HandleStartupPageRepair(RepairBlockKey key, XLogPhyBlock pblk)
+{
+    XLogReaderState *record = g_instance.startup_cxt.current_record;
+    parallel_recovery::RecordBadBlockAndPushToRemote(record, key, CRC_CHECK_FAIL,
+                                                     InvalidXLogRecPtr, pblk);
+    return;
+}
+
 /* Handle SIGHUP and SIGTERM signals of startup process */
 void HandleStartupProcInterrupts(void)
 {
@@ -193,6 +215,13 @@ void HandleStartupProcInterrupts(void)
     if (t_thrd.startup_cxt.got_SIGHUP) {
         t_thrd.startup_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
+    }
+
+    if (t_thrd.startup_cxt.check_repair) {
+        if (!IsExtremeRedo() && !IsParallelRedo()) {
+            parallel_recovery::SeqCheckRemoteReadAndRepairPage();
+        }
+        t_thrd.startup_cxt.check_repair = false;
     }
 
     /*
@@ -213,6 +242,11 @@ void HandleStartupProcInterrupts(void)
 static void StartupReleaseAllLocks(int code, Datum arg)
 {
     Assert(t_thrd.proc != NULL);
+
+    if (g_instance.startup_cxt.badPageHashTbl != NULL) {
+        hash_destroy(g_instance.startup_cxt.badPageHashTbl);
+        g_instance.startup_cxt.badPageHashTbl = NULL;
+    }
 
     /* Do nothing if we're not in hot standby mode */
     if (t_thrd.xlog_cxt.standbyState == STANDBY_DISABLED)
@@ -268,7 +302,7 @@ void StartupProcessMain(void)
      * Reset some signals that are accepted by postmaster but not here
      */
     (void)gspqsignal(SIGHUP, StartupProcSigHupHandler);    /* reload config file */
-    (void)gspqsignal(SIGINT, SIG_IGN);                     /* ignore query cancel */
+    (void)gspqsignal(SIGINT, StartupProcSigIntHandler);    /* check repair page and file */
     (void)gspqsignal(SIGTERM, StartupProcShutdownHandler); /* request shutdown */
     (void)gspqsignal(SIGQUIT, startupproc_quickdie);       /* hard crash time */
 
@@ -293,6 +327,7 @@ void StartupProcessMain(void)
     (void)gspqsignal(SIGWINCH, SIG_DFL);
 
     (void)RegisterRedoInterruptCallBack(HandleStartupProcInterrupts);
+    (void)RegisterRedoPageRepairCallBack(HandleStartupPageRepair);
     /*
      * Unblock signals (they were blocked when the postmaster forked us)
      */
@@ -322,6 +357,11 @@ void StartupProcessMain(void)
          */
 #endif
         DeleteDisConnFileInClusterStandby();
+        if (!dummyStandbyMode) {
+            Assert(g_instance.startup_cxt.badPageHashTbl == NULL);
+            g_instance.startup_cxt.badPageHashTbl = parallel_recovery::BadBlockHashTblCreate();
+        }
+
         StartupXLOG();
     }
 

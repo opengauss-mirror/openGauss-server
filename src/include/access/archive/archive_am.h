@@ -40,5 +40,6 @@ int ArchiveWrite(const char* fileName, const char *buffer, const int bufferLengt
 int ArchiveDelete(const char* fileName, ArchiveConfig *archive_config = NULL);
 List* ArchiveList(const char* prefix, ArchiveConfig *archive_config = NULL,
             bool reportError = true, bool shortenConnTime = false);
+bool ArchiveFileExist(const char* file_path, ArchiveConfig *archive_config);
 
 #endif /* ARCHIVE_AM_H */

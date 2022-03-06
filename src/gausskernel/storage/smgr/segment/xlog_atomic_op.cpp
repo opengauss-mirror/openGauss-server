@@ -216,7 +216,7 @@ struct XLogAtomicOperation {
     void XLogStart();
     void RegisterBuffer(Buffer buffer, uint8 flags, uint8 op, uint32 clean_flag);
     void RegisterBufData(char *data, int len, bool is_opcode);
-    void XLogCommit(RmgrId rmid, uint8 info, bool isupgrade, int bucket_id);
+    void XLogCommit(RmgrId rmid, uint8 info, int bucket_id);
     int CurrentBlockId();
 };
 
@@ -292,7 +292,7 @@ void XLogAtomicOperation::RegisterBufData(char *data, int len, bool is_opcode)
     stack.RegisterOpData(block_id, opData, len, is_opcode);
 }
 
-void XLogAtomicOperation::XLogCommit(RmgrId rmid, uint8 info, bool isupgrade, int bucket_id)
+void XLogAtomicOperation::XLogCommit(RmgrId rmid, uint8 info, int bucket_id)
 {
     /*
      * Do actual xlog begin/register/insert.
@@ -328,7 +328,7 @@ void XLogAtomicOperation::XLogCommit(RmgrId rmid, uint8 info, bool isupgrade, in
     }
 
     // 4. xlog insert
-    XLogRecPtr recptr = XLogInsert(rmid, info, isupgrade, bucket_id);
+    XLogRecPtr recptr = XLogInsert(rmid, info, bucket_id);
 
     // 5. mark dirty, set lsn, and release lock
     for (int i = 0; i < stack.depth; i++) {
@@ -413,7 +413,7 @@ void XLogAtomicOpRegisterBuffer(Buffer buffer, uint8 flags, uint8 op, uint32 cle
 void XLogAtomicOpCommit()
 {
     SegmentCheck(t_thrd.xlog_cxt.xlog_atomic_op != NULL);
-    XLogAtomicOpMgr->XLogCommit(RM_SEGPAGE_ID, XLOG_SEG_ATOMIC_OPERATION, false, SegmentBktId);
+    XLogAtomicOpMgr->XLogCommit(RM_SEGPAGE_ID, XLOG_SEG_ATOMIC_OPERATION, SegmentBktId);
 }
 
 void XLogAtomicOpReset()

@@ -29,11 +29,20 @@
 #include "c.h"
 
 #include "storage/remote_adapter.h"
+#include "storage/smgr/relfilenode.h"
+#include "postmaster/pagerepair.h"
+#include "access/xlog_basic.h"
 
+typedef uint64 XLogRecPtr;
 extern int RemoteGetCU(char* remote_address, uint32 spcnode, uint32 dbnode, uint32 relnode, int32 colid,
     uint64 offset, int32 size, uint64 lsn, char* cu_data);
 
-extern int RemoteGetPage(char* remote_address, uint32 spcnode, uint32 dbnode, uint32 relnode, int2 bucketnode, uint2 opt,
-    int32 forknum, uint32 blocknum, uint32 blocksize, uint64 lsn, char* page_data);
+extern int RemoteGetPage(char* remote_address, RepairBlockKey *key, uint32 blocksize, uint64 lsn,
+    char* page_data, const XLogPhyBlock *pblk, int timeout);
+
+extern int RemoteGetFile(char* remoteAddress, RemoteReadFileKey *key, uint64 lsn, uint32 size, char* pageData,
+    XLogRecPtr *remote_lsn, uint32 *remote_size, int timeout);
+extern int RemoteGetFileSize(char* remoteAddress, RemoteReadFileKey *key, uint64 lsn, int64 *size, int timeout);
+
 
 #endif /* REMOTE_READ_CLIENT_H */

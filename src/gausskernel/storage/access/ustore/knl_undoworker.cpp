@@ -236,6 +236,9 @@ NON_EXEC_STATIC void UndoWorkerMain()
         /* Report the error to the server log */
         EmitErrorReport();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
+
         FlushErrorState();
 
         AbortOutOfAnyTransaction();

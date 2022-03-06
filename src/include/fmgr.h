@@ -162,7 +162,7 @@ typedef struct FunctionCallInfoData {
     Datum prealloc_arg[FUNC_PREALLOCED_ARGS];    /* prealloced arguments.*/
     bool prealloc_argnull[FUNC_PREALLOCED_ARGS]; /* prealloced argument null flags.*/
     Oid prealloc_argTypes[FUNC_PREALLOCED_ARGS]; /* prealloced argument type */
-    ScalarVector* argVector;                     /*Scalar Vector */
+    ScalarVector* argVector;                     /* Scalar Vector */
     RefcusorInfoData refcursor_data;
     UDFInfoType udfInfo;
     StartWithFuncEvalInfo  swinfo;

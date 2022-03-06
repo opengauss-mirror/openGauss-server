@@ -61,15 +61,21 @@ typedef struct Cursor_Data {
 } Cursor_Data;
 
 typedef struct HTAB HTAB;
+
+typedef struct TableOfInfo {
+    bool isnestedtable = false;
+    int tableOfLayers = 0;
+    Oid tableOfIndexType = InvalidOid; /* type Oid of table of */
+    HTAB* tableOfIndex = NULL; /* mapping of table of index */
+} TableOfInfo;
+
 typedef struct ParamExternData {
     Datum value;   /* parameter value */
     bool isnull;   /* is it NULL? */
     uint16 pflags; /* flag bits, see above */
     Oid ptype;     /* parameter's datatype, or 0 */
     Cursor_Data cursor_data;
-    bool isnestedtable = false;
-    Oid tableOfIndexType = InvalidOid; /* type Oid of table of */
-    HTAB* tableOfIndex = NULL; /* mapping of table of index */
+    TableOfInfo* tabInfo = NULL;
 } ParamExternData;
 
 typedef struct ParamListInfoData* ParamListInfo;

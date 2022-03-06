@@ -55,7 +55,14 @@ end;
 $BODY$
 language plpgsql ;
 
-\df
+\df select1
+\df select2
+\df select3
+\df select4
+\df select5
+\df select6
+\df select7
+
 call select1();
 call select2();
 call select3();
@@ -63,7 +70,7 @@ call select4();
 call select5();
 call select6();
 call select7();
-call select7();
+
 CALL f_processed_return_table();
 BEGIN;
 SELECT reffunc('funccursor');
@@ -72,14 +79,14 @@ COMMIT;
 SELECT * FROM get_rows_setof();
 
 DROP TABLE t_num CASCADE;
-\df
+
 DROP FUNCTION select6; 
 DROP FUNCTION select5; 
 DROP FUNCTION select7; 
 DROP FUNCTION reffunc(refcursor);
 DROP FUNCTION get_rows_setof();
 DROP FUNCTION f_processed_return_table();
-\df
+
 SELECT COUNT(*) FROM gs_encrypted_proc;
 SELECT proname, prorettype, proallargtypes FROM gs_encrypted_proc JOIN pg_proc ON pg_proc.Oid = gs_encrypted_proc.func_id;
 DROP COLUMN ENCRYPTION KEY ret_cek2;

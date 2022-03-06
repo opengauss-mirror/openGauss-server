@@ -18,6 +18,20 @@
 
 #include "commands/tablespace.h"
 
+const char* tblspc_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_TBLSPC_CREATE) {
+        return "tblspc_create";
+    } else if (info == XLOG_TBLSPC_RELATIVE_CREATE) {
+        return "tblspc_relative_create";
+    } else if (info == XLOG_TBLSPC_DROP) {
+        return "tblspc_drop";
+    } else {
+        return "unkown_type";
+    }
+}
+
 void tblspc_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

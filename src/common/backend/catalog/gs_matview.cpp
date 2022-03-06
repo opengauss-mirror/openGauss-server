@@ -39,8 +39,6 @@
 #include "utils/syscache.h"
 #include "utils/inval.h"
 
-static Oid FindRoleid(Oid relid);
-
 void create_matview_tuple(Oid matviewOid, Oid matmapid, bool isIncremental)
 {
     errno_t rc;
@@ -179,6 +177,10 @@ void delete_matview_tuple(Oid matviewOid)
             matmapobject.objectSubId = 0;
 
             performDeletion(&matmapobject, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+        } else {
+            ereport(DEBUG2,
+                    (errmodule(MOD_OPT), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Matviewmap %d relation is invalid when delete it.", (int)matmapid)));
         }
     }
 
@@ -590,7 +592,7 @@ bool CheckPermissionForBasetable(const RangeTblEntry *rte)
 /*
  * Get owner by relid
  */
-static Oid FindRoleid(Oid relid)
+Oid FindRoleid(Oid relid)
 {
     Oid roleid;
     HeapTuple tuple = NULL;

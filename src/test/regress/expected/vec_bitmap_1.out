@@ -2009,6 +2009,15 @@ select * from vector_bitmap_table_01 t1 inner join vector_bitmap_table_02 t2 on 
                ->  Vector Nest Loop
                      Output: t1.col_int1, t1.col_int2, t1.col_int3, t1.col_int4, t1.col_int5, t2.col_int1, t2.col_int2, t2.col_int3, t2.col_int4, t2.col_int5
                      Join Filter: (t1.col_int1 = t2.col_int1)
+                     ->  Vector Partition Iterator
+                           Output: t2.col_int1, t2.col_int2, t2.col_int3, t2.col_int4, t2.col_int5
+                           Iterations: 4
+                           ->  Partitioned CStore Index Heap Scan on vector_bitmap_engine.vector_bitmap_table_02 t2
+                                 Output: t2.col_int1, t2.col_int2, t2.col_int3, t2.col_int4, t2.col_int5
+                                 Recheck Cond: (t2.col_int5 < 12)
+                                 Selected Partitions:  1..4
+                                 ->  Partitioned CStore Index Ctid Scan on bitmap_02_e
+                                       Index Cond: (t2.col_int5 < 12)
                      ->  CStore Index Heap Scan on vector_bitmap_engine.vector_bitmap_table_01 t1
                            Output: t1.col_int1, t1.col_int2, t1.col_int3, t1.col_int4, t1.col_int5
                            Recheck Cond: ((t1.col_int2 < 10) OR (t1.col_int3 < 12) OR (t1.col_int4 < 5))
@@ -2019,15 +2028,6 @@ select * from vector_bitmap_table_01 t1 inner join vector_bitmap_table_02 t2 on 
                                        Index Cond: (t1.col_int3 < 12)
                                  ->  CStore Index Ctid Scan on bitmap_01_d
                                        Index Cond: (t1.col_int4 < 5)
-                     ->  Vector Partition Iterator
-                           Output: t2.col_int1, t2.col_int2, t2.col_int3, t2.col_int4, t2.col_int5
-                           Iterations: 4
-                           ->  Partitioned CStore Index Heap Scan on vector_bitmap_engine.vector_bitmap_table_02 t2
-                                 Output: t2.col_int1, t2.col_int2, t2.col_int3, t2.col_int4, t2.col_int5
-                                 Recheck Cond: (t2.col_int5 < 12)
-                                 Selected Partitions:  1..4
-                                 ->  Partitioned CStore Index Ctid Scan on bitmap_02_e
-                                       Index Cond: (t2.col_int5 < 12)
 (29 rows)
 
 select * from vector_bitmap_table_01 t1 inner join vector_bitmap_table_02 t2 on t1.col_int1=t2.col_int1 where (t1.col_int2 < 10 or t1.col_int3 < 12 or t1.col_int4 < 5) and t2.col_int5 < 12 order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 limit 50;

@@ -209,13 +209,6 @@ Archive* CreateArchive(const char* FileSpec, const ArchiveFormat fmt, const int 
     return (Archive*)AH;
 }
 
-#ifdef ENABLE_UT
-Archive* uttest_CreateArchive(const char* FileSpec, const ArchiveFormat fmt, const int compression, ArchiveMode mode)
-{
-    return CreateArchive(FileSpec, fmt, compression, mode);
-}
-#endif
-
 /* Open an existing archive */
 /* Public */
 Archive* OpenArchive(const char* FileSpec, const ArchiveFormat fmt)

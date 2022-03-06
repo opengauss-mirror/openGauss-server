@@ -2497,6 +2497,7 @@ static void getBoundaryFromBaseRel(PlannerInfo* root, PartIteratorPath* itrpath)
 
     tuple = SearchSysCache2((int)ATTNUM, ObjectIdGetDatum(partitionedtableid), Int16GetDatum(map->partitionKey->values[0]));
     if (!HeapTupleIsValid(tuple)) {
+        decre_partmap_refcount(relation->partMap);
         ereport(ERROR,
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for attribute %d of relation %u",

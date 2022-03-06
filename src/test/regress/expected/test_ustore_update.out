@@ -166,7 +166,7 @@ insert into t4 values(3, 'cde');
 insert into t4 values(4, 'def');
 insert into t4 values(5, 'efg');
 commit;
-select * from t4;
+select * from t4 order by c1;
  c1 | c2  
 ----+-----
   1 | abc
@@ -179,18 +179,18 @@ select * from t4;
 start transaction;
 update t4 set c2 = 'aaaabbbbccccdddd' where c1 = 3;
 update t4 set c2 = 'aaaabbbbccccdddd' where c1 = 2;
-select * from t4;
+select * from t4 order by c1;
  c1 |        c2        
 ----+------------------
   1 | abc
+  2 | aaaabbbbccccdddd
   3 | aaaabbbbccccdddd
   4 | def
   5 | efg
-  2 | aaaabbbbccccdddd
 (5 rows)
 
 rollback;
-select * from t4;
+select * from t4 order by c1;
  c1 | c2  
 ----+-----
   1 | abc

@@ -1,0 +1,461 @@
+-- FOR PL/pgSQL bulk collect into scenarios --
+
+-- check compatibility --
+show sql_compatibility; -- expect A --
+
+-- create new schema --
+drop schema if exists plpgsql_bulk_collect;
+create schema plpgsql_bulk_collect;
+set current_schema = plpgsql_bulk_collect;
+
+-- initialize tables --
+create table customers (
+    id number(10) not null,
+    c_name varchar2(50),
+    c_age number(8) not null,
+    c_address varchar2(50),
+    salary float(2) not null,
+    constraint customers_pk primary key (id)
+);
+
+insert into customers (id, c_name, c_age, c_address, salary) values (1, 'Vera' ,32, 'Paris', 22999.00);
+insert into customers (id, c_name, c_age, c_address, salary) values (2, '' ,25, 'London', 5999.00);     -- a missing value here
+insert into customers (id, c_name, c_age, c_address, salary) values (3, 'Alice' ,22, 'Bangkok', 9800.98);
+insert into customers (id, c_name, c_age, c_address, salary) values (4, 'Jim' ,26, 'Dubai', 18700.00);
+insert into customers (id, c_name, c_age, c_address, salary) values (5, 'Kevin' ,28, 'Singapore', 18999.00);
+insert into customers (id, c_name, c_age, c_address, salary) values (6, 'Gauss' ,42, 'Beijing', 32999.00);
+
+create table bigtmp(a int, b varchar(10000));
+create table tmp(a int, b varchar(100));
+
+create type mytype as (
+    id integer,
+    biome varchar2(100)
+);
+
+create table biomebook (
+    id integer,
+    b_entry mytype
+);
+
+insert into biomebook values (1, (1, 'savanna'));
+insert into biomebook values (2, (2, 'giant-tree-taiga'));
+insert into biomebook values (3, (9, 'nether'));
+
+-- returns a biome record --
+create or replace function biofunc()
+return mytype
+is
+    ret mytype;
+begin
+    ret := (2, 'giant-tree-taiga');
+    return ret;
+end;
+/
+
+-- test function into target priority --
+create or replace function id_arr(inint in integer)
+return integer
+is
+    ret integer;
+begin
+    ret := 1234;
+    return ret;
+end;
+/
+
+----------------------------------------------------
+------------------ START OF TESTS ------------------
+----------------------------------------------------
+
+-- Scene1: select ... bulk collect into --
+-- single scalar out --
+declare
+    type i_list is varray(6) of integer;
+    i_arr i_list;
+begin
+    select 1 bulk collect into i_arr;
+    for i in 1..i_arr.count loop
+        dbe_output.print_line('id(' || i || '): ' || i_arr(i));
+    end loop;
+end;
+/
+
+-- multiple scalars out --
+declare
+    type i_list is varray(6) of integer;
+    i_arr i_list;
+begin
+    select 1 bulk collect into i_arr from customers;
+    for i in 1..i_arr.count loop
+        dbe_output.print_line('id(' || i || '): ' || i_arr(i));
+    end loop;
+end;
+/
+
+-- records handling --
+declare
+    type ty_list is varray(6) of mytype;
+    ty_arr ty_list;
+begin
+    select (1, 'savanna')::mytype bulk collect into ty_arr;
+    for i in 1..ty_arr.count loop
+        dbe_output.print_line('biome record: ' || ty_arr(i));
+    end loop;
+end;
+/
+
+declare
+    type ty_list is varray(6) of mytype;
+    ty_arr ty_list;
+begin
+    select biofunc() bulk collect into ty_arr;
+    for i in 1..ty_arr.count loop
+        dbe_output.print_line('biome record: ' || ty_arr(i));
+    end loop;
+end;
+/
+
+declare
+    type ty_list is varray(6) of mytype;
+    ty_arr ty_list;
+begin
+    select b_entry bulk collect into ty_arr from biomebook order by id;
+    for i in 1..ty_arr.count loop
+        dbe_output.print_line('biome record: ' || ty_arr(i));
+    end loop;
+end;
+/
+
+-- varray handling --
+declare
+    i_arr int[];
+begin
+    select 1 bulk collect into i_arr from customers;
+    for i in 1..i_arr.count loop
+        dbe_output.print_line('id(' || i || '): ' || i_arr(i));
+    end loop;
+end;
+/
+
+-- success, single target array --
+declare
+    type id_list is varray(6) of customers.id%type;
+    id_arr id_list;
+begin
+    select id bulk collect into id_arr from customers order by id DESC;
+    for i in 1..id_arr.count loop
+        dbe_output.print_line('id(' || i || '): ' || id_arr(i));
+    end loop;
+end;
+/
+
+-- success, multi target support
+declare
+    type tab is varray(6) of mytype;
+    tab1 tab := tab();
+begin
+    select id, c_name bulk collect into tab1 from customers order by id DESC;
+    raise info '%', tab1;
+end;
+/
+
+declare
+    type name_list is varray(6) of customers.c_name%type;
+    name_arr name_list;
+    cc varchar(100);
+begin
+    select c_name bulk collect into name_arr from customers order by id;
+    for i in 1..name_arr.count loop
+        dbe_output.print_line('name(' || i || '): ' || name_arr(i));
+    end loop;
+end;
+/
+
+-- this will take the entire array as a single output --
+-- error out now --
+declare
+    type name_list is varray(6) of customers.c_name%type;
+    name_arr name_list;
+begin
+    select array(select c_name from customers order by id) bulk collect into name_arr;
+    for i in 1..name_arr.count loop
+        dbe_output.print_line('name(' || i || '): ' || name_arr(i));
+    end loop;
+end;
+/
+
+-- multi target, correct answer --
+declare
+    type id_list is varray(6) of customers.id%type;
+    id_arr id_list;
+    type name_list is varray(6) of customers.c_name%type;
+    name_arr name_list;
+begin
+    select id, c_name bulk collect into id_arr, name_arr from customers order by id;
+    for i in 1..name_arr.count loop
+        dbe_output.print_line('id: ' || id_arr(i) || ' with name(' || i || '): ' || name_arr(i));
+    end loop;
+end;
+/
+
+-- should be able cast all elements --
+declare
+    type name_list is varray(6) of customers.c_name%type;
+    name_arr name_list;
+begin
+    select count(*) bulk collect into name_arr from customers;
+    for i in 1..name_arr.count loop
+        dbe_output.print_line('result ' || i || ': ' || name_arr(i));
+    end loop;
+end;
+/
+
+declare
+    type name_list is varray(6) of varchar2;
+    name_arr name_list;
+begin
+    select 99 bulk collect into name_arr from customers; -- 6 of them --
+    for i in 1..name_arr.count loop
+        dbe_output.print_line('result ' || i || ': ' || name_arr(i));
+    end loop;
+end;
+/
+
+declare
+    type id_list is varray(6) of integer;
+    id_arr id_list;
+begin
+    select '696' bulk collect into id_arr from customers;
+    for i in 1..id_arr.count loop
+        dbe_output.print_line('result ' || i || ': ' || id_arr(i));
+    end loop;
+end;
+/
+
+-- intense bulk collect --
+-- 'massive' insert --
+insert into bigtmp select generate_series(1, 10000), '1';
+
+declare
+    type i_list is varray(60000) of integer;
+    i_arr i_list;
+begin
+    select a bulk collect into i_arr from bigtmp order by a;
+    dbe_output.print_line('result 556: ' || i_arr(556));
+    dbe_output.print_line('result 1556: ' || i_arr(1556));
+    dbe_output.print_line('result 9999: ' || i_arr(9999));
+end;
+/
+
+declare
+    type i_list is varray(60000) of integer;
+    i_arr i_list;
+begin
+    select b bulk collect into i_arr from bigtmp order by a; -- typecasts
+    dbe_output.print_line('result 556: ' || i_arr(556));
+    dbe_output.print_line('result 1556: ' || i_arr(1556));
+    dbe_output.print_line('result 9999: ' || i_arr(9999));
+end;
+/
+
+-- toasted --
+insert into bigtmp values (99999997, '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');
+insert into bigtmp values (99999998, 'Pn5VELvD');
+insert into bigtmp values (99999999, '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');
+
+declare
+    type s_list is varray(60000) of varchar(10000);
+    s_arr s_list;
+begin
+    select b bulk collect into s_arr from bigtmp where a > 99999990 order by a;
+    dbe_output.print_line('result 99999997: ' || s_arr(1));
+    dbe_output.print_line('result 99999998: ' || s_arr(2));
+    dbe_output.print_line('result 99999999: ' || s_arr(3));
+end;
+/
+
+-- ERROR handling --
+-- syntax error --
+declare
+    type id_list is varray(6) of customers.id%type;
+    id_arr id_list;
+begin
+    select 1 collect bulk into id_arr;
+    for i in 1..id_arr.count loop
+        dbe_output.print_line('id(' || i || '): ' || id_arr(i));
+    end loop;
+end;
+/
+
+-- insert into is not a into at all! --
+declare
+    type name_list is varray(6) of varchar2;
+    name_arr name_list;
+begin
+    insert bulk collect into tmp values (1, '2');
+end;
+/
+
+-- should error out with type cast failure --
+declare
+    type id_list is varray(6) of customers.id%type;
+    id_arr id_list;
+begin
+    select array(select id from customers order by id) bulk collect into id_arr;
+    for i in 1..id_arr.count loop
+        dbe_output.print_line('id(' || i || '): ' || id_arr(i));
+    end loop;
+end;
+/
+
+-- query returns more columns than bulk collect targets, error --
+declare
+    type id_list is varray(6) of customers.id%type;
+    id_arr id_list;
+begin
+    select id, c_name bulk collect into id_arr from customers;
+    for i in 1..id_arr.count loop
+        dbe_output.print_line('id(' || i || '): ' || id_arr(i));
+    end loop;
+end;
+/
+
+-- multi-dimensional array --
+declare
+    i_arr int[][];
+begin
+    select 1 bulk collect into i_arr[1] from customers;
+    for i in 1..i_arr.count loop
+        dbe_output.print_line('id(' || i || '): ' || i_arr(1)(i));
+    end loop;
+end;
+/
+
+-- multiple targets, keep erroring out, type cast failure --
+declare
+    type id_list is varray(6) of customers.id%type;
+    id_arr id_list;
+    type name_list is varray(6) of customers.c_name%type;
+    name_arr name_list;
+begin
+    select array(select c_name from customers order by id),
+        array(select id from customers order by id)
+    bulk collect into name_arr, id_arr;
+    for i in 1..name_arr.count loop
+        dbe_output.print_line('id: ' || id_arr(i) || ' with name(' || i || '): ' || name_arr(i));
+    end loop;
+end;
+/
+
+-- should report error, into something not an array --
+declare
+    type name_list is varray(6) of customers.c_name%type;
+    name_arr name_list;
+    cc record;
+begin
+    select id bulk collect into cc from customers order by id DESC;
+    dbe_output.print_line('name count: ' || cc);
+end;
+/
+
+-- .. even if it is actually a single value returning --
+declare
+    type name_list is varray(6) of customers.c_name%type;
+    name_arr name_list;
+    cc integer;
+begin
+    select count(*) bulk collect into cc from customers;
+    dbe_output.print_line('name count: ' || cc);
+end;
+/
+
+-- returns nothing --
+declare
+    type s_list is varray(6) of integer;
+    s_arr s_list;
+begin
+    select a bulk collect into s_arr from tmp;     -- this is empty --
+    dbe_output.print_line('ok, is empty');
+end;
+/
+
+
+-- Scene2: returning --
+declare
+    type id_list is varray(6) of customers.id%type;
+    id_arr id_list;
+begin
+    -- select id bulk collect into id_arr from customers;
+    delete from customers where id = 2 returning id bulk collect into id_arr;
+    dbe_output.print_line('delete id: ' || id_arr(1));
+
+    select count(*) bulk collect into id_arr from customers;
+    dbe_output.print_line('total left: ' || id_arr(1));
+rollback;
+end;
+/
+
+declare
+    type name_list is varray(6) of customers.c_name%type;
+    name_arr name_list;
+begin
+    -- select id bulk collect into id_arr from customers;
+    update customers set c_name = 'Carol' where id = 2 returning c_name bulk collect into name_arr;
+    dbe_output.print_line('updated name: ' || name_arr(1));
+    select c_name bulk collect into name_arr from customers order by id;
+    for i in 1..name_arr.count loop
+        dbe_output.print_line('name(' || i || '): ' || name_arr(i));
+    end loop;
+rollback;
+end;
+/
+
+
+-- Scene3: fetch --
+-- error out, does not fetch direction statements --
+declare
+    cursor c_customers is select c_name from customers order by id;
+    type c_list is varray (6) of customers.c_name%type;
+    name_arr c_list := c_list();
+begin 
+    open c_customers;
+    fetch all in c_customers bulk collect into name_arr;
+    exit when c_customers%NOTFOUND;
+    close c_customers;
+
+    for i in 1..6 loop
+        dbe_output.print_line('name(' || i || '): ' || name_arr(i));
+    end loop;
+end;
+/
+
+-- fetch ... bulk collect into ... limit ...
+declare
+    cursor c_customers is select c_name from customers order by id;
+    type c_list is varray (6) of customers.c_name%type;
+    name_arr c_list := c_list();
+begin
+    open c_customers;
+    fetch c_customers bulk collect into name_arr limit 4;
+    exit when c_customers%NOTFOUND;
+    close c_customers;
+
+    for i in 1..6 loop
+        dbe_output.print_line('name(' || i || '): ' || name_arr(i));
+    end loop;
+end;
+/
+
+--------------------------------------------------
+------------------ END OF TESTS ------------------
+--------------------------------------------------
+
+drop table if exists tmp;
+drop table if exists biomebook;
+drop table if exists bigtmp;
+drop table if exists customers;
+drop type if exists mytype cascade;
+
+-- clean up --
+drop schema if exists plpgsql_bulk_collect cascade;

@@ -33,6 +33,9 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-OBJS = nas_am.o archive_am.o
+OBJS = archive_am.o
+ifeq ($(enable_lite_mode), no)
+OBJS += nas_am.o
+endif
 
 include $(top_srcdir)/src/gausskernel/common.mk

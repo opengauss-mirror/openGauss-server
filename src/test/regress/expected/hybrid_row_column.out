@@ -41,8 +41,9 @@ SELECT TRUNC(c_first::MACADDR) FROM columnar_table_06;
 SELECT COUNT(c_first) FROM columnar_table_06 GROUP BY c_first::MACADDR;
  count 
 -------
-     2
-(1 row)
+     1
+     1
+(2 rows)
 
 SELECT * FROM columnar_table_06 ORDER BY c_first::MACADDR;
  c_id | c_w_id |      c_first      

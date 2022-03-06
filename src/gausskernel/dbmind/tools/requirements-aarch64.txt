@@ -1,0 +1,20 @@
+## For DBMind-core ##
+cryptography==2.5  # for paramiko on openEuler
+paramiko==2.7.2
+numpy==1.16.5  # for openEuler aarch64
+scipy==1.6.0
+scikit-learn
+requests
+sqlparse
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+pycryptodome
+## For components ##
+## Prometheus Exporter
+pyyaml
+prometheus-client
+## X-Tuner ##
+bayesian-optimization
+ptable

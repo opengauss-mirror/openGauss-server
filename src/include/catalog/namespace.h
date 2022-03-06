@@ -25,6 +25,8 @@
 #include "nodes/primnodes.h"
 #include "lib/stringinfo.h"
 
+static volatile uint32 gt_tempID_seed = 0;
+
 /*
  *	This structure holds a list of possible functions or operators
  *	found by namespace lookup.	Each function/operator is identified
@@ -43,6 +45,7 @@ typedef struct _FuncCandidateList
 	int			ndargs;			/* number of defaulted args */
 	int		   *argnumbers;		/* args' positional indexes, if named call */
 	Oid			refSynOid;		/* referenced synonym's OID if mapping successfully, and drop it when view decoupling */
+        int 		allArgNum;      /* all param num including in/out/inout */
 	Oid			args[FLEXIBLE_ARRAY_MEMBER];		/* arg types --- VARIABLE LENGTH ARRAY */
 }	*FuncCandidateList;	/* VARIABLE LENGTH STRUCT */
 
@@ -110,9 +113,12 @@ extern Oid RangeVarGetRelidExtended(const RangeVar *relation,
 						 StringInfo detailInfo = NULL,
 						 Oid *refSynOid = NULL);
 extern Oid	RangeVarGetCreationNamespace(const RangeVar *newRelation);
+extern bool CheckRelationCreateAnyPrivilege(Oid userId, char relkind);
+extern bool CheckCreatePrivilegeInNamespace(Oid namespaceId, Oid roleId, const char* anyPrivilege);
 extern Oid RangeVarGetAndCheckCreationNamespace(RangeVar *newRelation,
 									 LOCKMODE lockmode,
-									 Oid *existing_relation_id);
+									 Oid *existing_relation_id,
+									 char relkind);
 extern void RangeVarAdjustRelationPersistence(RangeVar *newRelation, Oid nspid);
 extern Oid RelnameGetRelid(const char *relname, StringInfo detailInfo = NULL);
 extern char* RelnameGetRelidExtended(const char *relname, Oid *relOid, Oid *refSynOid = NULL,
@@ -216,7 +222,7 @@ extern Oid get_my_temp_schema();
 
 extern void FetchDefaultArgumentPos(int **defpos, int2vector *adefpos,
 									const char *argmodes, int pronallargs);
-extern Oid GetUserIdFromNspId(Oid nspid, bool is_securityadmin = false);
+extern Oid GetUserIdFromNspId(Oid nspid, bool is_securityadmin = false, bool anyPriv = false);
 
 extern void SetTempNamespace(Node *stmt, Oid namespaceOid);
 extern void setTempToastNspName();
@@ -230,5 +236,9 @@ extern bool IsPackageFunction(List* funcname);
 extern void recomputeNamespacePath(StringInfo error_info = NULL);
 extern KeyCandidateList GlobalSettingGetCandidates(const List *names, bool);
 extern KeyCandidateList CeknameGetCandidates(const List *names, bool);
+
+extern bool isTableofType(Oid typeOid, Oid* base_oid, Oid* indexbyType);
+extern bool isTableofIndexbyType(Oid typeOid);
+extern bool IsPlpgsqlLanguageOid(Oid langoid);
 #endif // !FRONTEND
 #endif   /* NAMESPACE_H */

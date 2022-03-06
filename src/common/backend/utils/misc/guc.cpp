@@ -8,8 +8,8 @@
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
- * Written by Peter Eisentraut <peter_e@gmx.net>.
  * Portions Copyright (c) 2021, openGauss Contributors
+ * Written by Peter Eisentraut <peter_e@gmx.net>.
  *
  * IDENTIFICATION
  * src/backend/utils/misc/guc.c
@@ -183,7 +183,6 @@
 #define INVALID_LINES_IDX (int)(~0)
 #define MAX_PARAM_LEN 1024
 #define WRITE_CONFIG_LOCK_LEN (1024 * 1024)
-#define CONFIG_BAK_FILENAME "postgresql.conf.bak"
 
 #ifdef EXEC_BACKEND
 #define CONFIG_EXEC_PARAMS "global/config_exec_params"
@@ -413,6 +412,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "sql_beta_feature",
 #ifndef ENABLE_MULTIPLE_NODES
     "plsql_show_all_error",
+    "uppercase_attribute_name",
 #endif 
     "track_stmt_session_slot",
     "track_stmt_stat_level",
@@ -971,7 +971,6 @@ const char* const config_group_names[] = {
     /* INSTRUMENTS_OPTIONS */
     gettext_noop("Instruments Options"),
     gettext_noop("Column Encryption"),
-    gettext_noop("Compress Options"),
 #ifdef PGXC
     /* DATA_NODES */
     gettext_noop("Datanodes and Connection Pooling"),
@@ -1645,6 +1644,17 @@ static void InitConfigureNamesBool()
             NULL,
             NULL},
 #endif
+        {{"enable_global_syscache",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("enable to use global system cache. "), NULL},
+            &g_instance.attr.attr_common.enable_global_syscache,
+            true,
+            NULL,
+            NULL,
+            NULL},
+
         {{"enable_router",
             PGC_SIGHUP,
             NODE_DISTRIBUTE,
@@ -1779,6 +1789,19 @@ static void InitConfigureNamesBool()
             NULL},
             &u_sess->attr.attr_sql.enable_default_ustore_table,
             false,
+            NULL,
+            NULL,
+            NULL
+        },
+        {{"enable_ustore",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enable ustore storage engine"),
+            NULL},
+            &g_instance.attr.attr_storage.enable_ustore,
+            true,
+            NULL,
             NULL,
             NULL,
             NULL
@@ -2070,7 +2093,11 @@ static void InitConfigureNamesInt()
             GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_common.asp_sample_num,
             100000,
+#ifdef ENABLE_MULTIPLE_NODES
             10000,
+#else
+            10,
+#endif
             100000,
             NULL,
             NULL,
@@ -2226,32 +2253,6 @@ static void InitConfigureNamesInt()
             1000,
             1000,
             1000,
-            NULL,
-            NULL,
-            NULL},
-        {{"pset_lob_length",
-            PGC_USERSET,
-            NODE_ALL,
-            CLIENT_CONN_STATEMENT,
-            gettext_noop("GUC parameter of pset_lob_length."),
-            NULL},
-            &u_sess->attr.attr_common.pset_lob_length,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"pset_num_width",
-            PGC_USERSET,
-            NODE_ALL,
-            CLIENT_CONN_STATEMENT,
-            gettext_noop("GUC parameter of pset_num_width."),
-            NULL},
-            &u_sess->attr.attr_common.pset_num_width,
-            0,
-            0,
-            128,
             NULL,
             NULL,
             NULL},
@@ -3043,7 +3044,6 @@ static void InitConfigureNamesString()
             NULL,
             NULL,
             NULL},
-
         {{"thread_pool_attr",
             PGC_POSTMASTER,
             NODE_ALL,
@@ -3053,6 +3053,19 @@ static void InitConfigureNamesString()
             GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_common.thread_pool_attr,
             "16, 2, (nobind)",
+            NULL,
+            NULL,
+            NULL},
+            
+         {{"thread_pool_stream_attr",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("Spare Cpu that can not be used in thread pool stream."),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.thread_pool_stream_attr,
+            "16, 0.2, 2, (nobind)",
             NULL,
             NULL,
             NULL},
@@ -3769,7 +3782,7 @@ static void InitConfigureNamesString()
             &u_sess->attr.attr_common.ts_compaction_strategy,
             "3,6,6,12,0", 
             check_compaciton_strategy,
-            NULL}, 
+            NULL},
 #endif
         {{NULL,
             (GucContext)0,
@@ -4045,9 +4058,21 @@ static void InitConfigureNamesEnum()
             PGC_POSTMASTER,
             NODE_SINGLENODE,
             PRESET_OPTIONS,
-            gettext_noop("Sets how binary values are to be encoded in XML."),
+            gettext_noop("Sets the type of shared storage cluster."),
             NULL},
             &g_instance.attr.attr_common.cluster_run_mode,
+            RUN_MODE_PRIMARY,
+            cluster_run_mode_options,
+            NULL,
+            NULL,
+            NULL},
+        {{"stream_cluster_run_mode",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            PRESET_OPTIONS,
+            gettext_noop("Sets the type of streaming cluster."),
+            NULL},
+            &g_instance.attr.attr_common.stream_cluster_run_mode,
             RUN_MODE_PRIMARY,
             cluster_run_mode_options,
             NULL,
@@ -8215,7 +8240,7 @@ static void CheckAlterSystemSetPrivilege(const char* name)
         "query_log_directory", "ssl_ca_file", "ssl_cert_file", "ssl_crl_file", "ssl_key_file", "stats_temp_directory",
         "unix_socket_directory", "unix_socket_group", "unix_socket_permissions",
         "krb_caseins_users", "krb_server_keyfile", "krb_srvname", "allow_system_table_mods", "enableSeparationOfDuty",
-        "modify_initial_password", "password_encryption_type", "password_policy",
+        "modify_initial_password", "password_encryption_type", "password_policy", "audit_xid_info",
         NULL
     };
     for (int i = 0; blackList[i] != NULL; i++) {
@@ -11298,7 +11323,8 @@ static const char* show_tcp_keepalives_interval(void)
     const int maxBufLen = 16;
     static char nbuf[maxBufLen];
 
-    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_getkeepalivesinterval(u_sess->proc_cxt.MyProcPort));
+    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d",
+                            pq_getkeepalivesinterval(u_sess->proc_cxt.MyProcPort));
     securec_check_ss(rc, "\0", "\0");
     return nbuf;
 }
@@ -12054,6 +12080,56 @@ ErrCode copy_guc_lines(char** copy_to_line, char** optlines, const char** opt_na
     }
     return CODE_OK;
 }
+
+/*
+ * @@GaussDB@@
+ * Brief		    : void modify_guc_one_line
+ * Description	: modify one guc config
+ * Notes		    :
+ */
+void modify_guc_one_line(char*** guc_optlines, const char* opt_name, const char* copy_from_line)
+{
+    int opt_name_index = 0;
+    int optvalue_off = 0;
+    int optvalue_len = 0;
+    char **optlines = *guc_optlines;
+
+    opt_name_index = find_guc_option(optlines, opt_name, NULL, NULL, &optvalue_off, &optvalue_len, false);
+    if (INVALID_LINES_IDX != opt_name_index) {
+        pfree(optlines[opt_name_index]);
+    } else {
+        int lines = 0;
+        /* get optlines row number */
+        for (lines = 0; optlines[lines] != NULL; ++lines) {}
+        /* add one line guc item, and set a end flag NULL. */
+        char **optlines_copy = (char**)pg_malloc((lines + 2) * sizeof(char*));
+        errno_t rc = memset_s(optlines_copy, (lines + 2) * sizeof(char*), 0, (lines + 2) * sizeof(char*));
+        securec_check(rc, "\0", "\0");
+        for (int cnt = 0; cnt < lines; cnt++) {
+            optlines_copy[cnt] = optlines[cnt];
+        }
+        pfree(optlines);
+        *guc_optlines = optlines_copy;
+        optlines = *guc_optlines;
+        optlines_copy = NULL;
+
+        Assert(optlines[lines] == NULL);
+        optlines[lines + 1] = NULL;
+        opt_name_index = lines;
+    }
+    int newsize = strlen(copy_from_line) + 1;
+
+    optlines[opt_name_index] = (char*)pg_malloc(newsize);
+
+    errno_t rc = strncpy_s(optlines[opt_name_index], newsize, copy_from_line, newsize - 1);
+    securec_check(rc, "\0", "\0");
+
+    if (newsize > MAX_PARAM_LEN) {
+        ereport(WARNING, (errmsg("modify_guc_one_line:opt len '%s' is out of 1024", optlines[opt_name_index])));
+    }
+
+}
+
 
 /*
  * @@GaussDB@@

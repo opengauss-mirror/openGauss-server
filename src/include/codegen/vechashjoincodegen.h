@@ -38,6 +38,7 @@ namespace dorado {
 /*
  * VecHashJoinCodeGen class implements specific optimization by using LLVM
  */
+#ifdef ENABLE_LLVM_COMPILE
 class VecHashJoinCodeGen : public BaseObject {
 public:
     /*
@@ -168,5 +169,6 @@ public:
      */
     static llvm::Function* HashJoinCodeGen_bf_includeLong(VecHashJoinState* node);
 };
+#endif
 }  // namespace dorado
 #endif

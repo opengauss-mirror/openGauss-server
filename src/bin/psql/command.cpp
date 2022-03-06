@@ -67,8 +67,6 @@
 #define static
 #endif
 
-SqlErrorHandle sqlErrHandle = SQLERROR_HANDLE_CONTINUE;
-
 /* functions for use in this file */
 static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, PQExpBuffer query_buf);
 static bool do_edit(const char* filename_arg, PQExpBuffer query_buf, int lineno, bool* edited);
@@ -81,8 +79,10 @@ static void minimal_error_message(PGresult* res);
 
 static void printSSLInfo(void);
 
+#ifndef ENABLE_LITE_MODE
 /* Show notice about when the password expired time will come. */
 static void show_password_notify(PGconn* conn);
+#endif
 
 #ifdef WIN32
 static void checkWin32Codepage(void);
@@ -1592,8 +1592,9 @@ static bool do_connect(char* dbname, char* user, char* host, char* port)
          * a new password, or give up.
          */
         if (NULL == password && (strstr(PQerrorMessage(n_conn), "password") != NULL) && pset.getPassword != TRI_NO) {
+            /* Get latest user name from current connection */
+            password = prompt_for_password(PQuser(n_conn));
             PQfinish(n_conn);
-            password = prompt_for_password(user);
             continue;
         }
 
@@ -1695,9 +1696,12 @@ void connection_warnings(bool in_startup)
             printf("%s (%s)\n", pset.progname, PG_VERSION);
 #endif
         }
+
+#ifndef ENABLE_LITE_MODE
         /* show notice message when the password expired time will come. */
         if (in_startup)
             (void)show_password_notify(pset.db);
+#endif
 
         if (pset.sversion / 100 != client_ver / 100)
             printf(_("WARNING: %s version %d.%d, server version %d.%d.\n"
@@ -2238,37 +2242,21 @@ static bool setToptFormat(const char* value, size_t vallen, printQueryOpt* popt,
     return true;
 }
 
-static bool setSqlErrorHandle(const char* value, size_t vallen, bool quiet)
+static bool setFeedBack(const char* value, printQueryOpt* popt, bool quiet)
 {
-    if (value == NULL) {
-        ;
-    } else if (pg_strncasecmp("continue", value, vallen) == 0) {
-        sqlErrHandle = SQLERROR_HANDLE_CONTINUE;
-    } else if (pg_strncasecmp("exit", value, vallen) == 0) {
-        sqlErrHandle = SQLERROR_HANDLE_EXIT;
+    if (value != NULL) {
+        popt->topt.feedback = ParseVariableBool(value);
     } else {
-        psql_error("\\pset: allowed sqlerror_handle are continue, exit\n");
-        return false;
+        popt->topt.feedback = !popt->topt.feedback;
     }
 
     if (!quiet) {
-        if (sqlErrHandle == SQLERROR_HANDLE_CONTINUE) {
-            printf(_("Whenever Error behavior is continue.\n"));
+        if (popt->topt.feedback) {
+            puts(_("Showing rows count feedback."));
         } else {
-            printf(_("Whenever Error behavior is exit.\n"));
+            puts(_("Rows count feedback is off."));
         }
     }
-
-    return true;
-}
-
-static bool setBorder(const char* value, printQueryOpt* popt, bool quiet)
-{
-    if (NULL != value)
-        popt->topt.border = atoi(value);
-
-    if (!quiet)
-        printf(_("Border style is %d.\n"), popt->topt.border);
 
     return true;
 }
@@ -2289,9 +2277,9 @@ bool do_pset(const char* param, const char* value, printQueryOpt* popt, bool qui
         }
     }
 
-    // set Sql Error Handle
-    else if (strcmp(param, "sqlerror_handle") == 0) {
-        if (!setSqlErrorHandle(value, vallen, quiet)) {
+    /* set feedback rows  */
+    else if (strcmp(param, "feedback") == 0) {
+        if(!setFeedBack(value, popt, quiet)) {
             return false;
         }
     }
@@ -2317,9 +2305,11 @@ bool do_pset(const char* param, const char* value, printQueryOpt* popt, bool qui
 
     /* set border style/width */
     else if (strcmp(param, "border") == 0) {
-        if(!setBorder(value, popt, quiet)) {
-            return false;
-        }
+        if (NULL != value)
+            popt->topt.border = atoi(value);
+
+        if (!quiet)
+            printf(_("Border style is %d.\n"), popt->topt.border);
     }
 
     /* set expanded/vertical mode */
@@ -2729,6 +2719,7 @@ static void minimal_error_message(PGresult* res)
     destroyPQExpBuffer(msg);
 }
 
+#ifndef ENABLE_LITE_MODE
 /* Show notice message when the password expired time will come. */
 static void show_password_notify(PGconn* conn)
 {
@@ -2793,8 +2784,11 @@ static void show_password_notify(PGconn* conn)
 
     PQclear(res1);
     PQclear(res2);
+    free((void *)date1);
+    free((void *)date2);
     return;
 }
+#endif
 
 extern void client_server_version_check(PGconn* conn)
 {

@@ -1050,12 +1050,29 @@ static JoinMethodHint* _readJoinHint(void)
 }
 
 /*
- * @Description: Read string to join hint struct.
- * @return: Join hint struct.
+ * @Description: Read string to predpush hint struct.
+ * @return: Predpush hint struct.
  */
 static PredpushHint* _readPredpushHint(void)
 {
     READ_LOCALS(PredpushHint);
+
+    _readBaseHint(&(local_node->base));
+    READ_BOOL_FIELD(negative);
+    READ_STRING_FIELD(dest_name);
+    READ_INT_FIELD(dest_id);
+    READ_BITMAPSET_FIELD(candidates);
+
+    READ_DONE();
+}
+
+/*
+ * @Description: Read string to predpush same level hint struct.
+ * @return: Predpush same level hint struct.
+ */
+static PredpushSameLevelHint* _readPredpushSameLevelHint(void)
+{
+    READ_LOCALS(PredpushSameLevelHint);
 
     _readBaseHint(&(local_node->base));
     READ_BOOL_FIELD(negative);
@@ -1329,8 +1346,12 @@ static HintState* _readHintState()
     IF_EXIST(predpush_hint) {
         READ_NODE_FIELD(predpush_hint);
     }
-    READ_NODE_FIELD(rewrite_hint);
-    READ_NODE_FIELD(gather_hint);
+    IF_EXIST(rewrite_hint) {
+        READ_NODE_FIELD(rewrite_hint);
+    }
+    IF_EXIST(gather_hint) {
+        READ_NODE_FIELD(gather_hint);
+    }
     IF_EXIST(no_expand_hint) {
         READ_NODE_FIELD(no_expand_hint);
     }
@@ -1342,6 +1363,9 @@ static HintState* _readHintState()
     }
     IF_EXIST(no_gpc_hint) {
         READ_NODE_FIELD(no_gpc_hint);
+    }
+    IF_EXIST(predpush_same_level_hint) {
+        READ_NODE_FIELD(predpush_same_level_hint);
     }
     READ_DONE();
 }
@@ -1611,6 +1635,10 @@ static RowMarkClause* _readRowMarkClause(void)
     READ_UINT_FIELD(rti);
     READ_BOOL_FIELD(forUpdate);
     READ_BOOL_FIELD(noWait);
+    IF_EXIST(waitSec) {
+        READ_INT_FIELD(waitSec);
+    }
+
     READ_BOOL_FIELD(pushedDown);
     IF_EXIST(strength) {
         READ_ENUM_FIELD(strength, LockClauseStrength);
@@ -3339,6 +3367,9 @@ static Scan* _readScan(Scan* local_node)
         READ_NODE_FIELD(tablesample);
     }
     read_mem_info(&local_node->mem_info);
+    IF_EXIST(scanBatchMode) {
+        READ_BOOL_FIELD(scanBatchMode);
+    }
     READ_DONE();
 }
 
@@ -3945,6 +3976,10 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
         READ_INT_FIELD(exclRelRTIndex);
     }
 
+    IF_EXIST(upsertWhere) {
+        READ_NODE_FIELD(upsertWhere);
+    }
+
     READ_DONE();
 }
 
@@ -3956,6 +3991,9 @@ static UpsertExpr* _readUpsertExpr(void)
     READ_NODE_FIELD(updateTlist);
     READ_NODE_FIELD(exclRelTlist);
     READ_INT_FIELD(exclRelIndex);
+    IF_EXIST(upsertWhere) {
+        READ_NODE_FIELD(upsertWhere);
+    }
 
     READ_DONE();
 }
@@ -3966,7 +4004,9 @@ static UpsertClause* _readUpsertClause(void)
 
     READ_NODE_FIELD(targetList);
     READ_INT_FIELD(location);
-
+    IF_EXIST(whereClause) {
+        READ_NODE_FIELD(whereClause);
+    }
     READ_DONE();
 }
 
@@ -4282,6 +4322,10 @@ static PlanRowMark* _readPlanRowMark(void)
     READ_UINT_FIELD(rowmarkId);
     READ_ENUM_FIELD(markType, RowMarkType);
     READ_BOOL_FIELD(noWait);
+    IF_EXIST(waitSec) {
+        READ_INT_FIELD(waitSec);
+    }
+
     READ_BOOL_FIELD(isParent);
     READ_INT_FIELD(numAttrs);
     READ_BITMAPSET_FIELD(bms_nodeids);
@@ -5522,6 +5566,8 @@ static PartitionState* _readPartitionState()
     READ_NODE_FIELD(partitionKey);
     READ_NODE_FIELD(partitionList);
     READ_ENUM_FIELD(rowMovement, RowMovementValue);
+    READ_NODE_FIELD(subPartitionState);
+    READ_NODE_FIELD(partitionNameList);
 
     if (local_node->partitionStrategy == '0') {
         local_node->partitionStrategy = 0;
@@ -5541,6 +5587,7 @@ static RangePartitionindexDefState* _readRangePartitionindexDefState()
 
     READ_STRING_FIELD(name);
     READ_STRING_FIELD(tablespace);
+    READ_NODE_FIELD(sublist);
 
     READ_DONE();
 }
@@ -5597,6 +5644,16 @@ static AddPartitionState* _readAddPartitionState()
 
     READ_NODE_FIELD(partitionList);
     READ_BOOL_FIELD(isStartEnd);
+
+    READ_DONE();
+}
+
+static AddSubPartitionState* _readAddSubPartitionState()
+{
+    READ_LOCALS(AddSubPartitionState);
+
+    READ_NODE_FIELD(subPartitionList);
+    READ_STRING_FIELD(partitionName);
 
     READ_DONE();
 }
@@ -6056,6 +6113,8 @@ Node* parseNodeString(void)
         return_value = _readSplitPartitionState();
     } else if (MATCH("ADDPARTITIONSTATE", 17)) {
         return_value = _readAddPartitionState();
+    } else if (MATCH("ADDSUBPARTITIONSTATE", 20)) {
+        return_value = _readAddSubPartitionState();
     } else if (MATCH("CLIENTLOGICCOLUMNREF", 20)) {
         return_value = _readClientLogicColumnRef();
     } else if (MATCH("GLOBALPARAM", 11)) {
@@ -6072,6 +6131,8 @@ Node* parseNodeString(void)
         return_value = _readUpsertClause();
     } else if (MATCH("PREDPUSHHINT", 12)) {
         return_value = _readPredpushHint();
+    } else if (MATCH("PREDPUSHSAMELEVELHINT", 21)) {
+        return_value = _readPredpushSameLevelHint();
     } else if (MATCH("REWRITEHINT", 11)) {
         return_value = _readRewriteHint();
     } else if (MATCH("GATHERHINT", 10)) {

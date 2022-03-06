@@ -89,7 +89,6 @@ CommandId HeapTupleHeaderGetCmin(HeapTupleHeader tup, Page page)
 {
     CommandId cid = HeapTupleHeaderGetRawCommandId(tup);
 
-    Assert(!(tup->t_infomask & HEAP_MOVED));
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tup)));
 
     if (tup->t_infomask & HEAP_COMBOCID)
@@ -115,7 +114,6 @@ CommandId HeapTupleGetCmax(HeapTuple tup)
     HeapTupleHeader htup = tup->t_data;
     CommandId cid = HeapTupleHeaderGetRawCommandId(htup);
 
-    Assert(!(htup->t_infomask & HEAP_MOVED));
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(tup)));
 
     if (htup->t_infomask & HEAP_COMBOCID)
@@ -128,7 +126,6 @@ CommandId HeapTupleHeaderGetCmax(HeapTupleHeader tup, Page page)
 {
     CommandId cid = HeapTupleHeaderGetRawCommandId(tup);
 
-    Assert(!(tup->t_infomask & HEAP_MOVED));
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetUpdateXid(page, tup)));
 
     if (tup->t_infomask & HEAP_COMBOCID)
@@ -142,7 +139,6 @@ bool CheckStreamCombocid(HeapTupleHeader tup, CommandId current_cid, Page page)
 {
     CommandId cid = HeapTupleHeaderGetRawCommandId(tup);
 
-    Assert(!(tup->t_infomask & HEAP_MOVED));
     Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tup)));
 
     /*

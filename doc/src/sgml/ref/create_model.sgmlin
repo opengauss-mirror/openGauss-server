@@ -23,6 +23,12 @@ where:
       * linear_regression: Compute a linear regression using Gradient Descent
       * svm_classification: Compute a support vector machine classifier  using Gradient Descent
       * kmeans: Compute an unsupervised clustering 
+      * pca: Compute a principal component analysis result using Gradient Descent
+      * multiclass: Compute a classification result for multiple types of data
+      * xgboost_regression_logistic: Compute logistic regression using XGBoost
+      * xgboost_binary_logistic: Compute logistic regression for binary classification using XGBoost
+      * xgboost_regression_squarederror: Compute regression with squarred loss
+      * xgboost_regression_gamma: Compute gamma regression with log-link using XGBoost
   * select_query is a standard SELECT query
   
 For supervised machine learning algorithms, FEATURES and TARGET clauses are mandatory. For unsupervised machine learning algorithms, FEATURES
@@ -54,6 +60,12 @@ For example:
   * max_seconds: Maximum number of seconds doing the optimization
   * optimizer: Select optimzier between: gd (gradient descent) or ngd (normalized gradient descent)
   * tolerance: System stops when the percentage of changes between two iterations is below this percentage
+  * seed: Seed value for random
+  * kernel: Name of kernel for svm classification, valid values are 'linear'(default), 'gaussian' and 'polynomial'
+  * components: Number of output dimensions for kernels different than linear, default is MAX(2*features, 128)
+  * gamma: Gamma parameter for gaussian kernel, default value is 0.5
+  * degree: Degree parameter for polynomial kernel in the range 2 to 9, default is 2
+  * coef0: Coef0 parameter for polynomial kernel and value is greater or equal than zero, default is 1.0
   * verbose: 0 (no output), 1 (more output)
 
 # Hyperparameter list for 'kmeans':
@@ -67,7 +79,31 @@ For example:
   * seeding_function: Algorithm used for initial seeds: 'Random++' or 'Kmeans||'
   * verbose:  0 (no output), 1 (less output), or 2 (full output)
   
+# Hyperparameter list for 'xgboost_regression_logistic', 'xgboost_binary_logistic', 'xgboost_regression_gamma' and 'xgboost_regression_squarederror':
+  * batch_size: Number of tuples in each processing batch
+  * booster: Which booster to use, e.g., gbtree, gblinear or dart (default: gbtree)
+  * tree_method: The tree construction algorithm used in XGBoost. Choices: auto, exact, approx, hist, gpu_hist (gpu_hist only supported with GPU)
+  * eval_metric: Evaluation metric for validation data, default is 'rmse'
+  * seed: Seed value for random
+  * nthread: Number of parallel threads used to run XGBoost
+  * max_depth: Maximum depth of a tree (default 6) (valid only for tree boosters)
+  * gamma: Minimum loss reduction required to make a further partition on a leaf node of the tree
+  * eta: Step size shrinkage used in update to prevents overfitting (default 0.3)
+  * min_child_weight: Minimum sum of instance weight (hessian) needed in a child (default 1)
+  * verbosity: Verbosity of printing messages: 0 (silent), 1 (warning), 2 (info), 3 (debug)
 
+# Hyperparameter list for 'pca':
+  * max_iterations: Maximum iterations until convergence
+  * batch_size: Number of tuples in each processing batch
+  * max_seconds: Maximum number of seconds doing the optimization
+  * number_components: Number of components to keep and value is greater or equal than 1, default 1
+  * tolerance: System stops when the percentage of changes between two iterations is below this percentage, default is 0.0005
+  * seed: Seed value for random
+  * verbose: 0 (no output), 1 (more output)
+
+# Hyperparameter list for 'multiclass':
+  * classifier: name of gradient descent binary classifier, currently supports 'svm_classification' and 'logistic_regression'
+  * and all hyperparameters of the selected binary classifier
 </synopsis>
 </refsynopsisdiv>
 </refentry>

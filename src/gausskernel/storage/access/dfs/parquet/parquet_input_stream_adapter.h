@@ -26,7 +26,9 @@
 
 #include "access/dfs/dfs_stream.h"
 #include "access/dfs/dfs_am.h"
+#ifndef ENABLE_LITE_MODE
 #include "parquet/api/reader.h"
+#endif
 #include "utils/memutils.h"
 
 namespace dfs {

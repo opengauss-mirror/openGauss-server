@@ -186,23 +186,16 @@ static bool hypo_query_walker(Node *parsetree)
     if (parsetree == NULL) {
         return false;
     }
+    if (nodeTag(parsetree) == T_ExplainStmt) {
+        ListCell *lc;
 
-    switch (nodeTag(parsetree)) {
-        case T_ExplainStmt: {
-            ListCell *lc;
+        foreach (lc, ((ExplainStmt *)parsetree)->options) {
+            DefElem *opt = (DefElem *)lfirst(lc);
 
-            foreach (lc, ((ExplainStmt *)parsetree)->options) {
-                DefElem *opt = (DefElem *)lfirst(lc);
-
-                if (strcmp(opt->defname, "analyze") == 0)
-                    return false;
-            }
-            return true;
-            break;
+            if (strcmp(opt->defname, "analyze") == 0)
+                return false;
         }
-        default: {
-            return false;
-        }
+        return true;
     }
     return false;
 }
@@ -690,15 +683,21 @@ static const hypoIndex *hypo_index_store_parsetree(IndexStmt *node, const char *
     }
 
     initStringInfo(&indexRelationName);
-    appendStringInfo(&indexRelationName, "%s", node->accessMethod);
-    appendStringInfo(&indexRelationName, "_");
-
+    appendStringInfoString(&indexRelationName, node->accessMethod);
+    appendStringInfoString(&indexRelationName, "_");
+    if (node->isGlobal) {
+        appendStringInfoString(&indexRelationName, "global");
+        appendStringInfoString(&indexRelationName, "_");
+    } else if (node->isPartitioned) {
+        appendStringInfoString(&indexRelationName, "local");
+        appendStringInfoString(&indexRelationName, "_");
+    }
     if (node->relation->schemaname != NULL && (strcmp(node->relation->schemaname, "public") != 0)) {
-        appendStringInfo(&indexRelationName, "%s", node->relation->schemaname);
-        appendStringInfo(&indexRelationName, "_");
+        appendStringInfoString(&indexRelationName, node->relation->schemaname);
+        appendStringInfoString(&indexRelationName, "_");
     }
 
-    appendStringInfo(&indexRelationName, "%s", node->relation->relname);
+    appendStringInfoString(&indexRelationName, node->relation->relname);
 
     /* now create the hypothetical index entry */
     entry = hypo_newIndex(relid, node->accessMethod, nkeycolumns, ninccolumns, node->options);
@@ -719,7 +718,8 @@ static const hypoIndex *hypo_index_store_parsetree(IndexStmt *node, const char *
         entry->unique = node->unique;
         entry->ncolumns = nkeycolumns + ninccolumns;
         entry->nkeycolumns = nkeycolumns;
-
+        entry->isGlobal = node->isGlobal;
+        entry->ispartitionedindex = node->isPartitioned;
         /* handle predicate if present */
         hypo_handle_predicate(node, entry);
 
@@ -1021,7 +1021,9 @@ static void hypo_injectHypotheticalIndex(PlannerInfo *root, Oid relationObjectId
 
     index->pages = entry->pages;
     index->tuples = entry->tuples;
-
+    index->ispartitionedindex = entry->ispartitionedindex;
+    index->partitionindex = InvalidOid;
+    index->isGlobal = entry->isGlobal;
     /*
      * obviously, setup this tag. However, it's only checked in
      * selfuncs.c/get_actual_variable_range, so we still need to add
@@ -1287,8 +1289,8 @@ static void hypo_set_indexname(hypoIndex *entry, const char *indexname)
     int totalsize;
     errno_t rc = EOK;
 
-    rc = snprintf_s(oid, sizeof(oid), sizeof(oid) - 1, "<%d>", entry->oid);
-    securec_check_ss_c(rc, "\0", "\0");
+    rc = snprintf_s(oid, sizeof(oid), sizeof(oid) - 1, "<%u>", entry->oid);
+    securec_check_ss(rc, "\0", "\0");
 
     /* we'll prefix the given indexname with the oid, and reserve a final \0 */
     totalsize = strlen(oid) + strlen(indexname) + 1;
@@ -1300,9 +1302,9 @@ static void hypo_set_indexname(hypoIndex *entry, const char *indexname)
 
     /* eventually truncate the given indexname at NAMEDATALEN-1 if needed */
     rc = strcpy_s(entry->indexname, NAMEDATALEN, oid);
-    securec_check_c(rc, "\0", "\0");
+    securec_check(rc, "\0", "\0");
     rc = strncat_s(entry->indexname, NAMEDATALEN, indexname, totalsize - strlen(oid) - 1);
-    securec_check_c(rc, "\0", "\0");
+    securec_check(rc, "\0", "\0");
 }
 
 /*

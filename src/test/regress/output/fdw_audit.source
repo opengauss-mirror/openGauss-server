@@ -1,0 +1,47 @@
+--clear audit log
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=67108863" > /dev/null 2>&1
+CREATE ROLE regress_test_foreign SYSADMIN IDENTIFIED BY 'test-1234';
+CREATE FOREIGN DATA WRAPPER fdw_audit_dummy;
+ALTER FOREIGN DATA WRAPPER fdw_audit_dummy NO VALIDATOR;
+ALTER FOREIGN DATA WRAPPER fdw_audit_dummy OPTIONS (a '1', b '2');
+ALTER FOREIGN DATA WRAPPER fdw_audit_dummy OWNER TO regress_test_foreign;
+ALTER FOREIGN DATA WRAPPER fdw_audit_dummy RENAME TO fdw_audit_dummy2;
+CREATE SERVER s1 FOREIGN DATA WRAPPER fdw_audit_dummy2;
+ALTER SERVER s1 VERSION '1.1';
+ALTER SERVER s1 OPTIONS (connect_timeout '30');
+ALTER SERVER s1 OWNER TO regress_test_foreign;
+ALTER SERVER s1 RENAME to s1new;
+DROP SERVER s1new;
+DROP FOREIGN DATA WRAPPER IF EXISTS fdw_audit_dummy2;
+DROP ROLE regress_test_foreign;
+SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_foreign_data_wrapper' or type = 'ddl_serverforhadoop' order by object_name,detail_info;
+   object_name    |                                detail_info                                
+------------------+---------------------------------------------------------------------------
+ fdw_audit_dummy  | ALTER FOREIGN DATA WRAPPER fdw_audit_dummy NO VALIDATOR;
+ fdw_audit_dummy  | ALTER FOREIGN DATA WRAPPER fdw_audit_dummy OPTIONS (a '1', b '2');
+ fdw_audit_dummy  | ALTER FOREIGN DATA WRAPPER fdw_audit_dummy OWNER TO regress_test_foreign;
+ fdw_audit_dummy  | ALTER FOREIGN DATA WRAPPER fdw_audit_dummy RENAME TO fdw_audit_dummy2;
+ fdw_audit_dummy  | CREATE FOREIGN DATA WRAPPER fdw_audit_dummy;
+ fdw_audit_dummy2 | DROP FOREIGN DATA WRAPPER IF EXISTS fdw_audit_dummy2;
+ s1               | ALTER SERVER s1 OPTIONS (connect_timeout '30');
+ s1               | ALTER SERVER s1 OWNER TO regress_test_foreign;
+ s1               | ALTER SERVER s1 RENAME to s1new;
+ s1               | ALTER SERVER s1 VERSION '1.1';
+ s1               | CREATE SERVER s1 FOREIGN DATA WRAPPER fdw_audit_dummy2;
+ s1new            | DROP SERVER s1new;
+(12 rows)
+
+--clear audit log
+SELECT pg_delete_audit('1012-11-10', '3012-11-11');
+ pg_delete_audit 
+-----------------
+ 
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1

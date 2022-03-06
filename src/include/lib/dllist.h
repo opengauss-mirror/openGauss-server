@@ -62,10 +62,16 @@ class DllistWithLock : public BaseObject {
 public:
     DllistWithLock();
     ~DllistWithLock();
-    void Remove(Dlelem* e);
+    void Remove(Dlelem* e)
+    {
+        (void)RemoveConfirm(e);
+    }
+    bool RemoveConfirm(Dlelem* e);
     void AddHead(Dlelem* e);
     void AddTail(Dlelem* e);
     Dlelem* RemoveHead();
+    Dlelem* RemoveHeadNoLock();
+    Dlelem* RemoveTail();
     bool IsEmpty();
     Dlelem* GetHead();
     void GetLock();

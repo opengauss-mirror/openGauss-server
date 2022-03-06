@@ -98,8 +98,10 @@ static void GetFileHeader(WritableParser* self, const char* path);
 #define parser_securec_check(rc) securec_check(rc, "\0", "\0")
 #define parser_securec_check_ss(rc) securec_check_ss(rc, "\0", "\0")
 
+#ifndef ENABLE_LITE_MODE
 static size_t SourceRead_OBS(Source* self, void* buffer, size_t len);
 static bool SourceNext_OBS(Source* self);
+#endif
 #endif
 
 static Source* CreateSource(const FileList* files, SourceType sourcetype);
@@ -464,8 +466,12 @@ void Source::SourceInit(bool isWrite)
         SourceNext = SourceNext_File;
 #else
         if (m_sourcetype == SOURCE_TYPE_OBS) {
+#ifndef ENABLE_LITE_MODE
             SourceRead = SourceRead_OBS;
             SourceNext = SourceNext_OBS;
+#else
+            FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
         } else {
             SourceRead = SourceRead_File;
             SourceNext = SourceNext_File;
@@ -1296,8 +1302,12 @@ int GDS::LineBuffer::AppendLine(const char* buf, int buf_len, bool isComplete)
                 parser_log(LEVEL_ERROR, "GDS max line size %d is exceeded.", (int)MaxAllocSize);
             }
 #else
+#ifndef ENABLE_LITE_MODE
             /* for OBS, append  the overload data  in overload buffer */
             SaveOverloadBuf(m_overload_buf, buf, buf_len, isComplete);
+#else
+            FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
 #endif
             /*
              * Here the curent overload buffer is already done so the actual buf_len can be returned.
@@ -1460,6 +1470,7 @@ int GDS::LineBuffer::SendOverloadBuf(evbuffer* dest, const char* buf, int buf_le
 #endif
 
 #ifdef OBS_SERVER
+#ifndef ENABLE_LITE_MODE
 static size_t SourceRead_OBS(Source* self, void* buffer, size_t len)
 {
     size_t nread = 0;
@@ -1679,5 +1690,5 @@ void GDS::LineBuffer::SaveOverloadBuf(StringInfo dest, const char* buf, int buf_
 
     MemoryContextSwitchTo(oldcontext);
 }
-
+#endif
 #endif

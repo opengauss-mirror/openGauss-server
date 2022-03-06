@@ -1022,11 +1022,20 @@ typedef struct size_info {
     int64 ec_fetch_count;
 } size_info;
 
+typedef struct IterationStats {
+    int totalIters;
+    struct timeval currentStartTime;
+    int levelBuf[SW_LOG_ROWS_FULL];
+    int64 rowCountBuf[SW_LOG_ROWS_FULL];
+    struct timeval startTimeBuf[SW_LOG_ROWS_FULL];
+    struct timeval endTimeBuf[SW_LOG_ROWS_FULL];
+} IterationStats;
+
 extern OperatorProfileTable g_operator_table;
 
 extern Instrumentation* InstrAlloc(int n, int instrument_options);
 extern void InstrStartNode(Instrumentation* instr);
-extern void InstrStopNode(Instrumentation* instr, double nTuples);
+extern void InstrStopNode(Instrumentation* instr, double nTuples, bool containMemory = true);
 extern void InstrEndLoop(Instrumentation* instr);
 extern void StreamEndLoop(StreamTime* instr);
 extern void AddControlMemoryContext(Instrumentation* instr, MemoryContext context);

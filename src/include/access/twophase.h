@@ -22,7 +22,7 @@
 #define GIDSIZE 200
 #define MAX_PREP_XACT_VERSIONS 64
 
-#define TwoPhaseStateHashPartition(hashcode) ((hashcode) % NUM_TWOPHASE_PARTITIONS)
+#define TwoPhaseStateHashPartition(hashcode) ((hashcode) % (TransactionId)NUM_TWOPHASE_PARTITIONS)
 #define TwoPhaseState(n) (t_thrd.xact_cxt.TwoPhaseState[TwoPhaseStateHashPartition(n)])
 
 #define TwoPhaseStateMappingPartitionLock(hashcode) (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstTwoPhaseStateLock + \
@@ -180,9 +180,6 @@ bool relsContainsSegmentTable(ColFileNodeRel *delrels, int ndelrels);
 extern void FinishPreparedTransaction(const char* gid, bool isCommit);
 
 extern bool TransactionIdIsPrepared(TransactionId xid);
-
-extern bool IsTransactionIdMarkedPrepared(TransactionId xid);
-
 extern void SetLocalSnapshotPreparedArray(Snapshot snapshot);
 
 extern int GetPendingXactCount(void);
@@ -194,5 +191,5 @@ extern void RemoveStaleTwophaseState(TransactionId xid);
 
 extern void RecoverPrepareTransactionCSNLog(char* buf);
 extern int get_snapshot_defualt_prepared_num(void);
-
+extern void DeleteObsoleteTwoPhaseFile(int64 pageno);
 #endif /* TWOPHASE_H */

@@ -335,12 +335,9 @@ static void knl_t_xact_init(knl_t_xact_context* xact_cxt)
     xact_cxt->XactLocalNodeCanAbort = true;
     xact_cxt->XactPrepareSent = false;
     xact_cxt->AlterCoordinatorStmt = false;
-    xact_cxt->XactXidStoreForCheck = InvalidTransactionId;
-    xact_cxt->reserved_nextxid_check = InvalidTransactionId;
     xact_cxt->forceSyncCommit = false;
     /* alloc in TopMemory Context, initialization is NULL when create new thread */
     xact_cxt->TransactionAbortContext = NULL;
-    xact_cxt->GTM_callbacks = NULL;
     xact_cxt->Seq_callbacks = NULL;
     xact_cxt->lxid = InvalidTransactionId;
     xact_cxt->stablexid = InvalidTransactionId;
@@ -368,6 +365,10 @@ static void knl_t_xact_init(knl_t_xact_context* xact_cxt)
     xact_cxt->PGXCNodeId = -1;
     xact_cxt->inheritFileNode = false;
     xact_cxt->applying_subxact_undo = false;
+    xact_cxt->XactXidStoreForCheck = InvalidTransactionId;
+    xact_cxt->enable_lock_cancel = false;
+    xact_cxt->ActiveLobRelid = InvalidOid;
+    xact_cxt->isSelectInto = false;
 }
 
 static void knl_t_mem_init(knl_t_mem_context* mem_cxt)
@@ -440,7 +441,6 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->is_hadr_main_standby = false;
     xlog_cxt->startup_processing = false;
     xlog_cxt->openLogFile = -1;
-    xlog_cxt->readfrombuffer = false;
     xlog_cxt->openLogSegNo = 0;
     xlog_cxt->openLogOff = 0;
     xlog_cxt->readFile = -1;
@@ -500,7 +500,6 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->gin_opCtx = NULL;
     xlog_cxt->gist_opCtx = NULL;
     xlog_cxt->spg_opCtx = NULL;
-    xlog_cxt->redo_oldversion_xlog = false;
     xlog_cxt->CheckpointStats = (CheckpointStatsData*)palloc0(sizeof(CheckpointStatsData));
     xlog_cxt->LogwrtResult = (XLogwrtResult*)palloc0(sizeof(XLogwrtResult));
     xlog_cxt->LogwrtPaxos = (XLogwrtPaxos*)palloc0(sizeof(XLogwrtPaxos));
@@ -511,6 +510,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
 #endif
     xlog_cxt->max_page_flush_lsn = MAX_XLOG_REC_PTR;
     xlog_cxt->redoInterruptCallBackFunc = NULL;
+    xlog_cxt->redoPageRepairCallBackFunc = NULL;
     xlog_cxt->xlog_atomic_op = NULL;
     xlog_cxt->currentRetryTimes = 0;
 }
@@ -600,6 +600,7 @@ static void knl_t_audit_init(knl_t_audit_context* audit)
     audit->rotation_requested = false;
     audit->space_beyond_size = (10 * 1024 * 1024);
     audit->pgaudit_filepath[0] = '\0';
+    audit->cur_thread_idx = -1;
 }
 
 static void knl_t_async_init(knl_t_async_context* asy_cxt)
@@ -642,6 +643,7 @@ static void knl_t_arch_init(knl_t_arch_context* arch)
     arch->task_wait_interval = 1000;
     arch->last_arch_time = 0;
     arch->arch_start_timestamp = 0;
+    arch->arch_start_lsn = InvalidXLogRecPtr;
     arch->sync_walsender_idx = -1;
 #ifndef ENABLE_MULTIPLE_NODES
     arch->sync_follower_id = -1;
@@ -655,6 +657,7 @@ static void knl_t_barrier_arch_init(knl_t_barrier_arch_context* barrier_arch)
     barrier_arch->wakened = false;
     barrier_arch->ready_to_stop = false;
     barrier_arch->slot_name = NULL;
+    barrier_arch->lastArchiveLoc = InvalidXLogRecPtr;
 }
 
 
@@ -724,6 +727,7 @@ static void knl_t_libwalreceiver_init(knl_t_libwalreceiver_context* libwalreceiv
     libwalreceiver_cxt->recvBuf = NULL;
     libwalreceiver_cxt->shared_storage_buf = NULL;
     libwalreceiver_cxt->shared_storage_read_buf = NULL;
+    libwalreceiver_cxt->decompressBuf = NULL;
     libwalreceiver_cxt->xlogreader = NULL;
 }
 
@@ -772,7 +776,7 @@ static void knl_t_datasender_init(knl_t_datasender_context* datasender_cxt)
 static void knl_t_walreceiverfuncs_init(knl_t_walreceiverfuncs_context* walreceiverfuncs_cxt)
 {
     walreceiverfuncs_cxt->WalRcv = NULL;
-    walreceiverfuncs_cxt->WalReplIndex = 0;
+    walreceiverfuncs_cxt->WalReplIndex = 1;
 }
 
 static void knl_t_replgram_init(knl_t_replgram_context* replgram_cxt)
@@ -896,7 +900,6 @@ static void knl_t_utils_init(knl_t_utils_context* utils_cxt)
     utils_cxt->STPSavedResourceOwner = NULL;
     utils_cxt->CurTransactionResourceOwner = NULL;
     utils_cxt->TopTransactionResourceOwner = NULL;
-    utils_cxt->ResourceRelease_callbacks = NULL;
     utils_cxt->SortColumnOptimize = false;
     utils_cxt->pRelatedRel = NULL;
     utils_cxt->sigTimerId = NULL;
@@ -951,6 +954,21 @@ static void knl_t_page_redo_init(knl_t_page_redo_context* page_redo_cxt)
     page_redo_cxt->shutdown_requested = false;
     page_redo_cxt->got_SIGHUP = false;
     page_redo_cxt->sleep_long = false;
+    page_redo_cxt->check_repair = false;
+}
+
+static void knl_t_parallel_decode_init(knl_t_parallel_decode_worker_context* parallel_decode_cxt)
+{
+    parallel_decode_cxt->shutdown_requested = false;
+    parallel_decode_cxt->got_SIGHUP = false;
+    parallel_decode_cxt->sleep_long = false;
+}
+
+static void knl_t_parallel_decode_reader_init(knl_t_logical_read_worker_context* parallel_decode_reader_cxt)
+{
+    parallel_decode_reader_cxt->shutdown_requested = false;
+    parallel_decode_reader_cxt->got_SIGHUP = false;
+    parallel_decode_reader_cxt->sleep_long = false;
 }
 
 static void knl_t_startup_init(knl_t_startup_context* startup_cxt)
@@ -1136,6 +1154,16 @@ static void knl_t_pagewriter_init(knl_t_pagewriter_context* pagewriter_cxt)
     pagewriter_cxt->shutdown_requested = false;
     pagewriter_cxt->page_writer_after = WRITEBACK_MAX_PENDING_FLUSHES;
     pagewriter_cxt->pagewriter_id = -1;
+}
+
+static void knl_t_barrier_creator_init(knl_t_barrier_creator_context* barrier_creator_cxt)
+{
+    barrier_creator_cxt->archive_slot_names = NULL;
+    barrier_creator_cxt->got_SIGHUP = false;
+    barrier_creator_cxt->is_first_barrier = false;
+    barrier_creator_cxt->barrier_update_last_time_info = NULL;
+    barrier_creator_cxt->shutdown_requested = false;
+    barrier_creator_cxt->first_cn_timeline = 0;
 }
 
 static void knl_t_xlogcopybackend_init(knl_t_sharestoragexlogcopyer_context* cxt)
@@ -1340,6 +1368,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->statement_fin_time2 = 0;
     storage_cxt->pageCopy = NULL;
 
+    storage_cxt->isSwitchoverLockHolder = false;
     storage_cxt->num_held_lwlocks = 0;
     storage_cxt->held_lwlocks = (LWLockHandle*)palloc0(MAX_SIMUL_LWLOCKS * sizeof(LWLockHandle));
     storage_cxt->lock_addin_request = 0;
@@ -1363,9 +1392,12 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->cmprMetaInfo = (CmprMetaUnion*)palloc0(sizeof(CmprMetaUnion));
     storage_cxt->DataFileIdCache = NULL;
     storage_cxt->SegSpcCache = NULL;
+    storage_cxt->uidHashCache = NULL;
+    storage_cxt->DisasterCache = NULL;
 
     storage_cxt->max_safe_fds = 32;
     storage_cxt->max_userdatafiles = 8192 - 1000;
+    storage_cxt->timeoutRemoteOpera = 0;
 }
 
 static void knl_t_port_init(knl_t_port_context* port_cxt)
@@ -1410,6 +1442,8 @@ static void knl_t_walsender_init(knl_t_walsender_context* walsender_cxt)
     securec_check(rc, "\0", "\0");
     rc = memset_s(walsender_cxt->gucconf_lock_file, MAXPGPATH, 0, MAXPGPATH);
     securec_check(rc, "\0", "\0");
+    rc = memset_s(walsender_cxt->slotname, NAMEDATALEN, 0, NAMEDATALEN);
+    securec_check(rc, "\0", "\0");
     walsender_cxt->ws_dummy_data_read_file_fd = NULL;
     walsender_cxt->ws_dummy_data_read_file_num = 1;
     walsender_cxt->CheckCUArray = NULL;
@@ -1422,13 +1456,17 @@ static void knl_t_walsender_init(knl_t_walsender_context* walsender_cxt)
     walsender_cxt->tmpbuf = (StringInfoData*)palloc0(sizeof(StringInfoData));
     walsender_cxt->remotePort = 0;
     walsender_cxt->walSndCaughtUp = false;
+    walsender_cxt->LogicalSlot = -1;
     walsender_cxt->last_check_timeout_timestamp = 0;
     walsender_cxt->isWalSndSendTimeoutMessage = false;
     walsender_cxt->advancePrimaryConn = NULL;
-	
+    walsender_cxt->xlogReadBuf = NULL;
+    walsender_cxt->compressBuf = NULL;
     walsender_cxt->ep_fd = -1;
     walsender_cxt->datafd = -1;
     walsender_cxt->is_obsmode = false;
+    walsender_cxt->standbyConnection = false;
+    walsender_cxt->restoreLogicalLogHead = NULL;
 }
 
 static void knl_t_tsearch_init(knl_t_tsearch_context* tsearch_cxt)
@@ -1450,7 +1488,8 @@ static void knl_t_postmaster_init(knl_t_postmaster_context* postmaster_cxt)
         0,
         MAX_REPLNODE_NUM * sizeof(replconninfo*));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(postmaster_cxt->ReplConnChanged, MAX_REPLNODE_NUM * sizeof(bool), 0, MAX_REPLNODE_NUM * sizeof(bool));
+    rc = memset_s(postmaster_cxt->ReplConnChangeType, MAX_REPLNODE_NUM * sizeof(int),
+        NO_CHANGE, MAX_REPLNODE_NUM * sizeof(int));
     securec_check(rc, "\0", "\0");
 
     rc = memset_s(postmaster_cxt->CrossClusterReplConnArray, MAX_REPLNODE_NUM * sizeof(replconninfo*), 0,
@@ -1598,6 +1637,12 @@ static void knl_t_bgworker_init(knl_t_bgworker_context* bgworker_cxt)
     bgworker_cxt->bgworker = NULL;
 }
 
+static void knl_index_advisor_init(knl_t_index_advisor_context* index_advisor_cxt)
+{
+    index_advisor_cxt->stmt_table_list = NULL;
+    index_advisor_cxt->stmt_target_list = NULL;
+}
+
 #ifdef ENABLE_MOT
 static void knl_t_mot_init(knl_t_mot_context* mot_cxt)
 {
@@ -1640,13 +1685,21 @@ void KnlDcfContextInit(knl_t_dcf_context* dcfContext)
     dcfContext->dcfCtxInfo = NULL;
 }
 
+void KnlLscContextInit(knl_t_lsc_context *lsc_cxt)
+{
+    lsc_cxt->lsc = NULL;
+    lsc_cxt->enable_lsc = false;
+    lsc_cxt->FetchTupleFromCatCList = NULL;
+}
+
 void knl_thread_init(knl_thread_role role)
 {
-    /* doesn't init t_thrd.bn, check GaussDbThreadMain for detail */
     t_thrd.role = role;
     t_thrd.subrole = NO_SUBROLE;
     t_thrd.proc = NULL;
     t_thrd.pgxact = NULL;
+    t_thrd.bn = NULL;
+    t_thrd.is_inited = false;
     t_thrd.myLogicTid = 10000;
     t_thrd.fake_session = NULL;
     t_thrd.threadpool_cxt.reaper_dead_session = false;
@@ -1656,7 +1709,8 @@ void knl_thread_init(knl_thread_role role)
     t_thrd.mcxt_group->Init(t_thrd.top_mem_cxt);
     MemoryContextSeal(t_thrd.top_mem_cxt);
     MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
-	
+    
+    KnlLscContextInit(&t_thrd.lsc_cxt);
     /* CommProxy Support */
     t_thrd.comm_sock_option = g_default_invalid_sock_opt;
     t_thrd.comm_epoll_option = g_default_invalid_epoll_opt;
@@ -1675,6 +1729,7 @@ void knl_thread_init(knl_thread_role role)
     knl_t_bgwriter_init(&t_thrd.bgwriter_cxt);
     knl_t_bootstrap_init(&t_thrd.bootstrap_cxt);
     knl_t_pagewriter_init(&t_thrd.pagewriter_cxt);
+    knl_t_barrier_creator_init(&t_thrd.barrier_creator_cxt);
     knl_t_bulkload_init(&t_thrd.bulk_cxt);
     knl_t_cbm_init(&t_thrd.cbm_cxt);
     knl_t_checkpoint_init(&t_thrd.checkpoint_cxt);
@@ -1741,6 +1796,8 @@ void knl_thread_init(knl_thread_role role)
     knl_t_pencentile_init(&t_thrd.percentile_cxt);
     knl_t_perf_snap_init(&t_thrd.perf_snap_cxt);
     knl_t_page_redo_init(&t_thrd.page_redo_cxt);
+    knl_t_parallel_decode_init(&t_thrd.parallel_decode_cxt);
+    knl_t_parallel_decode_reader_init(&t_thrd.logicalreadworker_cxt);
     knl_t_heartbeat_init(&t_thrd.heartbeat_cxt);
     knl_t_streaming_init(&t_thrd.streaming_cxt);
     knl_t_poolcleaner_init(&t_thrd.poolcleaner_cxt);
@@ -1753,6 +1810,7 @@ void knl_thread_init(knl_thread_role role)
     knl_t_security_policy_init(&t_thrd.security_policy_cxt);
     knl_t_security_ledger_init(&t_thrd.security_ledger_cxt);
     knl_t_bgworker_init(&t_thrd.bgworker_cxt);
+    knl_index_advisor_init(&t_thrd.index_advisor_cxt);
     KnlTApplyLauncherInit(&t_thrd.applylauncher_cxt);
     KnlTApplyWorkerInit(&t_thrd.applyworker_cxt);
     KnlTPublicationInit(&t_thrd.publication_cxt);
@@ -1781,6 +1839,14 @@ RedoInterruptCallBackFunc RegisterRedoInterruptCallBack(RedoInterruptCallBackFun
     return oldFunc;
 }
 
+RedoPageRepairCallBackFunc RegisterRedoPageRepairCallBack(RedoPageRepairCallBackFunc func)
+{
+    RedoPageRepairCallBackFunc oldFunc = t_thrd.xlog_cxt.redoPageRepairCallBackFunc;
+    t_thrd.xlog_cxt.redoPageRepairCallBackFunc = func;
+    return oldFunc;
+}
+
+
 void RedoInterruptCallBack()
 {
     if (t_thrd.xlog_cxt.redoInterruptCallBackFunc != NULL) {
@@ -1790,5 +1856,12 @@ void RedoInterruptCallBack()
 
     Assert(!AmStartupProcess());
     Assert(!AmPageRedoWorker());
+}
+
+void RedoPageRepairCallBack(RepairBlockKey key, XLogPhyBlock pblk)
+{
+    if (t_thrd.xlog_cxt.redoPageRepairCallBackFunc != NULL) {
+        t_thrd.xlog_cxt.redoPageRepairCallBackFunc(key, pblk);
+    }
 }
 

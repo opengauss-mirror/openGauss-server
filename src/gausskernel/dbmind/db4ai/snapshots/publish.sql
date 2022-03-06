@@ -46,8 +46,8 @@ BEGIN
         GET STACKED DIAGNOSTICS e_stack_act = PG_EXCEPTION_CONTEXT;
 
         IF CURRENT_SCHEMA = 'db4ai' THEN
-            e_stack_act := replace(e_stack_act, ' archive_snapshot(', ' db4ai.archive_snapshot(');
-            e_stack_act := replace(e_stack_act, ' publish_snapshot(', ' db4ai.publish_snapshot(');
+            e_stack_act := pg_catalog.replace(e_stack_act, ' archive_snapshot(', ' db4ai.archive_snapshot(');
+            e_stack_act := pg_catalog.replace(e_stack_act, ' publish_snapshot(', ' db4ai.publish_snapshot(');
         END IF;
 
         IF e_stack_act NOT SIMILAR TO '%PL/pgSQL function db4ai.(archive|publish)_snapshot\(name,name\) line 11 at assignment%'
@@ -59,14 +59,14 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || current_setting('db4ai.message_level');
-        RAISE INFO 'effective client_min_messages is ''%''', upper(current_setting('db4ai.message_level'));
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
 
     -- obtain relevant configuration parameters
     BEGIN
-        s_mode := upper(current_setting('db4ai_snapshot_mode'));
+        s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
@@ -77,17 +77,17 @@ BEGIN
 
     -- obtain relevant configuration parameters
     BEGIN
-        s_vers_del := current_setting('db4ai_snapshot_version_delimiter');
+        s_vers_del := pg_catalog.current_setting('db4ai_snapshot_version_delimiter');
     EXCEPTION WHEN OTHERS THEN
         s_vers_del := '@';
     END;
     BEGIN
-        s_vers_sep := upper(current_setting('db4ai_snapshot_version_separator'));
+        s_vers_sep := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_version_separator'));
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
 
-    current_compatibility_mode := current_setting('sql_compatibility');
+    current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
@@ -98,10 +98,10 @@ BEGIN
     IF i_name IS NULL OR i_name = '' THEN
         RAISE EXCEPTION 'i_name cannot be NULL or empty';
     ELSE
-        i_name := replace(i_name, chr(1), s_vers_del);
-        i_name := replace(i_name, chr(2), s_vers_sep);
-        s_name_vers := regexp_split_to_array(i_name, s_vers_del);
-        IF array_length(s_name_vers, 1) <> 2 OR array_length(s_name_vers, 2) <> none_represent THEN
+        i_name := pg_catalog.replace(i_name, pg_catalog.chr(1), s_vers_del);
+        i_name := pg_catalog.replace(i_name, pg_catalog.chr(2), s_vers_sep);
+        s_name_vers := pg_catalog.regexp_split_to_array(i_name, s_vers_del);
+        IF pg_catalog.array_length(s_name_vers, 1) <> 2 OR pg_catalog.array_length(s_name_vers, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_name must contain exactly one ''%'' character', s_vers_del
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
@@ -109,7 +109,7 @@ BEGIN
 
     UPDATE db4ai.snapshot SET published = publish, archived = NOT publish WHERE schema = i_schema AND name = i_name;
     IF SQL%ROWCOUNT = 0 THEN
-        RAISE EXCEPTION 'snapshot %.% does not exist' , quote_ident(i_schema), quote_ident(i_name);
+        RAISE EXCEPTION 'snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_name);
     END IF;
 
     res := ROW(i_schema, i_name);

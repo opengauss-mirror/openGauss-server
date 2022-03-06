@@ -1603,6 +1603,7 @@ static void expand_inherited_rtentry(PlannerInfo* root, RangeTblEntry* rte, Inde
             newrc->rowmarkId = oldrc->rowmarkId;
             newrc->markType = oldrc->markType;
             newrc->noWait = oldrc->noWait;
+            newrc->waitSec = oldrc->waitSec;
             newrc->isParent = false;
 
             root->rowMarks = lappend(root->rowMarks, newrc);
@@ -2367,6 +2368,7 @@ void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti)
             newrc->rowmarkId = oldrc->rowmarkId;
             newrc->markType = oldrc->markType;
             newrc->noWait = oldrc->noWait;
+            newrc->waitSec = oldrc->waitSec;
             newrc->isParent = false;
 
             root->rowMarks = lappend(root->rowMarks, newrc);

@@ -1,0 +1,175 @@
+CREATE TABLE t_processed (name varchar(100) , id INT , val INT , val2 INT)
+CREATE TABLE t_num(id INT, num int )
+CREATE OR REPLACE FUNCTION t_processed(in1 int, in2 int, in3 int, out1 OUT int, out2 OUT varchar, out3 OUT int) AS 'SELECT val, name, val2 from t_processed where id = in1 and id = in2 and val2 = in3 LIMIT 1' LANGUAGE SQL
+CREATE OR REPLACE FUNCTION f_plaintext_out(out1 INOUT int, out2 INOUT int) AS $$ BEGIN SELECT val, val2 from t_processed ORDER BY name LIMIT 1 INTO out1, out2; END;$$ LANGUAGE PLPGSQL
+CREATE FUNCTION select4 () RETURNS setof t_num LANGUAGE SQL AS 'SELECT id, num from t_num;'
+CREATE FUNCTION select5 () RETURNS int LANGUAGE SQL AS 'SELECT num from t_num;'
+Invoking select5 using simple query:
+CREATE FUNCTION select6 () RETURNS setof int LANGUAGE SQL AS 'SELECT  num from t_num;';
+CREATE FUNCTION select7 () RETURNS TABLE(a INT, b INT) LANGUAGE SQL AS 'SELECT id, num from t_num;';
+CREATE OR REPLACE FUNCTION get_rows_setof() RETURNS SETOF t_num AS 
+$BODY$ 
+DECLARE 
+r t_num%rowtype; 
+BEGIN 
+FOR r IN 
+SELECT * FROM t_num 
+LOOP 
+-- can do some processing here 
+RETURN NEXT r; -- return current row of SELECT 
+END LOOP; 
+RETURN; 
+END 
+$BODY$ 
+LANGUAGE plpgsql;
+Obtaining the list of columns
+ PROCEDURE_CAT | PROCEDURE_SCHEM | PROCEDURE_NAME  | COLUMN_NAME | COLUMN_TYPE | DATA_TYPE | TYPE_NAME | PRECISION | LENGTH | SCALE | RADIX | NULLABLE | REMARKS | COLUMN_DEF | SQL_DATA_TYPE | SQL_DATETIME_SUB | CHAR_OCTECT_LENGTH | ORDINAL_POSITION | IS_NULLABLE | SPECIFIC_NAME 
+---------------+-----------------+-----------------+-------------+-------------+-----------+-----------+-----------+--------+-------+-------+----------+---------+------------+---------------+------------------+--------------------+------------------+-------------+---------------
+               | public          | f_plaintext_out | out1        |           2 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | f_plaintext_out | out2        |           2 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | get_rows_setof  | id          |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | get_rows_setof  | num         |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select4         | id          |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select4         | num         |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select5         | returnValue |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select6         | returnValue |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select7         | a           |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | select7         | b           |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | t_processed     | in1         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | t_processed     | in2         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | t_processed     | in3         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                3 |             | 
+               | public          | t_processed     | out1        |           4 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                4 |             | 
+               | public          | t_processed     | out2        |           4 |        12 | varchar   |           |        |       |       |        2 |         |            |               |                  |                    |                5 |             | 
+               | public          | t_processed     | out3        |           4 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                6 |             | 
+(16 rows)
+
+DROP FUNCTION t_processed
+DROP FUNCTION f_plaintext_out
+DROP FUNCTION select4
+DROP FUNCTION select5
+DROP FUNCTION select6
+DROP FUNCTION select7
+DROP FUNCTION get_rows_setof
+DROP TABLE t_processed
+DROP TABLE t_num
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_processed (name varchar(100) ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), id INT ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), val INT ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), val2 INT)
+CREATE TABLE t_num(id INT, num int ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC))
+CREATE OR REPLACE FUNCTION t_processed(in1 int, in2 int, in3 int, out1 OUT int, out2 OUT varchar, out3 OUT int) AS 'SELECT val, name, val2 from t_processed where id = in1 and id = in2 and val2 = in3 LIMIT 1' LANGUAGE SQL
+CREATE OR REPLACE FUNCTION f_plaintext_out(out1 INOUT int, out2 INOUT int) AS $$ BEGIN SELECT val, val2 from t_processed ORDER BY name LIMIT 1 INTO out1, out2; END;$$ LANGUAGE PLPGSQL
+CREATE FUNCTION select4 () RETURNS setof t_num LANGUAGE SQL AS 'SELECT id, num from t_num;'
+CREATE FUNCTION select5 () RETURNS int LANGUAGE SQL AS 'SELECT num from t_num;'
+Invoking select5 using simple query:
+CREATE FUNCTION select6 () RETURNS setof int LANGUAGE SQL AS 'SELECT  num from t_num;';
+CREATE FUNCTION select7 () RETURNS TABLE(a INT, b INT) LANGUAGE SQL AS 'SELECT id, num from t_num;';
+CREATE OR REPLACE FUNCTION get_rows_setof() RETURNS SETOF t_num AS 
+$BODY$ 
+DECLARE 
+r t_num%rowtype; 
+BEGIN 
+FOR r IN 
+SELECT * FROM t_num 
+LOOP 
+-- can do some processing here 
+RETURN NEXT r; -- return current row of SELECT 
+END LOOP; 
+RETURN; 
+END 
+$BODY$ 
+LANGUAGE plpgsql;
+Obtaining the list of columns
+ PROCEDURE_CAT | PROCEDURE_SCHEM | PROCEDURE_NAME  | COLUMN_NAME | COLUMN_TYPE | DATA_TYPE | TYPE_NAME | PRECISION | LENGTH | SCALE | RADIX | NULLABLE | REMARKS | COLUMN_DEF | SQL_DATA_TYPE | SQL_DATETIME_SUB | CHAR_OCTECT_LENGTH | ORDINAL_POSITION | IS_NULLABLE | SPECIFIC_NAME 
+---------------+-----------------+-----------------+-------------+-------------+-----------+-----------+-----------+--------+-------+-------+----------+---------+------------+---------------+------------------+--------------------+------------------+-------------+---------------
+               | public          | f_plaintext_out | out1        |           2 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | f_plaintext_out | out2        |           2 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | get_rows_setof  | id          |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | get_rows_setof  | num         |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select4         | id          |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select4         | num         |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select5         | returnValue |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select6         | returnValue |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select7         | a           |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | select7         | b           |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | t_processed     | in1         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | t_processed     | in2         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | t_processed     | in3         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                3 |             | 
+               | public          | t_processed     | out1        |           4 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                4 |             | 
+               | public          | t_processed     | out2        |           4 |        12 | varchar   |           |        |       |       |        2 |         |            |               |                  |                    |                5 |             | 
+               | public          | t_processed     | out3        |           4 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                6 |             | 
+(16 rows)
+
+DROP FUNCTION t_processed
+DROP FUNCTION f_plaintext_out
+DROP FUNCTION select4
+DROP FUNCTION select5
+DROP FUNCTION select6
+DROP FUNCTION select7
+DROP FUNCTION get_rows_setof
+DROP TABLE t_processed
+DROP TABLE t_num
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1
+CREATE TABLE t_processed (name varchar(100) , id INT , val INT , val2 INT)
+CREATE TABLE t_num(id INT, num int )
+CREATE OR REPLACE FUNCTION t_processed(in1 int, in2 int, in3 int, out1 OUT int, out2 OUT varchar, out3 OUT int) AS 'SELECT val, name, val2 from t_processed where id = in1 and id = in2 and val2 = in3 LIMIT 1' LANGUAGE SQL
+CREATE OR REPLACE FUNCTION f_plaintext_out(out1 INOUT int, out2 INOUT int) AS $$ BEGIN SELECT val, val2 from t_processed ORDER BY name LIMIT 1 INTO out1, out2; END;$$ LANGUAGE PLPGSQL
+CREATE FUNCTION select4 () RETURNS setof t_num LANGUAGE SQL AS 'SELECT id, num from t_num;'
+CREATE FUNCTION select5 () RETURNS int LANGUAGE SQL AS 'SELECT num from t_num;'
+Invoking select5 using simple query:
+CREATE FUNCTION select6 () RETURNS setof int LANGUAGE SQL AS 'SELECT  num from t_num;';
+CREATE FUNCTION select7 () RETURNS TABLE(a INT, b INT) LANGUAGE SQL AS 'SELECT id, num from t_num;';
+CREATE OR REPLACE FUNCTION get_rows_setof() RETURNS SETOF t_num AS 
+$BODY$ 
+DECLARE 
+r t_num%rowtype; 
+BEGIN 
+FOR r IN 
+SELECT * FROM t_num 
+LOOP 
+-- can do some processing here 
+RETURN NEXT r; -- return current row of SELECT 
+END LOOP; 
+RETURN; 
+END 
+$BODY$ 
+LANGUAGE plpgsql;
+Obtaining the list of columns
+ PROCEDURE_CAT | PROCEDURE_SCHEM | PROCEDURE_NAME  | COLUMN_NAME | COLUMN_TYPE | DATA_TYPE | TYPE_NAME | PRECISION | LENGTH | SCALE | RADIX | NULLABLE | REMARKS | COLUMN_DEF | SQL_DATA_TYPE | SQL_DATETIME_SUB | CHAR_OCTECT_LENGTH | ORDINAL_POSITION | IS_NULLABLE | SPECIFIC_NAME 
+---------------+-----------------+-----------------+-------------+-------------+-----------+-----------+-----------+--------+-------+-------+----------+---------+------------+---------------+------------------+--------------------+------------------+-------------+---------------
+               | public          | f_plaintext_out | out1        |           2 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | f_plaintext_out | out2        |           2 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | get_rows_setof  | id          |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | get_rows_setof  | num         |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select4         | id          |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select4         | num         |           3 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select5         | returnValue |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select6         | returnValue |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                0 |             | 
+               | public          | select7         | a           |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | select7         | b           |           5 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | t_processed     | in1         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                1 |             | 
+               | public          | t_processed     | in2         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                2 |             | 
+               | public          | t_processed     | in3         |           1 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                3 |             | 
+               | public          | t_processed     | out1        |           4 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                4 |             | 
+               | public          | t_processed     | out2        |           4 |        12 | varchar   |           |        |       |       |        2 |         |            |               |                  |                    |                5 |             | 
+               | public          | t_processed     | out3        |           4 |         4 | int4      |           |        |       |       |        2 |         |            |               |                  |                    |                6 |             | 
+(16 rows)
+
+DROP FUNCTION t_processed
+DROP FUNCTION f_plaintext_out
+DROP FUNCTION select4
+DROP FUNCTION select5
+DROP FUNCTION select6
+DROP FUNCTION select7
+DROP FUNCTION get_rows_setof
+DROP TABLE t_processed
+DROP TABLE t_num

@@ -62,7 +62,10 @@ extern int PostgresMain(int argc, char* argv[], const char* dbname, const char* 
 extern long get_stack_depth_rlimit(void);
 extern void ResetUsage(void);
 extern void ShowUsage(const char* title);
+
+#define PRINTF_DST_MAX 32   /* buffer size used for check_log_duration's first parameter - msec_str */
 extern int check_log_duration(char* msec_str, bool was_logged);
+
 extern void set_debug_options(int debug_flag, GucContext context, GucSource source);
 extern bool set_plan_disabling_options(const char* arg, GucContext context, GucSource source);
 extern const char* get_stats_option_name(const char* arg);

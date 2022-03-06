@@ -165,6 +165,8 @@ struct ParseState {
     int p_next_resno;                    /* next targetlist resno to assign */
     List* p_locking_clause;              /* raw FOR UPDATE/FOR SHARE info */
     Node* p_value_substitute;            /* what to replace VALUE with, if any */
+
+    /* Flags telling about things found in the query: */
     bool p_hasAggs;
     bool p_hasWindowFuncs;
     bool p_hasSubLinks;
@@ -195,6 +197,7 @@ struct ParseState {
     PreParseColumnRefHook p_pre_columnref_hook;
     PostParseColumnRefHook p_post_columnref_hook;
     PreParseColumnRefHook p_bind_variable_columnref_hook;
+    PreParseColumnRefHook p_bind_describe_hook;
     ParseParamRefHook p_paramref_hook;
     CoerceParamHook p_coerce_param_hook;
     CreateProcOperatorHook p_create_proc_operator_hook;
@@ -202,6 +205,8 @@ struct ParseState {
     void* p_ref_hook_state; /* common passthrough link for above */
     void* p_cl_hook_state; /* cl related state - SQLFunctionParseInfoPtr  */
     List* p_target_list;
+    void* p_bind_hook_state;
+    void* p_describeco_hook_state;
 
     /*
      * star flag info
@@ -245,6 +250,12 @@ struct ParseState {
                         * report error when found "(+)". Only true when transform WhereClause
                         * in SelectStmt.
                         */
+
+    bool use_level; /* When selecting a column with the same name in an RTE list, whether to consider the
+                     * priority of RTE.
+                     * The priority refers to the index of RTE in the list. The smaller the index value, the
+                     * higher the priority.
+                     */
 
     PlusJoinRTEInfo* p_plusjoin_rte_info; /* The RTE info while processing "(+)" */
 };

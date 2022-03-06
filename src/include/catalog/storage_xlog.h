@@ -38,27 +38,17 @@ typedef struct xl_smgr_create {
 	ForkNumber	forkNum;
 } xl_smgr_create;
 
-typedef struct xl_smgr_create_compress {
-    xl_smgr_create xlrec;
-    uint2 pageCompressOpts;
-} xl_smgr_create_compress;
-
 typedef struct xl_smgr_truncate {
 	BlockNumber blkno;
 	RelFileNodeOld rnode;
 } xl_smgr_truncate;
 
-typedef struct xl_smgr_truncate_compress {
-    xl_smgr_truncate xlrec;
-    uint2 pageCompressOpts;
-} xl_smgr_truncate_compress;
-
-
-
 extern void log_smgrcreate(RelFileNode *rnode, ForkNumber forkNum);
 
 extern void smgr_redo(XLogReaderState *record);
 extern void smgr_desc(StringInfo buf, XLogReaderState *record);
+extern const char* smgr_type_name(uint8 subtype);
+
 extern void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum, char *data);
 extern void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn);
 
@@ -100,6 +90,7 @@ extern void log_move_segment_buckets(xl_seg_bktentry_tag_t *mapentry, uint32 nen
 extern void log_move_segment_redisinfo(SegRedisInfo *dredis, SegRedisInfo *sredis, Buffer dbuffer, Buffer sbuffer);
 extern void segpage_smgr_redo(XLogReaderState *record);
 extern void segpage_smgr_desc(StringInfo buf, XLogReaderState *record);
+extern const char* segpage_smgr_type_name(uint8 subtype);
 
 typedef struct XLogDataSpaceAllocateExtent {
     uint32 hwm;
@@ -162,6 +153,7 @@ typedef struct XLogMoveExtent {
 } XLogMoveExtent;
 
 struct HTAB* redo_create_remain_segs_htbl();
+extern void move_extent_flush_buffer(XLogMoveExtent *xlog_data);
 
 #endif   /* STORAGE_XLOG_H */
 

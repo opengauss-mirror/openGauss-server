@@ -169,6 +169,7 @@ extern void ResetSequence(Oid seq_relid);
 
 extern void seq_redo(XLogReaderState* rptr);
 extern void seq_desc(StringInfo buf, XLogReaderState* record);
+extern const char* seq_type_name(uint8 subtype);
 extern GTM_UUID get_uuid_from_rel(Relation rel);
 extern void lockNextvalOnCn(Oid relid);
 

@@ -869,7 +869,7 @@ CREATE USER test_normal_user PASSWORD 'Gauss_234';
 ALTER SCHEMA blockchain OWNER TO test_normal_user;
 DROP USER test_normal_user CASCADE;
 ERROR:  The schema 'blockchain' doesn't allow to drop
-ALTER SCHEMA blockchain OWNER TO @login_user@;
+ALTER SCHEMA blockchain OWNER TO "@login_user@";
 DROP USER test_normal_user CASCADE;
 CREATE TABLE blockchain.ledgernsp_t1_hist(a int, b text);
 ERROR:  cannot create table under blockchain namspace.

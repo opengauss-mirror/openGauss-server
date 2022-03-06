@@ -158,6 +158,14 @@ Datum file_fdw_handler(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(fdwroutine);
 }
 
+void check_file_fdw_permission()
+{
+    if ((!initialuser()) && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("Dist fdw are only available for the supper user and Operatoradmin")));
+    }
+}
+
 /*
  * Validate the generic options given to a FOREIGN DATA WRAPPER, SERVER,
  * USER MAPPING or FOREIGN TABLE that uses file_fdw.
@@ -173,6 +181,7 @@ Datum file_fdw_validator(PG_FUNCTION_ARGS)
     List* other_options = NIL;
     ListCell* cell = NULL;
 
+    check_file_fdw_permission();
     if (catalog == UserMappingRelationId) {
         ereport(
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("file_fdw doesn't support in USER MAPPING.")));

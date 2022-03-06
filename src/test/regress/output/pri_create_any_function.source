@@ -1,0 +1,173 @@
+CREATE USER test_create_any_function_role PASSWORD 'Gauss@1234';
+GRANT create any function to test_create_any_function_role;
+CREATE TABLESPACE pri_create_fun_tsp LOCATION '@testtablespace@/pri_create_fun_tsp'; 
+CREATE SCHEMA pri_fun_schema;
+set search_path=pri_fun_schema;
+SET ROLE test_create_any_function_role PASSWORD 'Gauss@1234';
+--定义函数为SQL查询。
+CREATE FUNCTION pri_fun_schema.pri_func_add_sql(integer, integer) RETURNS integer
+    AS 'select $1 + $2;'
+    LANGUAGE SQL
+    IMMUTABLE
+    RETURNS NULL ON NULL INPUT;
+--利用参数名用 PL/pgSQL 自增一个整数。
+CREATE OR REPLACE FUNCTION pri_fun_schema.pri_func_increment_plsql(i integer) RETURNS integer AS $$
+        BEGIN
+                RETURN i + 1;
+        END;
+$$ LANGUAGE plpgsql;
+--返回RECORD类型
+CREATE OR REPLACE FUNCTION pri_fun_schema.pri_compute(i int, out result_1 bigint, out result_2 bigint)
+returns SETOF RECORD
+as $$
+begin
+    result_1 = i + 1;
+    result_2 = i * 10;
+return next;
+end;
+$$language plpgsql;
+--返回一个包含多个输出参数的记录。
+CREATE FUNCTION pri_fun_schema.pri_func_dup_sql(in int, out f1 int, out f2 text)
+    AS $$ SELECT $1, CAST($1 AS text) || ' is text' $$
+    LANGUAGE SQL;
+--计算两个整数的和，并返回结果。若果输入为null，则返回null。
+CREATE FUNCTION pri_fun_schema.pri_func_add_sql2(num1 integer, num2 integer) RETURN integer
+AS
+BEGIN 
+RETURN num1 + num2;
+END;
+/
+--创建package属性的重载函数
+create or replace function pri_fun_schema.pri_get_sal(NAME VARCHAR2) RETURN NUMBER package
+IS
+  BEGIN
+    RETURN 1;
+  END;
+  /
+create or replace function pri_fun_schema.pri_get_sal(NAME int) RETURN NUMBER package
+IS
+  BEGIN
+    RETURN 1;
+  END;
+  /
+select pri_fun_schema.pri_func_add_sql(1,2);
+ pri_func_add_sql 
+------------------
+                3
+(1 row)
+
+select pri_fun_schema.pri_func_increment_plsql(1);
+ pri_func_increment_plsql 
+--------------------------
+                        2
+(1 row)
+
+select pri_fun_schema.pri_func_dup_sql(1);
+ pri_func_dup_sql 
+------------------
+ (1,"1 is text")
+(1 row)
+
+select pri_fun_schema.pri_func_add_sql2(1,2);
+ pri_func_add_sql2 
+-------------------
+                 3
+(1 row)
+
+select pri_fun_schema.pri_compute(1);
+ pri_compute 
+-------------
+ (2,10)
+(1 row)
+
+select pri_fun_schema.pri_get_sal('name');
+ pri_get_sal 
+-------------
+           1
+(1 row)
+
+select pri_fun_schema.pri_get_sal(1);
+ pri_get_sal 
+-------------
+           1
+(1 row)
+
+--PROCEDURE
+CREATE OR REPLACE PROCEDURE pri_fun_schema.pri_prc_add
+(
+    param1    IN   INTEGER,
+    param2    IN OUT  INTEGER
+)
+AS
+BEGIN
+   param2:= param1 + param2;
+END;
+/
+CREATE OR REPLACE PROCEDURE pri_fun_schema.pri_autonomous(out res int)  AS 
+DECLARE 
+    PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    res := 55;
+END;
+/
+select pri_prc_add(1,2);
+ pri_prc_add 
+-------------
+           3
+(1 row)
+
+select pri_autonomous();
+ pri_autonomous 
+----------------
+             55
+(1 row)
+
+reset role;
+CREATE TABLE pri_fun_schema.creditcard_info (id_number  int, name text, credit_card  varchar(19));
+SET ROLE test_create_any_function_role PASSWORD 'Gauss@1234';
+CREATE OR REPLACE PROCEDURE pri_fun_schema.pri_autonomous_1()  AS 
+BEGIN
+  insert into pri_fun_schema.creditcard_info values(66, 66,66);
+  select * from pri_fun_schema.creditcard_info;
+  commit;
+  insert into pri_fun_schema.creditcard_info values(77, 77,77);
+  rollback;
+END;
+/
+call pri_fun_schema.pri_autonomous_1();
+ERROR:  permission denied for relation creditcard_info
+DETAIL:  N/A
+CONTEXT:  SQL statement "insert into pri_fun_schema.creditcard_info values(66, 66,66)"
+PL/pgSQL function pri_autonomous_1() line 3 at SQL statement
+--  CREATE TABLE in procedure
+create or replace procedure pri_fun_schema.pri_test_proc_create(i in integer)
+as
+begin
+    create table pri_fun_schema.pri_t11(id int) tablespace pri_create_fun_tsp;
+end;
+/
+select pri_fun_schema.pri_test_proc_create(1);
+ERROR:  permission denied for schema pri_fun_schema
+DETAIL:  N/A
+CONTEXT:  SQL statement "create table pri_fun_schema.pri_t11(id int) tablespace pri_create_fun_tsp"
+PL/pgSQL function pri_test_proc_create(integer) line 3 at SQL statement
+referenced column: pri_test_proc_create
+reset role;
+--删除函数。
+DROP FUNCTION  pri_fun_schema.pri_func_add_sql(integer, integer);
+DROP FUNCTION  pri_fun_schema.pri_func_increment_plsql(integer);
+DROP FUNCTION  pri_fun_schema.pri_func_dup_sql(int);
+DROP FUNCTION  pri_fun_schema.pri_func_add_sql2(integer, integer);
+DROP FUNCTION  pri_fun_schema.pri_compute(int);
+DROP FUNCTION  pri_fun_schema.pri_get_sal(VARCHAR2);
+DROP FUNCTION  pri_fun_schema.pri_get_sal(int);
+DROP SCHEMA pri_fun_schema cascade;
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to function pri_prc_add(integer,integer)
+drop cascades to function pri_autonomous()
+drop cascades to table creditcard_info
+drop cascades to function pri_autonomous_1()
+drop cascades to function pri_test_proc_create(integer)
+DROP TABLESPACE pri_create_fun_tsp;
+\! rm -rf '@testtablespace@/pri_create_fun_tsp'
+DROP USER test_create_any_function_role cascade;

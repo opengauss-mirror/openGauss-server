@@ -163,16 +163,16 @@ create table ctltestg(a1 int, a2 int, constraint firstkey primary key(oid))with 
 \d+ ctltestg
 drop table if exists ctltestf, ctltestg;
 
-create schema DTS2019071912119;
-CREATE OR REPLACE FUNCTION DTS2019071912119.func_increment_plsql(i integer) RETURNS integer AS $$
+create schema testschema;
+CREATE OR REPLACE FUNCTION testschema.func_increment_plsql(i integer) RETURNS integer AS $$
         BEGIN
                 RETURN i + 1;
         END;
 $$ LANGUAGE plpgsql IMMUTABLE  ;
-create table DTS2019071912119.test1 (a int , b int default DTS2019071912119.func_increment_plsql(1));
-alter schema DTS2019071912119 rename to DTS2019071912119_bak;
-create table DTS2019071912119_bak.test2 (like DTS2019071912119_bak.test1 including all);
+create table testschema.test1 (a int , b int default testschema.func_increment_plsql(1));
+alter schema testschema rename to TESTTABLE_bak;
+create table TESTTABLE_bak.test2 (like TESTTABLE_bak.test1 including all);
 
-drop table DTS2019071912119_bak.test2;
-drop table DTS2019071912119_bak.test1;
-drop function DTS2019071912119_bak.func_increment_plsql();
+drop table TESTTABLE_bak.test2;
+drop table TESTTABLE_bak.test1;
+drop function TESTTABLE_bak.func_increment_plsql();

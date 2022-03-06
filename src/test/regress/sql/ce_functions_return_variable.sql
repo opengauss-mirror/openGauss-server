@@ -29,6 +29,27 @@ CALL f_processed_in_plpgsql('Bob',10000);
 
 DROP FUNCTION f_processed_in_plpgsql();
 DROP TABLE accounts;
+
+CREATE TABLE creditcard_info1 (id_number int,name text, credit_card varchar(19));
+CREATE TABLE creditcard_info2 (id_number int,name text encrypted with (column_encryption_key = ret_cek3, encryption_type = DETERMINISTIC),credit_card varchar(19) encrypted with (column_encryption_key = ret_cek3, encryption_type = DETERMINISTIC));
+CREATE or replace FUNCTION exec_insert1() RETURNS void AS $$
+   insert into creditcard_info1 values(1,2,3);
+   select credit_card from creditcard_info1;
+    $$ LANGUAGE SQL;
+CREATE or replace FUNCTION exec_insert2() RETURNS void AS $$
+   insert into creditcard_info2 values(1,2,3);
+   select credit_card from creditcard_info2;
+    $$ LANGUAGE SQL;
+CREATE or replace FUNCTION exec_insert1() RETURNS int AS $$
+   insert into creditcard_info1 values(1,2,3);
+   select credit_card from creditcard_info1;
+    $$ LANGUAGE SQL;
+CREATE or replace FUNCTION exec_insert2() RETURNS int AS $$
+   insert into creditcard_info2 values(1,2,3);
+   select credit_card from creditcard_info2;
+    $$ LANGUAGE SQL;
+DROP TABLE creditcard_info1;
+DROP TABLE creditcard_info2;
 DROP COLUMN ENCRYPTION KEY ret_cek3;
 DROP CLIENT MASTER KEY ret_cmk3;
 \! gs_ktool -d all

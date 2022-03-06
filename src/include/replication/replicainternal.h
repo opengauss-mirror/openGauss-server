@@ -20,6 +20,7 @@
 #endif
 
 #define IP_LEN 64
+#define SSL_MODE_LEN 16
 #define PG_PROTOCOL_VERSION "MPPDB"
 
 /* Notice: the value is same sa GUC_MAX_REPLNODE_NUM */
@@ -108,6 +109,7 @@ typedef struct gaussstate {
     uint64 term;
     BuildState build_info;
     HaRebuildReason ha_rebuild_reason;
+    int current_connect_idx;
 } GaussState;
 
 typedef struct newnodeinfo {
@@ -137,6 +139,9 @@ typedef struct replconninfo {
     int remoteheartbeatport;
     bool isCascade;
     bool isCrossRegion;
+#ifdef ENABLE_LITE_MODE
+    char sslmode[SSL_MODE_LEN];
+#endif
 } ReplConnInfo;
 
 /*
@@ -150,6 +155,7 @@ typedef struct hashmemdata {
     bool is_cross_region;
     bool is_hadr_main_standby;
     int current_repl;
+    int prev_repl;
     int repl_list_num;
     int loop_find_times;
     slock_t mutex;

@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_GLOBAL_CONFIGURATION">
+<refmeta>
+<refentrytitle>DROP GLOBAL CONFIGURATION</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP GLOBAL CONFIGURATION</refname>
+<refpurpose>drop records from gs_global_config</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP GLOBAL CONFIGURATION paraname, paraname...;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

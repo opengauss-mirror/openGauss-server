@@ -265,7 +265,7 @@ SELECT pg_create_logical_replication_slot('privs_test_slot', 'mppdb_decoding');
 --?.*
 (1 row)
 
-SELECT pg_create_physical_replication_slot_extern('uuid', false, 'obs.cnnorth-7.ulanqab.huawei.com;dyk;19D772JBCACXX3KWS51D;********;caoshufeng_uuid/dn1');
+SELECT pg_create_physical_replication_slot_extern('uuid', false, 'obs.cnnorth-7.ulanqab.huawei.com;dyk;19D772JBCACXX3KWS51D;********;caoshufeng_uuid/dn1', false);
 ERROR:  message is inleagel  "obs.cnnorth-7.ulanqab.huawei.com;dyk;19D772JBCACXX3KWS51D;********;caoshufeng_uuid/dn1"
 CONTEXT:  referenced column: pg_create_physical_replication_slot_extern
 SELECT pg_replication_slot_advance('privs_test_slot', NULL);

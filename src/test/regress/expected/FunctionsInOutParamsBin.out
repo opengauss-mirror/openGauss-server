@@ -1,0 +1,61 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE t_processed (name varchar(100) ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), id INT ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), val INT ENCRYPTED WITH (column_encryption_key = cek1, encryption_type = DETERMINISTIC), val2 INT)
+insert into t_processed values('one',1,10,10),('two',2,20,20),('three',3,30,30),('four',4,40,40),('five',5,50,50),('six',6,60,60),('seven',7,70,70),('eight',8,80,80),('nine',9,90,90),('ten',10,100,100)
+SELECT * from t_processed order by val2
+ name  | id | val | val2 
+-------+----+-----+------
+ one   |  1 |  10 |   10
+ two   |  2 |  20 |   20
+ three |  3 |  30 |   30
+ four  |  4 |  40 |   40
+ five  |  5 |  50 |   50
+ six   |  6 |  60 |   60
+ seven |  7 |  70 |   70
+ eight |  8 |  80 |   80
+ nine  |  9 |  90 |   90
+ ten   | 10 | 100 |  100
+(10 rows)
+
+CREATE OR REPLACE FUNCTION f_processed_in_out_1_int_param(in1 int, out1 OUT int) AS 'SELECT val from t_processed  where id = in1 LIMIT 1' LANGUAGE SQL
+SELECT f_processed_in_out_1_int_param(2)
+ f_processed_in_out_1_int_param 
+--------------------------------
+                             20
+(1 row)
+
+Invoking f_processed_in_out_1_int_param using CallableStatement
+f_processed_in_out_1param value of index 2 Type is java.lang.Integer value is 20
+CREATE OR REPLACE FUNCTION f_processed_in_int_out_varchar(in1 int, out1 OUT varchar) AS 'SELECT name from t_processed  where id = in1 LIMIT 1' LANGUAGE SQL
+SELECT f_processed_in_int_out_varchar(2)
+ f_processed_in_int_out_varchar 
+--------------------------------
+ two
+(1 row)
+
+Invoking f_processed_in_int_out_varchar using CallableStatement
+f_processed_in_out_1param_varchar_out value of index 2 Type is java.lang.String value is two
+CREATE OR REPLACE FUNCTION f_processed_varchar_in_int_out(in1 varchar, out1 OUT int) AS 'SELECT id from t_processed  where name = in1 LIMIT 1' LANGUAGE SQL
+SELECT f_processed_varchar_in_int_out('one')
+ f_processed_varchar_in_int_out 
+--------------------------------
+                              1
+(1 row)
+
+Invoking f_processed_varchar_in_int_out using CallableStatement
+f_processed_varchar_in_int_out value of index 2 Type is java.lang.Integer value is 1
+DROP FUNCTION f_processed_in_out_1_int_param
+DROP FUNCTION f_processed_in_int_out_varchar
+DROP FUNCTION f_processed_varchar_in_int_out
+DROP TABLE t_processed CASCADE
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1

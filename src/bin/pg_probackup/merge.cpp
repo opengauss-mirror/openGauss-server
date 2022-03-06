@@ -45,7 +45,7 @@ static void *merge_files(void *arg);
 static void do_in_place_merge(merge_files_arg *arguments,
                               pgFile *dest_file,
                               pgFile *tmp_file,
-                              bool iscontinue);
+                              bool *iscontinue);
 static void
 reorder_external_dirs(pgBackup *to_backup, parray *to_external,
                                             parray *from_external);
@@ -1071,7 +1071,6 @@ static void *
 merge_files(void *arg)
 {
     size_t i = 0;
-    bool iscontinue = false;
     merge_files_arg *arguments = (merge_files_arg *) arg;
     size_t n_files = parray_num(arguments->dest_backup->files);
 
@@ -1079,6 +1078,7 @@ merge_files(void *arg)
     {
         pgFile  *dest_file = (pgFile *) parray_get(arguments->dest_backup->files, i);
         pgFile  *tmp_file;
+        bool iscontinue = false;
 
         /* check for interrupt */
         if (interrupted || thread_interrupted)
@@ -1115,7 +1115,7 @@ merge_files(void *arg)
             goto done;
         }
 
-        do_in_place_merge(arguments, dest_file, tmp_file, iscontinue);
+        do_in_place_merge(arguments, dest_file, tmp_file, &iscontinue);
         if (iscontinue) {
             continue;
         }
@@ -1149,7 +1149,7 @@ merge_files(void *arg)
 static void do_in_place_merge(merge_files_arg *arguments,
                               pgFile *dest_file,
                               pgFile *tmp_file,
-                              bool iscontinue)
+                              bool *iscontinue)
 {
     bool in_place = false; /* keep file as it is */
 
@@ -1276,11 +1276,11 @@ static void do_in_place_merge(merge_files_arg *arguments,
 
             //TODO: report in_place merge bytes.
             parray_append(arguments->merge_filelist, tmp_file);
-            iscontinue = true;
+            *iscontinue = true;
         }
     }
 
-    iscontinue = false;
+    *iscontinue = false;
 }
 
 /* Recursively delete a directory and its contents */
@@ -1393,23 +1393,23 @@ merge_data_file(parray *parent_chain, pgBackup *full_backup,
             setvbuf(out, buffer, _IOFBF, STDIO_BUFSIZE);
 
     /* restore file into temp file */
-    tmp_file->size = restore_data_file(parent_chain, dest_file, out, to_fullpath_tmp1,
-    use_bitmap, NULL, InvalidXLogRecPtr, NULL,
-    /* when retrying merge header map cannot be trusted */
-    is_retry ? false : true);
+    restore_data_file(parent_chain, dest_file, out, to_fullpath_tmp1,
+                      use_bitmap, NULL, InvalidXLogRecPtr, NULL,
+                      /* when retrying merge header map cannot be trusted */
+                      is_retry ? false : true);
     if (fclose(out) != 0)
         elog(ERROR, "Cannot close file \"%s\": %s",
             to_fullpath_tmp1, strerror(errno));
 
     pg_free(buffer);
 
-    /* tmp_file->size is greedy, even if there is single 8KB block in file,
-    * that was overwritten twice during restore_data_file, we would assume that its size is
-    * 16KB.
-    * TODO: maybe we should just trust dest_file->n_blocks?
-    * No, we can`t, because current binary can be used to merge
-    * 2 backups of old versions, where n_blocks is missing.
+    /* In the case of incremental backup,
+    * the write size returned by restore_data_file()
+    * is different from the total file size.
+    * Since n_blocks was supported from the original version in gs_probackup,
+    * we should just trust dest_file->n_blocks
     */
+    tmp_file->size = dest_file->n_blocks * BLCKSZ;
 
     backup_data_file(NULL, tmp_file, to_fullpath_tmp1, to_fullpath_tmp2,
                                  InvalidXLogRecPtr, BACKUP_MODE_FULL,

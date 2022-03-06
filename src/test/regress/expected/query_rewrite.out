@@ -76,8 +76,159 @@ explain (costs off) select * from t1 where ( '1' = '0' and ( '1' = '1' or exists
    ->  Seq Scan on t1
 (3 rows)
 
+-- test for optimized join rel as sub-query
+set qrw_inlist2join_optmode = 'rule_base';
+CREATE TABLE t3 (
+slot integer NOT NULL,
+cid bigint NOT NULL,
+name character varying NOT NULL
+)
+WITH (orientation=row);
+insert into t3 (slot, cid, name) values(generate_series(1, 10), generate_series(1, 10), 'records.storage.state');
+analyze t3;
+explain (costs off) 
+select 
+  * 
+from 
+  t3 
+where 
+  slot = '5' 
+  and (name) in (
+    select 
+      name 
+    from 
+      t3 
+    where 
+      slot = '5' 
+      and cid in (
+        5, 1000, 1001, 1002, 1003, 1004, 1005, 
+        1006, 1007, 2000, 4000, 10781986, 10880002
+      ) 
+    limit 
+      50
+  );
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Nested Loop Semi Join
+   Join Filter: ((query_rewrite.t3.name)::text = (query_rewrite.t3.name)::text)
+   ->  Seq Scan on t3
+         Filter: (slot = 5)
+   ->  Limit
+         ->  Hash Right Semi Join
+               Hash Cond: ("*VALUES*".column1 = query_rewrite.t3.cid)
+               ->  Values Scan on "*VALUES*"
+               ->  Hash
+                     ->  Seq Scan on t3
+                           Filter: (slot = 5)
+(11 rows)
+
+select 
+  * 
+from 
+  t3 
+where 
+  slot = '5' 
+  and (name) in (
+    select 
+      name 
+    from 
+      t3 
+    where 
+      slot = '5' 
+      and cid in (
+        5, 1000, 1001, 1002, 1003, 1004, 1005, 
+        1006, 1007, 2000, 4000, 10781986, 10880002
+      ) 
+    limit 
+      50
+  );
+ slot | cid |         name          
+------+-----+-----------------------
+    5 |   5 | records.storage.state
+(1 row)
+
+explain (costs off) 
+select 
+  * 
+from 
+  t3 
+where 
+  cid in (
+    select 
+      cid 
+    from 
+      t3 
+    where 
+      slot = '5' 
+      and (name) in (
+        select 
+          name 
+        from 
+          t3 
+        where 
+          slot = '5' 
+          and cid in (
+            5, 1000, 1001, 1002, 1003, 1004, 1005, 
+            1006, 1007, 2000, 4000, 10781986, 10880002
+          ) 
+        limit 
+          50
+      )
+  );
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Hash Semi Join
+   Hash Cond: (query_rewrite.t3.cid = query_rewrite.t3.cid)
+   ->  Seq Scan on t3
+   ->  Hash
+         ->  Nested Loop Semi Join
+               Join Filter: ((query_rewrite.t3.name)::text = (query_rewrite.t3.name)::text)
+               ->  Seq Scan on t3
+                     Filter: (slot = 5)
+               ->  Limit
+                     ->  Hash Right Semi Join
+                           Hash Cond: ("*VALUES*".column1 = query_rewrite.t3.cid)
+                           ->  Values Scan on "*VALUES*"
+                           ->  Hash
+                                 ->  Seq Scan on t3
+                                       Filter: (slot = 5)
+(15 rows)
+
+select 
+  * 
+from 
+  t3 
+where 
+  cid in (
+    select 
+      cid 
+    from 
+      t3 
+    where 
+      slot = '5' 
+      and (name) in (
+        select 
+          name 
+        from 
+          t3 
+        where 
+          slot = '5' 
+          and cid in (
+            5, 1000, 1001, 1002, 1003, 1004, 1005, 
+            1006, 1007, 2000, 4000, 10781986, 10880002
+          ) 
+        limit 
+          50
+      )
+  );
+ slot | cid |         name          
+------+-----+-----------------------
+    5 |   5 | records.storage.state
+(1 row)
+
 drop schema query_rewrite cascade;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to table t2
+drop cascades to table t3
 reset current_schema;

@@ -78,7 +78,7 @@ typedef struct XLogDumpStats {
 static void XLogDumpTablePage(XLogReaderState* record, int block_id, RelFileNode rnode, BlockNumber blk);
 static void XLogDumpXLogRead(const char* directory, TimeLineID timeline_id, XLogRecPtr startptr, char* buf, Size count);
 static int XLogDumpReadPage(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetPtr,
-    char* readBuff, TimeLineID* curFileTLI);
+    char* readBuff, TimeLineID* curFileTLI, char* xlog_path = NULL);
 static void XLogDumpCountRecord(XLogDumpConfig* config, XLogDumpStats* stats, XLogReaderState* record);
 static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* record);
 static void XLogDumpStatsRow(const char* name, uint64 n, uint64 total_count, uint64 rec_len, uint64 total_rec_len,
@@ -356,7 +356,7 @@ static void XLogDumpXLogRead(const char* directory, TimeLineID timeline_id, XLog
 
             XLByteToSeg(recptr, sendSegNo);
 
-            XLogFileName(fname, timeline_id, sendSegNo);
+            XLogFileName(fname, MAXFNAMELEN, timeline_id, sendSegNo);
 
             sendFile = fuzzy_open_file(directory, fname);
 
@@ -371,7 +371,7 @@ static void XLogDumpXLogRead(const char* directory, TimeLineID timeline_id, XLog
                 int err = errno;
                 char fname[MAXPGPATH];
 
-                XLogFileName(fname, timeline_id, sendSegNo);
+                XLogFileName(fname, MAXFNAMELEN, timeline_id, sendSegNo);
 
                 fatal_error("could not seek in log segment %s to offset %u: %s", fname, startoff, strerror(err));
             }
@@ -389,7 +389,7 @@ static void XLogDumpXLogRead(const char* directory, TimeLineID timeline_id, XLog
             int err = errno;
             char fname[MAXPGPATH];
 
-            XLogFileName(fname, timeline_id, sendSegNo);
+            XLogFileName(fname, MAXFNAMELEN, timeline_id, sendSegNo);
 
             fatal_error("could not read from log segment %s, offset %d, length %d: %s",
                 fname,
@@ -411,7 +411,7 @@ static void XLogDumpXLogRead(const char* directory, TimeLineID timeline_id, XLog
  * XLogReader read_page callback
  */
 static int XLogDumpReadPage(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetPtr,
-    char* readBuff, TimeLineID* curFileTLI)
+    char* readBuff, TimeLineID* curFileTLI, char* xlog_path)
 {
     XLogDumpPrivate* dumpprivate = (XLogDumpPrivate*)state->private_data;
     int count = XLOG_BLCKSZ;
@@ -1088,7 +1088,7 @@ begin_read:
 
     for (;;) {
         /* try to read the next record */
-        record = XLogReadRecord(xlogreader_state, first_record, &errormsg, false);
+        record = XLogReadRecord(xlogreader_state, first_record, &errormsg);
         if (!record) {
             if (!config.follow || dumpprivate.endptr_reached)
                 break;

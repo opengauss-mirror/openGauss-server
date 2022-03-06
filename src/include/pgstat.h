@@ -38,6 +38,13 @@
 typedef enum TrackFunctionsLevel { TRACK_FUNC_OFF, TRACK_FUNC_PL, TRACK_FUNC_ALL } TrackFunctionsLevel;
 
 /* ----------
+ * Paths for the statistics files (relative to installation's $PGDATA).
+ * ----------
+ */
+#define PGSTAT_STAT_PERMANENT_FILENAME "global/pgstat.stat"
+#define PGSTAT_STAT_PERMANENT_TMPFILE "global/pgstat.tmp"
+
+/* ----------
  * The types of backend -> collector messages
  * ----------
  */
@@ -131,7 +138,7 @@ typedef struct PgStat_TableCounts {
 
 #ifdef DEBUG_UHEAP
 
-typedef int64 UHeapStat_Counter;
+typedef uint64 UHeapStat_Counter;
 
 #define MAX_TYPE_GET_TRANSSLOT_FROM            8
 #define MAX_TYPE_XID_IN_PROGRESS               7
@@ -872,7 +879,11 @@ typedef struct PgStat_MsgBadBlock {
     BadBlockHashEnt m_entry[PGSTAT_NUM_BADBLOCK_ENTRIES];
 } PgStat_MsgBadBlock;
 
+#ifndef ENABLE_LITE_MODE
 const int MAX_SQL_RT_INFO_COUNT = 100000;
+#else
+const int MAX_SQL_RT_INFO_COUNT = 10;
+#endif
 
 typedef struct SqlRTInfo {
     uint64 UniqueSQLId;
@@ -1165,6 +1176,11 @@ typedef enum WaitState {
     STATE_WAIT_DATASYNC,
     STATE_WAIT_DATASYNC_QUEUE,
     STATE_WAIT_FLUSH_DATA,
+    STATE_WAIT_RESERVE_TD,
+    STATE_WAIT_TD_ROLLBACK,
+    STATE_WAIT_TRANSACTION_ROLLBACK,
+    STATE_PRUNE_TABLE,
+    STATE_PRUNE_INDEX,
     STATE_STREAM_WAIT_CONNECT_NODES,
     STATE_STREAM_WAIT_PRODUCER_READY,
     STATE_STREAM_WAIT_THREAD_SYNC_QUIT,
@@ -1172,6 +1188,7 @@ typedef enum WaitState {
     STATE_WAIT_ACTIVE_STATEMENT,
     STATE_WAIT_MEMORY,
     STATE_EXEC_SORT,
+    STATE_EXEC_SORT_FETCH_TUPLE,
     STATE_EXEC_SORT_WRITE_FILE,
     STATE_EXEC_MATERIAL,
     STATE_EXEC_MATERIAL_WRITE_FILE,
@@ -1205,8 +1222,13 @@ typedef enum WaitState {
     STATE_GTM_SEQUENCE_SET_VAL,
     STATE_GTM_DROP_SEQUENCE,
     STATE_GTM_RENAME_SEQUENCE,
+    STATE_GTM_SET_DISASTER_CLUSTER,
+    STATE_GTM_GET_DISASTER_CLUSTER,
+    STATE_GTM_DEL_DISASTER_CLUSTER,
     STATE_WAIT_SYNC_CONSUMER_NEXT_STEP,
     STATE_WAIT_SYNC_PRODUCER_NEXT_STEP,
+    STATE_GTM_SET_CONSISTENCY_POINT,
+    STATE_WAIT_SYNC_BGWORKERS,
     STATE_WAIT_NUM  // MUST be last, DO NOT use this value.
 } WaitState;
 
@@ -1283,8 +1305,9 @@ typedef enum WaitEventIO {
     WAIT_EVENT_UNDO_FILE_PREFETCH,
     WAIT_EVENT_UNDO_FILE_READ,
     WAIT_EVENT_UNDO_FILE_WRITE,
-    WAIT_EVENT_UNDO_FILE_FLUSH,
     WAIT_EVENT_UNDO_FILE_SYNC,
+    WAIT_EVENT_UNDO_FILE_UNLINK,
+    WAIT_EVENT_UNDO_META_SYNC,
     WAIT_EVENT_WAL_BOOTSTRAP_SYNC,
     WAIT_EVENT_WAL_BOOTSTRAP_WRITE,
     WAIT_EVENT_WAL_COPY_READ,
@@ -1313,8 +1336,6 @@ typedef enum WaitEventIO {
     WAIT_EVENT_OBS_READ,
     WAIT_EVENT_OBS_WRITE,
     WAIT_EVENT_LOGCTRL_SLEEP,
-    WAIT_EVENT_COMPRESS_ADDRESS_FILE_FLUSH,
-    WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC,
     IO_EVENT_NUM = WAIT_EVENT_LOGCTRL_SLEEP - WAIT_EVENT_BUFFILE_READ + 1  // MUST be last, DO NOT use this value.
 } WaitEventIO;
 
@@ -1577,6 +1598,7 @@ typedef struct PgBackendStatus {
     volatile uint64 st_block_sessionid; /* block session */
     syscalllock statement_cxt_lock;     /* mutex for statement context(between session and statement flush thread) */
     void* statement_cxt;                /* statement context of full sql */
+    knl_u_trace_context trace_cxt;      /* request trace id */
 } PgBackendStatus;
 
 typedef struct PgBackendStatusNode {
@@ -1728,6 +1750,7 @@ extern void pgstat_report_conninfo(const char* conninfo);
 extern void pgstat_report_xact_timestamp(TimestampTz tstamp);
 extern void pgstat_report_waiting_on_resource(WorkloadManagerEnqueueState waiting);
 extern void pgstat_report_queryid(uint64 queryid);
+extern void pgstat_report_unique_sql_id(bool resetUniqueSql);
 extern void pgstat_report_global_session_id(GlobalSessionId globalSessionId);
 extern void pgstat_report_jobid(uint64 jobid);
 extern void pgstat_report_parent_sessionid(uint64 sessionid, uint32 level = 0);
@@ -1735,6 +1758,7 @@ extern void pgstat_report_smpid(uint32 smpid);
 
 extern void pgstat_report_blocksid(void* waitLockThrd, uint64 blockSessionId);
 
+extern void pgstat_report_trace_id(knl_u_trace_context *trace_cxt, bool is_report_trace_id = false);
 extern bool pgstat_get_waitlock(uint32 wait_event_info);
 extern const char* pgstat_get_wait_event(uint32 wait_event_info);
 extern const char* pgstat_get_backend_current_activity(ThreadId pid, bool checkUser);
@@ -2720,6 +2744,7 @@ extern void pgstat_set_io_state(WorkloadManagerIOState iostate);
 extern void pgstat_set_stmt_tag(WorkloadManagerStmtTag stmttag);
 extern ThreadId* pgstat_get_user_io_entry(Oid userid, int* num);
 extern ThreadId* pgstat_get_stmttag_write_entry(int* num);
+extern PgBackendStatusNode* pgstat_get_backend_status_by_appname(const char* appName, int* num);
 extern List* pgstat_get_user_backend_entry(Oid userid);
 extern void pgstat_reset_current_status(void);
 extern WaitInfo* read_current_instr_wait_info(void);
@@ -2738,6 +2763,7 @@ extern TableDistributionInfo* get_rto_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_recovery_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* streaming_hadr_get_recovery_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_node_xid_csn(TupleDesc tuple_desc);
+extern TableDistributionInfo* get_remote_index_status(TupleDesc tuple_desc, const char *schname, const char *idxname);
 
 #define SessionMemoryArraySize (BackendStatusArray_size)
 
@@ -2826,6 +2852,7 @@ extern void XLogStatShmemInit(void);
 extern Size XLogStatShmemSize(void);
 extern bool CheckUserExist(Oid userId, bool removeCount);
 
+extern void FreeBackendStatusNodeMemory(PgBackendStatusNode* node);
 extern PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls);
 extern uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc, FuncType insert,
                                           bool hasTID = false, ThreadId threadId = 0);
@@ -2923,6 +2950,24 @@ typedef struct IoWaitStatGlobalInfo {
     /* for io wait list */
     int io_wait_list_len;
 } IoWaitStatGlobalInfo;
+
+void pgstat_release_session_memory_entry();
+
+#define MAX_PATH 256
+
+typedef struct BadBlockKey {
+    RelFileNode relfilenode;
+    ForkNumber forknum;
+    uint32 blocknum;
+} BadBlockKey;
+
+typedef struct BadBlockEntry {
+    BadBlockKey key;
+    char path[MAX_PATH];
+    TimestampTz check_time;
+    TimestampTz repair_time;
+    XLogPhyBlock pblk;
+} BadBlockEntry;
 
 #endif /* PGSTAT_H */
 

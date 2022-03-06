@@ -42,12 +42,9 @@ const int KMS_PLAIN_PACKET_LEN = 16;
 
 typedef enum {
     IAM_AUTH_REQ = 0,
-    IAM_AGENCY_TOKEN_REQ,
     KMS_SELECT_CMK_REQ,
     KMS_ENC_CEK_REQ,
     KMS_DEC_CEK_REQ,
-    KMS_GEN_DEK_REQ,
-    KMS_DEC_DEK_REQ,
 } KmsHttpMsgType;
 
 extern CmkemErrCode get_kms_err_type(const char *kms_errmsg_body);

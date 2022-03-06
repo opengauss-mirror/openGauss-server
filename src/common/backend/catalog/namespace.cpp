@@ -36,6 +36,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_conversion.h"
 #include "catalog/pg_conversion_fn.h"
+#include "catalog/pg_language.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
@@ -52,7 +53,9 @@
 #include "catalog/pgxc_class.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/indexing.h"
+#include "catalog/gs_db_privilege.h"
 #include "commands/dbcommands.h"
+#include "commands/proclang.h"
 #include "commands/tablecmds.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
@@ -151,8 +154,6 @@
  * Note: all data pointed to by these List variables is in t_thrd.top_mem_cxt.
  */
 
-static volatile uint32 gt_tempID_seed = 0;
-
 /* Local functions */
 static void InitTempTableNamespace(void);
 static void RemoveTempRelations(Oid tempNamespaceId);
@@ -214,7 +215,6 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
     bool target_is_partition, bool isSupportSynonym, RangeVarGetRelidCallback callback, void* callback_arg,
     StringInfo detailInfo, Oid* refSynOid)
 {
-    uint64 inval_count;
     Oid relId;
     Oid oldRelId = InvalidOid;
     bool retry = false;
@@ -251,13 +251,18 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
      * by calling AcceptInvalidationMessages() before beginning this loop, but
      * that would add a significant amount overhead, so for now we don't.
      */
+    uint64 sess_inval_count;
+    uint64 thrd_inval_count = 0;
     for (;;) {
         /*
          * Remember this value, so that, after looking up the relation name
          * and locking its OID, we can check whether any invalidation messages
          * have been processed that might require a do-over.
          */
-        inval_count = u_sess->inval_cxt.SharedInvalidMessageCounter;
+        sess_inval_count = u_sess->inval_cxt.SIMCounter;
+        if (EnableLocalSysCache()) {
+            thrd_inval_count = t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;
+        }
 
         /*
          * Some non-default relpersistence value may have been specified.  The
@@ -376,8 +381,16 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
         /*
          * If no invalidation message were processed, we're done!
          */
-        if (inval_count == u_sess->inval_cxt.SharedInvalidMessageCounter)
-            break;
+        if (EnableLocalSysCache()) {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter &&
+                thrd_inval_count == t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter) {
+                break;
+            }
+        } else {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter) {
+                break;
+            }
+        }
 
         /*
          * Something may have changed.	Let's repeat the name lookup, to make
@@ -468,6 +481,72 @@ Oid RangeVarGetCreationNamespace(const RangeVar* newRelation)
     return namespaceId;
 }
 
+bool CheckRelationCreateAnyPrivilege(Oid userId, char relkind)
+{
+    AclResult aclResult = ACLCHECK_NO_PRIV;
+    switch (relkind) {
+        case RELKIND_COMPOSITE_TYPE:
+            if (HasSpecAnyPriv(userId, CREATE_ANY_TYPE, false)) {
+                aclResult = ACLCHECK_OK;
+            }
+            break;
+        /* sequence object */
+        case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
+            if (HasSpecAnyPriv(userId, CREATE_ANY_SEQUENCE, false)) {
+                aclResult = ACLCHECK_OK;
+            }
+            break;
+        case RELKIND_INDEX:
+        case RELKIND_GLOBAL_INDEX:
+            if (HasSpecAnyPriv(userId, CREATE_ANY_INDEX, false)) {
+                aclResult = ACLCHECK_OK;
+            }
+            break;
+        /* table */
+        default:
+            if (HasSpecAnyPriv(userId, CREATE_ANY_TABLE, false)) {
+                aclResult = ACLCHECK_OK;
+            }
+            break;
+    }
+    return (aclResult == ACLCHECK_OK) ? true : false;
+}
+
+/*
+ * checking whether the user has create any permission
+ */
+bool CheckCreatePrivilegeInNamespace(Oid namespaceId, Oid roleId, const char* anyPrivilege)
+{
+    /* Check we have creation rights in target namespace */
+    AclResult aclResult = pg_namespace_aclcheck(namespaceId, roleId, ACL_CREATE);
+    /*
+     * anyResult is true, explain that the current user is granted create any permission
+     */
+    bool anyResult = false;
+    if (aclResult != ACLCHECK_OK && !IsSysSchema(namespaceId)) {
+        anyResult = HasSpecAnyPriv(roleId, anyPrivilege, false);
+    }
+    if (aclResult != ACLCHECK_OK && !anyResult) {
+        aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+    }
+    return anyResult;
+}
+
+static void CheckCreateRelPrivilegeInNamespace(char relkind, Oid namespaceId)
+{
+    bool anyResult = false;
+    AclResult aclResult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
+    if (aclResult != ACLCHECK_OK && !IsSysSchema(namespaceId)) {
+        if (relkind != '\0') {
+            anyResult = CheckRelationCreateAnyPrivilege(GetUserId(), relkind);
+        }
+    }
+    if (aclResult != ACLCHECK_OK && (!anyResult)) {
+        aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+    }
+}
+
 /*
  * RangeVarGetAndCheckCreationNamespace
  *
@@ -494,9 +573,9 @@ Oid RangeVarGetCreationNamespace(const RangeVar* newRelation)
  * As a further side-effect, if the select namespace is a temporary namespace,
  * we mark the RangeVar as RELPERSISTENCE_TEMP.
  */
-Oid RangeVarGetAndCheckCreationNamespace(RangeVar* relation, LOCKMODE lockmode, Oid* existing_relation_id)
+Oid RangeVarGetAndCheckCreationNamespace(RangeVar* relation, LOCKMODE lockmode,
+    Oid* existing_relation_id, char relkind)
 {
-    uint64 inval_count;
     Oid relid;
     Oid oldrelid = InvalidOid;
     Oid nspid;
@@ -522,11 +601,13 @@ Oid RangeVarGetAndCheckCreationNamespace(RangeVar* relation, LOCKMODE lockmode, 
      * while we're doing the name lookups and acquiring locks.  See comments
      * in that function for a more detailed explanation of this logic.
      */
+    uint64 sess_inval_count;
+    uint64 thrd_inval_count = 0;
     for (;;) {
-        AclResult aclresult;
-
-        inval_count = u_sess->inval_cxt.SharedInvalidMessageCounter;
-
+        sess_inval_count = u_sess->inval_cxt.SIMCounter;
+        if (EnableLocalSysCache()) {
+            thrd_inval_count = t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;
+        }
         /* Look up creation namespace and check for existing relation. */
         nspid = RangeVarGetCreationNamespace(relation);
         Assert(OidIsValid(nspid));
@@ -542,12 +623,8 @@ Oid RangeVarGetAndCheckCreationNamespace(RangeVar* relation, LOCKMODE lockmode, 
          */
         if (IsBootstrapProcessingMode())
             break;
-
         /* Check namespace permissions. */
-        aclresult = pg_namespace_aclcheck(nspid, GetUserId(), ACL_CREATE);
-        if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(nspid));
-
+        CheckCreateRelPrivilegeInNamespace(relkind, nspid);
         if (retry) {
             /* If nothing changed, we're done. */
             if (relid == oldrelid && nspid == oldnspid)
@@ -574,8 +651,16 @@ Oid RangeVarGetAndCheckCreationNamespace(RangeVar* relation, LOCKMODE lockmode, 
         }
 
         /* If no invalidation message were processed, we're done! */
-        if (inval_count == u_sess->inval_cxt.SharedInvalidMessageCounter)
-            break;
+        if (EnableLocalSysCache()) {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter &&
+                thrd_inval_count == t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter) {
+                break;
+            }
+        } else {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter) {
+                break;
+            }
+        }
 
         /* Something may have changed, so recheck our work. */
         retry = true;
@@ -917,6 +1002,85 @@ bool TypeIsVisible(Oid typid)
     return visible;
 }
 
+bool isTableofIndexbyType(Oid typeOid)
+{
+    bool result = false;
+    HeapTuple typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
+    if (!HeapTupleIsValid(typeTup)) {
+        return result;
+    }
+
+    if (((Form_pg_type)GETSTRUCT(typeTup))->typtype == TYPTYPE_TABLEOF &&
+        (((Form_pg_type)GETSTRUCT(typeTup))->typcategory == TYPCATEGORY_TABLEOF_VARCHAR ||
+        ((Form_pg_type)GETSTRUCT(typeTup))->typcategory == TYPCATEGORY_TABLEOF_INTEGER)) {
+        result = true;
+    }
+
+    ReleaseSysCache(typeTup);
+
+    return result;
+}
+
+bool isTableofType(Oid typeOid, Oid* base_oid, Oid* indexbyType)
+{
+    bool result = false;
+    HeapTuple typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
+    if (!HeapTupleIsValid(typeTup)) {
+        return result;
+    }
+
+    if (((Form_pg_type)GETSTRUCT(typeTup))->typtype == TYPTYPE_TABLEOF) {
+        *base_oid = ((Form_pg_type)GETSTRUCT(typeTup))->typelem;
+        result = true;
+    }
+
+    if (indexbyType != NULL) {
+        if (((Form_pg_type)GETSTRUCT(typeTup))->typcategory == TYPCATEGORY_TABLEOF_VARCHAR) {
+            *indexbyType = VARCHAROID;
+        } else if (((Form_pg_type)GETSTRUCT(typeTup))->typcategory == TYPCATEGORY_TABLEOF_INTEGER) {
+            *indexbyType = INT4OID;
+        } else {
+            *indexbyType = InvalidOid;
+        }
+    }
+
+    ReleaseSysCache(typeTup);
+
+    return result;
+}
+
+bool IsPlpgsqlLanguageOid(Oid langoid)
+{
+    HeapTuple tp;
+    bool isNull = true;
+    char* langName = NULL;
+
+    Relation relation = heap_open(LanguageRelationId, NoLock);
+    tp = SearchSysCache1(LANGOID, ObjectIdGetDatum(langoid));
+    if (!HeapTupleIsValid(tp)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        (errmsg("cache lookup failed for language %u", langoid), errdetail("N/A."),
+                         errcause("System error."), erraction("Contact engineer to support."))));
+    }
+    Datum datum = heap_getattr(tp, Anum_pg_language_lanname, RelationGetDescr(relation), &isNull);
+    if (isNull) {
+        heap_close(relation, NoLock);
+        ReleaseSysCache(tp);
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for language name %u", langoid)));
+    }
+    langName = NameStr(*DatumGetName(datum));
+    int result = strcasecmp(langName, "plpgsql");
+    heap_close(relation, NoLock);
+    ReleaseSysCache(tp);
+
+    if (result == 0) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, HeapTuple procTup, List* argNames,
     Oid namespaceId, Oid objNsp, int nargs, CatCList* catList, bool expandVariadic, bool expandDefaults,
     bool includeOut, Oid refSynOid, bool enable_outparam_override)
@@ -946,11 +1110,15 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
             // For compatiable with the non-A special cases, for example function with out
             // param can't be called by SQL in A, but some of these are stilled called by
             // such as gsql in SQL.
-            Datum pprokind = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_prokind, &isNull);
-            if ((!isNull && PROC_IS_FUNC(pprokind)) || isNull) {
-                proNargs = procForm->pronargs;
-                allArgTypes = NULL;
-                includeOut = false;
+            Datum prolangoid = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_prolang, &isNull);
+            if (strcasecmp(get_language_name((Oid)prolangoid), "plpgsql") != 0 ||
+                u_sess->attr.attr_common.IsInplaceUpgrade || IsInitdb) {
+                Datum pprokind = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_prokind, &isNull);
+                if ((!isNull && PROC_IS_FUNC(pprokind)) || isNull) {
+                    proNargs = procForm->pronargs;
+                    allArgTypes = NULL;
+                    includeOut = false;
+                }
             }
         } else {
             proNargs = procForm->pronargs;
@@ -1089,6 +1257,15 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
         }
     }
 
+    int allArgNum = 0;
+#ifndef ENABLE_MULTIPLE_NODES
+    Datum allArgs = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proallargtypes, &isNull);
+    if (!isNull) {
+        ArrayType* arr1 = DatumGetArrayTypeP(allArgs); /* ensure not toasted */
+        allArgNum = ARR_DIMS(arr1)[0];
+    }
+#endif
+
     /*
      * We must compute the effective argument list so that we can easily
      * compare it to earlier results.  We waste a palloc cycle if it gets
@@ -1104,6 +1281,7 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     newResult->packageOid = DatumGetObjectId(packageOidDatum);
     /* record the referenced synonym oid for building view dependency. */
     newResult->refSynOid = refSynOid;
+    newResult->allArgNum = allArgNum;
 
     Oid* proargtypes = NULL;	
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1136,6 +1314,20 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
         errno_t rc = EOK;
         rc = memcpy_s(newResult->args, numProcAllArgs * sizeof(Oid), proargtypes, numProcAllArgs * sizeof(Oid));
         securec_check(rc, "\0", "\0");
+    }
+
+    /* 
+     * some procedure args have tableof variable,
+     * when match the proc parameters' type,
+     * we should change to its base type.
+     */
+    if (numProcAllArgs > 0 && newResult->args != NULL) {
+        for (int i = 0; i < numProcAllArgs; i++) {
+            Oid base_oid = InvalidOid;
+            if(isTableofType(newResult->args[i], &base_oid, NULL)) {
+                newResult->args[i] = base_oid;
+            }
+        }
     }
 
     if (variadic) {
@@ -1354,11 +1546,11 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
     }
 #endif
 	
-    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+    if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid)) {
+        caller_pkg_oid = u_sess->plsql_cxt.running_pkg_oid;
+    } else if (u_sess->plsql_cxt.curr_compile_context != NULL &&
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
         caller_pkg_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
-    } else {
-        caller_pkg_oid = u_sess->plsql_cxt.running_pkg_oid;
     }
     /* check for caller error */
     Assert(nargs >= 0 || !(expand_variadic || expand_defaults));
@@ -1382,11 +1574,19 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
 
     /* Step1. search syscache by name only and add candidates from pg_proc */
     CatCList* catlist = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+    } else {
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(funcname));
+    }
+#else
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
-    for (i = 0; i < catlist->n_members; i++) {
+#endif
 
+    for (i = 0; i < catlist->n_members; i++) {
         namespaceId = initNamesapceId;
-        HeapTuple proctup = &catlist->members[i]->tuple;
+        HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         if (!OidIsValid(HeapTupleGetOid(proctup)) || !HeapTupleIsValid(proctup)) {
             continue;
         }
@@ -1510,7 +1710,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
                     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(NameStr(synForm->synobjname)));
 #endif
                     for (i = 0; i < catlist->n_members; i++) {
-                        HeapTuple procTuple = &catlist->members[i]->tuple;
+                        HeapTuple procTuple = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
                         if (!OidIsValid(HeapTupleGetOid(procTuple))) {
                             continue;
                         }
@@ -1568,7 +1768,7 @@ KeyCandidateList CeknameGetCandidates(const List *names, bool key_create)
     catlist = SearchSysCacheList1(COLUMNSETTINGNAME, CStringGetDatum(keyname));
 
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple keytup = &catlist->members[i]->tuple;
+        HeapTuple keytup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_gs_column_keys keyform = (Form_gs_column_keys)GETSTRUCT(keytup);
         KeyCandidateList newResult;
 
@@ -1636,7 +1836,7 @@ KeyCandidateList GlobalSettingGetCandidates(const List *names, bool key_create)
     catlist = SearchSysCacheList1(GLOBALSETTINGNAME, CStringGetDatum(keyname));
 
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple keytup = &catlist->members[i]->tuple;
+        HeapTuple keytup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_gs_client_global_keys keyform = (Form_gs_client_global_keys)GETSTRUCT(keytup);
         KeyCandidateList newResult;
 
@@ -1888,8 +2088,27 @@ bool FunctionIsVisible(Oid funcid)
         visible = false;
 
         oidvector* proargs = ProcedureGetArgTypes(proctup);
-        clist = FuncnameGetCandidates(list_make1(makeString(proname)), nargs, NIL, false, false, false);
 
+#ifndef ENABLE_MULTIPLE_NODES
+        bool enable_outparam_override = false;
+        enable_outparam_override = enable_out_param_override();
+        if (enable_outparam_override) {
+            bool isNull = false;
+            Datum argTypes = ProcedureGetAllArgTypes(proctup, &isNull);
+            if (!isNull) {
+                oidvector* allArgTypes = (oidvector *)PG_DETOAST_DATUM(argTypes);
+                int proNargs = allArgTypes->dim1;
+                clist = FuncnameGetCandidates(list_make1(makeString(proname)),
+                                              proNargs, NIL, false, false, false, true);
+            } else {
+                clist = FuncnameGetCandidates(list_make1(makeString(proname)), nargs, NIL, false, false, false);
+            }
+        } else {
+            clist = FuncnameGetCandidates(list_make1(makeString(proname)), nargs, NIL, false, false, false);
+        }
+#else
+        clist = FuncnameGetCandidates(list_make1(makeString(proname)), nargs, NIL, false, false, false);
+#endif
         for (; clist; clist = clist->next) {
             if (memcmp(clist->args, proargs->values, nargs * sizeof(Oid)) == 0) {
                 /* Found the expected entry; is it the right proc? */
@@ -1973,7 +2192,7 @@ Oid OpernameGetOprid(List* names, Oid oprleft, Oid oprright)
             continue; /* do not look in temp namespace */
 
         for (i = 0; i < catlist->n_members; i++) {
-            HeapTuple opertup = &catlist->members[i]->tuple;
+            HeapTuple opertup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
             Form_pg_operator operform = (Form_pg_operator)GETSTRUCT(opertup);
 
             if (operform->oprnamespace == namespaceId) {
@@ -2050,7 +2269,7 @@ FuncCandidateList OpernameGetCandidates(List* names, char oprkind)
         resultSpace = (char*)palloc(catlist->n_members * SPACE_PER_OP);
 
     for (i = 0; i < catlist->n_members; i++) {
-        HeapTuple opertup = &catlist->members[i]->tuple;
+        HeapTuple opertup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_operator operform = (Form_pg_operator)GETSTRUCT(opertup);
         int pathpos = 0;
         FuncCandidateList newResult;
@@ -2127,6 +2346,7 @@ FuncCandidateList OpernameGetCandidates(List* names, char oprkind)
         newResult->pathpos = pathpos;
         newResult->oid = HeapTupleGetOid(opertup);
         newResult->nargs = 2;
+        newResult->packageOid = InvalidOid;
         newResult->nvargs = 0;
         newResult->ndargs = 0;
         newResult->argnumbers = NULL;
@@ -2950,7 +3170,7 @@ bool IsPackageFunction(List* funcname)
 #endif
     bool isFirstPackageFunction = false;
     for (int i = 0; i < catlist->n_members; i++) {
-        HeapTuple proctup = &catlist->members[i]->tuple;
+        HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
         Datum packageid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
         Oid packageid = InvalidOid;
@@ -2981,7 +3201,7 @@ bool IsPackageFunction(List* funcname)
         }
 
         /* package function and not package function can not overload */
-        proctup = &catlist->members[i]->tuple;
+        proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Datum ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
         result = DatumGetBool(ispackage);
         if (IsSystemObjOid(HeapTupleGetOid(proctup))) {
@@ -2996,16 +3216,16 @@ bool IsPackageFunction(List* funcname)
             if (result && isFirstPackageFunction) {
                 continue;
             } else if (!result) {
-                ReleaseCatCacheList(catlist);
+                ReleaseSysCacheList(catlist);
                 return false;
             }
         } else if (OidIsValid(packageid)) {
-            ReleaseCatCacheList(catlist);
+            ReleaseSysCacheList(catlist);
             return true;
         }
     }
 
-    ReleaseCatCacheList(catlist);
+    ReleaseSysCacheList(catlist);
     if (isFirstPackageFunction) {
         return true;
     } else {
@@ -3190,7 +3410,6 @@ Oid QualifiedNameGetCreationNamespace(const List* names, char** objname_p)
     /* deconstruct the name list */
     DeconstructQualifiedName(names, &schemaname, objname_p);
 
-    uint64 inval_count;
     Oid nspid = InvalidOid;
     Oid oldnspid = InvalidOid;
     bool retry = false;
@@ -3200,9 +3419,13 @@ Oid QualifiedNameGetCreationNamespace(const List* names, char** objname_p)
      * tracking whether any invalidation messages are processed
      * while we're doing the name lookups and acquiring locks.
      */
+    uint64 sess_inval_count;
+    uint64 thrd_inval_count = 0;
     for (;;) {
-        inval_count = u_sess->inval_cxt.SharedInvalidMessageCounter;
-
+        sess_inval_count = u_sess->inval_cxt.SIMCounter;
+        if (EnableLocalSysCache()) {
+            thrd_inval_count = t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;
+        }
         /* Look up creation namespace. */
         nspid = SchemaNameGetSchemaOid(schemaname);
         Assert(OidIsValid(nspid));
@@ -3225,8 +3448,16 @@ Oid QualifiedNameGetCreationNamespace(const List* names, char** objname_p)
             LockDatabaseObject(NamespaceRelationId, nspid, 0, AccessShareLock);
 
         /* If no invalidation message were processed, we're done! */
-        if (inval_count == u_sess->inval_cxt.SharedInvalidMessageCounter)
-            break;
+        if (EnableLocalSysCache()) {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter &&
+                thrd_inval_count == t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter) {
+                break;
+            }
+        } else {
+            if (sess_inval_count == u_sess->inval_cxt.SIMCounter) {
+                break;
+            }
+        }
 
         /* Something may have changed, so recheck our work. */
         retry = true;
@@ -3276,7 +3507,10 @@ Oid get_namespace_oid(const char* nspname, bool missing_ok)
     if (!OidIsValid(oid) && !missing_ok) {      
         char message[MAXSTRLEN]; 
         errno_t rc = sprintf_s(message, MAXSTRLEN, "schema \"%s\" does not exist", nspname);
-        securec_check_ss_c(rc, "", "");
+        if (strlen(nspname) > MAXSTRLEN) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("The schema name exceeds the maximum length.")));
+        }
+        securec_check_ss(rc, "", "");
         InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema \"%s\" does not exist", nspname)));
     }
@@ -4558,7 +4792,7 @@ void InitializeSearchPath(void)
          * In normal mode, arrange for a callback on any syscache invalidation
          * of pg_namespace rows.
          */
-        CacheRegisterSyscacheCallback(NAMESPACEOID, NamespaceCallback, (Datum)0);
+        CacheRegisterSessionSyscacheCallback(NAMESPACEOID, NamespaceCallback, (Datum)0);
         /* Force search path to be recomputed on next use */
         u_sess->catalog_cxt.baseSearchPathValid = false;
     }
@@ -4841,11 +5075,12 @@ void FetchDefaultArgumentPos(int** defpos, int2vector* adefpos, const char* argm
 /*
  * @Description: get the namespace's owner that has the same name as the namespace.
  * @in nspid : namespace oid.
+ * @anyPriv : anyPriv is true, explain that the user has create any permission
  * @in is_securityadmin : whether the is a security administrator doing this.
  * @return : return InvalidOid if there is no appropriate role.
  *            return the owner's oid if the namespace has the same name as its owner.
  */
-Oid GetUserIdFromNspId(Oid nspid, bool is_securityadmin)
+Oid GetUserIdFromNspId(Oid nspid, bool is_securityadmin, bool anyPriv)
 {
     char* rolname = NULL;
     Oid nspowner = InvalidOid;
@@ -4868,7 +5103,8 @@ Oid GetUserIdFromNspId(Oid nspid, bool is_securityadmin)
              * return the owner's oid
              */
             if (!strcmp(NameStr(nsptup->nspname), rolname)) {
-                if (!is_securityadmin && (!superuser_arg(GetUserId()) && !has_privs_of_role(GetUserId(), nspowner) &&
+                if (!is_securityadmin && (!superuser_arg(GetUserId()) &&
+                    !has_privs_of_role(GetUserId(), nspowner) && (!anyPriv) &&
                     !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))) {
                     ReleaseSysCache(tuple);
                     ereport(ERROR,

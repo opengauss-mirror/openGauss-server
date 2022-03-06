@@ -1,5 +1,12 @@
 #!/bin/bash
-
+#######################################################################
+# Copyright (c): 2020-2025, Huawei Tech. Co., Ltd.
+# descript: Compile and pack openGauss
+#           Return 0 means OK.
+#           Return 1 means failed.
+# version:  2.0
+# date:     2020-08-08
+#######################################################################
 declare build_version_mode='release'
 declare build_binarylib_dir='None'
 declare wrap_binaries='NO'
@@ -74,10 +81,15 @@ ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 echo "ROOT_DIR : $ROOT_DIR"
 cd build/script
 chmod a+x build_opengauss.sh
-sh build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server -mc off
+./build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server
 if [ "${wrap_binaries}"X = "YES"X ]
 then
-    chmod a+x build_opengauss.sh
-    sh package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file}
+    chmod a+x package_opengauss.sh
+    if [ X$config_file = "X" ];then
+        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode}
+    else
+        ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file}
+    fi
+
 fi
 exit 0

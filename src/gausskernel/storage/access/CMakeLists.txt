@@ -16,7 +16,6 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/index
     ${CMAKE_CURRENT_SOURCE_DIR}/nbtree 
     ${CMAKE_CURRENT_SOURCE_DIR}/obs
-    ${CMAKE_CURRENT_SOURCE_DIR}/archive
     ${CMAKE_CURRENT_SOURCE_DIR}/psort 
     ${CMAKE_CURRENT_SOURCE_DIR}/redo
     ${CMAKE_CURRENT_SOURCE_DIR}/rmgrdesc
@@ -26,6 +25,13 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/ubtree 
     ${CMAKE_CURRENT_SOURCE_DIR}/ustore 
 )
+
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    list(APPEND CMAKE_MODULE_PATH
+        ${CMAKE_CURRENT_SOURCE_DIR}/archive
+    )
+    add_subdirectory(archive)
+endif()
 
 add_subdirectory(cbtree)
 add_subdirectory(common)
@@ -38,7 +44,6 @@ add_subdirectory(heap)
 add_subdirectory(index)
 add_subdirectory(nbtree)
 add_subdirectory(obs)
-add_subdirectory(archive)
 add_subdirectory(psort)
 add_subdirectory(redo)
 add_subdirectory(rmgrdesc)

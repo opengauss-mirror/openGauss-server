@@ -38,7 +38,7 @@
 
 static inline bool TcapFeatureAvail()
 {
-    return t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM;
+    return t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM;
 }
 
 static inline void TcapFeatureEnsure()
@@ -48,7 +48,7 @@ static inline void TcapFeatureEnsure()
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Un-support feature"),
                     errdetail("Only support timecapsule from version %u", 
-                        INPLACE_UPDATE_WERSION_NUM)));
+                        INPLACE_UPDATE_VERSION_NUM)));
     }
 }
 
@@ -68,6 +68,7 @@ extern void TvUheapDeleteDelta(Oid relid, Snapshot snap);
 extern void TvUheapInsertLost(Oid relid, Snapshot snap);
 
 extern void TvRestoreVersion(TimeCapsuleStmt *stmt);
+extern TransactionId TvFetchSnpxminRecycle(TimestampTz tz);
 
 /*
  * Interfaces for Timecapsule `Recyclebin-based query, restore`
@@ -79,16 +80,20 @@ typedef enum TrObjType {
     RB_OBJ_TOAST = 2,
     RB_OBJ_TOAST_INDEX = 3,
     RB_OBJ_SEQUENCE = 4,
+    RB_OBJ_PARTITION = 5,
+    RB_OBJ_GLOBAL_INDEX = 6,
+    RB_OBJ_MATVIEW = 7
 } TrObjType;
 
 extern bool TrCheckRecyclebinDrop(const DropStmt *stmt, ObjectAddresses *objects);
-extern void TrDrop(const ObjectAddresses *objects, DropBehavior behavior);
+extern void TrDrop(const DropStmt* drop, const ObjectAddresses *objects, DropBehavior behavior);
 
 extern bool TrCheckRecyclebinTruncate(const TruncateStmt *stmt);
 extern void TrTruncate(const TruncateStmt *stmt);
 extern void TrRelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, void *baseDesc);
+extern void TrPartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid, void *baseDesc);
 
-extern void TrPurgeObject(const RangeVar *purobj, TrObjType type);
+extern void TrPurgeObject(RangeVar *purobj, TrObjType type);
 extern void TrPurgeTablespaceDML(int64 id);
 extern void TrPurgeTablespace(int64 id);
 extern void TrPurgeRecyclebin(int64 id);

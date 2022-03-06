@@ -31,8 +31,10 @@
 extern bool IsGTMConnected(void);
 extern GtmHostIndex InitGTM(bool useCache = true);
 extern void CloseGTM(void);
-extern void ResetGtmHandleXmin(GTM_TransactionKey txnKey);
-extern int SetGTMVacuumFlag(GTM_TransactionKey txnKey, bool is_vacuum);
+
+extern bool SetDisasterClusterGTM(char *disasterCluster);
+extern bool DelDisasterClusterGTM();
+extern bool GetDisasterClusterGTM(char** disasterCluster);
 
 extern GTM_TransactionKey BeginTranGTM(GTM_Timestamp *timestamp);
 extern GlobalTransactionId GetGxidGTM(GTM_TransactionKey txnKey, bool is_sub_xact);
@@ -56,6 +58,7 @@ extern GTM_Snapshot GetSnapshotGTM(GTM_TransactionKey txnKey, GlobalTransactionI
 extern GTM_Snapshot GetSnapshotGTMLite(void);
 extern GTM_SnapshotStatus GetGTMSnapshotStatus(GTM_TransactionKey txnKey);
 extern GTMLite_Status GetGTMLiteStatus(void);
+extern GTM_Snapshot GetSnapshotGTMDR(void);
 
 /* Sequence interface APIs with GTM */
 extern GTM_UUID GetSeqUUIDGTM();
@@ -75,5 +78,7 @@ extern void SetGTMrwTimeout(int timeout);
 extern void InitGTM_Reporttimeline(void);
 extern void SetGTMInterruptFlag();
 extern bool PingGTM(struct gtm_conn* conn);
+
+extern bool SetConsistencyPointCSNGTM(CommitSeqNo consistencyPointCSN);
 
 #endif /* ACCESS_GTM_H */

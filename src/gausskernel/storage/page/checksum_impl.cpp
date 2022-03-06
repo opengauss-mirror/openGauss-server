@@ -29,8 +29,10 @@ uint32 pg_checksum_block(char* data, uint32 size)
     uint32 result = 0;
     uint32 i, j;
 
+#ifndef ROACH_COMMON
     /* ensure that the size is compatible with the algorithm */
     Assert((size % (sizeof(uint32) * N_SUMS)) == 0);
+#endif
 
     /* initialize partial checksums to their corresponding offsets */
     for (j = 0; j < N_SUMS; j += 2) {

@@ -37,17 +37,17 @@ CREATE TABLE "S 1"."T 2" (
 INSERT INTO "S 1"."T 1"
 	SELECT id,
 	       id % 10,
-	       to_char(id, 'FM00000'),
+	       pg_catalog.to_char(id, 'FM00000'),
 	       '1970-01-01'::timestamptz + ((id % 100) || ' days')::interval,
 	       '1970-01-01'::timestamp + ((id % 100) || ' days')::interval,
 	       id % 10,
 	       id % 10,
 	       'foo'::user_enum
-	FROM generate_series(1, 1000) id;
+	FROM pg_catalog.generate_series(1, 1000) id;
 INSERT INTO "S 1"."T 2"
 	SELECT id,
-	       'AAA' || to_char(id, 'FM000')
-	FROM generate_series(1, 100) id;
+	       'AAA' || pg_catalog.to_char(id, 'FM000')
+	FROM pg_catalog.generate_series(1, 100) id;
 
 ANALYZE "S 1"."T 1";
 ANALYZE "S 1"."T 2";
@@ -188,7 +188,7 @@ SELECT 'fixed', NULL FROM ft1 t1 WHERE c1 = 1;
 -- user-defined operator/function
 CREATE FUNCTION postgres_fdw_abs(int) RETURNS int AS $$
 BEGIN
-RETURN abs($1);
+RETURN pg_catalog.abs($1);
 END
 $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE OPERATOR === (
@@ -200,7 +200,7 @@ CREATE OPERATOR === (
 );
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = postgres_fdw_abs(t1.c2);
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 === t1.c2;
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = abs(t1.c2);
+EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = pg_catalog.abs(t1.c2);
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = t1.c2;
 
 -- ===================================================================
@@ -210,7 +210,7 @@ EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = 1;         -- 
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = 100 AND t1.c2 = 0; -- BoolExpr
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 IS NULL;        -- NullTest
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 IS NOT NULL;    -- NullTest
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE round(abs(c1), 0) = 1; -- FuncExpr
+EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE pg_catalog.round(pg_catalog.abs(c1), 0) = 1; -- FuncExpr
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 = -c1;          -- OpExpr(l)
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE 1 = c1!;           -- OpExpr(r)
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE (c1 IS NOT NULL) IS DISTINCT FROM (c1 IS NOT NULL); -- DistinctExpr
@@ -225,9 +225,9 @@ SELECT * FROM ft2 a, ft2 b WHERE a.c1 = 47 AND b.c1 = a.c2;
 -- check both safe and unsafe join conditions
 EXPLAIN (VERBOSE, COSTS false)
   SELECT * FROM ft2 a, ft2 b
-  WHERE a.c2 = 6 AND b.c1 = a.c1 AND a.c8 = 'foo' AND b.c7 = upper(a.c7);
+  WHERE a.c2 = 6 AND b.c1 = a.c1 AND a.c8 = 'foo' AND b.c7 = pg_catalog.upper(a.c7);
 SELECT * FROM ft2 a, ft2 b
-WHERE a.c2 = 6 AND b.c1 = a.c1 AND a.c8 = 'foo' AND b.c7 = upper(a.c7);
+WHERE a.c2 = 6 AND b.c1 = a.c1 AND a.c8 = 'foo' AND b.c7 = pg_catalog.upper(a.c7);
 -- bug before 9.3.5 due to sloppy handling of remote-estimate parameters
 SELECT * FROM ft1 WHERE c1 = ANY (ARRAY(SELECT c1 FROM ft2 WHERE c1 < 5));
 SELECT * FROM ft2 WHERE c1 = ANY (ARRAY(SELECT c1 FROM ft1 WHERE c1 < 5));
@@ -267,12 +267,12 @@ EXPLAIN (VERBOSE, COSTS false) EXECUTE st1(1, 2);
 EXECUTE st1(1, 1);
 EXECUTE st1(101, 101);
 -- subquery using stable function (can't be sent to remote)
-PREPARE st2(int) AS SELECT * FROM ft1 t1 WHERE t1.c1 < $2 AND t1.c3 IN (SELECT c3 FROM ft2 t2 WHERE c1 > $1 AND date(c4) = '1970-01-17'::date) ORDER BY c1;
+PREPARE st2(int) AS SELECT * FROM ft1 t1 WHERE t1.c1 < $2 AND t1.c3 IN (SELECT c3 FROM ft2 t2 WHERE c1 > $1 AND pg_catalog.date(c4) = '1970-01-17'::date) ORDER BY c1;
 EXPLAIN (VERBOSE, COSTS false) EXECUTE st2(10, 20);
 EXECUTE st2(10, 20);
 EXECUTE st2(101, 121);
 -- subquery using immutable function (can be sent to remote)
-PREPARE st3(int) AS SELECT * FROM ft1 t1 WHERE t1.c1 < $2 AND t1.c3 IN (SELECT c3 FROM ft2 t2 WHERE c1 > $1 AND date(c5) = '1970-01-17'::date) ORDER BY c1;
+PREPARE st3(int) AS SELECT * FROM ft1 t1 WHERE t1.c1 < $2 AND t1.c3 IN (SELECT c3 FROM ft2 t2 WHERE c1 > $1 AND pg_catalog.date(c5) = '1970-01-17'::date) ORDER BY c1;
 EXPLAIN (VERBOSE, COSTS false) EXECUTE st3(10, 20);
 EXECUTE st3(10, 20);
 EXECUTE st3(20, 30);
@@ -448,34 +448,34 @@ INSERT INTO ft1(c1, c2) VALUES(1111, -2);  -- c2positive
 UPDATE ft1 SET c2 = -c2 WHERE c1 = 1;  -- c2positive
 
 -- Test savepoint/rollback behavior
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
 begin;
 update ft2 set c2 = 42 where c2 = 0;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
 savepoint s1;
 update ft2 set c2 = 44 where c2 = 4;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
 release savepoint s1;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
 savepoint s2;
 update ft2 set c2 = 46 where c2 = 6;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
 rollback to savepoint s2;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
 release savepoint s2;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
 savepoint s3;
 update ft2 set c2 = -2 where c2 = 42 and c1 = 10; -- fail on remote side
 rollback to savepoint s3;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
 release savepoint s3;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
 -- none of the above is committed yet remotely
-select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
 commit;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from ft2 where c2 < 500 group by 1 order by 1;
+select c2, pg_catalog.count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
 
 -- ===================================================================
 -- test serial columns (ie, sequence-based defaults)
@@ -530,14 +530,14 @@ begin
 		tg_name, argstr, TG_when, TG_level, TG_OP, relid;
     oldnew := '{}'::text[];
 	if TG_OP != 'INSERT' then
-		oldnew := array_append(oldnew, format('OLD: %s', OLD));
+		oldnew := pg_catalog.array_append(oldnew, pg_catalog.format('OLD: %s', OLD));
 	end if;
 
 	if TG_OP != 'DELETE' then
-		oldnew := array_append(oldnew, format('NEW: %s', NEW));
+		oldnew := pg_catalog.array_append(oldnew, pg_catalog.format('NEW: %s', NEW));
 	end if;
 
-    RAISE NOTICE '%', array_to_string(oldnew, ',');
+    RAISE NOTICE '%', pg_catalog.array_to_string(oldnew, ',');
 
 	if TG_OP = 'DELETE' then
 		return OLD;

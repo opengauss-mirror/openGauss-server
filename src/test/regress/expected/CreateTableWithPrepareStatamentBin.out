@@ -1,0 +1,27 @@
+\! gs_ktool -d all
+DELETE ALL
+ 1
+\! gs_ktool -g
+GENERATE
+1
+CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS t_string(key int,_varchar_ varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_char_ char(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC),_text_ text ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+INSERT INTO t_string (key, _varchar_, _char_, _text_) VALUES (?,?,?,?);
+1,varchar data,char data,text data
+INSERT INTO t_string (key, _varchar_, _char_, _text_) VALUES (1,'2','3','4');
+INSERT INTO t_string (key, _varchar_, _char_, _text_) VALUES (1,'2','3','4');
+select * from t_string;
+ key |  _varchar_   |                       _char_                       |  _text_   
+-----+--------------+----------------------------------------------------+-----------
+   1 | 2            | 3                                                  | 4
+   1 | 2            | 3                                                  | 4
+   1 | varchar data | char data                                          | text data
+(3 rows)
+
+DROP TABLE t_string;
+DROP COLUMN ENCRYPTION KEY cek1;
+DROP CLIENT MASTER KEY cmk1;
+\! gs_ktool -d all
+DELETE ALL
+ 1

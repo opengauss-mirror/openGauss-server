@@ -223,7 +223,7 @@ void UBTreeXlogSplitOperatorLeftpage(RedoBufferInfo *lbuf, void *recorddata, Blo
 
     /* assure that memory is properly allocated, prevent from core dump caused by buffer unpin */
     START_CRIT_SECTION();
-    newlpage = PageGetTempPageCopySpecial(lpage, true);
+    newlpage = PageGetTempPageCopySpecial(lpage);
     END_CRIT_SECTION();
 
     /* Set high key */

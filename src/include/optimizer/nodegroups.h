@@ -280,7 +280,7 @@ extern bool ng_is_distribute_key_valid(PlannerInfo* root, List* distribute_key, 
 extern void ngroup_info_hash_create();
 extern Bitmapset*  ngroup_info_hash_search(Oid ngroup_oid);
 extern void  ngroup_info_hash_insert(Oid ngroup_oid, Bitmapset * bms_node_ids);
-extern void ngroup_info_hash_delete(Oid ngroup_oid);
+extern void ngroup_info_hash_delete(Oid ngroup_oid, bool is_destory = false);
 extern void ngroup_info_hash_destory(void);
 
 

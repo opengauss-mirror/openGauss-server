@@ -28,6 +28,7 @@
 #include "postmaster/startup.h"
 #include "access/xlog.h"
 #include "replication/dcf_data.h"
+#include "replication/dcf_flowcontrol.h"
 #include "replication/dcf_replication.h"
 #include "replication/walreceiver.h"
 #include "replication/syncrep.h"
@@ -223,200 +224,6 @@ void ProcessStandbyFileTimeMessage(unsigned int src_node_id, const char* msg)
     } else {
         ereport(LOG, (errmsg("DCF leader config file has no change")));
     }
-}
-
-static bool GetNodeInfo(const uint32 nodeID, char *nodeIP, uint32 nodeIPLen, uint32 *nodePort)
-{
-    cJSON *nodeInfos = nullptr;
-    /* nodeInfos is null when GetNodeInfos returned false */
-    if (!GetNodeInfos(&nodeInfos)) {
-        return false;
-    }
-    const cJSON *nodeJsons = cJSON_GetObjectItem(nodeInfos, "nodes");
-    if (nodeJsons == nullptr) {
-        cJSON_Delete(nodeInfos);
-        ereport(ERROR, (errmodule(MOD_DCF), errmsg("Get nodes info failed from DCF!")));
-        return false;
-    }
-    const int DCF_ROLE_LEN = 64;
-    char localDCFRole[DCF_ROLE_LEN] = {0};
-    if (!GetDCFNodeInfo(nodeJsons, nodeID, localDCFRole, DCF_ROLE_LEN, nodeIP, nodeIPLen, (int*)nodePort)) {
-        cJSON_Delete(nodeInfos);
-        return false;
-    }
-    cJSON_Delete(nodeInfos);
-    return true;
-}
-
-static void SetGlobalCurRto(int nodeIndex, int64 currentRto)
-{
-    /* Update global rto to show */
-    if (currentRto != -1) {
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_RTO =
-            t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].current_RTO;
-
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].current_RTO = currentRto;
-
-        g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_rto =
-            t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].current_RTO;
-        ereport(DEBUG1, (errmsg("current rto is %ld",
-            g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_rto)));
-    }
-}
-
-static void DoActualSleep(int nodeIndex, bool forceUpdate)
-{
-    /* try to control log sent rate so that standby can flush and apply log under RTO seconds */
-    if (IS_PGXC_DATANODE) {
-        if (t_thrd.dcf_cxt.dcfCtxInfo->targetRTO > 0 || t_thrd.dcf_cxt.dcfCtxInfo->targetRPO > 0) {
-            if ((t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count %
-                t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count_limit == 0)
-                || t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].just_keep_alive || forceUpdate) {
-                DCFLogCtrlCalculateSleepTime(&(t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex]));
-                DCFLogCtrlCountSleepLimit(&(t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex]));
-            }
-            if (!t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].just_keep_alive) {
-                pgstat_report_waitevent(WAIT_EVENT_LOGCTRL_SLEEP);
-                /* The logical replication sleep isn't considered now */
-                SleepNodeReplication(nodeIndex);
-                pgstat_report_waitevent(WAIT_EVENT_END);
-            }
-        }
-    }
-    t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count++;
-}
-
-static void SetGlobalRtoData(int nodeIndex, uint32 srcNodeID)
-{
-    if (IS_PGXC_DATANODE) {
-        g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_rto =
-            t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].current_RTO;
-        if (t_thrd.dcf_cxt.dcfCtxInfo->targetRTO == 0) {
-            g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_sleep_time = 0;
-        } else {
-            g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_sleep_time =
-                t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_time;
-        }
-        if (g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].target_rto != t_thrd.dcf_cxt.dcfCtxInfo->targetRTO) {
-            ereport(LOG, (errmodule(MOD_RTO_RPO),
-                          errmsg("target_rto changes to %d, previous target_rto is %d, current the sleep time is %ld",
-                                 t_thrd.dcf_cxt.dcfCtxInfo->targetRTO,
-                                 g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].target_rto,
-                                 g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_sleep_time)));
-
-            g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].target_rto = t_thrd.dcf_cxt.dcfCtxInfo->targetRTO;
-        }
-
-        char *remoteIP = g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].dest_ip;
-        uint32 remotePort = 0;
-        char *localIP = g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].source_ip;
-        uint32 localPort = 0;
-        uint32 leaderID = -1;
-        if (GetNodeInfo(srcNodeID, remoteIP, IP_LEN, &remotePort)) {
-            g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].dest_port = (int)remotePort;
-        } else {
-            ereport(WARNING, (errmsg("Get ip and port of node with nodeID %u failed", srcNodeID)));
-        }
-        if (QueryLeaderNodeInfo(&leaderID, localIP, IP_LEN, &localPort)) {
-            g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].source_port = (int)localPort;
-        } else {
-            ereport(WARNING, (errmsg("Get ip and port of leader failed")));
-        }
-    }
-}
-
-static bool GetFlowControlParam(void)
-{
-    /* Get current rto and rpo */
-    const int rtoLen = 10; /* 10 is enough for rto is between 0 and 3600 */
-    char tempRTO[rtoLen] = {0};
-    const int rpoLen = 10; /* 10 is enough for rpo is between 0 and 3600 */
-    char tempRPO[rtoLen] = {0};
-    if (dcf_get_param("DN_FLOW_CONTROL_RTO", tempRTO, rtoLen) != 0) {
-        ereport(WARNING, (errmodule(MOD_RTO_RPO), errmsg("Get rto from dcf failed!")));
-        return false;
-    }
-    t_thrd.dcf_cxt.dcfCtxInfo->targetRTO = atoi(tempRTO);
-    ereport(DEBUG1, (errmodule(MOD_RTO_RPO),
-                     errmsg("target rto got from dcf is %d",
-                            t_thrd.dcf_cxt.dcfCtxInfo->targetRTO)));
-    if (dcf_get_param("DN_FLOW_CONTROL_RPO", tempRPO, rpoLen) != 0) {
-        ereport(WARNING, (errmodule(MOD_RTO_RPO), errmsg("Get rpo from dcf failed!")));
-        return false;
-    }
-    t_thrd.dcf_cxt.dcfCtxInfo->targetRPO = atoi(tempRPO);
-    ereport(DEBUG1, (errmodule(MOD_RTO_RPO),
-                     errmsg("target rpo got from dcf is %d",
-                            t_thrd.dcf_cxt.dcfCtxInfo->targetRPO)));
-    return true;
-}
-
-/*
- * Regular reply from standby advising of WAL positions on standby server.
- */
-static void DCFProcessStandbyReplyMessage(uint32 srcNodeID, const char* msg, uint32 msgSize)
-{
-    DCFStandbyReplyMessage reply;
-    int rc;
-    errno_t errorno = EOK;
-    char *buf = NULL;
-    int nodeIndex = -1;
-    bool forceUpdate = false;
-    if (msgSize < (sizeof(DCFStandbyReplyMessage) + 1)) {
-        ereport(WARNING, (errmsg("The size of msg didn't meet reply message and the size is %u\n", msgSize)));
-        return;
-    }
-
-    /* skip first char */
-    buf = const_cast<char*>(msg) + 1;
-
-    errorno = memcpy_s(&reply,
-                       sizeof(DCFStandbyReplyMessage),
-                       buf,
-                       sizeof(DCFStandbyReplyMessage));
-    securec_check(errorno, "\0", "\0");
-
-    ereport(DEBUG1, (errmsg("The src node id is %u", srcNodeID)));
-    ereport(DEBUG1, (errmsg("id is %s and receive %X/%X write %X/%X flush %X/%X apply %X/%X",
-        reply.id, (uint32)(reply.receive >> 32),
-        (uint32)reply.receive, (uint32)(reply.write >> 32), (uint32)reply.write,
-        (uint32)(reply.flush >> 32), (uint32)reply.flush, (uint32)(reply.apply >> 32),
-        (uint32)reply.apply)));
-    bool isSet = SetNodeInfoByNodeID(srcNodeID, reply, &nodeIndex);
-    if (!isSet) {
-        ereport(WARNING, (errmsg("Set node info with node ID %u failed!", srcNodeID)));
-        return;
-    }
-    /* Update standby node name */
-    char* id = g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].id;
-    rc = strncpy_s(id, DCF_STANDBY_NAME_SIZE, reply.id, strlen(reply.id));
-    securec_check(rc, "\0", "\0");
-
-    if (t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count_limit == 0) {
-        ereport(WARNING, (errmsg("Sleep count limit of the node with id %d is 0", srcNodeID)));
-        return;
-    }
-
-    if (t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_reply_time > 0) {
-        forceUpdate = IsForceUpdate(t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_reply_time, reply.sendTime);
-    }
-    if (IS_PGXC_DATANODE &&
-        ((t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count %
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count_limit) == 0 ||
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].just_keep_alive || forceUpdate)) {
-        int64 currentRto = DCFLogCtrlCalculateCurrentRTO(&reply,
-            &(t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex]));
-        SetGlobalCurRto(nodeIndex, currentRto);
-        /* Current RPO calculation is not required now. */
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_reply_time = reply.sendTime;
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_flush = reply.flush;
-        t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_apply = reply.apply;
-    }
-    if (!GetFlowControlParam()) {
-        return;
-    }
-    DoActualSleep(nodeIndex, forceUpdate);
-    SetGlobalRtoData(nodeIndex, srcNodeID);
 }
 
 /* receive xlog archive task response from follower */
@@ -784,7 +591,6 @@ static void ProcessArchiveXlogMessage(uint32 srcNodeID, const char* msg, uint32 
      * lock for archiver get PITR_TASK_GET flag, but works on old task.
      * if archiver works between set flag and set task details.
      */
-    SpinLockAcquire(&archive_task_status->mutex);
     while (pg_atomic_compare_exchange_u32(pitr_task_status, &expected, PITR_TASK_GET) == false) {
         /* some task arrived before last task done if expected not equal to NONE */
         expected = PITR_TASK_NONE;
@@ -794,11 +600,10 @@ static void ProcessArchiveXlogMessage(uint32 srcNodeID, const char* msg, uint32 
                                      archive_xlog_message->slot_name,
                                      static_cast<uint32>(archive_xlog_message->targetLsn >> 32),
                                      static_cast<uint32>(archive_xlog_message->targetLsn))));
-            SpinLockRelease(&archive_task_status->mutex);
             return;
         }
     }
-    
+    SpinLockAcquire(&archive_task_status->mutex);
     errorno = memcpy_s(&archive_task_status->archive_task,
                        sizeof(ArchiveXlogMessage),
                        archive_xlog_message,
@@ -975,11 +780,7 @@ int ReceiveLogCbFunc(unsigned int stream_id, unsigned long long index,
     char* copyStart = const_cast<char*>(buf) + alignOffset;
     XLogRecPtr copyStartPtr = paxosStartPtr + alignOffset;
 
-    if (IsExtremeRedo()) {
-        XLogWalRcvReceiveInBuf(copyStart, receive_len, copyStartPtr);
-    } else {
-        XLogWalRcvReceive(copyStart, receive_len, copyStartPtr);
-    }
+    XLogWalRcvReceive(copyStart, receive_len, copyStartPtr);
 
     DcfUpdateAppliedRecordIndex(index, lsn);
 

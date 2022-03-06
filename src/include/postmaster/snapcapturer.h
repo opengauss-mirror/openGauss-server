@@ -53,6 +53,6 @@ extern ThreadId StartSnapWorkerCapturer(void);
 extern bool IsTxnSnapWorkerProcess(void);
 extern NON_EXEC_STATIC void TxnSnapWorkerMain(void);
 
-#define ENABLE_TCAP_VERSION (u_sess->attr.attr_storage.version_retention_age > 0)
+#define ENABLE_TCAP_VERSION (u_sess->attr.attr_storage.undo_retention_time > 0)
 
 #endif

@@ -993,7 +993,7 @@ int pqWaitTimed(int forRead, int forWrite, PGconn* conn, time_t finish_time)
     if (result == 0) {
         printfPQExpBuffer(&conn->errorMessage,
             libpq_gettext("wait %s:%s timeout expired\n"),
-            conn->pghost, conn->pgport);
+            PQhost(conn), PQport(conn));
         return EOF;
     }
 

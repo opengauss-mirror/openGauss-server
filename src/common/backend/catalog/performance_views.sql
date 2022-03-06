@@ -115,13 +115,13 @@ CREATE VIEW dbe_perf.global_instance_time AS
 CREATE VIEW dbe_perf.workload_sql_count AS
   SELECT
     pg_user.respool as workload,
-    sum(S.select_count)::bigint AS select_count,
-    sum(S.update_count)::bigint AS update_count,
-    sum(S.insert_count)::bigint AS insert_count,
-    sum(S.delete_count)::bigint AS delete_count,
-    sum(S.ddl_count)::bigint AS ddl_count,
-    sum(S.dml_count)::bigint AS dml_count,
-    sum(S.dcl_count)::bigint AS dcl_count
+    pg_catalog.sum(S.select_count)::bigint AS select_count,
+    pg_catalog.sum(S.update_count)::bigint AS update_count,
+    pg_catalog.sum(S.insert_count)::bigint AS insert_count,
+    pg_catalog.sum(S.delete_count)::bigint AS delete_count,
+    pg_catalog.sum(S.ddl_count)::bigint AS ddl_count,
+    pg_catalog.sum(S.dml_count)::bigint AS dml_count,
+    pg_catalog.sum(S.dcl_count)::bigint AS dcl_count
     FROM
       pg_user left join pg_stat_get_sql_count() AS S on pg_user.usename = S.user_name
     GROUP by pg_user.respool;
@@ -129,22 +129,22 @@ CREATE VIEW dbe_perf.workload_sql_count AS
 CREATE VIEW dbe_perf.workload_sql_elapse_time AS
   SELECT
     pg_user.respool as workload,
-    sum(S.total_select_elapse)::bigint AS total_select_elapse,
-    MAX(S.max_select_elapse) AS max_select_elapse,
-    MIN(S.min_select_elapse) AS min_select_elapse,
-    ((sum(S.total_select_elapse) / greatest(sum(S.select_count), 1))::bigint) AS avg_select_elapse,
-    sum(S.total_update_elapse)::bigint AS total_update_elapse,
-    MAX(S.max_update_elapse) AS max_update_elapse,
-    MIN(S.min_update_elapse) AS min_update_elapse,
-    ((sum(S.total_update_elapse) / greatest(sum(S.update_count), 1))::bigint) AS avg_update_elapse,
-    sum(S.total_insert_elapse)::bigint AS total_insert_elapse,
-    MAX(S.max_insert_elapse) AS max_insert_elapse,
-    MIN(S.min_insert_elapse) AS min_insert_elapse,
-    ((sum(S.total_insert_elapse) / greatest(sum(S.insert_count), 1))::bigint) AS avg_insert_elapse,
-    sum(S.total_delete_elapse)::bigint AS total_delete_elapse,
-    MAX(S.max_delete_elapse) AS max_delete_elapse,
-    MIN(S.min_delete_elapse) AS min_delete_elapse,
-    ((sum(S.total_delete_elapse) / greatest(sum(S.delete_count), 1))::bigint) AS avg_delete_elapse
+    pg_catalog.sum(S.total_select_elapse)::bigint AS total_select_elapse,
+    pg_catalog.MAX(S.max_select_elapse) AS max_select_elapse,
+    pg_catalog.MIN(S.min_select_elapse) AS min_select_elapse,
+    ((pg_catalog.sum(S.total_select_elapse) / greatest(pg_catalog.sum(S.select_count), 1))::bigint) AS avg_select_elapse,
+    pg_catalog.sum(S.total_update_elapse)::bigint AS total_update_elapse,
+    pg_catalog.MAX(S.max_update_elapse) AS max_update_elapse,
+    pg_catalog.MIN(S.min_update_elapse) AS min_update_elapse,
+    ((pg_catalog.sum(S.total_update_elapse) / greatest(pg_catalog.sum(S.update_count), 1))::bigint) AS avg_update_elapse,
+    pg_catalog.sum(S.total_insert_elapse)::bigint AS total_insert_elapse,
+    pg_catalog.MAX(S.max_insert_elapse) AS max_insert_elapse,
+    pg_catalog.MIN(S.min_insert_elapse) AS min_insert_elapse,
+    ((pg_catalog.sum(S.total_insert_elapse) / greatest(pg_catalog.sum(S.insert_count), 1))::bigint) AS avg_insert_elapse,
+    pg_catalog.sum(S.total_delete_elapse)::bigint AS total_delete_elapse,
+    pg_catalog.MAX(S.max_delete_elapse) AS max_delete_elapse,
+    pg_catalog.MIN(S.min_delete_elapse) AS min_delete_elapse,
+    ((pg_catalog.sum(S.total_delete_elapse) / greatest(pg_catalog.sum(S.delete_count), 1))::bigint) AS avg_delete_elapse
     FROM
       pg_user left join pg_stat_get_sql_count() AS S on pg_user.usename = S.user_name
     GROUP by pg_user.respool;
@@ -249,7 +249,7 @@ SELECT
     giwi.bg_resp_avg as bg_resp_avg,
     giwi.bg_resp_total as bg_resp_total
 FROM
-    pg_user left join get_instr_workload_info(0) AS giwi on pg_user.usesysid = giwi.user_oid;
+    pg_user left join pg_catalog.get_instr_workload_info(0) AS giwi on pg_user.usesysid = giwi.user_oid;
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_user_transaction
   (OUT node_name name, OUT usename name, OUT commit_counter bigint,
@@ -298,18 +298,18 @@ CREATE VIEW dbe_perf.global_user_transaction AS
 CREATE VIEW dbe_perf.workload_transaction AS
 select
     pg_user.respool as workload,
-    sum(W.commit_counter)::bigint as commit_counter,
-    sum(W.rollback_counter)::bigint as rollback_counter,
-    min(W.resp_min)::bigint as resp_min,
-    max(W.resp_max)::bigint as resp_max,
-    ((sum(W.resp_total) / greatest(sum(W.commit_counter), 1))::bigint) AS resp_avg,
-    sum(W.resp_total)::bigint as resp_total,
-    sum(W.bg_commit_counter)::bigint as bg_commit_counter,
-    sum(W.bg_rollback_counter)::bigint as bg_rollback_counter,
-    min(W.bg_resp_min)::bigint as bg_resp_min,
-    max(W.bg_resp_max)::bigint as bg_resp_max,
-    ((sum(W.bg_resp_total) / greatest(sum(W.bg_commit_counter), 1))::bigint) AS bg_resp_avg,
-    sum(W.bg_resp_total)::bigint as bg_resp_total
+    pg_catalog.sum(W.commit_counter)::bigint as commit_counter,
+    pg_catalog.sum(W.rollback_counter)::bigint as rollback_counter,
+    pg_catalog.min(W.resp_min)::bigint as resp_min,
+    pg_catalog.max(W.resp_max)::bigint as resp_max,
+    ((pg_catalog.sum(W.resp_total) / greatest(pg_catalog.sum(W.commit_counter), 1))::bigint) AS resp_avg,
+    pg_catalog.sum(W.resp_total)::bigint as resp_total,
+    pg_catalog.sum(W.bg_commit_counter)::bigint as bg_commit_counter,
+    pg_catalog.sum(W.bg_rollback_counter)::bigint as bg_rollback_counter,
+    pg_catalog.min(W.bg_resp_min)::bigint as bg_resp_min,
+    pg_catalog.max(W.bg_resp_max)::bigint as bg_resp_max,
+    ((pg_catalog.sum(W.bg_resp_total) / greatest(pg_catalog.sum(W.bg_commit_counter), 1))::bigint) AS bg_resp_avg,
+    pg_catalog.sum(W.bg_resp_total)::bigint as bg_resp_total
 from
     pg_user left join dbe_perf.user_transaction AS W on pg_user.usename = W.usename
 group by
@@ -361,18 +361,18 @@ CREATE VIEW dbe_perf.global_workload_transaction AS
 CREATE VIEW dbe_perf.summary_workload_transaction AS
   SELECT 
     W.workload AS workload,
-    sum(W.commit_counter) AS commit_counter,
-    sum(W.rollback_counter) AS rollback_counter,
-    coalesce(min(NULLIF(W.resp_min, 0)), 0) AS resp_min,
-    max(W.resp_max) AS resp_max,
-    ((sum(W.resp_total) / greatest(sum(W.commit_counter), 1))::bigint) AS resp_avg,
-    sum(W.resp_total) AS resp_total,
-    sum(W.bg_commit_counter) AS bg_commit_counter,
-    sum(W.bg_rollback_counter) AS bg_rollback_counter,
-    coalesce(min(NULLIF(W.bg_resp_min, 0)), 0) AS bg_resp_min,
-    max(W.bg_resp_max) AS bg_resp_max,
-    ((sum(W.bg_resp_total) / greatest(sum(W.bg_commit_counter), 1))::bigint) AS bg_resp_avg,
-    sum(W.bg_resp_total) AS bg_resp_total
+    pg_catalog.sum(W.commit_counter) AS commit_counter,
+    pg_catalog.sum(W.rollback_counter) AS rollback_counter,
+    coalesce(pg_catalog.min(NULLIF(W.resp_min, 0)), 0) AS resp_min,
+    pg_catalog.max(W.resp_max) AS resp_max,
+    ((pg_catalog.sum(W.resp_total) / greatest(pg_catalog.sum(W.commit_counter), 1))::bigint) AS resp_avg,
+    pg_catalog.sum(W.resp_total) AS resp_total,
+    pg_catalog.sum(W.bg_commit_counter) AS bg_commit_counter,
+    pg_catalog.sum(W.bg_rollback_counter) AS bg_rollback_counter,
+    coalesce(pg_catalog.min(NULLIF(W.bg_resp_min, 0)), 0) AS bg_resp_min,
+    pg_catalog.max(W.bg_resp_max) AS bg_resp_max,
+    ((pg_catalog.sum(W.bg_resp_total) / greatest(pg_catalog.sum(W.bg_commit_counter), 1))::bigint) AS bg_resp_avg,
+    pg_catalog.sum(W.bg_resp_total) AS bg_resp_total
     FROM dbe_perf.get_global_workload_transaction() AS W
     GROUP by W.workload;
 
@@ -527,7 +527,7 @@ CREATE VIEW dbe_perf.session_cpu_runtime AS
       S.query,
       S.node_group,
       T.top_cpu_dn
-    FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_realtime_session_info(NULL) AS T
+    FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
     WHERE S.pid = T.threadid;
 
 CREATE VIEW dbe_perf.session_memory_runtime AS
@@ -542,7 +542,7 @@ CREATE VIEW dbe_perf.session_memory_runtime AS
     S.query,
     S.node_group,
     T.top_mem_dn
-  FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_realtime_session_info(NULL) AS T
+  FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
     WHERE S.pid = T.threadid;
 
 CREATE OR REPLACE VIEW dbe_perf.session_stat_activity AS
@@ -568,8 +568,10 @@ CREATE OR REPLACE VIEW dbe_perf.session_stat_activity AS
     ELSE S.srespool
     END AS resource_pool,
           S.query_id,
-          S.query
-  FROM pg_database D, pg_stat_get_activity(NULL) AS S, pg_authid U
+          S.query,
+          S.unique_sql_id,
+          S.trace_id
+  FROM pg_database D, pg_catalog.pg_stat_get_activity(NULL) AS S, pg_authid U
     WHERE S.datid = D.oid AND
           S.usesysid = U.oid;
 
@@ -579,7 +581,7 @@ CREATE OR REPLACE FUNCTION dbe_perf.get_global_session_stat_activity
    out client_hostname text, out client_port integer, out backend_start timestamptz,
    out xact_start timestamptz, out query_start timestamptz, out state_change timestamptz,
    out waiting boolean, out enqueue text, out state text, out resource_pool name, 
-   out query_id bigint, out query text)
+   out query_id bigint, out query text, out unique_sql_id bigint, out trace_id text)
 RETURNS setof record
 AS $$
 DECLARE
@@ -614,6 +616,8 @@ DECLARE
         resource_pool :=row_data.resource_pool;
         query_id :=row_data.query_id;
         query := row_data.query;
+        unique_sql_id := row_data.unique_sql_id;
+        trace_id := row_data.trace_id;
         return next;
       END LOOP;
     END LOOP;
@@ -625,7 +629,7 @@ CREATE VIEW dbe_perf.global_session_stat_activity AS
   SELECT * FROM dbe_perf.get_global_session_stat_activity();
 
 CREATE VIEW dbe_perf.thread_wait_status AS
-  SELECT * FROM pg_stat_get_status(NULL);
+  SELECT * FROM pg_catalog.pg_stat_get_status(NULL);
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_thread_wait_status()
 RETURNS setof dbe_perf.thread_wait_status
@@ -665,7 +669,7 @@ CREATE VIEW DBE_PERF.wlm_user_resource_runtime AS
     T.total_temp_space,
     T.used_spill_space,
     T.total_spill_space
-  FROM (select usename, (gs_wlm_user_resource_info(usename::cstring)).* from pg_user) T;
+  FROM (select usename, (pg_catalog.gs_wlm_user_resource_info(usename::cstring)).* from pg_user) T;
     
 CREATE VIEW dbe_perf.wlm_user_resource_config AS
   SELECT
@@ -679,7 +683,7 @@ CREATE VIEW dbe_perf.wlm_user_resource_config AS
     T.spacelimit,
     T.childcount,
     T.childlist
-  FROM pg_authid AS S, gs_wlm_get_user_info(NULL) AS T, pg_resource_pool AS R
+  FROM pg_authid AS S, pg_catalog.gs_wlm_get_user_info(NULL) AS T, pg_resource_pool AS R
     WHERE S.oid = T.userid AND T.rpoid = R.oid;
 
 CREATE VIEW dbe_perf.operator_history_table AS
@@ -712,7 +716,7 @@ CREATE VIEW dbe_perf.global_operator_history_table AS
 
 --history operator-level view for DM in single CN
 CREATE VIEW dbe_perf.operator_history AS
-  SELECT * FROM pg_stat_get_wlm_operator_info(0);
+  SELECT * FROM pg_catalog.pg_stat_get_wlm_operator_info(0);
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_operator_history()
 RETURNS setof dbe_perf.operator_history
@@ -741,7 +745,7 @@ CREATE VIEW dbe_perf.global_operator_history AS
 --real time operator-level view in single CN
 CREATE VIEW dbe_perf.operator_runtime AS
   SELECT t.*
-  FROM dbe_perf.session_stat_activity AS s, pg_stat_get_wlm_realtime_operator_info(NULL) as t
+  FROM dbe_perf.session_stat_activity AS s, pg_catalog.pg_stat_get_wlm_realtime_operator_info(NULL) as t
     WHERE s.query_id = t.queryid;
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_operator_runtime()
@@ -838,7 +842,7 @@ SELECT
     S.mem_top5_value,
     S.top_mem_dn,
     S.top_cpu_dn
-FROM pg_stat_get_wlm_session_info(0) S;
+FROM pg_catalog.pg_stat_get_wlm_session_info(0) S;
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_statement_complex_history()
 RETURNS setof dbe_perf.statement_complex_history
@@ -941,7 +945,7 @@ CREATE VIEW dbe_perf.statement_complex_runtime AS
     S.node_group,
     T.top_cpu_dn,
     T.top_mem_dn
-  FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_realtime_session_info(NULL) AS T
+  FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
     WHERE S.pid = T.threadid;
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_statement_complex_runtime()
@@ -982,7 +986,7 @@ CREATE VIEW dbe_perf.statement_iostat_complex_runtime AS
      S.query,
      S.node_group,
      T.curr_io_limits as curr_io_limits
-   FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_session_iostat_info(0) AS T
+   FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_session_iostat_info(0) AS T
      WHERE S.pid = T.threadid;
 
 CREATE OR REPLACE VIEW dbe_perf.statement_wlmstat_complex_runtime AS
@@ -1013,7 +1017,7 @@ CREATE OR REPLACE VIEW dbe_perf.statement_wlmstat_complex_runtime AS
           S.query,
           S.is_plana,
           S.node_group
-  FROM pg_database D, pg_stat_get_session_wlmstat(NULL) AS S, pg_authid AS U, gs_wlm_session_respool(0) AS T
+  FROM pg_database D, pg_catalog.pg_stat_get_session_wlmstat(NULL) AS S, pg_authid AS U, pg_catalog.gs_wlm_session_respool(0) AS T
     WHERE S.datid = D.oid AND
           S.usesysid = U.oid AND
           T.threadid = S.threadid;
@@ -1090,9 +1094,9 @@ CREATE VIEW dbe_perf.statio_all_indexes AS
     N.nspname AS schemaname,
     C.relname AS relname,
     I.relname AS indexrelname,
-    pg_stat_get_blocks_fetched(I.oid) -
-    pg_stat_get_blocks_hit(I.oid) AS idx_blks_read,
-    pg_stat_get_blocks_hit(I.oid) AS idx_blks_hit
+    pg_catalog.pg_stat_get_blocks_fetched(I.oid) -
+    pg_catalog.pg_stat_get_blocks_hit(I.oid) AS idx_blks_read,
+    pg_catalog.pg_stat_get_blocks_hit(I.oid) AS idx_blks_hit
   FROM pg_class C JOIN
        pg_index X ON C.oid = X.indrelid JOIN
        pg_class I ON I.oid = X.indexrelid
@@ -1203,7 +1207,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.summary_statio_all_indexes AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
          COALESCE(Ti.indexrelname, Tn.toastindexname) AS indexrelname,
-         SUM(Ti.idx_blks_read) idx_blks_read, SUM(Ti.idx_blks_hit) idx_blks_hit 
+         pg_catalog.SUM(Ti.idx_blks_read) idx_blks_read, pg_catalog.SUM(Ti.idx_blks_hit) idx_blks_hit 
     FROM dbe_perf.get_summary_statio_all_indexes() as Ti
          LEFT JOIN dbe_perf.get_local_toastname_and_toastindexname() AS Tn
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
@@ -1214,9 +1218,9 @@ CREATE VIEW dbe_perf.statio_all_sequences AS
     C.oid AS relid,
     N.nspname AS schemaname,
     C.relname AS relname,
-    pg_stat_get_blocks_fetched(C.oid) -
-    pg_stat_get_blocks_hit(C.oid) AS blks_read,
-    pg_stat_get_blocks_hit(C.oid) AS blks_hit
+    pg_catalog.pg_stat_get_blocks_fetched(C.oid) -
+    pg_catalog.pg_stat_get_blocks_hit(C.oid) AS blks_read,
+    pg_catalog.pg_stat_get_blocks_hit(C.oid) AS blks_hit
   FROM pg_class C
        LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
     WHERE C.relkind = 'S' or C.relkind = 'L';
@@ -1255,7 +1259,7 @@ CREATE VIEW dbe_perf.global_statio_all_sequences AS
 
 CREATE VIEW dbe_perf.summary_statio_all_sequences AS
   SELECT schemaname, relname, 
-         SUM(blks_read) blks_read, SUM(blks_hit) blks_hit
+         pg_catalog.SUM(blks_read) blks_read, pg_catalog.SUM(blks_hit) blks_hit
    FROM dbe_perf.get_global_statio_all_sequences() 
    GROUP BY (schemaname, relname);
 
@@ -1264,18 +1268,18 @@ CREATE VIEW dbe_perf.statio_all_tables AS
     C.oid AS relid,
     N.nspname AS schemaname,
     C.relname AS relname,
-    pg_stat_get_blocks_fetched(C.oid) -
-    pg_stat_get_blocks_hit(C.oid) AS heap_blks_read,
-    pg_stat_get_blocks_hit(C.oid) AS heap_blks_hit,
-    sum(pg_stat_get_blocks_fetched(I.indexrelid) -
-        pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_read,
-    sum(pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_hit,
-    pg_stat_get_blocks_fetched(T.oid) -
-      pg_stat_get_blocks_hit(T.oid) AS toast_blks_read,
-    pg_stat_get_blocks_hit(T.oid) AS toast_blks_hit,
-    pg_stat_get_blocks_fetched(X.oid) -
-      pg_stat_get_blocks_hit(X.oid) AS tidx_blks_read,
-    pg_stat_get_blocks_hit(X.oid) AS tidx_blks_hit
+    pg_catalog.pg_stat_get_blocks_fetched(C.oid) -
+    pg_catalog.pg_stat_get_blocks_hit(C.oid) AS heap_blks_read,
+    pg_catalog.pg_stat_get_blocks_hit(C.oid) AS heap_blks_hit,
+    pg_catalog.sum(pg_catalog.pg_stat_get_blocks_fetched(I.indexrelid) -
+        pg_catalog.pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_read,
+    pg_catalog.sum(pg_catalog.pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_hit,
+    pg_catalog.pg_stat_get_blocks_fetched(T.oid) -
+      pg_catalog.pg_stat_get_blocks_hit(T.oid) AS toast_blks_read,
+    pg_catalog.pg_stat_get_blocks_hit(T.oid) AS toast_blks_hit,
+    pg_catalog.pg_stat_get_blocks_fetched(X.oid) -
+      pg_catalog.pg_stat_get_blocks_hit(X.oid) AS tidx_blks_read,
+    pg_catalog.pg_stat_get_blocks_hit(X.oid) AS tidx_blks_hit
   FROM pg_class C LEFT JOIN
        pg_index I ON C.oid = I.indrelid LEFT JOIN
        pg_class T ON C.reltoastrelid = T.oid LEFT JOIN
@@ -1399,10 +1403,10 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW dbe_perf.summary_statio_all_tables AS
   SELECT Ti.schemaname as schemaname, COALESCE(Ti.relname, Tn.toastname) as relname,
-         SUM(Ti.heap_blks_read) heap_blks_read, SUM(Ti.heap_blks_hit) heap_blks_hit,
-         SUM(Ti.idx_blks_read) idx_blks_read, SUM(Ti.idx_blks_hit) idx_blks_hit,
-         SUM(Ti.toast_blks_read) toast_blks_read, SUM(Ti.toast_blks_hit) toast_blks_hit,
-         SUM(Ti.tidx_blks_read) tidx_blks_read, SUM(Ti.tidx_blks_hit) tidx_blks_hit
+         pg_catalog.SUM(Ti.heap_blks_read) heap_blks_read, pg_catalog.SUM(Ti.heap_blks_hit) heap_blks_hit,
+         pg_catalog.SUM(Ti.idx_blks_read) idx_blks_read, pg_catalog.SUM(Ti.idx_blks_hit) idx_blks_hit,
+         pg_catalog.SUM(Ti.toast_blks_read) toast_blks_read, pg_catalog.SUM(Ti.toast_blks_hit) toast_blks_hit,
+         pg_catalog.SUM(Ti.tidx_blks_read) tidx_blks_read, pg_catalog.SUM(Ti.tidx_blks_hit) tidx_blks_hit
     FROM dbe_perf.get_summary_statio_all_tables() Ti left join dbe_perf.get_local_toast_relation() Tn on Tn.shemaname = Ti.toastrelschemaname and Tn.relname = Ti.toastrelname
   GROUP BY (1, 2);
 
@@ -1494,7 +1498,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.summary_statio_sys_indexes AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
       COALESCE(Ti.indexrelname, Tn.toastindexname) AS indexrelname,
-      SUM(Ti.idx_blks_read) idx_blks_read, SUM(Ti.idx_blks_hit) idx_blks_hit
+      pg_catalog.SUM(Ti.idx_blks_read) idx_blks_read, pg_catalog.SUM(Ti.idx_blks_hit) idx_blks_hit
   FROM dbe_perf.get_summary_statio_sys_indexes() AS Ti
       LEFT JOIN dbe_perf.get_local_toastname_and_toastindexname() AS Tn
       ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
@@ -1539,7 +1543,7 @@ CREATE VIEW dbe_perf.global_statio_sys_sequences AS
 
 CREATE VIEW dbe_perf.summary_statio_sys_sequences AS
   SELECT schemaname, relname, 
-         SUM(blks_read) blks_read, SUM(blks_hit) blks_hit
+         pg_catalog.SUM(blks_read) blks_read, pg_catalog.SUM(blks_hit) blks_hit
     FROM dbe_perf.get_global_statio_sys_sequences() 
   GROUP BY (schemaname, relname);
 
@@ -1649,10 +1653,10 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.summary_statio_sys_tables AS
   SELECT 
     Ti.schemaname, COALESCE(Ti.relname, Tn.toastname, NULL) as relname, 
-    SUM(Ti.heap_blks_read) heap_blks_read, SUM(Ti.heap_blks_hit) heap_blks_hit,
-    SUM(Ti.idx_blks_read) idx_blks_read, SUM(Ti.idx_blks_hit) idx_blks_hit,
-    SUM(Ti.toast_blks_read) toast_blks_read, SUM(Ti.toast_blks_hit) toast_blks_hit,
-    SUM(Ti.tidx_blks_read) tidx_blks_read, SUM(Ti.tidx_blks_hit) tidx_blks_hit
+    pg_catalog.SUM(Ti.heap_blks_read) heap_blks_read, pg_catalog.SUM(Ti.heap_blks_hit) heap_blks_hit,
+    pg_catalog.SUM(Ti.idx_blks_read) idx_blks_read, pg_catalog.SUM(Ti.idx_blks_hit) idx_blks_hit,
+    pg_catalog.SUM(Ti.toast_blks_read) toast_blks_read, pg_catalog.SUM(Ti.toast_blks_hit) toast_blks_hit,
+    pg_catalog.SUM(Ti.tidx_blks_read) tidx_blks_read, pg_catalog.SUM(Ti.tidx_blks_hit) tidx_blks_hit
   FROM dbe_perf.get_summary_statio_sys_tables() as Ti 
     LEFT JOIN dbe_perf.get_local_toast_relation() Tn 
     ON Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname
@@ -1747,7 +1751,7 @@ CREATE VIEW dbe_perf.summary_statio_user_indexes AS
   SELECT
       Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
       COALESCE(Ti.indexrelname, Tn.toastindexname) AS indexrelname,
-      SUM(Ti.idx_blks_read) idx_blks_read, SUM(Ti.idx_blks_hit) idx_blks_hit 
+      pg_catalog.SUM(Ti.idx_blks_read) idx_blks_read, pg_catalog.SUM(Ti.idx_blks_hit) idx_blks_hit 
   FROM dbe_perf.get_summary_statio_user_indexes() AS Ti
       LEFT JOIN dbe_perf.get_local_toastname_and_toastindexname() AS Tn
       ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
@@ -1792,7 +1796,7 @@ CREATE VIEW dbe_perf.global_statio_user_sequences AS
 
 CREATE VIEW dbe_perf.summary_statio_user_sequences AS
   SELECT schemaname, relname, 
-         SUM(blks_read) blks_read, SUM(blks_hit) blks_hit
+         pg_catalog.SUM(blks_read) blks_read, pg_catalog.SUM(blks_hit) blks_hit
     FROM dbe_perf.get_global_statio_user_sequences() 
   GROUP BY (schemaname, relname);
 
@@ -1901,10 +1905,10 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW dbe_perf.summary_statio_user_tables AS
   SELECT Ti.schemaname as schemaname, COALESCE(Ti.relname, Tn.toastname) as relname, 
-         SUM(Ti.heap_blks_read) heap_blks_read, SUM(Ti.heap_blks_hit) heap_blks_hit,
-         SUM(Ti.idx_blks_read) idx_blks_read, SUM(Ti.idx_blks_hit) idx_blks_hit,
-         SUM(Ti.toast_blks_read) toast_blks_read, SUM(Ti.toast_blks_hit) toast_blks_hit,
-         SUM(Ti.tidx_blks_read) tidx_blks_read, SUM(Ti.tidx_blks_hit) tidx_blks_hit
+         pg_catalog.SUM(Ti.heap_blks_read) heap_blks_read, pg_catalog.SUM(Ti.heap_blks_hit) heap_blks_hit,
+         pg_catalog.SUM(Ti.idx_blks_read) idx_blks_read, pg_catalog.SUM(Ti.idx_blks_hit) idx_blks_hit,
+         pg_catalog.SUM(Ti.toast_blks_read) toast_blks_read, pg_catalog.SUM(Ti.toast_blks_hit) toast_blks_hit,
+         pg_catalog.SUM(Ti.tidx_blks_read) tidx_blks_read, pg_catalog.SUM(Ti.tidx_blks_hit) tidx_blks_hit
   FROM dbe_perf.get_summary_statio_user_tables() AS Ti LEFT JOIN dbe_perf.get_local_toast_relation() Tn 
          ON Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname
   GROUP BY (1, 2);
@@ -1924,9 +1928,9 @@ DECLARE
     query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
       query_str := 'SELECT  D.datname AS datname,
-      pg_stat_get_db_cu_mem_hit(D.oid) AS mem_hit,
-      pg_stat_get_db_cu_hdd_sync(D.oid) AS hdd_sync_read,
-      pg_stat_get_db_cu_hdd_asyn(D.oid) AS hdd_asyn_read
+      pg_catalog.pg_stat_get_db_cu_mem_hit(D.oid) AS mem_hit,
+      pg_catalog.pg_stat_get_db_cu_hdd_sync(D.oid) AS hdd_sync_read,
+      pg_catalog.pg_stat_get_db_cu_hdd_asyn(D.oid) AS hdd_asyn_read
       FROM pg_database D;';
         FOR each_node_out IN EXECUTE(query_str) LOOP
           node_name1 := row_name.node_name;
@@ -1953,25 +1957,25 @@ CREATE VIEW dbe_perf.stat_all_tables AS
     C.oid AS relid,
     N.nspname AS schemaname,
     C.relname AS relname,
-    pg_stat_get_numscans(C.oid) AS seq_scan,
-    pg_stat_get_tuples_returned(C.oid) AS seq_tup_read,
-    sum(pg_stat_get_numscans(I.indexrelid))::bigint AS idx_scan,
-    sum(pg_stat_get_tuples_fetched(I.indexrelid))::bigint +
-    pg_stat_get_tuples_fetched(C.oid) AS idx_tup_fetch,
-    pg_stat_get_tuples_inserted(C.oid) AS n_tup_ins,
-    pg_stat_get_tuples_updated(C.oid) AS n_tup_upd,
-    pg_stat_get_tuples_deleted(C.oid) AS n_tup_del,
-    pg_stat_get_tuples_hot_updated(C.oid) AS n_tup_hot_upd,
-    pg_stat_get_live_tuples(C.oid) AS n_live_tup,
-    pg_stat_get_dead_tuples(C.oid) AS n_dead_tup,
-    pg_stat_get_last_vacuum_time(C.oid) as last_vacuum,
-    pg_stat_get_last_autovacuum_time(C.oid) as last_autovacuum,
-    pg_stat_get_last_analyze_time(C.oid) as last_analyze,
-    pg_stat_get_last_autoanalyze_time(C.oid) as last_autoanalyze,
-    pg_stat_get_vacuum_count(C.oid) AS vacuum_count,
-    pg_stat_get_autovacuum_count(C.oid) AS autovacuum_count,
-    pg_stat_get_analyze_count(C.oid) AS analyze_count,
-    pg_stat_get_autoanalyze_count(C.oid) AS autoanalyze_count
+    pg_catalog.pg_stat_get_numscans(C.oid) AS seq_scan,
+    pg_catalog.pg_stat_get_tuples_returned(C.oid) AS seq_tup_read,
+    pg_catalog.sum(pg_catalog.pg_stat_get_numscans(I.indexrelid))::bigint AS idx_scan,
+    pg_catalog.sum(pg_catalog.pg_stat_get_tuples_fetched(I.indexrelid))::bigint +
+    pg_catalog.pg_stat_get_tuples_fetched(C.oid) AS idx_tup_fetch,
+    pg_catalog.pg_stat_get_tuples_inserted(C.oid) AS n_tup_ins,
+    pg_catalog.pg_stat_get_tuples_updated(C.oid) AS n_tup_upd,
+    pg_catalog.pg_stat_get_tuples_deleted(C.oid) AS n_tup_del,
+    pg_catalog.pg_stat_get_tuples_hot_updated(C.oid) AS n_tup_hot_upd,
+    pg_catalog.pg_stat_get_live_tuples(C.oid) AS n_live_tup,
+    pg_catalog.pg_stat_get_dead_tuples(C.oid) AS n_dead_tup,
+    pg_catalog.pg_stat_get_last_vacuum_time(C.oid) as last_vacuum,
+    pg_catalog.pg_stat_get_last_autovacuum_time(C.oid) as last_autovacuum,
+    pg_catalog.pg_stat_get_last_analyze_time(C.oid) as last_analyze,
+    pg_catalog.pg_stat_get_last_autoanalyze_time(C.oid) as last_autoanalyze,
+    pg_catalog.pg_stat_get_vacuum_count(C.oid) AS vacuum_count,
+    pg_catalog.pg_stat_get_autovacuum_count(C.oid) AS autovacuum_count,
+    pg_catalog.pg_stat_get_analyze_count(C.oid) AS analyze_count,
+    pg_catalog.pg_stat_get_autoanalyze_count(C.oid) AS autoanalyze_count
     FROM pg_class C LEFT JOIN
          pg_index I ON C.oid = I.indrelid
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
@@ -2112,15 +2116,15 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW dbe_perf.summary_stat_all_tables AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname, NULL) as relname,
-         SUM(Ti.seq_scan) seq_scan, SUM(Ti.seq_tup_read) seq_tup_read,
-         SUM(Ti.idx_scan) idx_scan, SUM(Ti.idx_tup_fetch) idx_tup_fetch,
-         SUM(Ti.n_tup_ins) n_tup_ins, SUM(Ti.n_tup_upd) n_tup_upd, 
-         SUM(Ti.n_tup_del) n_tup_del, SUM(Ti.n_tup_hot_upd) n_tup_hot_upd,
-         SUM(Ti.n_live_tup) n_live_tup, SUM(Ti.n_dead_tup) n_dead_tup,
-         MAX(Ti.last_vacuum) last_vacuum, MAX(Ti.last_autovacuum) last_autovacuum,
-         MAX(Ti.last_analyze) last_analyze, MAX(Ti.last_autoanalyze) last_autoanalyze,
-         SUM(Ti.vacuum_count) vacuum_count, SUM(Ti.autovacuum_count) autovacuum_count,
-         SUM(Ti.analyze_count) analyze_count, SUM(Ti.autoanalyze_count) autoanalyze_count
+         pg_catalog.SUM(Ti.seq_scan) seq_scan, pg_catalog.SUM(Ti.seq_tup_read) seq_tup_read,
+         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch,
+         pg_catalog.SUM(Ti.n_tup_ins) n_tup_ins, pg_catalog.SUM(Ti.n_tup_upd) n_tup_upd, 
+         pg_catalog.SUM(Ti.n_tup_del) n_tup_del, pg_catalog.SUM(Ti.n_tup_hot_upd) n_tup_hot_upd,
+         pg_catalog.SUM(Ti.n_live_tup) n_live_tup, pg_catalog.SUM(Ti.n_dead_tup) n_dead_tup,
+         pg_catalog.MAX(Ti.last_vacuum) last_vacuum, pg_catalog.MAX(Ti.last_autovacuum) last_autovacuum,
+         pg_catalog.MAX(Ti.last_analyze) last_analyze, pg_catalog.MAX(Ti.last_autoanalyze) last_autoanalyze,
+         pg_catalog.SUM(Ti.vacuum_count) vacuum_count, pg_catalog.SUM(Ti.autovacuum_count) autovacuum_count,
+         pg_catalog.SUM(Ti.analyze_count) analyze_count, pg_catalog.SUM(Ti.autoanalyze_count) autoanalyze_count
     FROM (SELECT * FROM dbe_perf.get_summary_stat_all_tables()) AS Ti
     LEFT JOIN dbe_perf.get_local_toast_relation() Tn
          ON Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname
@@ -2133,9 +2137,9 @@ CREATE VIEW dbe_perf.stat_all_indexes AS
     N.nspname AS schemaname,
     C.relname AS relname,
     I.relname AS indexrelname,
-    pg_stat_get_numscans(I.oid) AS idx_scan,
-    pg_stat_get_tuples_returned(I.oid) AS idx_tup_read,
-    pg_stat_get_tuples_fetched(I.oid) AS idx_tup_fetch
+    pg_catalog.pg_stat_get_numscans(I.oid) AS idx_scan,
+    pg_catalog.pg_stat_get_tuples_returned(I.oid) AS idx_tup_read,
+    pg_catalog.pg_stat_get_tuples_fetched(I.oid) AS idx_tup_fetch
     FROM pg_class C JOIN
          pg_index X ON C.oid = X.indrelid JOIN
          pg_class I ON I.oid = X.indexrelid
@@ -2229,7 +2233,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.summary_stat_all_indexes AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
          COALESCE(Ti.indexrelname, Tn.toastindexname) AS indexrelname,
-         SUM(Ti.idx_scan) idx_scan, SUM(Ti.idx_tup_read) idx_tup_read, SUM(Ti.idx_tup_fetch) idx_tup_fetch
+         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_read) idx_tup_read, pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch
     FROM dbe_perf.get_summary_stat_all_indexes() AS Ti
          LEFT JOIN dbe_perf.get_local_toastname_and_toastindexname() AS Tn
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
@@ -2375,15 +2379,15 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW dbe_perf.summary_stat_sys_tables AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname, NULL) AS relname, 
-         SUM(Ti.seq_scan) seq_scan, SUM(Ti.seq_tup_read) seq_tup_read,
-         SUM(Ti.idx_scan) idx_scan, SUM(Ti.idx_tup_fetch) idx_tup_fetch,
-         SUM(Ti.n_tup_ins) n_tup_ins, SUM(Ti.n_tup_upd) n_tup_upd, 
-         SUM(Ti.n_tup_del) n_tup_del, SUM(Ti.n_tup_hot_upd) n_tup_hot_upd,
-         SUM(Ti.n_live_tup) n_live_tup, SUM(Ti.n_dead_tup) n_dead_tup,
-         MAX(Ti.last_vacuum) last_vacuum, MAX(Ti.last_autovacuum) last_autovacuum,
-         MAX(Ti.last_analyze) last_analyze, MAX(Ti.last_autoanalyze) last_autoanalyze,
-         SUM(Ti.vacuum_count) vacuum_count, SUM(Ti.autovacuum_count) autovacuum_count,
-         SUM(Ti.analyze_count) analyze_count, SUM(Ti.autoanalyze_count) autoanalyze_count
+         pg_catalog.SUM(Ti.seq_scan) seq_scan, pg_catalog.SUM(Ti.seq_tup_read) seq_tup_read,
+         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch,
+         pg_catalog.SUM(Ti.n_tup_ins) n_tup_ins, pg_catalog.SUM(Ti.n_tup_upd) n_tup_upd, 
+         pg_catalog.SUM(Ti.n_tup_del) n_tup_del, pg_catalog.SUM(Ti.n_tup_hot_upd) n_tup_hot_upd,
+         pg_catalog.SUM(Ti.n_live_tup) n_live_tup, pg_catalog.SUM(Ti.n_dead_tup) n_dead_tup,
+         pg_catalog.MAX(Ti.last_vacuum) last_vacuum, pg_catalog.MAX(Ti.last_autovacuum) last_autovacuum,
+         pg_catalog.MAX(Ti.last_analyze) last_analyze, pg_catalog.MAX(Ti.last_autoanalyze) last_autoanalyze,
+         pg_catalog.SUM(Ti.vacuum_count) vacuum_count, pg_catalog.SUM(Ti.autovacuum_count) autovacuum_count,
+         pg_catalog.SUM(Ti.analyze_count) analyze_count, pg_catalog.SUM(Ti.autoanalyze_count) autoanalyze_count
     FROM dbe_perf.get_summary_stat_sys_tables() as Ti LEFT JOIN dbe_perf.get_local_toast_relation() as Tn 
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
     GROUP BY (1, 2);
@@ -2480,7 +2484,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.summary_stat_sys_indexes AS
   SELECT Ti.schemaname AS schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
          COALESCE(Ti.indexrelname, Tn.toastindexname) AS indexrelname,
-         SUM(Ti.idx_scan) idx_scan, SUM(Ti.idx_tup_read) idx_tup_read, SUM(Ti.idx_tup_fetch) idx_tup_fetch
+         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_read) idx_tup_read, pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch
     FROM dbe_perf.get_summary_stat_sys_indexes() AS Ti
          LEFT JOIN dbe_perf.get_local_toastname_and_toastindexname() AS Tn
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
@@ -2626,15 +2630,15 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW dbe_perf.summary_stat_user_tables AS
   SELECT Ti.schemaname AS schemaname, COALESCE(Ti.relname, Tn.toastname, NULL) AS relname, 
-         SUM(Ti.seq_scan) seq_scan, SUM(Ti.seq_tup_read) seq_tup_read,
-         SUM(Ti.idx_scan) idx_scan, SUM(Ti.idx_tup_fetch) idx_tup_fetch,
-         SUM(Ti.n_tup_ins) n_tup_ins, SUM(Ti.n_tup_upd) n_tup_upd, 
-         SUM(Ti.n_tup_del) n_tup_del, SUM(Ti.n_tup_hot_upd) n_tup_hot_upd,
-         SUM(Ti.n_live_tup) n_live_tup, SUM(Ti.n_dead_tup) n_dead_tup,
-         MAX(Ti.last_vacuum) last_vacuum, MAX(Ti.last_autovacuum) last_autovacuum,
-         MAX(Ti.last_analyze) last_analyze, MAX(Ti.last_autoanalyze) last_autoanalyze,
-         SUM(Ti.vacuum_count) vacuum_count, SUM(Ti.autovacuum_count) autovacuum_count,
-         SUM(Ti.analyze_count) analyze_count, SUM(Ti.autoanalyze_count) autoanalyze_count
+         pg_catalog.SUM(Ti.seq_scan) seq_scan, pg_catalog.SUM(Ti.seq_tup_read) seq_tup_read,
+         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch,
+         pg_catalog.SUM(Ti.n_tup_ins) n_tup_ins, pg_catalog.SUM(Ti.n_tup_upd) n_tup_upd, 
+         pg_catalog.SUM(Ti.n_tup_del) n_tup_del, pg_catalog.SUM(Ti.n_tup_hot_upd) n_tup_hot_upd,
+         pg_catalog.SUM(Ti.n_live_tup) n_live_tup, pg_catalog.SUM(Ti.n_dead_tup) n_dead_tup,
+         pg_catalog.MAX(Ti.last_vacuum) last_vacuum, pg_catalog.MAX(Ti.last_autovacuum) last_autovacuum,
+         pg_catalog.MAX(Ti.last_analyze) last_analyze, pg_catalog.MAX(Ti.last_autoanalyze) last_autoanalyze,
+         pg_catalog.SUM(Ti.vacuum_count) vacuum_count, pg_catalog.SUM(Ti.autovacuum_count) autovacuum_count,
+         pg_catalog.SUM(Ti.analyze_count) analyze_count, pg_catalog.SUM(Ti.autoanalyze_count) autoanalyze_count
     FROM dbe_perf.get_summary_stat_user_tables() AS Ti LEFT JOIN dbe_perf.get_local_toast_relation() AS Tn 
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
     GROUP BY (1, 2);
@@ -2731,7 +2735,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE VIEW dbe_perf.summary_stat_user_indexes AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
          COALESCE(Ti.indexrelname, Tn.toastindexname) AS indexrelname,
-         SUM(Ti.idx_scan) idx_scan, SUM(Ti.idx_tup_read) idx_tup_read, SUM(Ti.idx_tup_fetch) idx_tup_fetch
+         pg_catalog.SUM(Ti.idx_scan) idx_scan, pg_catalog.SUM(Ti.idx_tup_read) idx_tup_read, pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch
     FROM dbe_perf.get_summary_stat_user_indexes() as Ti
          LEFT JOIN dbe_perf.get_local_toastname_and_toastindexname() AS Tn
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
@@ -2741,24 +2745,24 @@ CREATE VIEW dbe_perf.stat_database AS
   SELECT
     D.oid AS datid,
     D.datname AS datname,
-    pg_stat_get_db_numbackends(D.oid) AS numbackends,
-    pg_stat_get_db_xact_commit(D.oid) AS xact_commit,
-    pg_stat_get_db_xact_rollback(D.oid) AS xact_rollback,
-    pg_stat_get_db_blocks_fetched(D.oid) -
-    pg_stat_get_db_blocks_hit(D.oid) AS blks_read,
-    pg_stat_get_db_blocks_hit(D.oid) AS blks_hit,
-    pg_stat_get_db_tuples_returned(D.oid) AS tup_returned,
-    pg_stat_get_db_tuples_fetched(D.oid) AS tup_fetched,
-    pg_stat_get_db_tuples_inserted(D.oid) AS tup_inserted,
-    pg_stat_get_db_tuples_updated(D.oid) AS tup_updated,
-    pg_stat_get_db_tuples_deleted(D.oid) AS tup_deleted,
-    pg_stat_get_db_conflict_all(D.oid) AS conflicts,
-    pg_stat_get_db_temp_files(D.oid) AS temp_files,
-    pg_stat_get_db_temp_bytes(D.oid) AS temp_bytes,
-    pg_stat_get_db_deadlocks(D.oid) AS deadlocks,
-    pg_stat_get_db_blk_read_time(D.oid) AS blk_read_time,
-    pg_stat_get_db_blk_write_time(D.oid) AS blk_write_time,
-    pg_stat_get_db_stat_reset_time(D.oid) AS stats_reset
+    pg_catalog.pg_stat_get_db_numbackends(D.oid) AS numbackends,
+    pg_catalog.pg_stat_get_db_xact_commit(D.oid) AS xact_commit,
+    pg_catalog.pg_stat_get_db_xact_rollback(D.oid) AS xact_rollback,
+    pg_catalog.pg_stat_get_db_blocks_fetched(D.oid) -
+    pg_catalog.pg_stat_get_db_blocks_hit(D.oid) AS blks_read,
+    pg_catalog.pg_stat_get_db_blocks_hit(D.oid) AS blks_hit,
+    pg_catalog.pg_stat_get_db_tuples_returned(D.oid) AS tup_returned,
+    pg_catalog.pg_stat_get_db_tuples_fetched(D.oid) AS tup_fetched,
+    pg_catalog.pg_stat_get_db_tuples_inserted(D.oid) AS tup_inserted,
+    pg_catalog.pg_stat_get_db_tuples_updated(D.oid) AS tup_updated,
+    pg_catalog.pg_stat_get_db_tuples_deleted(D.oid) AS tup_deleted,
+    pg_catalog.pg_stat_get_db_conflict_all(D.oid) AS conflicts,
+    pg_catalog.pg_stat_get_db_temp_files(D.oid) AS temp_files,
+    pg_catalog.pg_stat_get_db_temp_bytes(D.oid) AS temp_bytes,
+    pg_catalog.pg_stat_get_db_deadlocks(D.oid) AS deadlocks,
+    pg_catalog.pg_stat_get_db_blk_read_time(D.oid) AS blk_read_time,
+    pg_catalog.pg_stat_get_db_blk_write_time(D.oid) AS blk_write_time,
+    pg_catalog.pg_stat_get_db_stat_reset_time(D.oid) AS stats_reset
   FROM pg_database D;
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_database
@@ -2820,11 +2824,11 @@ CREATE VIEW dbe_perf.summary_stat_database AS
     FROM
       dbe_perf.stat_database AS SUMMARY_ITEM,
       (SELECT datname,
-         SUM(numbackends) numbackends, SUM(xact_commit) xact_commit, SUM(xact_rollback) xact_rollback,
-         SUM(blks_read) blks_read, SUM(blks_hit) blks_hit, SUM(tup_returned) tup_returned,
-         SUM(tup_fetched) tup_fetched, SUM(temp_files) temp_files, 
-         SUM(temp_bytes) temp_bytes, SUM(blk_read_time) blk_read_time, 
-         SUM(blk_write_time) blk_write_time, MAX(stats_reset) stats_reset
+         pg_catalog.SUM(numbackends) numbackends, pg_catalog.SUM(xact_commit) xact_commit, pg_catalog.SUM(xact_rollback) xact_rollback,
+         pg_catalog.SUM(blks_read) blks_read, pg_catalog.SUM(blks_hit) blks_hit, pg_catalog.SUM(tup_returned) tup_returned,
+         pg_catalog.SUM(tup_fetched) tup_fetched, pg_catalog.SUM(temp_files) temp_files, 
+         pg_catalog.SUM(temp_bytes) temp_bytes, pg_catalog.SUM(blk_read_time) blk_read_time, 
+         pg_catalog.SUM(blk_write_time) blk_write_time, pg_catalog.MAX(stats_reset) stats_reset
       FROM dbe_perf.get_global_stat_database() GROUP BY (datname)) AS ALL_NODES
     WHERE ALL_NODES.datname = SUMMARY_ITEM.datname;
       
@@ -2832,11 +2836,11 @@ CREATE VIEW dbe_perf.stat_database_conflicts AS
   SELECT
     D.oid AS datid,
     D.datname AS datname,
-    pg_stat_get_db_conflict_tablespace(D.oid) AS confl_tablespace,
-    pg_stat_get_db_conflict_lock(D.oid) AS confl_lock,
-    pg_stat_get_db_conflict_snapshot(D.oid) AS confl_snapshot,
-    pg_stat_get_db_conflict_bufferpin(D.oid) AS confl_bufferpin,
-    pg_stat_get_db_conflict_startup_deadlock(D.oid) AS confl_deadlock
+    pg_catalog.pg_stat_get_db_conflict_tablespace(D.oid) AS confl_tablespace,
+    pg_catalog.pg_stat_get_db_conflict_lock(D.oid) AS confl_lock,
+    pg_catalog.pg_stat_get_db_conflict_snapshot(D.oid) AS confl_snapshot,
+    pg_catalog.pg_stat_get_db_conflict_bufferpin(D.oid) AS confl_bufferpin,
+    pg_catalog.pg_stat_get_db_conflict_startup_deadlock(D.oid) AS confl_deadlock
   FROM pg_database D;
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_database_conflicts
@@ -2876,11 +2880,11 @@ CREATE VIEW dbe_perf.global_stat_database_conflicts AS
 CREATE VIEW dbe_perf.summary_stat_database_conflicts AS
   SELECT
     D.datname AS datname,
-    pg_stat_get_db_conflict_tablespace(D.oid) AS confl_tablespace,
-    pg_stat_get_db_conflict_lock(D.oid) AS confl_lock,
-    pg_stat_get_db_conflict_snapshot(D.oid) AS confl_snapshot,
-    pg_stat_get_db_conflict_bufferpin(D.oid) AS confl_bufferpin,
-    pg_stat_get_db_conflict_startup_deadlock(D.oid) AS confl_deadlock
+    pg_catalog.pg_stat_get_db_conflict_tablespace(D.oid) AS confl_tablespace,
+    pg_catalog.pg_stat_get_db_conflict_lock(D.oid) AS confl_lock,
+    pg_catalog.pg_stat_get_db_conflict_snapshot(D.oid) AS confl_snapshot,
+    pg_catalog.pg_stat_get_db_conflict_bufferpin(D.oid) AS confl_bufferpin,
+    pg_catalog.pg_stat_get_db_conflict_startup_deadlock(D.oid) AS confl_deadlock
   FROM pg_database D;
 
 CREATE VIEW dbe_perf.stat_xact_all_tables AS
@@ -2888,15 +2892,15 @@ CREATE VIEW dbe_perf.stat_xact_all_tables AS
     C.oid AS relid,
     N.nspname AS schemaname,
     C.relname AS relname,
-    pg_stat_get_xact_numscans(C.oid) AS seq_scan,
-    pg_stat_get_xact_tuples_returned(C.oid) AS seq_tup_read,
-    sum(pg_stat_get_xact_numscans(I.indexrelid))::bigint AS idx_scan,
-    sum(pg_stat_get_xact_tuples_fetched(I.indexrelid))::bigint +
-    pg_stat_get_xact_tuples_fetched(C.oid) AS idx_tup_fetch,
-    pg_stat_get_xact_tuples_inserted(C.oid) AS n_tup_ins,
-    pg_stat_get_xact_tuples_updated(C.oid) AS n_tup_upd,
-    pg_stat_get_xact_tuples_deleted(C.oid) AS n_tup_del,
-    pg_stat_get_xact_tuples_hot_updated(C.oid) AS n_tup_hot_upd
+    pg_catalog.pg_stat_get_xact_numscans(C.oid) AS seq_scan,
+    pg_catalog.pg_stat_get_xact_tuples_returned(C.oid) AS seq_tup_read,
+    pg_catalog.sum(pg_catalog.pg_stat_get_xact_numscans(I.indexrelid))::bigint AS idx_scan,
+    pg_catalog.sum(pg_catalog.pg_stat_get_xact_tuples_fetched(I.indexrelid))::bigint +
+    pg_catalog.pg_stat_get_xact_tuples_fetched(C.oid) AS idx_tup_fetch,
+    pg_catalog.pg_stat_get_xact_tuples_inserted(C.oid) AS n_tup_ins,
+    pg_catalog.pg_stat_get_xact_tuples_updated(C.oid) AS n_tup_upd,
+    pg_catalog.pg_stat_get_xact_tuples_deleted(C.oid) AS n_tup_del,
+    pg_catalog.pg_stat_get_xact_tuples_hot_updated(C.oid) AS n_tup_hot_upd
   FROM pg_class C LEFT JOIN
        pg_index I ON C.oid = I.indrelid
        LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
@@ -3021,9 +3025,9 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW dbe_perf.summary_stat_xact_all_tables AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname, NULL) AS relname,
-         SUM(Ti.seq_scan) seq_scan, SUM(Ti.seq_tup_read) seq_tup_read, SUM(Ti.idx_scan) idx_scan,
-         SUM(Ti.idx_tup_fetch) idx_tup_fetch, SUM(Ti.n_tup_ins) n_tup_ins, SUM(Ti.n_tup_upd) n_tup_upd,
-         SUM(Ti.n_tup_del) n_tup_del, SUM(Ti.n_tup_hot_upd) n_tup_hot_upd
+         pg_catalog.SUM(Ti.seq_scan) seq_scan, pg_catalog.SUM(Ti.seq_tup_read) seq_tup_read, pg_catalog.SUM(Ti.idx_scan) idx_scan,
+         pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch, pg_catalog.SUM(Ti.n_tup_ins) n_tup_ins, pg_catalog.SUM(Ti.n_tup_upd) n_tup_upd,
+         pg_catalog.SUM(Ti.n_tup_del) n_tup_del, pg_catalog.SUM(Ti.n_tup_hot_upd) n_tup_hot_upd
     FROM dbe_perf.get_summary_stat_xact_all_tables() as Ti LEFT JOIN dbe_perf.get_local_toast_relation() AS Tn 
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
     GROUP BY (1, 2);
@@ -3132,9 +3136,9 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW dbe_perf.summary_stat_xact_sys_tables AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
-         SUM(Ti.seq_scan) seq_scan, SUM(Ti.seq_tup_read) seq_tup_read, SUM(Ti.idx_scan) idx_scan,
-         SUM(Ti.idx_tup_fetch) idx_tup_fetch, SUM(Ti.n_tup_ins) n_tup_ins, SUM(Ti.n_tup_upd) n_tup_upd,
-         SUM(Ti.n_tup_del) n_tup_del, SUM(Ti.n_tup_hot_upd) n_tup_hot_upd
+         pg_catalog.SUM(Ti.seq_scan) seq_scan, pg_catalog.SUM(Ti.seq_tup_read) seq_tup_read, pg_catalog.SUM(Ti.idx_scan) idx_scan,
+         pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch, pg_catalog.SUM(Ti.n_tup_ins) n_tup_ins, pg_catalog.SUM(Ti.n_tup_upd) n_tup_upd,
+         pg_catalog.SUM(Ti.n_tup_del) n_tup_del, pg_catalog.SUM(Ti.n_tup_hot_upd) n_tup_hot_upd
     FROM dbe_perf.get_summary_stat_xact_sys_tables() as Ti LEFT JOIN dbe_perf.get_local_toast_relation() AS Tn
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
     GROUP BY (1, 2);
@@ -3243,9 +3247,9 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW dbe_perf.summary_stat_xact_user_tables AS
   SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname) AS relname,
-         SUM(Ti.seq_scan) seq_scan, SUM(Ti.seq_tup_read) seq_tup_read, SUM(Ti.idx_scan) idx_scan,
-         SUM(Ti.idx_tup_fetch) idx_tup_fetch, SUM(Ti.n_tup_ins) n_tup_ins, SUM(Ti.n_tup_upd) n_tup_upd,
-         SUM(Ti.n_tup_del) n_tup_del, SUM(Ti.n_tup_hot_upd) n_tup_hot_upd
+         pg_catalog.SUM(Ti.seq_scan) seq_scan, pg_catalog.SUM(Ti.seq_tup_read) seq_tup_read, pg_catalog.SUM(Ti.idx_scan) idx_scan,
+         pg_catalog.SUM(Ti.idx_tup_fetch) idx_tup_fetch, pg_catalog.SUM(Ti.n_tup_ins) n_tup_ins, pg_catalog.SUM(Ti.n_tup_upd) n_tup_upd,
+         pg_catalog.SUM(Ti.n_tup_del) n_tup_del, pg_catalog.SUM(Ti.n_tup_hot_upd) n_tup_hot_upd
     FROM dbe_perf.get_summary_stat_xact_user_tables() AS Ti LEFT JOIN dbe_perf.get_local_toast_relation() AS Tn
          ON (Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname)
     GROUP BY (1, 2);
@@ -3255,9 +3259,9 @@ CREATE VIEW dbe_perf.stat_user_functions AS
             P.oid AS funcid,
             N.nspname AS schemaname,
             P.proname AS funcname,
-            pg_stat_get_function_calls(P.oid) AS calls,
-            pg_stat_get_function_total_time(P.oid) AS total_time,
-            pg_stat_get_function_self_time(P.oid) AS self_time
+            pg_catalog.pg_stat_get_function_calls(P.oid) AS calls,
+            pg_catalog.pg_stat_get_function_total_time(P.oid) AS total_time,
+            pg_catalog.pg_stat_get_function_self_time(P.oid) AS self_time
     FROM pg_proc P LEFT JOIN pg_namespace N ON (N.oid = P.pronamespace)
     WHERE P.prolang != 12  -- fast check to eliminate built-in functions
           AND pg_stat_get_function_calls(P.oid) IS NOT NULL;
@@ -3297,7 +3301,7 @@ CREATE VIEW dbe_perf.global_stat_user_functions AS
 
 CREATE VIEW dbe_perf.summary_stat_user_functions AS
   SELECT schemaname, funcname,
-         SUM(calls) calls, SUM(total_time) total_time, SUM(self_time) self_time
+         pg_catalog.SUM(calls) calls, pg_catalog.SUM(total_time) total_time, pg_catalog.SUM(self_time) self_time
     FROM dbe_perf.get_global_stat_user_functions() 
     GROUP BY (schemaname, funcname);
 
@@ -3306,12 +3310,12 @@ CREATE VIEW dbe_perf.stat_xact_user_functions AS
     P.oid AS funcid,
     N.nspname AS schemaname,
     P.proname AS funcname,
-    pg_stat_get_xact_function_calls(P.oid) AS calls,
-    pg_stat_get_xact_function_total_time(P.oid) AS total_time,
-    pg_stat_get_xact_function_self_time(P.oid) AS self_time
+    pg_catalog.pg_stat_get_xact_function_calls(P.oid) AS calls,
+    pg_catalog.pg_stat_get_xact_function_total_time(P.oid) AS total_time,
+    pg_catalog.pg_stat_get_xact_function_self_time(P.oid) AS self_time
   FROM pg_proc P LEFT JOIN pg_namespace N ON (N.oid = P.pronamespace)
     WHERE P.prolang != 12  -- fast check to eliminate built-in functions
-          AND pg_stat_get_xact_function_calls(P.oid) IS NOT NULL;
+          AND pg_catalog.pg_stat_get_xact_function_calls(P.oid) IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_xact_user_functions
   (OUT node_name name, OUT funcid oid, OUT schemaname name, OUT funcname name, OUT calls bigint,
@@ -3348,7 +3352,7 @@ CREATE VIEW dbe_perf.global_stat_xact_user_functions AS
 
 CREATE VIEW dbe_perf.summary_stat_xact_user_functions AS
   SELECT schemaname, funcname,
-         SUM(calls) calls, SUM(total_time) total_time, SUM(self_time) self_time
+         pg_catalog.SUM(calls) calls, pg_catalog.SUM(total_time) total_time, pg_catalog.SUM(self_time) self_time
     FROM dbe_perf.get_global_stat_xact_user_functions() 
     GROUP BY (schemaname, funcname);
 
@@ -3390,8 +3394,8 @@ CREATE VIEW dbe_perf.global_stat_bad_block AS
 
 CREATE VIEW dbe_perf.summary_stat_bad_block AS
   SELECT databaseid, tablespaceid, relfilenode,
-         SUM(forknum) forknum, SUM(error_count) error_count,
-         MIN(first_time) first_time, MAX(last_time) last_time
+         pg_catalog.SUM(forknum) forknum, pg_catalog.SUM(error_count) error_count,
+         pg_catalog.MIN(first_time) first_time, pg_catalog.MAX(last_time) last_time
     FROM dbe_perf.get_global_stat_bad_block() 
     GROUP BY (databaseid, tablespaceid, relfilenode);
 
@@ -3435,13 +3439,13 @@ CREATE VIEW dbe_perf.global_file_redo_iostat AS
 
 CREATE VIEW dbe_perf.summary_file_redo_iostat AS 
   SELECT 
-    sum(phywrts) AS phywrts,
-    sum(phyblkwrt) AS phyblkwrt,
-    sum(writetim) AS writetim,
-    ((sum(writetim) / greatest(sum(phywrts), 1))::bigint) AS avgiotim,
-    max(lstiotim) AS lstiotim,
-    min(miniotim) AS miniotim,
-    max(maxiowtm) AS maxiowtm
+    pg_catalog.sum(phywrts) AS phywrts,
+    pg_catalog.sum(phyblkwrt) AS phyblkwrt,
+    pg_catalog.sum(writetim) AS writetim,
+    ((pg_catalog.sum(writetim) / greatest(pg_catalog.sum(phywrts), 1))::bigint) AS avgiotim,
+    pg_catalog.max(lstiotim) AS lstiotim,
+    pg_catalog.min(miniotim) AS miniotim,
+    pg_catalog.max(maxiowtm) AS maxiowtm
     FROM dbe_perf.get_global_file_redo_iostat();
 
 CREATE VIEW dbe_perf.local_rel_iostat AS
@@ -3480,8 +3484,8 @@ CREATE VIEW dbe_perf.global_rel_iostat AS
 
 CREATE VIEW dbe_perf.summary_rel_iostat AS
   SELECT
-    sum(phyrds) AS phyrds, sum(phywrts) AS phywrts, sum(phyblkrd) AS phyblkrd,
-    sum(phyblkwrt) AS phyblkwrt
+    pg_catalog.sum(phyrds) AS phyrds, pg_catalog.sum(phywrts) AS phywrts, pg_catalog.sum(phyblkrd) AS phyblkrd,
+    pg_catalog.sum(phyblkwrt) AS phyblkwrt
     FROM dbe_perf.get_global_rel_iostat();
 
 
@@ -3532,10 +3536,10 @@ CREATE VIEW dbe_perf.global_file_iostat AS
 CREATE VIEW dbe_perf.summary_file_iostat AS 
   SELECT 
     filenum, dbid, spcid,
-    sum(phyrds) AS phyrds, sum(phywrts) AS phywrts, sum(phyblkrd) AS phyblkrd,
-    sum(phyblkwrt) AS phyblkwrt, sum(readtim) AS readtim, sum(writetim) AS writetim,
-    ((sum(readtim + writetim) / greatest(sum(phyrds + phywrts), 1))::bigint) AS avgiotim,
-    max(lstiotim) AS lstiotim, min(miniotim) AS miniotim, max(maxiowtm) AS maxiowtm
+    pg_catalog.sum(phyrds) AS phyrds, pg_catalog.sum(phywrts) AS phywrts, pg_catalog.sum(phyblkrd) AS phyblkrd,
+    pg_catalog.sum(phyblkwrt) AS phyblkwrt, pg_catalog.sum(readtim) AS readtim, pg_catalog.sum(writetim) AS writetim,
+    ((pg_catalog.sum(readtim + writetim) / greatest(pg_catalog.sum(phyrds + phywrts), 1))::bigint) AS avgiotim,
+    pg_catalog.max(lstiotim) AS lstiotim, pg_catalog.min(miniotim) AS miniotim, pg_catalog.max(maxiowtm) AS maxiowtm
     FROM dbe_perf.get_global_file_iostat()
     GROUP by (filenum, dbid, spcid);
 
@@ -3740,7 +3744,7 @@ CREATE VIEW dbe_perf.replication_stat AS
     W.receiver_replay_location,
     W.sync_priority,
     W.sync_state
-    FROM pg_stat_get_activity(NULL) AS S, pg_authid U,
+    FROM pg_catalog.pg_stat_get_activity(NULL) AS S, pg_authid U,
          pg_stat_get_wal_senders() AS W
     WHERE S.usesysid = U.oid AND
           S.pid = W.pid;
@@ -3988,7 +3992,8 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
    OUT lwlock_time bigint,
    OUT lwlock_wait_time bigint,
    OUT details bytea,
-   OUT is_slow_sql bool)
+   OUT is_slow_sql bool,
+   OUT trace_id text)
  RETURNS setof record
  AS $$
  DECLARE
@@ -4055,6 +4060,7 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
           lwlock_wait_time := row_data.lwlock_wait_time;
           details := row_data.details;
           is_slow_sql := row_data.is_slow_sql;
+          trace_id := row_data.trace_id;
           return next;
        END LOOP;
     END LOOP;
@@ -4116,7 +4122,8 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
    OUT lwlock_time bigint,
    OUT lwlock_wait_time bigint,
    OUT details bytea,
-   OUT is_slow_sql bool)
+   OUT is_slow_sql bool,
+   OUT trace_id text)
  RETURNS setof record
  AS $$
  DECLARE
@@ -4183,6 +4190,7 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
           lwlock_wait_time := row_data.lwlock_wait_time;
           details := row_data.details;
           is_slow_sql := row_data.is_slow_sql;
+          trace_id := row_data.trace_id;
           return next;
        END LOOP;
     END LOOP;
@@ -4250,22 +4258,22 @@ CREATE VIEW dbe_perf.global_statement_count AS
 CREATE VIEW dbe_perf.summary_statement_count AS
   SELECT 
     user_name, 
-    SUM(select_count) AS select_count, SUM(update_count) AS update_count,
-    SUM(insert_count) AS insert_count, SUM(delete_count) AS delete_count,
-    SUM(mergeinto_count) AS mergeinto_count, SUM(ddl_count) AS ddl_count,
-    SUM(dml_count) AS dml_count, SUM(dcl_count) AS dcl_count,
-    SUM(total_select_elapse) AS total_select_elapse,
-    ((SUM(total_select_elapse) / greatest(SUM(select_count), 1))::bigint) AS avg_select_elapse,
-    MAX(max_select_elapse) AS max_select_elapse, MIN(min_select_elapse) AS min_select_elapse,
-    SUM(total_update_elapse) AS total_update_elapse,
-    ((SUM(total_update_elapse) / greatest(SUM(update_count), 1))::bigint) AS avg_update_elapse,
-    MAX(max_update_elapse) AS max_update_elapse, MIN(min_update_elapse) AS min_update_elapse,
-    SUM(total_insert_elapse) AS total_insert_elapse,
-    ((SUM(total_insert_elapse) / greatest(SUM(insert_count), 1))::bigint) AS avg_insert_elapse,
-    MAX(max_insert_elapse) AS max_insert_elapse, MIN(min_insert_elapse) AS min_insert_elapse,
-    SUM(total_delete_elapse) AS total_delete_elapse,
-    ((SUM(total_delete_elapse) / greatest(SUM(delete_count), 1))::bigint) AS avg_delete_elapse,
-    MAX(max_delete_elapse) AS max_delete_elapse, MIN(min_delete_elapse) AS min_delete_elapse
+    pg_catalog.SUM(select_count) AS select_count, pg_catalog.SUM(update_count) AS update_count,
+    pg_catalog.SUM(insert_count) AS insert_count, pg_catalog.SUM(delete_count) AS delete_count,
+    pg_catalog.SUM(mergeinto_count) AS mergeinto_count, pg_catalog.SUM(ddl_count) AS ddl_count,
+    pg_catalog.SUM(dml_count) AS dml_count, pg_catalog.SUM(dcl_count) AS dcl_count,
+    pg_catalog.SUM(total_select_elapse) AS total_select_elapse,
+    ((pg_catalog.SUM(total_select_elapse) / greatest(pg_catalog.SUM(select_count), 1))::bigint) AS avg_select_elapse,
+    pg_catalog.MAX(max_select_elapse) AS max_select_elapse, pg_catalog.MIN(min_select_elapse) AS min_select_elapse,
+    pg_catalog.SUM(total_update_elapse) AS total_update_elapse,
+    ((pg_catalog.SUM(total_update_elapse) / greatest(pg_catalog.SUM(update_count), 1))::bigint) AS avg_update_elapse,
+    pg_catalog.MAX(max_update_elapse) AS max_update_elapse, pg_catalog.MIN(min_update_elapse) AS min_update_elapse,
+    pg_catalog.SUM(total_insert_elapse) AS total_insert_elapse,
+    ((pg_catalog.SUM(total_insert_elapse) / greatest(pg_catalog.SUM(insert_count), 1))::bigint) AS avg_insert_elapse,
+    pg_catalog.MAX(max_insert_elapse) AS max_insert_elapse, pg_catalog.MIN(min_insert_elapse) AS min_insert_elapse,
+    pg_catalog.SUM(total_delete_elapse) AS total_delete_elapse,
+    ((pg_catalog.SUM(total_delete_elapse) / greatest(pg_catalog.SUM(delete_count), 1))::bigint) AS avg_delete_elapse,
+    pg_catalog.MAX(max_delete_elapse) AS max_delete_elapse, pg_catalog.MIN(min_delete_elapse) AS min_delete_elapse
     FROM dbe_perf.get_global_statement_count() GROUP by (user_name);
 
 /* configuration */
@@ -4331,7 +4339,7 @@ CREATE VIEW dbe_perf.global_config_settings AS
 
 /* waits*/
 CREATE VIEW dbe_perf.wait_events AS
-  SELECT * FROM get_instr_wait_event(NULL);
+  SELECT * FROM pg_catalog.get_instr_wait_event(NULL);
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_wait_events()
 RETURNS setof dbe_perf.wait_events
@@ -4368,7 +4376,7 @@ DECLARE
   BEGIN
     QUERY_STR_NODES := 'select * from dbe_perf.node_name';
     FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-      QUERY_STR := 'SELECT * FROM get_instr_rt_percentile(0)';
+      QUERY_STR := 'SELECT * FROM pg_catalog.get_instr_rt_percentile(0)';
       FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
         p80 = ROW_DATA."P80";
         p95 = ROW_DATA."P95";
@@ -4451,7 +4459,7 @@ CREATE VIEW dbe_perf.global_ckpt_status AS
 CREATE OR REPLACE VIEW dbe_perf.global_double_write_status AS
     SELECT node_name, curr_dwn, curr_start_page, file_trunc_num, file_reset_num,
            total_writes, low_threshold_writes, high_threshold_writes,
-           total_pages, low_threshold_pages, high_threshold_pages
+           total_pages, low_threshold_pages, high_threshold_pages, file_id
     FROM pg_catalog.local_double_write_stat();
 
 CREATE OR REPLACE VIEW DBE_PERF.global_single_flush_dw_status AS
@@ -4479,7 +4487,7 @@ SELECT node_name, rto_info
 FROM pg_catalog.local_rto_stat();
 
 CREATE OR REPLACE VIEW dbe_perf.global_streaming_hadr_rto_and_rpo_stat AS
-SELECT hadr_sender_node_name, hadr_receiver_node_name, current_rto, target_rto, current_rpo, target_rpo, current_sleep_time
+SELECT hadr_sender_node_name, hadr_receiver_node_name, current_rto, target_rto, current_rpo, target_rpo, rto_sleep_time, rpo_sleep_time
 FROM pg_catalog.gs_hadr_local_rto_and_rpo_stat();
 
 CREATE OR REPLACE VIEW dbe_perf.global_recovery_status AS
@@ -4574,7 +4582,7 @@ SELECT
 		S.pl_compilation_time,
 		S.net_send_time,
 		S.data_io_time
-FROM pg_stat_get_wlm_session_info(0) S where S.is_slow_query = 1;
+FROM pg_catalog.pg_stat_get_wlm_session_info(0) S where S.is_slow_query = 1;
 
 CREATE OR REPLACE FUNCTION dbe_perf.global_slow_query_history
 RETURNS setof dbe_perf.gs_slow_query_history
@@ -4667,17 +4675,17 @@ CREATE OR REPLACE VIEW DBE_PERF.local_active_session AS
 	tt(sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessionid, start_time, event, lwtid, psessionid,
 	   tlevel, smpid, userid, application_name, client_addr, client_hostname, client_port, query_id, unique_query_id,
 	   user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, wait_status, global_sessionid, final_block_sessionid, level, head)
-	  AS(SELECT las.*, las.block_sessionid AS final_block_sessionid, 1 AS level, array_append('{}', las.sessionid) AS head FROM las
+	  AS(SELECT las.*, las.block_sessionid AS final_block_sessionid, 1 AS level, pg_catalog.array_append('{}', las.sessionid) AS head FROM las
 		UNION ALL
 		 SELECT tt.sampleid, tt.sample_time, tt.need_flush_sample, tt.databaseid, tt.thread_id, tt.sessionid, tt.start_time, tt.event, tt.lwtid, tt.psessionid,
 				tt.tlevel, tt.smpid, tt.userid, tt.application_name, tt.client_addr, tt.client_hostname, tt.client_port, tt.query_id, tt.unique_query_id,
-				tt.user_id, tt.cn_id, tt.unique_query, tt.locktag, tt.lockmode, tt.block_sessionid, tt.wait_status, tt.global_sessionid,                                                                                                                  las.block_sessionid AS final_block_sessionid, tt.level + 1 AS level, array_append(tt.head, las.sessionid) AS head
+				tt.user_id, tt.cn_id, tt.unique_query, tt.locktag, tt.lockmode, tt.block_sessionid, tt.wait_status, tt.global_sessionid,                                                                                                                  las.block_sessionid AS final_block_sessionid, tt.level + 1 AS level, pg_catalog.array_append(tt.head, las.sessionid) AS head
 		 FROM tt INNER JOIN las ON tt.final_block_sessionid = las.sessionid
 		 WHERE las.sampleid = tt.sampleid AND (las.block_sessionid IS NOT NULL OR las.block_sessionid != 0)
 		   AND las.sessionid != all(head) AND las.sessionid != las.block_sessionid)
   SELECT sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessionid, start_time, event, lwtid, psessionid,
 		 tlevel, smpid, userid, application_name, client_addr, client_hostname, client_port, query_id, unique_query_id,
 		 user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, final_block_sessionid, wait_status, global_sessionid FROM tt
-	WHERE level = (SELECT MAX(level) FROM tt t1 WHERE t1.sampleid =  tt.sampleid AND t1.sessionid = tt.sessionid);
+	WHERE level = (SELECT pg_catalog.MAX(level) FROM tt t1 WHERE t1.sampleid =  tt.sampleid AND t1.sessionid = tt.sessionid);
 
 grant select on all tables in schema dbe_perf to public;

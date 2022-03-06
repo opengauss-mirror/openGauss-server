@@ -1297,6 +1297,11 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
         }
     }
 
+    foreach(lc, subquery->rtable) {
+        RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
+        rte->pulled_from_subquery = true;
+    }
+
     /*
      * Now append the adjusted rtable entries to upper query. (We hold off
      * until after fixing the upper rtable entries; no point in running that

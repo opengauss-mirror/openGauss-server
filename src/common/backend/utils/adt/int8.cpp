@@ -24,7 +24,6 @@
 #include "libpq/pqformat.h"
 #include "utils/int8.h"
 #include "utils/builtins.h"
-#include "utils/guc_sql.h"
 
 #define MAXINT8LEN 25
 
@@ -154,23 +153,11 @@ Datum int8in(PG_FUNCTION_ARGS)
 Datum int8out(PG_FUNCTION_ARGS)
 {
     int64 val = PG_GETARG_INT64(0);
+    char buf[MAXINT8LEN + 1];
     char* result = NULL;
 
-    if (u_sess->attr.attr_sql.for_print_tuple) {
-        double var = (double)val;
-        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
-            result = apply_num_format(var);
-        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
-            result = apply_num_width(var);
-        }
-    }
-
-    if (result == NULL) {
-        char buf[MAXINT8LEN + 1];
-        pg_lltoa(val, buf);
-        result = pstrdup(buf);
-    }
-
+    pg_lltoa(val, buf);
+    result = pstrdup(buf);
     PG_RETURN_CSTRING(result);
 }
 

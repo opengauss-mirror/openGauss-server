@@ -1,0 +1,18 @@
+## For DBMind-core ##
+paramiko==2.7.2
+numpy
+scikit-learn
+requests
+sqlparse
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+pycryptodome
+## For components ##
+## Prometheus Exporter
+pyyaml
+prometheus-client
+## X-Tuner ##
+bayesian-optimization
+ptable

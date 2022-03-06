@@ -68,8 +68,8 @@ void RemoteCopy_GetRelationLoc(RemoteCopyData* state, Relation rel, List* attnum
         }
     }
 
-    state->idx_dist_by_col = -1;
-    if (state->rel_loc && state->rel_loc->partAttrNum != 0) {
+    state->idx_dist_by_col = NULL;
+    if (state->rel_loc && state->rel_loc->partAttrNum != NULL) {
         /*
          * Find the column used as key for data distribution.
          * First scan attributes of tuple descriptor with the list
@@ -79,15 +79,19 @@ void RemoteCopy_GetRelationLoc(RemoteCopyData* state, Relation rel, List* attnum
          */
         if (attnums != NIL) {
             ListCell* cur = NULL;
-            foreach (cur, attnums) {
+            foreach (cur, state->rel_loc->partAttrNum) {
                 int attnum = lfirst_int(cur);
-                if (state->rel_loc->partAttrNum == attnum) {
-                    state->idx_dist_by_col = attnum - 1;
-                    break;
+                if (list_member_int(attnums, attnum)) {
+                    state->idx_dist_by_col = lappend_int(state->idx_dist_by_col, attnum - 1);
                 }
             }
         } else {
-            state->idx_dist_by_col = state->rel_loc->partAttrNum - 1;
+            ListCell* cell = NULL;
+            AttrNumber num;
+            foreach (cell, state->rel_loc->partAttrNum) {
+                num = lfirst_int(cell);
+                state->idx_dist_by_col = lappend_int(state->idx_dist_by_col, num - 1);
+            }
         }
     }
 
@@ -126,15 +130,7 @@ void RemoteCopy_BuildStatement(
             quote_qualified_identifier(get_namespace_name(RelationGetNamespace(rel)), RelationGetRelationName(rel)));
 
     if (attnamelist != NIL) {
-        ListCell* cell = NULL;
-        ListCell* prev = NULL;
         appendStringInfoString(&state->query_buf, " (");
-        foreach (cell, attnamelist) {
-            if (prev != NULL)
-                appendStringInfoString(&state->query_buf, ", ");
-            appendStringInfoString(&state->query_buf, quote_identifier(strVal(lfirst(cell))));
-            prev = cell;
-        }
 
         /*
          * For COPY FROM, we need to append unspecified attributes that have
@@ -151,13 +147,24 @@ void RemoteCopy_BuildStatement(
                     Expr* defexpr = (Expr*)build_column_default(rel, attnum);
                     if (defexpr && ((!pgxc_is_expr_shippable(expression_planner(defexpr), NULL)) ||
                                        (list_member_int(state->idx_dist_by_col, attnum - 1)))) {
-                        appendStringInfoString(&state->query_buf, ", ");
                         appendStringInfoString(
                             &state->query_buf, quote_identifier(NameStr(tupDesc->attrs[attnum - 1]->attname)));
+                        appendStringInfoString(&state->query_buf, ", ");
                     }
                 }
             }
         }
+
+        ListCell* cell = NULL;
+        foreach (cell, attnamelist) {
+            appendStringInfoString(&state->query_buf, quote_identifier(strVal(lfirst(cell))));
+            appendStringInfoString(&state->query_buf, ", ");
+        }
+        int blankPos = 1;
+        int delimPos = 1;
+        state->query_buf.data[state->query_buf.len - blankPos] = '\0';
+        state->query_buf.data[state->query_buf.len - blankPos - delimPos] = '\0';
+        state->query_buf.len -= (blankPos + delimPos);
 
         appendStringInfoChar(&state->query_buf, ')');
     }
@@ -288,6 +295,11 @@ void RemoteCopy_BuildStatement(
 
     if (options->rco_fill_missing_fields)
         appendStringInfoString(&state->query_buf, " FILL_MISSING_FIELDS");
+
+    if (options->transform_query_string) {
+        appendStringInfoChar(&state->query_buf, ' ');
+        appendStringInfoString(&state->query_buf, options->transform_query_string);
+    }
 }
 
 /*
@@ -301,15 +313,24 @@ RemoteCopyOptions* makeRemoteCopyOptions(void)
     return NULL;
 #else
     RemoteCopyOptions* res = (RemoteCopyOptions*)palloc(sizeof(RemoteCopyOptions));
-    res->rco_binary = false;
+    res->rco_format = FORMAT_UNKNOWN;
     res->rco_oids = false;
-    res->rco_csv_mode = false;
+    res->rco_without_escaping = false;
     res->rco_delim = NULL;
     res->rco_null_print = NULL;
     res->rco_quote = NULL;
     res->rco_escape = NULL;
+    res->rco_eol = NULL;
     res->rco_force_quote = NIL;
     res->rco_force_notnull = NIL;
+    res->rco_eol_type = EOL_NL;
+    res->rco_date_format = NULL;
+    res->rco_time_format = NULL;
+    res->rco_timestamp_format = NULL;
+    res->rco_smalldatetime_format = NULL;
+    res->rco_compatible_illegal_chars = false;
+    res->rco_ignore_extra_data = false;
+    res->rco_fill_missing_fields = false;
     return res;
 #endif
 }

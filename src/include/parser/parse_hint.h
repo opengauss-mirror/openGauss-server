@@ -50,6 +50,7 @@
 #define HINT_TRUE "True"
 #define HINT_FALSE "False"
 #define HINT_PRED_PUSH "Predpush"
+#define HINT_PRED_PUSH_SAME_LEVEL "Predpush_Same_Level"
 #define HINT_REWRITE "Rewrite_rule"
 #define HINT_GATHER "Gather"
 #define HINT_NO_EXPAND "No_expand"
@@ -96,6 +97,7 @@ typedef enum HintKeyword {
     HINT_KEYWORD_INDEXONLYSCAN,
     HINT_KEYWORD_SKEW,
     HINT_KEYWORD_PREDPUSH,
+    HINT_KEYWORD_PREDPUSH_SAME_LEVEL,
     HINT_KEYWORD_REWRITE,
     HINT_KEYWORD_GATHER,
     HINT_KEYWORD_NO_EXPAND,
@@ -238,6 +240,14 @@ typedef struct PredpushHint {
     Relids candidates;      /* which one will be push down */
 } PredpushHint;
 
+typedef struct PredpushSameLevelHint {
+    Hint base; /* base hint */
+    bool negative;
+    char *dest_name;
+    int dest_id;
+    Relids candidates;      /* which one will be push down */
+} PredpushSameLevelHint;
+
 /* Enable/disable rewrites with hint */
 typedef struct RewriteHint {
     Hint base; /* base hint */
@@ -300,6 +310,7 @@ extern void HintStateDelete(HintState* hintState);
 extern bool permit_predpush(PlannerInfo *root);
 extern bool permit_from_rewrite_hint(PlannerInfo *root, unsigned int params);
 extern Relids predpush_candidates_same_level(PlannerInfo *root);
+extern bool is_predpush_same_level_matched(PredpushSameLevelHint* hint, Relids relids, ParamPathInfo* ppi);
 extern bool permit_gather(PlannerInfo *root, GatherSource src = HINT_GATHER_GUC);
 extern GatherSource get_gather_hint_source(PlannerInfo *root);
 extern bool check_set_hint_in_white_list(const char* name);

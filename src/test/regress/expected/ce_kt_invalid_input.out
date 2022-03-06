@@ -286,10 +286,10 @@ RK management options:
 -- print version 
 \! gs_ktool -v -v
 VERSION
-gs_ktool V1.0.0 || KMC V3.0.0.SPC005
+gs_ktool 1.0.0 | KMC 21.1.0.B006
 \! gs_ktool -v 0
 VERSION
-gs_ktool V1.0.0 || KMC V3.0.0.SPC005
+gs_ktool 1.0.0 | KMC 21.1.0.B006
 \! gs_ktool -V
 gs_ktool: invalid option -- 'V'
 HINT: try '-h' or '-?' for more infromation.

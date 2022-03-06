@@ -13,10 +13,10 @@
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
  *
- * command.h
+ * create_model.h
  *
  * IDENTIFICATION
- *        src/include/dbmind/db4ai/commands/create_model.h
+ *        src/include/db4ai/create_model.h
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -33,15 +33,22 @@
 #include "tcop/dest.h"
 
 struct Model;
+struct QueryDesc;
 
 struct DestReceiverTrainModel {
     DestReceiver dest;
-    Model *model;
+    MemoryContext memcxt;
+    AlgorithmML algorithm;
+    const char* model_name;
+    const char* sql;
+    List* hyperparameters;      // List of Hyperparamters
     List *targetlist; // for gradient descent
+    bool  save_model; // Set to save automatically the model into the modle warehouse
 };
 
-void configure_dest_receiver_train_model(DestReceiverTrainModel *dest, AlgorithmML algorithm, const char *model_name,
-    const char *sql);
+
+void configure_dest_receiver_train_model(DestReceiverTrainModel *dest, MemoryContext context, AlgorithmML algorithm,
+                                        const char* model_name, const char* sql, bool automatic_save);
 
 // Create a DestReceiver object for training model operators
 DestReceiver *CreateTrainModelDestReceiver();
@@ -49,9 +56,12 @@ DestReceiver *CreateTrainModelDestReceiver();
 // Rewrite a create model query, and plan the query. This method is used in query execution
 // and for explain statements
 PlannedStmt *plan_create_model(CreateModelStmt *stmt, const char *query_string, ParamListInfo params,
-    DestReceiver *dest);
+    DestReceiver *dest, MemoryContext cxt);
 
 // Call executor
 void exec_create_model(CreateModelStmt *stmt, const char *queryString, ParamListInfo params, char *completionTag);
+
+// Execute a query plan for create model
+void exec_create_model_planned(QueryDesc *queryDesc, char *completionTag);
 
 #endif

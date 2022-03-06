@@ -5,8 +5,8 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * src/include/libpq/pqformat.h
  *
  * -------------------------------------------------------------------------
@@ -211,7 +211,10 @@ static inline void pq_sendint16(StringInfo buf, uint16 i)
 }
 
 /* append a binary [u]int32 to a StringInfo buffer */
-static inline void pq_sendint32(StringInfo buf, uint32 i)
+#ifndef ENABLE_UT
+static
+#endif
+ inline void pq_sendint32(StringInfo buf, uint32 i)
 {
     enlargeStringInfo(buf, sizeof(uint32));
     pq_writeint32(buf, i);

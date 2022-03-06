@@ -36,9 +36,9 @@
  * to look like NO SCROLL cursors.
  *
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/utils/portal.h
  *
@@ -221,6 +221,7 @@ typedef struct PortalData {
     bool atEnd;
     bool posOverflow;
     long portalPos;
+    bool hasStreamForPlpgsql; /* true if plpgsql's portal has stream may cause hang in for-loop */
 
     /* Presentation data, primarily used by the pg_cursors system view */
     TimestampTz creation_time; /* time at which this portal was defined */
@@ -234,6 +235,8 @@ typedef struct PortalData {
     bool is_from_spi;
 #ifndef ENABLE_MULTIPLE_NODES
     PortalStream streamInfo;
+    bool isAutoOutParam;  /* is autonomous transaction procedure out param? */
+    bool isPkgCur; /* cursor variable is a package variable? */
 #endif
 } PortalData;
 
@@ -267,7 +270,7 @@ extern void UnpinPortal(Portal portal);
 extern void MarkPortalActive(Portal portal);
 extern void MarkPortalDone(Portal portal);
 extern void MarkPortalFailed(Portal portal);
-extern void PortalDrop(Portal portal, bool isTopCommit, bool isInCreate = false);
+extern void PortalDrop(Portal portal, bool isTopCommit);
 extern Portal GetPortalByName(const char* name);
 extern void PortalDefineQuery(Portal portal, const char* prepStmtName, const char* sourceText, const char* commandTag,
     List* stmts, CachedPlan* cplan);
@@ -275,6 +278,7 @@ extern Node* PortalListGetPrimaryStmt(List* stmts);
 extern void PortalCreateHoldStore(Portal portal);
 extern void PortalHashTableDeleteAll(void);
 extern bool ThereAreNoReadyPortals(void);
-extern void ResetPortalCursor(SubTransactionId mySubid, Oid funOid, int funUseCount);
+extern void ResetPortalCursor(SubTransactionId mySubid, Oid funOid, int funUseCount, bool reset = true);
 extern void HoldPinnedPortals(void);
+extern void HoldPortal(Portal portal);
 #endif /* PORTAL_H */

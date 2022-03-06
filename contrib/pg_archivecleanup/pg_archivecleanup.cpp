@@ -205,7 +205,7 @@ static void SetWALFileNameForCleanup(void)
              * Use just the prefix of the filename, ignore everything after
              * first period
              */
-            XLogFileName(exclusiveCleanupFileName, tli, ((uint64)log) << segLen | seg);
+            XLogFileName(exclusiveCleanupFileName, MAXFNAMELEN, tli, ((uint64)log) << segLen | seg);
         }
     }
 

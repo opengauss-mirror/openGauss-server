@@ -1,0 +1,72 @@
+\! gs_ktool -d all
+\! gs_ktool -g
+
+DROP CLIENT MASTER KEY IF EXISTS copyCMK CASCADE;
+CREATE CLIENT MASTER KEY copyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY copyCEK WITH VALUES (CLIENT_MASTER_KEY = copyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+CREATE TABLE IF NOT EXISTS CopyFromTbl(i0 INT, i1 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = copyCEK, ENCRYPTION_TYPE = DETERMINISTIC) , i2 INT);
+COPY copyfromtbl FROM stdin;
+5	10	7
+20	20	8
+30	10	12
+50	35	12
+80	15	23
+\.
+-- fail   error
+COPY copyfromtbl FROM stdin;
+1	2	3	4
+\.
+
+SELECT * FROM CopyFromTbl ORDER BY i0;
+
+COPY copyfromtbl (i0, i1,i2) FROM stdin;
+5	10	7
+20	20	8
+30	10	12
+50	35	12
+80	15	23
+\.
+SELECT * FROM CopyFromTbl ORDER BY i0;
+
+-- false
+COPY copyfromtbl (i0, i1,i2) FROM stdin;
+5	12	7\
+\.
+
+COPY copyfromtbl (i0, i1,i2) FROM stdin;
+5	12\	7
+\.
+
+\copy copyfromtbl (i0, i1,i2) FROM stdin;
+5	12	7\
+\.
+
+\copy copyfromtbl (i0, i1,i2) FROM stdin;
+5	12\	7
+\.
+
+\copy CopyFromTbl FROM '@abs_srcdir@/data/ce_copy_from.csv' WITH DELIMITER ',' CSV HEADER;
+SELECT * FROM CopyFromTbl ORDER BY i0;
+\copy (SELECT * FROM CopyFromTbl ORDER BY i2) TO '@abs_srcdir@/data/ce_copy_to.csv' WITH DELIMITER ',' CSV HEADER;
+
+copy CopyFromTbl FROM '@abs_srcdir@/data/ce_copy_from.csv' WITH DELIMITER ',' CSV HEADER;
+copy CopyFromTbl (i0, i1,i2) FROM '@abs_srcdir@/data/ce_copy_from.csv' WITH DELIMITER ',' CSV HEADER;
+copy CopyFromTbl TO '@abs_srcdir@/data/ce_copy_to.csv' WITH DELIMITER ',' CSV HEADER;
+copy (SELECT * FROM CopyFromTbl ORDER BY i2) TO '@abs_srcdir@/data/ce_copy_to.csv' WITH DELIMITER ',' CSV HEADER;
+
+CREATE TABLE IF NOT EXISTS CopyTOTbl(i0 INT, i1 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY=copyCEK, ENCRYPTION_TYPE = DETERMINISTIC) , i2 INT);
+\copy CopyToTbl FROM '@abs_srcdir@/data/ce_copy_to.csv' WITH DELIMITER ',' CSV HEADER;
+SELECT * FROM CopyToTbl ORDER BY i0;
+COPY (SELECT * FROM CopyFromTbl ORDER BY i0) TO stdout;
+
+DROP TABLE IF EXISTS encrypted_tb;
+create table encrypted_tb(     inv_date_sk  integer  not null,inv_item_sk  integer  not null,     inv_warehouse_sk integer      encrypted with (column_encryption_key = copyCEK, encryption_type = DETERMINISTIC));
+\copy encrypted_tb FROM '@abs_srcdir@/data/ce_copy_from.csv' WITH (delimiter',',IGNORE_EXTRA_DATA 'on');
+select * FROM encrypted_tb ORDER BY inv_date_sk;
+
+DROP TABLE IF EXISTS encrypted_tb;
+DROP TABLE IF EXISTS CopyFromTbl;
+DROP TABLE IF EXISTS CopyToTbl;
+DROP CLIENT MASTER KEY copyCMK CASCADE;
+
+\! gs_ktool -d all

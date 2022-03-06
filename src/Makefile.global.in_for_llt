@@ -390,7 +390,13 @@ LIBEDIT_LIB_PATH = $(LIBEDIT_HOME)/lib
 ZLIB_HOME = $(top_builddir)/../$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
 ZLIB_INCLUDE_PATH = $(ZLIB_HOME)/include
 ZLIB_LIB_PATH = $(ZLIB_HOME)/lib
+
 #############################################################################
+# xgboost component
+#############################################################################
+XGBOOST_HOME = $(top_builddir)/../$(BINARYPATH)/xgboost/$(LIB_SUPPORT_LLT)
+XGBOOST_INCLUDE_PATH = $(XGBOOST_HOME)/include
+XGBOOST_LIB_PATH = $(XGBOOST_HOME)/lib64
 
 #############################################################################
 # lz4 component
@@ -511,6 +517,7 @@ endif
 ifdef PGXS
 
 override CPPFLAGS := -I$(includedir_server) -I$(includedir_internal) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LICENSE_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) $(CPPFLAGS)
+
 
 else # not PGXS
 
@@ -696,6 +703,7 @@ LIBOPENSSL_LIB_PATH = $(LIBOPENSSL_HOME)/lib
 LIBOPENSSL_SSL_PATH = $(LIBOPENSSL_HOME)/ssl
 LIBOPENSSL_INCLUDE_PATH = $(LIBOPENSSL_HOME)/include
 
+ifneq ($(enable_lite_mode), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 #############################################################################
 # kmc component
@@ -703,6 +711,7 @@ ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 LIBKMC_HOME = $(top_builddir)/../$(PLATFORMPATH)/kmc/comm
 LIBKMC_LIB_PATH = $(LIBKMC_HOME)/lib
 LIBKMC_INCLUDE_PATH = $(LIBKMC_HOME)/include
+endif
 endif
 
 #############################################################################

@@ -1,0 +1,23 @@
+create database gsc1;
+\c gsc1
+create table gsc1_t1(c1 int);
+insert into gsc1_t1 values(1);
+create database gsc2;
+\c gsc2
+create table gsc2_t1(c1 int);
+insert into gsc2_t1 values(2);
+\! @abs_bindir@/gsql -p @portstring@ -d gsc1 -c "select * from gsc1_t1;" > /dev/null 2>&1 &
+\! @abs_bindir@/gsql -p @portstring@ -d gsc2 -c "select * from gsc2_t1;" > /dev/null 2>&1 &
+\c postgres
+select pg_sleep(0.5);
+alter database gsc1 rename to gsc_temp;
+alter database gsc2 rename to gsc1;
+alter database gsc_temp rename to gsc2;
+\c gsc1
+select * from gsc2_t1;
+\c gsc2
+select * from gsc1_t1;
+\c postgres
+drop database gsc1;
+drop database gsc2;
+\c regression

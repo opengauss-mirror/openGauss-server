@@ -326,7 +326,6 @@ extern bool check_asp_flush_mode(char** newval, void** extra, GucSource source);
 
 /* in access/transam/xlog.c */
 extern bool check_wal_buffers(int* newval, void** extra, GucSource source);
-extern bool check_wal_insert_status_entries(int* newval, void** extra, GucSource source);
 extern void assign_xlog_sync_method(int new_sync_method, void* extra);
 
 /* in tcop/stmt_retry.cpp */
@@ -373,10 +372,17 @@ typedef enum {
     CANONICAL_PATHKEY = 256, /* Use canonicalize pathkeys directly */
     INDEX_COST_WITH_LEAF_PAGES_ONLY = 512, /* compute index cost with consideration of leaf-pages-only */
     PARTITION_OPFUSION = 1024, /* Enable partition opfusion */
-    SPI_DEBUG = 2048,
-    RESOWNER_DEBUG = 4096,
-    A_STYLE_COERCE = 8192
+    A_STYLE_COERCE = 2048,
+    PLPGSQL_STREAM_FETCHALL = 4096, /* fetch all tuple when has stream sql under plpgsql's for-loop */
+    PREDPUSH_SAME_LEVEL = 8192, /* predpush same level */
+    PARTITION_FDW_ON = 16384 /* support create foreign table on partitioned table */
 } sql_beta_param;
+
+typedef enum {
+    OFF_VECTOR_ENGINE,
+    FORCE_VECTOR_ENGINE,
+    OPT_VECTOR_ENGINE
+} TryVectorEngineStrategy;
 
 #define ENABLE_PRED_PUSH(root) \
     ((PRED_PUSH & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
@@ -409,6 +415,9 @@ typedef struct {
 } ConfFileLock;
 
 #define PG_LOCKFILE_SIZE 1024
+
+#define CONFIG_BAK_FILENAME "postgresql.conf.bak"
+
 extern void* pg_malloc(size_t size);
 extern char* xstrdup(const char* s);
 
@@ -418,6 +427,7 @@ extern int find_guc_option(char** optlines, const char* opt_name,
     int* name_offset, int* name_len, int* value_offset, int* value_len, bool ignore_case);
 
 extern void modify_guc_lines(char*** optlines, const char** opt_name, char** copy_from_line);
+extern void modify_guc_one_line(char*** guc_optlines, const char* opt_name, const char* copy_from_line);
 extern ErrCode copy_guc_lines(char** copy_to_line, char** optlines, const char** opt_name);
 extern ErrCode copy_asyn_lines(char* path, char** copy_to_line, const char** opt_name);
 
@@ -456,7 +466,6 @@ extern void set_qunit_case_number_hook(int newval, void* extra);
 #endif
 
 extern GucContext get_guc_context();
-extern void InitializeNumLwLockPartitions(void);
 
 extern bool check_double_parameter(double* newval, void** extra, GucSource source);
 extern bool CheckReplChannel(const char* ChannelInfo);

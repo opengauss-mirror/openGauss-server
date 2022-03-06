@@ -1,0 +1,75 @@
+set enable_default_ustore_table = on;
+
+show undo_retention_time;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 900" > /dev/null 2>&1
+select pg_sleep(4);
+show undo_retention_time;
+
+create table t_timecapsule_test_tmp(id int, snaptime timestamptz, snapcsn bigint);
+
+CREATE OR REPLACE FUNCTION findCsn(int8)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count integer;
+begin
+  count = (select snapcsn from t_timecapsule_test_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+
+CREATE OR REPLACE FUNCTION findTime(int8)
+  RETURNS timestamptz
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count timestamptz;
+begin
+  count = (select snaptime from t_timecapsule_test_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+
+--parition table
+--timecapsule query normal table
+drop table if exists t1;
+create table t1 (id int)
+partition by range (id)
+(
+partition p1 values less than (10),
+partition p2 values less than (20)
+);
+insert into t1 values(1);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+update t1 set id = 2 where id = 1;
+select * from t1 timecapsule csn findCsn(1);
+drop table t1;
+
+delete from t_timecapsule_test_tmp;
+
+--timecapsule table normal table
+drop table if exists t1;
+create table t1 (id int)
+partition by range (id)
+(
+partition p1 values less than (10),
+partition p2 values less than (20)
+);
+insert into t1 values(1);
+insert into t1 values(2);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+delete from t1 where id = 1;
+select * from t1 order by id;
+TIMECAPSULE TABLE t1 TO csn findCsn(1);
+select * from t1;
+drop table t1;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 0" > /dev/null 2>&1
+
+set enable_default_ustore_table = off;

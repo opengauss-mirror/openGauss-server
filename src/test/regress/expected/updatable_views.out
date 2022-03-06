@@ -1,0 +1,152 @@
+CREATE USER regress_view_user1 PASSWORD 'Gauss@123';
+CREATE USER regress_view_user2 PASSWORD 'Gauss@123';
+-- nested-view permissions check
+CREATE TABLE base_tbl(a int, b text, c float);
+INSERT INTO base_tbl VALUES (1, 'Row 1', 1.0);
+SET SESSION AUTHORIZATION regress_view_user1 PASSWORD 'Gauss@123';
+CREATE VIEW rw_view1 AS SELECT * FROM base_tbl;
+GRANT ALL ON SCHEMA regress_view_user1 TO regress_view_user2;
+SELECT * FROM rw_view1;  -- not allowed
+ERROR:  permission denied for relation base_tbl
+DETAIL:  N/A
+SELECT * FROM rw_view1 FOR UPDATE;  -- not allowed
+ERROR:  permission denied for relation base_tbl
+DETAIL:  N/A
+UPDATE rw_view1 SET b = 'foo' WHERE a = 1;  -- not allowed
+ERROR:  permission denied for relation base_tbl
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regress_view_user2 PASSWORD 'Gauss@123';
+CREATE VIEW rw_view2 AS SELECT * FROM regress_view_user1.rw_view1;
+SELECT * FROM rw_view2;  -- not allowed
+ERROR:  permission denied for relation rw_view1
+DETAIL:  N/A
+SELECT * FROM rw_view2 FOR UPDATE;  -- not allowed
+ERROR:  permission denied for relation rw_view1
+DETAIL:  N/A
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1;  -- not allowed
+ERROR:  permission denied for relation rw_view1
+DETAIL:  N/A
+RESET SESSION AUTHORIZATION;
+GRANT SELECT ON base_tbl TO regress_view_user1;
+SET SESSION AUTHORIZATION regress_view_user1 PASSWORD 'Gauss@123';
+SELECT * FROM rw_view1;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+SELECT * FROM rw_view1 FOR UPDATE;  -- not allowed
+ERROR:  permission denied for relation base_tbl
+DETAIL:  N/A
+UPDATE rw_view1 SET b = 'foo' WHERE a = 1;  -- unlike pgsql, we do not support updating views
+ERROR:  cannot update view "rw_view1"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+SET SESSION AUTHORIZATION regress_view_user2 PASSWORD 'Gauss@123';
+SELECT * FROM rw_view2;  -- not allowed
+ERROR:  permission denied for relation rw_view1
+DETAIL:  N/A
+SELECT * FROM rw_view2 FOR UPDATE;  -- not allowed
+ERROR:  permission denied for relation rw_view1
+DETAIL:  N/A
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1;  -- not allowed
+ERROR:  permission denied for relation rw_view1
+DETAIL:  N/A
+SET SESSION AUTHORIZATION regress_view_user1 PASSWORD 'Gauss@123';
+GRANT SELECT ON rw_view1 TO regress_view_user2;
+SET SESSION AUTHORIZATION regress_view_user2 PASSWORD 'Gauss@123';
+SELECT * FROM rw_view2;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+SELECT * FROM rw_view2 FOR UPDATE;  -- not allowed
+ERROR:  permission denied for relation rw_view1
+DETAIL:  N/A
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1;  -- unlike pgsql, we do not support updating views
+ERROR:  cannot update view "rw_view2"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+RESET SESSION AUTHORIZATION;
+GRANT UPDATE ON base_tbl TO regress_view_user1;
+SET SESSION AUTHORIZATION regress_view_user1 PASSWORD 'Gauss@123';
+SELECT * FROM rw_view1;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+SELECT * FROM rw_view1 FOR UPDATE;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+UPDATE rw_view1 SET b = 'foo' WHERE a = 1;  -- unlike pgsql, we do not support updating views
+ERROR:  cannot update view "rw_view1"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+SET SESSION AUTHORIZATION regress_view_user2 PASSWORD 'Gauss@123';
+SELECT * FROM rw_view2;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+SELECT * FROM rw_view2 FOR UPDATE;  -- not allowed
+ERROR:  permission denied for relation rw_view1
+DETAIL:  N/A
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1;  -- unlike pgsql, we do not support updating views
+ERROR:  cannot update view "rw_view2"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+SET SESSION AUTHORIZATION regress_view_user1 PASSWORD 'Gauss@123';
+GRANT UPDATE ON rw_view1 TO regress_view_user2;
+SET SESSION AUTHORIZATION regress_view_user2 PASSWORD 'Gauss@123';
+SELECT * FROM rw_view2;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+SELECT * FROM rw_view2 FOR UPDATE;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1;  -- unlike pgsql, we do not support updating views
+ERROR:  cannot update view "rw_view2"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+RESET SESSION AUTHORIZATION;
+REVOKE UPDATE ON base_tbl FROM regress_view_user1;
+SET SESSION AUTHORIZATION regress_view_user1 PASSWORD 'Gauss@123';
+SELECT * FROM rw_view1;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+SELECT * FROM rw_view1 FOR UPDATE;  -- not allowed
+ERROR:  permission denied for relation base_tbl
+DETAIL:  N/A
+UPDATE rw_view1 SET b = 'foo' WHERE a = 1;  -- unlike pgsql, we do not support updating views
+ERROR:  cannot update view "rw_view1"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+SET SESSION AUTHORIZATION regress_view_user2 PASSWORD 'Gauss@123';
+SELECT * FROM rw_view2;
+ a |   b   | c 
+---+-------+---
+ 1 | Row 1 | 1
+(1 row)
+
+SELECT * FROM rw_view2 FOR UPDATE;  -- not allowed
+ERROR:  permission denied for relation base_tbl
+DETAIL:  N/A
+UPDATE rw_view2 SET b = 'bar' WHERE a = 1;  -- unlike pgsql, we do not support updating views
+ERROR:  cannot update view "rw_view2"
+HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE trigger.
+RESET SESSION AUTHORIZATION;
+DROP TABLE base_tbl CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view regress_view_user1.rw_view1
+drop cascades to view regress_view_user2.rw_view2
+DROP USER regress_view_user1;
+DROP USER regress_view_user2;

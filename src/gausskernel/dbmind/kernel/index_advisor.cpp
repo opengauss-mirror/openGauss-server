@@ -30,6 +30,8 @@
 #include "access/tupdesc.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_attribute.h"
+#include "catalog/pg_class.h"
+#include "catalog/pg_partition_fn.h"
 #include "commands/sqladvisor.h"
 #include "funcapi.h"
 #include "nodes/makefuncs.h"
@@ -64,6 +66,7 @@ typedef struct {
     char schema[NAMEDATALEN];
     char table[NAMEDATALEN];
     StringInfoData column;
+    char index_type[NAMEDATALEN];
 } SuggestedIndex;
 
 typedef struct {
@@ -79,7 +82,16 @@ typedef struct {
     List *index;
     List *join_cond;
     List *index_print;
+    bool ispartition = false;
+    bool issubpartition=false;
+    List *partition_key_list;
+    List *subpartition_key_list;
 } TableCell;
+
+typedef struct {
+    char *alias_name;
+    char *column_name;
+} TargetCell;
 
 typedef struct {
     uint4 cardinality;
@@ -87,6 +99,11 @@ typedef struct {
     char *op;
     char *field_expr;
 } IndexCell;
+
+typedef struct {
+    char *index_columns;
+    char *index_type;
+} IndexPrint;
 
 namespace index_advisor {
     typedef struct {
@@ -125,13 +142,19 @@ static uint4 calculate_field_cardinality(char *, char *, const char *);
 static bool is_tmp_table(const char *);
 static void find_table_by_column(char **, char **, char **);
 static void split_field_list(List *, char **, char **, char **);
+static void get_partition_key_name(Relation, TableCell *, bool is_subpartition = false);
 static bool check_relation_type_valid(Oid);
-static TableCell *find_or_create_tblcell(char *table_name, char *alias_name, char *schema_name = NULL);
+static TableCell *find_or_create_tblcell(char *table_name, char *alias_name, char *schema_name = NULL,
+    bool is_partition = false, bool is_subpartition = false);
+static TargetCell *find_or_create_clmncell(char **, List *);
 static void add_index_from_field(char *, char *, IndexCell *);
 static bool parse_group_clause(List *, List *);
 static bool parse_order_clause(List *, List *);
 static void add_index_from_group_order(TableCell *, List *, List *, bool);
+static void get_partition_index_type(IndexPrint *, TableCell *);
+static IndexPrint *generat_index_print(TableCell *, char *);
 static void generate_final_index();
+static void parse_target_list(List *);
 static void parse_from_clause(List *);
 static void add_drived_tables(RangeVar *);
 static void parse_join_tree(JoinExpr *);
@@ -156,7 +179,7 @@ Datum gs_index_advise(PG_FUNCTION_ARGS)
     if (query == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("you must enter a query statement.")));
     }
-#define COLUMN_NUM 3
+#define COLUMN_NUM 4
     if (SRF_IS_FIRSTCALL()) {
         TupleDesc tup_desc;
         MemoryContext old_context;
@@ -175,6 +198,7 @@ Datum gs_index_advise(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tup_desc, (AttrNumber)1, "schema", TEXTOID, -1, 0);
         TupleDescInitEntry(tup_desc, (AttrNumber)2, "table", TEXTOID, -1, 0);
         TupleDescInitEntry(tup_desc, (AttrNumber)3, "column", TEXTOID, -1, 0);
+        TupleDescInitEntry(tup_desc, (AttrNumber)4, "indextype", TEXTOID, -1, 0);
 
         func_ctx->tuple_desc = BlessTupleDesc(tup_desc);
         func_ctx->max_calls = max_calls;
@@ -206,6 +230,7 @@ Datum gs_index_advise(PG_FUNCTION_ARGS)
         values[0] = CStringGetTextDatum(entry->schema);
         values[1] = CStringGetTextDatum(entry->table);
         values[2] = CStringGetTextDatum(entry->column.data);
+        values[3] = CStringGetTextDatum(entry->index_type);
 
         tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
@@ -246,22 +271,26 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
     }
 
     Node *parsetree = (Node *)lfirst(list_head(parse_tree_list));
-    Node* parsetree_copy = (Node*)copyObject(parsetree);
-    find_select_stmt(parsetree);
-
+    Node *parsetree_copy = (Node *)copyObject(parsetree);
+    // Check for syntax errors
+    parse_analyze(parsetree, query_string, NULL, 0);
+    find_select_stmt(parsetree_copy);
     if (!g_stmt_list) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), 
-            errmsg("can not advise for the query because not found the select statement.")));
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("can not advise for the query because not found a select statement.")));
     }
 
     // Parse the SelectStmt structure
     ListCell *item = NULL;
 
     foreach (item, g_stmt_list) {
+        t_thrd.index_advisor_cxt.stmt_table_list = NIL;
+        t_thrd.index_advisor_cxt.stmt_target_list = NIL;
         SelectStmt *stmt = (SelectStmt *)lfirst(item);
         parse_from_clause(stmt->fromClause);
+        parse_target_list(stmt->targetList);
 
-        if (g_table_list) {
+        if (t_thrd.index_advisor_cxt.stmt_table_list) {
             parse_where_clause(stmt->whereClause);
             determine_driver_table();
             if (parse_group_clause(stmt->groupClause, stmt->targetList)) {
@@ -269,7 +298,7 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
             } else if (parse_order_clause(stmt->sortClause, stmt->targetList)) {
                 add_index_from_group_order(g_driver_table, stmt->sortClause, stmt->targetList, false);
             }
-            if (g_table_list->length > 1 && g_driver_table) {
+            if (t_thrd.index_advisor_cxt.stmt_table_list->length > 1 && g_driver_table) {
                 add_index_for_drived_tables();
             }
 
@@ -278,6 +307,8 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
 
             g_driver_table = NULL;
         }
+        list_free_ext(t_thrd.index_advisor_cxt.stmt_table_list);
+        list_free_ext(t_thrd.index_advisor_cxt.stmt_target_list);
     }
     if (g_table_list == NIL) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), 
@@ -286,12 +317,21 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
 
     // Use SQL Advisor
     extract_info_from_plan(parsetree_copy, query_string);
-    generate_final_index();
 
     // Format the return result, e.g., 'table1, "(col1,col2),(col3)"'.
-    int array_len = g_table_list->length;
-    *len = array_len;
-    SuggestedIndex *array = (SuggestedIndex *)palloc0(sizeof(SuggestedIndex) * array_len);
+    // Get index quantity.
+    Size index_len = 0;
+    item = NULL;
+    foreach (item, g_table_list) {
+        TableCell *cur_table = (TableCell *)lfirst(item);
+        if (cur_table->index_print) {
+            index_len += cur_table->index_print->length;
+        } else {
+            index_len++;
+        }
+    }
+    *len = index_len;
+    SuggestedIndex *array = (SuggestedIndex *)palloc0(sizeof(SuggestedIndex) * index_len);
     errno_t rc = EOK;
     item = NULL;
     int i = 0;
@@ -299,29 +339,29 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
     foreach (item, g_table_list) {
         TableCell *cur_table = (TableCell *)lfirst(item);
         List *index_list = cur_table->index_print;
-
-        rc = strcpy_s((array + i)->schema, NAMEDATALEN, cur_table->schema_name);  
-        securec_check(rc, "\0", "\0");
-        rc = strcpy_s((array + i)->table, NAMEDATALEN, cur_table->table_name);
-        securec_check(rc, "\0", "\0");
-        initStringInfo(&(array + i)->column);
         if (!index_list) {
+            rc = strcpy_s((array + i)->schema, NAMEDATALEN, cur_table->schema_name);
+            securec_check(rc, "\0", "\0");
+            rc = strcpy_s((array + i)->table, NAMEDATALEN, cur_table->table_name);
+            securec_check(rc, "\0", "\0");
+            initStringInfo(&(array + i)->column);
             appendStringInfoString(&(array + i)->column, "");
+            i++;
         } else {
             ListCell *cur_index = NULL;
-            int j = 0;
             foreach (cur_index, index_list) {
-                if (j > 0) {
-                    appendStringInfoString(&(array + i)->column, ",(");
-                } else {
-                    appendStringInfoString(&(array + i)->column, "(");
-                }
-                appendStringInfoString(&(array + i)->column, (char *)lfirst(cur_index));
-                appendStringInfoString(&(array + i)->column, ")");
-                j++;
+                rc = strcpy_s((array + i)->schema, NAMEDATALEN, cur_table->schema_name);  
+                securec_check(rc, "\0", "\0");
+                rc = strcpy_s((array + i)->table, NAMEDATALEN, cur_table->table_name);
+                securec_check(rc, "\0", "\0");
+                initStringInfo(&(array + i)->column);
+                appendStringInfoString(&(array + i)->column, (char *)((IndexPrint *)lfirst(cur_index))->index_columns);
+                rc = strcpy_s((array + i)->index_type, NAMEDATALEN, ((IndexPrint *)lfirst(cur_index))->index_type);
+                securec_check(rc, "\0", "\0");
+                i++;
             }
         }
-        i++;
+        
         list_free_deep(index_list);
     }
 
@@ -344,6 +384,7 @@ void extract_info_from_plan(Node* parse_tree, const char *query_string)
 
     List* query_tree_list = pg_analyze_and_rewrite(parse_tree, query_string, NULL, 0);
     foreach (lc, query_tree_list) {
+        t_thrd.index_advisor_cxt.stmt_table_list = NIL;
         Query* query = castNode(Query, lfirst(lc));
 
         if (query->commandType != CMD_UTILITY) {
@@ -351,6 +392,8 @@ void extract_info_from_plan(Node* parse_tree, const char *query_string)
             plan_tree = pg_plan_query(query, 0, NULL);
             extractNode((Plan*)plan_tree->planTree, NIL, plan_tree->rtable, plan_tree->subplans);
         }
+        generate_final_index();
+        list_free_ext(t_thrd.index_advisor_cxt.stmt_table_list);
     }
 
     u_sess->adv_cxt.getPlanInfoFunc = NULL;
@@ -388,8 +431,10 @@ void get_join_condition_from_plan(Node* node, List* rtable)
             if (rte1->relid != rte2->relid) {
                 char *l_field_name = pstrdup(get_attname(rte1->relid, arg1->varattno));
                 char *r_field_name = pstrdup(get_attname(rte2->relid, arg2->varattno));
-                TableCell *ltable = find_or_create_tblcell(rte1->relname, NULL);
-                TableCell *rtable = find_or_create_tblcell(rte2->relname, NULL);
+                char *l_schema_name = get_namespace_name(get_rel_namespace(rte1->relid));
+                char *r_schema_name = get_namespace_name(get_rel_namespace(rte2->relid));
+                TableCell *ltable = find_or_create_tblcell(rte1->relname, NULL, l_schema_name);
+                TableCell *rtable = find_or_create_tblcell(rte2->relname, NULL, r_schema_name);
 
                 if (!ltable || !rtable) {
                     return;
@@ -472,10 +517,16 @@ void get_order_condition_from_plan(Node* node)
         }
         char *relname = get_rel_name(origtbl);
         char *schemaname = get_namespace_name(get_rel_namespace(origtbl));
+        // get source column
+        char *column_name = pstrdup(get_attname(origtbl, targetEntry->resorigcol));
+        // not supported cte
+        if (strcasecmp(column_name, targetEntry->resname) != 0) {
+            return;
+        }
         if (relname && schemaname) {
             TableCell *tblcell = find_or_create_tblcell(relname, NULL, schemaname);
             if (tblcell != nullptr) {
-                add_index(tblcell, targetEntry->resname);
+                add_index(tblcell, column_name);
             }
         } else {
             ereport(WARNING,
@@ -560,6 +611,9 @@ List *get_index_attname(Oid index_oid)
     int2 attnum;
     for (int i = 0; i < attnums->dim1; i++) {
         attnum = attnums->values[i];
+        if (attnum < 1) {
+            break;
+        }
         attnames = lappend(attnames, search_table_attname(indrelid, attnum));
     }
 
@@ -705,6 +759,8 @@ void find_select_stmt(Node *parsetree)
     g_stmt_list = lappend(g_stmt_list, stmt);
 
     switch (stmt->op) {
+        case SETOP_INTERSECT:
+        case SETOP_EXCEPT:
         case SETOP_UNION: {
             // analyze the set operation: union
             find_select_stmt((Node *)stmt->larg);
@@ -783,8 +839,126 @@ void extract_stmt_where_clause(Node *item_where)
     }
 }
 
+void get_partition_index_type(IndexPrint *suggested_index, TableCell *table)
+{
+    StringInfoData partition_keys;
+    initStringInfo(&partition_keys);
+    int i = 0;
+    ListCell *value = NULL;
+    foreach (value, table->partition_key_list) {
+        char *partition_key = (char *)lfirst(value);
+        if (i == 0) {
+            appendStringInfoString(&partition_keys, partition_key);
+        } else {
+            appendStringInfoString(&partition_keys, ",");
+            appendStringInfoString(&partition_keys, partition_key);
+        }
+        i++;
+    }
+    if (table->subpartition_key_list != NIL) {
+        StringInfoData subpartition_keys;
+        initStringInfo(&subpartition_keys);
+        int i = 0;
+        foreach (value, table->subpartition_key_list) {
+            char *subpartition_key = (char *)lfirst(value);
+            if (i == 0) {
+                appendStringInfoString(&subpartition_keys, subpartition_key);
+            } else {
+                appendStringInfoString(&subpartition_keys, ",");
+                appendStringInfoString(&subpartition_keys, subpartition_key);
+            }
+            i++;
+        }
+        if (!strstr(suggested_index->index_columns, subpartition_keys.data)) {
+            // if not specified subpartition and the suggested columns does not contain subpartition key,
+            // then recommend global index
+            suggested_index->index_type = "global";
+            pfree_ext(partition_keys.data);
+            pfree_ext(subpartition_keys.data);
+            return;
+        }
+        if (table->ispartition || strstr(suggested_index->index_columns, partition_keys.data) != NULL) {
+            // if the suggested columns contain subpartition key and specify partition or
+            // the suggested columns contain subpartition key and partition key
+            // then recommend local index
+            suggested_index->index_type = "local";
+        } else {
+            suggested_index->index_type = "global";
+        }
+        pfree_ext(subpartition_keys.data);
+    } else {
+        if (table->ispartition || strstr(suggested_index->index_columns, partition_keys.data) != NULL) {
+            // if the suggested columns contain partition key, then recommend local index
+            suggested_index->index_type = "local";
+        } else {
+            suggested_index->index_type = "global";
+        }
+    }
+    pfree_ext(partition_keys.data);
+}
+
 /*
- * generate_final_index
+ * generat_index_print
+ *     Generate index type, normal table is '' by default
+ *     partition table is divided into local and global.
+ *
+ * The table in each subquery is preferentially selected for matching.
+ * The same table is repeated in different partition states in the whole query, 
+.* resulting in an incorrect index type.
+ */
+IndexPrint *generat_index_print(TableCell *table, char *index_print)
+{
+    IndexPrint *suggested_index = (IndexPrint *)palloc0(sizeof(*suggested_index));
+    suggested_index->index_columns = index_print;
+    suggested_index->index_type = NULL;
+    // recommend index type for partition index
+    bool stmt_table_match = false;
+    ListCell *stmt_table = NULL;
+    foreach(stmt_table, t_thrd.index_advisor_cxt.stmt_table_list) {
+        TableCell *cur_table = (TableCell *)lfirst(stmt_table);
+        char *cur_schema_name = cur_table->schema_name;
+        char *cur_table_name = cur_table->table_name;
+        if (IsSameRel(cur_schema_name, cur_table_name, table->schema_name, table->table_name)) {
+            stmt_table_match = true;
+            if (cur_table->issubpartition) {
+                // recommend the index type of the query with specified partition for local index
+                suggested_index->index_type = "local";
+            } else if (cur_table->partition_key_list != NIL) {
+                get_partition_index_type(suggested_index, cur_table);
+            } else {
+                suggested_index->index_type = "";
+            }
+            break;
+        }
+    }
+    if (!t_thrd.index_advisor_cxt.stmt_table_list or !stmt_table_match) {
+        if (table->issubpartition) {
+            suggested_index->index_type = "local";
+        } else if (table->partition_key_list != NIL) {
+            get_partition_index_type(suggested_index, table);
+        } else {
+            suggested_index->index_type = "";
+        }
+    }
+    return suggested_index;
+}
+
+TableCell *find_table(TableCell *table)
+{
+    ListCell *item = NULL;
+    foreach(item, g_table_list) {
+        TableCell *cur_table = (TableCell *)lfirst(item);
+        char *cur_schema_name = cur_table->schema_name;
+        char *cur_table_name = cur_table->table_name;
+        if (IsSameRel(cur_schema_name, cur_table_name, table->schema_name, table->table_name)) {
+            return cur_table;
+        }
+    }
+    return NULL;
+}
+
+/*
+ * generate_final_index_print
  *     Concatenate the candidate indexes of the table into a string of
  *     composite index.
  *
@@ -794,7 +968,7 @@ void extract_stmt_where_clause(Node *item_where)
 void generate_final_index_print(TableCell *table, Oid table_oid)
 {
     Size suggested_index_len = NAMEDATALEN * table->index->length;
-    char *suggested_index = (char *)palloc0(suggested_index_len);
+    char *index_print = (char *)palloc0(suggested_index_len);
     ListCell *index = NULL;
     errno_t rc = EOK;
     int i = 0;
@@ -802,15 +976,15 @@ void generate_final_index_print(TableCell *table, Oid table_oid)
     // concatenate the candidate indexes into a string
     foreach (index, table->index) {
         char *index_name = ((IndexCell *)lfirst(index))->index_name;
-        if ((strlen(index_name) + strlen(suggested_index) + 1) > suggested_index_len) {
+        if ((strlen(index_name) + strlen(index_print) + 1) > suggested_index_len) {
             break;
         }
         if (i == 0) {
-            rc = strcpy_s(suggested_index, suggested_index_len, index_name);
+            rc = strcpy_s(index_print, suggested_index_len, index_name);
         } else {
-            rc = strcat_s(suggested_index, suggested_index_len, ",");
+            rc = strcat_s(index_print, suggested_index_len, ",");
             securec_check(rc, "\0", "\0");
-            rc = strcat_s(suggested_index, suggested_index_len, index_name);
+            rc = strcat_s(index_print, suggested_index_len, index_name);
         }
         securec_check(rc, "\0", "\0");
         i++;
@@ -818,15 +992,7 @@ void generate_final_index_print(TableCell *table, Oid table_oid)
     list_free_deep(table->index);
     table->index = NIL;
 
-    // check the previously suggested indexes
-    ListCell *prev_index = NULL;
-    foreach (prev_index, table->index_print) {
-        if (strncasecmp((char *)lfirst(prev_index), suggested_index, strlen(suggested_index)) == 0) {
-            pfree(suggested_index);
-            return;
-        }
-    }
-
+    TableCell *table_index = find_table(table);
     // check the existed indexes
     List *indexes = get_table_indexes(table_oid);
     index = NULL;
@@ -853,21 +1019,42 @@ void generate_final_index_print(TableCell *table, Oid table_oid)
         }
         list_free(attnames);
         // the suggested index has existed
-        if (strcasecmp(existed_index, suggested_index) == 0) {
-            pfree(suggested_index);
+        if (strcasecmp(existed_index, index_print) == 0) {
+            if (table_index == NULL) {
+                g_table_list = lappend(g_table_list, table);
+            }
+            pfree(index_print);
             pfree(existed_index);
             return;
         }
         pfree(existed_index);
     }
-    table->index_print = lappend(table->index_print, suggested_index);
+    if (table_index != NULL) {
+        // check the previous suggested indexes
+        ListCell *prev_index = NULL;
+        IndexPrint *suggest_index = NULL;
+        suggest_index = generat_index_print(table, index_print);
+        foreach (prev_index, table_index->index_print) {
+            if (strncasecmp(((IndexPrint *)lfirst(prev_index))->index_columns, index_print, strlen(index_print)) == 0) {
+                if (((IndexPrint *)lfirst(prev_index))->index_type != suggest_index->index_type) {
+                    ((IndexPrint *)lfirst(prev_index))->index_type = "global";
+                }
+                pfree(index_print);
+                return;
+            }
+        }
+        table_index->index_print = lappend(table_index->index_print, suggest_index);
+    } else {
+        table->index_print = lappend(table->index_print, generat_index_print(table, index_print));
+        g_table_list = lappend(g_table_list, table);
+    }
 
     return;
 }
 void generate_final_index()
 {
     ListCell *table_item = NULL;
-    foreach (table_item, g_table_list) {
+    foreach (table_item, t_thrd.index_advisor_cxt.stmt_table_list) {
         TableCell *table = (TableCell *)lfirst(table_item);
         if (table->index != NIL) {
             RangeVar *rtable = makeRangeVar(table->schema_name, table->table_name, -1);
@@ -876,6 +1063,8 @@ void generate_final_index()
                 continue;
             }
             generate_final_index_print(table, table_oid);
+        } else if (find_table(table) == NULL) {
+            g_table_list = lappend(g_table_list, table);
         }
     }
 }
@@ -942,21 +1131,46 @@ void parse_where_clause(Node *item_where)
 void parse_from_clause(List *from_list)
 {
     ListCell *from = NULL;
-
     foreach (from, from_list) {
         Node *item = (Node *)lfirst(from);
         if (nodeTag(item) == T_RangeVar) {
             // single table
             RangeVar *table = (RangeVar *)item;
             if (table->alias) {
-                (void)find_or_create_tblcell(table->relname, table->alias->aliasname, table->schemaname);
+                (void)find_or_create_tblcell(table->relname, table->alias->aliasname, table->schemaname,
+                    table->ispartition, table->issubpartition);
             } else {
-                (void)find_or_create_tblcell(table->relname, NULL, table->schemaname);
+                (void)find_or_create_tblcell(table->relname, NULL, table->schemaname, table->ispartition,
+                    table->issubpartition);
             }
         } else if (nodeTag(item) == T_JoinExpr) {
             // multi-table join
             parse_join_tree((JoinExpr *)item);
+        } else if(nodeTag(item) == T_RangeSubselect) {
+            SelectStmt *stmt = (SelectStmt *)(((RangeSubselect *)item)->subquery);
+            if (stmt->fromClause) {
+                parse_from_clause(stmt->fromClause);
+            }
         } else {
+        }
+    }
+}
+
+void parse_target_list(List *target_list)
+{
+    ListCell *target_cell = NULL;
+    foreach (target_cell, target_list) {
+        Node *item = (Node *)lfirst(target_cell);
+        if (nodeTag(item) != T_ResTarget) {
+            continue;
+        }
+        ResTarget *target = (ResTarget *)item;
+        if (nodeTag(target->val) != T_ColumnRef) {
+            continue;
+        }
+        // only when the alias name exist, we need to save it.
+        if (target->name) {
+            (void)find_or_create_clmncell(&target->name, ((ColumnRef *)(target->val))->fields);
         }
     }
 }
@@ -966,10 +1180,12 @@ void add_drived_tables(RangeVar *join_node)
     TableCell *join_table = NULL;
 
     if (join_node->alias) {
-        join_table = find_or_create_tblcell(join_node->relname, join_node->alias->aliasname, join_node->schemaname);
+        join_table = find_or_create_tblcell(join_node->relname, join_node->alias->aliasname, join_node->schemaname,
+            join_node->ispartition, join_node->issubpartition);
     } else {
-        join_table = find_or_create_tblcell(join_node->relname, NULL, join_node->schemaname);
-    }    
+        join_table = find_or_create_tblcell(join_node->relname, NULL, join_node->schemaname, join_node->ispartition,
+            join_node->issubpartition);
+    }
 
     if (!join_table) {
         return;
@@ -988,12 +1204,22 @@ void parse_join_tree(JoinExpr *join_tree)
         parse_join_tree((JoinExpr *)larg);
     } else if (nodeTag(larg) == T_RangeVar) {
         add_drived_tables((RangeVar *)larg);
+    } else if (nodeTag(larg) == T_RangeSubselect) {
+        SelectStmt *stmt = (SelectStmt *)(((RangeSubselect *)larg)->subquery);
+        if (stmt->fromClause) {
+            parse_from_clause(stmt->fromClause);
+        }
     }
 
     if (nodeTag(rarg) == T_JoinExpr) {
         parse_join_tree((JoinExpr *)rarg);
     } else if (nodeTag(rarg) == T_RangeVar) {
         add_drived_tables((RangeVar *)rarg);
+    } else if (nodeTag(rarg) == T_RangeSubselect) {
+        SelectStmt *stmt = (SelectStmt *)(((RangeSubselect *)rarg)->subquery);
+        if (stmt->fromClause) {
+            parse_from_clause(stmt->fromClause);
+        }
     }
 
     if (join_tree->isNatural == true) {
@@ -1098,14 +1324,18 @@ void parse_join_expr(JoinExpr *join_tree)
     TableCell *ltable, *rtable = NULL;
 
     if (l_join_node->alias) {
-        ltable = find_or_create_tblcell(l_join_node->relname, l_join_node->alias->aliasname, l_join_node->schemaname);
+        ltable = find_or_create_tblcell(l_join_node->relname, l_join_node->alias->aliasname, l_join_node->schemaname,
+            l_join_node->ispartition, l_join_node->issubpartition);
     } else {
-        ltable = find_or_create_tblcell(l_join_node->relname, NULL, l_join_node->schemaname);
+        ltable = find_or_create_tblcell(l_join_node->relname, NULL, l_join_node->schemaname, l_join_node->ispartition,
+            l_join_node->issubpartition);
     }
     if (r_join_node->alias) {
-        rtable = find_or_create_tblcell(r_join_node->relname, r_join_node->alias->aliasname, r_join_node->schemaname);
+        rtable = find_or_create_tblcell(r_join_node->relname, r_join_node->alias->aliasname, r_join_node->schemaname,
+            r_join_node->ispartition, l_join_node->issubpartition);
     } else {
-        rtable = find_or_create_tblcell(r_join_node->relname, NULL, r_join_node->schemaname);
+        rtable = find_or_create_tblcell(r_join_node->relname, NULL, r_join_node->schemaname, r_join_node->ispartition,
+            l_join_node->issubpartition);
     }
 
     if (!ltable || !rtable) {
@@ -1292,7 +1522,7 @@ void split_field_list(List *fields, char **schema_name_ptr, char **table_name_pt
     // if fields have table name
     if (*table_name_ptr != NULL) {
         // check existed tables
-        foreach (item, g_table_list) {
+        foreach (item, t_thrd.index_advisor_cxt.stmt_table_list) {
             TableCell *cur_table = (TableCell *)lfirst(item);
             if (*schema_name_ptr != NULL && strcasecmp(*schema_name_ptr, cur_table->schema_name) != 0) {
                 continue;
@@ -1333,8 +1563,9 @@ void find_table_by_column(char **schema_name_ptr, char **table_name_ptr, char **
     Oid relid;
     Relation relation;
     TupleDesc tupdesc;
-
-    foreach (lc, g_table_list) {
+    TargetCell *target = NULL;
+    target = find_or_create_clmncell(col_name_ptr, NULL);
+    foreach (lc, t_thrd.index_advisor_cxt.stmt_table_list) {
         char *schema_name = ((TableCell *)lfirst(lc))->schema_name;
         char *table_name = ((TableCell *)lfirst(lc))->table_name;
 
@@ -1351,11 +1582,61 @@ void find_table_by_column(char **schema_name_ptr, char **table_name_ptr, char **
                 break;
             }
         }
+        if (cnt == 1) {
+            heap_close(relation, AccessShareLock);
+            break;
+        }
+        // handle alias name scene
+        if (target == NULL) {
+            heap_close(relation, AccessShareLock);
+            continue;
+        }
+        for (int attrIdx = tupdesc->natts - 1; attrIdx >= 0; --attrIdx) {
+            if (strcasecmp(target->column_name, RelAttrName(tupdesc, attrIdx)) == 0) {
+                cnt += 1;
+                *schema_name_ptr = schema_name;
+                *table_name_ptr = table_name;
+                *col_name_ptr = target->column_name;
+                break;
+            }
+        }
         heap_close(relation, AccessShareLock);
+        if (cnt == 1) {
+            break;
+        }
     }
 
     if (cnt != 1) {
         *schema_name_ptr = *table_name_ptr = *col_name_ptr = NULL;
+    }
+}
+
+// Get the partition keys of the partition table or subpartition table
+void get_partition_key_name(Relation rel, TableCell *table, bool is_subpartition)
+{
+    int partkey_column_n = 0;
+    int2vector *partkey_column = NULL;
+    partkey_column = GetPartitionKey(rel->partMap);
+    partkey_column_n = partkey_column->dim1;
+    for (int i = 0; i < partkey_column_n; i++) {
+        table->partition_key_list =
+            lappend(table->partition_key_list, get_attname(rel->rd_id, partkey_column->values[i]));
+    }
+    if (is_subpartition) {
+        List *partOidList = relationGetPartitionOidList(rel);
+        Assert(list_length(partOidList) != 0);
+        Partition subPart = partitionOpen(rel, linitial_oid(partOidList), NoLock);
+        Relation subPartRel = partitionGetRelation(rel, subPart);
+        int subpartkey_column_n = 0;
+        int2vector *subpartkey_column = NULL;
+        subpartkey_column = GetPartitionKey(subPartRel->partMap);
+        subpartkey_column_n = subpartkey_column->dim1;
+        for (int i = 0; i < subpartkey_column_n; i++) {
+            table->subpartition_key_list =
+                lappend(table->subpartition_key_list, get_attname(rel->rd_id, subpartkey_column->values[i]));
+        }
+        releaseDummyRelation(&subPartRel);
+        partitionClose(rel, subPart, NoLock);
     }
 }
 
@@ -1370,8 +1651,7 @@ bool check_relation_type_valid(Oid relid)
         heap_close(relation, AccessShareLock);
         return result;
     }
-    if (RelationIsRelation(relation) && RelationGetStorageType(relation) == HEAP_DISK && 
-        RelationGetPartType(relation) == PARTTYPE_NON_PARTITIONED_RELATION &&
+    if (RelationIsRelation(relation) && RelationGetStorageType(relation) == HEAP_DISK &&
         RelationGetRelPersistence(relation) == RELPERSISTENCE_PERMANENT) {
         const char *format = ((relation->rd_options) && (((StdRdOptions *)(relation->rd_options))->orientation)) ?
             ((char *)(relation->rd_options) + *(int *)&(((StdRdOptions *)(relation->rd_options))->orientation)) :
@@ -1403,9 +1683,10 @@ bool is_tmp_table(const char *table_name)
 /*
  * find_or_create_tblcell
  *     Find the TableCell that has given table_name(alias_name) among the global
- *     variable 'g_table_list', and if not found, create a TableCell and return it.
+ *     variable 't_thrd.index_advisor_cxt.stmt_table_list', and if not found, create a TableCell and return it.
  */
-TableCell *find_or_create_tblcell(char *table_name, char *alias_name, char *schema_name)
+TableCell *find_or_create_tblcell(char *table_name, char *alias_name, char *schema_name, bool ispartition,
+    bool issubpartition)
 {
     if (!table_name) {
         return NULL;
@@ -1419,8 +1700,8 @@ TableCell *find_or_create_tblcell(char *table_name, char *alias_name, char *sche
     ListCell *item = NULL;
     ListCell *sub_item = NULL;
 
-    if (g_table_list != NIL) {
-        foreach (item, g_table_list) {
+    if (t_thrd.index_advisor_cxt.stmt_table_list != NIL) {
+        foreach (item, t_thrd.index_advisor_cxt.stmt_table_list) {
             TableCell *cur_table = (TableCell *)lfirst(item);
             char *cur_schema_name = cur_table->schema_name;
             char *cur_table_name = cur_table->table_name;
@@ -1464,13 +1745,55 @@ TableCell *find_or_create_tblcell(char *table_name, char *alias_name, char *sche
     new_table->alias_name = NIL;
     if (alias_name) {
         new_table->alias_name = lappend(new_table->alias_name, alias_name);
-    }    
+    }
     new_table->index = NIL;
     new_table->join_cond = NIL;
     new_table->index_print = NIL;
-    g_table_list = lappend(g_table_list, new_table);
-
+    new_table->partition_key_list = NIL;
+    new_table->subpartition_key_list = NIL;
+    new_table->ispartition = ispartition;
+    new_table->issubpartition = issubpartition;
+    // set the partition key of the partition table, including partition and subpartition
+    Relation rel = heap_open(table_oid, AccessShareLock);
+    if RelationIsPartitioned(rel) {
+        if RelationIsSubPartitioned(rel) {
+            get_partition_key_name(rel, new_table, true);
+        } else {
+            get_partition_key_name(rel, new_table);
+        }
+    }
+    heap_close(rel, AccessShareLock);
+    t_thrd.index_advisor_cxt.stmt_table_list = lappend(t_thrd.index_advisor_cxt.stmt_table_list, new_table);
     return new_table;
+}
+
+/*
+ * find_or_create_clmncell
+ *     Find the columnCell that has given column_name(alias_name) among the global
+ *     variable 't_thrd.index_advisor_cxt.stmt_target_list', and if not found, create a columnCell and return it.
+ * we consider column alias name is unique within a select query
+ */
+TargetCell *find_or_create_clmncell(char **alias_name, List *fields)
+{
+    if (fields == NIL) {
+        // find the columnCell according to the alias_name
+        ListCell *target_cell = NULL;
+        foreach (target_cell, t_thrd.index_advisor_cxt.stmt_target_list) {
+            TargetCell *target = (TargetCell *)lfirst(target_cell);
+            if (strcasecmp(target->alias_name, *alias_name) == 0) {
+                return target;
+            }
+        }
+        return NULL;
+    }
+    // create a columnCell and return it
+    TargetCell *new_target = NULL;
+    new_target = (TargetCell *)palloc0(sizeof(TargetCell));
+    new_target->alias_name = *alias_name;
+    new_target->column_name = strVal(linitial(fields));
+    t_thrd.index_advisor_cxt.stmt_target_list = lappend(t_thrd.index_advisor_cxt.stmt_target_list, new_target);
+
+    return new_target;
 }
 
 /*
@@ -1542,8 +1865,8 @@ void add_index_from_field(char *schema_name, char *table_name, IndexCell *index)
 // The table that has smallest result set is set as the driver table.
 void determine_driver_table()
 {
-    if (g_table_list->length == 1) {
-        g_driver_table = (TableCell *)linitial(g_table_list);
+    if (t_thrd.index_advisor_cxt.stmt_table_list->length == 1) {
+        g_driver_table = (TableCell *)linitial(t_thrd.index_advisor_cxt.stmt_table_list);
     } else {
         if (g_drived_tables != NIL) {
             uint4 small_result_set = UINT32_MAX;
@@ -1699,7 +2022,7 @@ bool parse_group_clause(List *group_clause, List *target_list)
     }
 
     if (is_only_one_table && pre_schema && pre_table) {
-        if (g_table_list->length == 1 || (g_driver_table &&
+        if (t_thrd.index_advisor_cxt.stmt_table_list->length == 1 || (g_driver_table &&
             IsSameRel(pre_schema, pre_table, g_driver_table->schema_name, g_driver_table->table_name))) {
             return true;
         }
@@ -1764,7 +2087,7 @@ bool parse_order_clause(List *order_clause, List *target_list)
     }
 
     if (is_only_one_table && pre_schema && pre_table) {
-        if (g_table_list->length == 1 || (g_driver_table &&
+        if (t_thrd.index_advisor_cxt.stmt_table_list->length == 1 || (g_driver_table &&
             IsSameRel(pre_schema, pre_table, g_driver_table->schema_name, g_driver_table->table_name))) {
             return true;
         }

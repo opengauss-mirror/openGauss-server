@@ -54,7 +54,7 @@ bool SimpleCheckBlockheader(XLogReaderState *xlogreader, XLogRecPtr targetPagePt
         checkSize += XLOG_BLCKSZ;
     } while (checkSize < *size);
 
-    if (checkSize != *size) {
+    if (checkSize < *size) {
         *size = checkSize;
     }
 
@@ -64,27 +64,28 @@ bool SimpleCheckBlockheader(XLogReaderState *xlogreader, XLogRecPtr targetPagePt
 bool SharedStorageXlogReadCheck(XLogReaderState *xlogreader, XLogRecPtr readEnd, XLogRecPtr readPageStart,
     char *localBuff, int *readLen)
 {
-    uint64 diffLen = ((readEnd - readPageStart) >= ShareStorageBufSize) ? ShareStorageBufSize
-                                                                        : (readEnd - readPageStart);
-    uint64 calcLen = readPageStart % ShareStorageAlnSize;
-    if (calcLen) {
-        diffLen = ((diffLen + calcLen) > ShareStorageAlnSize) ? (ShareStorageAlnSize - calcLen) : diffLen;
+    int diffLen;
+    Assert((readPageStart % XLOG_BLCKSZ) == 0);
+    XLogRecPtr alignReadEnd = readPageStart - readPageStart % ShareStorageBufSize + ShareStorageBufSize;
+    if (alignReadEnd > readEnd) {
+        XLogRecPtr ActualCopyEnd = TYPEALIGN(XLOG_BLCKSZ, readEnd);
+        diffLen = static_cast<int>(ActualCopyEnd - readPageStart);
+    } else {
+        diffLen = static_cast<int>(alignReadEnd - readPageStart);
     }
-
     bool readResult = false;
     int readBytes = ReadXlogFromShareStorage(readPageStart, localBuff,
                                              (int)TYPEALIGN(g_instance.xlog_cxt.shareStorageopCtl.blkSize, diffLen));
     if (readBytes > 0) {
-        *readLen = (readBytes > (int)diffLen) ? diffLen : readBytes;
+        *readLen = (int)((XLogRecPtr)readBytes > (readEnd - readPageStart)) ? (readEnd - readPageStart) : readBytes;
         readResult = SimpleCheckBlockheader(xlogreader, readPageStart, localBuff, readLen);
     } else {
         *readLen = 0;
         ereport(FATAL,
                 (errcode(ERRCODE_INVALID_STATUS),
-                 errmsg("read zero length of xlog from shared storage startlsn : %lx, readlen :%lx, inserthead :%lx",
+                 errmsg("read zero length of xlog from shared storage startlsn : %lx, readlen :%d, inserthead :%lx",
                         readPageStart, diffLen, readEnd)));
     }
-
     return readResult;
 }
 
@@ -138,12 +139,15 @@ bool shared_storage_xlog_read(int timeout, unsigned char *type, char **buffer, i
 
         ReadShareStorageCtlInfo(ctlInfo);
         uint32 lastTerm = pg_atomic_read_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->shareStorageTerm);
-        if (ctlInfo->term > lastTerm) {
+        if (ctlInfo->term > lastTerm || ctlInfo->xlogFileSize != (uint64)g_instance.attr.attr_storage.xlog_file_size) {
             t_thrd.walreceiver_cxt.termChanged = true;
             if (isStopping)
                 return false;
-            else
-                ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("the term on shared storage is changed")));
+            else {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                    errmsg("the term(%u:%u) or xlog file size(%lu:%lu) on shared storage is changed", ctlInfo->term,
+                        lastTerm, ctlInfo->xlogFileSize, (uint64)g_instance.attr.attr_storage.xlog_file_size)));
+            }
         }
 
         if (SharedStorageXlogReadCheck(xlogreader, ctlInfo->insertHead, page_lsn, local_buff, &read_len)) {
@@ -227,7 +231,7 @@ void shared_storage_xlog_check_consistency()
     char *errormsg = NULL;
 
     if (XLByteLT(localRec + recordLen, sharedStorageCtl->insertHead)) {
-        XLogRecord *record = XLogReadRecord(xlogReader, localRec, &errormsg, false, false);  // don't need decode
+        XLogRecord *record = XLogReadRecord(xlogReader, localRec, &errormsg, false);  // don't need decode
         if (record == NULL) {
             ereport(WARNING, (errcode(ERRCODE_INVALID_STATUS),
                               errmsg("standby's local request lsn[%lx] is not valid record", localRec)));

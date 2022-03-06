@@ -53,8 +53,11 @@
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
+#include "catalog/gs_db_privilege.h"
+#include "catalog/namespace.h"
 #include "commands/defrem.h"
 #include "commands/proclang.h"
+#include "commands/typecmds.h"
 #include "executor/executor.h"
 #include "gs_policy/gs_policy_masking.h"
 #include "miscadmin.h"
@@ -152,6 +155,17 @@ static void compute_return_type(
             if (!OidIsValid(rettype)) {
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
                     errmsg("table of type %s typelem does not exist", TypeNameToString(returnType))));
+            }
+
+            if (((Form_pg_type)GETSTRUCT(typtup))->typcategory == TYPCATEGORY_TABLEOF_VARCHAR ||
+                ((Form_pg_type)GETSTRUCT(typtup))->typcategory == TYPCATEGORY_TABLEOF_INTEGER) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmodule(MOD_PLSQL),
+                            errmsg("table of index type is not supported as function return type."),
+                            errdetail("N/A"),
+                            errcause("feature not supported"),
+                            erraction("check define of funtion")));
             }
         } else {
             rettype = typeTypeId(typtup);
@@ -256,10 +270,15 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("parameterCount is invalid %d", parameterCount)));
     }
-    inTypes = (Oid*)palloc(parameterCount * sizeof(Oid));
-    allTypes = (Datum*)palloc(parameterCount * sizeof(Datum));
-    paramModes = (Datum*)palloc(parameterCount * sizeof(Datum));
-    paramNames = (Datum*)palloc0(parameterCount * sizeof(Datum));
+
+    /* parameterCount will be zero when someone create a function without paramters. */
+    if (parameterCount != 0) {
+        inTypes = (Oid*)palloc(parameterCount * sizeof(Oid));
+        allTypes = (Datum*)palloc(parameterCount * sizeof(Datum));
+        paramModes = (Datum*)palloc(parameterCount * sizeof(Datum));
+        paramNames = (Datum*)palloc0(parameterCount * sizeof(Datum));
+    }
+
     *parameterDefaults = NIL;
 
     /* may need a pstate for parse analysis of default exprs */
@@ -308,18 +327,7 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
                             errmsg("argument type %s is only a shell", TypeNameToString(t))));
             }
 
-            /* if table of type, find its array type */
-            if (((Form_pg_type)GETSTRUCT(typtup))->typtype == TYPTYPE_TABLEOF) {
-                toid = ((Form_pg_type)GETSTRUCT(typtup))->typelem;
-                if (!OidIsValid(toid)) {
-                    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                        errmsg("table of type %s typelem does not exist", TypeNameToString(t))));
-                    toid = InvalidOid; /* keep compiler quiet */
-                }
-            } else {
-                toid = typeTypeId(typtup);
-            }
-            
+            toid = typeTypeId(typtup);
             ReleaseSysCache(typtup);
         } else if (!OidIsValid(toid)) {
             int rc = 0;
@@ -482,6 +490,8 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
     free_parsestate(pstate);
 
     /* Now construct the proper outputs as needed */
+
+    /* if there are no paramters (parameterCount is 0), we make a InvalidOidVector */
     *parameterTypes = buildoidvector(inTypes, inCount);
 
     if (outCount > 0 || varCount > 0) {
@@ -903,7 +913,25 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
     bool shippable = false;
     bool package = false;
     bool proIsProcedure = stmt->isProcedure;
-    if (PLSQL_SECURITY_DEFINER) {
+    if (!OidIsValid(pkg_oid)) {
+        u_sess->plsql_cxt.debug_query_string = pstrdup(queryString);
+    }
+    if (PLSQL_SECURITY_DEFINER && u_sess->attr.attr_common.upgrade_mode == 0 && OidIsValid(pkg_oid)) {
+        bool isnull = false;
+        HeapTuple pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkg_oid));
+        Datum pkgSecDefDatum = SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgsecdef, &isnull);
+        if (isnull) {
+            security = false;
+        } else {
+            bool pkgSecDef = DatumGetBool(pkgSecDefDatum);
+            if (!pkgSecDef) {
+                security = false;
+            } else {
+                security = true;
+            }
+        }
+        ReleaseSysCache(pkgTuple);
+    } else if (PLSQL_SECURITY_DEFINER && u_sess->attr.attr_common.upgrade_mode == 0) {
         security = true;
     }
     probin_str = NULL;
@@ -913,8 +941,6 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
     if (rc == PLPGSQL_COMPILE_PACKAGE) {
         u_sess->plsql_cxt.procedure_start_line = stmt->startLineNumber;
         u_sess->plsql_cxt.procedure_first_line = stmt->firstLineNumber;
-    } else {
-        u_sess->plsql_cxt.sourceText = pstrdup(queryString);
     }
     u_sess->plsql_cxt.isCreateFunction = true;
     /*
@@ -946,12 +972,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
                 errcause("The schema in the package does not support object creation.."),
                 erraction("Please create an object in another schema.")));
     }
-
-    /* Check we have creation rights in target namespace */
-    aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
-    if (aclresult != ACLCHECK_OK)
-        aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
-
+    bool anyResult = CheckCreatePrivilegeInNamespace(namespaceId, GetUserId(), CREATE_ANY_FUNCTION);
     if (namespaceId == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
@@ -965,7 +986,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
     pgxc_lock_for_utility_stmt((Node*)stmt, namespaceId == u_sess->catalog_cxt.myTempNamespace);
 
     if (u_sess->attr.attr_sql.enforce_a_behavior) {
-        proowner = GetUserIdFromNspId(namespaceId);
+        proowner = GetUserIdFromNspId(namespaceId, false, anyResult);
 
         if (!OidIsValid(proowner))
             proowner = GetUserId();
@@ -973,9 +994,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
             isalter = true;
 
         if (isalter) {
-            aclresult = pg_namespace_aclcheck(namespaceId, proowner, ACL_CREATE);
-            if (aclresult != ACLCHECK_OK)
-                aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+            (void)CheckCreatePrivilegeInNamespace(namespaceId, proowner, CREATE_ANY_FUNCTION);
         }
     } else {
         proowner = GetUserId();
@@ -998,7 +1017,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
                                             : 0)));
 
     languageOid = HeapTupleGetOid(languageTuple);
-	
+
 #ifdef ENABLE_MULTIPLE_NODES
     if (languageOid == JavalanguageId) {
         /*
@@ -1143,6 +1162,9 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
         stmt->isPrivate);
     u_sess->plsql_cxt.procedure_start_line = 0;
     u_sess->plsql_cxt.procedure_first_line = 0;
+    if (u_sess->plsql_cxt.debug_query_string != NULL && !OidIsValid(pkg_oid)) {
+        pfree_ext(u_sess->plsql_cxt.debug_query_string);
+    }
 }
 
 /*
@@ -1400,7 +1422,7 @@ void RemovePackageById(Oid pkgOid, bool isBody)
     }
 }
 
-void dropFunctionByPackageOid(Oid package_oid) 
+void DeleteFunctionByPackageOid(Oid package_oid) 
 {
     if (!OidIsValid(package_oid)) {
         return;
@@ -1510,19 +1532,16 @@ void RenameFunction(List* name, List* argtypes, const char* newname)
         }
     } else {
         Datum packageOidDatum;
-        Oid packageOid = InvalidOid;
         bool isNull = false;
         packageOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isNull);
-        packageOid = ObjectIdGetDatum(packageOidDatum);
-        if (!OidIsValid(packageOid)) {
-            packageOidDatum = ObjectIdGetDatum(InvalidOid);
-        }
-
         Datum allargtypes = ProcedureGetAllArgTypes(tup, &isNull);
-        if (SearchSysCacheExists4(PROCALLARGS,
+        Datum argmodes = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_proargmodes, &isNull);
+        if (SearchSysCacheExistsForProcAllArgs(
                 CStringGetDatum(newname),
                 allargtypes,
-                ObjectIdGetDatum(namespaceOid), packageOidDatum)) {
+                ObjectIdGetDatum(namespaceOid),
+                packageOidDatum,
+                argmodes)) {
             ereport(ERROR,
                 (errcode(ERRCODE_DUPLICATE_FUNCTION),
                     errmsg("function %s already exists in schema \"%s\"",
@@ -1608,8 +1627,9 @@ void AlterFunctionOwner(List* name, List* argtypes, Oid newOwnerId)
 
 /*
  * Change function owner by Oid
+ * in byPackage: means whether called by Alter Package Owner
  */
-void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId)
+void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId, bool byPackage)
 {
     Relation rel;
     HeapTuple tup;
@@ -1635,13 +1655,52 @@ void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId)
 
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
-    checkAllowAlter(tup);
+    if (!byPackage) {
+        checkAllowAlter(tup);
+    }
     AlterFunctionOwner_internal(rel, tup, newOwnerId);
 
     /* Recode time of change the funciton owner. */
     UpdatePgObjectMtime(procOid, OBJECT_TYPE_PROC);
 
     heap_close(rel, NoLock);
+}
+
+/*
+ * Change function owner by package Oid, called by Alter Package Owner
+ */
+void AlterFunctionOwnerByPkg(Oid packageOid, Oid newOwnerId)
+{
+    if (!OidIsValid(packageOid)) {
+        return;
+    }
+
+    HeapTuple oldtup;
+    ScanKeyData entry;
+    ScanKeyInit(&entry, Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(packageOid));
+    Relation pg_proc_rel = heap_open(ProcedureRelationId, RowExclusiveLock);
+    SysScanDesc scan = systable_beginscan(pg_proc_rel, InvalidOid, false, NULL, 1, &entry);
+    while ((oldtup = systable_getnext(scan)) != NULL) {
+        HeapTuple proctup = heap_copytuple(oldtup);
+        Oid funcOid = InvalidOid;
+        if (HeapTupleIsValid(proctup)) {
+            funcOid = HeapTupleGetOid(proctup);
+            if (!OidIsValid(funcOid)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmodule(MOD_PLSQL),
+                        errmsg("cache lookup failed for function id %u", funcOid)));
+            }
+        } else {
+            ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmodule(MOD_PLSQL),
+                        errmsg("cache lookup failed for function %u", funcOid)));
+        }
+        AlterFunctionOwner_oid(funcOid, newOwnerId, true);
+    }
+    systable_endscan(scan);
+    heap_close(pg_proc_rel, NoLock);
 }
 
 /*
@@ -1725,6 +1784,8 @@ static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwne
 
         /* Update owner dependency reference */
         changeDependencyOnOwner(ProcedureRelationId, procOid, newOwnerId);
+        /* Update owner of function type build in pg_type */
+        AlterTypeOwnerByFunc(procOid, newOwnerId);
     }
 
     ReleaseSysCache(tup);
@@ -2502,10 +2563,13 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
         }    
 
         Datum allargtypes = ProcedureGetAllArgTypes(tup, &isNull);
-        if (SearchSysCacheExists4(PROCALLARGS,
+        Datum argmodes = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_proargmodes, &isNull);
+        if (SearchSysCacheExistsForProcAllArgs(
                 CStringGetDatum(NameStr(proc->proname)),
                 allargtypes,
-                ObjectIdGetDatum(nspOid), packageOidDatum)) {
+                ObjectIdGetDatum(nspOid),
+                packageOidDatum,
+                argmodes)) {
             ereport(ERROR,
                 (errcode(ERRCODE_DUPLICATE_FUNCTION),
                     errmsg("function \"%s\" already exists in schema \"%s\"",

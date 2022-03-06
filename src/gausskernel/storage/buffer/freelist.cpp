@@ -453,6 +453,7 @@ void StrategyInitialize(bool init)
     }
 }
 
+const int MIN_REPAIR_FILE_SLOT_NUM = 32;
 /* ----------------------------------------------------------------
  *				Backend-private buffer ring management
  * ----------------------------------------------------------------
@@ -488,7 +489,9 @@ BufferAccessStrategy GetAccessStrategy(BufferAccessStrategyType btype)
             ring_size = g_instance.attr.attr_storage.NBuffers / 32 /
                 Max(g_instance.attr.attr_storage.autovacuum_max_workers, 1);
             break;
-
+        case BAS_REPAIR:
+            ring_size = Min(g_instance.attr.attr_storage.NBuffers, MIN_REPAIR_FILE_SLOT_NUM);
+            break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
                             (errmsg("unrecognized buffer access strategy: %d", (int)btype))));

@@ -199,9 +199,9 @@ void _bt_spooldestroy(BTSpool *btspool)
 /*
  * spool an index entry into the sort file.
  */
-void _bt_spool(BTSpool *btspool, ItemPointer self, Datum *values, const bool *isnull, IndexTransInfo* transInfo)
+void _bt_spool(BTSpool *btspool, ItemPointer self, Datum *values, const bool *isnull)
 {
-    tuplesort_putindextuplevalues(btspool->sortstate, btspool->index, self, values, isnull, transInfo);
+    tuplesort_putindextuplevalues(btspool->sortstate, btspool->index, self, values, isnull);
 }
 
 /*

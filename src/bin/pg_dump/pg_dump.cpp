@@ -152,6 +152,9 @@ const int MAX_CMK_STORE_SIZE = 64;
 #include "utils/aes.h"
 #include "pgtime.h"
 
+#ifdef ENABLE_UT
+#define static
+#endif
 
 #define FREE_PTR(ptr)      \
     if (ptr != NULL) {     \
@@ -229,7 +232,7 @@ static char connected_node_type = 'N'; /* 'N' -- NONE
 char* all_data_nodename_list = NULL;
 const uint32 USTORE_UPGRADE_VERSION = 92368;
 const uint32 PACKAGE_ENHANCEMENT = 92444;
-const uint32 SUBSCRIPTION_VERSION = 92504;
+const uint32 SUBSCRIPTION_VERSION = 92580;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -432,8 +435,13 @@ static void getBlobs(Archive* fout);
 static void dumpBlob(Archive* fout, BlobInfo* binfo);
 static int dumpBlobs(Archive* fout, void* arg);
 static void dumpDatabase(Archive* AH);
+static void getGrantAnyPrivilegeQuery(Archive* fout, PQExpBuffer grantAnyPrivilegeSql,
+    Oid roleid, const char* adminOption);
+static void dumpAnyPrivilege(Archive* fout);
+#ifdef HAVE_CE
 static void dumpClientGlobalKeys(Archive* fout, const Oid nspoid, const char *nspname);
 static void dumpColumnEncryptionKeys(Archive* fout, const Oid nspoid, const char *nspname);
+#endif
 static void dumpEncoding(Archive* AH);
 static void dumpStdStrings(Archive* AH);
 static void binary_upgrade_set_type_oids_by_type_oid(
@@ -567,9 +575,13 @@ int main(int argc, char** argv)
         {"serializable-deferrable", no_argument, &serializable_deferrable, 1},
         {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
         {"no-security-labels", no_argument, &no_security_labels, 1},
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
         {"no-publications", no_argument, &no_publications, 1},
+#endif
         {"no-unlogged-table-data", no_argument, &no_unlogged_table_data, 1},
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
         {"no-subscriptions", no_argument, &no_subscriptions, 1},
+#endif
         {"include-alter-table", no_argument, &include_alter_table, 1},
         {"exclude-self", no_argument, &exclude_self, 1},
         {"include-depend-objs", no_argument, &include_depend_objs, 1},
@@ -988,7 +1000,11 @@ int main(int argc, char** argv)
         dumpDatabase(fout);
         dumpDirectory(fout);
     }
-
+    ArchiveHandle* archiveHandle = (ArchiveHandle*)fout;
+    const char* sqlCmd = "select * from pg_class where relname = 'gs_db_privilege';";
+    if (isExistsSQLResult(archiveHandle->connection, sqlCmd)) {
+        dumpAnyPrivilege(fout);
+    }
     /* gets the total number of dump objects */
     if (!dataOnly) {
         for (i = 0; i < numObjs; i++) {
@@ -1733,9 +1749,13 @@ void help(const char* pchProgname)
     printf(_("  --exclude-table-data=TABLE                  do NOT dump data for the named table(s)\n"));
     printf(_("  --exclude-with                              do NOT dump WITH() of table(s)\n"));
     printf(_("  --inserts                                   dump data as INSERT commands, rather than COPY\n"));
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
     printf(_("  --no-publications                           do not dump publications\n"));
+#endif
     printf(_("  --no-security-labels                        do not dump security label assignments\n"));
+#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
     printf(_("  --no-subscriptions                          do not dump subscriptions\n"));
+#endif
     printf(_("  --no-tablespaces                            do not dump tablespace assignments\n"));
     printf(_("  --no-unlogged-table-data                    do not dump unlogged table data\n"));
     printf(_("  --include-alter-table                       dump the table delete column\n"));
@@ -2078,7 +2098,7 @@ static void ExcludeMatRelTables(Archive* fout, SimpleOidList* oidlists)
         "SELECT c.oid"
         "   FROM pg_catalog.pg_class c"
         "   WHERE c.relkind = 'r'"
-        "   AND (c.relname like 'matviewmap_%%' OR c.relname like 'mlog_%%'\n)");
+        "   AND (c.relname like 'matviewmap\\_%%' OR c.relname like 'mlog\\_%%'\n)");
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
@@ -3476,6 +3496,91 @@ static void dumpDatabase(Archive* fout)
     destroyPQExpBuffer(creaQry);
 }
 
+static void getGrantAnyPrivilegeQuery(Archive* fout, PQExpBuffer grantAnyPrivilegeSql,
+    Oid roleid, const char* adminOption)
+{
+    PGresult* anyRes = NULL;
+    PQExpBuffer gsDbPrivilegeQry = createPQExpBuffer();
+    if (gsDbPrivilegeQry == NULL) {
+        return;
+    }
+    appendPQExpBuffer(gsDbPrivilegeQry,
+        "SELECT pg_roles.rolname, gs_db_privilege.privilege_type from gs_db_privilege "
+        "left join pg_roles on gs_db_privilege.roleid = pg_roles.oid "
+        "where gs_db_privilege.roleid = %u and gs_db_privilege.admin_option = '%s';", roleid, adminOption);
+    anyRes = ExecuteSqlQuery(fout, gsDbPrivilegeQry->data, PGRES_TUPLES_OK);
+    int tupleNum = PQntuples(anyRes);
+    if (tupleNum <= 0) {
+        PQclear(anyRes);
+        destroyPQExpBuffer(gsDbPrivilegeQry);
+        return;
+    }
+    appendPQExpBuffer(grantAnyPrivilegeSql, "GRANT ");
+    char* roleName = PQgetvalue(anyRes, 0, 0);
+    for (int j = 0; j < tupleNum; j++) {
+        char* privilegeType = PQgetvalue(anyRes, j, 1);
+        if (j == tupleNum - 1) {
+            appendPQExpBuffer(grantAnyPrivilegeSql, "%s ", privilegeType);
+        } else {
+            appendPQExpBuffer(grantAnyPrivilegeSql, "%s, ", privilegeType);
+        }
+    }
+    appendPQExpBuffer(grantAnyPrivilegeSql, "TO %s", roleName);
+    if (*adminOption == 't') {
+        appendPQExpBuffer(grantAnyPrivilegeSql, " WITH ADMIN OPTION");
+    }
+    appendPQExpBuffer(grantAnyPrivilegeSql, ";\n");
+    PQclear(anyRes);
+    destroyPQExpBuffer(gsDbPrivilegeQry);
+}
+/*
+ * Dump privilege of database level.
+ *
+ */
+static void dumpAnyPrivilege(Archive *fout)
+{
+    PGresult* res = NULL;
+    Oid roleid = 0;
+    PQExpBuffer selectGsDbPrivilegeQry = createPQExpBuffer();
+    if (selectGsDbPrivilegeQry == NULL) {
+        return;
+    }
+    PQExpBuffer grantAnyPrivilegeSql = createPQExpBuffer();
+    if (grantAnyPrivilegeSql == NULL) {
+        destroyPQExpBuffer(selectGsDbPrivilegeQry);
+        return;
+    }
+    appendPQExpBuffer(selectGsDbPrivilegeQry, "SELECT distinct roleid from gs_db_privilege;");
+    res = ExecuteSqlQuery(fout, selectGsDbPrivilegeQry->data, PGRES_TUPLES_OK);
+    int roleidNum = PQfnumber(res, "roleid");
+    for (int i = 0; i < PQntuples(res); i++) {
+        roleid = atooid(PQgetvalue(res, i, roleidNum));
+        getGrantAnyPrivilegeQuery(fout, grantAnyPrivilegeSql, roleid, "f");
+        getGrantAnyPrivilegeQuery(fout, grantAnyPrivilegeSql, roleid, "t");
+    }
+    ArchiveEntry(fout,
+        nilCatalogId,                /* catalog ID */
+        createDumpId(),              /* dump ID */
+        "AnyPrivilege",              /* Name */
+        NULL,                        /* Namespace */
+        NULL,                        /* Tablespace */
+        "",                          /* Owner */
+        false,                       /* with oids */
+        "AnyPrivilege",              /* Desc */
+        SECTION_PRE_DATA,            /* Section */
+        grantAnyPrivilegeSql->data,  /* Create */
+        "",                          /* Del */
+        NULL,                        /* Copy */
+        NULL,                        /* Deps */
+        0,                           /* # Deps */
+        NULL,                        /* Dumper */
+        NULL);                       /* Dumper Arg */
+    PQclear(res);
+    destroyPQExpBuffer(selectGsDbPrivilegeQry);
+    destroyPQExpBuffer(grantAnyPrivilegeSql);
+}
+
+#ifdef HAVE_CE
 static void dumpClientGlobalKeys(Archive *fout, const Oid nspoid, const char *nspname) 
 {
     int j = 0;
@@ -3761,7 +3866,7 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
     destroyPQExpBuffer(selectClientGlobalKeysArgsQry);
     destroyPQExpBuffer(createColumnEncryptionKeysQry);
 }
-
+#endif
 /*
  * dumpEncoding: put the correct encoding into the archive
  */
@@ -4109,6 +4214,11 @@ void getPublications(Archive *fout)
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
     ntups = PQntuples(res);
+    if (ntups == 0) {
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        return;
+    }
 
     i_tableoid = PQfnumber(res, "tableoid");
     i_oid = PQfnumber(res, "oid");
@@ -4205,6 +4315,7 @@ static void dumpPublication(Archive *fout, const PublicationInfo *pubinfo)
 
     destroyPQExpBuffer(delq);
     destroyPQExpBuffer(query);
+    destroyPQExpBuffer(labelq);
 }
 
 /*
@@ -4317,23 +4428,6 @@ static void dumpPublicationTable(Archive *fout, const PublicationRelInfo *pubrin
 }
 
 /*
- * Is the currently connected user a superuser?
- */
-static bool is_superuser(Archive *fout)
-{
-    ArchiveHandle *AH = (ArchiveHandle *)fout;
-    const char *val;
-
-    val = PQparameterStatus(AH->connection, "is_sysadmin");
-
-    if (val && strcmp(val, "on") == 0) {
-        return true;
-    }
-
-    return false;
-}
-
-/*
  * getSubscriptions
  * 	  get information about subscriptions
  */
@@ -4356,15 +4450,13 @@ void getSubscriptions(Archive *fout)
         return;
     }
 
-    if (!is_superuser(fout)) {
-        int n;
-
+    if (!isExecUserSuperRole(fout)) {
         res = ExecuteSqlQuery(fout,
             "SELECT count(*) FROM pg_subscription "
             "WHERE subdbid = (SELECT oid FROM pg_catalog.pg_database"
             "                 WHERE datname = current_database())",
             PGRES_TUPLES_OK);
-        n = atoi(PQgetvalue(res, 0, 0));
+        uint64 n = (res != NULL) ? strtoul(PQgetvalue(res, 0, 0), NULL, 10) : 0;
         if (n > 0) {
             write_msg(NULL, "WARNING: subscriptions not dumped because current user is not a superuser\n");
         }
@@ -4388,6 +4480,11 @@ void getSubscriptions(Archive *fout)
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
     ntups = PQntuples(res);
+    if (ntups == 0) {
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        return;
+    }
 
     i_tableoid = PQfnumber(res, "tableoid");
     i_oid = PQfnumber(res, "oid");
@@ -4500,6 +4597,7 @@ static void dumpSubscription(Archive *fout, const SubscriptionInfo *subinfo)
 
     destroyPQExpBuffer(delq);
     destroyPQExpBuffer(query);
+    destroyPQExpBuffer(labelq);
 }
 
 static void binary_upgrade_set_type_oids_by_type_oid(
@@ -10647,10 +10745,10 @@ static void dumpNamespace(Archive* fout, NamespaceInfo* nspinfo)
         NULL,
         nspinfo->rolname,
         nspinfo->nspacl);
-
+#ifdef HAVE_CE
     dumpClientGlobalKeys(fout, nspinfo->dobj.catId.oid, nspinfo->dobj.name);
     dumpColumnEncryptionKeys(fout, nspinfo->dobj.catId.oid, nspinfo->dobj.name);
-
+#endif
     free(qnspname);
     qnspname = NULL;
 
@@ -10959,6 +11057,8 @@ static void dumpTableofType(Archive* fout, TypeInfo* tyinfo)
     
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
     num = PQntuples(res);
+
+    qtypname = gs_strdup(fmtId(tyinfo->dobj.name));
     /*
      * DROP must be fully qualified in case same name appears in pg_catalog.
      * CASCADE shouldn't be required here as for normal types since the I/O
@@ -10967,12 +11067,15 @@ static void dumpTableofType(Archive* fout, TypeInfo* tyinfo)
     appendPQExpBuffer(delq, "DROP TYPE %s%s.", if_exists, fmtId(tyinfo->dobj.nmspace->dobj.name));
     appendPQExpBuffer(delq, "%s%s;\n", qtypname, if_cascade);
 
-    qtypname = gs_strdup(fmtId(tyinfo->dobj.name));
     appendPQExpBuffer(q, "CREATE TYPE %s AS TABLE OF ", qtypname);
 
-    if (num > 1) {
+    if (num != 1) {
         PQclear(res);
+        destroyPQExpBuffer(q);
+        destroyPQExpBuffer(delq);
+        destroyPQExpBuffer(labelq);
         destroyPQExpBuffer(query);
+        free(qtypname);
         return;
     }
     field_num = PQfnumber(res, "typname");
@@ -17505,7 +17608,7 @@ static void GenerateSubPartitionDetail(PQExpBuffer result, Archive *fout, TableI
             if (!PQgetisnull(res, i, i_boundaries)) {
                 boundaryValue = gs_strdup(PQgetvalue(res, i, i_boundaries));
             }
-            if (boundaryValue == NULL || (boundaryValue != NULL && strlen(boundaryValue) == 0)) {
+            if (boundaryValue == NULL || strlen(boundaryValue) == 0) {
                 appendPQExpBuffer(result, "DEFAULT");
             } else if (isTypeString(tbinfo, subpartkeycols[0])) {
                 char *boundStr = gs_strdup(PQgetvalue(res, i, i_boundStr));
@@ -17763,7 +17866,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 if (!PQgetisnull(res, i, iBoundaries)) {
                     boundaryValue = gs_strdup(PQgetvalue(res, i, iBoundaries));
                 }
-                if (boundaryValue == NULL || (boundaryValue != NULL && strlen(boundaryValue) == 0)) {
+                if (boundaryValue == NULL || strlen(boundaryValue) == 0) {
                     appendPQExpBuffer(result, "DEFAULT");
                 } else if (isTypeString(tbinfo, partkeycols[0])) {
                     char *boundStr = gs_strdup(PQgetvalue(res, i, iBoundStr));
@@ -19872,6 +19975,8 @@ static const char* getAttrName(int attrnum, TableInfo* tblInfo)
             return "xc_node_id";
         case BucketIdAttributeNumber:
             return "tablebucketid";
+        case UidAttributeNumber:
+            return "gs_tuple_uid";
 #endif
         default:
             break;
@@ -20521,6 +20626,10 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
                 PQntuples(res)),
             fmtId(tbinfo->dobj.name),
             PQntuples(res));
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        destroyPQExpBuffer(delqry);
+        destroyPQExpBuffer(labelq);
         exit_nicely(1);
     }
 
@@ -20531,6 +20640,10 @@ static void dumpSequence(Archive* fout, TableInfo* tbinfo, bool large)
             "query to get data of sequence \"%s\" returned name \"%s\"\n",
             tbinfo->dobj.name,
             PQgetvalue(res, 0, 0));
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        destroyPQExpBuffer(delqry);
+        destroyPQExpBuffer(labelq);
         exit_nicely(1);
     }
 #endif
@@ -20684,13 +20797,9 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo, bool large)
     PGresult* res = NULL;
     char* last = NULL;
     char* start = NULL;
-    int64 startValue = 0;
     char* increment = NULL;
-    int64 incrementValue = 0;
     char* max = NULL;
-    int64 maxValue = 0;
     char* min = NULL;
-    int64 minValue = 0;
 
     bool called = false;
     PQExpBuffer query = createPQExpBuffer();
@@ -20710,21 +20819,19 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo, bool large)
                 PQntuples(res)),
             fmtId(tbinfo->dobj.name),
             PQntuples(res));
+        PQclear(res);
+        destroyPQExpBuffer(query);
         exit_nicely(1);
     }
 
     /*local last_value and isCalled are not reliable. but the following values are reliable */
     start = PQgetvalue(res, 0, 0);
-    startValue = atol(start);
 
     increment = PQgetvalue(res, 0, 1);
-    incrementValue = atol(increment);
 
     max = PQgetvalue(res, 0, 2);
-    maxValue = atol(max);
 
     min = PQgetvalue(res, 0, 3);
-    minValue = atol(min);
 
     called = (strcmp(PQgetvalue(res, 0, 4), "t") == 0);
 
@@ -20780,6 +20887,8 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo, bool large)
                     PQntuples(res)),
                 fmtId(tbinfo->dobj.name),
                 PQntuples(res));
+            PQclear(res);
+            destroyPQExpBuffer(query);
             exit_nicely(1);
         }
 

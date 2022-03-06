@@ -4,6 +4,7 @@
  *	  Declarations for operations on built-in types.
  *
  *
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2021, openGauss Contributors
@@ -137,6 +138,7 @@ extern Datum has_cek_privilege_id_name(PG_FUNCTION_ARGS);
 extern Datum has_cek_privilege_id_id(PG_FUNCTION_ARGS);
 extern Datum has_cek_privilege_name(PG_FUNCTION_ARGS);
 extern Datum has_cek_privilege_id(PG_FUNCTION_ARGS);
+extern Datum has_any_privilege(PG_FUNCTION_ARGS);
 
 /* bool.c */
 extern Datum boolin(PG_FUNCTION_ARGS);
@@ -591,7 +593,6 @@ extern Datum pg_read_file(PG_FUNCTION_ARGS);
 extern Datum pg_read_file_all(PG_FUNCTION_ARGS);
 extern Datum pg_read_binary_file(PG_FUNCTION_ARGS);
 extern Datum pg_read_binary_file_all(PG_FUNCTION_ARGS);
-extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
 extern Datum pg_ls_dir(PG_FUNCTION_ARGS);
 extern Datum pg_stat_file_recursive(PG_FUNCTION_ARGS);
 
@@ -702,7 +703,22 @@ extern Datum texticregexne(PG_FUNCTION_ARGS);
 extern Datum textregexsubstr(PG_FUNCTION_ARGS);
 extern Datum textregexreplace_noopt(PG_FUNCTION_ARGS);
 extern Datum textregexreplace(PG_FUNCTION_ARGS);
+extern Datum regexp_replace_noopt(PG_FUNCTION_ARGS);
+extern Datum regexp_replace_with_position(PG_FUNCTION_ARGS);
+extern Datum regexp_replace_with_occur(PG_FUNCTION_ARGS);
+extern Datum regexp_replace_with_opt(PG_FUNCTION_ARGS);
 extern Datum similar_escape(PG_FUNCTION_ARGS);
+extern Datum regexp_count_noopt(PG_FUNCTION_ARGS);
+extern Datum regexp_count_position(PG_FUNCTION_ARGS);
+extern Datum regexp_count_matchopt(PG_FUNCTION_ARGS);
+extern Datum regexp_instr_noopt(PG_FUNCTION_ARGS);
+extern Datum regexp_instr_position(PG_FUNCTION_ARGS);
+extern Datum regexp_instr_occurren(PG_FUNCTION_ARGS);
+extern Datum regexp_instr_returnopt(PG_FUNCTION_ARGS);
+extern Datum regexp_instr_matchopt(PG_FUNCTION_ARGS);
+extern Datum regexp_substr_with_position(PG_FUNCTION_ARGS);
+extern Datum regexp_substr_with_occurrence(PG_FUNCTION_ARGS);
+extern Datum regexp_substr_with_opt(PG_FUNCTION_ARGS);
 extern Datum regexp_matches(PG_FUNCTION_ARGS);
 extern Datum regexp_matches_no_flags(PG_FUNCTION_ARGS);
 extern Datum regexp_split_to_table(PG_FUNCTION_ARGS);
@@ -954,7 +970,7 @@ extern bool SplitIdentifierString(char* rawstring, char separator, List** nameli
 extern bool SplitIdentifierInteger(char* rawstring, char separator, List** namelist);
 extern Datum replace_text(PG_FUNCTION_ARGS);
 extern Datum replace_text_with_two_args(PG_FUNCTION_ARGS);
-extern text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool glob);
+extern text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, int position, int occur);
 extern Datum split_text(PG_FUNCTION_ARGS);
 extern Datum text_to_array(PG_FUNCTION_ARGS);
 extern Datum array_to_text(PG_FUNCTION_ARGS);
@@ -1459,6 +1475,10 @@ extern Datum pgxc_pool_connection_status(PG_FUNCTION_ARGS);
 extern Datum pg_pool_validate(PG_FUNCTION_ARGS);
 extern Datum pg_pool_ping(PG_FUNCTION_ARGS);
 extern Datum comm_check_connection_status(PG_FUNCTION_ARGS);
+extern Datum pgxc_disaster_read_set(PG_FUNCTION_ARGS);
+extern Datum pgxc_disaster_read_init(PG_FUNCTION_ARGS);
+extern Datum pgxc_disaster_read_clear(PG_FUNCTION_ARGS);
+extern Datum pgxc_disaster_read_status(PG_FUNCTION_ARGS);
 #endif
 
 /* comm_proxy.cpp */
@@ -1538,13 +1558,13 @@ extern void encryptOBS(char* srcplaintext, char destciphertext[], uint32 destcip
 extern void decryptOBS(
     const char* srcciphertext, char destplaintext[], uint32 destplainlength, const char* obskey = NULL);
 extern void encryptECString(char* src_plain_text, char* dest_cipher_text,
-                                 uint32 dest_cipher_length, KeyMode mode);
+                                 uint32 dest_cipher_length, int mode);
 extern bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
-                                 uint32 dest_plain_length, KeyMode mode);
+                                 uint32 dest_plain_length, int mode);
 extern bool IsECEncryptedString(const char* src_cipher_text);
 extern void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray,
-                                         int arrayLength, KeyMode mode);
-extern void DecryptOptions(List *options, const char** sensitiveOptionsArray, int arrayLength, KeyMode mode);
+                                         int arrayLength, int mode);
+extern void DecryptOptions(List *options, const char** sensitiveOptionsArray, int arrayLength, int mode);
 
 #define EC_CIPHER_TEXT_LENGTH 1024
 
@@ -1596,6 +1616,7 @@ extern Datum tdigest_in(PG_FUNCTION_ARGS);
 
 /* AI */
 extern Datum db4ai_predict_by(PG_FUNCTION_ARGS);
+extern Datum db4ai_explain_model(PG_FUNCTION_ARGS);
 extern Datum gs_index_advise(PG_FUNCTION_ARGS);
 extern Datum hypopg_create_index(PG_FUNCTION_ARGS);                             
 extern Datum hypopg_display_index(PG_FUNCTION_ARGS);                            
@@ -1608,9 +1629,20 @@ extern Datum mot_global_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_local_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_session_memory_detail(PG_FUNCTION_ARGS);
 
+/* UBtree index */
+Datum gs_index_verify(PG_FUNCTION_ARGS);
+Datum gs_index_recycle_queue(PG_FUNCTION_ARGS);
+
 /* undo meta */
 extern Datum gs_undo_meta(PG_FUNCTION_ARGS);
+extern Datum gs_stat_undo(PG_FUNCTION_ARGS);
 extern Datum gs_undo_translot(PG_FUNCTION_ARGS);
+extern Datum gs_undo_record(PG_FUNCTION_ARGS);
+
+/* Xlog write/flush */
+extern Datum gs_stat_wal_entrytable(PG_FUNCTION_ARGS);
+extern Datum gs_walwriter_flush_position(PG_FUNCTION_ARGS);
+extern Datum gs_walwriter_flush_stat(PG_FUNCTION_ARGS);
 
 /* Ledger */
 extern Datum get_dn_hist_relhash(PG_FUNCTION_ARGS);
@@ -1625,6 +1657,15 @@ extern Datum gs_is_recycle_object(PG_FUNCTION_ARGS);
 /* Oracle connect by */
 extern Datum sys_connect_by_path(PG_FUNCTION_ARGS);
 extern Datum connect_by_root(PG_FUNCTION_ARGS);
+
+/* Sequence update */
+Datum large_sequence_upgrade_node_tree(PG_FUNCTION_ARGS);
+Datum large_sequence_rollback_node_tree(PG_FUNCTION_ARGS);
+
+/* Create Index Concurrently for Distribution */
+#ifdef ENABLE_MULTIPLE_NODES
+extern Datum gs_mark_indisvalid(PG_FUNCTION_ARGS);
+#endif
 
 /* origin.cpp */
 extern Datum pg_replication_origin_advance(PG_FUNCTION_ARGS);
@@ -1645,7 +1686,6 @@ extern Datum pg_get_publication_tables(PG_FUNCTION_ARGS);
 
 /* launcher.cpp */
 extern Datum pg_stat_get_subscription(PG_FUNCTION_ARGS);
-
 
 #endif /* !FRONTEND_PARSER */
 

@@ -1,0 +1,262 @@
+create schema force_vector_engine;
+set current_schema=force_vector_engine;
+create table force_vector_test(id int, val int);
+insert into force_vector_test values(generate_series(1, 10000), generate_series(1, 1000));
+create table force_vector_test1(id int, val int);
+insert into force_vector_test1 select * from force_vector_test;
+create index on force_vector_test1(id);
+analyze force_vector_test;
+analyze force_vector_test1;
+create table force_vector_test2(id int, val int) with (orientation=column);
+insert into force_vector_test2 select * from force_vector_test;
+analyze force_vector_test2;
+create function func_add_sql(a int, b int)
+returns int
+AS $$
+declare
+    res int;
+begin
+    select a+b into res;
+	return res;
+end; $$
+LANGUAGE plpgsql;
+set try_vector_engine_strategy='force';
+explain select count(*) from force_vector_test;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter  (cost=170.01..170.01 rows=1 width=8)
+   ->  Vector Aggregate  (cost=170.00..170.01 rows=1 width=8)
+         ->  Vector Adapter(type: BATCH MODE)  (cost=145.00..145.00 rows=10000 width=0)
+               ->  Seq Scan on force_vector_test  (cost=0.00..145.00 rows=10000 width=0)
+(4 rows)
+
+select count(*) from force_vector_test;
+ count 
+-------
+ 10000
+(1 row)
+
+explain select count(*) from force_vector_test1 where id=2;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Row Adapter  (cost=8.28..8.28 rows=1 width=8)
+   ->  Vector Aggregate  (cost=8.27..8.28 rows=1 width=8)
+         ->  Vector Adapter  (cost=8.27..8.27 rows=1 width=0)
+               ->  Index Only Scan using force_vector_test1_id_idx on force_vector_test1  (cost=0.00..8.27 rows=1 width=0)
+                     Index Cond: (id = 2)
+(5 rows)
+
+select count(*) from force_vector_test1 where id=2;
+ count 
+-------
+     1
+(1 row)
+
+explain select count(*) from force_vector_test1 where id=2 and val=2;
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Row Adapter  (cost=8.28..8.28 rows=1 width=8)
+   ->  Vector Aggregate  (cost=8.27..8.28 rows=1 width=8)
+         ->  Vector Adapter  (cost=8.27..8.27 rows=1 width=0)
+               ->  Index Scan using force_vector_test1_id_idx on force_vector_test1  (cost=0.00..8.27 rows=1 width=0)
+                     Index Cond: (id = 2)
+                     Filter: (val = 2)
+(6 rows)
+
+select count(*) from force_vector_test1 where id=2 and val=2;
+ count 
+-------
+     1
+(1 row)
+
+set enable_indexscan=off;
+explain select count(*) from force_vector_test1 where id=2;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Row Adapter  (cost=8.28..8.28 rows=1 width=8)
+   ->  Vector Aggregate  (cost=8.27..8.28 rows=1 width=8)
+         ->  Vector Adapter  (cost=8.27..8.27 rows=1 width=0)
+               ->  Bitmap Heap Scan on force_vector_test1  (cost=4.26..8.27 rows=1 width=0)
+                     Recheck Cond: (id = 2)
+                     ->  Bitmap Index Scan on force_vector_test1_id_idx  (cost=0.00..4.26 rows=1 width=0)
+                           Index Cond: (id = 2)
+(7 rows)
+
+select count(*) from force_vector_test1 where id=2;
+ count 
+-------
+     1
+(1 row)
+
+explain select count(*) from func_add_sql(1,2);
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Row Adapter  (cost=0.27..0.27 rows=1 width=8)
+   ->  Vector Aggregate  (cost=0.26..0.27 rows=1 width=8)
+         ->  Vector Adapter  (cost=0.26..0.26 rows=1 width=0)
+               ->  Function Scan on func_add_sql  (cost=0.25..0.26 rows=1 width=0)
+(4 rows)
+
+select count(*) from func_add_sql(1,2);
+ count 
+-------
+     1
+(1 row)
+
+explain values (1, 'AAAAA', 'read'),(2, 'BBBBB', 'write') order by 1,2,3;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Row Adapter  (cost=0.04..0.04 rows=2 width=68)
+   ->  Vector Sort  (cost=0.04..0.04 rows=2 width=68)
+         Sort Key: column1, column2, column3
+         ->  Vector Adapter  (cost=0.03..0.03 rows=2 width=68)
+               ->  Values Scan on "*VALUES*"  (cost=0.00..0.03 rows=2 width=68)
+(5 rows)
+
+values (1, 'AAAAA', 'read'),(2, 'BBBBB', 'write') order by 1,2,3;
+ column1 | column2 | column3 
+---------+---------+---------
+       1 | AAAAA   | read
+       2 | BBBBB   | write
+(2 rows)
+
+explain select * from force_vector_test where ctid='(0,1)' order by 2;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Row Adapter  (cost=4.03..4.03 rows=1 width=8)
+   ->  Vector Sort  (cost=4.02..4.03 rows=1 width=8)
+         Sort Key: val
+         ->  Vector Adapter  (cost=4.01..4.01 rows=1 width=8)
+               ->  Tid Scan on force_vector_test  (cost=0.00..4.01 rows=1 width=8)
+                     TID Cond: (ctid = '(0,1)'::tid)
+(6 rows)
+
+select * from force_vector_test where ctid='(0,1)' order by 2;
+ id | val 
+----+-----
+  1 |   1
+(1 row)
+
+explain select * from force_vector_test t1, force_vector_test2 t2 where t1.id=t2.id order by t1.id limit 10;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter  (cost=691.62..691.62 rows=10 width=16)
+   ->  Vector Limit  (cost=691.60..691.62 rows=10 width=16)
+         ->  Vector Sort  (cost=691.60..716.60 rows=10000 width=16)
+               Sort Key: t1.id
+               ->  Vector Sonic Hash Join  (cost=193.00..475.50 rows=10000 width=16)
+                     Hash Cond: (t1.id = t2.id)
+                     ->  Vector Adapter(type: BATCH MODE)  (cost=145.00..145.00 rows=10000 width=8)
+                           ->  Seq Scan on force_vector_test t1  (cost=0.00..145.00 rows=10000 width=8)
+                     ->  CStore Scan on force_vector_test2 t2  (cost=0.00..68.00 rows=10000 width=8)
+(9 rows)
+
+select * from force_vector_test t1, force_vector_test2 t2 where t1.id=t2.id order by t1.id limit 10;
+ id | val | id | val 
+----+-----+----+-----
+  1 |   1 |  1 |   1
+  2 |   2 |  2 |   2
+  3 |   3 |  3 |   3
+  4 |   4 |  4 |   4
+  5 |   5 |  5 |   5
+  6 |   6 |  6 |   6
+  7 |   7 |  7 |   7
+  8 |   8 |  8 |   8
+  9 |   9 |  9 |   9
+ 10 |  10 | 10 |  10
+(10 rows)
+
+set query_dop=1004;
+explain select count(*) from force_vector_test;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter  (cost=61.26..61.26 rows=1 width=8)
+   ->  Vector Aggregate  (cost=61.25..61.26 rows=1 width=8)
+         ->  Vector Streaming(type: LOCAL GATHER dop: 1/4)  (cost=61.25..61.26 rows=1 width=8)
+               ->  Vector Aggregate  (cost=61.25..61.26 rows=1 width=8)
+                     ->  Vector Adapter(type: BATCH MODE)  (cost=36.25..36.25 rows=10000 width=0)
+                           ->  Seq Scan on force_vector_test  (cost=0.00..36.25 rows=10000 width=0)
+(6 rows)
+
+select count(*) from force_vector_test;
+ count 
+-------
+ 10000
+(1 row)
+
+set query_dop=1;
+create table force_vector_test3(id int, val int) with(storage_type=ustore);
+select count(*) from force_vector_test3;
+ count 
+-------
+     0
+(1 row)
+
+insert into force_vector_test3 select * from force_vector_test;
+analyze force_vector_test3;
+explain select count(*) from force_vector_test;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter  (cost=170.01..170.01 rows=1 width=8)
+   ->  Vector Aggregate  (cost=170.00..170.01 rows=1 width=8)
+         ->  Vector Adapter(type: BATCH MODE)  (cost=145.00..145.00 rows=10000 width=0)
+               ->  Seq Scan on force_vector_test  (cost=0.00..145.00 rows=10000 width=0)
+(4 rows)
+
+select count(*) from force_vector_test;
+ count 
+-------
+ 10000
+(1 row)
+
+create table force_vector_test4(c1 int, c2 double precision, c3 double precision, c4 point);
+insert into force_vector_test4(c1, c2, c3) values(20, 2.3, 2.3);
+select point(c2, c3) from force_vector_test4 where c1 = 20;
+   point   
+-----------
+ (2.3,2.3)
+(1 row)
+
+-- Do not use vectorization engine
+explain select point(c2, c3) from force_vector_test4 where c1 = 20;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Seq Scan on force_vector_test4  (cost=0.00..25.49 rows=6 width=16)
+   Filter: (c1 = 20)
+(2 rows)
+
+create table force_vector_test5(id int, name varchar(1000));
+insert into force_vector_test5 values(1, 'apple');
+insert into force_vector_test5 values(2, 'pear');
+insert into force_vector_test5 values(3, 'apple pear');
+-- Using the Vectorization Engine
+explain select count(*) from force_vector_test5 where id =1 or to_tsvector('ngram',name)@@to_tsquery('ngram','pear');
+                                                         QUERY PLAN                                                         
+----------------------------------------------------------------------------------------------------------------------------
+ Row Adapter  (cost=12.62..12.62 rows=1 width=8)
+   ->  Vector Aggregate  (cost=12.61..12.62 rows=1 width=8)
+         ->  Vector Adapter(type: BATCH MODE)  (cost=12.61..12.61 rows=1 width=0)
+               Filter: ((id = 1) OR (to_tsvector('ngram'::regconfig, (name)::text) @@ '''pe'' & ''ea'' & ''ar'''::tsquery))
+               ->  Seq Scan on force_vector_test5  (cost=0.00..12.61 rows=1 width=0)
+(5 rows)
+
+select count(*) from force_vector_test5 where id =1 or to_tsvector('ngram',name)@@to_tsquery('ngram','pear');
+ count 
+-------
+     3
+(1 row)
+
+create table force_vector_test6(a int, b int, c int);
+insert into force_vector_test6 values(1,2,3);
+alter table force_vector_test6 drop column b;
+insert into force_vector_test6 select * from force_vector_test6;
+set try_vector_engine_strategy='off';
+drop table force_vector_test;
+drop table force_vector_test1;
+drop table force_vector_test2;
+drop table force_vector_test3;
+drop table force_vector_test4;
+drop table force_vector_test5;
+drop table force_vector_test6;
+drop function func_add_sql;
+drop schema force_vector_engine cascade;

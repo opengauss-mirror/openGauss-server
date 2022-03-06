@@ -39,8 +39,8 @@ typedef enum {
 #define IS_PGXC_COORDINATOR (g_instance.role == VCOORDINATOR && !is_streaming_engine())
 #define IS_PGXC_DATANODE (g_instance.role == VDATANODE || g_instance.role == VSINGLENODE || is_streaming_engine())
 #else
-#define IS_PGXC_COORDINATOR (g_instance.role == VCOORDINATOR)
-#define IS_PGXC_DATANODE (g_instance.role == VDATANODE || g_instance.role == VSINGLENODE)
+#define IS_PGXC_COORDINATOR false
+#define IS_PGXC_DATANODE true
 #endif
 #define IS_SINGLE_NODE (g_instance.role == VSINGLENODE)
 #define REMOTE_CONN_TYPE u_sess->attr.attr_common.remoteConnType

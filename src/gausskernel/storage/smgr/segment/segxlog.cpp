@@ -455,7 +455,7 @@ static void redo_xlog_log_shrink_extent(Buffer buffer, const char* data)
     remain_segs_lock.unLock();
 }
 
-static void redo_xlog_deal_alloc_seg(uint8 opCode, Buffer buffer, const char* data, int data_len, TransactionId xid)
+void redo_xlog_deal_alloc_seg(uint8 opCode, Buffer buffer, const char* data, int data_len, TransactionId xid)
 {
     if (opCode == SPCXLOG_INIT_SEGHEAD) {
         unsigned char is_seg_head = *(unsigned char *)(data + sizeof(XLogRecPtr));
@@ -472,12 +472,12 @@ static void redo_xlog_deal_alloc_seg(uint8 opCode, Buffer buffer, const char* da
     }
 }
 
-static void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo redo_buf, const char *data)
+void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data)
 {
-    Buffer buffer = redo_buf.buf;
+    Buffer buffer = redo_buf->buf;
     ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE), errmsg("redo_atomic_xlog_dispatch opCode: %u", opCode)));
     if (opCode == SPCXLOG_SET_BITMAP) {
-        redo_set_bitmap(redo_buf.blockinfo, buffer, data);
+        redo_set_bitmap(redo_buf->blockinfo, buffer, data);
     } else if (opCode == SPCXLOG_FREE_BITMAP) {
         redo_unset_bitmap(buffer, data);
     } else if (opCode == SPCXLOG_MAPHEAD_ALLOCATED_EXTENTS) {
@@ -518,7 +518,7 @@ static void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo redo_buf, con
     }
 }
 
-static void move_extent_flush_buffer(XLogMoveExtent *xlog_data)
+void move_extent_flush_buffer(XLogMoveExtent *xlog_data)
 {
     BlockNumber logic_start = ExtentIdToLogicBlockNum(xlog_data->extent_id);
     for (int i=0; i<ExtentSizeByCount(xlog_data->extent_id); i++) {
@@ -601,7 +601,7 @@ static void redo_atomic_xlog(XLogReaderState *record)
 
         if (redo_action == BLK_NEEDS_REDO) {
             for (int j = 0; j < decoded_op.operations; j++) {
-                redo_atomic_xlog_dispatch(decoded_op.op[j], redo_buf, decoded_op.data[j]);
+                redo_atomic_xlog_dispatch(decoded_op.op[j], &redo_buf, decoded_op.data[j]);
             }
 
             PageSetLSN(redo_buf.pageinfo.page, redo_buf.lsn);
@@ -766,25 +766,17 @@ static void redo_space_drop(XLogReaderState *record)
     XLogDropSegmentSpace(spcNode, dbNode);
 }
 
-/*
- * This xlog only copy data to the new block, without modifying data in buffer. If the logic block being in the
- * buffer pool, its pblk points to the old block. The buffer descriptor can not have the logic blocknumber and the new
- * physical block number because we do not know whether we should use the old or thew new physical block for the same
- * logic block, as later segment head modification can either success or fail.
- */
-static void redo_new_page(XLogReaderState *record)
+void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn)
 {
-    BufferTag *tag = (BufferTag *)XLogRecGetData(record);
-
     char page[BLCKSZ];
-    errno_t er = memcpy_s(page, BLCKSZ, (char *)XLogRecGetData(record) + sizeof(BufferTag), BLCKSZ);
+    errno_t er = memcpy_s(page, BLCKSZ, data, BLCKSZ);
     securec_check(er, "\0", "\0");
 
-    PageSetLSN(page, record->EndRecPtr);
+    PageSetLSN(page, lsn);
     PageSetChecksumInplace(page, tag->blockNum);
 
     if (FORCE_FINISH_ENABLED) {
-        update_max_page_flush_lsn(record->EndRecPtr, t_thrd.proc_cxt.MyProcPid, false);
+        update_max_page_flush_lsn(lsn, t_thrd.proc_cxt.MyProcPid, false);
     }
 
     bool flush_old_file = false;
@@ -801,6 +793,20 @@ static void redo_new_page(XLogReaderState *record)
         g_instance.dw_single_cxt.single_flush_state[pos] = true;
     }
     t_thrd.proc->dw_pos = -1;
+}
+
+
+/*
+ * This xlog only copy data to the new block, without modifying data in buffer. If the logic block being in the
+ * buffer pool, its pblk points to the old block. The buffer descriptor can not have the logic blocknumber and the new
+ * physical block number because we do not know whether we should use the old or thew new physical block for the same
+ * logic block, as later segment head modification can either success or fail.
+ */
+static void redo_new_page(XLogReaderState *record)
+{
+    Assert(record != NULL);
+    BufferTag *tag = (BufferTag *)XLogRecGetData(record);
+    seg_redo_new_page_copy_and_flush(tag, (char *)XLogRecGetData(record) + sizeof(BufferTag), record->EndRecPtr);
 }
 
 void segpage_smgr_redo(XLogReaderState *record)

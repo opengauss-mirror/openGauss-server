@@ -43,7 +43,7 @@
 #include "cmkem_comm_algorithm.h"
 #include "reg_hook_frame.h"
 
-#include "./convert_jsonfile/kms_httpmsg_temp.ini"
+#include "./kms_restful_temp.ini"
 
 #ifdef ENABLE_UT
 #define static
@@ -90,20 +90,31 @@ static ProcessPolicy decrypt_cek_cipher_hookfunc(CmkemUStr *cek_cipher, CmkIdent
  */
 cJSON *get_json_temp(KmsHttpMsgType json_tree_type)
 {
-    switch (json_tree_type) {
-        case IAM_AUTH_REQ:
-            return cJSON_Parse(temp_iam_auth_req);
-        case KMS_SELECT_CMK_REQ:
-            return cJSON_Parse(temp_kms_select_key_req);
-        case KMS_ENC_CEK_REQ:
-            return cJSON_Parse(temp_kms_enc_key_req);
-        case KMS_DEC_CEK_REQ:
-            return cJSON_Parse(temp_kms_dec_key_req);
-        default:
-            break;
-    }
+    const char *temp_in = NULL;
+    cJSON *json_out = NULL;
+    
+    typedef struct {
+        KmsHttpMsgType type;
+        const char *temp;
+    } JsonTemp;
 
-    return NULL;
+    const JsonTemp json_tbl[] = {
+        {IAM_AUTH_REQ, temp_iam_auth_req},
+        {KMS_SELECT_CMK_REQ, temp_kms_select_key_req},
+        {KMS_ENC_CEK_REQ, temp_kms_enc_key_req},
+        {KMS_DEC_CEK_REQ, temp_kms_dec_key_req},
+    };
+
+    temp_in = json_tbl[json_tree_type].temp;
+
+    /*
+     * the format of the temp_in is : "(str_with_bracket)", we should remove the backet
+     * temp_in + 1 : remove the left bracket
+     * strlen(temp_in) - 2 : remove the right bracket
+     */
+    json_out = cJSON_ParseWithLength(temp_in + 1, strlen(temp_in) - 2);
+
+    return json_out;
 }
 
 char *get_iam_auth_req_jsontemp(const char *user_name, const char *password, const char *domain_name,
@@ -325,6 +336,10 @@ void free_kms_cache(size_t cache_id)
     if (cache_id >= KMS_CACHE_TBL_LEN) {
         return;
     }
+
+    errno_t rc = memset_s(kms_cache_tbl[cache_id], sizeof(CachedAuthInfo), 0, sizeof(CachedAuthInfo));
+    securec_check_c(rc, "", "");
+
     cmkem_free(kms_cache_tbl[cache_id]);
 }
 

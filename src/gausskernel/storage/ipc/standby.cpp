@@ -34,15 +34,14 @@
 #include "utils/ps_status.h"
 #include "utils/timestamp.h"
 #include "utils/snapmgr.h"
-
+#include "replication/walreceiver.h"
 static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlist, ProcSignalReason reason);
 static void ResolveRecoveryConflictWithLock(Oid dbOid, Oid relOid);
 static void LogAccessExclusiveLocks(int nlocks, xl_standby_lock* locks);
 static void LogReleaseAccessExclusiveLocks(int nlocks, xl_standby_lock* locks);
 static XLogRecPtr LogCurrentRunningXacts(RunningTransactions CurrRunningXacts);
-#ifndef ENABLE_MULTIPLE_NODES
 static void RecordCommittingCsnInfo(TransactionId xid);
-#endif
+
 /*
  * InitRecoveryTransactionEnvironment
  *		Initialize tracking of in-progress transactions in master
@@ -112,16 +111,10 @@ void ShutdownRecoveryTransactionEnvironment(void)
  * transactions.  Returns zero (a time safely in the past) if we are willing
  * to wait forever.
  */
-static TimestampTz GetStandbyLimitTime(void)
+static TimestampTz GetStandbyLimitTime(TimestampTz startTime)
 {
-    TimestampTz rtime;
-    bool fromStream = false;
-
-    /*
-     * The cutoff time is the last WAL data receipt time plus the appropriate
-     * delay variable.	Delay of -1 means wait forever.
-     */
-    GetXLogReceiptTime(&rtime, &fromStream);
+    TimestampTz rtime = startTime;
+    bool fromStream = (t_thrd.xlog_cxt.XLogReceiptSource == XLOG_FROM_STREAM);
 
     if (fromStream) {
         if (u_sess->attr.attr_storage.max_standby_streaming_delay < 0)
@@ -143,12 +136,12 @@ static TimestampTz GetStandbyLimitTime(void)
  * We wait here for a while then return. If we decide we can't wait any
  * more then we return true, if we can wait some more return false.
  */
-static bool WaitExceedsMaxStandbyDelay(void)
+static bool WaitExceedsMaxStandbyDelay(TimestampTz startTime)
 {
-    TimestampTz ltime;
+    TimestampTz ltime = 0;
 
     /* Are we past the limit time? */
-    ltime = GetStandbyLimitTime();
+    ltime = GetStandbyLimitTime(startTime);
     if (ltime && GetCurrentTimestamp() >= ltime)
         return true;
 
@@ -216,7 +209,7 @@ static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlis
             }
 
             /* Is it time to kill it? */
-            if (WaitExceedsMaxStandbyDelay()) {
+            if (WaitExceedsMaxStandbyDelay(waitStart)) {
                 ThreadId pid;
 
                 /*
@@ -258,6 +251,21 @@ void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid, const R
      */
     if (!TransactionIdIsValid(latestRemovedXid))
         return;
+
+    if (IS_DISASTER_RECOVER_MODE) {
+        CommitSeqNo limitXminCSN = CSNLogGetDRCommitSeqNo(latestRemovedXid);
+        while (true) {
+            CommitSeqNo lastReplayedConflictCSN = (CommitSeqNo)pg_atomic_read_u64(
+                &(g_instance.comm_cxt.predo_cxt.last_replayed_conflict_csn));
+            if (limitXminCSN <= lastReplayedConflictCSN) {
+                break;
+            }
+            if (pg_atomic_compare_exchange_u64(&(g_instance.comm_cxt.predo_cxt.last_replayed_conflict_csn),
+                &lastReplayedConflictCSN, limitXminCSN)) {
+                break;
+            }
+        }
+    }
 
     backends = GetConflictingVirtualXIDs(latestRemovedXid, node.dbNode, lsn);
 
@@ -393,8 +401,8 @@ void ResolveRecoveryConflictWithBufferPin(void)
 
     Assert(InHotStandby);
 
-    ltime = GetStandbyLimitTime();
     now = GetCurrentTimestamp();
+    ltime = GetStandbyLimitTime(now);
 
     if (!ltime) {
         /*
@@ -702,7 +710,7 @@ bool HasStandbyLocks()
     return (t_thrd.storage_cxt.RecoveryLockList == NIL);
 }
 
-#ifndef ENABLE_MULTIPLE_NODES
+
 /*
  * For hot standby, maintain a list for csn commting status compensation
  * when primary dn restart after crash.
@@ -719,10 +727,6 @@ void DealCSNLogForHotStby(XLogReaderState* record, uint8 info)
             XactLockTableInsert(id[0]);
             CSNLogSetCommitSeqNo(id[0], (int)childrenxidnum, &id[3], (COMMITSEQNO_COMMIT_INPROGRESS | id[1]));
             RecordCommittingCsnInfo(id[0]);
-            for (uint64 i = 0; i < childrenxidnum; ++i) {
-                XactLockTableInsert(id[i + 3]);
-                RecordCommittingCsnInfo(id[i + 3]);
-            }
         } else {
             XactLockTableInsert(id[0]);
             CSNLogSetCommitSeqNo(id[0], 0, 0, (COMMITSEQNO_COMMIT_INPROGRESS | id[1]));
@@ -731,14 +735,23 @@ void DealCSNLogForHotStby(XLogReaderState* record, uint8 info)
         return;
     } else {
         uint64* id = ((uint64 *)XLogRecGetData(record));
+#ifndef ENABLE_MULTIPLE_NODES
         CSNLogSetCommitSeqNo(id[0], 0, NULL, COMMITSEQNO_ABORTED);
         XactLockTableDelete(id[0]);
         (void)RemoveCommittedCsnInfo(id[0]);
-
+#else
+        if (id[0] == InvalidTransactionId) {
+            RemoveAllCommittedCsnInfo();
+        } else {
+            Assert(t_thrd.proc->workingVersionNum < DISASTER_READ_VERSION_NUM);
+            CSNLogSetCommitSeqNo(id[0], 0, NULL, COMMITSEQNO_ABORTED);
+            XactLockTableDelete(id[0]);
+            (void)RemoveCommittedCsnInfo(id[0]);
+        }
+#endif
         return;
     }
 }
-#endif
 
 
 
@@ -751,22 +764,15 @@ void DealCSNLogForHotStby(XLogReaderState* record, uint8 info)
  */
 void standby_redo(XLogReaderState* record)
 {
-    uint8 info;
-
-    /* Support  redo old version xlog during upgrade (Just the runningxact log with chekpoint online ) */
-    if (t_thrd.xlog_cxt.redo_oldversion_xlog)
-        info = (((XLogRecordOld*)record->decoded_record)->xl_info) & ~XLR_INFO_MASK;
-    else
-        info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
 
     /* Backup blocks are not used in standby records */
     Assert(!XLogRecHasAnyBlockRefs(record));
-#ifndef ENABLE_MULTIPLE_NODES
+
     if (info == XLOG_STANDBY_CSN_COMMITTING || info == XLOG_STANDBY_CSN_ABORTED) {
         DealCSNLogForHotStby(record, info);
         return;
     }
-#endif
 
     /* Do nothing if we're not in hot standby mode */
     if (t_thrd.xlog_cxt.standbyState == STANDBY_DISABLED)
@@ -780,17 +786,11 @@ void standby_redo(XLogReaderState* record)
             StandbyAcquireAccessExclusiveLock(xlrec->locks[i].xid, xlrec->locks[i].dbOid, xlrec->locks[i].relOid);
     } else if (info == XLOG_RUNNING_XACTS) {
         RunningTransactionsData running;
-        if (t_thrd.xlog_cxt.redo_oldversion_xlog) {
-            xl_running_xacts_old* xlrc = (xl_running_xacts_old*)XLogRecGetData(record);
-            running.nextXid = xlrc->nextXid;
-            running.oldestRunningXid = xlrc->oldestRunningXid;
-            running.latestCompletedXid = xlrc->latestCompletedXid;
-        } else {
-            xl_running_xacts* xlrec = (xl_running_xacts*)XLogRecGetData(record);
-            running.nextXid = xlrec->nextXid;
-            running.oldestRunningXid = xlrec->oldestRunningXid;
-            running.latestCompletedXid = xlrec->latestCompletedXid;
-        }
+
+        xl_running_xacts* xlrec = (xl_running_xacts*)XLogRecGetData(record);
+        running.nextXid = xlrec->nextXid;
+        running.oldestRunningXid = xlrec->oldestRunningXid;
+        running.latestCompletedXid = xlrec->latestCompletedXid;
         ProcArrayApplyRecoveryInfo(&running);
     } else if (info == XLOG_STANDBY_CSN) {
         TransactionId new_global_xmin = *((TransactionId*)XLogRecGetData(record));
@@ -1083,26 +1083,28 @@ void LogReleaseAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
 }
 
 
-
-#ifndef ENABLE_MULTIPLE_NODES
 void StandbyXlogStartup(void)
 {
     t_thrd.xlog_cxt.committing_csn_list = NIL;
 }
 
-void *XLogReleaseAdnGetCommittingCsnList()
+void *XLogReleaseAndGetCommittingCsnList()
 {
     ListCell* l = NULL;
     foreach (l, t_thrd.xlog_cxt.committing_csn_list) {
         TransactionId* action = (TransactionId*)lfirst(l);
         if (log_min_messages <= DEBUG4) {
-            ereport(LOG, (errmsg("XLogReleaseAdnGetCommittingCsnList: action xid:%lu", *action)));
+            ereport(LOG, (errmsg("XLogReleaseAndGetCommittingCsnList: action xid:%lu", *action)));
         }
         CSNLogSetCommitSeqNo(*action, 0, NULL, COMMITSEQNO_ABORTED);
         XactLockTableDelete(*action);
     }
 
     List* committingCsnList = t_thrd.xlog_cxt.committing_csn_list;
+#ifdef ENABLE_MULTIPLE_NODES
+    list_free(t_thrd.xlog_cxt.committing_csn_list);
+    committingCsnList = NIL;
+#endif
     t_thrd.xlog_cxt.committing_csn_list = NIL;
     return committingCsnList;
 }
@@ -1119,7 +1121,6 @@ void CleanUpMakeCommitAbort(List* committingCsnList)
         XLogRegisterData((char *)action, sizeof(TransactionId));
         XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_ABORTED);
     }
-
     MemoryContext oldCtx = NULL;
     if (IsExtremeRtoRunning()) {
         oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
@@ -1129,8 +1130,6 @@ void CleanUpMakeCommitAbort(List* committingCsnList)
         (void)MemoryContextSwitchTo(oldCtx);
     }
 }
-
-
 
 void StandbyXlogCleanup(void)
 {
@@ -1150,11 +1149,25 @@ void StandbyXlogCleanup(void)
         }
         CSNLogSetCommitSeqNo(*action, 0, NULL, COMMITSEQNO_ABORTED);
         XactLockTableDelete(*action);
+#ifndef ENABLE_MULTIPLE_NODES
         XLogBeginInsert();
         XLogRegisterData((char *)action, sizeof(TransactionId));
         XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_ABORTED);
-
+#endif
     }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    TransactionId clean_xid = InvalidTransactionId;
+    if (t_thrd.role == STARTUP && !IS_PGXC_COORDINATOR && t_thrd.proc->workingVersionNum >= DISASTER_READ_VERSION_NUM) {
+        if (log_min_messages <= DEBUG4) {
+            ereport(LOG, (errmsg("StandbyXlogCleanup: insert clean xlog")));
+        }
+        XLogBeginInsert();
+        XLogRegisterData((char*)(&clean_xid), sizeof(TransactionId));
+        XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_ABORTED);
+    }
+#endif
+
     MemoryContext oldCtx = NULL;
     if (IsExtremeRtoRunning()) {
         oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
@@ -1168,8 +1181,23 @@ void StandbyXlogCleanup(void)
 
 bool StandbySafeRestartpoint(void)
 {
-    if (t_thrd.xlog_cxt.committing_csn_list)
+#ifdef ENABLE_MULTIPLE_NODES
+    ListCell* l = NULL;
+    if (t_thrd.xlog_cxt.committing_csn_list && IS_DISASTER_RECOVER_MODE) {
+        foreach (l, t_thrd.xlog_cxt.committing_csn_list) {
+            TransactionId* action = (TransactionId*)lfirst(l);
+            if (log_min_messages <= DEBUG4) {
+                ereport(LOG,
+                    (errmsg("StandbySafeRestartpoint: action xid:%lu", *action)));
+            }
+        }
         return false;
+    }
+#else
+    if (t_thrd.xlog_cxt.committing_csn_list) {
+        return false;
+    }
+#endif
     return true;
 }
 
@@ -1221,4 +1249,19 @@ bool RemoveCommittedCsnInfo(TransactionId xid)
     }
     return false;
 }
-#endif
+
+void RemoveAllCommittedCsnInfo()
+{
+    ListCell* l = NULL;
+    foreach (l, t_thrd.xlog_cxt.committing_csn_list) {
+        TransactionId* action = (TransactionId*)lfirst(l);
+        if (log_min_messages <= DEBUG4) {
+            ereport(LOG,
+                (errmsg("RemoveAllCommittedCsnInfo successfully: action xid:%lu", *action)));
+        }
+        CSNLogSetCommitSeqNo(*action, 0, NULL, COMMITSEQNO_ABORTED);
+        XactLockTableDelete(*action);
+    }
+    list_free_deep(t_thrd.xlog_cxt.committing_csn_list);
+    t_thrd.xlog_cxt.committing_csn_list = NIL;
+}

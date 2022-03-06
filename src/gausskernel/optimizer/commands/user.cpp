@@ -3395,6 +3395,9 @@ void RenameRole(const char* oldname, const char* newname)
     int i;
     Oid roleid;
     bool is_opradmin = false;
+    Relation pg_job_tbl = NULL;
+    TableScanDesc scan = NULL;
+    HeapTuple tuple = NULL;
 
     Relation rel = heap_open(AuthIdRelationId, RowExclusiveLock);
     TupleDesc dsc = RelationGetDescr(rel);
@@ -3508,6 +3511,23 @@ void RenameRole(const char* oldname, const char* newname)
      * Close pg_authid, but keep lock till commit.
      */
     heap_close(rel, NoLock);
+
+    /*
+     * change the user name in the pg_job.
+     */
+    pg_job_tbl = heap_open(PgJobRelationId, ExclusiveLock);
+    scan = heap_beginscan(pg_job_tbl, SnapshotNow, 0, NULL);
+
+    while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
+        Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
+        if (strcmp(NameStr(pg_job->log_user), oldname) == 0) {
+            update_pg_job_username(pg_job->job_id, newname);
+        }
+    }
+
+    heap_endscan(scan);
+    heap_close(pg_job_tbl, ExclusiveLock);
+
 }
 
 /*
@@ -3980,6 +4000,9 @@ static bool IsLockOnRelation(const LockInstanceData* instance)
             on_relation = true;
             break;
         case LOCKTAG_TUPLE:
+            on_relation = true;
+            break;
+        case LOCKTAG_UID:
             on_relation = true;
             break;
         case LOCKTAG_CSTORE_FREESPACE:

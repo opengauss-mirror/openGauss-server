@@ -4737,9 +4737,8 @@ void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatD
                                      * to identify which column(s) the index
                                      * depends on.
                                      */
-                                    vardata->acl_ok =
-                                        (pg_class_aclcheck(rte->relid, GetUserId(),
-                                                     ACL_SELECT) == ACLCHECK_OK);
+                                    vardata->acl_ok = (rte->securityQuals == NIL) &&
+                                        (pg_class_aclcheck(rte->relid, GetUserId(), ACL_SELECT) == ACLCHECK_OK);
                                 }
                                 else
                                 {
@@ -4827,11 +4826,9 @@ static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatDat
             if (HeapTupleIsValid(vardata->statsTuple))
             {
                 /* check if user has permission to read this column */
-                vardata->acl_ok =
-                    (pg_class_aclcheck(rte->relid, GetUserId(),
-                                       ACL_SELECT) == ACLCHECK_OK) ||
-                    (pg_attribute_aclcheck(rte->relid, var->varattno, GetUserId(),
-                                           ACL_SELECT) == ACLCHECK_OK);
+                vardata->acl_ok = (rte->securityQuals == NIL) &&
+                    ((pg_class_aclcheck(rte->relid, GetUserId(), ACL_SELECT) == ACLCHECK_OK) ||
+                    (pg_attribute_aclcheck(rte->relid, var->varattno, GetUserId(), ACL_SELECT) == ACLCHECK_OK));
             }
             else
             {
@@ -4894,8 +4891,12 @@ static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatDat
          * RelOptInfos.  For instance, if any subquery pullup happened during
          * planning, Vars in the targetlist might have gotten replaced, and we
          * need to see the replacement expressions.
+         * This is a temporary fix for mislocated varattno after inlist2join
+         * optimization.
          */
-        subquery = rel->subroot->parse;
+        if (!rel->subroot->parse->is_from_inlist2join_rewrite) {
+            subquery = rel->subroot->parse;
+        }
         Assert(IsA(subquery, Query));
 
         /* Get the subquery output expression referenced by the upper Var */
@@ -5065,6 +5066,9 @@ double get_variable_numdistinct(VariableStatData* vardata, bool* isdefault, bool
                     stadistinct = 1.0; /* only 1 value */
                     break;
                 case BucketIdAttributeNumber:
+                    stadistinct = 1.0; /* only 1 value */
+                    break;
+                case UidAttributeNumber:
                     stadistinct = 1.0; /* only 1 value */
                     break;
 #endif

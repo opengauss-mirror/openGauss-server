@@ -70,6 +70,7 @@ void rto_get_standby_info_text(char *info, uint32 max_info_len)
 Datum rto_get_standby_info()
 {
     Datum value;
+    const uint32 RTO_INFO_BUFFER_SIZE = 2048 * (1 + g_instance.attr.attr_storage.max_wal_senders);
     char *info = (char *)palloc0(sizeof(char) * RTO_INFO_BUFFER_SIZE);
     rto_get_standby_info_text(info, RTO_INFO_BUFFER_SIZE);
     value = CStringGetTextDatum(info);
@@ -97,8 +98,6 @@ RTOStandbyData *GetDCFRTOStat(uint32 *num)
             if (strstr(standby_names, "hadr_") != NULL) {
                 continue;
             }
-            ereport(LOG, (errmsg("Step into GetDCFRTOStat and id is %s.",
-                g_instance.rto_cxt.dcf_rto_standby_data[i].id)));
             char *local_ip = (char *)(result[readDCFNode].source_ip);
             rc = strncpy_s(local_ip, IP_LEN, (char *)g_instance.rto_cxt.dcf_rto_standby_data[i].source_ip,
                            strlen((char *)g_instance.rto_cxt.dcf_rto_standby_data[i].source_ip));
@@ -112,12 +111,7 @@ RTOStandbyData *GetDCFRTOStat(uint32 *num)
             result[readDCFNode].source_port = g_instance.rto_cxt.dcf_rto_standby_data[i].source_port;
             result[readDCFNode].dest_port = g_instance.rto_cxt.dcf_rto_standby_data[i].dest_port;
             result[readDCFNode].current_rto = g_instance.rto_cxt.dcf_rto_standby_data[i].current_rto;
-
-            if (u_sess->attr.attr_storage.target_rto == 0) {
-                result[readDCFNode].current_sleep_time = 0;
-            } else {
-                result[readDCFNode].current_sleep_time = g_instance.rto_cxt.dcf_rto_standby_data[i].current_sleep_time;
-            }
+            result[readDCFNode].current_sleep_time = g_instance.rto_cxt.dcf_rto_standby_data[i].current_sleep_time;
             result[readDCFNode].target_rto = u_sess->attr.attr_storage.target_rto;
             readDCFNode++;
         }
@@ -144,7 +138,7 @@ RTOStandbyData *GetRTOStat(uint32 *num)
             rc = strncpy_s(standby_names, IP_LEN, g_instance.rto_cxt.rto_standby_data[i].id,
                            strlen(g_instance.rto_cxt.rto_standby_data[i].id));
             securec_check(rc, "\0", "\0");
-            if (strstr(standby_names, "hadr_") != NULL) {
+            if ((strstr(standby_names, "hadr_") != NULL) || (strstr(standby_names, "hass") != NULL)) {
                 SpinLockRelease(&walsnd->mutex);
                 continue;
             }
@@ -189,7 +183,8 @@ HadrRTOAndRPOData *HadrGetRTOStat(uint32 *num)
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
-        if (walsnd->pid != 0 && (strstr(g_instance.rto_cxt.rto_standby_data[i].id, "hadr_") != NULL)) {
+        if (walsnd->pid != 0 && ((strstr(g_instance.rto_cxt.rto_standby_data[i].id, "hadr_") != NULL) ||
+            (strstr(g_instance.rto_cxt.rto_standby_data[i].id, "hass") != NULL))) {
             char *standby_names = (char *)(result[readWalSnd].id);
             rc = strncpy_s(standby_names, IP_LEN, g_instance.rto_cxt.rto_standby_data[i].id,
                            strlen(g_instance.rto_cxt.rto_standby_data[i].id));
@@ -210,11 +205,15 @@ HadrRTOAndRPOData *HadrGetRTOStat(uint32 *num)
             result[readWalSnd].current_rto = g_instance.rto_cxt.rto_standby_data[i].current_rto;
             result[readWalSnd].current_rpo = walsnd->log_ctrl.current_RPO < 0 ? 0 : walsnd->log_ctrl.current_RPO;
 
-            if (u_sess->attr.attr_storage.hadr_recovery_time_target == 0 &&
-                u_sess->attr.attr_storage.hadr_recovery_point_target == 0) {
-                result[readWalSnd].current_sleep_time = 0;
+            if (u_sess->attr.attr_storage.hadr_recovery_time_target == 0) {
+                result[readWalSnd].rto_sleep_time = 0;
             } else {
-                result[readWalSnd].current_sleep_time = g_instance.rto_cxt.rto_standby_data[i].current_sleep_time;
+                result[readWalSnd].rto_sleep_time = g_instance.rto_cxt.rto_standby_data[i].current_sleep_time;
+            }
+            if (u_sess->attr.attr_storage.hadr_recovery_point_target == 0) {
+                result[readWalSnd].rpo_sleep_time = 0;
+            } else {
+                result[readWalSnd].rpo_sleep_time = g_instance.streaming_dr_cxt.rpoSleepTime;
             }
             result[readWalSnd].target_rto = u_sess->attr.attr_storage.hadr_recovery_time_target;
             result[readWalSnd].target_rpo = u_sess->attr.attr_storage.hadr_recovery_point_target;

@@ -55,6 +55,39 @@ char *GetUndoHeader(XlUndoHeader *xlundohdr, Oid *partitionOid, UndoRecPtr *blkp
     return currLogPtr;
 }
 
+const char* uheap_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    info &= XLOG_UHEAP_OPMASK;
+    switch (info) {
+        case XLOG_UHEAP_INSERT:
+            return "unheap_insert";
+            break;
+        case XLOG_UHEAP_DELETE:
+            return "unheap_delete";
+            break;
+        case XLOG_UHEAP_UPDATE:
+            return "unheap_update";
+            break;
+        case XLOG_UHEAP_FREEZE_TD_SLOT:
+            return "unheap_freeze";
+            break;
+        case XLOG_UHEAP_INVALID_TD_SLOT:
+            return "unheap_invalid_slot";
+            break;
+        case XLOG_UHEAP_CLEAN:
+            return "unheap_clean";
+            break;
+        case XLOG_UHEAP_MULTI_INSERT:
+            return "unheap_multi_insert";
+            break;
+        default:
+            return "unknown_type";
+            break;
+    }
+}
+
+
 /*
  * For pg_xlogdump to dump out xlog info
  */
@@ -186,11 +219,16 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
                 xlundohdr->urecptr, blkprev, prevUrp, xlundohdr->relOid, partitionOid, xlundohdr->flag, subXid);
 
             if (xlrec->flags & XLZ_NON_INPLACE_UPDATE) {
+                appendStringInfo(buf, "NON_INPLACE_UPDATE. ");
                 xlundohdr = (XlUndoHeader *)((char *)currLogPtr);
                 currLogPtr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid);
                 appendStringInfo(buf,
                     "relOid %u, urecptr %016lx, blkprev %016lx, prevurp %016lx, newflag %u, subXid %lu,",
                     xlundohdr->relOid, xlundohdr->urecptr, blkprev, prevUrp, xlundohdr->flag, subXid);
+            } else if (xlrec->flags & XLZ_BLOCK_INPLACE_UPDATE) {
+                appendStringInfo(buf, "BLOCK_INPLACE_UPDATE. ");
+            } else {
+                appendStringInfo(buf, "INPLACE_UPDATE. ");
             }
 
             undo::XlogUndoMeta *xlundometa = (undo::XlogUndoMeta *)currLogPtr;
@@ -300,6 +338,26 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
     }
 }
 
+const char* uheap2_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    info &= XLOG_UHEAP_OPMASK;
+    switch (info) {
+        case XLOG_UHEAP2_BASE_SHIFT:
+            return "uheap2_base_shift";
+            break;
+        case XLOG_UHEAP2_FREEZE:
+            return "uheap2_freeze";
+            break;
+        case XLOG_UHEAP2_EXTEND_TD_SLOTS:
+            return "uheap2_extend_slot";
+            break;
+        default:
+            return "unknown_type";
+            break;
+    }
+}
+
 void UHeap2Desc(StringInfo buf, XLogReaderState *record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -327,6 +385,21 @@ void UHeap2Desc(StringInfo buf, XLogReaderState *record)
             appendStringInfo(buf, "UNKNOWN");
     }
 }
+
+const char* uheap_undo_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == XLOG_UHEAPUNDO_PAGE) {
+        return "uheap_undo_page";
+    } else if (info == XLOG_UHEAPUNDO_RESET_SLOT) {
+        return "uheap_undo_reset_slot";
+    } else if (info == XLOG_UHEAPUNDO_ABORT_SPECINSERT) {
+        return "uheap_undo_abort";
+    } else {
+        return "unknown_type";
+    }
+}
+
 
 void UHeapUndoDesc(StringInfo buf, XLogReaderState *record)
 {

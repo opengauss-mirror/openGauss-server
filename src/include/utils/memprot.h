@@ -101,12 +101,6 @@ extern void gs_memprot_reset_beyondchunk(void);
 #define GS_MEMPROT_SHARED_MALLOC(sz) MemoryProtectFunctions::gs_memprot_malloc<MEM_SHRD>(sz)
 #define GS_MEMPROT_SHARED_FREE(ptr, sz) MemoryProtectFunctions::gs_memprot_free<MEM_SHRD>(ptr, sz)
 
-/**
- * reserve or release memory for compressed table
- */
-extern bool compressed_mem_reserve(Size sz, bool protect);
-extern void compressed_mem_release(Size sz);
-
 extern int getSessionMemoryUsageMB();
 
 #endif

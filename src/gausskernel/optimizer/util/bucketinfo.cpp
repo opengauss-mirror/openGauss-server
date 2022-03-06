@@ -44,7 +44,8 @@ bool hasValidBuckets(RangeVar* r, int bucketmapsize)
     foreach (lc, r->buckets) {
         uint2 v = (uint2)intVal(lfirst(lc));
         if (v >= bucketmapsize) {
-            ereport(ERROR,
+            int eleval = (bucketmapsize == 0 ? PANIC : ERROR);
+            ereport(eleval,
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                     errmsg("buckets id %d of table \"%s\" is outsize range [%d,%d]",
                         v,

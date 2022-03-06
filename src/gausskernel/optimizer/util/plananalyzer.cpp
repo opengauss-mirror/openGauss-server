@@ -1067,7 +1067,7 @@ void RecordQueryPlanIssues(const List* results)
     }
 
     /* Hold the planer issue info in memory context of workload manager */
-    AutoContextSwitch memSwitch(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    AutoContextSwitch memSwitch(g_instance.wlm_cxt->query_resource_track_mcxt);
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue = pstrdup(max_issue_desc);
 
     return;

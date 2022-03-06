@@ -21,13 +21,6 @@ typedef enum _backslashResult {
                            * resulted in an error */
 } backslashResult;
 
-typedef enum SqlErrorHandle {
-    SQLERROR_HANDLE_CONTINUE = 0,
-    SQLERROR_HANDLE_EXIT
-} SqlErrorHandle;
-
-extern SqlErrorHandle sqlErrHandle;
-
 extern backslashResult HandleSlashCmds(PsqlScanState scan_state, PQExpBuffer query_buf);
 
 extern int process_file(char* filename, bool single_txn, bool use_relative_path);

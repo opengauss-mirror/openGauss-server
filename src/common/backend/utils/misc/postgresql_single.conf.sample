@@ -476,7 +476,7 @@ log_min_duration_statement = 1800000	# -1 is disabled, 0 logs all statements
 #log_pagewriter = off
 log_connections = off			# log connection requirement from client
 log_disconnections = off		# log disconnection from client
-log_duration = on			# log the execution time of each query
+log_duration = off			# log the execution time of each query
 					# when log_duration is on and log_min_duration_statement
 					# is larger than zero, log the ones whose execution time
 					# is larger than this threshold
@@ -737,6 +737,8 @@ audit_enabled = on
 #audit_function_exec = 0
 #audit_copy_exec = 0
 #audit_set_parameter = 1		# whether audit set parameter operation
+#audit_xid_info = 0 			# whether record xid info in audit log
+#audit_thread_num = 1
 
 #Choose which style to print the explain info, normal,pretty,summary,run
 #explain_perf_mode = normal

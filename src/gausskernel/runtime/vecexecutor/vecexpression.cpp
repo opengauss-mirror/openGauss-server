@@ -103,8 +103,7 @@ static ScalarVector* ExecEvalVecVar(
             break;
     }
 
-    // Sys column branch
-    //
+    /* Sys column branch */
     Assert(batch != NULL);
     if (attnum < 0) {
         ScalarVector* pVec = batch->GetSysVector(attnum);
@@ -229,6 +228,22 @@ static ScalarVector* ExecEvalVecNot(
     return pVector;
 }
 
+static ScalarVector* ExecEvalVecRownum(
+    RownumState* exprstate, ExprContext* econtext, bool* pSelection, ScalarVector* pVector, ExprDoneCond* isDone)
+{
+    Assert(pSelection != NULL);
+    ScalarValue* pDest = pVector->m_vals;
+    int64 ps_rownum = exprstate->ps->ps_rownum;
+    
+    for (int i = 0; i < econtext->align_rows; i++) {
+        SET_NOTNULL(pVector->m_flag[i]);
+        pDest[i] = ++ps_rownum ;
+    }
+
+    pVector->m_rows = econtext->align_rows;
+
+    return pVector;
+}
 // TRUE means we deal with or
 // false means we deal with and
 template <bool AndOrFLag>
@@ -2334,7 +2349,7 @@ static ScalarVector* ExecEvalVecCoerceViaIO(
 
     pVector->m_rows = econtext->align_rows;
     pVector->m_desc.typeId = iostate->infunc.fn_rettype;
-    pVector->m_desc.encoded = COL_IS_ENCODE_T<retType>();
+    pVector->m_desc.encoded = COL_IS_ENCODE(retType);
 
     return pVector;
 }
@@ -3165,6 +3180,12 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmodule(MOD_VEC_EXECUTOR),
                     errmsg("Unsupported array coerce expression in vector engine")));
+        case T_Rownum: {
+            RownumState* rnstate = (RownumState*)makeNode(RownumState);
+            rnstate->ps = parent;
+            state = (ExprState*)rnstate;
+            state->vecExprFun = (VectorExprFun)ExecEvalVecRownum;
+        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -3537,44 +3558,40 @@ static inline void SetAlignRowsForProject(ExprContext* econtext, VectorBatch* ba
  *      it in the previously specified VectorBatch.
  * @in projInfo: ProjectionInfo node information
  * @in selReSet: Sign projInfo->pi_batch's m_sel if need reset.
+ * @in batchReset: True if pProjBatch is used for multi-entry.
  * @return: Return project result.
  */
 VectorBatch* ExecVecProject(ProjectionInfo* projInfo, bool selReSet, ExprDoneCond* isDone)
 {
-    VectorBatch* pProjBatch = NULL;
-    VectorBatch* srcBatch = NULL;
-    ExprContext* econtext = NULL;
-    int numSimpleVars;
-
     Assert(projInfo != NULL);
 
-    // get the projection info we want
-    //
-    pProjBatch = projInfo->pi_batch;
-    econtext = projInfo->pi_exprContext;
+    VectorBatch* pProjBatch = projInfo->pi_batch;
+    VectorBatch* srcBatch = NULL;
+    ExprContext* econtext = projInfo->pi_exprContext;
+    int numSimpleVars;
 
     /* Assume single result row until proven otherwise */
     if (isDone != NULL)
         *isDone = ExprSingleResult;
 
-    // Clear any former contents of the result pProjBatch
-    //
+    /* Clear any former contents of the result pProjBatch */
     pProjBatch->Reset();
 
     if (selReSet) {
         pProjBatch->ResetSelection(true);
     }
 
-    // align rows
+    /* align rows */
     econtext->align_rows = 0;
     SetAlignRowsForProject(econtext, econtext->ecxt_outerbatch);
     SetAlignRowsForProject(econtext, econtext->ecxt_innerbatch);
     SetAlignRowsForProject(econtext, econtext->ecxt_aggbatch);
     SetAlignRowsForProject(econtext, econtext->ecxt_scanbatch);
     Assert(econtext->align_rows != 0);
-    // Assign simple Vars to result by direct extraction of fields from source
-    // slots ... a mite ugly, but fast ...
-    //
+    /*
+     * Assign simple Vars to result by direct extraction of fields from source
+     * slots ... a mite ugly, but fast ...
+     */
     numSimpleVars = projInfo->pi_numSimpleVars;
     if (numSimpleVars > 0) {
         ScalarVector* values = pProjBatch->m_arr;
@@ -3608,16 +3625,14 @@ VectorBatch* ExecVecProject(ProjectionInfo* projInfo, bool selReSet, ExprDoneCon
             }
         }
 
-        // Set the number of rows on which batch is used
-        //
+        /* Set the number of rows on which batch is used */
         pProjBatch->m_rows = srcBatch->m_rows;
         for (i = 0; i < pProjBatch->m_cols; i++) {
             pProjBatch->m_arr[i].m_rows = srcBatch->m_rows;
         }
     }
 
-    // If there are any generic expressions, evaluate them.
-    //
+    /* If there are any generic expressions, evaluate them. */
     if (projInfo->pi_targetlist) {
         if (projInfo->jitted_vectarget) {
             projInfo->jitted_vectarget(econtext, pProjBatch);
@@ -3642,20 +3657,14 @@ VectorBatch* ExecVecProject(ProjectionInfo* projInfo, bool selReSet, ExprDoneCon
         }
     }
 
-    // Kludge: this is to fix some cases only const evaluation in target list, thus
-    // we may get a over sized batch. Adjust it back here.
-    //
+    /*
+     * Kludge: this is to fix some cases only const evaluation in target list, thus
+     * we may get a over sized batch. Adjust it back here.
+     */
     if (srcBatch != NULL)
         pProjBatch->m_rows = Min(pProjBatch->m_rows, srcBatch->m_rows);
 
-    // Successfully formed a result batch
-    //
-    if (econtext->have_vec_set_fun) {
-        return projInfo->pi_setFuncBatch;
-    } else {
-        Assert(pProjBatch->IsValid());
-        return pProjBatch;
-    }
+    return (econtext->have_vec_set_fun) ? projInfo->pi_setFuncBatch : pProjBatch;
 }
 
 static ScalarVector* ExecEvalVecGroupingFuncExpr(GroupingFuncExprState* gstate, ExprContext* econtext,

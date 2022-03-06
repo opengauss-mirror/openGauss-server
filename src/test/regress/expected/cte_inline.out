@@ -1,0 +1,510 @@
+create schema cte_inline;
+set current_schema = cte_inline;
+-- Set up some simple test tables
+CREATE TABLE test (
+  f1 integer,
+  f2 integer,
+  f3 float
+);
+INSERT INTO test VALUES (1, 2, 3);
+INSERT INTO test VALUES (2, 3, 4);
+INSERT INTO test VALUES (3, 4, 5);
+INSERT INTO test VALUES (1, 1, 1);
+INSERT INTO test VALUES (2, 2, 2);
+INSERT INTO test VALUES (3, 3, 3);
+INSERT INTO test VALUES (6, 7, 8);
+INSERT INTO test VALUES (8, 9, NULL);
+CREATE TABLE test_1 (like test);
+--
+-- Tests for CTE inlining behavior
+--
+-- Basic subquery that can be inlined
+explain (verbose, costs off)
+with x as (select * from (select f1 from test) ss)
+select * from x where f1 = 1;
+         QUERY PLAN          
+-----------------------------
+ Seq Scan on cte_inline.test
+   Output: test.f1
+   Filter: (test.f1 = 1)
+(3 rows)
+
+-- Deep deep subquery
+explain (verbose, costs off)
+with a as (
+    with b as (
+        with c as (
+            with d as (select * from (
+                with z as (
+                  with y as (
+                    with x as (select f1 from test) 
+                    select * from x)
+                  select * from y)
+                select * from z)
+            ) select * from d)
+        select * from c)
+    select * from b)
+select * from a where f1 = 1;
+         QUERY PLAN          
+-----------------------------
+ Seq Scan on cte_inline.test
+   Output: test.f1
+   Filter: (test.f1 = 1)
+(3 rows)
+
+-- Explicitly request materialization
+explain (verbose, costs off)
+with x as materialized (select * from (select f1 from test) ss)
+select * from x where f1 = 1;
+             QUERY PLAN              
+-------------------------------------
+ CTE Scan on x
+   Output: x.f1
+   Filter: (x.f1 = 1)
+   CTE x
+     ->  Seq Scan on cte_inline.test
+           Output: test.f1
+(6 rows)
+
+-- Stable functions are safe to inline
+explain (verbose, costs off)
+with x as (select * from (select f1, now() from test) ss)
+select * from x where f1 = 1;
+         QUERY PLAN          
+-----------------------------
+ Seq Scan on cte_inline.test
+   Output: test.f1, now()
+   Filter: (test.f1 = 1)
+(3 rows)
+
+-- Volatile functions prevent inlining
+explain (verbose, costs off)
+with x as (select * from (select f1, random() from test) ss)
+select * from x where f1 = 1;
+             QUERY PLAN              
+-------------------------------------
+ CTE Scan on x
+   Output: x.f1, x.random
+   Filter: (x.f1 = 1)
+   CTE x
+     ->  Seq Scan on cte_inline.test
+           Output: test.f1, random()
+(6 rows)
+
+-- SELECT FOR UPDATE/SHARE cannot be inlined
+explain (verbose, costs off)
+with x as (select * from (select f1 from test for update) ss)
+select * from x where f1 = 1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ CTE Scan on x
+   Output: x.f1
+   Filter: (x.f1 = 1)
+   CTE x
+     ->  Subquery Scan on ss
+           Output: ss.f1
+           ->  LockRows
+                 Output: test.f1, test.ctid
+                 ->  Seq Scan on cte_inline.test
+                       Output: test.f1, test.ctid
+(10 rows)
+
+explain (verbose, costs off)
+with x as not materialized (select * from (select f1 from test for share) ss)
+select * from x where f1 = 1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ CTE Scan on x
+   Output: x.f1
+   Filter: (x.f1 = 1)
+   CTE x
+     ->  Subquery Scan on ss
+           Output: ss.f1
+           ->  LockRows
+                 Output: test.f1, test.ctid
+                 ->  Seq Scan on cte_inline.test
+                       Output: test.f1, test.ctid
+(10 rows)
+
+-- IUDs cannot be inlined
+explain (verbose, costs off)
+with x as not materialized (insert into test_1 values(1,2,4) returning *)
+select * from x;
+                    QUERY PLAN                     
+---------------------------------------------------
+ CTE Scan on x
+   Output: x.f1, x.f2, x.f3
+   CTE x
+     ->  Insert on cte_inline.test_1
+           Output: test_1.f1, test_1.f2, test_1.f3
+           ->  Result
+                 Output: 1, 2, 4::double precision
+(7 rows)
+
+explain (verbose, costs off)
+with x as not materialized (update test_1 set f3 = 3 where f1 = 1 returning *)
+select * from x;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ CTE Scan on x
+   Output: x.f1, x.f2, x.f3
+   CTE x
+     ->  Update on cte_inline.test_1
+           Output: test_1.f1, test_1.f2, test_1.f3
+           ->  Seq Scan on cte_inline.test_1
+                 Output: test_1.f1, test_1.f2, 3::double precision, test_1.ctid
+                 Filter: (test_1.f1 = 1)
+(8 rows)
+
+explain (verbose, costs off)
+with x as not materialized (delete from test_1 returning *)
+select * from x;
+                    QUERY PLAN                     
+---------------------------------------------------
+ CTE Scan on x
+   Output: x.f1, x.f2, x.f3
+   CTE x
+     ->  Delete on cte_inline.test_1
+           Output: test_1.f1, test_1.f2, test_1.f3
+           ->  Seq Scan on cte_inline.test_1
+                 Output: test_1.ctid
+(7 rows)
+
+-- Multiply-referenced CTEs are inlined only when requested
+explain (verbose, costs off)
+with x as (select * from (select f1, now() as n from test) ss)
+select * from x, x x2 where x.n = x2.n;
+             QUERY PLAN              
+-------------------------------------
+ Hash Join
+   Output: x.f1, x.n, x2.f1, x2.n
+   Hash Cond: (x.n = x2.n)
+   CTE x
+     ->  Seq Scan on cte_inline.test
+           Output: test.f1, now()
+   ->  CTE Scan on x
+         Output: x.f1, x.n
+   ->  Hash
+         Output: x2.f1, x2.n
+         ->  CTE Scan on x x2
+               Output: x2.f1, x2.n
+(12 rows)
+
+explain (verbose, costs off)
+with x as not materialized (select * from (select f1, now() as n from test) ss)
+select * from x, x x2 where x.n = x2.n;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Result
+   Output: cte_inline.test.f1, now(), cte_inline.test.f1, now()
+   One-Time Filter: (now() = now())
+   ->  Nested Loop
+         Output: cte_inline.test.f1, cte_inline.test.f1
+         ->  Seq Scan on cte_inline.test
+               Output: cte_inline.test.f1, cte_inline.test.f2, cte_inline.test.f3
+         ->  Materialize
+               Output: cte_inline.test.f1
+               ->  Seq Scan on cte_inline.test
+                     Output: cte_inline.test.f1
+(11 rows)
+
+-- Check handling of outer references
+explain (verbose, costs off)
+with x as (select * from test)
+select * from (with y as (select * from x) select * from y) ss;
+                 QUERY PLAN                  
+---------------------------------------------
+ CTE Scan on x
+   Output: x.f1, x.f2, x.f3
+   CTE x
+     ->  Seq Scan on cte_inline.test
+           Output: test.f1, test.f2, test.f3
+(5 rows)
+
+explain (verbose, costs off)
+with x as materialized (select * from test)
+select * from (with y as (select * from x) select * from y) ss;
+                 QUERY PLAN                  
+---------------------------------------------
+ CTE Scan on x
+   Output: x.f1, x.f2, x.f3
+   CTE x
+     ->  Seq Scan on cte_inline.test
+           Output: test.f1, test.f2, test.f3
+(5 rows)
+
+-- Ensure that we inline the currect CTE when there are
+-- multiple CTEs with the same name
+explain (verbose, costs off)
+with x as (select 1 as y)
+select * from (with x as (select 2 as y) select * from x) ss;
+ QUERY PLAN  
+-------------
+ Result
+   Output: 2
+(2 rows)
+
+-- Row marks are not pushed into CTEs (opengauss not supported)
+explain (verbose, costs off)
+with x as (select * from test)
+select * from x for update;
+ERROR:  SELECT FOR UPDATE/SHARE cannot be applied to a WITH query
+-- For CTEs in subquery
+explain (verbose, costs off)
+select * from (with x as (select * from test_1) select x.f1 from x) tmp where tmp.f1 = 1;
+          QUERY PLAN           
+-------------------------------
+ Seq Scan on cte_inline.test_1
+   Output: test_1.f1
+   Filter: (test_1.f1 = 1)
+(3 rows)
+
+explain (verbose, costs off)
+select * from (with x as materialized (select * from test_1) select x.f1 from x) tmp where tmp.f1 = 1;
+                    QUERY PLAN                     
+---------------------------------------------------
+ CTE Scan on x
+   Output: x.f1
+   Filter: (x.f1 = 1)
+   CTE x
+     ->  Seq Scan on cte_inline.test_1
+           Output: test_1.f1, test_1.f2, test_1.f3
+(6 rows)
+
+-- cte within in/any/some sublink are handled correctly
+explain (verbose, costs off)
+select * from test where test.f1 in 
+(with x as (select * from test_1) select x.f1 from x);
+                   QUERY PLAN                    
+-------------------------------------------------
+ Hash Join
+   Output: test.f1, test.f2, test.f3
+   Hash Cond: (test.f1 = test_1.f1)
+   ->  Seq Scan on cte_inline.test
+         Output: test.f1, test.f2, test.f3
+   ->  Hash
+         Output: test_1.f1
+         ->  HashAggregate
+               Output: test_1.f1
+               Group By Key: test_1.f1
+               ->  Seq Scan on cte_inline.test_1
+                     Output: test_1.f1
+(12 rows)
+
+explain (verbose, costs off)
+select * from test where test.f1 in 
+(with x as materialized (select * from test_1) select x.f1 from x);
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Hash Join
+   Output: test.f1, test.f2, test.f3
+   Hash Cond: (test.f1 = x.f1)
+   ->  Seq Scan on cte_inline.test
+         Output: test.f1, test.f2, test.f3
+   ->  Hash
+         Output: x.f1
+         ->  HashAggregate
+               Output: x.f1
+               Group By Key: x.f1
+               ->  CTE Scan on x
+                     Output: x.f1
+                     CTE x
+                       ->  Seq Scan on cte_inline.test_1
+                             Output: test_1.f1, test_1.f2, test_1.f3
+(15 rows)
+
+explain (verbose, costs off)
+select * from test where test.f1 = any
+(with x as (select * from test_1) select x.f1 from x);
+                   QUERY PLAN                    
+-------------------------------------------------
+ Hash Join
+   Output: test.f1, test.f2, test.f3
+   Hash Cond: (test.f1 = test_1.f1)
+   ->  Seq Scan on cte_inline.test
+         Output: test.f1, test.f2, test.f3
+   ->  Hash
+         Output: test_1.f1
+         ->  HashAggregate
+               Output: test_1.f1
+               Group By Key: test_1.f1
+               ->  Seq Scan on cte_inline.test_1
+                     Output: test_1.f1
+(12 rows)
+
+explain (verbose, costs off)
+select * from test where test.f1 = any
+(with x as materialized (select * from test_1) select x.f1 from x);
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Hash Join
+   Output: test.f1, test.f2, test.f3
+   Hash Cond: (test.f1 = x.f1)
+   ->  Seq Scan on cte_inline.test
+         Output: test.f1, test.f2, test.f3
+   ->  Hash
+         Output: x.f1
+         ->  HashAggregate
+               Output: x.f1
+               Group By Key: x.f1
+               ->  CTE Scan on x
+                     Output: x.f1
+                     CTE x
+                       ->  Seq Scan on cte_inline.test_1
+                             Output: test_1.f1, test_1.f2, test_1.f3
+(15 rows)
+
+-- not expanded subquery
+explain (verbose, costs off)
+select * from test where test.f1 = any
+(with x as (select * from test_1) select x.f1 from x);
+                   QUERY PLAN                    
+-------------------------------------------------
+ Hash Join
+   Output: test.f1, test.f2, test.f3
+   Hash Cond: (test.f1 = test_1.f1)
+   ->  Seq Scan on cte_inline.test
+         Output: test.f1, test.f2, test.f3
+   ->  Hash
+         Output: test_1.f1
+         ->  HashAggregate
+               Output: test_1.f1
+               Group By Key: test_1.f1
+               ->  Seq Scan on cte_inline.test_1
+                     Output: test_1.f1
+(12 rows)
+
+explain (verbose, costs off)
+select * from test where test.f1 = any
+(with x as materialized (select * from test_1) select /*+ no_expand */ x.f1 from x);
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on cte_inline.test
+   Output: test.f1, test.f2, test.f3
+   Filter: (hashed SubPlan 2)
+   SubPlan 2
+     ->  CTE Scan on x
+           Output: x.f1
+           CTE x
+             ->  Seq Scan on cte_inline.test_1
+                   Output: test_1.f1, test_1.f2, test_1.f3
+(9 rows)
+
+explain (verbose, costs off)
+select * from test where exists 
+(with x as (select * from test_1) select /*+ no_expand */ x.f1 from x where test.f1 = x.f1);
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on cte_inline.test
+   Output: test.f1, test.f2, test.f3
+   Filter: (alternatives: SubPlan 1 or hashed SubPlan 2)
+   SubPlan 1
+     ->  Seq Scan on cte_inline.test_1
+           Filter: (test.f1 = cte_inline.test_1.f1)
+   SubPlan 2
+     ->  Seq Scan on cte_inline.test_1
+           Output: cte_inline.test_1.f1
+(9 rows)
+
+-- intargetlist rewrite
+explain (verbose, costs off)
+select * from test where test.f1 = (with x as (select * from test_1) select x.f2 from x where x.f2 = test.f2 and x.f2 < 10 order by 1 limit 1) and test.f2 < 50 order by 1,2,3;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Sort
+   Output: test.f1, test.f2, test.f3
+   Sort Key: test.f1, test.f2, test.f3
+   ->  Seq Scan on cte_inline.test
+         Output: test.f1, test.f2, test.f3
+         Filter: ((test.f2 < 50) AND (test.f1 = (SubPlan 1)))
+         SubPlan 1
+           ->  Limit
+                 Output: test_1.f2
+                 ->  Seq Scan on cte_inline.test_1
+                       Output: test_1.f2
+                       Filter: ((test_1.f2 < 10) AND (test_1.f2 = test.f2))
+(12 rows)
+
+explain (verbose, costs off)
+select * from test where test.f1 = (with x as materialized (select * from test_1) select x.f2 from x where x.f2 = test.f2 and x.f2 < 10 order by 1 limit 1) and test.f2 < 50 order by 1,2,3;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Output: test.f1, test.f2, test.f3
+   Sort Key: test.f1, test.f2, test.f3
+   ->  Seq Scan on cte_inline.test
+         Output: test.f1, test.f2, test.f3
+         Filter: ((test.f2 < 50) AND (test.f1 = (SubPlan 2)))
+         SubPlan 2
+           ->  Limit
+                 Output: x.f2
+                 CTE x
+                   ->  Seq Scan on cte_inline.test_1
+                         Output: test_1.f1, test_1.f2, test_1.f3
+                 ->  CTE Scan on x
+                       Output: x.f2
+                       Filter: ((x.f2 < 10) AND (x.f2 = test.f2))
+(15 rows)
+
+-- not referenced cte contains DML
+explain (verbose, costs off)
+with x as (select f1 from test),
+y as (insert into test_1 default values)
+select * from x;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Seq Scan on cte_inline.test
+   Output: test.f1
+   CTE y
+     ->  Insert on cte_inline.test_1
+           ->  Result
+                 Output: NULL::integer, NULL::integer, NULL::double precision
+(6 rows)
+
+explain (verbose, costs off)
+with a as( with z as (insert into test default values) select 1)
+select 1;
+ERROR:  WITH clause containing a data-modifying statement must be at the top level
+LINE 2: with a as( with z as (insert into test default values) selec...
+                        ^
+-- cte with subquery and referenced in grouping function will not be inlined
+explain (verbose, costs off)
+WITH cte AS not materialized (
+  SELECT 
+    (
+      CASE WHEN (
+        NOT EXISTS (
+          select 
+            * 
+          from 
+            test
+        )
+      ) THEN ('P') END
+    ) col 
+  FROM 
+    test_1
+) 
+SELECT 
+  col, GROUPING(col)
+FROM 
+  cte
+GROUP BY 
+  GROUPING SETS(col);
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ HashAggregate
+   Output: cte.col, GROUPING(cte.col)
+   Group By Key: cte.col
+   CTE cte
+     ->  Seq Scan on cte_inline.test_1
+           Output: CASE WHEN (NOT $0) THEN 'P'::text ELSE NULL::text END
+           InitPlan 1 (returns $0)
+             ->  Seq Scan on cte_inline.test
+   ->  CTE Scan on cte
+         Output: cte.col
+(10 rows)
+
+drop schema cte_inline cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table test
+drop cascades to table test_1

@@ -53,13 +53,17 @@ typedef struct LogCtrlData {
     int64 sleep_count_limit;
     XLogRecPtr prev_flush;
     XLogRecPtr prev_apply;
+    XLogRecPtr local_prev_flush;
+    TimestampTz prev_send_time;
     TimestampTz prev_reply_time;
-    uint64 pre_rate1;
-    uint64 pre_rate2;
-    uint64 pre_rpo_rate;
+    TimestampTz prev_calculate_time;    /* Controls the flush_rate and apply_rate calculation interval. */
+    uint64 flush_rate;                  /* Recent average flush speed << SHIFT_SPEED. */
+    uint64 apply_rate;                  /* Recent average apply speed << SHIFT_SPEED. */
+    uint64 period_total_flush;          /* Flush amount in a calculation period */
+    uint64 period_total_apply;          /* Apply amount in a calculation period */
+    uint64 local_flush_rate;            /* Local log generation speed << SHIFT_SPEED. */
     int64 prev_RPO;
     int64 current_RPO;
-    TimestampTz prev_send_time;
 } LogCtrlData;
 
 /*
@@ -78,6 +82,7 @@ typedef struct WalSnd {
     bool sendKeepalive;          /* do we send keepalives on this connection? */
     bool replSender;             /* is the walsender a normal replication or building */
     bool is_cross_cluster;       /* is the walsender from another cluster? */
+    bool isTermChanged;          /* is the term changed? used in streaming dr cluster */
 
     ServerMode peer_role;
     DbState peer_state;
@@ -90,6 +95,8 @@ typedef struct WalSnd {
     XLogRecPtr write;
     XLogRecPtr flush;
     XLogRecPtr apply;
+    /* record standby reply message reply.replyFlags */
+    uint32 replyFlags;
 
     /* if valid means all the required replication data already flushed on the standby */
     XLogRecPtr data_flush;
@@ -133,6 +140,9 @@ typedef struct WalSnd {
      * Time needed for synchronous per xlog while catching up.
      */
     double catchupRate;
+    /* Whether the interaction between the active and standby clusters of the streaming disaster recovery switchover is complete */
+    bool isInteractionCompleted;
+    TimestampTz lastRequestTimestamp;
 } WalSnd;
 
 extern THR_LOCAL WalSnd* MyWalSnd;
@@ -185,7 +195,7 @@ typedef struct WalSndCtlData {
     bool sync_master_standalone;
     TimestampTz keep_sync_window_start;
     bool out_keep_sync_window;
-    
+
     /*
      * The demotion of postmaster  Also indicates that all the walsenders
      * should reject any demote requests if postmaster is doning domotion.

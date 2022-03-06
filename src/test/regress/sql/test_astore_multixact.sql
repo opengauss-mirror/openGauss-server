@@ -106,36 +106,6 @@ end;
 /
 \parallel off
 
-insert into astore_mult1 values (2, 2);
-\parallel on 2
-begin
-perform * from astore_mult1 where a = 2 for key share;
-perform pg_sleep(2);
-delete from astore_mult1 where a = 2;
-end;
-/
-begin
-update astore_mult1 set b = 2 where a = 2;
-perform pg_sleep(3);
-end;
-/
-\parallel off
-
-insert into astore_mult1 values (2, 2);
-\parallel on 2
-begin
-perform * from astore_mult1 where a = 2 for key share;
-perform pg_sleep(2);
-delete from astore_mult1 where a = 2;
-end;
-/
-begin
-update astore_mult1 set b = 2 where a = 2;
-perform pg_sleep(3);
-end;
-/
-\parallel off
-
 vacuum freeze astore_mult1;
 vacuum freeze astore_mult2;
 

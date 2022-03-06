@@ -241,6 +241,9 @@ NON_EXEC_STATIC void GlobalStatsTrackerMain()
         /* Report the error to the server log */
         EmitErrorReport();
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
+
         FlushErrorState();
 
         /* Now we can allow interrupts again */
@@ -283,6 +286,13 @@ NON_EXEC_STATIC void GlobalStatsTrackerMain()
     }
 
 shutdown:
+    /*
+     * Before the thread exits, set global_stats_map to NULL to prevent core dump when the
+     * backend thread accesses the released memory during the prune operation.
+     */
+    PrepareStatsHashForSwitch();
+    g_instance.stat_cxt.tableStat->global_stats_map = NULL;
+    CompleteStatsHashSwitch();
     ereport(LOG, (errmsg("global stats shutting down")));
     proc_exit(0);
 }

@@ -48,7 +48,7 @@ void InitDoradoStorage(char *filePath, uint64 fileSize)
 {
     Assert(!g_instance.xlog_cxt.shareStorageopCtl.isInit);
     g_instance.xlog_cxt.shareStorageopCtl.xlogFilePath = filePath;
-    g_instance.xlog_cxt.shareStorageopCtl.xlogFileSize = fileSize;
+    
     g_instance.xlog_cxt.shareStorageopCtl.blkSize = MEMORY_ALIGNED_SIZE;
     g_instance.xlog_cxt.shareStorageopCtl.opereateIf = &doradoOperateIf;
 
@@ -57,7 +57,15 @@ void InitDoradoStorage(char *filePath, uint64 fileSize)
     if (g_instance.xlog_cxt.shareStorageopCtl.fd < 0) {
         ereport(PANIC, (errcode_for_file_access(), errmsg("could not open xlog file \"%s\" : %m", filePath)));
     }
+
     g_instance.xlog_cxt.shareStorageopCtl.isInit = true;
+    if (IsInitdb) {
+        g_instance.xlog_cxt.shareStorageopCtl.xlogFileSize = fileSize;
+    } else {
+        Assert(g_instance.xlog_cxt.shareStorageXLogCtl != NULL);
+        DoradoReadCtlInfo(g_instance.xlog_cxt.shareStorageXLogCtl);
+        g_instance.xlog_cxt.shareStorageopCtl.xlogFileSize = g_instance.xlog_cxt.shareStorageXLogCtl->xlogFileSize;
+    }
 }
 
 void DoradoWriteCtlInfo(const ShareStorageXLogCtl *ctlInfo)

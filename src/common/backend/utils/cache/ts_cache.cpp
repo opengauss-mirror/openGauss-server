@@ -78,8 +78,8 @@ static void InvalidateTSCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
     hash_seq_init(&status, hash);
     while ((entry = (TSAnyCacheEntry*)hash_seq_search(&status)) != NULL)
         entry->isvalid = false;
-
     /* Also invalidate the current-config cache if it's pg_ts_config */
+    /* when detach from thread, mark u_sess->tscache_cxt.TSCurrentConfigCache as invalid */
     if (hash == u_sess->tscache_cxt.TSConfigCacheHash)
         u_sess->tscache_cxt.TSCurrentConfigCache = InvalidOid;
 }
@@ -98,8 +98,7 @@ void init_ts_parser_cache()
     ctl.hcxt = u_sess->cache_mem_cxt;
     u_sess->tscache_cxt.TSParserCacheHash =
         hash_create("Tsearch parser cache", 4, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-    /* Flush cache on pg_ts_parser changes */
-    CacheRegisterSyscacheCallback(
+    CacheRegisterSessionSyscacheCallback(
         TSPARSEROID, InvalidateTSCacheCallBack, PointerGetDatum(u_sess->tscache_cxt.TSParserCacheHash));
 }
 
@@ -200,10 +199,9 @@ void init_ts_distionary_cache()
     ctl.hcxt = u_sess->cache_mem_cxt;
     u_sess->tscache_cxt.TSDictionaryCacheHash =
         hash_create("Tsearch dictionary cache", 8, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-    /* Flush cache on pg_ts_dict and pg_ts_template changes */
-    CacheRegisterSyscacheCallback(
+    CacheRegisterSessionSyscacheCallback(
         TSDICTOID, InvalidateTSCacheCallBack, PointerGetDatum(u_sess->tscache_cxt.TSDictionaryCacheHash));
-    CacheRegisterSyscacheCallback(
+    CacheRegisterSessionSyscacheCallback(
         TSTEMPLATEOID, InvalidateTSCacheCallBack, PointerGetDatum(u_sess->tscache_cxt.TSDictionaryCacheHash));
 }
 
@@ -353,9 +351,9 @@ static void init_ts_config_cache(void)
     u_sess->tscache_cxt.TSConfigCacheHash =
         hash_create("Tsearch configuration cache", 16, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
     /* Flush cache on pg_ts_config and pg_ts_config_map changes */
-    CacheRegisterSyscacheCallback(
+    CacheRegisterSessionSyscacheCallback(
         TSCONFIGOID, InvalidateTSCacheCallBack, PointerGetDatum(u_sess->tscache_cxt.TSConfigCacheHash));
-    CacheRegisterSyscacheCallback(
+    CacheRegisterSessionSyscacheCallback(
         TSCONFIGMAP, InvalidateTSCacheCallBack, PointerGetDatum(u_sess->tscache_cxt.TSConfigCacheHash));
 }
 

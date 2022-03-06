@@ -336,7 +336,7 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
             quoteRelationName(pkrelname, pk_rel);
 
             rc = snprintf_s(querystr, sizeof(querystr), sizeof(querystr) - 1,
-                IsShareLockForForeignKey(trigdata->tg_relation) ? "SELECT 1 FROM ONLY %s x FOR SHARE OF x" :
+                IsShareLockForForeignKey(pk_rel) ? "SELECT 1 FROM ONLY %s x FOR SHARE OF x" :
                 "SELECT 1 FROM ONLY %s x FOR KEY SHARE OF x", pkrelname);
             securec_check_ss(rc, "\0", "\0");
 
@@ -476,7 +476,7 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
             queryoids[i] = fk_type;
         }
 
-        appendStringInfo(&querybuf, IsShareLockForForeignKey(trigdata->tg_relation) ? " FOR SHARE OF x" :
+        appendStringInfo(&querybuf, IsShareLockForForeignKey(pk_rel) ? " FOR SHARE OF x" :
             " FOR KEY SHARE OF x");
 
         /* Prepare and save the plan */
@@ -798,7 +798,7 @@ Datum RI_FKey_noaction(PG_FUNCTION_ARGS)
                     queryoids[i] = pk_type;
                 }
 
-                appendStringInfo(&querybuf, IsShareLockForForeignKey(trigdata->tg_relation) ?
+                appendStringInfo(&querybuf, IsShareLockForForeignKey(fk_rel) ?
                     " FOR SHARE OF x" : " FOR KEY SHARE OF x");
 
                 /* Prepare and save the plan */
@@ -1335,7 +1335,7 @@ Datum RI_FKey_restrict(PG_FUNCTION_ARGS)
                     queryoids[i] = pk_type;
                 }
 
-                appendStringInfo(&querybuf, IsShareLockForForeignKey(trigdata->tg_relation) ?
+                appendStringInfo(&querybuf, IsShareLockForForeignKey(fk_rel) ?
                     " FOR SHARE OF x" : " FOR KEY SHARE OF x");
 
                 /* Prepare and save the plan */

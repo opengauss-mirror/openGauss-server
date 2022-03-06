@@ -110,13 +110,17 @@ int main(int argc, char* argv[])
     int key_num = 0;
     int key_child_num = 0;
     int i = 0;
+    int j = 0;
     char* key_child[MAX_CHILD_NUM];
     char* path_child[MAX_CHILD_NUM];
     char* keyword = NULL;
     errno_t rc = EOK;
     FILE* cmd_fp = NULL;
-    char read_buf[MAX_CHILD_PATH] = {0};
     char* mv_cmd = NULL;
+    char* keypath[2];   /* we can specify 2 path,the first is the cipher path,the second is the rand path. */
+
+    keypath[0] = NULL;
+    keypath[1] = NULL;
 
     for (i = 0; i < MAX_CHILD_NUM; i++) {
         key_child[i] = NULL;
@@ -128,36 +132,40 @@ int main(int argc, char* argv[])
         return result;
     }
 
-    if (argv[1] != NULL) {
-        key_num = check_key_num(argv[1]);
-        if (key_num == 0) {
-            (void)fprintf(stderr, _("ERROR: invalid passwd length\n"));
-            return result;
-        }
-
-        key_child_num = key_num / KEY_SPLIT_LEN + 1;
-        keyword = (char*)crypt_malloc_zero(KEY_SPLIT_LEN * key_child_num);
-        if (NULL == keyword) {
-            (void)fprintf(stderr, _("out of memory\n"));
-            return result;
-        }
-        rc = memcpy_s(keyword, KEY_SPLIT_LEN * key_child_num, argv[1], key_num + 1);
-        securec_check_c(rc, "\0", "\0");
-        rc = memset_s(argv[1], key_num, 0, key_num);
-        securec_check_c(rc, "\0", "\0");
+    key_num = check_key_num(argv[1]);
+    if (key_num == 0) {
+        (void)fprintf(stderr, _("ERROR: invalid passwd length\n"));
+        return result;
     }
 
-    for (i = 2; i < argc; i++) {
+    key_child_num = key_num / KEY_SPLIT_LEN + 1;
+    keyword = (char*)crypt_malloc_zero(KEY_SPLIT_LEN * key_child_num);
+    if (NULL == keyword) {
+        (void)fprintf(stderr, _("out of memory\n"));
+        return result;
+    }
+    rc = memcpy_s(keyword, KEY_SPLIT_LEN * key_child_num, argv[1], key_num + 1);
+    securec_check_c(rc, "\0", "\0");
+    rc = memset_s(argv[1], key_num, 0, key_num);
+    securec_check_c(rc, "\0", "\0");
+
+    for (i = 2, j = 0; i < argc; i++, j++) {
         if (strlen(argv[i]) > MAX_CHILD_PATH) {
             (void)fprintf(stderr, _("ERROR: path %s length is more then %d\n"), argv[i], MAX_CHILD_PATH);
             goto END;
         }
-        canonicalize_path(argv[i]);
-        if (-1 == access(argv[i], R_OK | W_OK)) {
-            (void)fprintf(stderr, _("ERROR: Could not access the path %s\n"), argv[i]);
+
+        keypath[j] = strdup(argv[i]);
+        if (NULL == keypath[j]) {
+            (void)write_stderr(_("%s: out of memory\n"), "gs_guc");
+            exit(1);
+        }
+        canonicalize_path(keypath[j]);
+        if (-1 == access(keypath[j], R_OK | W_OK)) {
+            (void)fprintf(stderr, _("ERROR: Could not access the path %s\n"), keypath[j]);
             goto END;
         }
-        check_path(argv[i]);
+        check_path(keypath[j]);
     }
 
     init_log((char*)PROG_NAME);
@@ -168,7 +176,7 @@ int main(int argc, char* argv[])
         securec_check_c(rc, "\0", "\0");
 
         path_child[i] = (char*)crypt_malloc_zero(MAX_CHILD_PATH + 1);
-        rc = snprintf_s(path_child[i], MAX_CHILD_PATH, MAX_CHILD_PATH - 1, "%s/key_%d", argv[2], i);
+        rc = snprintf_s(path_child[i], MAX_CHILD_PATH, MAX_CHILD_PATH - 1, "%s/key_%d", keypath[0], i);
         securec_check_ss_c(rc, "\0", "\0");
 
         create_child_dir(path_child[i]);
@@ -177,14 +185,14 @@ int main(int argc, char* argv[])
         if (argc == 4) {
             CRYPT_FREE(path_child[i]);
             path_child[i] = (char*)crypt_malloc_zero(MAX_CHILD_PATH + 1);
-            rc = snprintf_s(path_child[i], MAX_CHILD_PATH, MAX_CHILD_PATH - 1, "%s/key_%d", argv[3], i);
+            rc = snprintf_s(path_child[i], MAX_CHILD_PATH, MAX_CHILD_PATH - 1, "%s/key_%d", keypath[1], i);
             securec_check_ss_c(rc, "\0", "\0");
 
             create_child_dir(path_child[i]);
 
             mv_cmd = (char*)crypt_malloc_zero(MAX_COMMAND_LEN + 1);
             rc = snprintf_s(mv_cmd, MAX_COMMAND_LEN, MAX_COMMAND_LEN - 1, "mv %s/key_%d/*.rand %s/key_%d/",
-                            argv[2], i, argv[3], i);
+                            keypath[0], i, keypath[1], i);
             securec_check_ss_c(rc, "\0", "\0");
 
             cmd_fp = popen(mv_cmd, "r");
@@ -194,12 +202,6 @@ int main(int argc, char* argv[])
                 CRYPT_FREE(key_child[i]);
                 CRYPT_FREE(path_child[i]);
                 goto END;
-            }
-
-            while (fgets(read_buf, sizeof(read_buf) - 1, cmd_fp) != 0) {
-                printf("%s\n", read_buf);
-                rc = memset_s(read_buf, sizeof(read_buf), 0, sizeof(read_buf));
-                securec_check_c(rc, "\0", "\0");
             }
             pclose(cmd_fp);
             CRYPT_FREE(mv_cmd);
@@ -217,5 +219,7 @@ END:
         securec_check_c(rc, "\0", "\0");
         CRYPT_FREE(keyword);
     }
+    CRYPT_FREE(keypath[0]);
+    CRYPT_FREE(keypath[1]);
     return result;
 }

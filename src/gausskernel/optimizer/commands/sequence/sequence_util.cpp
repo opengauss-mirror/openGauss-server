@@ -22,10 +22,13 @@
 #include "access/gtm.h"
 #include "access/multixact.h"
 #include "access/xlogproc.h"
+#include "catalog/pg_proc.h"
 #include "commands/dbcommands.h"
 #include "commands/sequence.h"
 #include "gtm/gtm_client.h"
+#include "parser/parse_coerce.h"
 #include "storage/lmgr.h"
+#include "utils/builtins.h"
 #include "utils/lsyscache.h"
 
 /*
@@ -115,7 +118,7 @@ void fill_seq_with_data(Relation rel, HeapTuple tuple)
         XLogRegisterData((char*)&xlrec, sizeof(xl_seq_rec));
         XLogRegisterData((char*)tuple->t_data, tuple->t_len);
 
-        recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, false, rel->rd_node.bucketNode);
+        recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, rel->rd_node.bucketNode);
 
         PageSetLSN(page, recptr);
     }
@@ -565,4 +568,105 @@ SeqTable GetGlobalSeqElm(Oid relid, GlobalSeqInfoHashBucket* bucket)
     } 
 
     return currseq;
+}
+
+/*
+ * Add coercion for (numeric)func() to get (int8)func().
+ * There's no need to concern numeric overflow since large sequence is not supported before upgrade.
+ */
+static Node* update_seq_expr(FuncExpr* func)
+{
+    func->funcresulttype = NUMERICOID;
+    Node* newnode = coerce_to_target_type(
+        NULL, (Node*)func, NUMERICOID, INT8OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+    return newnode;
+}
+
+/*
+ * Add coercion for (int8)func() to get (numeric)func().
+ */
+static Node* rollback_seq_expr(FuncExpr* func)
+{
+    func->funcresulttype = INT8OID;
+    Node* newnode = coerce_to_target_type(
+        NULL, (Node*)func, INT8OID, NUMERICOID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+    return newnode;
+}
+
+typedef struct MutateSeqExprCxt {
+    Node* (*worker)(FuncExpr* func);
+    Oid expextedResType;
+} MutateSeqExprCxt;
+
+static bool RevertUpgradedFunc(FuncExpr* func, Node** ret)
+{
+    Assert(list_length(func->args) == 1);
+    Node* arg = (Node*)linitial(func->args);
+    if (!IsA(arg, FuncExpr)) {
+        return false;
+    }
+    FuncExpr* innerFunc = (FuncExpr*)arg;
+    if (innerFunc->funcid == NEXTVALFUNCOID || innerFunc->funcid == CURRVALFUNCOID ||
+        innerFunc->funcid == LASTVALFUNCOID) {
+        innerFunc->funcresulttype = INT8OID;
+        *ret = (Node*)innerFunc;
+        return true;
+    }
+    return false;
+}
+
+static Node* large_sequence_modify_node_tree_mutator(Node* node, void* cxt)
+{
+    /* Traverse through the expression tree and convert nextval() calls with proper coercion */
+    if (node == NULL) {
+        return NULL;
+    }
+    if (IsA(node, Query)) {
+        return (Node*)query_tree_mutator(
+            (Query*) node, (Node* (*)(Node*, void*))large_sequence_modify_node_tree_mutator, cxt, 0);
+    }
+    if (IsA(node, FuncExpr)) {
+        FuncExpr* func = (FuncExpr*) node;
+        MutateSeqExprCxt* context = (MutateSeqExprCxt*)cxt;
+        if (func->funcid == NEXTVALFUNCOID || func->funcid == CURRVALFUNCOID || func->funcid == LASTVALFUNCOID) {
+            if (func->funcresulttype == context->expextedResType) {
+                /* Check to allow reentrancy of rollback/upgrade procedure */
+                return (Node*)func;
+            }
+            return ((MutateSeqExprCxt*)cxt)->worker(func);
+        } else if (context->expextedResType == INT8OID && func->funcid == 1779) { /* Only for rollback func()::int8 */
+            Node* ret = NULL;
+            if (RevertUpgradedFunc(func, &ret)) {
+                return ret;
+            }
+        }
+    }
+    return expression_tree_mutator(
+        node, (Node* (*)(Node*, void*))large_sequence_modify_node_tree_mutator, cxt);
+}
+
+Datum large_sequence_upgrade_node_tree(PG_FUNCTION_ARGS)
+{
+    char* res = NULL;
+    char* orig = text_to_cstring(PG_GETARG_TEXT_P(0));
+    Node* expr = (Node*)stringToNode_skip_extern_fields(orig);
+    MutateSeqExprCxt cxt = {update_seq_expr, NUMERICOID};
+    expr = query_or_expression_tree_mutator(
+        expr, (Node* (*)(Node*, void*))large_sequence_modify_node_tree_mutator, &cxt, 0);
+    res = nodeToString(expr);
+
+    PG_RETURN_TEXT_P(cstring_to_text(res));
+}
+
+Datum large_sequence_rollback_node_tree(PG_FUNCTION_ARGS)
+{
+    char* res = NULL;
+    char* orig = text_to_cstring(PG_GETARG_TEXT_P(0));
+    Node* expr = (Node*)stringToNode_skip_extern_fields(orig);
+    MutateSeqExprCxt cxt = {rollback_seq_expr, INT8OID};
+    expr = query_or_expression_tree_mutator(
+        expr, (Node* (*)(Node*, void*))large_sequence_modify_node_tree_mutator, &cxt, 0);
+    res = nodeToString(expr);
+
+    PG_RETURN_TEXT_P(cstring_to_text(res));
 }

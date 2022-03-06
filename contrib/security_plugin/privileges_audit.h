@@ -26,13 +26,14 @@
 #include "nodes/primnodes.h"
 #include "nodes/parsenodes.h"
 #include "gs_policy/gs_vector.h"
+#include "gs_policy_object_types.h"
 
 #define SET_DB_SCHEMA_TABLE    buffer->append(schemaname);    \
                             buffer->push_back('.');
 
 typedef std::pair<gs_stl::gs_string, gs_stl::gs_string> names_pair;
 void acl_audit_object(const policy_set *security_policy_ids, const policy_set *policy_ids, const ListCell *rel,
-    const names_pair names, int priv_type, const char *priv_name, int objtype);
+    const names_pair names, int priv_type, const char *priv_name, int objtype, int target_type);
 bool internal_audit_object_str(const policy_set* security_policy_ids, const policy_set* policy_ids,
     const PolicyLabelItem* item, int priv_type, const char* priv_name, const char* objname = "",
     bool ignore_db = false);
@@ -41,9 +42,7 @@ void internal_audit_str(const policy_set *security_policy_ids, const policy_set 
 void login_object(const policy_set *security_policy_ids, const policy_set *policy_ids, const char *login_str,
     int priv_type, const char *priv_name);
 void internal_audit_object_str(const policy_set *security_policy_ids, const policy_set *policy_ids, const ListCell *rel,
-    const names_pair names, int priv_type, const char *priv_name, int objtype, bool is_rolegrant = false, bool ignore_db = false);
-void audit_object(const policy_set *security_policy_ids, const policy_set *policy_ids,
-    const char *relname, int priv_type, const char *priv_name, int objtype);
+    const names_pair names, int priv_type, const char *priv_name, int objtype, int target_type = ACL_TARGET_OBJECT, bool is_rolegrant = false, bool ignore_db = false);
 void audit_table(const policy_set *security_policy_ids, const policy_set *policy_ids,
     RangeVar *rel, int priv_type, const char *priv_name, int objtype);
 void alter_table(const policy_set *security_policy_ids, const policy_set *policy_ids,
@@ -60,5 +59,6 @@ void destroy_logs();
 void get_cursor_tables(List *rtable, char *buff, size_t buff_size, int _printed_size,
     gs_stl::gs_vector<PolicyLabelItem> *cursor_objects = nullptr);
 void get_open_cursor_info(PlannedStmt *stmt, char *buff, size_t buff_size);
+PrivObject get_privtype_from_aclobject(GrantObjectType acl_type);
 
 #endif /* PRIVILEGES_AUDIT_H_ */

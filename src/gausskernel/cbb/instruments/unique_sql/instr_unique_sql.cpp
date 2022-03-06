@@ -1691,6 +1691,12 @@ Datum get_instr_unique_sql(PG_FUNCTION_ARGS)
     }
 }
 
+bool CheckSkipSQL(Query* query)
+{
+    return query->utilityStmt != NULL && (IsA(query->utilityStmt, ExplainStmt) ||
+        (IsA(query->utilityStmt, RemoteQuery) &&
+        (((RemoteQuery*)query->utilityStmt)->exec_direct_type != EXEC_DIRECT_NONE)));
+}
 /*
  * GenerateUniqueSQLInfo - generate unique sql info
  *
@@ -1710,8 +1716,8 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
      * refer to the assert in method "relation_open"
      */
     if (sql == NULL || query == NULL || g_instance.stat_cxt.UniqueSQLHashtbl == NULL || !is_local_unique_sql() ||
-        IsAbortedTransactionBlockState() || 
-        (query->utilityStmt != NULL && IsA(query->utilityStmt, ExplainStmt))) {
+        IsAbortedTransactionBlockState() || CheckSkipSQL(query) ||
+        u_sess->unique_sql_cxt.skipUniqueSQLCount != 0) {
         return;
     }
 
@@ -1759,6 +1765,7 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
 
     UpdateUniqueSQLStat(query, current_sql, 0);
     instr_stmt_report_query(u_sess->unique_sql_cxt.unique_sql_id);
+    pgstat_report_unique_sql_id(false);
 
     /* if track top enabled, only TOP SQL will generate unique sql id */
     if (IS_UNIQUE_SQL_TRACK_TOP) {
@@ -1822,6 +1829,7 @@ static void SetLocalUniqueSQLId(List* query_list)
                 }
 #endif
                 instr_stmt_report_query(u_sess->unique_sql_cxt.unique_sql_id);
+                pgstat_report_unique_sql_id(false);
 
                 /* dynamic enable statement tracking */
                 instr_stmt_dynamic_change_level();
@@ -2510,7 +2518,7 @@ static bool AutoRecycleUniqueSQLEntry()
         return false;
     }
     const double cleanRatio = 0.1;
-    int cleanCount = Max(int(cleanRatio * instr_unique_sql_count + totalCount - instr_unique_sql_count), 1);
+    int cleanCount = Max(int(cleanRatio * instr_unique_sql_count + (totalCount - instr_unique_sql_count)), 1);
     /* get remove entry list */
     KeyUpdatedtime* removeList = GetSortedEntryList();
     if (removeList == NULL) {
@@ -2662,6 +2670,7 @@ void ResetCurrentUniqueSQL(bool need_reset_cn_id)
 #ifndef ENABLE_MULTIPLE_NODES
     u_sess->unique_sql_cxt.unique_sql_text = NULL;
 #endif
+    u_sess->unique_sql_cxt.skipUniqueSQLCount = 0;
 }
 
 void FindUniqueSQL(UniqueSQLKey key, char* unique_sql)

@@ -7,7 +7,7 @@ CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORIT
 
 CREATE TABLE IF NOT EXISTS t_varchar
     (id INT, name varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = cek1, ENCRYPTION_TYPE = DETERMINISTIC),
-    address varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = cek1, ENCRYPTION_TYPE = DETERMINISTIC));
+    address varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = cek1, ENCRYPTION_TYPE = RANDOMIZED));
 SELECT attname, atttypid::regtype FROM pg_attribute JOIN pg_class On attrelid = Oid WHERE relname = 't_varchar' AND attnum >0;
 \d t_varchar;
 \d+ t_varchar;

@@ -456,6 +456,40 @@ select * from test_debug_recursive (1, 1);
        5 |     120
 (5 rows)
 
+--test empty procedure
+CREATE OR REPLACE PROCEDURE test_empty(i int,j out int)
+AS
+DECLARE
+begin
+
+end;
+/
+truncate debug_info;
+select * from turn_on_debugger('test_empty');
+ turn_on_debugger 
+------------------
+                0
+(1 row)
+
+select * from dbe_pldebugger.local_debug_server_info();
+--?.*
+--?.*
+--? datanode1 |    .* |   .*
+--? datanode1 |    .* |   .*
+(2 rows)
+
+select * from debug_info;
+--?.*
+--?.*
+--? datanode1 |    .*
+(1 row)
+
+call test_empty(1, '');
+ j 
+---
+  
+(1 row)
+
 -- test set_var
 CREATE OR REPLACE PROCEDURE test_setvar(x int) AS
 DECLARE
@@ -493,7 +527,8 @@ select * from dbe_pldebugger.local_debug_server_info();
 --?.*
 --? datanode1 |    .* |   .*
 --? datanode1 |    .* |   .*
-(2 rows)
+--? datanode1 |    .* |   .*
+(3 rows)
 
 select * from debug_info;
 --?.*
@@ -605,7 +640,8 @@ select * from dbe_pldebugger.local_debug_server_info();
 --? datanode1 |    .* |   .*
 --? datanode1 |    .* |   .*
 --? datanode1 |    .* |   .*
-(3 rows)
+--? datanode1 |    .* |   .*
+(4 rows)
 
 select * from debug_info;
 --?.*
@@ -620,7 +656,7 @@ select z_pk.pro1(1,2,'+');
 (1 row)
 
 drop schema pl_debugger cascade;
-NOTICE:  drop cascades to 17 other objects
+NOTICE:  drop cascades to 18 other objects
 DETAIL:  drop cascades to table test
 drop cascades to function test_debug(integer)
 drop cascades to table show_code_table
@@ -633,6 +669,7 @@ drop cascades to function test_debug2()
 drop cascades to function test_debug3(integer)
 drop cascades to function test_debug4(integer)
 drop cascades to function test_debug_recursive(integer,integer)
+drop cascades to function test_empty(integer)
 drop cascades to function test_setvar(integer)
 --?drop cascades to package .*
 --?drop cascades to package .*

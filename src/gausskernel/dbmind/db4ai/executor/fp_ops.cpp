@@ -192,19 +192,9 @@ double IncrementalStatistics::getMin() const
     return min_value;
 }
 
-void IncrementalStatistics::setMin(double min)
-{
-    min_value = min;
-}
-
 double IncrementalStatistics::getMax() const
 {
     return max_value;
-}
-
-void IncrementalStatistics::setMax(double max)
-{
-    max_value = max;
 }
 
 double IncrementalStatistics::getTotal() const
@@ -214,17 +204,13 @@ double IncrementalStatistics::getTotal() const
 
 void IncrementalStatistics::setTotal(double t)
 {
-    total = t;
+    total = max_value = min_value = t;
+    population = 1ULL;
 }
 
 uint64_t IncrementalStatistics::getPopulation() const
 {
     return population;
-}
-
-void IncrementalStatistics::setPopulation(uint64_t pop)
-{
-    population = pop;
 }
 
 double IncrementalStatistics::getEmpiricalMean() const
@@ -245,7 +231,10 @@ double IncrementalStatistics::getEmpiricalVariance() const
 
 double IncrementalStatistics::getEmpiricalStdDev() const
 {
-    return std::sqrt(getEmpiricalVariance());
+    double const std_dev = getEmpiricalVariance();
+    // round-off errors might happen and we don't want to take
+    // sqrt of a negative number (that technically should be zero for example)
+    return std_dev < 0. ? 0. : std::sqrt(getEmpiricalVariance());
 }
 
 bool IncrementalStatistics::reset()

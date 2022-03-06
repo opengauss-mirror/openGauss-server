@@ -279,6 +279,8 @@ extern void batch_lookup_job_attribute(JobAttribute *attributes, int n);
 extern void batch_lookup_program_argument(Datum job_name, JobArgument *arguments, int num_of_args);
 extern List *search_related_attribute(Relation gs_job_attribute_rel, Datum attribute_name, Datum attribute_value);
 extern HeapTuple search_from_pg_job(Relation pg_job_rel, Datum job_name);
+extern int4 get_job_id_from_pg_job(Datum job_name);
+HeapTuple search_from_pg_job_proc_no_exception(Relation rel, Datum job_name);
 
 /* Tools */
 extern void enable_single_force(Datum object_name, Datum enable_value, bool force);

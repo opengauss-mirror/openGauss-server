@@ -26,12 +26,16 @@ override CPPFLAGS += -DPGXC -I$(srcdir) -I$(top_builddir)/src/ -I$(top_builddir)
 override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks
 override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/cmk_entity_manager_hooks
 override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/encryption_hooks
+ifeq ($(enable_lite_mode), no)
 override CPPFLAGS += -I$(CJSON_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -L$(CJSON_LIB_PATH) -L$(LIBCURL_LIB_PATH) -lcjson -lcurl
+endif
 
 ifeq "$(ENABLE_CE)" "1"
 override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-override CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+  ifneq ($(enable_lite_mode), yes)
+    override CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+  endif
 endif
 endif
 
@@ -98,9 +102,12 @@ endif
 # shared library link.  (The order in which you list them here doesn't
 # matter.)
 ifneq ($(PORTNAME), win32)
-SHLIB_LINK += $(filter  -lcrypt -ldes -lcom_err -lcrypto -lssl -lk5crypto -lkrb5 -lgssapi_krb5 -lgss -lgssapi -lsocket -lnsl -lresolv -lintl -lsecurec, $(LIBS)) $(LDAP_LIBS_FE) $(PTHREAD_LIBS) -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+SHLIB_LINK += $(filter  -lcrypt -ldes -lcom_err -lcrypto -lssl -lk5crypto -lkrb5 -lgssapi_krb5 -lgss -lgssapi -lsocket -lnsl -lresolv -lintl -l$(SECURE_C_CHECK), $(LIBS)) $(LDAP_LIBS_FE) $(PTHREAD_LIBS)
 else
-SHLIB_LINK += $(filter  -lcrypt -ldes -lcom_err -lcrypto -lssl -lk5crypto -lkrb5 -lgssapi32 -lsocket -lnsl -lresolv -lintl -lsecurec $(PTHREAD_LIBS), $(LIBS)) $(LDAP_LIBS_FE) -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+SHLIB_LINK += $(filter  -lcrypt -ldes -lcom_err -lcrypto -lssl -lk5crypto -lkrb5 -lgssapi32 -lsocket -lnsl -lresolv -lintl -l$(SECURE_C_CHECK) $(PTHREAD_LIBS), $(LIBS)) $(LDAP_LIBS_FE)
+endif
+ifeq ($(enable_lite_mode), no)
+    SHLIB_LINK += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
 endif
 ifeq ($(PORTNAME), win32)
 SHLIB_LINK += -lshfolder -lwsock32 -lws2_32 -lsecur32 $(filter -leay32 -lssleay32 -lcomerr32 -lkrb5_32, $(LIBS))
@@ -123,7 +130,12 @@ endif
 
 ifneq ($(enable_ut), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_local_kms.o, $(OBJS))
+ifneq ($(enable_lite_mode), yes)
+  OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_local_kms.o, $(OBJS))
+else
+  OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.o, $(OBJS))
+  OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.o, $(OBJS))
+endif
 else
 OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.o, $(OBJS))
 OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.o, $(OBJS))
@@ -146,8 +158,10 @@ OBJS:=$(CE_OBJS)
 NAME:=pq_ce
 
 gs_ktool:
+ifneq ($(enable_lite_mode), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 	$(MAKE) -C $(top_builddir)/../distribute/bin/gs_ktool
+endif
 endif
 
 libpq_ce/fe-protocol3.o libpq_ce/fe-exec.o: client_logic_cache/types_to_oid.h

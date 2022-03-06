@@ -20,6 +20,18 @@
 #include "common/fe_memutils.h"
 #endif
 
+const char *clog_type_name(uint8 subtype)
+{
+    uint8 info = subtype & ~XLR_INFO_MASK;
+    if (info == CLOG_ZEROPAGE) {
+        return "clog_zeropage";
+    } else if (info == CLOG_TRUNCATE) {
+        return "clog_truncate";
+    } else {
+        return "unkown_type";
+    }
+}
+
 void clog_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);

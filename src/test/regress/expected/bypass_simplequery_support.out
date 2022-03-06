@@ -827,6 +827,11 @@ select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 limit 3 offs
     3 |    3 | 
 (3 rows)
 
+select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 limit 3 offset 30;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
+
 explain select * from test_bypass_sq1 where col1>0  order by col1 for update limit 3 offset 3;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
@@ -842,6 +847,16 @@ explain select * from test_bypass_sq1 where col1>0  order by col1 for update lim
 --------------------------------------------------------------------------------------------------------
  [Bypass]
  Limit  (cost=0.00..0.42 rows=3 width=46)
+   ->  LockRows  (cost=0.00..54.95 rows=389 width=46)
+         ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=46)
+               Index Cond: (col1 > 0)
+(5 rows)
+
+explain select * from test_bypass_sq1 where col1>0  order by col1 for update limit 3 offset 30;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ [Bypass]
+ Limit  (cost=4.24..4.66 rows=3 width=46)
    ->  LockRows  (cost=0.00..54.95 rows=389 width=46)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=46)
                Index Cond: (col1 > 0)
@@ -864,6 +879,11 @@ select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 offset 3;
     3 |    3 | 
     3 |    3 | test_insert3
 (4 rows)
+
+select * from test_bypass_sq1 where col1>0  order by col1 for update limit 3 offset 30;
+ col1 | col2 | col3 
+------+------+------
+(0 rows)
 
 explain select * from test_bypass_sq1 where col1>0 order by col1 for update offset 3;
                                                QUERY PLAN                                               
@@ -1886,6 +1906,13 @@ revoke update on test_bypass_sq7 from qps;
 revoke select on test_bypass_sq7 from qps;
 DROP OWNED BY qps;
 DROP ROLE qps;
+-- test rule do nothing
+create table test(a int);
+create view v_test as select * from test;
+CREATE OR REPLACE RULE v_delete as ON DELETE TO v_test DO INSTEAD NOTHING;
+delete from v_test;
+drop table test cascade;
+NOTICE:  drop cascades to view v_test
 -- end
 reset track_activities;
 set track_sql_count = off;

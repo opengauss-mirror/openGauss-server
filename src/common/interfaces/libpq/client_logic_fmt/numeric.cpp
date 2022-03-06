@@ -22,46 +22,32 @@
  */
  
 #include "numeric.h"
-#include "biginteger.h"
 #include "client_logic_cache/icached_column_manager.h"
 #include "client_logic_common/client_logic_utils.h"
 #include "libpq-int.h"
 
-#define palloc(sz) malloc(sz)
+#define palloc(sz) calloc(sz, sizeof(unsigned char))
 #define pfree free
 
 #define ereport(a, b) return false;
-#define NUMERIC_HDRSZ (sizeof(uint16) + sizeof(int16))
-
-#define NUMERIC_HDRSZ_SHORT (sizeof(uint16))
+#define NUMERIC_HDRSZ (VARHDRSZ + sizeof(uint16) + sizeof(int16))
+#define NUMERIC_BI_MASK 0xF000
+#define NUMERIC_IS_NAN(n) (NUMERIC_NB_FLAGBITS(n) == NUMERIC_NAN)
+#define NUMERIC_HDRSZ_SHORT (VARHDRSZ + sizeof(uint16))
 #define VEC_TO_CHOICE(res) ((NumericChoice *)(res))
 #define NUMERIC_FLAGBITS(n) ((n)->choice.n_header & NUMERIC_SIGN_MASK)
-#define CNUMERIC_FLAGBITS(n) ((n)->n_header & NUMERIC_SIGN_MASK)
-#define VNUMERIC_FLAGBITS(n) (VEC_TO_CHOICE(n)->n_header & NUMERIC_SIGN_MASK)
 
 #define NUMERIC_IS_SHORT(n) (NUMERIC_FLAGBITS(n) == NUMERIC_SHORT)
-#define CNUMERIC_IS_SHORT(n) (CNUMERIC_FLAGBITS(n) == NUMERIC_SHORT)
-#define VNUMERIC_IS_SHORT(n) (VNUMERIC_FLAGBITS(n) == NUMERIC_SHORT)
 #define NUMERIC_SHORT_SIGN_MASK 0x2000
 #define NUMERIC_DSCALE_MASK 0x3FFF
 #define NUMERIC_SIGN(n)                                                                                             \
     (NUMERIC_IS_SHORT(n) ? (((n)->choice.n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) : \
                             NUMERIC_FLAGBITS(n))
-#define CNUMERIC_SIGN(n)                                                                                      \
-    (CNUMERIC_IS_SHORT(n) ? (((n)->n_short.n_header & NUMERIC_SHORT_SIGN_MASK) ? NUMERIC_NEG : NUMERIC_POS) : \
-                            CNUMERIC_FLAGBITS(n))
 #define NUMERIC_DSCALE(n)                                                                          \
     (NUMERIC_IS_SHORT((n)) ?                                                                       \
         ((n)->choice.n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT : \
         ((n)->choice.n_long.n_sign_dscale & NUMERIC_DSCALE_MASK))
 
-#define CNUMERIC_DSCALE(n)                                                                                        \
-    (CNUMERIC_IS_SHORT((n)) ? ((n)->n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT : \
-                            ((n)->n_long.n_sign_dscale & NUMERIC_DSCALE_MASK))
-#define VNUMERIC_DSCALE(n)                                                                               \
-    (VNUMERIC_IS_SHORT((n)) ?                                                                            \
-        (VEC_TO_CHOICE(n)->n_short.n_header & NUMERIC_SHORT_DSCALE_MASK) >> NUMERIC_SHORT_DSCALE_SHIFT : \
-        (VEC_TO_CHOICE(n)->n_long.n_sign_dscale & NUMERIC_DSCALE_MASK))
 
 #define NUMERIC_WEIGHT(n)                                                                                   \
     (NUMERIC_IS_SHORT((n)) ?                                                                                \
@@ -69,26 +55,9 @@
         ((n)->choice.n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK)) :                                       \
         ((n)->choice.n_long.n_weight))
 
-#define CNUMERIC_WEIGHT(n)                                                                           \
-    (CNUMERIC_IS_SHORT((n)) ?                                                                        \
-        (((n)->n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) | \
-        ((n)->n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK)) :                                       \
-        ((n)->n_long.n_weight))
-#define VNUMERIC_WEIGHT(n)                                                                                        \
-    (VNUMERIC_IS_SHORT((n)) ?                                                                                     \
-        ((VEC_TO_CHOICE(n)->n_short.n_header & NUMERIC_SHORT_WEIGHT_SIGN_MASK ? ~NUMERIC_SHORT_WEIGHT_MASK : 0) | \
-        (VEC_TO_CHOICE(n)->n_short.n_header & NUMERIC_SHORT_WEIGHT_MASK)) :                                       \
-        (VEC_TO_CHOICE(n)->n_long.n_weight))
-
-#define VNUMERIC_DIGITS(num) \
-    (VNUMERIC_IS_SHORT(num) ? VEC_TO_CHOICE(num)->n_short.n_data : VEC_TO_CHOICE(num)->n_long.n_data)
 #define NUMERIC_DIGITS(num) (NUMERIC_IS_SHORT(num) ? (num)->choice.n_short.n_data : (num)->choice.n_long.n_data)
-#define CNUMERIC_DIGITS(num) (CNUMERIC_IS_SHORT(num) ? (num)->n_short.n_data : (num)->n_long.n_data)
 #define NUMERIC_64 0xD000
 #define NUMERIC_64VALUE(n) (*((int64 *)((n)->choice.n_bi.n_data)))
-#define CNUMERIC_64VALUE(n) (*((int64 *)((n)->n_bi.n_data)))
-#define NUMERIC_BI_MASK 0xF000
-#define NUMERIC_BI_SCALEMASK 0x00FF
 #define NUMERIC_SHORT_DSCALE_MASK 0x1F80
 #define NUMERIC_SHORT_DSCALE_SHIFT 7
 #define NUMERIC_SHORT_WEIGHT_SIGN_MASK 0x0040
@@ -99,22 +68,23 @@
 #define NUMERIC_SHORT_DSCALE_MAX (NUMERIC_SHORT_DSCALE_MASK >> NUMERIC_SHORT_DSCALE_SHIFT)
 #ifndef WORDS_LITTLEENDIAN
 #define VARSIZE_4B(PTR) (((varattrib_4b_fe *)(PTR))->va_4byte.va_header & 0x3FFFFFFF)
+#define SET_VARSIZE_4B(PTR, len) (((varattrib_4b_fe*)(PTR))->va_4byte.va_header = (len)&0x3FFFFFFF)
 #else
-#define VyARSIZE_4B(PTR) ((((varattrib_4b_fe *)(PTR))->va_4byte.va_header >> 2) & 0x3FFFFFFF)
+#define VARSIZE_4B(PTR) ((((varattrib_4b_fe *)(PTR))->va_4byte.va_header >> 2) & 0x3FFFFFFF)
+#define SET_VARSIZE_4B(PTR, len) (((varattrib_4b_fe*)(PTR))->va_4byte.va_header = (((uint32)(len)) << 2))
 #endif
+#define SET_VARSIZE(PTR, len) do { \
+        SET_VARSIZE_4B(PTR, len);  \
+        *binary_size = len;        \
+    } while (0)
 
-#define CNUMERIC_NDIGITS(num) ((VARSIZE(num) - sizeof(int16)) / sizeof(NumericDigit))
 #define NUMERIC_NDIGITS(num) ((VARSIZE(num) - NUMERIC_HEADER_SIZE(num)) / sizeof(NumericDigit))
 
-#define VNUMERIC_NDIGITS(num)                                                                         \
-    ((num.size() - sizeof(uint16) - (((VNUMERIC_FLAGBITS(num) & 0x8000) == 0) ? sizeof(int16) : 0)) / \
-        sizeof(NumericDigit))
 #define VARSIZE(PTR) VARSIZE_4B(PTR)
 #define NUMERIC_HEADER_SIZE(n) (sizeof(uint16) + (((NUMERIC_FLAGBITS(n) & 0x8000) == 0) ? sizeof(int16) : 0))
-#define NUMERIC_BI_SCALE(n) ((n)->choice.n_header & NUMERIC_BI_SCALEMASK)
-#define CNUMERIC_BI_SCALE(n) ((n)->n_header & NUMERIC_BI_SCALEMASK)
+#define NUMERIC_NB_FLAGBITS(n) ((n)->choice.n_header & NUMERIC_BI_MASK)  // nan or biginteger
 #define NUMERIC_IS_BI(n) (NUMERIC_NB_FLAGBITS(n) > NUMERIC_NAN)
-#define CNUMERIC_IS_BI(n) (CNUMERIC_NB_FLAGBITS(n) > NUMERIC_NAN)
+
 #define FREE_POINTER(ptr) do {                        \
         if ((ptr) != NULL) {    \
             pfree((void *)ptr); \
@@ -123,9 +93,7 @@
         }                       \
     } while (0)
 #define pfree_ext(__p) FREE_POINTER(__p)
-#define NUMERIC_NB_FLAGBITS(n) ((n)->choice.n_header & NUMERIC_BI_MASK) // nan or biginteger
-#define CNUMERIC_NB_FLAGBITS(n) ((n)->n_header & NUMERIC_BI_MASK)       // nan or biginteger
-#define NUMERIC_IS_NAN(n) (NUMERIC_NB_FLAGBITS(n) == NUMERIC_NAN)
+#define CNUMERIC_NB_FLAGBITS(n) ((n)->n_header & 0xF000)       // nan or biginteger
 #define CNUMERIC_IS_NAN(n) (CNUMERIC_NB_FLAGBITS(n) == NUMERIC_NAN)
 #define NUMERIC_128 0xE000
 #define NUMERIC_FLAG_IS_BI128(n) (n == NUMERIC_128)
@@ -135,12 +103,12 @@
 typedef union {
     struct {                /* Normal varlena (4-byte length) */
         uint32 va_header;
-        char va_data[1];
+        char va_data[FLEXIBLE_ARRAY_MEMBER];
     } va_4byte;
     struct {                /* Compressed-in-line format */
         uint32 va_header;
         uint32 va_rawsize;  /* Original data size (excludes header) */
-        char va_data[1];    /* Compressed data */
+        char va_data[FLEXIBLE_ARRAY_MEMBER];    /* Compressed data */
     } va_compressed;
 } varattrib_4b_fe;
 
@@ -161,7 +129,7 @@ static void strip_var(NumericVar *var);
 
 static const char *set_var_from_str(const char *str, const char *cp, NumericVar *dest, char *err_msg);
 static void free_var(NumericVar *var);
-static void init_var_from_num(NumericChoice *num, NumericVar *dest);
+static void init_var_from_num(NumericData* num, NumericVar *dest);
 static bool get_str_from_var(const NumericVar *var, char *str, size_t max_size);
 static NumericVar const_nan = { 0, 0, NUMERIC_NAN, 0, NULL, NULL };
 
@@ -170,7 +138,7 @@ static const int round_powers[4] = {0, 1000, 100, 10};
 #endif
 
 #ifdef NUMERIC_DEBUG
-static void dump_numeric(const char *str, Numeric num);
+static void dump_numeric(const char *str, NumericData* num);
 #else
 #define dump_numeric(s, n)
 #endif
@@ -431,36 +399,18 @@ unsigned char *scan_numeric(const PGconn* conn, const char *num, int typmod, siz
 }
 
 
-bool numerictoa(NumericChoice *num, char *ascii, size_t max_size)
+bool numerictoa(NumericData* num, char *ascii, size_t max_size)
 {
     NumericVar x;
-    int scale = 0;
 
     /*
      * Handle NaN
      */
-    if (CNUMERIC_IS_NAN(num)) {
+    if (NUMERIC_IS_NAN(num)) {
         errno_t rc = EOK;
-        rc = memcpy_s(ascii, strlen("NaN") + 1, "NaN", strlen("NaN"));
+        rc = memcpy_s(ascii, max_size, "NaN", strlen("NaN"));
         securec_check_c(rc, "\0", "\0");
         return true;
-    }
-
-    /*
-     * If numeric is big integer, call int64_out/int128_out
-     */
-    uint16 numFlags = CNUMERIC_NB_FLAGBITS(num);
-    if (NUMERIC_FLAG_IS_BI64(numFlags)) {
-        int64 val64 = CNUMERIC_64VALUE(num);
-        scale = CNUMERIC_BI_SCALE(num);
-        return bi64_out(val64, scale, ascii);
-    } else if (NUMERIC_FLAG_IS_BI128(numFlags)) {
-        int128 val128 = 0;
-        errno_t rc = EOK;
-        rc = memcpy_s(&val128, sizeof(int128), num->n_bi.n_data, sizeof(int128));
-        securec_check_c(rc, "\0", "\0");
-        scale = CNUMERIC_BI_SCALE(num);
-        return bi128_out(val128, scale, ascii);
     }
 
     /*
@@ -550,7 +500,7 @@ bool apply_typmod(NumericVar *var, int32 typmod, char *err_msg)
  */
 unsigned char *make_result(NumericVar *var, size_t *binary_size, char *err_msg)
 {
-    unsigned char *binary = NULL;
+    NumericData* result;
     NumericDigit *digits = var->digits;
     int weight = var->weight;
     int sign = var->sign;
@@ -558,16 +508,14 @@ unsigned char *make_result(NumericVar *var, size_t *binary_size, char *err_msg)
     Size len;
 
     if (sign == NUMERIC_NAN) {
-        binary = (unsigned char *)malloc(NUMERIC_HDRSZ_SHORT);
-        if (binary == NULL) {
+        result = (NumericData*)palloc(NUMERIC_HDRSZ_SHORT);
+        if (result == NULL) {
             return NULL;
         }
-        errno_t rc = EOK;
-        rc = memset_s(binary, NUMERIC_HDRSZ_SHORT, 0, NUMERIC_HDRSZ_SHORT);
-        securec_check_c(rc, "\0", "\0");
-        *binary_size = NUMERIC_HDRSZ_SHORT;
-        ((NumericChoice *)binary)->n_header = NUMERIC_NAN;
-        return binary;
+
+        SET_VARSIZE(result, NUMERIC_HDRSZ_SHORT);
+        result->choice.n_header = NUMERIC_NAN;
+        return (unsigned char*) result;
     }
 
     n = var->ndigits;
@@ -592,45 +540,38 @@ unsigned char *make_result(NumericVar *var, size_t *binary_size, char *err_msg)
     /* Build the result */
     if (NUMERIC_CAN_BE_SHORT(var->dscale, weight)) {
         len = NUMERIC_HDRSZ_SHORT + n * sizeof(NumericDigit);
-        binary = (unsigned char *)malloc(len);
-        if (binary == NULL) {
+        result = (NumericData*)palloc(len);
+        if (result == NULL) {
             return NULL;
         }
-        errno_t rc = EOK;
-        rc = memset_s(binary, len, 0, len);
-        securec_check_c(rc, "\0", "\0");
-        *binary_size = len;
-        ((NumericChoice *)(binary))->n_short.n_header =
+        SET_VARSIZE(result, len);
+        result->choice.n_short.n_header =
             (sign == NUMERIC_NEG ? (NUMERIC_SHORT | NUMERIC_SHORT_SIGN_MASK) : NUMERIC_SHORT) |
             (var->dscale << NUMERIC_SHORT_DSCALE_SHIFT) | (weight < 0 ? NUMERIC_SHORT_WEIGHT_SIGN_MASK : 0) |
             (weight & NUMERIC_SHORT_WEIGHT_MASK);
     } else {
         len = NUMERIC_HDRSZ + n * sizeof(NumericDigit);
-        binary = (unsigned char *)malloc(len);
-        if (binary == NULL) {
+        result = (NumericData*)palloc(len);
+        if (result == NULL) {
             return NULL;
         }
-        errno_t rc = EOK;
-        rc = memset_s(binary, len, 0, len);
-        securec_check_c(rc, "\0", "\0");
-        *binary_size = len;
-        ((NumericChoice *)binary)->n_long.n_sign_dscale = sign | (var->dscale & NUMERIC_DSCALE_MASK);
-        ((NumericChoice *)binary)->n_long.n_weight = weight;
+        SET_VARSIZE(result, len);
+        result->choice.n_long.n_sign_dscale = sign | (var->dscale & NUMERIC_DSCALE_MASK);
+        result->choice.n_long.n_weight = weight;
     }
 
     if (n != 0) {
-        errno_t rc = memcpy_s(VNUMERIC_DIGITS(binary), n * sizeof(NumericDigit), digits, n * sizeof(NumericDigit));
+        errno_t rc = memcpy_s(NUMERIC_DIGITS(result), n * sizeof(NumericDigit), digits, n * sizeof(NumericDigit));
         securec_check_c(rc, "\0", "\0");
     }
 
     /* Check for overflow of int16 fields */
-    if (VNUMERIC_WEIGHT(binary) != weight || VNUMERIC_DSCALE(binary) != var->dscale) {
-        free(binary);
-        binary = NULL;
+    if (NUMERIC_WEIGHT(result) != weight || NUMERIC_DSCALE(result) != var->dscale) {
+        libpq_free(result);
         check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "value overflows numeric format\n"));
         return NULL;
     }
-    return binary;
+    return (unsigned char*) result;
 }
 /*
  * set_var_from_str()
@@ -798,25 +739,25 @@ static const char *set_var_from_str(const char *str, const char *cp, NumericVar 
 /*
  * init_var_from_num() -
  *
- * Initialize a variable from packed db format. The digits array is not
- * copied, which saves some cycles when the resulting var is not modified.
- * Also, there's no need to call free_var(), as long as you don't assign any
- * other value to it (with set_var_* functions, or by using the var as the
- * destination of a function like add_var())
+ *  Initialize a variable from packed db format. The digits array is not
+ *  copied, which saves some cycles when the resulting var is not modified.
+ *  Also, there's no need to call free_var(), as long as you don't assign any
+ *  other value to it (with set_var_* functions, or by using the var as the
+ *  destination of a function like add_var())
  *
- * CAUTION: Do not modify the digits buffer of a var initialized with this
- * function, e.g by calling round_var() or trunc_var(), as the changes will
- * propagate to the original Numeric! It's OK to use it as the destination
- * argument of one of the calculational functions, though.
+ *  CAUTION: Do not modify the digits buffer of a var initialized with this
+ *  function, e.g by calling round_var() or trunc_var(), as the changes will
+ *  propagate to the original NumericData*! It's OK to use it as the destination
+ *  argument of one of the calculational functions, though.
  */
-static inline void init_var_from_num(NumericChoice *num, NumericVar *dest)
+static inline void init_var_from_num(NumericData* num, NumericVar* dest)
 {
-    Assert(!CNUMERIC_IS_BI(num));
-    dest->ndigits = CNUMERIC_NDIGITS(num);
-    dest->weight = CNUMERIC_WEIGHT(num);
-    dest->sign = CNUMERIC_SIGN(num);
-    dest->dscale = CNUMERIC_DSCALE(num);
-    dest->digits = CNUMERIC_DIGITS(num);
+    Assert(!NUMERIC_IS_BI(num));
+    dest->ndigits = NUMERIC_NDIGITS(num);
+    dest->weight = NUMERIC_WEIGHT(num);
+    dest->sign = NUMERIC_SIGN(num);
+    dest->dscale = NUMERIC_DSCALE(num);
+    dest->digits = NUMERIC_DIGITS(num);
     dest->buf = NULL; /* digits array is not palloc'd */
 }
 

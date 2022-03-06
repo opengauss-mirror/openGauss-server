@@ -105,6 +105,7 @@
     #include "access/gtm.h"
     #include "storage/ipc.h"
     #include "pgxc/nodemgr.h"
+    #include"replication/walreceiver.h"
     /* PGXC_DATANODE */
     #include "postmaster/autovacuum.h"
     #include "postmaster/postmaster.h"
@@ -189,15 +190,10 @@ static void ResetProcXidCache(PGPROC* proc, bool needlock);
 /* for local multi version snapshot */
 void CalculateLocalLatestSnapshot(bool forceCalc);
 static TransactionId GetMultiSnapshotOldestXmin();
-#ifdef ENABLE_MULTIPLE_NODES
-    static TransactionId FixSnapshotXminByLocal(TransactionId xid);
-#endif
 static inline void ProcArrayEndTransactionInternal(PGPROC* proc, PGXACT* pgxact, TransactionId latestXid,
-                                                   TransactionId* xid, uint32* nsubxids, bool isCommit);
+                                                   TransactionId* xid, uint32* nsubxids);
 
 static void ProcArrayGroupClearXid(PGPROC* proc, TransactionId latestXid);
-static void UpdateCSNAtTransactionCommit(CommitSeqNo maxCommitCSN);
-
 
 extern bool StreamTopConsumerAmI();
 
@@ -449,9 +445,6 @@ void ProcArrayRemove(PGPROC* proc, TransactionId latestXid)
             arrayP->pgprocnos[arrayP->numProcs - 1] = -1; /* for debugging */
             arrayP->numProcs--;
 
-            /* Update csn in shared memory after transaction commit. */
-            UpdateCSNAtTransactionCommit(0);
-
             /* Calc new sanpshot. */
             if (TransactionIdIsValid(latestXid))
                 CalculateLocalLatestSnapshot(false);
@@ -532,7 +525,7 @@ void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommi
             TransactionId xid;
             uint32 nsubxids;
 
-            ProcArrayEndTransactionInternal(proc, pgxact, latestXid, &xid, &nsubxids, isCommit);
+            ProcArrayEndTransactionInternal(proc, pgxact, latestXid, &xid, &nsubxids);
             CalculateLocalLatestSnapshot(false);
             LWLockRelease(ProcArrayLock);
         } else
@@ -550,6 +543,7 @@ void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommi
         pgxact->next_xid = InvalidTransactionId;
         pgxact->xmin = InvalidTransactionId;
         pgxact->csn_min = InvalidCommitSeqNo;
+        pgxact->csn_dr = InvalidCommitSeqNo;
         /* must be cleared with xid/xmin: */
         pgxact->vacuumFlags &= ~PROC_VACUUM_STATE_MASK;
         ProcArrayClearAutovacuum(pgxact);
@@ -574,7 +568,7 @@ void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommi
  * We don't do any locking here; caller must handle that.
  */
 static inline void ProcArrayEndTransactionInternal(PGPROC* proc, PGXACT* pgxact, TransactionId latestXid,
-                                                   TransactionId* xid, uint32* nsubxids, bool isCommit)
+                                                   TransactionId* xid, uint32* nsubxids)
 {
     /* Store xid and nsubxids to update csnlog */
     *xid = pgxact->xid;
@@ -591,6 +585,7 @@ static inline void ProcArrayEndTransactionInternal(PGPROC* proc, PGXACT* pgxact,
     proc->lxid = InvalidLocalTransactionId;
     pgxact->xmin = InvalidTransactionId;
     pgxact->csn_min = InvalidCommitSeqNo;
+    pgxact->csn_dr = InvalidCommitSeqNo;
     /* must be cleared with xid/xmin: */
     pgxact->vacuumFlags &= ~PROC_VACUUM_STATE_MASK;
     ProcArrayClearAutovacuum(pgxact);
@@ -603,9 +598,6 @@ static inline void ProcArrayEndTransactionInternal(PGPROC* proc, PGXACT* pgxact,
     /* Also advance global latestCompletedXid while holding the lock */
     if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, latestXid))
         t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid = latestXid;
-
-    if (TransactionIdIsNormal(latestXid) && isCommit)
-        UpdateCSNAtTransactionCommit(0);
 
     /* Clear commit csn after csn update */
     proc->commitCSN = 0;
@@ -702,14 +694,11 @@ static void ProcArrayGroupClearXid(PGPROC* proc, TransactionId latestXid)
         if (proc_member->commitCSN > maxcsn)
             maxcsn = proc_member->commitCSN;
         ProcArrayEndTransactionInternal(
-            proc_member, pgxact, proc_member->procArrayGroupMemberXid, &xid[index], &nsubxids[index], false);
+            proc_member, pgxact, proc_member->procArrayGroupMemberXid, &xid[index], &nsubxids[index]);
         /* Move to next proc in list. */
         nextidx = pg_atomic_read_u32(&proc_member->procArrayGroupNext);
         index++;
     }
-
-    /* Update CSN only once after loop. */
-    UpdateCSNAtTransactionCommit(maxcsn);
 
     /* already hold lock, caculate snapshot after last invocation */
     CalculateLocalLatestSnapshot(false);
@@ -767,6 +756,7 @@ void ProcArrayClearTransaction(PGPROC* proc)
     proc->lxid = InvalidLocalTransactionId;
     pgxact->xmin = InvalidTransactionId;
     pgxact->csn_min = InvalidCommitSeqNo;
+    pgxact->csn_dr = InvalidCommitSeqNo;
     proc->recoveryConflictPending = false;
 
     /* redundant, but just in case */
@@ -780,32 +770,6 @@ void ProcArrayClearTransaction(PGPROC* proc)
 
     /* Free xid cache memory if needed */
     ResetProcXidCache(proc, true);
-}
-
-/* Update csn in shared memory.
- *
- * Input param maxCommitCSN is used at group commit with gtm,
- * it's the max commit csn of group commit transactions,
- * else 0.
- */
-static void UpdateCSNAtTransactionCommit(CommitSeqNo maxCommitCSN)
-{
-    CommitSeqNo result = 0;
-
-    /* under following condition, nextCSN has already been updated, just return */
-    if (useLocalXid || !IsPostmasterEnvironment || GTM_FREE_MODE || GTM_LITE_MODE) {
-        return;
-    }
-    /* Get CSN and update nextCommitSeqNo to csn+1 */
-    if (maxCommitCSN)
-        result = maxCommitCSN;
-    else
-        result = GetCommitCsn();
-
-    if (t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo < result + 1)
-        t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo = result + 1;
-
-    return;
 }
 
 void UpdateCSNLogAtTransactionEND(
@@ -1309,7 +1273,7 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
      * local must sync with gtm.
      */
     if (shortcutByRecentXmin &&
-        TransactionIdPrecedes(xid, pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo))) {
+        TransactionIdPrecedes(xid, pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo))) {
         xc_by_recent_xmin_inc();
 
         /*
@@ -1567,16 +1531,18 @@ TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin, bool bRecen
                 (!TransactionIdIsValid(result) || TransactionIdPrecedes(currGlobalXmin, result)))
                 result = currGlobalXmin;
         }
-    } else
+    } else {
         /* directly fetch recentGlobalXmin from ShmemVariableCache */
         result = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
+    }
 
     /* Update by vacuum_defer_cleanup_age */
-    if (TransactionIdPrecedes(result, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age))
+    if (TransactionIdPrecedes(result, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age)) {
         result = FirstNormalTransactionId;
-    else
+    } else {
         result -= u_sess->attr.attr_storage.vacuum_defer_cleanup_age;
-
+    }
+    
     /* Check whether there's a replication slot requiring an older xmin. */
     if (TransactionIdIsNormal(replication_slot_xmin) && TransactionIdPrecedes(replication_slot_xmin, result))
         result = replication_slot_xmin;
@@ -1617,27 +1583,26 @@ TransactionId GetGlobalOldestXmin()
     result = GetMultiSnapshotOldestXmin();
 
     /* Update by vacuum_defer_cleanup_age */
-    if (TransactionIdPrecedes(result, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age))
+    if (TransactionIdPrecedes(result, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age)) {
         result = FirstNormalTransactionId;
-    else
+    } else {
         result -= u_sess->attr.attr_storage.vacuum_defer_cleanup_age;
-
+    }
     return result;
 }
 
-TransactionId GetOldestXminForUndo(void)
+TransactionId GetOldestXminForUndo(TransactionId *recycleXmin)
 {
     TransactionId oldestXmin = GetMultiSnapshotOldestXmin();
-    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    *recycleXmin = oldestXmin;
+    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+    TransactionId xmin = FirstNormalTransactionId;
     if (ENABLE_TCAP_VERSION) {
-        if (TransactionIdPrecedes(oldestXmin, (uint64)u_sess->attr.attr_storage.version_retention_age)) {
-            oldestXmin = FirstNormalTransactionId;
-        } else {
-            oldestXmin -= u_sess->attr.attr_storage.version_retention_age;
-        }
+        xmin = g_instance.flashback_cxt.oldestXminInFlashback;
+        *recycleXmin = (oldestXmin < xmin) ? oldestXmin : xmin;
     }
-    if (unlikely(TransactionIdPrecedes(oldestXmin, oldestXidInUndo))) {
-        oldestXmin = oldestXidInUndo;
+    if (unlikely(TransactionIdPrecedes(*recycleXmin, oldestXidInUndo))) {
+        *recycleXmin = oldestXidInUndo;
     }
     return oldestXmin;
 }
@@ -1718,8 +1683,7 @@ Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot)
 
     t_thrd.xact_cxt.useLocalSnapshot = false;
 
-    if (GTM_MODE ||
-        (GTM_LITE_MODE && ((is_exec_cn && !force_local_snapshot) || /* GTM_LITE exec cn */
+    if (IS_DISASTER_RECOVER_MODE || (GTM_LITE_MODE && ((is_exec_cn && !force_local_snapshot) || /* GTM_LITE exec cn */
                            (!is_exec_cn && u_sess->utils_cxt.snapshot_source == SNAPSHOT_COORDINATOR))))  { /* GTM_LITE other node */
         /*
          * Obtain a global snapshot for a openGauss session
@@ -1732,8 +1696,6 @@ Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot)
             }
         }
     }
-    /* For gtm mode, use local snapshot */
-    t_thrd.xact_cxt.useLocalSnapshot = GTM_MODE ? true : false;
 
     /* first we try to get multiversion snapshot */
     if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE ||
@@ -1915,27 +1877,32 @@ RETRY_GET:
      * different way of computing it than GetOldestXmin uses, but should give
      * the same result.
      */
-    if (TransactionIdPrecedes(xmin, globalxmin))
+    if (TransactionIdPrecedes(xmin, globalxmin)) {
         globalxmin = xmin;
+    }
 
     /* When initdb we set vacuum_defer_cleanup_age to zero, so we can vacuum
         freeze three default database to avoid that localxid larger than GTM next_xid. */
-    if (isSingleMode)
+    if (isSingleMode) {
         u_sess->attr.attr_storage.vacuum_defer_cleanup_age = 0;
+    }
 
     /* Update global variables too */
-    if (TransactionIdPrecedes(globalxmin, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age))
+    if (TransactionIdPrecedes(globalxmin, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age)) {
         u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
-    else
+    } else {
         u_sess->utils_cxt.RecentGlobalXmin = globalxmin - u_sess->attr.attr_storage.vacuum_defer_cleanup_age;
+    }
 
-    if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin))
+    if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin)) {
         u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
+    }
 
     /* Check whether there's a replication slot requiring an older xmin. */
     if (TransactionIdIsValid(replication_slot_xmin) &&
-        TransactionIdPrecedes(replication_slot_xmin, u_sess->utils_cxt.RecentGlobalXmin))
+        TransactionIdPrecedes(replication_slot_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
         u_sess->utils_cxt.RecentGlobalXmin = replication_slot_xmin;
+    }
     /* Non-catalog tables can be vacuumed if older than this xid */
     u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
 
@@ -1944,8 +1911,9 @@ RETRY_GET:
      * xmin.
      */
     if (TransactionIdIsNormal(replication_slot_catalog_xmin) &&
-        NormalTransactionIdPrecedes(replication_slot_catalog_xmin, u_sess->utils_cxt.RecentGlobalXmin))
+        NormalTransactionIdPrecedes(replication_slot_catalog_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
         u_sess->utils_cxt.RecentGlobalXmin = replication_slot_catalog_xmin;
+    }
     u_sess->utils_cxt.RecentXmin = xmin;
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -2650,6 +2618,7 @@ VirtualTransactionId* GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbO
             continue;
 
         if (!OidIsValid(dbOid) || proc->databaseId == dbOid) {
+#ifndef ENABLE_MULTIPLE_NODES
             /* Fetch xmin just once - can't change on us, but good coding */
             TransactionId pxmin = pgxact->xmin;
 
@@ -2667,6 +2636,24 @@ VirtualTransactionId* GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbO
                 if (VirtualTransactionIdIsValid(vxid))
                     t_thrd.storage_cxt.proc_vxids[count++] = vxid;
             }
+#else
+            CommitSeqNo xact_csn = pgxact->csn_dr;
+            CommitSeqNo limitXminCSN = InvalidCommitSeqNo;
+
+            if (TransactionIdIsValid(limitXmin)) {
+                limitXminCSN = CSNLogGetDRCommitSeqNo(limitXmin);
+            }
+
+            if (!TransactionIdIsValid(limitXmin) || (limitXminCSN >= xact_csn && xact_csn != InvalidCommitSeqNo)) {
+                VirtualTransactionId vxid;
+                GET_VXID_FROM_PGPROC(vxid, *proc);
+
+                if (VirtualTransactionIdIsValid(vxid)) {
+                    t_thrd.storage_cxt.proc_vxids[count++] = vxid;
+                }
+            }
+
+#endif
         }
     }
 #ifndef ENABLE_MULTIPLE_NODES
@@ -3157,7 +3144,7 @@ int CountUserBackends(Oid roleid)
             if (proc->pid == 0)
                 continue; /* do not count prepared xacts */
 
-            if (proc->roleId == roleid)
+            if (proc->roleId == roleid && (t_thrd.role != STREAM_WORKER))
                 count++;
         }
 
@@ -3301,15 +3288,24 @@ void ReloadConnInfoOnBackends(void)
 
         if (proc->pid == 0)
             continue; /* useless on prepared xacts */
-
-        if (!OidIsValid(proc->databaseId))
-            continue; /* ignore backends not connected to a database */
-
+        
         if (pgxact->vacuumFlags & PROC_IN_VACUUM)
             continue; /* ignore vacuum processes */
-
-        if (ENABLE_THREAD_POOL && proc->sessionid > 0)
-            continue;
+        
+        if (EnableGlobalSysCache()) {
+            /* syscache is on thread in gsc mode. when enable thread pool,
+             * even the thread does not connect to a database, we still need send signal to it */
+            if (!OidIsValid(proc->databaseId) && !ENABLE_THREAD_POOL) {
+                continue;
+            }
+        } else {
+            if (!OidIsValid(proc->databaseId)) {
+                continue;
+            }
+            if (ENABLE_THREAD_POOL && proc->sessionid > 0) {
+                continue;
+            }
+        }
 
         pid = proc->pid;
         /*
@@ -3591,7 +3587,7 @@ static bool GetPGXCSnapshotData(Snapshot snapshot)
      * If this node is in recovery phase,
      * snapshot has to be taken directly from WAL information.
      */
-    if (RecoveryInProgress())
+    if (!IS_DISASTER_RECOVER_MODE && RecoveryInProgress())
         return false;
 
     /*
@@ -3660,26 +3656,10 @@ static bool GetSnapshotDataDataNode(Snapshot snapshot)
 
     if (IsAutoVacuumWorkerProcess() || GetForceXidFromGTM()) {
         GTM_Snapshot gtm_snapshot;
-        bool canbe_grouped = (!u_sess->utils_cxt.FirstSnapshotSet) || (!IsolationUsesXactSnapshot());
-
         ereport(DEBUG1,
                 (errmsg("Getting snapshot for autovacuum. Current XID = " XID_FMT, GetCurrentTransactionIdIfAny())));
 
-        if (GTM_MODE) {
-            if (TransactionIdIsValid(GetCurrentTransactionIdIfAny())) {
-                gtm_snapshot = GetSnapshotGTM(GetCurrentTransactionKeyIfAny(),
-                                              GetCurrentTransactionIdIfAny(),
-                                              canbe_grouped,
-                                              t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM);
-            } else { /* no valid xid */
-                gtm_snapshot = GetSnapshotGTM(GetCurrentTransactionKey(),
-                                              InvalidTransactionId,
-                                              canbe_grouped,
-                                              t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM);
-            }
-        } else {
-            gtm_snapshot = GetSnapshotGTMLite();
-        }
+        gtm_snapshot = IS_DISASTER_RECOVER_MODE ? GetSnapshotGTMDR() : GetSnapshotGTMLite();
 
         if (!gtm_snapshot) {
             if (g_instance.status > NoShutdown) {
@@ -3690,40 +3670,6 @@ static bool GetSnapshotDataDataNode(Snapshot snapshot)
             } else {
                 ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("GTM error, could not obtain snapshot")));
             }
-        } else if (GTM_MODE) {
-            *u_sess->utils_cxt.g_GTM_Snapshot = *gtm_snapshot;
-
-            u_sess->utils_cxt.snapshot_source = SNAPSHOT_DIRECT;
-            u_sess->utils_cxt.gxmin = gtm_snapshot->sn_xmin;
-            u_sess->utils_cxt.gxmax = gtm_snapshot->sn_xmax;
-            u_sess->utils_cxt.g_snapshotcsn = gtm_snapshot->csn;
-            u_sess->utils_cxt.GtmTimeline = GetCurrentTransactionTimeline();
-            u_sess->utils_cxt.RecentGlobalXmin = gtm_snapshot->sn_recent_global_xmin;
-
-            /*
-             * Fix RecentGlobalXmin using GetOldestXmin, considering local xmins.
-             * As we might prune or vacuum dead tuples deleted by xids older than RecentGlobalXmin.
-             * We should keep RecentGlobalXmin is the minnimum xmin.
-             * If RecentGlobalXmin is larger than local xmins, tuples being accessed might be cleaned wrongly.
-             */
-            u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
-
-            if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin))
-                u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
-
-            if (module_logging_is_on(MOD_TRANS_SNAPSHOT)) {
-                ereport(LOG, (errmodule(MOD_TRANS_SNAPSHOT), errmsg("for autovacuum from GTM: xmin = " XID_FMT
-                                                                    ", xmax = " XID_FMT ", csn = %lu, RecGlobXmin = " XID_FMT,
-                                                                    u_sess->utils_cxt.gxmin, u_sess->utils_cxt.gxmax, u_sess->utils_cxt.g_snapshotcsn,
-                                                                    u_sess->utils_cxt.RecentGlobalXmin)));
-            }
-
-            elog(DEBUG1,
-                 "for autovacuum from GTM: xmin = " XID_FMT ", xmax = " XID_FMT ", csn = %lu, RecGlobXmin = " XID_FMT,
-                 u_sess->utils_cxt.gxmin,
-                 u_sess->utils_cxt.gxmax,
-                 u_sess->utils_cxt.g_snapshotcsn,
-                 u_sess->utils_cxt.RecentGlobalXmin);
         } else {
             *u_sess->utils_cxt.g_GTM_Snapshot = *gtm_snapshot;
             u_sess->utils_cxt.snapshot_source = SNAPSHOT_DIRECT;
@@ -3741,63 +3687,38 @@ static bool GetSnapshotDataDataNode(Snapshot snapshot)
         }
     }
 
-    if (GTM_MODE &&
-        (u_sess->utils_cxt.snapshot_source == SNAPSHOT_COORDINATOR ||
-         u_sess->utils_cxt.snapshot_source == SNAPSHOT_DIRECT) &&
-        (TransactionIdIsValid(u_sess->utils_cxt.gxmin))) {
-        TransactionId xmin = FixSnapshotXminByLocal(u_sess->utils_cxt.gxmin);
-        snapshot->xmin = xmin;
-        snapshot->xmax = u_sess->utils_cxt.gxmax;
-        snapshot->snapshotcsn = u_sess->utils_cxt.g_snapshotcsn;
-        snapshot->timeline = u_sess->utils_cxt.GtmTimeline;
-        snapshot->curcid = GetCurrentCommandId(false);
-
-        if (!TransactionIdIsValid(t_thrd.pgxact->xmin)) {
-            t_thrd.pgxact->xmin = u_sess->utils_cxt.TransactionXmin = xmin;
-            t_thrd.pgxact->handle = GetCurrentTransactionHandleIfAny();
-        } else {
-            /*
-             * if we get snapshot from CN, we have fixed mypgxact, now we set
-             * TransactionXmin and gxmin
-             */
-            u_sess->utils_cxt.TransactionXmin = t_thrd.pgxact->xmin;
-            t_thrd.pgxact->handle = GetCurrentTransactionHandleIfAny();
-        }
-
-        /*
-         * We should update RecentXmin here. But we have recently seen some
-         * issues with that - so skipping it for the time being.
-         *
-         * !!description
-         */
-        u_sess->utils_cxt.RecentXmin = xmin;
-
-        /*
-         * This is a new snapshot, so set both refcounts are zero, and mark it
-         * as not copied in persistent memory.
-         */
-        snapshot->active_count = 0;
-        snapshot->regd_count = 0;
-        snapshot->copied = false;
-        snapshot->user_data = NULL;
-
-        CheckSnapshotIsValidException(snapshot, "GetSnapshotDataDataNode");
-
-        return true;
-    } else if (GTM_LITE_MODE && u_sess->utils_cxt.snapshot_source == SNAPSHOT_COORDINATOR) {
+    if (GTM_LITE_MODE && u_sess->utils_cxt.snapshot_source == SNAPSHOT_COORDINATOR) {
         TransactionId save_recentglobalxmin = u_sess->utils_cxt.RecentGlobalXmin;
         snapshot->gtm_snapshot_type =
             u_sess->utils_cxt.is_autovacuum_snapshot ? GTM_SNAPSHOT_TYPE_AUTOVACUUM : GTM_SNAPSHOT_TYPE_GLOBAL;
-        /* only use gtm csn */
-        Snapshot ret;
-        ret = GetLocalSnapshotData(snapshot);
-        Assert(ret != NULL);
-        snapshot->snapshotcsn = u_sess->utils_cxt.g_snapshotcsn;
-        (void)set_proc_csn_and_check("GetSnapshotDataDataNodeFromCN", snapshot->snapshotcsn,
-                                     snapshot->gtm_snapshot_type, SNAPSHOT_COORDINATOR);
-        /* reset RecentGlobalXmin */
-        u_sess->utils_cxt.RecentGlobalXmin = save_recentglobalxmin;
-        /* too late to check and set */
+        if (IS_DISASTER_RECOVER_MODE) {
+            snapshot->snapshotcsn = u_sess->utils_cxt.g_snapshotcsn;
+            t_thrd.pgxact->csn_dr = snapshot->snapshotcsn;
+            pg_memory_barrier();
+            CommitSeqNo lastReplayedConflictCSN = (CommitSeqNo)pg_atomic_read_u64(
+                &(g_instance.comm_cxt.predo_cxt.last_replayed_conflict_csn));
+            if (lastReplayedConflictCSN != 0 && snapshot->snapshotcsn - 1 <= lastReplayedConflictCSN) {
+                ereport(ERROR, (errmsg("gtm csn small: gtm csn %lu, lastReplayedConflictCSN %lu",
+                    snapshot->snapshotcsn, lastReplayedConflictCSN)));
+            }
+            LWLockAcquire(XLogMaxCSNLock, LW_SHARED);
+            if (t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN + 1 < snapshot->snapshotcsn) {
+                ereport(ERROR, (errmsg("dn data invisible: local csn %lu, gtm snapshotcsn %lu",
+                    t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN, snapshot->snapshotcsn)));
+            }
+            LWLockRelease(XLogMaxCSNLock);
+        } else {
+            /* only use gtm csn */
+            Snapshot ret;
+            ret = GetLocalSnapshotData(snapshot);
+            Assert(ret != NULL);
+            snapshot->snapshotcsn = u_sess->utils_cxt.g_snapshotcsn;
+            (void)set_proc_csn_and_check("GetSnapshotDataDataNodeFromCN", snapshot->snapshotcsn,
+                                         snapshot->gtm_snapshot_type, SNAPSHOT_COORDINATOR);
+            /* reset RecentGlobalXmin */
+            u_sess->utils_cxt.RecentGlobalXmin = save_recentglobalxmin;
+            /* too late to check and set */
+        }
         return true;
     }
 
@@ -3812,12 +3733,9 @@ static bool GetSnapshotDataDataNode(Snapshot snapshot)
  */
 static bool GetSnapshotDataCoordinator(Snapshot snapshot)
 {
-    bool canbe_grouped = false;
     GTM_Snapshot gtm_snapshot;
 
     Assert(IS_PGXC_COORDINATOR || IsPGXCNodeXactDatanodeDirect());
-
-    canbe_grouped = (!u_sess->utils_cxt.FirstSnapshotSet) || (!IsolationUsesXactSnapshot());
 
     /* Log some information about snapshot obtention */
     if (IsAutoVacuumWorkerProcess()) {
@@ -3827,17 +3745,7 @@ static bool GetSnapshotDataCoordinator(Snapshot snapshot)
         ereport(DEBUG1, (errmsg("Getting snapshot. Current XID = " XID_FMT, GetCurrentTransactionIdIfAny())));
     }
 
-    if (GTM_MODE) {
-        if (TransactionIdIsValid(GetCurrentTransactionIdIfAny())) {
-            gtm_snapshot = GetSnapshotGTM(GetCurrentTransactionKeyIfAny(), GetCurrentTransactionIdIfAny(),
-                                          canbe_grouped, t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM);
-        } else { /* no valid xid */
-            gtm_snapshot = GetSnapshotGTM(GetCurrentTransactionKey(),
-                                          InvalidTransactionId, canbe_grouped, t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM);
-        }
-    } else {
-        gtm_snapshot = GetSnapshotGTMLite();
-    }
+    gtm_snapshot = IS_DISASTER_RECOVER_MODE ? GetSnapshotGTMDR() : GetSnapshotGTMLite();
 
     if (!gtm_snapshot) {
         if (g_instance.status > NoShutdown) {
@@ -3848,81 +3756,29 @@ static bool GetSnapshotDataCoordinator(Snapshot snapshot)
                     (errcode(ERRCODE_CONNECTION_FAILURE),
                      errmsg("GTM error, could not obtain snapshot XID = " XID_FMT, GetCurrentTransactionIdIfAny())));
         }
-    } else if (GTM_MODE) {
-        *u_sess->utils_cxt.g_GTM_Snapshot = *gtm_snapshot;
-
-        u_sess->utils_cxt.RecentGlobalXmin = gtm_snapshot->sn_recent_global_xmin;
-
-        /*
-         * Fix RecentGlobalXmin using GetOldestXmin, considering local xmins.
-         * As we might prune or vacuum dead tuples deleted by xids older than RecentGlobalXmin.
-         * We should keep RecentGlobalXmin is the minnimum xmin.
-         * If RecentGlobalXmin is larger than local xmins, tuples being accessed might be cleaned wrongly.
-         */
-        u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
-
-        if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin))
-            u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
-
-        snapshot->xmin = FixSnapshotXminByLocal(gtm_snapshot->sn_xmin);
-        snapshot->xmax = gtm_snapshot->sn_xmax;
-        snapshot->snapshotcsn = gtm_snapshot->csn;
-
-        snapshot->timeline = GetCurrentTransactionTimeline();
-
-        ereport(DEBUG1,
-                (errmsg("from GTM: xmin = " XID_FMT " , xmax = " XID_FMT ", RecGlobalXmin = " XID_FMT,
-                        gtm_snapshot->sn_xmin,
-                        gtm_snapshot->sn_xmax,
-                        gtm_snapshot->sn_recent_global_xmin)));
-
-        ereport(DEBUG1,
-                (errmsg("on CN: xmin = " XID_FMT ", xmax = " XID_FMT ", RecGlobalXmin = " XID_FMT,
-                        snapshot->xmin,
-                        snapshot->xmax,
-                        u_sess->utils_cxt.RecentGlobalXmin)));
-
-        snapshot->curcid = GetCurrentCommandId(false);
-
-        if (!TransactionIdIsValid(t_thrd.pgxact->xmin)) {
-            t_thrd.pgxact->xmin = u_sess->utils_cxt.TransactionXmin = snapshot->xmin;
-            t_thrd.pgxact->handle = GetCurrentTransactionHandleIfAny();
-        }
-
-        /*  We should update RecentXmin here. */
-        u_sess->utils_cxt.RecentXmin = snapshot->xmin;
-
-        /*
-         * This is a new snapshot, so set both refcounts are zero, and mark it
-         * as not copied in persistent memory.
-         */
-        snapshot->active_count = 0;
-        snapshot->regd_count = 0;
-        snapshot->copied = false;
-        snapshot->user_data = NULL;
-
-        if (module_logging_is_on(MOD_TRANS_SNAPSHOT))
-            ereport(LOG,
-                    (errmodule(MOD_TRANS_SNAPSHOT),
-                     errmsg("CN gets Snapshot from: gtm_snapshot->sn_xmin = %lu, gtm_snapshot->sn_recent_global_xmin = "
-                            "%lu.",
-                            gtm_snapshot->sn_xmin,
-                            gtm_snapshot->sn_recent_global_xmin)));
-
-        return true;
     } else {
         snapshot->gtm_snapshot_type = GTM_SNAPSHOT_TYPE_GLOBAL;
         *u_sess->utils_cxt.g_GTM_Snapshot = *gtm_snapshot;
-        /* only use gtm csn */
-        Snapshot ret;
-        ret = GetLocalSnapshotData(snapshot);
-        Assert(ret != NULL);
+        if (IS_DISASTER_RECOVER_MODE) {
+            snapshot->snapshotcsn = gtm_snapshot->csn;
+            t_thrd.pgxact->csn_dr = snapshot->snapshotcsn;
+            LWLockAcquire(XLogMaxCSNLock, LW_SHARED);
+            if (t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN + 1 < snapshot->snapshotcsn) {
+                ereport(ERROR, (errmsg("cn data invisible: local csn %lu, gtm snapshotcsn %lu", t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN, snapshot->snapshotcsn)));
+            }
+            LWLockRelease(XLogMaxCSNLock);
+        } else {
+            /* only use gtm csn */
+            Snapshot ret;
+            ret = GetLocalSnapshotData(snapshot);
+            Assert(ret != NULL);
 
-        snapshot->snapshotcsn = set_proc_csn_and_check("GetSnapshotDataCoordinator", gtm_snapshot->csn,
-                                                       snapshot->gtm_snapshot_type, SNAPSHOT_DIRECT);
+            snapshot->snapshotcsn = set_proc_csn_and_check("GetSnapshotDataCoordinator", gtm_snapshot->csn,
+                                                           snapshot->gtm_snapshot_type, SNAPSHOT_DIRECT);
 
-        u_sess->utils_cxt.g_GTM_Snapshot->csn = snapshot->snapshotcsn;
-        u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
+            u_sess->utils_cxt.g_GTM_Snapshot->csn = snapshot->snapshotcsn;
+            u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
+        }
         if (module_logging_is_on(MOD_TRANS_SNAPSHOT)) {
             ereport(LOG, (errmodule(MOD_TRANS_SNAPSHOT),
                           errmsg("CN gets snapshot from gtm_snapshot, csn = %lu.", snapshot->snapshotcsn)));
@@ -4062,6 +3918,8 @@ void SyncWaitXidEnd(TransactionId xid, Buffer buffer)
  */
 void SyncLocalXidWait(TransactionId xid)
 {
+    ReleaseAllGSCRdConcurrentLock();
+    
     int64 remainingNapTime = (int64)u_sess->attr.attr_common.transaction_sync_naptime * 1000000; /* us */
     int64 remainingTimeout = (int64)u_sess->attr.attr_common.transaction_sync_timeout * 1000000; /* us */
     const int64 sleepTime = 1000;
@@ -4282,6 +4140,7 @@ void CreateSharedRingBuffer(void)
 static void IncrRefCount(snapxid_t* s)
 {
     t_thrd.proc->snap_refcnt_bitmap |= 1 << (SNAPXID_INDEX(s) % 64);
+    pg_write_barrier();
 }
 
 /*
@@ -4290,6 +4149,7 @@ static void IncrRefCount(snapxid_t* s)
 static void DecrRefCount(snapxid_t* s)
 {
     t_thrd.proc->snap_refcnt_bitmap &= ~(1 << (SNAPXID_INDEX(s) % 64));
+    pg_write_barrier();
 }
 
 /*
@@ -4457,17 +4317,20 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
         t_thrd.pgxact->handle = GetCurrentTransactionHandleIfAny();
     }
 
-    if (TransactionIdPrecedes(snapxid->localxmin, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age))
+    if (TransactionIdPrecedes(snapxid->localxmin, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age)) {
         u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
-    else
+    } else {
         u_sess->utils_cxt.RecentGlobalXmin = snapxid->localxmin - u_sess->attr.attr_storage.vacuum_defer_cleanup_age;
+    }
 
-    if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin))
+    if (!TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin)) {
         u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
+    }
 
     if (TransactionIdIsNormal(replication_slot_xmin) &&
-        TransactionIdPrecedes(replication_slot_xmin, u_sess->utils_cxt.RecentGlobalXmin))
+        TransactionIdPrecedes(replication_slot_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
         u_sess->utils_cxt.RecentGlobalXmin = replication_slot_xmin;
+    }
 
     u_sess->utils_cxt.RecentXmin = snapxid->xmin;
     snapshot->xmin = snapxid->xmin;
@@ -4530,6 +4393,11 @@ static void init_shmem_csn_cleanup_instr(void)
     LWLockRelease(CsnMinLock);
 }
 
+static bool ForceCalculateSnapshotXmin(bool forceCalc)
+{
+    return (!u_sess->attr.attr_storage.enable_defer_calculate_snapshot || forceCalc);
+}
+
 void CalculateLocalLatestSnapshot(bool forceCalc)
 {
     /*
@@ -4561,12 +4429,14 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
 
     /*
      * We calculate xmin under the fllowing conditions:
-     * 1. we didn't calculate snapshot for GTM_MAX_PENDING_SNAPSHOT_CNT times
-     * 2. we didn't calculate snapshot for GTM_CALC_SNAPSHOT_TIMEOUT seconds
+     * 1. we always calculate snapshot if disable defer_calculate_snpshot.
+     * 2. we didn't calculate snapshot for GTM_MAX_PENDING_SNAPSHOT_CNT times.
+     * 3. we didn't calculate snapshot for GTM_CALC_SNAPSHOT_TIMEOUT seconds.
      */
     currentTimeStamp = GetCurrentTimestamp();
-    if (forceCalc || ((++snapshotPendingCnt == MAX_PENDING_SNAPSHOT_CNT) ||
-                      (TimestampDifferenceExceeds(snapshotTimeStamp, currentTimeStamp, CALC_SNAPSHOT_TIMEOUT)))) {
+    if (ForceCalculateSnapshotXmin(forceCalc) || ((++snapshotPendingCnt == MAX_PENDING_SNAPSHOT_CNT) ||
+        (TimestampDifferenceExceeds(snapshotTimeStamp, currentTimeStamp, CALC_SNAPSHOT_TIMEOUT)))) {
+        pg_read_barrier();
         snapshotPendingCnt = 0;
         snapshotTimeStamp = currentTimeStamp;
 
@@ -4692,24 +4562,6 @@ static TransactionId GetMultiSnapshotOldestXmin()
     return ((snapxid_t*)g_snap_current)->localxmin;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
-/*
- * Transaction end first on GTM, but it may not end in CN/DN.
- * We need to fix xmin by local snapshot, else there may be visibility error
- * after recovery of a two-phase transaction failure.
- *
- */
-static TransactionId FixSnapshotXminByLocal(TransactionId xid)
-{
-    snapxid_t* x = (snapxid_t*)g_snap_current;
-
-    if (TransactionIdIsNormal(x->xmin) && TransactionIdPrecedes(x->xmin, xid))
-        return x->xmin;
-    else
-        return xid;
-}
-#endif
-
 void ProcArrayResetXmin(PGPROC* proc)
 {
     PGXACT* pgxact = &g_instance.proc_base_all_xacts[proc->pgprocno];
@@ -4778,73 +4630,6 @@ TransactionId SubTransGetTopParentXidFromProcs(TransactionId xid)
     return InvalidTransactionId;
 }
 
-void FixCurrentSnapshotByGxid(TransactionId gxid)
-{
-    if (u_sess->attr.attr_common.xc_maintenance_mode || !GTM_MODE || !TransactionIdIsNormal(gxid))
-        return;
-
-    volatile snapxid_t* x = (volatile snapxid_t*)g_snap_current;
-    if (TransactionIdPrecedes(gxid, x->xmin)) {
-        LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
-
-        /* recheck again */
-        x = (volatile snapxid_t*)g_snap_current;
-        if (TransactionIdPrecedes(gxid, x->xmin)) {
-            ereport(LOG,
-                    (errmsg("There is an old xid %lu arrived, so we need to "
-                            "recalculate the local snapshot which should include it.",
-                            gxid)));
-            CalculateLocalLatestSnapshot(true);
-        }
-        LWLockRelease(ProcArrayLock);
-    }
-}
-
-/* check whether snapshot is valid */
-void CheckSnapshotIsValidException(Snapshot snapshot, const char* location)
-{
-    if (!GTM_MODE)
-        return;
-    if (!u_sess->attr.attr_common.xc_maintenance_mode && !u_sess->utils_cxt.cn_xc_maintain_mode &&
-        !IsAutoVacuumWorkerProcess()) {
-        Assert(snapshot);
-        if (snapshot->satisfies == SNAPSHOT_MVCC &&
-            TransactionIdIsValid(u_sess->utils_cxt.g_GTM_Snapshot->sn_xmin)) {
-            TransactionId newestOldestXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
-            if ((pg_strcasecmp(location, "GetSnapshotDataDataNode") == 0) &&
-                TransactionIdPrecedes(u_sess->utils_cxt.g_GTM_Snapshot->sn_xmin, newestOldestXmin))
-                ereport(ERROR,
-                        (errcode(ERRCODE_SNAPSHOT_INVALID),
-                         errmsg("Snapshot is invalid at %s, this is a safe error "
-                                "if there is breakdown in gtm log",
-                                location),
-                         errdetail("Snaphot xmin %lu is lower than "
-                                   "newestOldestXmin: %lu",
-                                   u_sess->utils_cxt.g_GTM_Snapshot->sn_xmin,
-                                   newestOldestXmin),
-                         errhint("This is a safe error report, will not impact "
-                                 "data consistency, retry your query if needed.")));
-        }
-    }
-}
-
-/*
- * xid comparator for qsort/bsearch
- */
-#ifdef ENABLE_MULTIPLE_NODES
-static int cmp_xid(const void* aa, const void* bb)
-{
-    TransactionId a = *(const TransactionId*)aa;
-    TransactionId b = *(const TransactionId*)bb;
-
-    if (TransactionIdPrecedes(a, b))
-        return -1;
-    if (TransactionIdFollows(a, b))
-        return 1;
-    return 0;
-}
-#endif
-
 Datum pgxc_gtm_snapshot_status(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_MULTIPLE_NODES
@@ -4852,131 +4637,10 @@ Datum pgxc_gtm_snapshot_status(PG_FUNCTION_ARGS)
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in single node mode.")));
     SRF_RETURN_DONE(funcctx);
 #else
-#define GTM_SNAPSHOT_ATTRS 6
-    /* check gtm mode, only gtm support this function */
-    if (!GTM_MODE) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("unsupported function or view in %s mode.", GTM_LITE_MODE ? "GTM-Lite" : "GTM-Free")));
-    }
-    uint64 xcnt = 0;
-    int64 index = 0;
-    TransactionId* xids = NULL;
     FuncCallContext* funcctx = NULL;
-    ProcArrayStruct* arrayP = g_instance.proc_array_idx;
-    GTM_SnapshotStatus snapshot_status = NULL;
-
-    if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tupdesc;
-        MemoryContext oldcontext;
-
-        funcctx = SRF_FIRSTCALL_INIT();
-        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-        /* Build tupdesc for result tuples */
-        tupdesc = CreateTemplateTupleDesc(GTM_SNAPSHOT_ATTRS, false);
-        TupleDescInitEntry(tupdesc, (AttrNumber)1, "xmin", XIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)2, "xmax", XIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)3, "csn", XIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)4, "oldestxmin", XIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)5, "xcnt", XIDOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)6, "running_xids", TEXTOID, -1, 0);
-
-        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
-        /* Only one tuple */
-        funcctx->max_calls = 1;
-
-        MemoryContextSwitchTo(oldcontext);
-    }
-
-    xids = (TransactionId*)MemoryContextAlloc(
-        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), arrayP->numProcs * sizeof(TransactionId));
-
-    if (xids == NULL)
-        ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Out of memory at palloc memory for xids!")));
-
-    /*
-     * Ensure that no xids enter or leave the procarray while we obtain
-     * snapshot.
-     */
-    LWLockAcquire(ProcArrayLock, LW_SHARED);
-
-    funcctx = SRF_PERCALL_SETUP();
-
-    for (index = 0; index < arrayP->numProcs; index++) {
-        int pgprocno = arrayP->pgprocnos[index];
-        volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
-        TransactionId xid = 0;
-
-        xid = pgxact->xid;
-
-        /* Skip self */
-        if (pgxact == t_thrd.pgxact)
-            continue;
-
-        if (!TransactionIdIsValid(xid))
-            continue;
-
-        xids[xcnt++] = xid;
-    }
-
-    LWLockRelease(ProcArrayLock);
-
-    funcctx = SRF_PERCALL_SETUP();
-    if (funcctx->call_cntr < funcctx->max_calls) {
-        Datum values[GTM_SNAPSHOT_ATTRS];
-        bool nulls[GTM_SNAPSHOT_ATTRS];
-        StringInfoData str;
-        HeapTuple tuple;
-        Datum result;
-        errno_t rc = 0;
-        uint64 i;
-
-        /* Form tuple with appropriate data. */
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check_c(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check_c(rc, "\0", "\0");
-
-        snapshot_status = GetGTMSnapshotStatus(GetCurrentTransactionKey());
-        if (snapshot_status == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE),
-                            errmsg("GTM error, could not obtain valid gtm snapshot status.")));
-        }
-        values[0] = TransactionIdGetDatum(snapshot_status->xmin);
-        values[1] = TransactionIdGetDatum(snapshot_status->xmax);
-        values[2] = TransactionIdGetDatum(snapshot_status->csn);
-        values[3] = TransactionIdGetDatum(snapshot_status->recent_global_xmin);
-        values[4] = TransactionIdGetDatum(xcnt);
-
-        /* Form running xids */
-        if (xcnt > 0) {
-            initStringInfo(&str);
-
-            /* Sort transaction id */
-            if (xcnt > 1)
-                qsort(xids, xcnt, sizeof(TransactionId), cmp_xid);
-
-            for (i = 0; i < xcnt; i++) {
-                if (i > 0)
-                    appendStringInfoChar(&str, ',');
-                appendStringInfo(&str, "%lu", xids[i]);
-            }
-
-            values[5] = CStringGetTextDatum(str.data);
-        } else {
-            nulls[5] = true;
-        }
-
-        /* Build and return the tuple. */
-        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
-        result = HeapTupleGetDatum(tuple);
-
-        /* free memory */
-        pfree(xids);
-        SRF_RETURN_NEXT(funcctx, result);
-    }
-
-    /* free memory */
-    pfree(xids);
+    /* check gtm mode, only gtm support this function */
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        errmsg("unsupported function or view in %s mode.", GTM_LITE_MODE ? "GTM-Lite" : "GTM-Free")));
     SRF_RETURN_DONE(funcctx);
 #endif
 }
@@ -5211,4 +4875,17 @@ calculate_local_csn_min()
     LWLockRelease(ProcArrayLock);
     return local_csn_min;
 }
+/*
+ * Updates the maximum value for CSN read from XLog
+ */
 
+void UpdateXLogMaxCSN(CommitSeqNo xlogCSN)
+{
+    if (xlogCSN > t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN) {
+        LWLockAcquire(XLogMaxCSNLock, LW_EXCLUSIVE);
+        if (xlogCSN > t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN) {
+            t_thrd.xact_cxt.ShmemVariableCache->xlogMaxCSN = xlogCSN;
+        }
+        LWLockRelease(XLogMaxCSNLock);
+    }
+}

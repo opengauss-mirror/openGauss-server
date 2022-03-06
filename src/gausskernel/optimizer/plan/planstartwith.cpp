@@ -1407,6 +1407,10 @@ static Sort *CreateSortPlanUnderRU(PlannerInfo* root, Plan* lefttree, List *sibl
         foreach (lc1, lefttree->targetlist) {
             TargetEntry *tle = (TargetEntry *)lfirst(lc1);
 
+            if (tle->resname == NULL) {
+                continue;
+            }
+
             /* one more fix name */
             char *label = strrchr(tle->resname, '@');
             label += 1;

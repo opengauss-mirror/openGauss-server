@@ -26,8 +26,10 @@
 
 /* Becareful: liborc header file must before  openGauss header file */
 #include "orc_rw.h"
+#ifndef ENABLE_LITE_MODE
 #include "orc/Adaptor.hh"
 #include "orc/Exceptions.hh"
+#endif
 #include "OrcObsFile.h"
 #include "access/obs/obs_am.h"
 #include "storage/cucache_mgr.h"

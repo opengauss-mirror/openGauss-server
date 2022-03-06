@@ -47,6 +47,9 @@
 #include "pgxc/execRemote.h"
 #include "catalog/pgxc_node.h"
 #endif
+#include "replication/walreceiver.h"
+
+#define CLUSTER_EXPANSION_BASE 2
 
 void InitQueryHashTable(void);
 static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const char* queryString, EState* estate);
@@ -460,9 +463,7 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
         prm->ptype = param_types[i];
         prm->pflags = PARAM_FLAG_CONST;
         prm->value = ExecEvalExprSwitchContext(n, GetPerTupleExprContext(estate), &prm->isnull, NULL);
-        prm->tableOfIndexType = InvalidOid;
-        prm->tableOfIndex = NULL;
-        prm->isnestedtable = false;
+        prm->tabInfo = NULL;
 
         i++;
     }
@@ -1323,7 +1324,11 @@ Datum pg_prepared_statement(PG_FUNCTION_ARGS)
             securec_check(rc, "\0", "\0");
 
             values[0] = CStringGetTextDatum(prep_stmt->stmt_name);
-            values[1] = CStringGetTextDatum(prep_stmt->plansource->query_string);
+            char* maskquery = maskPassword(prep_stmt->plansource->query_string);
+            const char* query = (maskquery == NULL) ? prep_stmt->plansource->query_string : maskquery;
+            values[1] = CStringGetTextDatum(query);
+            if (query != maskquery)
+                pfree_ext(maskquery);
             values[2] = TimestampTzGetDatum(prep_stmt->prepare_time);
             values[3] = build_regtype_array(prep_stmt->plansource->param_types, prep_stmt->plansource->num_params);
             values[4] = BoolGetDatum(prep_stmt->from_sql);
@@ -1398,8 +1403,9 @@ void DropDatanodeStatement(const char* stmt_name)
         List* nodelist = NIL;
 
         /* make a List of integers from node numbers */
-        for (i = 0; i < entry->current_nodes_number; i++)
+        for (i = 0; i < entry->current_nodes_number; i++) {
             nodelist = lappend_int(nodelist, entry->dns_node_indices[i]);
+        }
 
         CN_GPC_LOG("drop datanode statment", NULL, entry->stmt_name);
 
@@ -1435,7 +1441,7 @@ void DeActiveAllDataNodeStatements(void)
         tmp_num = entry->current_nodes_number;
         entry->current_nodes_number = 0;
         if (tmp_num > 0) {
-            Assert(tmp_num <= u_sess->pgxc_cxt.NumDataNodes);
+            Assert(tmp_num <= Max(u_sess->pgxc_cxt.NumTotalDataNodes, u_sess->pgxc_cxt.NumDataNodes));
             errorno = memset_s(entry->dns_node_indices, tmp_num * sizeof(int), 0, tmp_num * sizeof(int));
             securec_check_c(errorno, "\0", "\0");
         }
@@ -1474,7 +1480,7 @@ bool HaveActiveDatanodeStatements(void)
  * Returns false if statement has not been active on the node and should be
  * prepared on the node
  */
-bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
+bool ActivateDatanodeStatementOnNode(const char* stmt_name, int nodeIdx)
 {
     DatanodeStatement* entry = NULL;
     int i;
@@ -1484,23 +1490,24 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
 
     /* see if statement already active on the node */
     for (i = 0; i < entry->current_nodes_number; i++) {
-        if (entry->dns_node_indices[i] == noid)
+        if (entry->dns_node_indices[i] == nodeIdx) {
             return true;
+        }
     }
 
     /* After cluster expansion, must expand entry->dns_node_indices array too */
     if (entry->current_nodes_number == entry->max_nodes_number) {
         int* new_dns_node_indices = (int*)MemoryContextAllocZero(
-            u_sess->pcache_cxt.datanode_queries->hcxt, entry->max_nodes_number * 2 * sizeof(int));
+            u_sess->pcache_cxt.datanode_queries->hcxt, entry->max_nodes_number * CLUSTER_EXPANSION_BASE * sizeof(int));
         errno_t errorno = EOK;
         errorno = memcpy_s(new_dns_node_indices,
-            entry->max_nodes_number * 2 * sizeof(int),
+            entry->max_nodes_number * CLUSTER_EXPANSION_BASE * sizeof(int),
             entry->dns_node_indices,
             entry->max_nodes_number * sizeof(int));
         securec_check(errorno, "\0", "\0");
         pfree_ext(entry->dns_node_indices);
         entry->dns_node_indices = new_dns_node_indices;
-        entry->max_nodes_number = entry->max_nodes_number * 2;
+        entry->max_nodes_number = entry->max_nodes_number * CLUSTER_EXPANSION_BASE;
         elog(LOG,
             "expand node ids array for active datanode statements "
             "after cluster expansion, now array size is %d",
@@ -1508,8 +1515,7 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
     }
 
     /* statement is not active on the specified node append item to the list */
-    entry->dns_node_indices[entry->current_nodes_number++] = noid;
-
+    entry->dns_node_indices[entry->current_nodes_number++] = nodeIdx;
     return false;
 }
 

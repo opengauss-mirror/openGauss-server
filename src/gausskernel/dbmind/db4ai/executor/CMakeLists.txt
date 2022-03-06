@@ -3,7 +3,10 @@ set(TGT_executor_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/distance_functions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp_ops.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hyperparameter_validation.cpp
-)    
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/matrix.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/direct.cpp
+)
 set(TGT_executor_INC 
     ${PROJECT_OPENGS_DIR}/contrib/log_fdw
     ${PROJECT_TRUNK_DIR}/distribute/bin/gds
@@ -27,3 +30,4 @@ add_static_objtarget(gausskernel_db4ai_executor TGT_executor_SRC TGT_executor_IN
 
 add_subdirectory(gd)
 add_subdirectory(kmeans)
+add_subdirectory(xgboost)

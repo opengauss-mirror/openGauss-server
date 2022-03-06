@@ -57,14 +57,14 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || current_setting('db4ai.message_level');
-        RAISE INFO 'effective client_min_messages is %', upper(current_setting('db4ai.message_level'));
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        RAISE INFO 'effective client_min_messages is %', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
 
     -- obtain active snapshot mode
     BEGIN
-        s_mode := upper(current_setting('db4ai_snapshot_mode'));
+        s_mode := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_mode'));
     EXCEPTION WHEN OTHERS THEN
         s_mode := 'MSS';
     END;
@@ -75,17 +75,17 @@ BEGIN
 
     -- obtain relevant configuration parameters
     BEGIN
-        s_vers_del := current_setting('db4ai_snapshot_version_delimiter');
+        s_vers_del := pg_catalog.current_setting('db4ai_snapshot_version_delimiter');
     EXCEPTION WHEN OTHERS THEN
         s_vers_del := '@';
     END;
     BEGIN
-        s_vers_sep := upper(current_setting('db4ai_snapshot_version_separator'));
+        s_vers_sep := pg_catalog.upper(pg_catalog.current_setting('db4ai_snapshot_version_separator'));
     EXCEPTION WHEN OTHERS THEN
         s_vers_sep := '.';
     END;
 
-    current_compatibility_mode := current_setting('sql_compatibility');
+    current_compatibility_mode := pg_catalog.current_setting('sql_compatibility');
     IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
         none_represent := 0;
     ELSE
@@ -100,10 +100,10 @@ BEGIN
     IF i_parent IS NULL OR i_parent = '' THEN
         RAISE EXCEPTION 'i_parent cannot be NULL or empty';
     ELSE
-        i_parent := replace(i_parent, chr(1), s_vers_del);
-        i_parent := replace(i_parent, chr(2), s_vers_sep);
-        p_name_vers := regexp_split_to_array(i_parent, s_vers_del);
-        IF array_length(p_name_vers, 1) <> 2 OR array_length(p_name_vers, 2) <> none_represent THEN
+        i_parent := pg_catalog.replace(i_parent, pg_catalog.chr(1), s_vers_del);
+        i_parent := pg_catalog.replace(i_parent, pg_catalog.chr(2), s_vers_sep);
+        p_name_vers := pg_catalog.regexp_split_to_array(i_parent, s_vers_del);
+        IF pg_catalog.array_length(p_name_vers, 1) <> 2 OR pg_catalog.array_length(p_name_vers, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_parent must contain exactly one ''%'' character', s_vers_del
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
@@ -113,75 +113,75 @@ BEGIN
     BEGIN
         SELECT id, matrix_id, root_id FROM db4ai.snapshot WHERE schema = i_schema AND name = i_parent INTO STRICT p_id, m_id, r_id;
     EXCEPTION WHEN NO_DATA_FOUND THEN
-        RAISE EXCEPTION 'parent snapshot %.% does not exist' , quote_ident(i_schema), quote_ident(i_parent);
+        RAISE EXCEPTION 'parent snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
     END;
 
-    IF i_sample_infixes IS NULL OR array_length(i_sample_infixes, 1) = none_represent OR array_length(i_sample_infixes, 2) <> none_represent THEN
+    IF i_sample_infixes IS NULL OR pg_catalog.array_length(i_sample_infixes, 1) = none_represent OR pg_catalog.array_length(i_sample_infixes, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_sample_infixes array malformed'
         USING HINT = 'pass sample infixes as NAME[] literal, e.g. ''{_train, _test}''';
     END IF;
 
-    IF i_sample_ratios IS NULL OR array_length(i_sample_ratios, 1) = none_represent OR array_length(i_sample_ratios, 2) <> none_represent THEN
+    IF i_sample_ratios IS NULL OR pg_catalog.array_length(i_sample_ratios, 1) = none_represent OR pg_catalog.array_length(i_sample_ratios, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_sample_ratios array malformed'
         USING HINT = 'pass sample percentages as NUMBER[] literal, e.g. ''{.8, .2}''';
     END IF;
 
-    IF array_length(i_sample_infixes, 1) <> array_length(i_sample_ratios, 1) THEN
+    IF pg_catalog.array_length(i_sample_infixes, 1) <> pg_catalog.array_length(i_sample_ratios, 1) THEN
         RAISE EXCEPTION 'i_sample_infixes and i_sample_ratios array length mismatch';
     END IF;
 
     IF i_stratify IS NOT NULL THEN
-        IF array_length(i_stratify, 1) = none_represent OR array_length(i_stratify, 2) <> none_represent THEN
+        IF pg_catalog.array_length(i_stratify, 1) = none_represent OR pg_catalog.array_length(i_stratify, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_stratify array malformed'
             USING HINT = 'pass stratification field names as NAME[] literal, e.g. ''{color, size}''';
         END IF;
 
-        EXECUTE 'SELECT ARRAY[COUNT(DISTINCT ' || array_to_string(i_stratify, '), COUNT(DISTINCT ') || ')] FROM db4ai.v' || p_id
+        EXECUTE 'SELECT ARRAY[COUNT(DISTINCT ' || pg_catalog.array_to_string(i_stratify, '), COUNT(DISTINCT ') || ')] FROM db4ai.v' || p_id::TEXT
             INTO STRICT stratify_count;
         IF stratify_count IS NULL THEN
             RAISE EXCEPTION 'sample snapshot internal error2: %', p_id;
         END IF;
 
-        SELECT array_agg(ordered) FROM (SELECT unnest(i_stratify) ordered ORDER BY unnest(stratify_count)) INTO STRICT i_stratify;
+        SELECT pg_catalog.array_agg(ordered) FROM (SELECT pg_catalog.unnest(i_stratify) ordered ORDER BY pg_catalog.unnest(stratify_count)) INTO STRICT i_stratify;
         IF i_stratify IS NULL THEN
             RAISE EXCEPTION 'sample snapshot internal error3';
         END IF;
     END IF;
 
     IF i_sample_comments IS NOT NULL THEN
-        IF array_length(i_sample_comments, 1) = none_represent OR array_length(i_sample_comments, 2) <> none_represent THEN
+        IF pg_catalog.array_length(i_sample_comments, 1) = none_represent OR pg_catalog.array_length(i_sample_comments, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_sample_comments array malformed'
             USING HINT = 'pass sample comments as TEXT[] literal, e.g. ''{comment 1, comment 2}''';
-        ELSIF array_length(i_sample_infixes, 1) <> array_length(i_sample_comments, 1) THEN
+        ELSIF pg_catalog.array_length(i_sample_infixes, 1) <> pg_catalog.array_length(i_sample_comments, 1) THEN
             RAISE EXCEPTION 'i_sample_infixes and i_sample_comments array length mismatch';
         END IF;
     END IF;
 
     -- extract normalized projection list (private: nullable, shared: not null, user_cname: not null)
-    p_sv_proj := substring(pg_get_viewdef('db4ai.v' || p_id), '^SELECT (.*), t[0-9]+\.xc_node_id, t[0-9]+\.ctid FROM.*$');
-    mapping := array(SELECT unnest(ARRAY[ m[1], m[2], coalesce(m[3], replace(m[4],'""','"'))]) FROM regexp_matches(p_sv_proj,
+    p_sv_proj := pg_catalog.substring(pg_catalog.pg_get_viewdef('db4ai.v' || p_id::TEXT), '^SELECT (.*), t[0-9]+\.xc_node_id, t[0-9]+\.ctid FROM.*$');
+    mapping := array(SELECT pg_catalog.unnest(ARRAY[ m[1], m[2], coalesce(m[3], pg_catalog.replace(m[4],'""','"'))]) FROM pg_catalog.regexp_matches(p_sv_proj,
         '(?:COALESCE\(t[0-9]+\.(f[0-9]+), )?t[0-9]+\.(f[0-9]+)(?:\))? AS (?:([^\s",]+)|"((?:[^"]*"")*[^"]*)")', 'g') m);
 
-    FOR idx IN 3 .. array_length(mapping, 1) BY 3 LOOP
+    FOR idx IN 3 .. pg_catalog.array_length(mapping, 1) BY 3 LOOP
         IF s_mode = 'MSS' THEN
-            s_sv_proj := s_sv_proj || coalesce(mapping[idx-2], mapping[idx-1]) || ' AS ' || quote_ident(mapping[idx]) || ',';
-            s_bt_proj := s_bt_proj || quote_ident(mapping[idx]) || ' AS ' || coalesce(mapping[idx-2], mapping[idx-1]) || ',';
+            s_sv_proj := s_sv_proj || coalesce(mapping[idx-2], mapping[idx-1]) || ' AS ' || pg_catalog.quote_ident(mapping[idx]) || ',';
+            s_bt_proj := s_bt_proj || pg_catalog.quote_ident(mapping[idx]) || ' AS ' || coalesce(mapping[idx-2], mapping[idx-1]) || ',';
         ELSIF s_mode = 'CSS' THEN
             IF mapping[idx-2] IS NULL THEN
-                s_sv_proj := s_sv_proj || mapping[idx-1] || ' AS ' || quote_ident(mapping[idx]) || ',';
+                s_sv_proj := s_sv_proj || mapping[idx-1] || ' AS ' || pg_catalog.quote_ident(mapping[idx]) || ',';
             ELSE
-                s_sv_proj := s_sv_proj || 'coalesce(' || mapping[idx-2] || ',' || mapping[idx-1] || ') AS ' || quote_ident(mapping[idx]) || ',';
+                s_sv_proj := s_sv_proj || 'coalesce(' || mapping[idx-2] || ',' || mapping[idx-1] || ') AS ' || pg_catalog.quote_ident(mapping[idx]) || ',';
             END IF;
         END IF;
-        s_uv_proj := s_uv_proj || quote_ident(mapping[idx]) || ',';
+        s_uv_proj := s_uv_proj || pg_catalog.quote_ident(mapping[idx]) || ',';
     END LOOP;
 
-    s_bt_dist := getdistributekey('db4ai.t' || coalesce(m_id, p_id));
+    s_bt_dist := pg_catalog.getdistributekey('db4ai.t' || coalesce(m_id, p_id)::TEXT);
     s_bt_dist := CASE WHEN s_bt_dist IS NULL
                 THEN ' DISTRIBUTE BY REPLICATION'
                 ELSE ' DISTRIBUTE BY HASH(' || s_bt_dist || ')' END; s_bt_dist = '';
 
-    FOR i IN 1 .. array_length(i_sample_infixes, 1) LOOP
+    FOR i IN 1 .. pg_catalog.array_length(i_sample_infixes, 1) LOOP
         IF i_sample_infixes[i] IS NULL THEN
             RAISE EXCEPTION 'i_sample_infixes array contains NULL values';
         END IF;
@@ -191,18 +191,18 @@ BEGIN
         END IF;
 
         qual_name :=  p_name_vers[1] || i_sample_infixes[i] || s_vers_del || p_name_vers[2];
-        IF char_length(qual_name) > 63 THEN
+        IF pg_catalog.char_length(qual_name) > 63 THEN
             RAISE EXCEPTION 'sample snapshot name too long: ''%''', qual_name;
         ELSE
             s_name := (i_schema, qual_name);
-            qual_name := quote_ident(s_name.schema) || '.' || quote_ident(s_name.name);
+            qual_name := pg_catalog.quote_ident(s_name.schema) || '.' || pg_catalog.quote_ident(s_name.name);
         END IF;
 
         IF i_sample_ratios[i] < 0 OR i_sample_ratios[i] > 1 THEN
             RAISE EXCEPTION 'sample ratio must be between 0 and 1';
         END IF;
 
-        -- SELECT nextval('db4ai.snapshot_sequence') INTO STRICT s_id;
+        -- SELECT pg_catalog.nextval('db4ai.snapshot_sequence') INTO STRICT s_id;
         SELECT MAX(id)+1 FROM db4ai.snapshot INTO STRICT s_id; -- openGauss BUG: cannot create sequences in initdb
 
         -- check for duplicate snapshot
@@ -218,29 +218,29 @@ BEGIN
         IF s_mode = 'MSS' THEN
             exec_cmds := ARRAY [
                 -- extract and propagate DISTRIBUTE BY from root MSS snapshot
-                [ 'O','CREATE TABLE db4ai.t' || s_id || ' WITH (orientation = column, compression = low)' || s_bt_dist
-                || ' AS SELECT ' || rtrim(s_bt_proj, ',') || ' FROM db4ai.v' || p_id || ' WHERE random() <= ' || i_sample_ratios[i] ],
+                [ 'O','CREATE TABLE db4ai.t' || s_id::TEXT || ' WITH (orientation = column, compression = low)' || s_bt_dist
+                || ' AS SELECT ' || pg_catalog.rtrim(s_bt_proj, ',') || ' FROM db4ai.v' || p_id::TEXT || ' WHERE pg_catalog.random() <= ' || i_sample_ratios[i] ],
              -- || ' AS SELECT ' || rtrim(s_bt_proj, ',') || ' FROM db4ai.v' || p_id || ' WHERE dbms_random.value(0, 1) <= ' || i_sample_ratios[i],
-                [ 'O', 'COMMENT ON TABLE db4ai.t' || s_id || ' IS ''snapshot backing table, root is ' || qual_name || '''' ],
-                [ 'O', 'CREATE VIEW db4ai.v' || s_id || ' WITH(security_barrier) AS SELECT ' || s_sv_proj || ' xc_node_id, ctid FROM db4ai.t' || s_id ]];
+                [ 'O', 'COMMENT ON TABLE db4ai.t' || s_id::TEXT || ' IS ''snapshot backing table, root is ' || qual_name || '''' ],
+                [ 'O', 'CREATE VIEW db4ai.v' || s_id::TEXT || ' WITH(security_barrier) AS SELECT ' || s_sv_proj || ' xc_node_id, ctid FROM db4ai.t' || s_id::TEXT ]];
         ELSIF s_mode = 'CSS' THEN
             IF m_id IS NULL THEN
                 exec_cmds := ARRAY [
-                    [ 'O', 'UPDATE db4ai.snapshot SET matrix_id = ' || p_id || ' WHERE schema = ''' || i_schema || ''' AND name = '''
+                    [ 'O', 'UPDATE db4ai.snapshot SET matrix_id = ' || p_id::TEXT || ' WHERE schema = ''' || i_schema || ''' AND name = '''
                     || i_parent || '''' ],
-                    [ 'O', 'ALTER TABLE db4ai.t' || p_id || ' ADD _' || p_id || ' BOOLEAN NOT NULL DEFAULT TRUE' ],
-                    [ 'O', 'ALTER TABLE db4ai.t' || p_id || ' ALTER _' || p_id || ' SET DEFAULT FALSE' ],
-                    [ 'O', 'CREATE OR REPLACE VIEW db4ai.v' || p_id || ' WITH(security_barrier) AS SELECT ' || p_sv_proj || ', xc_node_id, ctid FROM db4ai.t'
-                    || p_id || ' WHERE _' || p_id ]];
+                    [ 'O', 'ALTER TABLE db4ai.t' || p_id::TEXT || ' ADD _' || p_id::TEXT || ' BOOLEAN NOT NULL DEFAULT TRUE' ],
+                    [ 'O', 'ALTER TABLE db4ai.t' || p_id::TEXT || ' ALTER _' || p_id::TEXT || ' SET DEFAULT FALSE' ],
+                    [ 'O', 'CREATE OR REPLACE VIEW db4ai.v' || p_id::TEXT || ' WITH(security_barrier) AS SELECT ' || p_sv_proj || ', xc_node_id, ctid FROM db4ai.t'
+                    || p_id::TEXT || ' WHERE _' || p_id::TEXT ]];
                 m_id := p_id;
             END IF;
             exec_cmds := exec_cmds || ARRAY [
-                [ 'O', 'ALTER TABLE db4ai.t' || m_id || ' ADD _' || s_id || ' BOOLEAN NOT NULL DEFAULT FALSE' ],
-                [ 'O', 'UPDATE db4ai.t' || m_id || ' SET _' || s_id || ' = TRUE WHERE _' || p_id || ' AND random() <= '
+                [ 'O', 'ALTER TABLE db4ai.t' || m_id::TEXT || ' ADD _' || s_id::TEXT || ' BOOLEAN NOT NULL DEFAULT FALSE' ],
+                [ 'O', 'UPDATE db4ai.t' || m_id::TEXT || ' SET _' || s_id::TEXT || ' = TRUE WHERE _' || p_id::TEXT || ' AND pg_catalog.random() <= '
              -- [ 'O', 'UPDATE db4ai.t' || m_id || ' SET _' || s_id || ' = TRUE WHERE _' || p_id || ' AND dbms_random.value(0, 1) <= '
                 || i_sample_ratios[i] ],
-                [ 'O', 'CREATE VIEW db4ai.v' || s_id || ' WITH(security_barrier) AS SELECT ' || s_sv_proj || ' xc_node_id, ctid FROM db4ai.t' || m_id
-                || ' WHERE _' || s_id ]];
+                [ 'O', 'CREATE VIEW db4ai.v' || s_id::TEXT || ' WITH(security_barrier) AS SELECT ' || s_sv_proj || ' xc_node_id, ctid FROM db4ai.t' || m_id::TEXT
+                || ' WHERE _' || s_id::TEXT ]];
         END IF;
 
         --        || ' AS SELECT ' || proj_list || ' FROM '
@@ -253,8 +253,8 @@ BEGIN
         --SELECT * FROM (SELECT *, count(*) over()_ cnt, row_number() OVER(ORDER BY COLOR) _row FROM t) WHERE _row % (cnt/ 10) = 0;
 
         -- Execute the queries
-        RAISE NOTICE E'accumulated commands:\n%', array_to_string(exec_cmds, E'\n');
-        IF 1 + array_length(exec_cmds, 1) <> (db4ai.prepare_snapshot_internal(
+        RAISE NOTICE E'accumulated commands:\n%', pg_catalog.array_to_string(exec_cmds, E'\n');
+        IF 1 + pg_catalog.array_length(exec_cmds, 1) <> (db4ai.prepare_snapshot_internal(
                 s_id, p_id, m_id, r_id, s_name.schema, s_name.name,
                 ARRAY [ 'SAMPLE ' || i_sample_infixes[i] || ' ' || i_sample_ratios[i] ||
                 CASE WHEN i_stratify IS NULL THEN '' ELSE ' ' || i_stratify::TEXT END ],
@@ -263,10 +263,10 @@ BEGIN
         END IF;
 
         -- create custom view, owned by current user
-        EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || rtrim(s_uv_proj, ',') || ' FROM db4ai.v' || s_id;
-        EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id
-            || CASE WHEN length(i_sample_comments[i]) > 0 THEN ' comment is "' || i_sample_comments[i] || '"' ELSE '' END || '''';
-        EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO ' || CURRENT_USER;
+        EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || pg_catalog.rtrim(s_uv_proj, ',') || ' FROM db4ai.v' || s_id::TEXT;
+        EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
+            || CASE WHEN pg_catalog.length(i_sample_comments[i]) > 0 THEN ' comment is "' || i_sample_comments[i] || '"' ELSE '' END || '''';
+        EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER || '"';
 
         exec_cmds := NULL;
 

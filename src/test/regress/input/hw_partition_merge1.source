@@ -96,7 +96,7 @@ drop table test_merge_table_tablespace;
 
 --
 --
-CREATE TABLE DTS2016122106940_tbl
+CREATE TABLE TESTTABLE_tbl
 (
 id int,
 info varchar(200)
@@ -108,20 +108,20 @@ partition p1 values less than(100000),
 partition p2 values less than(300000),
 partition p3 values less than(maxvalue)
 );
-CREATE INDEX idx_dts2016122106940_tbl on DTS2016122106940_tbl(id) local (
+CREATE INDEX idx_testtable_tbl on TESTTABLE_tbl(id) local (
 partition idx_p1,
 partition idx_p2 tablespace partition_merge_ts1,
 partition idx_p3 tablespace partition_merge_ts2
 );
-select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_dts2016122106940_tbl' order by partition_name;
-alter table DTS2016122106940_tbl merge partitions p2,p3 into partition p3;
-select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_dts2016122106940_tbl' order by partition_name;
+select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_testtable_tbl' order by partition_name;
+alter table TESTTABLE_tbl merge partitions p2,p3 into partition p3;
+select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_testtable_tbl' order by partition_name;
 START TRANSACTION;
-alter table DTS2016122106940_tbl merge partitions p1,p3 into partition p3;
-select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_dts2016122106940_tbl' order by partition_name;
+alter table TESTTABLE_tbl merge partitions p1,p3 into partition p3;
+select index_name,partition_name,def_tablespace_name from dba_ind_partitions where index_name ='idx_testtable_tbl' order by partition_name;
 ROLLBACK;
-DROP INDEX idx_dts2016122106940_tbl;
-DROP TABLE DTS2016122106940_tbl;
+DROP INDEX idx_testtable_tbl;
+DROP TABLE TESTTABLE_tbl;
 
 drop tablespace partition_merge_ts0;
 drop tablespace partition_merge_ts1;

@@ -47,6 +47,8 @@ HeartbeatClient::~HeartbeatClient()
 struct replconninfo* GetHeartBeatServerConnInfo(void)
 {
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
 
     if (walrcv->pid <= 0) {
         return NULL;
@@ -66,8 +68,11 @@ struct replconninfo* GetHeartBeatServerConnInfo(void)
             continue;
         }
 
+        /* remove any '%zone' part from an IPv6 address string */
+        ipNoZone = remove_ipv6_zone(conninfo->remotehost, ipNoZoneData, IP_LEN);
+
         /* find target conninfo by conn_channel */
-        if (strcmp(conninfo->remotehost, (char*)walrcv->conn_channel.remotehost) == 0 &&
+        if (strcmp(ipNoZone, (char*)walrcv->conn_channel.remotehost) == 0 &&
             conninfo->remoteport == walrcv->conn_channel.remoteport) {
             return conninfo;
         }
@@ -89,25 +94,19 @@ bool HeartbeatClient::Connect()
     PurePort *port = NULL;
     int rcs = 0;
     int remotePort = -1;
-    int i = 0;
-    while (i < MAX_REPLNODE_NUM) {
-        conninfo = GetHeartBeatServerConnInfo();
-        if (conninfo == NULL) {
-            sleep(SLEEP_TIME);
-            i++;
-            continue;
-        }
+    conninfo = GetHeartBeatServerConnInfo();
+    if (conninfo == NULL) {
+        return false;
+    }
 
-        rcs = snprintf_s(connstr, MAX_CONN_INFO, MAX_CONN_INFO - 1, "host=%s port=%d localhost=%s localport=%d",
-                         conninfo->remotehost, conninfo->remoteheartbeatport, conninfo->localhost,
-                         conninfo->localheartbeatport);
-        securec_check_ss(rcs, "", "");
-        port = PQconnect(connstr);
-        if (port != NULL) {
-            remotePort = conninfo->remoteheartbeatport;
-            ereport(LOG, (errmsg("Connected to heartbeat primary :%s success.", connstr)));
-            break;
-        }
+    rcs = snprintf_s(connstr, MAX_CONN_INFO, MAX_CONN_INFO - 1, "host=%s port=%d localhost=%s localport=%d connect_timeout=2",
+                     conninfo->remotehost, conninfo->remoteheartbeatport, conninfo->localhost,
+                     conninfo->localheartbeatport);
+    securec_check_ss(rcs, "", "");
+    port = PQconnect(connstr);
+    if (port != NULL) {
+        remotePort = conninfo->remoteheartbeatport;
+        ereport(LOG, (errmsg("Connected to heartbeat primary :%s success.", connstr)));
     }
 
     if (port != NULL) {
@@ -179,6 +178,8 @@ bool HeartbeatClient::InitConnection(HeartbeatConnection *con, int remotePort)
 static int GetChannelId(char remotehost[IP_LEN], int remoteheartbeatport)
 {
     struct replconninfo *replconninfo = NULL;
+    char* ipNoZone = NULL;
+    char ipNoZoneData[IP_LEN] = {0};
 
     for (int i = 0; i < MAX_REPLNODE_NUM; i++) {
         replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
@@ -186,7 +187,10 @@ static int GetChannelId(char remotehost[IP_LEN], int remoteheartbeatport)
             continue;
         }
 
-        if (strncmp((char *)replconninfo->remotehost, (char *)remotehost, IP_LEN) == 0 &&
+        /* remove any '%zone' part from an IPv6 address string */
+        ipNoZone = remove_ipv6_zone(replconninfo->remotehost, ipNoZoneData, IP_LEN);
+
+        if (strncmp((char *)ipNoZone, (char *)remotehost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == remoteheartbeatport) {
             return replconninfo->localheartbeatport;
         }

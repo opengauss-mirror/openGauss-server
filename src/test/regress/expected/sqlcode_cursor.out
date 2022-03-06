@@ -1,0 +1,873 @@
+create schema hw_sqlcode;
+set current_schema = hw_sqlcode;
+/* ---------anonymous block------------ */
+/* no exception */
+DECLARE
+    a int;
+BEGIN
+    RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+NOTICE:  SQLSTATE = <NULL>, SQLCODE = <NULL>, SQLERRM = <NULL>
+/* exception */
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+CREATE or replace procedure func1_1 IS
+	--PRAGMA AUTONOMOUS_TRANSACTION;
+	a int;
+BEGIN
+	a := 1/0;
+EXCEPTION
+    WHEN others THEN
+		RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+DECLARE
+    a int;
+BEGIN
+	func1_1();
+	RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+CONTEXT:  SQL statement "CALL func1_1()"
+PL/pgSQL function inline_code_block line 3 at PERFORM
+NOTICE:  SQLSTATE = <NULL>, SQLCODE = <NULL>, SQLERRM = <NULL>
+/* commit rollback */
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+		COMMIT;
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+		ROLLBACK;
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+/* PRAGMA AUTONOMOUS_TRANSACTION; */
+CREATE OR REPLACE FUNCTION func5() RETURN void
+AS
+DECLARE
+	PRAGMA AUTONOMOUS_TRANSACTION;
+    a int;
+BEGIN
+    a := 1/0;
+END;
+/
+DECLARE
+    a int;
+BEGIN
+	func5();
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = ERROR:  division by zero
+CONTEXT:  SQL statement "SELECT 1/0"
+PL/pgSQL function func5() line 6 at assignment
+referenced column: func5
+
+CREATE OR REPLACE FUNCTION func5_1() RETURN void
+AS
+DECLARE
+	PRAGMA AUTONOMOUS_TRANSACTION;
+    a int;
+BEGIN
+    RAISE NOTICE 'AUTONOMOUS_TRANSACTION SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+DECLARE
+    a int;
+BEGIN
+	a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+		func5_1();
+END;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+NOTICE:  AUTONOMOUS_TRANSACTION SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = <NULL>
+CONTEXT:  referenced column: func5_1
+
+CREATE or replace procedure func5_2 IS
+	a int;
+BEGIN
+	a := 1/0;
+EXCEPTION
+    WHEN others THEN
+		RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+DECLARE
+    a int;
+BEGIN
+	func5_2();
+	RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+CONTEXT:  SQL statement "CALL func5_2()"
+PL/pgSQL function inline_code_block line 3 at PERFORM
+NOTICE:  SQLSTATE = <NULL>, SQLCODE = <NULL>, SQLERRM = <NULL>
+/* CALL function */
+CREATE OR REPLACE FUNCTION func7() RETURN void
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+END;
+/
+DECLARE
+    a int;
+BEGIN
+	func7();
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+/* RAISE ERROR */
+DECLARE
+    a int;
+BEGIN
+	RAISE sqlstate 'AA666';
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+ERROR:  AA666
+/* ---------function------------ */
+/* no exception */
+CREATE OR REPLACE FUNCTION func1() RETURN void
+AS
+BEGIN
+    RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL func1();
+NOTICE:  SQLSTATE = <NULL>, SQLCODE = <NULL>, SQLERRM = <NULL>
+ func1 
+-------
+ 
+(1 row)
+
+/* exception */
+CREATE OR REPLACE FUNCTION func2() RETURN void
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL func2();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+ func2 
+-------
+ 
+(1 row)
+
+/* commit rollback */
+CREATE OR REPLACE FUNCTION func3() RETURN void
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+		COMMIT;
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL func3();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+ func3 
+-------
+ 
+(1 row)
+
+CREATE OR REPLACE FUNCTION func4() RETURN void
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+		ROLLBACK;
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL func4();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+ func4 
+-------
+ 
+(1 row)
+
+/* PRAGMA AUTONOMOUS_TRANSACTION; */
+CREATE OR REPLACE FUNCTION func5() RETURN void
+AS
+DECLARE
+	PRAGMA AUTONOMOUS_TRANSACTION;
+    a int;
+BEGIN
+    a := 1/0;
+END;
+/
+CREATE OR REPLACE FUNCTION func6() RETURN void
+AS
+DECLARE
+    a int;
+BEGIN
+	func5();
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL func6();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = ERROR:  division by zero
+CONTEXT:  SQL statement "SELECT 1/0"
+PL/pgSQL function func5() line 6 at assignment
+referenced column: func5
+
+ func6 
+-------
+ 
+(1 row)
+
+/* CALL function */
+CREATE OR REPLACE FUNCTION func7() RETURN void
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+END;
+/
+CREATE OR REPLACE FUNCTION func8() RETURN void
+AS
+DECLARE
+    a int;
+BEGIN
+	func7();
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL func8();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+ func8 
+-------
+ 
+(1 row)
+
+/* RAISE ERROR */
+CREATE OR REPLACE FUNCTION func9() RETURN void
+AS
+DECLARE
+    a int;
+BEGIN
+	RAISE sqlstate 'AA666';
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL func9();
+ERROR:  AA666
+/* ---------PROCEDURE------------ */
+/* no exception */
+CREATE OR REPLACE PROCEDURE proc1()
+AS
+BEGIN
+    RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL proc1();
+NOTICE:  SQLSTATE = <NULL>, SQLCODE = <NULL>, SQLERRM = <NULL>
+ proc1 
+-------
+ 
+(1 row)
+
+/* exception */
+CREATE OR REPLACE PROCEDURE proc2()
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL proc2();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+ proc2 
+-------
+ 
+(1 row)
+
+/* commit rollback */
+CREATE OR REPLACE PROCEDURE proc3()
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+		COMMIT;
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL proc3();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+ proc3 
+-------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE proc4()
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+		ROLLBACK;
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL proc4();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+ proc4 
+-------
+ 
+(1 row)
+
+/* PRAGMA AUTONOMOUS_TRANSACTION; */
+CREATE OR REPLACE PROCEDURE proc5()
+AS
+DECLARE
+	PRAGMA AUTONOMOUS_TRANSACTION;
+    a int;
+BEGIN
+    a := 1/0;
+END;
+/
+CREATE OR REPLACE PROCEDURE proc6()
+AS
+DECLARE
+    a int;
+BEGIN
+	proc5();
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL proc6();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = ERROR:  division by zero
+CONTEXT:  SQL statement "SELECT 1/0"
+PL/pgSQL function proc5() line 6 at assignment
+referenced column: proc5
+
+ proc6 
+-------
+ 
+(1 row)
+
+/* CALL function */
+CREATE OR REPLACE PROCEDURE proc7()
+AS
+DECLARE
+    a int;
+BEGIN
+    a := 1/0;
+END;
+/
+CREATE OR REPLACE PROCEDURE proc8()
+AS
+DECLARE
+    a int;
+BEGIN
+	proc7();
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL proc8();
+NOTICE:  SQLSTATE = 22012, SQLCODE = 22012, SQLERRM = division by zero
+ proc8 
+-------
+ 
+(1 row)
+
+/* RAISE ERROR */
+CREATE OR REPLACE PROCEDURE proc9()
+AS
+DECLARE
+    a int;
+BEGIN
+	RAISE sqlstate 'AA666';
+EXCEPTION
+    WHEN DIVISION_BY_ZERO THEN
+        RAISE NOTICE 'SQLSTATE = %, SQLCODE = %, SQLERRM = %',SQLSTATE,SQLCODE,SQLERRM;
+END;
+/
+CALL proc9();
+ERROR:  AA666
+DROP SCHEMA hw_sqlcode CASCADE;
+NOTICE:  drop cascades to 21 other objects
+DETAIL:  drop cascades to function func1_1()
+drop cascades to function func5_1()
+drop cascades to function func5_2()
+drop cascades to function func1()
+drop cascades to function func2()
+drop cascades to function func3()
+drop cascades to function func4()
+drop cascades to function func5()
+drop cascades to function func6()
+drop cascades to function func7()
+drop cascades to function func8()
+drop cascades to function func9()
+drop cascades to function proc1()
+drop cascades to function proc2()
+drop cascades to function proc3()
+drop cascades to function proc4()
+drop cascades to function proc5()
+drop cascades to function proc6()
+drop cascades to function proc7()
+drop cascades to function proc8()
+drop cascades to function proc9()
+create schema hw_cursor_state;
+set current_schema = hw_cursor_state;
+set behavior_compat_options='COMPAT_CURSOR';
+/* ---------anonymous block------------ */
+/*create*/
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+create table tb_test(col1 int);
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,,,false,
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,,,false,
+/* select */
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+select 1 into v_count;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,true,false,false,1
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,true,false,false,1
+/* insert */
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+insert into tb_test select 1;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,true,false,false,1
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,true,false,false,1
+/* update */
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+update tb_test set col1=2;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,true,false,false,1
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,true,false,false,1
+/* delete */
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+delete from tb_test;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,true,false,false,1
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,true,false,false,1
+/*Same layer*/
+CREATE OR REPLACE PROCEDURE proc_test1()
+as
+v_count int;
+BEGIN
+v_count := 1;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+CREATE OR REPLACE PROCEDURE proc_test2()
+as
+v_count int;
+BEGIN
+v_count := 1;
+update tb_test set col1=2;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+proc_test2();
+proc_test1();
+end
+/
+NOTICE:  1,false,true,false,0
+CONTEXT:  SQL statement "CALL proc_test2()"
+PL/pgSQL function inline_code_block line 4 at PERFORM
+NOTICE:  1,false,true,false,0
+CONTEXT:  SQL statement "CALL proc_test1()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+/*EXCEPTION*/
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+update tb_test11 set col1=2;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+EXCEPTION
+when others then
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,,,false,
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,,,false,
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+update tb_test11 set col1=2;
+EXCEPTION
+when others then
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,,,false,
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,,,false,
+/*COMMIT ROLLBACK*/
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+update tb_test set col1=2;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+COMMIT;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,false,true,false,0
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,false,true,false,0
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,false,true,false,0
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+update tb_test set col1=2;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+ROLLBACK;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,false,true,false,0
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,false,true,false,0
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,false,true,false,0
+/* PRAGMA AUTONOMOUS_TRANSACTION */
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+DECLARE
+v_count int;
+PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+v_count := 1;
+update tb_test set col1=2;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,false,true,false,0
+CONTEXT:  referenced column: proc_test
+
+NOTICE:  1,false,true,false,0
+/*drop*/
+CREATE OR REPLACE PROCEDURE proc_test()
+as
+v_count int;
+BEGIN
+v_count := 1;
+drop table tb_test;
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+DECLARE
+v_count int;
+BEGIN
+v_count := 1;
+proc_test();
+RAISE NOTICE '%',v_count||','||SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end
+/
+NOTICE:  1,,,false,
+CONTEXT:  SQL statement "CALL proc_test()"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+NOTICE:  1,,,false,
+create table staff(id int, name varchar2(10));
+insert into staff values(1, 'xiaoming1');
+insert into staff values(2, 'xiaoming2');
+insert into staff values(3, 'xiaoming');
+insert into staff values(4, 'xiaoming4');
+CREATE OR REPLACE FUNCTION fun_cursor1() return void AS
+DECLARE
+BEGIN
+insert into staff values(3, 'xiaoming');
+dbe_output.print_line('cursor after insert');
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+SAVEPOINT my_savepoint;
+dbe_output.print_line('cursor after savepoint');
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+update staff set name = 'wdc1' where id = 1;
+dbe_output.print_line('cursor after update');
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+ROLLBACK TO SAVEPOINT my_savepoint;
+dbe_output.print_line('cursor after rollback to savepoint');
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+CREATE OR REPLACE PROCEDURE fun_cursor2() AS
+DECLARE
+BEGIN
+fun_cursor1();
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+IF SQL%FOUND THEN
+dbe_output.print_line('cursor effective');
+END IF;
+delete from staff where id = 3;
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+call fun_cursor2();
+cursor after insert
+NOTICE:  true,false,false,1
+CONTEXT:  SQL statement "CALL fun_cursor1()"
+PL/pgSQL function fun_cursor2() line 4 at PERFORM
+cursor after savepoint
+NOTICE:  false,true,false,0
+CONTEXT:  SQL statement "CALL fun_cursor1()"
+PL/pgSQL function fun_cursor2() line 4 at PERFORM
+cursor after update
+NOTICE:  true,false,false,1
+CONTEXT:  SQL statement "CALL fun_cursor1()"
+PL/pgSQL function fun_cursor2() line 4 at PERFORM
+cursor after rollback to savepoint
+NOTICE:  false,true,false,0
+CONTEXT:  SQL statement "CALL fun_cursor1()"
+PL/pgSQL function fun_cursor2() line 4 at PERFORM
+NOTICE:  false,true,false,0
+NOTICE:  true,false,false,2
+ fun_cursor2 
+-------------
+ 
+(1 row)
+
+CREATE OR REPLACE FUNCTION fun_cursor1() return void AS
+DECLARE
+BEGIN
+insert into staff values(3, 'xiaoming');
+update staff set name = 'zcna' where id = 1;
+--commit;
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+RAISE division_by_zero;
+end;
+/
+CREATE OR REPLACE PROCEDURE fun_cursor2() AS
+DECLARE
+BEGIN
+fun_cursor1();
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+IF SQL%FOUND THEN
+dbe_output.print_line('cursor effective');
+END IF;
+delete from staff where id = 3;
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+EXCEPTION
+WHEN division_by_zero THEN
+RAISE NOTICE 'test:% ... %',SQLCODE,SQLSTATE;
+RAISE NOTICE '%',SQL%FOUND ||','||SQL%NOTFOUND ||','||SQL%ISOPEN || ',' || SQL%ROWCOUNT;
+end;
+/
+call fun_cursor2();
+NOTICE:  true,false,false,1
+CONTEXT:  SQL statement "CALL fun_cursor1()"
+PL/pgSQL function fun_cursor2() line 4 at PERFORM
+NOTICE:  test:22012 ... 22012
+NOTICE:  true,false,false,1
+ fun_cursor2 
+-------------
+ 
+(1 row)
+
+set behavior_compat_options = '';
+DROP SCHEMA hw_cursor_state CASCADE;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to function proc_test1()
+drop cascades to function proc_test2()
+drop cascades to function proc_test()
+drop cascades to table staff
+drop cascades to function fun_cursor1()
+drop cascades to function fun_cursor2()

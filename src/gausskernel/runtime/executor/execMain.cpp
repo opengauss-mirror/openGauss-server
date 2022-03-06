@@ -37,6 +37,7 @@
  *
  * -------------------------------------------------------------------------
  */
+
 #include "codegen/gscodegen.h"
 
 #include "postgres.h"
@@ -297,9 +298,10 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     }
 
     old_context = MemoryContextSwitchTo(estate->es_query_cxt);
-
+#ifdef ENABLE_LLVM_COMPILE
     /* Initialize the actual CodeGenObj */
     CodeGenThreadRuntimeSetup();
+#endif
 
     /*
      * Fill in external parameters, if any, from queryDesc; and allocate
@@ -543,6 +545,7 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
      */
     old_context = MemoryContextSwitchTo(estate->es_query_cxt);
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * Generate machine code for this query.
      */
@@ -555,6 +558,7 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
             CodeGenThreadRuntimeCodeGenerate();
         }
     }
+#endif
 
     /* Allow instrumentation of Executor overall runtime */
     if (queryDesc->totaltime) {
@@ -767,9 +771,11 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
     UnregisterSnapshot(estate->es_snapshot);
     UnregisterSnapshot(estate->es_crosscheck_snapshot);
 
+#ifdef ENABLE_LLVM_COMPILE
     if (!t_thrd.codegen_cxt.g_runningInFmgr) {
         CodeGenThreadTearDown();
     }
+#endif
 
     /*
      * Must switch out of context before destroying it
@@ -1305,6 +1311,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
         erm->rowmarkId = rc->rowmarkId;
         erm->markType = rc->markType;
         erm->noWait = rc->noWait;
+        erm->waitSec = rc->waitSec;
         erm->numAttrs = rc->numAttrs;
         ItemPointerSetInvalid(&(erm->curCtid));
         estate->es_rowMarks = lappend(estate->es_rowMarks, erm);
@@ -1457,6 +1464,10 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     if (estate->pruningResult) {
         destroyPruningResult(estate->pruningResult);
         estate->pruningResult = NULL;
+    }
+
+    if (planstate->ps_ProjInfo) {
+        planstate->ps_ProjInfo->pi_topPlan = true;
     }
 
     /*
@@ -2119,7 +2130,6 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
 
     // planstate->plan will be release if rollback excuted
     bool is_saved_recursive_union_plan_nodeid = EXEC_IN_RECURSIVE_MODE(planstate->plan);
-
     /*
      * Loop until we've processed the proper number of tuples from the plan.
      */
@@ -2206,20 +2216,27 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
             slot = ExecFilterJunk(estate->es_junkFilter, slot);
         }
 
+#ifdef ENABLE_MULTIPLE_NDOES
         if (stream_instrument) {
             t_thrd.pgxc_cxt.GlobalNetInstr = planstate->instrument;
         }
-
+#endif
         /*
          * If we are supposed to send the tuple somewhere, do so. (In
          * practice, this is probably always the case at this point.)
          */
-        if (sendTuples && !u_sess->exec_cxt.executorStopFlag) {
+#ifdef ENABLE_MULTIPLE_NDOES
+        if (sendTuples && !u_sess->exec_cxt.executorStopFlag)
+#else
+        if (sendTuples)
+#endif
+        {
             (*dest->receiveSlot)(slot, dest);
         }
 
+#ifdef ENABLE_MULTIPLE_NDOES
         t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
-
+#endif
         /*
          * Count tuples processed, if this is a SELECT.  (For other operation
          * types, the ModifyTable plan node must count the appropriate
@@ -2944,7 +2961,7 @@ HeapTuple heap_lock_updated(CommandId cid, Relation relation, int lockmode, Item
                  * invalid if it is already committed.
                  */
                 if (TransactionIdDidCommit(SnapshotDirty.xmin)) {
-                    elog(WARNING,
+                    elog(DEBUG2,
                         "t_xmin %lu is committed in clog, but still"
                         " in procarray, so set it back to invalid.",
                         SnapshotDirty.xmin);

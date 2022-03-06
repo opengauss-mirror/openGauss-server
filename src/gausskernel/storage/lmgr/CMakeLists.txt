@@ -1,7 +1,12 @@
 #This is the main CMAKE for build bin.
 execute_process(
     COMMAND perl generate-lwlocknames.pl ${CMAKE_CURRENT_SOURCE_DIR}/lwlocknames.txt
-    COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/lwlocknames.h ${PROJECT_SRC_DIR}/include/storage/lwlocknames.h
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE LWLOCKNAMES
+)
+
+execute_process(
+    COMMAND cp -f ${CMAKE_CURRENT_SOURCE_DIR}/lwlocknames.h ${PROJECT_SRC_DIR}/include/storage/lwlocknames.h
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     OUTPUT_VARIABLE LWLOCKNAMES
 )

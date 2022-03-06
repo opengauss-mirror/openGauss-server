@@ -1038,6 +1038,11 @@ static bool enable_parametrized_path(PlannerInfo* root, RelOptInfo* baserel, Pat
 {
     Assert(path != NULL);
 
+    if (!ENABLE_SQL_BETA_FEATURE(PREDPUSH_SAME_LEVEL)) {
+        /* sql beta feature is necessary */
+        return false;
+    }
+
     if (ENABLE_PRED_PUSH_FORCE(root) && is_predpush_dest(root, baserel->relids)) {
         if (path->param_info) {
             return !bms_is_subset(path->param_info->ppi_req_outer, predpush_candidates_same_level(root));
@@ -1048,6 +1053,9 @@ static bool enable_parametrized_path(PlannerInfo* root, RelOptInfo* baserel, Pat
 
     return false;
 }
+
+#define HEAP_PAGES_FETCHED(isUstore, pages_fetched, allvisfrac) \
+        (isUstore) ? 0.0 : ceil((pages_fetched) * (1.0 - (allvisfrac)))
 
 /*
  * cost_index
@@ -1071,6 +1079,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
 {
     IndexOptInfo* index = path->indexinfo;
     RelOptInfo* baserel = index->rel;
+    bool isUstore = baserel->is_ustore;
     bool indexonly = (path->path.pathtype == T_IndexOnlyScan);
     List* allclauses = NIL;
     Cost startup_cost = 0;
@@ -1178,6 +1187,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
      * We use the measured fraction of the entire heap that is all-visible,
      * which might not be particularly relevant to the subset of the heap
      * that this query will fetch; but it's not clear how to do better.
+     * For ustore, there is visibility info in index so we will not need to
+     * fetch any heap pages for index-only scan.
      * ----------
      */
 
@@ -1198,7 +1209,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
             tuples_fetched * loop_count, (BlockNumber)baserel->pages, (double)index->pages, root, ispartitionedindex);
 
         if (indexonly)
-            pages_fetched = ceil(pages_fetched * (1.0 - baserel->allvisfrac));
+            pages_fetched = HEAP_PAGES_FETCHED(isUstore, pages_fetched, baserel->allvisfrac);
 
         /* Apply cost mod */
         spc_random_page_cost = RANDOM_PAGE_COST(use_modded_cost, old_random_page_cost, \
@@ -1227,7 +1238,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
             pages_fetched * loop_count, (BlockNumber)baserel->pages, (double)index->pages, root, ispartitionedindex);
 
         if (indexonly)
-            pages_fetched = ceil(pages_fetched * (1.0 - baserel->allvisfrac));
+            pages_fetched = HEAP_PAGES_FETCHED(isUstore, pages_fetched, baserel->allvisfrac);
 
         /* Apply cost mod after new pages fetched */
         spc_random_page_cost = RANDOM_PAGE_COST(use_modded_cost, old_random_page_cost, \
@@ -1248,7 +1259,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
             tuples_fetched, (BlockNumber)baserel->pages, (double)index->pages, root, ispartitionedindex);
 
         if (indexonly)
-            pages_fetched = ceil(pages_fetched * (1.0 - baserel->allvisfrac));
+            pages_fetched = HEAP_PAGES_FETCHED(isUstore, pages_fetched, baserel->allvisfrac);
 
         /* Apply cost mod */
         spc_random_page_cost = RANDOM_PAGE_COST(use_modded_cost, old_random_page_cost, \
@@ -1266,7 +1277,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         pages_fetched = ceil(indexSelectivity * (double)baserel->pages);
 
         if (indexonly)
-            pages_fetched = ceil(pages_fetched * (1.0 - baserel->allvisfrac));
+            pages_fetched = HEAP_PAGES_FETCHED(isUstore, pages_fetched, baserel->allvisfrac);
 
         if (pages_fetched > 0) {
             /* Apply cost mod after new pages fetched */
@@ -1617,6 +1628,13 @@ void cost_bitmap_heap_scan(
          */
         pages_fetched = (2.0 * T * tuples_fetched) / (2.0 * T + tuples_fetched);
     }
+
+    ereport(DEBUG2,
+        (errmodule(MOD_OPT),
+            errmsg("Computing IndexScanCost: pagesFetched: %lf, tuples_fetched: %lf, indexSelectivity: %lf,"
+                   " indexTotalCost: %lf, loopCount: %lf, T: %lf",
+                pages_fetched, tuples_fetched, indexSelectivity, indexTotalCost, loop_count, T)));
+
     if (pages_fetched >= T) {
         pages_fetched = T;
     } else {
@@ -1652,6 +1670,10 @@ void cost_bitmap_heap_scan(
     cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
 
     run_cost += cpu_per_tuple * tuples_fetched;
+    ereport(DEBUG2,
+        (errmodule(MOD_OPT),
+            errmsg("Computing IndexScanCost: startupCost: %lf, runCost: %lf",
+                startup_cost, run_cost)));
 
     path->startup_cost = startup_cost;
     path->total_cost = startup_cost + run_cost;
@@ -4296,6 +4318,7 @@ void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* w
     path->jpath.path.startup_cost = startup_cost;
     path->jpath.path.total_cost = startup_cost + run_cost;
     path->jpath.path.stream_cost = inner_path->stream_cost;
+    path->joinRows = hashjointuples;
 
     if (!u_sess->attr.attr_sql.enable_hashjoin && hasalternative)
         path->jpath.path.total_cost *= g_instance.cost_cxt.disable_cost_enlarge_factor;

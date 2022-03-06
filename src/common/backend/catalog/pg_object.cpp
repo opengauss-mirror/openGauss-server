@@ -36,6 +36,7 @@
 #include "utils/rel.h"
 #include "miscadmin.h"
 #include "catalog/index.h"
+#include "utils/knl_relcache.h"
 
 /*
  * @Description: Insert a new record to pg_object.
@@ -94,13 +95,13 @@ void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const P
         nulls[Anum_pg_object_mtime - 1] = true;
     }
 
-    if (objectOpt.hasCreatecsn && (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM)) {
+    if (objectOpt.hasCreatecsn && (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM)) {
         values[Anum_pg_object_createcsn - 1] = UInt64GetDatum(csn);
     } else {
         nulls[Anum_pg_object_createcsn - 1] = true;
     }
 
-    if (objectOpt.hasChangecsn && (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM)) {
+    if (objectOpt.hasChangecsn && (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM)) {
         values[Anum_pg_object_changecsn - 1] = UInt64GetDatum(csn);
     } else {
         nulls[Anum_pg_object_changecsn - 1] = true;
@@ -159,7 +160,7 @@ void DeletePgObject(Oid objectOid, PgObjectType objectType)
  * 	@in relationChangecsn: the changecsn of table recorded in pg_object.
  * Returns: CommitSeqNo
  */
-static CommitSeqNo GetMaxChangecsn(List* indexIds, CommitSeqNo relationChangecsn)
+static CommitSeqNo GetMaxChangecsn(Relation rel, List* indexIds, CommitSeqNo relationChangecsn)
 {
     HeapTuple tup = NULL;
     TupleDesc tupdesc = NULL;
@@ -213,7 +214,7 @@ void GetObjectCSN(Oid objectOid, Relation userRel, PgObjectType objectType, Obje
        The pg_object system table does not hold objects generated during the database init 
        process,so the object's createcsn and changecsn is zero during the process.
     */
-    if (IsInitdb || !(t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM)) {
+    if (IsInitdb || !(t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM)) {
         return;
     }
     /* 
@@ -248,7 +249,7 @@ void GetObjectCSN(Oid objectOid, Relation userRel, PgObjectType objectType, Obje
             bool hasindex = userRel->rd_rel->relhasindex;
             if (hasindex) {
                 List* indexIds = RelationGetIndexList(userRel);
-                csnInfo->changecsn = GetMaxChangecsn(indexIds, csnInfo->changecsn);
+                csnInfo->changecsn = GetMaxChangecsn(userRel, indexIds, csnInfo->changecsn);
             }
         }
         ReleaseSysCache(tup);
@@ -280,6 +281,9 @@ bool CheckObjectExist(Oid objectOid, PgObjectType objectType)
             break;
         case OBJECT_TYPE_PROC:
             tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(objectOid));
+            break;
+        case OBJECT_TYPE_PKGSPEC:
+            tup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(objectOid));
             break;
         default:
             return false;
@@ -331,7 +335,7 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
         securec_check(rc, "\0", "\0");
         replaces[Anum_pg_object_mtime - 1] = true;
         values[Anum_pg_object_mtime - 1] = nowtime;
-        if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+        if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
             if (!u_sess->exec_cxt.isExecTrunc) {
                 replaces[Anum_pg_object_changecsn - 1] = true;
                 values[Anum_pg_object_changecsn - 1] = UInt64GetDatum(csn);
@@ -342,7 +346,7 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
         CatalogUpdateIndexes(relation, newtuple);
         ReleaseSysCache(tup);
         heap_freetuple_ext(newtuple);
-        if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+        if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
             if (!u_sess->exec_cxt.isExecTrunc &&
                 (objectType == OBJECT_TYPE_RELATION || objectType == OBJECT_TYPE_INDEX)) {
                 Relation userRel = RelationIdGetRelation(objectOid);
@@ -367,7 +371,7 @@ void UpdatePgObjectChangecsn(Oid objectOid, PgObjectType objectType)
     Relation relation = NULL;
     HeapTuple tup = NULL;
     CommitSeqNo csn = t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
-    if (!(t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) || IsInitdb) {
+    if (!(t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) || IsInitdb) {
         return;
     }
     if (!CheckObjectExist(objectOid, objectType)) {

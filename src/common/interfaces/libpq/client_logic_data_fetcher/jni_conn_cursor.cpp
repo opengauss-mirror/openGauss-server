@@ -23,7 +23,9 @@
 
 #include "jni_conn_cursor.h"
 #include "libpq-int.h"
+#ifndef ENABLE_LITE_MODE
 #include <jni.h>
+#endif
 
 static const int DATA_INDEX = 2;
 

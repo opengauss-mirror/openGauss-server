@@ -301,8 +301,13 @@ void UndoSlotBufferCache::RemoveSlotBuffer(UndoSlotPtr slotPtr)
         next->prev_ = entry->prev_;
     }
     size_--;
-    ereport(DEBUG1, (errmsg(UNDOFORMAT("release entry %lu head_ %lu tail_ %lu."), 
-        entry->tag_, head_->tag_, tail_->tag_)));
+    if (size_ != 0) {
+        ereport(DEBUG1, (errmsg(UNDOFORMAT("release entry %lu head_ %lu tail_ %lu."),
+            entry->tag_, head_->tag_, tail_->tag_)));
+    } else {
+        ereport(DEBUG1, (errmsg(UNDOFORMAT("release entry %lu.SlotBuffer is empty"),
+            entry->tag_)));
+    }
     return;
 }
 

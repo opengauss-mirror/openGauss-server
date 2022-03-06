@@ -1,0 +1,7 @@
+set(JDBC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../jdbc_client_lib/gsjdbc4.jar)
+find_package(Java REQUIRED)
+include(UseJava)
+file(GLOB_RECURSE java_files ${CMAKE_CURRENT_SOURCE_DIR}/*.java)
+message(STATUS "Java file ${java_files}")
+add_jar(jdbc_client ${java_files} INCLUDE_JARS ${JDBC_PATH} MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/manifest.txt)
+message(STATUS "gsjdbc4.jar file path ${JDBC_PATH}")

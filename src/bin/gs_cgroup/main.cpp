@@ -105,13 +105,11 @@ static void usage(void)
         "                     with '-N' to display the control group configuration of the specified logical cluster.\n"
         " -P                : display all cgroups tree information of whole cluster.\n"
         " --penalty         : the penalty exception flag, should be used with '-E data'.\n"
-        " -r data           : blkio bps read\n"
         " --recover         : recover the group configure to last change by normal user.\n"
         "                     with '-N' to recover control group of the specified logical cluster.\n"
         " --refresh         : refresh the cgroup group based on the configuration file.\n"
         "                     with '-N' to refresh control group of the specified logical cluster.\n"
         " --revert          : revert the group to default.\n"
-        " -R data           : blkio iops read\n"
         " -s pct            : class group percentage\n"
         " -S name           : specify the Class name together with '-c', '-d', '-u' or '-E' option\n"
         "                     if the class name is \"default\", it will be treated as \"DefaultClass\". \n"
@@ -124,8 +122,6 @@ static void usage(void)
         "                     with '-N' to update control group of the specified logical cluster.\n"
         " -U name           : the user name of database\n"
         " -V [--version]    : show the version.\n"
-        " -w data           : blkio bps write\n"
-        " -W data           : blkio iops write\n"
         "\n"
         "Examples:\n"
         "Root user can execute:\n"
@@ -147,14 +143,6 @@ static void usage(void)
         "  update the CPU cores of Gaussdb:user cgroup as 2~8.\n"
         "gs_cgroup -u --fixed -S class1 -s 40: \n"
         "  update the CPU cores percentage of class1 group as 40%% of the Top group: Class\n"
-        "gs_cgroup -u -S class -r \"major:minor value\": \n"
-        "  update the BLKIO Readbps throttle value of class cgroup.\n"
-        "  The major:minor value can be retrieved by following steps: \n"
-        "  a. run \"df\" command to find the disk which will be controlled;\n"
-        "  b. run \"ls -l device\" to find the major and minor value of the disk;\n"
-        "     device can't include the device number, such as sdd is correct rather than sdd1;\n"
-        "     it may display: brw-rw---- 1 root disk 8, 48 Mar 10 05:44 device\n"
-        "     so the major:minor value is \"8:48\";\n"
         "gs_cgroup -S class -G wg -E \"blocktime=5,elapsedtime=5\" -a\n"
         "gs_cgroup -S class -G wg -E \"spillsize=256,broadcastsize=100\" -a\n"
         "gs_cgroup -c -N ngname: create control groups for the logical cluster ngname.\n"
@@ -371,20 +359,6 @@ static void check_input_for_security(char* input)
 }
 
 /*
- * @Description: check iops and bps values.
- * @IN void
- * @Return:  1: valid 0: invalid
- * @See also:
- */
-static int check_bps_or_iops_value(void)
-{
-    if (cgutil_opt.bpsread[0] || cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] || cgutil_opt.iopswrite[0])
-        return 1;
-
-    return 0;
-}
-
-/*
  * @Description: Check whether the name of class,
  *               Class group and Workload group is valid.
  * @IN void
@@ -516,37 +490,6 @@ static int check_input_valid(void)
 }
 
 /*
- * @Description: check io values.
- * @IN void
- * @Return:  -1: abnormal 0: normal
- * @See also:
- */
-static int check_io_value(void)
-{
-    /* check exception data */
-    if (!(cgutil_opt.cflag || cgutil_opt.dflag || cgutil_opt.uflag || *cgutil_opt.edata)) {
-        fprintf(stderr,
-            "ERROR: please specify one option from '-c', '-d', '-u', '-E' "
-            "when using class name!\n");
-        return -1;
-    }
-
-    /* check group percentage with '-u' flag */
-    if (cgutil_opt.uflag == 0 || cgutil_opt.clspct || cgutil_opt.grppct)
-        return 0;
-
-    /* check io values with '--fixed' flag */
-    if (cgutil_opt.fixed && cgutil_opt.setspct == 0 && cgutil_opt.setfixed == 0 && !check_bps_or_iops_value()) {
-        fprintf(stderr,
-            "ERROR: please specified the fixed percent or IO values "
-            "when updating fixed values!\n");
-        return -1;
-    }
-
-    return 0;
-}
-
-/*
  * @Description: check user info with flags.
  * @IN void
  * @Return:  -1: abnormal 0: normal
@@ -646,13 +589,6 @@ static int check_flag_process(void)
  */
 static int check_group_name_process(int top, int bkd)
 {
-    /* class group name special process */
-    if (cgutil_opt.clsname[0] != '\0') {
-        if (-1 == check_io_value()) {
-            return -1;
-        }
-    }
-
     /* check class name and percentage */
     if (cgutil_opt.clspct && '\0' == cgutil_opt.clsname[0]) {
         fprintf(stderr,
@@ -702,8 +638,7 @@ static int check_group_name_process(int top, int bkd)
             fprintf(stderr, "ERROR: please specify the top dynamic percent when using top name!\n");
             return -1;
         } else if (cgutil_opt.fixed &&
-                   !(cgutil_opt.setspct || cgutil_opt.toppct || top || cgutil_opt.bpsread[0] ||
-                       cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] || cgutil_opt.iopswrite[0])) {
+                   !(cgutil_opt.setspct || cgutil_opt.toppct || top)) {
             fprintf(stderr,
                 "ERROR: please specify the cpu core percent or IO values "
                 "when updating fixed values!\n");
@@ -721,8 +656,7 @@ static int check_group_name_process(int top, int bkd)
         }
 
         /* check backend percent with '--fixed' flag */
-        if (cgutil_opt.fixed && !(cgutil_opt.setspct || cgutil_opt.bkdpct || bkd || cgutil_opt.bpsread[0] ||
-                                    cgutil_opt.iopsread[0] || cgutil_opt.bpswrite[0] || cgutil_opt.iopswrite[0])) {
+        if (cgutil_opt.fixed && !(cgutil_opt.setspct || cgutil_opt.bkdpct || bkd)) {
             fprintf(stderr,
                 "ERROR: please specified the cpu core percent or IO values "
                 "when updating fixed values!\n");
@@ -1120,24 +1054,6 @@ static int parse_options(int argc, char** argv)
             case 'P': /* display Cgroup tree information */
                 cgutil_opt.ptree = 1;
                 break;
-            case 'r': /* IO bps read */
-                sret = strncpy_s(cgutil_opt.bpsread, IODATA_LEN, optarg, IODATA_LEN - 1);
-                securec_check_errno(sret, , -1);
-                check_input_for_security(cgutil_opt.bpsread);
-
-                if (*cgutil_opt.bpsread == '\0')
-                    fprintf(stdout, "NOTICE: invalid IO value for '-r' flag!\n");
-
-                break;
-            case 'R': /* IO iops read */
-                sret = strncpy_s(cgutil_opt.iopsread, IODATA_LEN, optarg, IODATA_LEN - 1);
-                securec_check_errno(sret, , -1);
-                check_input_for_security(cgutil_opt.iopsread);
-
-                if (*cgutil_opt.iopsread == '\0')
-                    fprintf(stdout, "NOTICE: invalid IO value for '-R' flag!\n");
-
-                break;
             case 's': /* Class group percentage */
                 if (check_and_get_group_percent(optarg, "class") == -1)
                     return -1;
@@ -1175,16 +1091,6 @@ static int parse_options(int argc, char** argv)
             case 'V': /* version */
                 cgutil_version = DEF_GS_VERSION;
                 return 0;
-            case 'w': /* IO bps write */
-                sret = strncpy_s(cgutil_opt.bpswrite, IODATA_LEN, optarg, IODATA_LEN - 1);
-                securec_check_errno(sret, , -1);
-                check_input_for_security(cgutil_opt.bpswrite);
-                break;
-            case 'W': /* IO iops write */
-                sret = strncpy_s(cgutil_opt.iopswrite, IODATA_LEN, optarg, IODATA_LEN - 1);
-                securec_check_errno(sret, , -1);
-                check_input_for_security(cgutil_opt.iopswrite);
-                break;
             case 1:
                 if (IS_EXCEPT_FLAG(cgutil_opt.eflag, EXCEPT_NONE))
                     cgutil_opt.eflag = EXCEPT_FLAG(EXCEPT_PENALTY);

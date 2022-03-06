@@ -122,5 +122,13 @@ TDEKeyCacheLock 112
 RoleIdLock 113
 UniqueSqlEvictLock 114
 InstrStmtTrackCtlLock 115
-ReplicationOriginLock 116
-LogicalRepWorkerLock 117
+HashUidLock 116
+ParallelDecodeLock 117
+XLogMaxCSNLock 118
+DisasterCacheLock 119
+MaxCSNArrayLock 120
+RepairBadBlockStatHashLock 121
+ReplicationOriginLock 122
+LogicalRepWorkerLock 123
+XGBoostLibLock 124
+NgroupDestoryLock 125

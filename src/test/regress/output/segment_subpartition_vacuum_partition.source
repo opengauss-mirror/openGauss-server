@@ -1,0 +1,220 @@
+--
+--segment table don't support vacuum full now
+--
+DROP SCHEMA segment_subpartition_vacuum_partition CASCADE;
+ERROR:  schema "segment_subpartition_vacuum_partition" does not exist
+CREATE SCHEMA segment_subpartition_vacuum_partition;
+SET CURRENT_SCHEMA TO segment_subpartition_vacuum_partition;
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "autovacuum = off" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_defer_calculate_snapshot = off" >/dev/null 2>&1
+CREATE TABLE temp1(c1 int, c2 int);
+--
+--1. test for basic function
+--
+CREATE TABLE range_list1
+(
+    month_code VARCHAR2 (30),
+    dept_code  VARCHAR2 (30),
+    user_no    VARCHAR2 (30),
+    sales_amt  int
+) WITH (SEGMENT=ON)
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+    PARTITION p_201901 VALUES LESS THAN('201903')
+    (
+        SUBPARTITION p_201901_a values ('1'),
+        SUBPARTITION p_201901_b values ('2')
+    ),
+    PARTITION p_201902 VALUES LESS THAN('201910')
+    (
+        SUBPARTITION p_201902_a values ('1'),
+        SUBPARTITION p_201902_b values ('2')
+    )
+);
+--vacuum, success
+VACUUM range_list1 PARTITION (p_201901);
+VACUUM range_list1 SUBPARTITION (p_201902_a);
+--vacuum full, success
+VACUUM FULL range_list1 PARTITION (p_201901);
+INFO:  skipping segment table "range_list1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list1 SUBPARTITION (p_201902_a);
+INFO:  skipping segment table "range_list1" --- please use gs_space_shrink to recycle segment space.
+--vacuum full compact, fail
+VACUUM FULL COMPACT range_list1 PARTITION (p_201901);
+ERROR:  COMPACT can not be used with PARTITION
+VACUUM FULL COMPACT range_list1 SUBPARTITION (p_201902_a);
+ERROR:  COMPACT can not be used with SUBPARTITION
+--vacuum freeze, success
+VACUUM FREEZE range_list1 PARTITION (p_201901);
+VACUUM FREEZE range_list1 SUBPARTITION (p_201902_a);
+--vacuum verbose, success
+VACUUM VERBOSE range_list1 PARTITION (p_201901);
+--?INFO:  vacuuming "segment_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
+--?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 out of 0 pages(datanode1 pid=.*)
+DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. CPU 0.00s/0.00u sec elapsed 0.00 sec.
+--?INFO:  vacuuming "segment_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
+--?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 out of 0 pages(datanode1 pid=.*)
+DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. CPU 0.00s/0.00u sec elapsed 0.00 sec.
+VACUUM VERBOSE range_list1 SUBPARTITION (p_201902_a);
+--?INFO:  vacuuming "segment_subpartition_vacuum_partition.range_list1"(datanode1 pid=.*)
+--?INFO:  "range_list1": found 0 removable, 0 nonremovable row versions in 0 out of 0 pages(datanode1 pid=.*)
+DETAIL:  0 dead row versions cannot be removed yet. There were 0 unused item pointers. 0 pages are entirely empty. CPU 0.00s/0.00u sec elapsed 0.00 sec.
+--vacuum option all
+VACUUM (FULL, VERBOSE, FREEZE) range_list1 PARTITION (p_201901);
+INFO:  skipping segment table "range_list1" --- please use gs_space_shrink to recycle segment space.
+VACUUM (FULL, VERBOSE, FREEZE) range_list1 SUBPARTITION (p_201902_a);
+INFO:  skipping segment table "range_list1" --- please use gs_space_shrink to recycle segment space.
+--
+--2. test the actual work
+--
+CREATE TABLE range_list_sales1
+(
+    product_id     INT4,
+    customer_id    INT4,
+    time_id        DATE,
+    channel_id     CHAR(1),
+    type_id        INT4,
+    quantity_sold  NUMERIC(3),
+    amount_sold    NUMERIC(10,2)
+) WITH (SEGMENT=ON)
+PARTITION BY RANGE (customer_id) SUBPARTITION BY LIST (channel_id)
+(
+    PARTITION customer1 VALUES LESS THAN (200)
+    (
+        SUBPARTITION customer1_channel1 VALUES ('0', '1', '2'),
+        SUBPARTITION customer1_channel2 VALUES ('3', '4', '5'),
+        SUBPARTITION customer1_channel3 VALUES ('6', '7', '8'),
+        SUBPARTITION customer1_channel4 VALUES ('9')
+    ),
+    PARTITION customer2 VALUES LESS THAN (500)
+    (
+        SUBPARTITION customer2_channel1 VALUES ('0', '1', '2', '3', '4'),
+        SUBPARTITION customer2_channel2 VALUES (DEFAULT)
+    ),
+    PARTITION customer3 VALUES LESS THAN (1200)
+    (
+        SUBPARTITION customer3_channel1 VALUES ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9')
+    )
+);
+INSERT INTO range_list_sales1 SELECT generate_series(1,1000),
+                                     generate_series(1,1000),
+                                     date_pli('2008-01-01', generate_series(1,1000)),
+                                     generate_series(1,1000)%10,
+                                     generate_series(1,1000)%10,
+                                     generate_series(1,1000)%1000,
+                                     generate_series(1,1000);
+CREATE INDEX range_list_sales1_idx1 ON range_list_sales1(product_id, customer_id) GLOBAL;
+CREATE INDEX range_list_sales1_idx2 ON range_list_sales1(channel_id) GLOBAL;
+CREATE INDEX range_list_sales1_idx3 ON range_list_sales1(customer_id) LOCAL;
+CREATE INDEX range_list_sales1_idx4 ON range_list_sales1(time_id, type_id) LOCAL;
+SELECT pg_relation_size('range_list_sales1');
+ pg_relation_size 
+------------------
+           106496
+(1 row)
+
+--delete & insert
+DELETE FROM range_list_sales1;
+INSERT INTO range_list_sales1 SELECT generate_series(1,1000),
+                                     generate_series(1,1000),
+                                     date_pli('2008-01-01', generate_series(1,1000)),
+                                     generate_series(1,1000)%10,
+                                     generate_series(1,1000)%10,
+                                     generate_series(1,1000)%1000,
+                                     generate_series(1,1000);
+SELECT pg_relation_size('range_list_sales1');
+ pg_relation_size 
+------------------
+           172032
+(1 row)
+
+--vacuum full partition
+INSERT INTO temp1 VALUES(1,1);
+VACUUM FULL range_list_sales1 PARTITION (customer1);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list_sales1 PARTITION (customer2);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list_sales1 PARTITION (customer3);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+SELECT pg_relation_size('range_list_sales1');
+ pg_relation_size 
+------------------
+           172032
+(1 row)
+
+--delete & insert
+DELETE FROM range_list_sales1;
+INSERT INTO range_list_sales1 SELECT generate_series(1,1000),
+                                     generate_series(1,1000),
+                                     date_pli('2008-01-01', generate_series(1,1000)),
+                                     generate_series(1,1000)%10,
+                                     generate_series(1,1000)%10,
+                                     generate_series(1,1000)%1000,
+                                     generate_series(1,1000);
+SELECT pg_relation_size('range_list_sales1');
+ pg_relation_size 
+------------------
+           229376
+(1 row)
+
+--vacuum full subpartition
+INSERT INTO temp1 VALUES(1,1);
+VACUUM FULL range_list_sales1 SUBPARTITION (customer1_channel1);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list_sales1 SUBPARTITION (customer1_channel2);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list_sales1 SUBPARTITION (customer1_channel3);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list_sales1 SUBPARTITION (customer1_channel4);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list_sales1 SUBPARTITION (customer2_channel1);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list_sales1 SUBPARTITION (customer2_channel2);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+VACUUM FULL range_list_sales1 SUBPARTITION (customer3_channel1);
+INFO:  skipping segment table "range_list_sales1" --- please use gs_space_shrink to recycle segment space.
+SELECT pg_relation_size('range_list_sales1');
+ pg_relation_size 
+------------------
+           229376
+(1 row)
+
+--check index is ok
+SELECT /*+ tablescan(range_list_sales1) */ COUNT(product_id) FROM range_list_sales1;
+ count 
+-------
+  1000
+(1 row)
+
+SELECT /*+ indexonlyscan(range_list_sales1 range_list_sales1_idx1) */ COUNT(product_id) FROM range_list_sales1;
+ count 
+-------
+  1000
+(1 row)
+
+SELECT /*+ indexonlyscan(range_list_sales1 range_list_sales1_idx2) */ COUNT(channel_id) FROM range_list_sales1;
+ count 
+-------
+  1000
+(1 row)
+
+SELECT /*+ indexonlyscan(range_list_sales1 range_list_sales1_idx3) */ COUNT(customer_id) FROM range_list_sales1;
+ count 
+-------
+  1000
+(1 row)
+
+SELECT /*+ indexonlyscan(range_list_sales1 range_list_sales1_idx4) */ COUNT(time_id) FROM range_list_sales1;
+ count 
+-------
+  1000
+(1 row)
+
+--finish
+DROP TABLE temp1;
+DROP TABLE range_list1;
+DROP TABLE range_list_sales1;
+DROP SCHEMA segment_subpartition_vacuum_partition CASCADE;
+RESET CURRENT_SCHEMA;
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "autovacuum" >/dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_defer_calculate_snapshot" >/dev/null 2>&1

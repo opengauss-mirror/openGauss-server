@@ -250,9 +250,8 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
          * walsender changes the state to SYNC_REP_WAIT_COMPLETE, it will never
          * update it again, so we can't be seeing a stale value in that case.
          */
-        if (t_thrd.proc->syncRepState == SYNC_REP_WAIT_COMPLETE && !DelayIntoMostAvaSync(true)) {
+        if (t_thrd.proc->syncRepState == SYNC_REP_WAIT_COMPLETE && !DelayIntoMostAvaSync(true))
             break;
-        }
 
         /*
          * If a wait for synchronous replication is pending, we can neither
@@ -603,7 +602,8 @@ void SyncRepReleaseWaiters(void)
     LWLockRelease(SyncRepLock);
 
     ereport(DEBUG3,
-            (errmsg("released %d procs up to receive %X/%X, %d procs up to write %X/%X, %d procs up to flush %X/%X, %d procs up to apply %X/%X",
+            (errmsg("released %d procs up to receive %X/%X, %d procs up to write %X/%X, "
+                    "%d procs up to flush %X/%X, %d procs up to apply %X/%X",
                     numreceive, (uint32)(receivePtr >> 32), (uint32)receivePtr, numwrite, (uint32)(writePtr >> 32),
                     (uint32)writePtr, numflush, (uint32)(flushPtr >> 32), (uint32)flushPtr,
                     numapply, (uint32)(replayPtr >> 32), (uint32)replayPtr)));
@@ -909,7 +909,7 @@ static int SyncRepGetStandbyPriority(void)
      * Since synchronous cascade replication is not allowed, we always set the
      * priority of cascading walsender to zero.
      */
-    if (AM_WAL_STANDBY_SENDER || AM_WAL_SHARE_STORE_SENDER || AM_WAL_HADR_SENDER)
+    if (AM_WAL_STANDBY_SENDER || AM_WAL_SHARE_STORE_SENDER || AM_WAL_HADR_DNCN_SENDER || AM_WAL_DB_SENDER)
         return 0;
 
     if (!SyncStandbysDefined() || t_thrd.syncrep_cxt.SyncRepConfig == NULL || !SyncRepRequested())
@@ -1436,6 +1436,7 @@ void SyncRepCheckSyncStandbyAlive(void)
         ereport(LOG, (errmsg("synchronous master is now standalone")));
 
         t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone = true;
+
         /*
          * If there is any waiting sender, then wake-up them as
          * master has switched to standalone mode

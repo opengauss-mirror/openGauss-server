@@ -20,7 +20,6 @@
 #include "storage/buf/block.h"
 #include "storage/buf/buf.h"
 #include "storage/buf/bufpage.h"
-#include "storage/page_compression.h"
 #include "storage/smgr/relfilenode.h"
 
 struct XLogPhyBlock;
@@ -46,10 +45,13 @@ struct XLogPhyBlock;
 #define REGBUF_KEEP_DATA                           \
     0x10 /* include data even if a full-page image \
           * is taken */
+
+/* The time unit is microsecond. */
+static const int MAX_RPO_SLEEP_TIME = 500000;
+
 /* prototypes for public functions in xloginsert.c: */
 extern void XLogBeginInsert(void);
-extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, bool isupgrade = false, int bucket_id = InvalidBktId, 
-    bool isSwitchoverBarrier = false);
+extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id = InvalidBktId, bool istoast = false);
 extern void XLogEnsureRecordSpace(int nbuffers, int ndatas);
 extern void XLogRegisterData(char* data, int len);
 extern void XLogRegisterBuffer(uint8 block_id, Buffer buffer, uint8 flags, TdeInfo* tdeinfo = NULL);
@@ -61,5 +63,5 @@ extern bool XLogCheckBufferNeedsBackup(Buffer buffer);
 extern XLogRecPtr XLogSaveBufferForHint(Buffer buffer, bool buffer_std);
 extern void InitXLogInsert(void);
 extern void XLogIncludeOrigin(void);
-
+extern void LogCSN(CommitSeqNo *curCSN);
 #endif /* XLOGINSERT_H */

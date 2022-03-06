@@ -17,9 +17,11 @@
 
 #include "fmgr.h"
 #include "access/xlog.h"
+#include "replication/walprotocol.h"
 #include "storage/lock/lwlock.h"
 #include "storage/shmem.h"
 #include "storage/spin.h"
+
 extern const uint32 EXTRA_SLOT_VERSION_NUM;
 #define ARCHIVE_PITR_PREFIX  "pitr_"
 
@@ -195,6 +197,12 @@ typedef struct ArchiveSlotConfig {
 #define INT32_HIGH_MASK 0xFF00
 #define INT32_LOW_MASK 0x00FF
 
+/*
+ * Interval in which standby snapshots are logged into the WAL stream, in
+ * milliseconds.
+ */
+#define LOG_SNAPSHOT_INTERVAL_MS 15000
+
 /* we steal two bytes from persistency for updagrade */
 #define GET_SLOT_EXTRA_DATA_LENGTH(data) (((int)((data).persistency)) >> 16)
 #define SET_SLOT_EXTRA_DATA_LENGTH(data, length) ((data).persistency = (ReplicationSlotPersistency)((int)(((data).persistency) & INT32_LOW_MASK) | ((length) << 16)))
@@ -214,6 +222,7 @@ typedef struct ReplicationSlotState {
     XLogRecPtr max_required;
     XLogRecPtr quorum_min_required;
     XLogRecPtr min_tools_required;
+    XLogRecPtr min_archive_slot_required;
     bool exist_in_use;
 } ReplicationSlotState;
 /*
@@ -292,8 +301,9 @@ extern Datum pg_get_replication_slot_name(PG_FUNCTION_ARGS);
 /* slot redo */
 extern void slot_redo(XLogReaderState* record);
 extern void slot_desc(StringInfo buf, XLogReaderState* record);
+extern const char* slot_type_name(uint8 subtype);
 extern void redo_slot_advance(const ReplicationSlotPersistentData* slotInfo);
-extern void log_slot_advance(const ReplicationSlotPersistentData* slotInfo);
+extern void log_slot_advance(const ReplicationSlotPersistentData* slotInfo, char* extra_content = NULL);
 extern void log_slot_drop(const char* name);
 extern void LogCheckSlot();
 extern Size GetAllLogicalSlot(LogicalPersistentData*& LogicalSlot);

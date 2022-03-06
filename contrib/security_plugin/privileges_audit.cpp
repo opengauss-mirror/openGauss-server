@@ -49,6 +49,25 @@
 #define ACCESS_CONTROL_CHECK_ACL_PRIVILIGE(type) \
     ((check_acl_privilige_hook == NULL) ? true : check_acl_privilige_hook(type))
 
+typedef struct AclObjectType {
+    GrantObjectType grant_type;
+    PrivObject privi_type;
+} AclObjectType;
+
+static AclObjectType aclobject_infos[] = {
+    {ACL_OBJECT_COLUMN, O_COLUMN},
+    {ACL_OBJECT_RELATION, O_TABLE},
+    {ACL_OBJECT_SEQUENCE, O_SEQUENCE},
+    {ACL_OBJECT_DATABASE, O_DATABASE},
+    {ACL_OBJECT_DOMAIN, O_DOMAIN},
+    {ACL_OBJECT_FOREIGN_SERVER, O_SERVER},
+    {ACL_OBJECT_FUNCTION, O_FUNCTION},
+    {ACL_OBJECT_LANGUAGE, O_LANGUAGE},
+    {ACL_OBJECT_NAMESPACE, O_SCHEMA},
+    {ACL_OBJECT_TABLESPACE, O_TABLESPACE},
+    {ACL_OBJECT_DATA_SOURCE, O_DATA_SOURCE},
+};
+
 void add_current_path(int objtype, List *fqdn, gs_stl::gs_string *buffer);
 
 /*
@@ -61,14 +80,17 @@ void add_current_path(int objtype, List *fqdn, gs_stl::gs_string *buffer);
  * ignore_db: whether ignore database
  */
 void internal_audit_object_str(const policy_set *security_policy_ids, const policy_set *policy_ids, const ListCell *rel,
-    const names_pair names, int priv_type, const char *priv_name, int objtype, bool is_rolegrant, bool ignore_db)
+                               const names_pair names, int priv_type, const char *priv_name, int objtype,
+                               int target_type, bool is_rolegrant, bool ignore_db)
 {
     /*
      * Note PolicyLabelItem just support table/function/view/column
      * so that only "all" label will work for other object type
      */
     PolicyLabelItem item;
-    gen_policy_labelitem(item, rel, objtype);
+    if (target_type == ACL_TARGET_OBJECT)  {
+        gen_policy_labelitem(item, rel, objtype);
+    }
 
     /* PolicyLabelItem construction will append schema oid by relid */
     policy_simple_set policy_result;
@@ -213,96 +235,15 @@ bool internal_audit_object_str(const policy_set* security_policy_ids, const poli
     return is_found;
 }
 
-/* append audit logs for comment */
-void audit_object(const policy_set *security_policy_ids, const policy_set *policy_ids, const char *relname,
-    int priv_type, const char *priv_name, int objtype)
-{
-    switch (objtype) {
-        case OBJECT_ROLE:
-            internal_audit_str(security_policy_ids, policy_ids, relname, priv_type, priv_name, O_ROLE);
-            break;
-        case OBJECT_USER:
-            internal_audit_str(security_policy_ids, policy_ids, relname, priv_type, priv_name, O_USER);
-            break;
-        case OBJECT_SCHEMA:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_SCHEMA);
-            break;
-        case OBJECT_SEQUENCE:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_SEQUENCE);
-            break;
-        case OBJECT_DATABASE:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_DATABASE);
-            break;
-        case OBJECT_FOREIGN_SERVER:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_SERVER);
-            break;
-        case OBJECT_FOREIGN_TABLE:
-        case OBJECT_STREAM:
-        case OBJECT_TABLE:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name,
-                (objtype == OBJECT_TABLE) ? O_TABLE : O_FOREIGNTABLE);
-            break;
-        case OBJECT_COLUMN:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_COLUMN);
-            break;
-        case OBJECT_FUNCTION:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_FUNCTION);
-            break;
-        case OBJECT_CONTQUERY:
-        case OBJECT_VIEW:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_VIEW);
-            break;
-        case OBJECT_INDEX:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_INDEX);
-            break;
-        case OBJECT_TABLESPACE:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_TABLESPACE);
-            break;
-        default:
-            break;
-    }
-}
-
 void acl_audit_object(const policy_set *security_policy_ids, const policy_set *policy_ids, const ListCell *rel,
-                      const names_pair names, int priv_type, const char *priv_name, int objtype)
+                      const names_pair names, int priv_type, const char *priv_name, int objtype, int target_type)
 {
-    switch (objtype) {
-        case ACL_OBJECT_COLUMN:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_COLUMN);
-            break;
-        case ACL_OBJECT_RELATION:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_TABLE);
-            break;
-        case ACL_OBJECT_SEQUENCE:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_SEQUENCE);
-            break;
-        case ACL_OBJECT_DATABASE:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_DATABASE,
-                false, true);
-            break;
-        case ACL_OBJECT_DOMAIN:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_DOMAIN);
-            break;
-        case ACL_OBJECT_FOREIGN_SERVER:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_SERVER);
-            break;
-        case ACL_OBJECT_FUNCTION:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_FUNCTION);
-            break;
-        case ACL_OBJECT_LANGUAGE:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_LANGUAGE);
-            break;
-        case ACL_OBJECT_NAMESPACE:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_SCHEMA);
-            break;
-        case ACL_OBJECT_TABLESPACE:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_TABLESPACE);
-            break;
-        case ACL_OBJECT_DATA_SOURCE:
-            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_DATA_SOURCE);
-            break;
-        default:
-            break;
+    PrivObject type = get_privtype_from_aclobject((GrantObjectType)objtype);
+    if (type == O_DATABASE) {
+        internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, type, target_type,
+                                  false, true);
+    } else {
+        internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, type, target_type);
     }
 }
 
@@ -828,37 +769,21 @@ void get_open_cursor_info(PlannedStmt *stmt, char *buff, size_t buff_size)
         printed_size = snprintf_s(buff, buff_size, buff_size - 1, "%s ", cstmt->portalname);
         securec_check_ss(printed_size, "\0", "\0");
     }
-    switch (stmt->commandType) {
-        case CMD_SELECT: {
-            rc = snprintf_s(buff + printed_size, buff_size - printed_size, buff_size - printed_size - 1,
-                "FOR SELECT FROM");
-            securec_check_ss(rc, "\0", "\0");
-            printed_size += rc;
-            break;
-        }
-        case CMD_INSERT: {
-            rc = snprintf_s(buff + printed_size, buff_size - printed_size, buff_size - printed_size - 1,
-                "FOR INSERT TO");
-            securec_check_ss(rc, "\0", "\0");
-            printed_size += rc;
-            break;
-        }
-        case CMD_UPDATE: {
-            rc = snprintf_s(buff + printed_size, buff_size - printed_size, buff_size - printed_size - 1,
-                "FOR UPDATE FROM");
-            securec_check_ss(rc, "\0", "\0");
-            printed_size += rc;
-            break;
-        }
-        case CMD_DELETE: {
-            rc = snprintf_s(buff + printed_size, buff_size - printed_size, buff_size - printed_size - 1,
-                "FOR DELETE FROM");
-            securec_check_ss(rc, "\0", "\0");
-            printed_size += rc;
-            break;
-        }
-        default:
-            break;
-    }
+
+    rc = snprintf_s(buff + printed_size, buff_size - printed_size, buff_size - printed_size - 1,
+        get_cursorinfo(stmt->commandType));
+    securec_check_ss(rc, "\0", "\0");
+    printed_size += rc;
+
     get_cursor_tables(stmt->rtable, buff, buff_size, printed_size);
+}
+
+PrivObject get_privtype_from_aclobject(GrantObjectType acl_type)
+{
+    for (unsigned int i = 0; i < (sizeof(aclobject_infos) / sizeof(aclobject_infos[0])); ++i) {
+        if (aclobject_infos[i].grant_type == acl_type) {
+            return aclobject_infos[i].privi_type;
+        }
+    }
+    return O_UNKNOWN;
 }

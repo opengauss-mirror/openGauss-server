@@ -49,6 +49,7 @@ typedef struct IndexVacuumInfo {
     int message_level;             /* ereport level for progress messages */
     double num_heap_tuples;        /* tuples remaining in heap */
     BufferAccessStrategy strategy; /* access strategy for reads */
+    OidRBTree *invisibleParts;     /* used for Ustore GPI */
 } IndexVacuumInfo;
 
 /*
@@ -107,11 +108,14 @@ struct ScanState;
  * check for conflicting live tuples (possibly blocking).
  */
 typedef enum IndexUniqueCheck {
-    UNIQUE_CHECK_NO,      /* Don't do any uniqueness checking */
-    UNIQUE_CHECK_YES,     /* Enforce uniqueness at insertion time */
-    UNIQUE_CHECK_PARTIAL, /* Test uniqueness, but no error */
-    UNIQUE_CHECK_EXISTING /* Check if existing tuple is unique */
+    UNIQUE_CHECK_NO,            /* Don't do any uniqueness checking */
+    UNIQUE_CHECK_YES,           /* Enforce uniqueness at insertion time */
+    UNIQUE_CHECK_PARTIAL,       /* Test uniqueness, but no error */
+    UNIQUE_CHECK_EXISTING,      /* Check if existing tuple is unique */
+    UNIQUE_CHECK_UPSERT         /* Test uniqueness, but no error and no insertion when a conflict is found */
 } IndexUniqueCheck;
+
+#define IndexUniqueCheckNoError(unique) ((unique) == UNIQUE_CHECK_PARTIAL || (unique) == UNIQUE_CHECK_UPSERT)
 
 /*
  * generalized index_ interface routines (in indexam.c)
@@ -183,12 +187,16 @@ HeapTuple systable_getnext_back(SysScanDesc sysscan);
  * global partition index access method support routines (in genam.c)
  */
 typedef struct GPIScanDescData {
-    HTAB* fakeRelationTable;       /* fake partition relation and partition hash table */
-    OidRBTree* invisiblePartTree;  /* cache invisible partition oid in GPI */
-    Relation parentRelation;       /* parent relation of partition */
-    Relation fakePartRelation;     /* fake-relation using partition */
-    Partition partition;           /* partition use to fake partition rel */
-    Oid currPartOid;               /* current partition oid in GPI */
+    HTAB* fakeRelationTable;                /* fake partition relation and partition hash table */
+    OidRBTree* invisiblePartTree;           /* cache invisible partition oid in GPI */
+    OidRBTree* invisiblePartTreeForVacuum;  /* only _bt_check_unique() may use it
+                                             * to determine the index tuple
+                                             * can be marked as dead
+                                             */
+    Relation parentRelation;                /* parent relation of partition */
+    Relation fakePartRelation;              /* fake-relation using partition */
+    Partition partition;                    /* partition use to fake partition rel */
+    Oid currPartOid;                        /* current partition oid in GPI */
 } GPIScanDescData;
 
 typedef GPIScanDescData* GPIScanDesc;

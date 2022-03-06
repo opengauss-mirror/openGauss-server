@@ -1,0 +1,146 @@
+# Copyright (c) 2022 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
+pg_sql_statement_history:
+  name: pg_sql_statement_history
+  desc: openGauss history query statement history
+  query:
+    - name: pg_sql_statement_history
+      sql: "
+      SELECT H.unique_query_id,
+            H.db_name AS datname,
+            H.schema_name AS SCHEMA,
+      	  H.query,
+      	  (extract(epoch
+      			  FROM H.start_time) * 1000)::bigint as start_time,
+      	  (extract(epoch
+      			  FROM H.finish_time) * 1000)::bigint as finish_time,
+      	  extract(epoch
+      			  FROM H.finish_time - H.start_time)* 1000 AS exc_time,
+      	  H.cpu_time,
+      	  H.data_io_time,
+      	  H.n_returned_rows,
+      	  H.n_tuples_fetched,
+      	  H.n_tuples_returned,
+      	  H.n_tuples_inserted,
+      	  H.n_tuples_updated,
+      	  H.n_tuples_deleted,
+      	  (H.n_blocks_hit / (H.n_blocks_fetched+0.01)) AS hit_rate,
+      	  (H.n_blocks_fetched / (H.n_blocks_hit+0.01)) AS fetch_rate,
+      	  H.lock_wait_count,
+      	  H.lwlock_wait_count,
+      	  S.n_calls,
+      	  S.sort_count / S.n_calls AS sort_count,
+         	S.sort_mem_used / S.n_calls AS sort_mem_used,
+         	S.sort_spill_count / S.n_calls AS sort_spill_count,
+         	S.hash_count / S.n_calls AS hash_count,
+         	S.hash_mem_used / S.n_calls AS hash_mem_used,
+         	S.hash_spill_count / S.n_calls AS hash_spill_count
+      FROM dbe_perf.statement_history H inner join dbe_perf.statement S
+      on H.unique_query_id = S.unique_sql_id
+      WHERE H.query !='COMMIT'
+        AND H.application_name != 'gs_clean'
+        AND S.n_calls > 1
+        AND (H.start_time > now() - (1 / 24 / 60 / 60) * ({scrape_interval} / 1000)
+			OR (exc_time > {scrape_interval} AND H.finish_time > now() - (1 / 24 / 60 / 60) * ({scrape_interval} / 1000))
+		)
+      ORDER BY H.start_time DESC
+      LIMIT 50;"
+      version: '>=0.0.0'
+      timeout: 10
+      status: enable
+  metrics:
+    - name: datname
+      description: Name of database
+      usage: LABEL
+    - name: schema
+      description: Name of schema
+      usage: LABEL
+    - name: start_time
+      description: start executing time
+      usage: LABEL
+    - name: finish_time
+      description: finish executing time
+      usage: LABEL
+    - name: query
+      description: query text
+      usage: LABEL
+    - name: unique_query_id
+      description: unique query id
+      usage: LABEL
+    - name: debug_query_id
+      description: debug query id
+      usage: LABEL
+    - name: n_returned_rows
+      description: select returned rows
+      usage: LABEL
+    - name: n_tuples_returned
+      description: n tuples return
+      usage: LABEL
+    - name: n_tuples_fetched
+      description: select fetch rows
+      usage: LABEL
+    - name: n_tuples_inserted
+      description: insert tuples
+      usage: LABEL
+    - name: n_tuples_updated
+      description: update tuples
+      usage: LABEL
+    - name: n_tuples_deleted
+      description: delete tuples
+      usage: LABEL
+    - name: hit_rate
+      description: hit ratio
+      usage: LABEL
+    - name: fetch_rate
+      description: fetch rate
+      usage: LABEL
+    - name: lock_wait_count
+      description: lock wait count
+      usage: LABEL
+    - name: lwlock_wait_count
+      description: lwclock wait count
+      usage: LABEL
+    - name: cpu_time
+      description: cpu time
+      usage: LABEL
+    - name: data_io_time
+      description: data_io_time
+      usage: LABEL
+    - name: exc_time
+      description: time taken to execute
+      usage: GAUGE
+    - name: n_calls
+      description: the number of calls
+      usage: LABEL
+    - name: sort_count
+      description: sort count
+      usage: LABEL
+    - name: sort_mem_used
+      description: sort mem used
+      usage: LABEL
+    - name: sort_spill_count
+      description: sort spill count
+      usage: LABEL
+    - name: hash_count
+      description: hash count
+      usage: LABEL
+    - name: hash_mem_used
+      description: hash mem used
+      usage: LABEL
+    - name: hash_spill_count
+      description: hash spill count
+      usage: LABEL
+  status: enable
+  ttl: 0
+  timeout: 1

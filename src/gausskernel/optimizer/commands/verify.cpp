@@ -1281,6 +1281,16 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
         SMGR_READ_STATUS rdStatus = smgrread(src, forkNum, blkno, buf);
         /* check the page & crc */
         if (rdStatus == SMGR_RD_CRC_ERROR) {
+            // Retry 5 times to increase program reliability.
+            for (int retryTimes = 1; retryTimes < FAIL_RETRY_MAX_NUM && rdStatus == SMGR_RD_CRC_ERROR; ++retryTimes) {
+                /* If we got a cancel signal during the copy of the data, quit */
+                CHECK_FOR_INTERRUPTS();
+                rdStatus = smgrread(src, forkNum, blkno, buf);
+            }
+            if (rdStatus != SMGR_RD_CRC_ERROR) {
+                continue;
+            }
+
             isValidRelationPage = false;
             /*
              * check the cudesc table|cudesc-toast| cudesc_index. If one of them is damaged, we will have to
@@ -1300,6 +1310,8 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
                         RelationGetRelationName(rel),
                         relpathbackend(src->smgr_rnode.node, src->smgr_rnode.backend, forkNum)),
                         handle_in_client(true)));
+            /* Add the wye page to the global variable and try to fix it. */
+            addGlobalRepairBadBlockStat(src->smgr_rnode, forkNum, blkno);
         }
     }
 

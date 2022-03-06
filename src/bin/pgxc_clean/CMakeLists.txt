@@ -16,7 +16,10 @@ set(TGT_clean_INC
 set(clean_DEF_OPTIONS ${MACRO_OPTIONS} -D_FORTIFY_SOURCE=2)
 set(clean_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS} -O2)
 set(clean_LINK_OPTIONS ${BIN_LINK_OPTIONS} -s)
-set(clean_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -lsecurec -lrt -lz -lminiunz -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -lpq)
+set(clean_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz -lpq)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    list(APPEND clean_LINK_LIBS -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss)
+endif()
 add_bintarget(gs_clean TGT_clean_SRC TGT_clean_INC "${clean_DEF_OPTIONS}" "${clean_COMPILE_OPTIONS}" "${clean_LINK_OPTIONS}" "${clean_LINK_LIBS}")
 add_dependencies(gs_clean elog_static pgport_static pq)
 target_link_directories(gs_clean PUBLIC

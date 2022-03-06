@@ -122,8 +122,6 @@ static void knl_u_attr_init(knl_session_attr* attr)
     attr->attr_sql.under_explain = false;
     attr->attr_resource.enable_auto_explain = false;
     attr->attr_sql.enable_upsert_to_merge = false;
-    attr->attr_sql.for_print_tuple = false;
-    attr->attr_sql.numeric_out_for_format = false;
     attr->attr_common.extension_session_vars_array_size = 0;
     attr->attr_common.extension_session_vars_array = NULL;
 }
@@ -333,7 +331,7 @@ static void knl_u_stream_init(knl_u_stream_context* stream_cxt)
 static void knl_u_sig_init(knl_u_sig_context* sig_cxt)
 {
     sig_cxt->got_SIGHUP = 0;
-    sig_cxt->got_PoolReload = 0;
+    sig_cxt->got_pool_reload = 0;
     sig_cxt->cp_PoolReload = 0;
 }
 
@@ -353,6 +351,7 @@ static void knl_u_SPI_init(knl_u_SPI_context* spi)
     spi->autonomous_session = NULL;
     spi->spi_exec_cplan_stack = NULL;
     spi->cur_tableof_index = NULL;
+    spi->has_stream_in_cursor_or_forloop_sql = false;
 }
 
 static void knl_u_trigger_init(knl_u_trigger_context* tri_cxt)
@@ -439,6 +438,7 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
 
     utils_cxt->TransactionXmin = FirstNormalTransactionId;
     utils_cxt->RecentXmin = FirstNormalTransactionId;
+    utils_cxt->RecentDataXmin = FirstNormalTransactionId;
     utils_cxt->RecentGlobalXmin = InvalidTransactionId;
     utils_cxt->RecentGlobalDataXmin = InvalidTransactionId;
 
@@ -464,11 +464,6 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->memory_context_limited_white_list = NULL;
     utils_cxt->enable_memory_context_control = false;
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
-
-    utils_cxt->donothingDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
-    utils_cxt->debugtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
-    utils_cxt->spi_printtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
-    init_sess_dest(utils_cxt->donothingDR, utils_cxt->debugtupDR, utils_cxt->spi_printtupDR);
 }
 
 static void knl_u_security_init(knl_u_security_context* sec_cxt) {
@@ -803,6 +798,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->curr_compile_context = NULL;
     plsql_cxt->compile_context_list = NIL;
     plsql_cxt->plpgsql_IndexErrorVariable = 0;
+    plsql_cxt->shared_simple_eval_resowner = NULL;
     plsql_cxt->simple_eval_estate = NULL;
     plsql_cxt->simple_econtext_stack = NULL;
     plsql_cxt->context_array = NIL;
@@ -830,8 +826,21 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->isCreateFunction = false;
     plsql_cxt->need_pkg_dependencies = false;
     plsql_cxt->pkg_dependencies = NIL;
+    plsql_cxt->func_tableof_index = NIL;
+    plsql_cxt->pass_func_tupdesc = NULL;
+    plsql_cxt->portal_depth = 0;
     plsql_cxt->auto_parent_session_pkgs = NULL;
     plsql_cxt->not_found_parent_session_pkgs = false;
+    plsql_cxt->storedPortals = NIL;
+    plsql_cxt->portalContext = NIL;
+    plsql_cxt->call_after_auto = false;
+    plsql_cxt->parent_session_id = 0;
+    plsql_cxt->parent_thread_id = 0;
+    plsql_cxt->parent_context = NULL;
+    plsql_cxt->is_package_instantiation = false;
+    plsql_cxt->cur_exception_cxt = NULL;
+    plsql_cxt->pragma_autonomous = false;
+    plsql_cxt->ActiveLobToastOid = InvalidOid;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
@@ -1002,6 +1011,7 @@ static void knl_u_unique_sql_init(knl_u_unique_sql_context* unique_sql_cxt)
     unique_sql_cxt->multi_sql_offset = 0;
     unique_sql_cxt->is_top_unique_sql = false;
     unique_sql_cxt->need_update_calls = true;
+    unique_sql_cxt->skipUniqueSQLCount = 0;
     unique_sql_cxt->unique_sql_sort_instr = (unique_sql_sorthash_instr*)palloc0(sizeof(unique_sql_sorthash_instr));
     unique_sql_cxt->unique_sql_hash_instr = (unique_sql_sorthash_instr*)palloc0(sizeof(unique_sql_sorthash_instr));
     unique_sql_cxt->unique_sql_sort_instr->has_sorthash = false;
@@ -1026,6 +1036,12 @@ static void knl_u_slow_query_init(knl_u_slow_query_context* slow_query_cxt)
     slow_query_cxt->slow_query.n_returned_rows = 0;
     slow_query_cxt->slow_query.current_table_counter = (PgStat_TableCounts*)palloc0(sizeof(PgStat_TableCounts));
     slow_query_cxt->slow_query.unique_sql_id = 0;
+}
+
+static void knl_u_trace_context_init(knl_u_trace_context* trace_cxt)
+{
+    Assert(trace_cxt != NULL);
+    trace_cxt->trace_id[0] = '\0';
 }
 
 static void knl_u_ledger_init(knl_u_ledger_context *ledger_context)
@@ -1062,7 +1078,7 @@ static void knl_u_statement_init(knl_u_statement_context* statement_cxt)
     statement_cxt->stmt_stat_cxt = NULL;
 }
 
-static void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)
+void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)
 {
     relmap_cxt->shared_map = (RelMapFile*)palloc0(sizeof(RelMapFile));
     relmap_cxt->local_map = (RelMapFile*)palloc0(sizeof(RelMapFile));
@@ -1074,9 +1090,9 @@ static void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)
     relmap_cxt->UHeapRelfilenodeMapHash = NULL;
 }
 
-static void knl_u_inval_init(knl_u_inval_context* inval_cxt)
+void knl_u_inval_init(knl_u_inval_context* inval_cxt)
 {
-    inval_cxt->deepthInAcceptInvalidationMessage = 0;
+    inval_cxt->DeepthInAcceptInvalidationMessage = 0;
     inval_cxt->transInvalInfo = NULL;
     inval_cxt->SharedInvalidMessagesArray = NULL;
     inval_cxt->numSharedInvalidMessagesArray = 0;
@@ -1088,7 +1104,7 @@ static void knl_u_inval_init(knl_u_inval_context* inval_cxt)
     inval_cxt->partcache_callback_list =
         (PARTCACHECALLBACK*)palloc0(sizeof(PARTCACHECALLBACK) * MAX_PARTCACHE_CALLBACKS);
     inval_cxt->partcache_callback_count = 0;
-    inval_cxt->SharedInvalidMessageCounter = 0;
+    inval_cxt->SIMCounter = 0;
     inval_cxt->catchupInterruptPending = 0;
     inval_cxt->messages = (SharedInvalidationMessage*)palloc0(MAXINVALMSGS * sizeof(SharedInvalidationMessage));
     inval_cxt->nextmsg = 0;
@@ -1170,6 +1186,7 @@ static void knl_u_pgxc_init(knl_u_pgxc_context* pgxc_cxt)
 {
 #ifdef ENABLE_MULTIPLE_NODES
     pgxc_cxt->NumDataNodes = 0;
+    pgxc_cxt->NumTotalDataNodes = 0;
 #else
     pgxc_cxt->NumDataNodes = 1;
 #endif
@@ -1196,6 +1213,9 @@ static void knl_u_pgxc_init(knl_u_pgxc_context* pgxc_cxt)
     pgxc_cxt->PoolerResendParams = false;
     pgxc_cxt->PoolerConnectionInfo = (PGXCNodeConnectionInfo*)palloc0(sizeof(PGXCNodeConnectionInfo));
     pgxc_cxt->poolHandle = NULL;
+    pgxc_cxt->ConsistencyPointUpdating = false;
+    pgxc_cxt->disasterReadArray = NULL;
+    pgxc_cxt->DisasterReadArrayInit = false;
 
     pgxc_cxt->connection_cache = NIL;
     pgxc_cxt->connection_cache_handle = NIL;
@@ -1249,6 +1269,7 @@ static void knl_u_xact_init(knl_u_xact_context* xact_cxt)
     xact_cxt->sendSeqSchmaName = NULL;
     xact_cxt->sendSeqName = NULL;
     xact_cxt->send_result = NULL;
+    xact_cxt->ActiveLobRelid = InvalidOid;
 }
 
 static void knl_u_ps_init(knl_u_ps_context* ps_cxt)
@@ -1281,16 +1302,28 @@ static void knl_u_mot_init(knl_u_mot_context* mot_cxt)
 }
 #endif
 
+static void knl_u_clientConnTime_init(knl_u_clientConnTime_context* clientConnTime_cxt)
+{
+    Assert(clientConnTime_cxt != NULL);
+
+    /* Record start time while initializing session for client connection */
+    INSTR_TIME_SET_CURRENT(clientConnTime_cxt->connStartTime);
+
+    /* Set flag to "true", to indicate this session in initial process */
+    clientConnTime_cxt->checkOnlyInConnProcess = true;
+}
+
 void knl_session_init(knl_session_context* sess_cxt)
 {
     sess_cxt->status = KNL_SESS_UNINIT;
     DLInitElem(&sess_cxt->elem, sess_cxt);
+    DLInitElem(&sess_cxt->elem2, sess_cxt);
 
     sess_cxt->attachPid = InvalidTid;
     sess_cxt->top_transaction_mem_cxt = NULL;
     sess_cxt->self_mem_cxt = NULL;
     sess_cxt->temp_mem_cxt = NULL;
-
+    sess_cxt->dbesql_mem_cxt = NULL;
     sess_cxt->guc_variables = NULL;
     sess_cxt->num_guc_variables = 0;
     sess_cxt->session_id = 0;
@@ -1339,6 +1372,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_proc_init(&sess_cxt->proc_cxt);
     knl_u_ps_init(&sess_cxt->ps_cxt);
     knl_u_regex_init(&sess_cxt->regex_cxt);
+
     knl_u_relcache_init(&sess_cxt->relcache_cxt);
     knl_u_relmap_init(&sess_cxt->relmap_cxt);
     knl_u_sig_init(&sess_cxt->sig_cxt);
@@ -1359,6 +1393,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_user_login_init(&sess_cxt->user_login_cxt);
     knl_u_percentile_init(&sess_cxt->percentile_cxt);
     knl_u_slow_query_init(&sess_cxt->slow_query_cxt);
+    knl_u_trace_context_init(&sess_cxt->trace_cxt);
     knl_u_statement_init(&sess_cxt->statement_cxt);
     knl_u_streaming_init(&sess_cxt->streaming_cxt);
     knl_u_ledger_init(&sess_cxt->ledger_cxt);
@@ -1367,6 +1402,8 @@ void knl_session_init(knl_session_context* sess_cxt)
 #endif
     KnlUUstoreInit(&sess_cxt->ustore_cxt);
     KnlURepOriginInit(&sess_cxt->reporigin_cxt);
+
+    knl_u_clientConnTime_init(&sess_cxt->clientConnTime_cxt);
 
     MemoryContextSeal(sess_cxt->top_mem_cxt);
 }
@@ -1530,11 +1567,19 @@ bool stp_set_commit_rollback_err_msg(stp_xact_err_type type)
                 break;
             case STP_XACT_PACKAGE_INSTANTIATION:
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
-                    "can not use commit rollback in package instantiation");
+                    "can not use commit/rollback/savepoint in package instantiation");
                 break;
             case STP_XACT_COMPL_SQL:
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
                     "can not use commit rollback in Complex SQL");
+                break;
+            case STP_XACT_IMMUTABLE:
+                rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
+                    "commit/rollback/savepoint is not allowed in a non-volatile function");
+                break;
+            case STP_XACT_TOO_MANY_PORTAL:
+                rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
+                    "transaction statement in store procedure is not supported used in multi-layer portal");
                 break;
             default:
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",

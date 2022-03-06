@@ -231,6 +231,9 @@ void JobExecuteWorkerMain()
         /* Flush any leaked data in the top-level context */
         MemoryContextResetAndDeleteChildren(t_thrd.mem_cxt.msg_mem_cxt);
 
+        /* release resource held by lsc */
+        AtEOXact_SysDBCache(false);
+
         LWLockReleaseAll();
         if (t_thrd.utils_cxt.CurrentResourceOwner) {
             ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);

@@ -39,6 +39,11 @@ static text* dotrim(const char* string, int stringlen, const char* set, int setl
 Datum lower(PG_FUNCTION_ARGS)
 {
     text* in_string = PG_GETARG_TEXT_PP(0);
+    if (unlikely(VARATT_IS_HUGE_TOAST_POINTER(in_string))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("lower() arguments cannot exceed 1GB")));
+    }
     char* out_string = NULL;
     text* result = NULL;
 
@@ -66,6 +71,11 @@ Datum lower(PG_FUNCTION_ARGS)
 Datum upper(PG_FUNCTION_ARGS)
 {
     text* in_string = PG_GETARG_TEXT_PP(0);
+    if (unlikely(VARATT_IS_HUGE_TOAST_POINTER(in_string))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("upper() arguments cannot exceed 1GB")));
+    }
     char* out_string = NULL;
     text* result = NULL;
 
@@ -637,7 +647,15 @@ Datum rtrim1(PG_FUNCTION_ARGS)
     text* string = PG_GETARG_TEXT_PP(0);
     text* ret = NULL;
 
-    ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, false, true);
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT) {
+        /*
+         * char(n) will not ignore the tailing blanks in A_FORMAT compatibility.
+         * here, we just return original input.
+         */
+        PG_RETURN_TEXT_P(string);
+    } else {
+        ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, false, true);
+    }
 
     if ((ret == NULL || 0 == VARSIZE_ANY_EXHDR(ret)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
         PG_RETURN_NULL();

@@ -679,6 +679,8 @@ typedef struct BTScanPosItem { /* what we remember about each match */
     LocationIndex tupleOffset; /* IndexTuple's offset in workspace, if any */
     Oid partitionOid;          /* partition table oid in workspace, if any */
     int2 bucketid;             /* bucketid in workspace, if any */
+    /* only used in ubtree */
+    bool needRecheck;
 } BTScanPosItem;
 
 typedef struct BTScanPosData {
@@ -1112,6 +1114,7 @@ extern Buffer _bt_walk_left(Relation rel, Buffer buf);
 extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost);
 extern bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_check_natts(const Relation index, Page page, OffsetNumber offnum);
+extern int _bt_getrootheight(Relation rel);
 
 /*
  * prototypes for functions in nbtutils.c
@@ -1144,8 +1147,7 @@ extern double _bt_spools_heapscan(Relation heap, Relation index, BTBuildState *b
 extern void _bt_end_parallel();
 extern BTSpool* _bt_spoolinit(Relation heap, Relation index, bool isunique, bool isdead, void* meminfo);
 extern void _bt_spooldestroy(BTSpool* btspool);
-extern void _bt_spool(BTSpool *btspool, ItemPointer self, Datum *values, const bool *isnull,
-    IndexTransInfo *transInfo = NULL);
+extern void _bt_spool(BTSpool *btspool, ItemPointer self, Datum *values, const bool *isnull);
 extern void _bt_leafbuild(BTSpool* btspool, BTSpool* spool2);
 // these 4 functions are move here from nbtsearch.cpp(static functions)
 extern void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup);
@@ -1161,6 +1163,7 @@ extern uint64 uniter_next(pg_atomic_uint64 *curiter, uint32 cycle0, uint32 cycle
  */
 extern void btree_redo(XLogReaderState* record);
 extern void btree_desc(StringInfo buf, XLogReaderState* record);
+extern const char* btree_type_name(uint8 subtype);
 extern void btree_xlog_startup(void);
 extern void btree_xlog_cleanup(void);
 extern bool btree_safe_restartpoint(void);
