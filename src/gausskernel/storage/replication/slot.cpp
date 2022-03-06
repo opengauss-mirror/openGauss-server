@@ -705,7 +705,8 @@ static void ReplicationSlotDropAcquired(void)
     } else {
         volatile ReplicationSlot *vslot = slot;
 
-        bool fail_softly = GET_SLOT_PERSISTENCY(slot->data) == RS_EPHEMERAL;
+        bool fail_softly = GET_SLOT_PERSISTENCY(slot->data) == RS_EPHEMERAL ||
+            (GET_SLOT_PERSISTENCY(slot->data) == RS_PERSISTENT && slot->extra_content != NULL);
         SpinLockAcquire(&slot->mutex);
         vslot->active = false;
         SpinLockRelease(&slot->mutex);
