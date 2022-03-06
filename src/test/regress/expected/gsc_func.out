@@ -68,8 +68,8 @@ select * from gs_gsc_catalog_detail(1, 1262) limit 1;
 (1 row)
 
 select * from gs_gsc_catalog_detail(-1, 1259) limit 1;
- database_id | database_name | rel_id | rel_name | cache_id |  self  |  ctid  | infomask | infomask2 | hash_value | refcount 
--------------+---------------+--------+----------+----------+--------+--------+----------+-----------+------------+----------
+--?.* database_id | database_name | rel_id | rel_name | cache_id |  self   |  ctid   | infomask | infomask2 | hash_value | refcount
+--?.*-------------+---------------+--------+----------+----------+---------+---------+----------+-----------+------------+----------
 --?.*       16299 | postgres      |   1259 | pg_class |       84 | (7, 3) | (7, 3) |    10507 |        40 | 1520565747 |        0
 (1 row)
 

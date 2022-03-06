@@ -1,0 +1,6 @@
+\! @abs_bindir@/gsql -dpostgres -p @portstring@ -c "create database gs_basebackup;"
+\! @abs_bindir@/gsql -dgs_basebackup -p @portstring@ -f "@abs_srcdir@/sql/gs_basebackup/init/compress_data.sql";
+\! mkdir @abs_bindir@/../gs_basebackup_node_nstream_np
+\! chmod 700 @abs_bindir@/../gs_basebackup_node_nstream_np
+\! chmod +x  @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh
+\! @abs_srcdir@/script/gs_basebackup/gs_basebackup.sh @abs_bindir@ @abs_srcdir@ @portstring@ gs_basebackup_node_nstream_np compress_data.sql

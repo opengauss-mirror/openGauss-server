@@ -53,6 +53,7 @@ static inline void PRXLogRecGetBlockTag(XLogRecParseState *recordBlockState, Rel
         rnode->relNode = blockparse->blockhead.relNode;
         rnode->spcNode = blockparse->blockhead.spcNode;
         rnode->bucketNode = blockparse->blockhead.bucketNode;
+        rnode->opt = blockparse->blockhead.opt;
     }
     if (blknum != NULL) {
         *blknum = blockparse->blockhead.blkno;
@@ -245,6 +246,7 @@ void PRTrackRelStorageDrop(XLogRecParseState *recordBlockState, HTAB *redoItemHa
         rNode.dbNode = blockparse->blockhead.dbNode;
         rNode.relNode = blockparse->blockhead.relNode;
         rNode.bucketNode = blockparse->blockhead.bucketNode;
+        rNode.opt = blockparse->blockhead.opt;
 #ifdef USE_ASSERT_CHECKING
         ereport(LOG, (errmsg("PRTrackRelTruncate:(%X/%X)clear relation %u/%u/%u forknum %u record",
             (uint32)(blockparse->blockhead.end_ptr >> 32), (uint32)(blockparse->blockhead.end_ptr), rNode.spcNode,

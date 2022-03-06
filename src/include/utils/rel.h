@@ -94,6 +94,16 @@ typedef  struct  RelationBucketKey
     Oid         *bucketKeyType;		/*the data type of partition key*/
 }RelationBucketKey;
 
+/* page compress related reloptions. */
+typedef struct PageCompressOpts {
+    int compressType;                /* compress algorithm */
+    int compressLevel;        /* compress level */
+    uint32 compressChunkSize;        /* chunk size of compressed data */
+    uint32 compressPreallocChunks;    /* prealloced chunks to store compressed data */
+    bool compressByteConvert;  /* byte row-coll-convert */
+    bool compressDiffConvert;  /* make difference convert */
+} PageCompressOpts;
+
 /* describe commit sequence number of object in pg_object */
 typedef struct ObjectCSN
 {
@@ -320,6 +330,12 @@ typedef enum RedisRelAction {
     REDIS_REL_RESET_CTID
 } RedisHtlAction;
 
+/* PageCompressOpts->compressType values */
+typedef enum CompressTypeOption {
+    COMPRESS_TYPE_NONE = 0, COMPRESS_TYPE_PGLZ = 1, COMPRESS_TYPE_ZSTD = 2
+} CompressTypeOption;
+
+
 typedef struct StdRdOptions {
     int32 vl_len_;           /* varlena header (do not touch directly!) */
     int fillfactor;          /* page fill factor in percent (0..100) */
@@ -388,6 +404,7 @@ typedef struct StdRdOptions {
     char* encrypt_algo;
     bool enable_tde;     /* switch flag for table-level TDE encryption */
     bool on_commit_delete_rows; /* global temp table */
+    PageCompressOpts compress; /* page compress related reloptions. */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -793,6 +810,6 @@ extern void RelationDecrementReferenceCount(Oid relationId);
 
 extern void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info);
 extern char RelationGetRelReplident(Relation r);
-
+extern void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compressOpts, const char* name);
 #endif /* REL_H */
 

@@ -113,6 +113,10 @@ static relopt_bool boolRelOpts[] = {
     {{ "crossbucket", "Enables cross bucket index creation in this index relation", RELOPT_KIND_BTREE}, false },
     {{ "enable_tde", "enable table's level transparent data encryption", RELOPT_KIND_HEAP }, false },
     {{ "hasuids", "Enables uids in this relation", RELOPT_KIND_HEAP }, false },
+    {{ "compress_byte_convert", "Whether do byte convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     false },
+    {{ "compress_diff_convert", "Whether do diiffer convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     false },
     /* list terminator */
     {{NULL}}
 };
@@ -233,6 +237,16 @@ static relopt_int intRelOpts[] = {
         },
         0, 1, 32
     },
+    {{ "compress_level", "Level of page compression.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, -31, 31},
+    {{ "compresstype", "compress type (none, pglz or zstd).", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 2},
+    {{ "compress_chunk_size", "Size of chunk to store compressed page.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     BLCKSZ / 2,
+     BLCKSZ / 16,
+     BLCKSZ / 2},
+    {{ "compress_prealloc_chunks", "Number of prealloced chunks for each block.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     0,
+     0,
+     7},
     /* list terminator */
     {{NULL}}
 };
@@ -1948,7 +1962,20 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "cmk_id", RELOPT_TYPE_STRING, offsetof(StdRdOptions, cmk_id)},
         { "encrypt_algo", RELOPT_TYPE_STRING, offsetof(StdRdOptions, encrypt_algo)},
         { "enable_tde", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, enable_tde)},
-        { "hasuids", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hasuids) }
+        { "hasuids", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hasuids) },
+        { "compresstype", RELOPT_TYPE_INT, 
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressType)},
+        { "compress_level", RELOPT_TYPE_INT,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressLevel)},
+        { "compress_chunk_size", RELOPT_TYPE_INT,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressChunkSize)},
+        {"compress_prealloc_chunks", RELOPT_TYPE_INT,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressPreallocChunks)},
+        { "compress_byte_convert", RELOPT_TYPE_BOOL,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressByteConvert)},
+        { "compress_diff_convert", RELOPT_TYPE_BOOL,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
+
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
@@ -2595,6 +2622,25 @@ void ForbidUserToSetDefinedOptions(List *options)
 }
 
 /*
+ * @Description: compressed parameter cannot be changed by ALTER TABLE statement if table is uncompressed table.
+ *   this function do the checking work.
+ * @Param[IN] options: input user options
+ * @See also:
+ */
+void ForbidUserToSetCompressedOptions(List *options)
+{
+    static const char *unSupportOptions[] = {"compresstype",   "compress_chunk_size",   "compress_prealloc_chunks",
+                                             "compress_level", "compress_byte_convert", "compress_diff_convert"};
+    int firstInvalidOpt = -1;
+    if (FindInvalidOption(options, unSupportOptions, lengthof(unSupportOptions), &firstInvalidOpt)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 (errmsg("Un-support feature"), errdetail("Option \"%s\" doesn't allow ALTER on uncompressed table",
+                                                          unSupportOptions[firstInvalidOpt]))));
+    }
+}
+
+/*
  * @Description: forbid to change inner option
  *   inner options only can be used by system itself.
  *   forbid all the users to set or change the inner options.
@@ -2887,4 +2933,34 @@ bool is_cstore_option(char relkind, Datum reloptions)
         StdRdOptionsGetStringData(std_opt, orientation, ORIENTATION_ROW)) == 0;
     pfree_ext(std_opt);
     return result;
+}
+
+void SetOneOfCompressOption(const char* defname, TableCreateSupport* tableCreateSupport)
+{
+    if (pg_strcasecmp(defname, "compresstype") == 0) {
+        tableCreateSupport->compressType = true;
+    } else if (pg_strcasecmp(defname, "compress_chunk_size") == 0) {
+        tableCreateSupport->compressChunkSize = true;
+    } else if (pg_strcasecmp(defname, "compress_prealloc_chunks") == 0) {
+        tableCreateSupport->compressPreAllocChunks = true;
+    } else if (pg_strcasecmp(defname, "compress_level") == 0) {
+        tableCreateSupport->compressLevel = true;
+    } else if (pg_strcasecmp(defname, "compress_byte_convert") == 0) {
+        tableCreateSupport->compressByteConvert = true;
+    } else if (pg_strcasecmp(defname, "compress_diff_convert") == 0) {
+        tableCreateSupport->compressDiffConvert = true;
+    }
+}
+
+void CheckCompressOption(TableCreateSupport *tableCreateSupport)
+{
+    if (!tableCreateSupport->compressType && HasCompressOption(tableCreateSupport)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/"
+                               "compress_diff_convert should be used with compresstype.")));
+    }
+    if (!tableCreateSupport->compressByteConvert && tableCreateSupport->compressDiffConvert) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("compress_diff_convert should be used with compress_byte_convert.")));
+    }
 }

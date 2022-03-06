@@ -319,17 +319,30 @@ void log_smgrcreate(RelFileNode* rnode, ForkNumber forkNum)
     if (IsSegmentFileNode(*rnode)) {
         return;
     }
-    
+
+    xl_smgr_create_compress xlrec;
+    uint size;
+    uint8 info = XLOG_SMGR_CREATE | XLR_SPECIAL_REL_UPDATE;
+    /*
+    * compressOptions Copy
+    */
+    if (rnode->opt != 0) {
+        xlrec.pageCompressOpts = rnode->opt;
+        size = sizeof(xl_smgr_create_compress);
+        info |= XLR_REL_COMPRESS;
+    } else {
+        size = sizeof(xl_smgr_create);
+    }
+
     /*
      * Make an XLOG entry reporting the file creation.
      */
-    xl_smgr_create xlrec;
-    xlrec.forkNum = forkNum;
-    RelFileNodeRelCopy(xlrec.rnode, *rnode);
+    xlrec.xlrec.forkNum = forkNum;
+    RelFileNodeRelCopy(xlrec.xlrec.rnode, *rnode);
 
     XLogBeginInsert();
-    XLogRegisterData((char*)&xlrec, sizeof(xlrec));
-    XLogInsert(RM_SMGR_ID, XLOG_SMGR_CREATE | XLR_SPECIAL_REL_UPDATE, rnode->bucketNode);
+    XLogRegisterData((char*)&xlrec, size);
+    XLogInsert(RM_SMGR_ID, info, rnode->bucketNode);
 }
 
 static void CStoreRelDropStorage(Relation rel, RelFileNode* rnode, Oid ownerid)
@@ -691,14 +704,24 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
          * Make an XLOG entry reporting the file truncation.
          */
         XLogRecPtr lsn;
-        xl_smgr_truncate xlrec;
+        xl_smgr_truncate_compress xlrec;
+        uint size;
+        uint8 info = XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE;
 
-        xlrec.blkno = nblocks;
-        RelFileNodeRelCopy(xlrec.rnode, rel->rd_node);
+        xlrec.xlrec.blkno = nblocks;
+
+        if (rel->rd_node.opt != 0) {
+            xlrec.pageCompressOpts = rel->rd_node.opt;
+            size = sizeof(xl_smgr_truncate_compress);
+            info |= XLR_REL_COMPRESS;
+        } else {
+            size = sizeof(xl_smgr_truncate);
+        }
+
+        RelFileNodeRelCopy(xlrec.xlrec.rnode, rel->rd_node);
 
         XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, sizeof(xlrec));
-
+        XLogRegisterData((char*)&xlrec, size);
         lsn = XLogInsert(RM_SMGR_ID, XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE, rel->rd_node.bucketNode);
 
         /*
@@ -1213,7 +1236,7 @@ void smgr_redo(XLogReaderState* record)
 {
     XLogRecPtr lsn = record->EndRecPtr;
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-
+    bool compress = XLogRecGetInfo(record) & XLR_REL_COMPRESS;
     /* Backup blocks are not used in smgr records */
     Assert(!XLogRecHasAnyBlockRefs(record));
 
@@ -1222,14 +1245,14 @@ void smgr_redo(XLogReaderState* record)
 
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-        smgr_redo_create(rnode, xlrec->forkNum, (char *)xlrec);    
-            /* Redo column file, attid is hidden in forkNum */
-
+        rnode.opt = compress ? ((xl_smgr_create_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
+        smgr_redo_create(rnode, xlrec->forkNum, (char *)xlrec);
+        /* Redo column file, attid is hidden in forkNum */
     } else if (info == XLOG_SMGR_TRUNCATE) {
         xl_smgr_truncate* xlrec = (xl_smgr_truncate*)XLogRecGetData(record);
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-
+        rnode.opt = compress ? ((xl_smgr_truncate_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
         /*
          * Forcibly create relation if it doesn't exist (which suggests that
          * it was dropped somewhere later in the WAL sequence).  As in

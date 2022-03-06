@@ -301,10 +301,12 @@ void PrepForRead(char* path, int64 blocknum, bool is_segment, RelFileNode *relno
         char* bucketNodestr = strstr(path, "_b");
         if (NULL != bucketNodestr) {
             bucketNodestr += 2; /* delete first two chars: _b */
-            flag = StrToInt32(bucketNodestr, &(relfilenode.rnode.node.bucketNode));
+            int _bucketNode;
+            flag = StrToInt32(bucketNodestr, &_bucketNode);   // carrottodo
             if (!flag) {
                 ereport(ERROR, (errmsg("Can not covert %s to int32 type. \n", bucketNodestr)));
             }
+            relfilenode.rnode.node.bucketNode = (int2)_bucketNode;
             rc = strncpy_s(pathFirstpart, MAXFNAMELEN, path, strlen(path) - strlen(bucketNodestr));
             securec_check(rc, "\0", "\0");
         }
@@ -852,13 +854,14 @@ Datum gs_read_segment_block_from_remote(PG_FUNCTION_ARGS)
     uint32 dbNode = PG_GETARG_UINT32(1);
     uint32 relNode = PG_GETARG_UINT32(2);
     int16 bucketNode = PG_GETARG_INT16(3);
-    int32 forkNum = PG_GETARG_INT32(4);
-    uint64 blockNum = (uint64)PG_GETARG_TRANSACTIONID(5);
-    uint32 blockSize = PG_GETARG_UINT32(6);
-    uint64 lsn = (uint64)PG_GETARG_TRANSACTIONID(7);
-    uint32 seg_relNode = PG_GETARG_UINT32(8);
-    uint32 seg_block = PG_GETARG_UINT32(9);
-    int32 timeout = PG_GETARG_INT32(10);
+    uint16 opt = PG_GETARG_INT16(4);
+    int32 forkNum = PG_GETARG_INT32(5);
+    uint64 blockNum = (uint64)PG_GETARG_TRANSACTIONID(6);
+    uint32 blockSize = PG_GETARG_UINT32(7);
+    uint64 lsn = (uint64)PG_GETARG_TRANSACTIONID(8);
+    uint32 seg_relNode = PG_GETARG_UINT32(9);
+    uint32 seg_block = PG_GETARG_UINT32(10);
+    int32 timeout = PG_GETARG_INT32(11);
 
     XLogPhyBlock pblk = {
         .relNode = seg_relNode,
@@ -871,6 +874,7 @@ Datum gs_read_segment_block_from_remote(PG_FUNCTION_ARGS)
     key.relfilenode.dbNode = dbNode;
     key.relfilenode.relNode = relNode;
     key.relfilenode.bucketNode = bucketNode;
+    key.relfilenode.opt = opt;
     key.forknum = forkNum;
     key.blocknum = blockNum;
 

@@ -325,6 +325,7 @@ extern bool ConditionalLockBuffer(Buffer buffer);
 extern void LockBufferForCleanup(Buffer buffer);
 extern bool ConditionalLockBufferForCleanup(Buffer buffer);
 extern bool ConditionalLockUHeapBufferForCleanup(Buffer buffer);
+extern bool IsBufferCleanupOK(Buffer buffer);
 extern bool HoldingBufferPinThatDelaysRecovery(void);
 extern void AsyncUnpinBuffer(volatile void* bufHdr, bool forgetBuffer);
 extern void AsyncCompltrPinBuffer(volatile void* bufHdr);

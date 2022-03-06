@@ -87,6 +87,7 @@
 #include "pgxc/groupmgr.h"
 #include "storage/buf/buf.h"
 #include "storage/predicate.h"
+#include "storage/page_compression.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/smgr/smgr.h"
@@ -514,8 +515,9 @@ static void InitSubPartitionDef(Partition newPartition, Oid partOid, char strate
  */
 Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, Oid relid, Oid relfilenode,
     Oid bucketOid, TupleDesc tupDesc, char relkind, char relpersistence, bool partitioned_relation, bool rowMovement,
-    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Oid ownerid,
-    bool skip_create_storage, TableAmType tam_type, int8 relindexsplit, StorageType storage_type, bool newcbi)
+    bool shared_relation, bool mapped_relation, bool allow_system_table_mods, int8 row_compress, Datum reloptions,
+    Oid ownerid, bool skip_create_storage, TableAmType tam_type, int8 relindexsplit, StorageType storage_type,
+    bool newcbi, Oid accessMethodObjectId)
 {
     bool create_storage = false;
     Relation rel;
@@ -626,9 +628,11 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
         relpersistence,
         relkind,
         row_compress,
+        reloptions,
         tam_type,
         relindexsplit,
-        storage_type
+        storage_type,
+        accessMethodObjectId
     );
 
     if (partitioned_relation) {
@@ -2712,6 +2716,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
         mapped_relation,
         allow_system_table_mods,
         row_compress,
+        reloptions,
         ownerid,
         false,
         tam,
@@ -5248,7 +5253,7 @@ void dropDeltaTableOnPartition(Oid partId)
  *
  */
 Partition heapCreatePartition(const char* part_name, bool for_partitioned_table, Oid part_tablespace, Oid part_id,
-    Oid partFileNode, Oid bucketOid, Oid ownerid, StorageType storage_type, bool newcbi)
+    Oid partFileNode, Oid bucketOid, Oid ownerid, StorageType storage_type, bool newcbi, Datum reloptions)
 {
     Partition new_part_desc = NULL;
     bool createStorage = false;
@@ -5301,7 +5306,8 @@ Partition heapCreatePartition(const char* part_name, bool for_partitioned_table,
         part_id,      /* partition oid */
         partFileNode, /* partition's file node, same as partition oid*/
         part_tablespace,
-        for_partitioned_table ? HEAP_DISK : storage_type);
+        for_partitioned_table ? HEAP_DISK : storage_type,
+        reloptions);
 
     /*
      * Save newcbi as a context indicator to 
@@ -5805,7 +5811,9 @@ Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid, Oid partTablespa
         newPartrelfileOid,
         bucketOid,
         ownerid,
-        storage_type);
+        storage_type,
+        false,
+        reloptions);
 
     Assert(newPartitionOid == PartitionGetPartid(newPartition));
     if (isSubpartition) {
@@ -6012,7 +6020,9 @@ Oid HeapAddIntervalPartition(Relation pgPartRel, Relation rel, Oid partTableOid,
         partrelfileOid,
         bucketOid,
         ownerid,
-        storage_type);
+        storage_type,
+        false,
+        reloptions);
     pfree(partName);
 
     Assert(newPartitionOid == PartitionGetPartid(newPartition));
@@ -6100,7 +6110,8 @@ Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
         forPartitionTable = false;
     }
     newListPartition = heapCreatePartition(newListPartDef->partitionName, forPartitionTable, newPartitionTableSpaceOid,
-                                           newListPartitionOid, partrelfileOid, bucketOid, ownerid, storage_type);
+                                           newListPartitionOid, partrelfileOid, bucketOid, ownerid, storage_type,false,
+        reloptions);
 
     Assert(newListPartitionOid == PartitionGetPartid(newListPartition));
 
@@ -6386,7 +6397,9 @@ Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
                                            partrelfileOid,
                                            bucketOid,
                                            ownerid,
-                                           storage_type);
+                                           storage_type,
+                                           false,
+                                           reloptions);
 
     Assert(newHashPartitionOid == PartitionGetPartid(newHashPartition));
     if (isSubpartition) {
@@ -6561,7 +6574,9 @@ static void addNewPartitionTupleForTable(Relation pg_partition_rel, const char* 
         new_partition_rfoid,
         InvalidOid,
         ownerid,
-        HEAP_DISK);
+        HEAP_DISK,
+        false,
+        reloptions);
 
     Assert(new_partition_oid == PartitionGetPartid(new_partition));
     new_partition->pd_part->parttype = PART_OBJ_TYPE_PARTED_TABLE;

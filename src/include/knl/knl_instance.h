@@ -1199,6 +1199,7 @@ typedef struct knl_instance_context {
     knl_g_archive_context archive_obs_cxt;
     knl_g_archive_thread_info archive_thread_info;
     struct HTAB* ngroup_hash_table;
+    struct HTAB* mmapCache;
     knl_g_hypo_context hypo_cxt;
 
     knl_g_segment_context segment_cxt;

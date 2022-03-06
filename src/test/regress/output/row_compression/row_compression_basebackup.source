@@ -1,0 +1,28 @@
+--?.*
+CREATE DATABASE
+--?.*
+CREATE TABLE
+CREATE INDEX
+INSERT 0 1000
+CHECKPOINT
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+ count 
+-------
+  1000
+(1 row)
+
+SET
+ count 
+-------
+  1000
+(1 row)
+
+--?.*
+SHUTDOWN

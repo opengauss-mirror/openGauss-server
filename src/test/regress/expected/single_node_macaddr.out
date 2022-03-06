@@ -41,7 +41,6 @@ SELECT * FROM macaddr_data;
 
 CREATE INDEX macaddr_data_btree ON macaddr_data USING btree (b);
 CREATE INDEX macaddr_data_hash ON macaddr_data USING hash (b);
-ERROR:  access method "hash" does not support row store
 SELECT a, b, trunc(b) FROM macaddr_data ORDER BY 2, 1;
  a  |         b         |       trunc       
 ----+-------------------+-------------------

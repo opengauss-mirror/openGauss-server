@@ -696,6 +696,7 @@ ifneq ($(with_openeuler_os), yes)
 	cp -d $(with_3rd)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)/lib/libevent* '$(DESTDIR)$(libdir)/'
 	cp $(SECUREDYNAMICLIB_HOME)/libsecurec* '$(DESTDIR)$(libdir)/'
 ifneq (, $(findstring __USE_NUMA, $(CFLAGS)))
+	cp $(ZSTD_LIB_PATH)/libzstd* '$(DESTDIR)$(libdir)/'
 	cp $(NUMA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 endif
 ifeq ($(enable_mot), yes)

@@ -354,7 +354,6 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "mytable_pkey" fo
 -- ok
 create index idx_gtt1_1 on gtt1 using btree (a);
 create index idx_gtt1_2 on gtt1 using hash (a);
-ERROR:  access method "hash" does not support row store
 create global temp table tmp_t0(c0 tsvector,c1 varchar(100));
 create index idx_tmp_t0_1 on tmp_t0 using gin (c0);
 ERROR:  access method "gin" is not support for global temporary table index

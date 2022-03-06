@@ -260,11 +260,8 @@ INTERVAL ('1 month')
 );
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "interval_partition_table_003_pkey" for table "interval_partition_table_003"
 create index interval_partition_table_003_1 ON interval_partition_table_003 USING HASH (logdate) LOCAL;
-ERROR:  access method "hash" does not support row store
 create index interval_partition_table_003_2 ON interval_partition_table_003 USING HASH (c2) LOCAL;
-ERROR:  access method "hash" does not support row store
 create index interval_partition_table_003_3 ON interval_partition_table_003 USING HASH (c1) LOCAL;
-ERROR:  access method "hash" does not support row store
 select relname from pg_partition where INDEXTBLID=(select RELFILENODE from pg_partition where relname='interval_partition_table_003_1') order by 1;
  relname 
 ---------

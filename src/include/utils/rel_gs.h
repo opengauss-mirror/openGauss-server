@@ -656,6 +656,11 @@ extern void PartitionDecrementReferenceCount(Partition part);
     ((PARTTYPE_VALUE_PARTITIONED_RELATION == (relation)->rd_rel->parttype) && \
         (RELKIND_RELATION == (relation)->rd_rel->relkind))
 
+#define HEAP_IS_PARTITIONED(relation)                                         \
+    ((PARTTYPE_PARTITIONED_RELATION == (relation)->rd_rel->parttype ||        \
+      PARTTYPE_VALUE_PARTITIONED_RELATION == (relation)->rd_rel->parttype) && \
+     (RELKIND_RELATION == (relation)->rd_rel->relkind || RELKIND_INDEX == (relation)->rd_rel->relkind))
+
 /*  
  *   type  bucketOid     bucketKey     meaning
  *    N      INV           INV         relation has no bucket
@@ -720,7 +725,7 @@ static inline bool IsCompressedByCmprsInPgclass(const RelCompressType cmprInPgcl
 /* at default row relation is not compressed in options */
 /* maybe exsiting compressed row-table don't modify compression option synchronously */
 #define RowRelationIsCompressed(relation) \
-    (pg_strcasecmp(COMPRESSION_NO, StdRdOptionsGetStringData(relation->rd_options, compression, COMPRESSION_NO)) != 0 || \
+    (pg_strcasecmp(COMPRESSION_YES, StdRdOptionsGetStringData(relation->rd_options, compression, COMPRESSION_NO)) == 0 || \
         IsCompressedByCmprsInPgclass((RelCompressType)relation->rd_rel->relcmprs))
 
 #define RelIsSpecifiedFTbl(rte, SepcifiedType) \

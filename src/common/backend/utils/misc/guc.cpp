@@ -971,6 +971,7 @@ const char* const config_group_names[] = {
     /* INSTRUMENTS_OPTIONS */
     gettext_noop("Instruments Options"),
     gettext_noop("Column Encryption"),
+    gettext_noop("Compress Options"),
 #ifdef PGXC
     /* DATA_NODES */
     gettext_noop("Datanodes and Connection Pooling"),
