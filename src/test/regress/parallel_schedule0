@@ -899,11 +899,11 @@ test: toomanyparams
 
 test: test_astore_multixact
 test: component_view_enhancements 
-#test: single_node_user_mapping
+test: single_node_user_mapping
 
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
-#test: publication
-#test: subscription
+test: publication
+test: subscription
 test: fdw_audit
 test: gs_global_config_audit
 test: detail

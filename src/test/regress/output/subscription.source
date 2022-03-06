@@ -38,9 +38,9 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 --enable publication and subscription audit
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=16777215" > /dev/null 2>&1
 --- prepare
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/subscription.key.cipher
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/subscription.key.rand
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o subscription > /dev/null 2>&1 ; echo $?
+\! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/subscription.key.cipher
+\! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/subscription.key.rand
+\! echo $OLDGAUSSHOME | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o subscription > /dev/null 2>&1 ; echo $?
 0
 CREATE ROLE regress_subscription_user LOGIN SYSADMIN PASSWORD 'Abcdef@123';
 CREATE ROLE regress_subscription_user2 LOGIN SYSADMIN PASSWORD 'Abcdef@123';

@@ -6,9 +6,9 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 (1 row)
 
 --- prepare
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/usermapping.key.cipher
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} rm -f {}/bin/usermapping.key.rand
-\! echo $GAUSSHOME | sed 's/^.*tmp_check\/install\///g' | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o usermapping > /dev/null 2>&1 ; echo $?
+\! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.cipher
+\! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.rand
+\! echo $OLDGAUSSHOME | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o usermapping > /dev/null 2>&1 ; echo $?
 0
 CREATE ROLE regress_usermapping_user LOGIN SYSADMIN PASSWORD 'Abcdef@123';
 SET SESSION AUTHORIZATION 'regress_usermapping_user' PASSWORD 'Abcdef@123';
