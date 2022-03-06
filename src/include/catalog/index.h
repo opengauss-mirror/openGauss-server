@@ -20,6 +20,7 @@
 #include "utils/tuplesort.h"
 
 #define DEFAULT_INDEX_TYPE	"btree"
+#define DEFAULT_HASH_INDEX_TYPE "hash"
 #define DEFAULT_CSTORE_INDEX_TYPE "psort"
 #define DEFAULT_GIST_INDEX_TYPE	"gist"
 #define CSTORE_BTREE_INDEX_TYPE "cbtree"

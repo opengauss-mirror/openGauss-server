@@ -180,6 +180,8 @@ typedef HeapPageHeaderData* HeapPageHeader;
 #define GetPageHeaderSize(page) (PageIs8BXidHeapVersion(page) ? SizeOfHeapPageHeaderData : SizeOfPageHeaderData)
 
 #define SizeOfHeapPageUpgradeData MAXALIGN(offsetof(HeapPageHeaderData, pd_linp) - offsetof(PageHeaderData, pd_linp))
+    
+#define GET_ITEMID_BY_IDX(buf, i) ((ItemIdData *)(buf + GetPageHeaderSize(buf) + (i) * sizeof(ItemIdData)))
 
 #define PageXLogRecPtrGet(val) \
 	((uint64) (val).xlogid << 32 | (val).xrecoff)
@@ -403,6 +405,7 @@ inline OffsetNumber PageGetMaxOffsetNumber(char* pghr)
 #define PageSetLSNInternal(page, lsn) \
     (((PageHeader)(page))->pd_lsn.xlogid = (uint32)((lsn) >> 32), ((PageHeader)(page))->pd_lsn.xrecoff = (uint32)(lsn))
 
+#ifndef FRONTEND
 inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
 {
     if (check && XLByteLT(LSN, PageGetLSN(page))) {
@@ -410,6 +413,7 @@ inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
     }
     PageSetLSNInternal(page, LSN);
 }
+#endif
 
 #define PageHasFreeLinePointers(page) (((PageHeader)(page))->pd_flags & PD_HAS_FREE_LINES)
 #define PageSetHasFreeLinePointers(page) (((PageHeader)(page))->pd_flags |= PD_HAS_FREE_LINES)
@@ -499,6 +503,7 @@ extern Page PageGetTempPageCopySpecial(Page page);
 extern void PageRestoreTempPage(Page tempPage, Page oldPage);
 extern void PageRepairFragmentation(Page page);
 extern Size PageGetFreeSpace(Page page);
+extern Size PageGetFreeSpaceForMultipleTuples(Page page, int ntups);
 extern Size PageGetExactFreeSpace(Page page);
 extern Size PageGetHeapFreeSpace(Page page);
 extern void PageIndexTupleDelete(Page page, OffsetNumber offset);

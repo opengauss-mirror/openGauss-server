@@ -26,7 +26,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = file_ops.o datapagemap.o fetch.o filemap.o logging.o parsexlog.o pg_rewind.o
+OBJS = file_ops.o datapagemap.o fetch.o filemap.o logging.o parsexlog.o pg_rewind.o compressed_rewind.o
 
 #all:gs_rewind.a
 

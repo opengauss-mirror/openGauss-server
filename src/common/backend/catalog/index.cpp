@@ -912,9 +912,9 @@ Oid index_create(Relation heapRelation, const char *indexRelationName, Oid index
     indexRelation = heap_create(indexRelationName, namespaceId, tableSpaceId, indexRelationId, relFileNode,
         RELATION_CREATE_BUCKET(heapRelation) ? heapRelation->rd_bucketoid : InvalidOid, indexTupDesc, relKind,
         relpersistence, isLocalPart, false, shared_relation, mapped_relation, allow_system_table_mods,
-        REL_CMPRS_NOT_SUPPORT, heapRelation->rd_rel->relowner, skip_create_storage,
+        REL_CMPRS_NOT_SUPPORT, (Datum)reloptions, heapRelation->rd_rel->relowner, skip_create_storage,
         isUstore ? TAM_USTORE : TAM_HEAP, /* XXX: Index tables are by default HEAP Table Type */
-        relindexsplit, storage_type, extra->crossBucket);
+        relindexsplit, storage_type, extra->crossBucket, accessMethodObjectId);
 
     Assert(indexRelationId == RelationGetRelid(indexRelation));
 
@@ -932,7 +932,6 @@ Oid index_create(Relation heapRelation, const char *indexRelationName, Oid index
      * XXX should have a cleaner way to create cataloged indexes
      */
     indexRelation->rd_rel->relowner = heapRelation->rd_rel->relowner;
-    indexRelation->rd_rel->relam = accessMethodObjectId;
     indexRelation->rd_rel->relhasoids = false;
 
     if (accessMethodObjectId == PSORT_AM_OID) {
@@ -1244,7 +1243,8 @@ Oid partition_index_create(const char* partIndexName, /* the name of partition i
         parentIndex->rd_bucketoid,
         parentIndex->rd_rel->relowner,
         RelationGetStorageType(parentIndex),
-        extra->crossbucket);
+        extra->crossbucket,
+        indexRelOptions);
     partitionIndex->pd_part->parttype = PART_OBJ_TYPE_INDEX_PARTITION;
     partitionIndex->pd_part->rangenum = 0;
     partitionIndex->pd_part->parentid = parentIndexId;
@@ -1282,9 +1282,13 @@ Oid partition_index_create(const char* partIndexName, /* the name of partition i
     partitionIndex->pd_part->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
 
     /* insert into pg_partition */
+#ifndef ENABLE_MULTIPLE_NODES
+    insertPartitionEntry(pg_partition_rel, partitionIndex, partitionIndex->pd_id, NULL, NULL, 0, 0, 0, indexRelOptions,
+                         PART_OBJ_TYPE_INDEX_PARTITION);
+#else
     insertPartitionEntry(
         pg_partition_rel, partitionIndex, partitionIndex->pd_id, NULL, NULL, 0, 0, 0, 0, PART_OBJ_TYPE_INDEX_PARTITION);
-
+#endif
     /* Make the above change visible */
     CommandCounterIncrement();
 

@@ -113,7 +113,8 @@ extern void RelationCacheInitializePhase3(void);
  */
 extern Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, TupleDesc tupDesc, Oid relid,
     Oid relfilenode, Oid reltablespace, bool shared_relation, bool mapped_relation, char relpersistence, char relkind,
-    int8 row_compress, TableAmType tam_type, int8 relindexsplit = 0, StorageType storage_type = HEAP_DISK);
+    int8 row_compress, Datum reloptions, TableAmType tam_type, int8 relindexsplit = 0, StorageType storage_type = HEAP_DISK,
+    Oid accessMethodObjectId = 0);
 
 /*
  * Routine to manage assignment of new relfilenode to a relation

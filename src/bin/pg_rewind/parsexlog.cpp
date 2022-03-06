@@ -161,7 +161,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
         pg_fatal("find max lsn fail, errmsg:%s\n", returnmsg);
         return BUILD_FATAL;
     }
-    pg_log(PG_PROGRESS, "find max lsn success, %s\n", returnmsg);
+    pg_log(PG_PROGRESS, "find max lsn success, %s", returnmsg);
 
     readprivate.datadir = datadir;
     readprivate.tli = tli;

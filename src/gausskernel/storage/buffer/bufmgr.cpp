@@ -5758,6 +5758,51 @@ bool ConditionalLockBufferForCleanup(Buffer buffer)
 }
 
 /*
+ * IsBufferCleanupOK - as above, but we already have the lock
+ *
+ * Check whether it's OK to perform cleanup on a buffer we've already
+ * locked.  If we observe that the pin count is 1, our exclusive lock
+ * happens to be a cleanup lock, and we can proceed with anything that
+ * would have been allowable had we sought a cleanup lock originally.
+ */
+bool IsBufferCleanupOK(Buffer buffer)
+{
+    BufferDesc *bufHdr;
+    uint32 buf_state;
+
+    Assert(BufferIsValid(buffer));
+
+    if (BufferIsLocal(buffer)) {
+        /* There should be exactly one pin */
+        if (u_sess->storage_cxt.LocalRefCount[-buffer - 1] != 1)
+            return false;
+        /* Nobody else to wait for */
+        return true;
+    }
+
+    /* There should be exactly one local pin */
+    if (GetPrivateRefCount(buffer) != 1)
+        return false;
+
+    bufHdr = GetBufferDescriptor(buffer - 1);
+
+    /* caller must hold exclusive lock on buffer */
+    Assert(LWLockHeldByMeInMode(bufHdr->content_lock, LW_EXCLUSIVE));
+
+    buf_state = LockBufHdr(bufHdr);
+
+    Assert(BUF_STATE_GET_REFCOUNT(buf_state) > 0);
+    if (BUF_STATE_GET_REFCOUNT(buf_state) == 1) {
+        /* pincount is OK. */
+        UnlockBufHdr(bufHdr, buf_state);
+        return true;
+    }
+
+    UnlockBufHdr(bufHdr, buf_state);
+    return false;
+}
+
+/*
  *	Functions for buffer I/O handling
  *
  *	Note: We assume that nested buffer I/O never occurs.

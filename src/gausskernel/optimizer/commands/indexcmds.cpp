@@ -1054,6 +1054,14 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
+    TableCreateSupport indexCreateSupport{false,false,false,false,false,false};
+    ListCell* cell = NULL;
+    foreach (cell, stmt->options) {
+        DefElem* defElem = (DefElem*)lfirst(cell);
+        SetOneOfCompressOption(defElem->defname, &indexCreateSupport);
+    }
+    
+    CheckCompressOption(&indexCreateSupport);
     /*
      * Parse AM-specific options, convert to text array form, validate.
      */

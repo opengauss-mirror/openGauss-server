@@ -123,6 +123,7 @@ Datum gs_read_block_from_remote(PG_FUNCTION_ARGS)
     key.relfilenode.dbNode = dbNode;
     key.relfilenode.relNode = relNode;
     key.relfilenode.bucketNode = bucketNode;
+    key.relfilenode.opt = 0;
     key.forknum = forkNum;
     key.blocknum = blockNum;
 
@@ -134,6 +135,48 @@ Datum gs_read_block_from_remote(PG_FUNCTION_ARGS)
         (void)StandbyReadPageforPrimary(key, blockSize, lsn, &result, timeout, NULL);
     }
 
+    if (NULL != result) {
+        PG_RETURN_BYTEA_P(result);
+    } else {
+        PG_RETURN_NULL();
+    }
+}
+
+/*
+ * Read block from buffer from primary, returning it as bytea
+ */
+Datum gs_read_block_from_remote_compress(PG_FUNCTION_ARGS)
+{
+    RepairBlockKey key;
+    uint32 blockSize;
+    uint64 lsn;
+    int timeout = 0;
+    bool isForCU = false;
+    bytea* result = NULL;
+
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to read files"))));
+    }
+    /* handle optional arguments */
+    key.relfilenode.spcNode = PG_GETARG_UINT32(0);
+    key.relfilenode.dbNode = PG_GETARG_UINT32(1);
+    key.relfilenode.relNode = PG_GETARG_UINT32(2);
+    key.relfilenode.bucketNode = PG_GETARG_INT16(3);
+    key.relfilenode.opt = PG_GETARG_UINT16(4);
+    key.forknum = PG_GETARG_INT32(5);
+    key.blocknum = (uint64)PG_GETARG_TRANSACTIONID(6);
+    blockSize = PG_GETARG_UINT32(7);
+    lsn = (uint64)PG_GETARG_TRANSACTIONID(8);
+    isForCU = PG_GETARG_BOOL(9);
+    timeout = PG_GETARG_INT32(10);
+    /* get block from local buffer */
+    if (isForCU) {
+        /* if request to read CU block, we use forkNum column to replace colid. */
+        (void)StandbyReadCUforPrimary(key, key.blocknum, blockSize, lsn, timeout, &result);
+    } else {
+        (void)StandbyReadPageforPrimary(key, blockSize, lsn, &result, timeout, NULL);
+    }
+    
     if (NULL != result) {
         PG_RETURN_BYTEA_P(result);
     } else {

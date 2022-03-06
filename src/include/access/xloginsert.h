@@ -20,6 +20,7 @@
 #include "storage/buf/block.h"
 #include "storage/buf/buf.h"
 #include "storage/buf/bufpage.h"
+#include "storage/page_compression.h"
 #include "storage/smgr/relfilenode.h"
 
 struct XLogPhyBlock;

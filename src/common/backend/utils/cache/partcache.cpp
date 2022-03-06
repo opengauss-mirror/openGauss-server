@@ -59,6 +59,7 @@
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
+#include "storage/page_compression.h"
 #include "storage/smgr/smgr.h"
 #include "storage/smgr/segment.h"
 #include "catalog/storage.h"
@@ -326,6 +327,7 @@ Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool in
     return partition;
 }
 
+
 void PartitionInitPhysicalAddr(Partition partition)
 {
     partition->pd_node.spcNode = ConvertToRelfilenodeTblspcOid(partition->pd_part->reltablespace);
@@ -349,6 +351,12 @@ void PartitionInitPhysicalAddr(Partition partition)
                         PartitionGetPartitionName(partition),
                         partition->pd_id)));
         }
+    }
+
+    partition->pd_node.opt = 0;
+    if (partition->rd_options) {
+        SetupPageCompressForRelation(&partition->pd_node, &((StdRdOptions*)(partition->rd_options))->compress,
+                                      PartitionGetPartitionName(partition));
     }
 }
 
@@ -441,7 +449,7 @@ void PartitionClose(Partition partition)
 }
 
 Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid partfilenode, Oid parttablespace,
-    StorageType storage_type)
+    StorageType storage_type, Datum reloptions)
 {
     Partition part;
     MemoryContext oldcxt;
@@ -490,6 +498,11 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
 
     if (partfilenode != InvalidOid) {
         PartitionInitPhysicalAddr(part);
+        /* compressed option was set by PartitionInitPhysicalAddr if part->rd_options != NULL */
+        if (part->rd_options == NULL && reloptions) {
+            StdRdOptions* options = (StdRdOptions*)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
+            SetupPageCompressForRelation(&part->pd_node, &options->compress, PartitionGetPartitionName(part));
+        }
     }
 
     if (storage_type == SEGMENT_PAGE) {

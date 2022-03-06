@@ -664,3 +664,281 @@ void pglz_decompress(const PGLZ_Header* source, char* dest)
      * That's it.
      */
 }
+
+/* ----------
+ * lz_compress -
+ *
+ *		Compresses source into dest using strategy. Returns the number of
+ *		bytes written in buffer dest, or -1 if compression fails.
+ * ----------
+ */
+int32 lz_compress(const char* source, int32 slen, char* dest)
+{
+    unsigned char* bp = (unsigned char*) dest;
+    unsigned char* bstart = bp;
+    int hist_next = 0;
+    bool hist_recycle = false;
+    const char* dp = source;
+    const char* dend = source + slen;
+    unsigned char ctrl_dummy = 0;
+    unsigned char* ctrlp = &ctrl_dummy;
+    unsigned char ctrlb = 0;
+    unsigned char ctrl = 0;
+    bool found_match = false;
+    int32 match_len;
+    int32 match_off;
+    int32 good_match;
+    int32 good_drop;
+    int32 result_size;
+    int32 result_max;
+    int32 need_rate;
+    errno_t rc;
+
+    const PGLZ_Strategy* strategy = PGLZ_strategy_always;
+    /*
+     * Our fallback strategy is the default.
+     */
+    if (strategy == NULL) {
+        strategy = PGLZ_strategy_default;
+    }
+
+    /*
+     * If the strategy forbids compression (at all or if source chunk size out
+     * of range), fail.
+     */
+    if (strategy->match_size_good <= 0 || slen < strategy->min_input_size || slen > strategy->max_input_size) {
+        return -1;
+    }
+
+    /*
+     * Limit the match parameters to the supported range.
+     */
+    good_match = strategy->match_size_good;
+    if (good_match > PGLZ_MAX_MATCH) {
+        good_match = PGLZ_MAX_MATCH;
+    } else if (good_match < 17) {
+        good_match = 17;
+    }
+
+    good_drop = strategy->match_size_drop;
+    if (good_drop < 0) {
+        good_drop = 0;
+    } else if (good_drop > 100) {
+        good_drop = 100;
+    }
+
+    need_rate = strategy->min_comp_rate;
+    if (need_rate < 0) {
+        need_rate = 0;
+    } else if (need_rate > 99) {
+        need_rate = 99;
+    }
+
+    /*
+     * Compute the maximum result size allowed by the strategy, namely the
+     * input size minus the minimum wanted compression rate.  This had better
+     * be <= slen, else we might overrun the provided output buffer.
+     */
+    if (slen > (INT_MAX / 100)) {
+        /* Approximate to avoid overflow */
+        result_max = (slen / 100) * (100 - need_rate);
+    } else {
+        result_max = (slen * (100 - need_rate)) / 100;
+    }
+
+    /*
+     * Initialize the history lists to empty.  We do not need to zero the
+     * hist_entries[] array; its entries are initialized as they are used.
+     */
+    rc = memset_s(u_sess->utils_cxt.hist_start, HIST_START_LEN, 0, HIST_START_LEN);
+    securec_check(rc, "\0", "\0");
+
+    /*
+     * Compress the source directly into the output buffer.
+     */
+    while (dp < dend) {
+        /*
+         * If we already exceeded the maximum result size, fail.
+         *
+         * We check once per loop; since the loop body could emit as many as 4
+         * bytes (a control byte and 3-byte tag), PGLZ_MAX_OUTPUT() had better
+         * allow 4 slop bytes.
+         */
+        if (bp - bstart >= result_max) {
+            return -1;
+        }
+
+        /*
+         * If we've emitted more than first_success_by bytes without finding
+         * anything compressible at all, fail.  This lets us fall out
+         * reasonably quickly when looking at incompressible input (such as
+         * pre-compressed data).
+         */
+        if (!found_match && bp - bstart >= strategy->first_success_by) {
+            return -1;
+        }
+
+        /*
+         * Try to find a match in the history
+         */
+        if (pglz_find_match(u_sess->utils_cxt.hist_start, dp, dend, &match_len, &match_off, good_match, good_drop)) {
+            /*
+             * Create the tag and add history entries for all matched
+             * characters.
+             */
+            pglz_out_tag(ctrlp, ctrlb, ctrl, bp, match_len, match_off);
+            while (match_len--) {
+                pglz_hist_add(
+                        u_sess->utils_cxt.hist_start, u_sess->utils_cxt.hist_entries, hist_next, hist_recycle, dp,
+                        dend);
+                dp++; /* Do not do this ++ in the line above! */
+                /* The macro would do it four times - Jan.  */
+            }
+            found_match = true;
+        } else {
+            /*
+             * No match found. Copy one literal byte.
+             */
+            pglz_out_literal(ctrlp, ctrlb, ctrl, bp, *dp);
+            pglz_hist_add(
+                    u_sess->utils_cxt.hist_start, u_sess->utils_cxt.hist_entries, hist_next, hist_recycle, dp, dend);
+            dp++; /* Do not do this ++ in the line above! */
+            /* The macro would do it four times - Jan.  */
+        }
+    }
+
+    /*
+     * Write out the last control byte and check that we haven't overrun the
+     * output size allowed by the strategy.
+     */
+    *ctrlp = ctrlb;
+    result_size = bp - bstart;
+    if (result_size >= result_max) {
+        return -1;
+    }
+
+    /* success */
+    return result_size;
+}
+
+/* ----------
+ * pglz_decompress -
+ *
+ *		Decompresses source into dest. Returns the number of bytes
+ *		decompressed in the destination buffer, and *optionally*
+ *		checks that both the source and dest buffers have been
+ *		fully read and written to, respectively.
+ * ----------
+ */
+int32 lz_decompress(const char* source, int32 slen, char* dest, int32 rawsize, bool check_complete)
+{
+    const unsigned char* sp;
+    const unsigned char* srcend;
+    unsigned char* dp;
+    unsigned char* destend;
+    errno_t rc = 0;
+
+    sp = (const unsigned char*) source;
+    srcend = ((const unsigned char*) source) + slen;
+    dp = (unsigned char*) dest;
+    destend = dp + rawsize;
+
+    while (sp < srcend && dp < destend) {
+        /*
+         * Read one control byte and process the next 8 items (or as many as
+         * remain in the compressed input).
+         */
+        unsigned char ctrl = *sp++;
+        int ctrlc;
+
+        for (ctrlc = 0; ctrlc < 8 && sp < srcend && dp < destend; ctrlc++) {
+            if (ctrl & 1) {
+                /*
+                 * Set control bit means we must read a match tag. The match
+                 * is coded with two bytes. First byte uses lower nibble to
+                 * code length - 3. Higher nibble contains upper 4 bits of the
+                 * offset. The next following byte contains the lower 8 bits
+                 * of the offset. If the length is coded as 18, another
+                 * extension tag byte tells how much longer the match really
+                 * was (0-255).
+                 */
+                int32 len;
+                int32 off;
+
+                len = (sp[0] & 0x0f) + 3;
+                off = ((sp[0] & 0xf0) << 4) | sp[1];
+                sp += 2;
+                if (len == 18) {
+                    len += *sp++;
+                }
+
+                /*
+                 * Now we copy the bytes specified by the tag from OUTPUT to
+                 * OUTPUT (copy len bytes from dp - off to dp). The copied
+                 * areas could overlap, to preven possible uncertainty, we
+                 * copy only non-overlapping regions.
+                 */
+                len = Min(len, destend - dp);
+                while (off < len) {
+                    /*---------
+                     * When offset is smaller than length - source and
+                     * destination regions overlap. memmove() is resolving
+                     * this overlap in an incompatible way with pglz. Thus we
+                     * resort to memcpy()-ing non-overlapping regions.
+                     *
+                     * Consider input: 112341234123412341234
+                     * At byte 5       here ^ we have match with length 16 and
+                     * offset 4.       11234M(len=16, off=4)
+                     * We are decoding first period of match and rewrite match
+                     *                 112341234M(len=12, off=8)
+                     *
+                     * The same match is now at position 9, it points to the
+                     * same start byte of output, but from another position:
+                     * the offset is doubled.
+                     *
+                     * We iterate through this offset growth until we can
+                     * proceed to usual memcpy(). If we would try to decode
+                     * the match at byte 5 (len=16, off=4) by memmove() we
+                     * would issue memmove(5, 1, 16) which would produce
+                     * 112341234XXXXXXXXXXXX, where series of X is 12
+                     * undefined bytes, that were at bytes [5:17].
+                     * ---------
+                     */
+                    errno_t rc = memcpy_s(dp, off + 1, dp - off, off);
+                    securec_check(rc, "", "");
+                    len -= off;
+                    dp += off;
+                    off += off;
+                }
+                rc = memcpy_s(dp, len + 1, dp - off, len);
+                securec_check(rc, "", "");
+                dp += len;
+            } else {
+                /*
+                 * An unset control bit means LITERAL BYTE. So we just copy
+                 * one from INPUT to OUTPUT.
+                 */
+                *dp++ = *sp++;
+            }
+
+            /*
+             * Advance the control bit
+             */
+            ctrl >>= 1;
+        }
+    }
+
+    /*
+     * Check we decompressed the right amount. If we are slicing, then we
+     * won't necessarily be at the end of the source or dest buffers when we
+     * hit a stop, so we don't test them.
+     */
+    if (check_complete && (dp != destend || sp != srcend)) {
+        return -1;
+    }
+
+    /*
+     * That's it.
+     */
+    return (char*) dp - dest;
+}

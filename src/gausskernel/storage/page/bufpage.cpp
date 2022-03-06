@@ -436,3 +436,28 @@ void PageSetChecksumInplace(Page page, BlockNumber blkno)
 
     ((PageHeader)page)->pd_checksum = pg_checksum_page((char*)page, blkno);
 }
+
+/*
+ * PageGetFreeSpaceForMultipleTuples
+ *	 Returns the size of the free (allocatable) space on a page,
+ *	 reduced by the space needed for multiple new line pointers.
+ *
+ * Note: this should usually only be used on index pages.  Use
+ * PageGetHeapFreeSpace on heap pages.
+ */
+Size PageGetFreeSpaceForMultipleTuples(Page page, int ntups)
+{
+    int space;
+
+    /*
+     * Use signed arithmetic here so that we behave sensibly if pd_lower >
+     * pd_upper.
+     */
+    space = (int)((PageHeader)page)->pd_upper - (int)((PageHeader)page)->pd_lower;
+
+    if (space < (int)(ntups * sizeof(ItemIdData)))
+        return 0;
+    space -= ntups * sizeof(ItemIdData);
+
+    return (Size) space;
+}

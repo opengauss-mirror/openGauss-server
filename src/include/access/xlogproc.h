@@ -59,6 +59,7 @@ typedef void (*relasexlogreadstate)(void* record);
 #define XLogBlockHeadGetForkNum(blockhead) ((blockhead)->forknum)
 #define XLogBlockHeadGetBlockNum(blockhead) ((blockhead)->blkno)
 #define XLogBlockHeadGetBucketId(blockhead) ((blockhead)->bucketNode)
+#define XLogBlockHeadGetCompressOpt(blockhead) ((blockhead)->opt)
 #define XLogBlockHeadGetValidInfo(blockhead) ((blockhead)->block_valid)
 #define XLogBlockHeadGetPhysicalBlock(blockhead) ((blockhead)->pblk)
 /* for common blockhead end  */
@@ -495,7 +496,8 @@ typedef struct {
     TransactionId xl_xid; /* xact id */
     Oid spcNode;          /* tablespace */
     Oid dbNode;           /* database */
-    int4 bucketNode;      /* bucket   */
+    int2 bucketNode; /* bucket   */
+    uint2 opt;
     XLogPhyBlock pblk;
 } XLogBlockHead;
 
@@ -1002,6 +1004,47 @@ extern void UBTreeXlogUnlinkPageOperatorChildpage(RedoBufferInfo* cbuf, void* re
 
 extern void UBTreeXlogClearIncompleteSplit(RedoBufferInfo* buffer);
 
+void HashRedoInitMetaPageOperatorPage(RedoBufferInfo *metabuf, void *recorddata);
+
+void HashRedoInitBitmapPageOperatorBitmapPage(RedoBufferInfo *bitmapbuf, void *recorddata);
+void HashRedoInitBitmapPageOperatorMetaPage(RedoBufferInfo *metabuf);
+
+void HashRedoInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *data, Size datalen);
+void HashRedoInsertOperatorMetaPage(RedoBufferInfo *metabuf);
+
+void HashRedoAddOvflPageOperatorOvflPage(RedoBufferInfo *ovflbuf, BlockNumber leftblk, void *data, Size datalen);
+void HashRedoAddOvflPageOperatorLeftPage(RedoBufferInfo *ovflbuf, BlockNumber rightblk);
+void HashRedoAddOvflPageOperatorMapPage(RedoBufferInfo *mapbuf, void *data);
+void HashRedoAddOvflPageOperatorNewmapPage(RedoBufferInfo *newmapbuf, void *recorddata);
+void HashRedoAddOvflPageOperatorMetaPage(RedoBufferInfo *metabuf, void *recorddata, void *data, Size datalen);
+
+void HashRedoSplitAllocatePageOperatorObukPage(RedoBufferInfo *oldbukbuf, void *recorddata);
+void HashRedoSplitAllocatePageOperatorNbukPage(RedoBufferInfo *newbukbuf, void *recorddata);
+void HashRedoSplitAllocatePageOperatorMetaPage(RedoBufferInfo *metabuf, void *recorddata, void *blkdata);
+
+void HashRedoSplitCompleteOperatorObukPage(RedoBufferInfo *oldbukbuf, void *recorddata);
+void HashRedoSplitCompleteOperatorNbukPage(RedoBufferInfo *newbukbuf, void *recorddata);
+
+void HashXlogMoveAddPageOperatorPage(RedoBufferInfo *redobuffer, void *recorddata, void *blkdata, Size len);
+void HashXlogMoveDeleteOvflPageOperatorPage(RedoBufferInfo *redobuffer, void *blkdata, Size len);
+
+void HashXlogSqueezeAddPageOperatorPage(RedoBufferInfo *redobuffer, void *recorddata, void *blkdata, Size len);
+void HashXlogSqueezeInitOvflbufOperatorPage(RedoBufferInfo *redobuffer, void *recorddata);
+void HashXlogSqueezeUpdatePrevPageOperatorPage(RedoBufferInfo *redobuffer, void *recorddata);
+void HashXlogSqueezeUpdateNextPageOperatorPage(RedoBufferInfo *redobuffer, void *recorddata);
+void HashXlogSqueezeUpdateBitmapOperatorPage(RedoBufferInfo *redobuffer, void *blkdata);
+void HashXlogSqueezeUpdateMateOperatorPage(RedoBufferInfo *redobuffer, void *blkdata);
+
+void HashXlogDeleteBlockOperatorPage(RedoBufferInfo *redobuffer, void *recorddata, void *blkdata, Size len);
+
+void HashXlogSplitCleanupOperatorPage(RedoBufferInfo *redobuffer);
+
+void HashXlogUpdateMetaOperatorPage(RedoBufferInfo *redobuffer, void *recorddata);
+
+void HashXlogVacuumOnePageOperatorPage(RedoBufferInfo *redobuffer, void *recorddata, Size len);
+
+void HashXlogVacuumMateOperatorPage(RedoBufferInfo *redobuffer, void *recorddata);
+
 void XLogRecSetBlockCommonState(XLogReaderState* record, XLogBlockParseEnum blockvalid,
     RelFileNodeForkNum filenode, XLogRecParseState* recordblockstate, XLogPhyBlock *pblk = NULL);
 
@@ -1047,6 +1090,7 @@ extern void UBTreeRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* bl
 extern void UBTree2RedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
     RedoBufferInfo *bufferinfo);
 
+extern void HashRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 XLogRecParseState* XactXlogCsnlogParseToBlock(XLogReaderState* record, uint32* blocknum, TransactionId xid,
     int nsubxids, TransactionId* subxids, CommitSeqNo csn, XLogRecParseState* recordstatehead);
 extern void XLogRecSetVmBlockState(XLogReaderState* record, uint32 blockid, XLogRecParseState* recordblockstate);
@@ -1189,6 +1233,7 @@ extern void XLogBlockSegDdlDoRealAction(XLogBlockHead* blockhead, void* blockrec
 extern void GinRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void GistRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo);
 extern bool IsCheckPoint(const XLogRecParseState *parseState);
+
 void redo_atomic_xlog_dispatch(uint8 opCode, RedoBufferInfo *redo_buf, const char *data);
 void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn);
 

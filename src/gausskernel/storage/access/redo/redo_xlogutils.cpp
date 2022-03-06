@@ -196,6 +196,9 @@ bool XLogBlockRefreshRedoBufferInfo(XLogBlockHead *blockhead, RedoBufferInfo *bu
     if (bufferinfo->blockinfo.rnode.relNode != XLogBlockHeadGetRelNode(blockhead)) {
         return false;
     }
+    if (bufferinfo->blockinfo.rnode.opt != XLogBlockHeadGetCompressOpt(blockhead)) {
+        return false;
+    }
     if (bufferinfo->blockinfo.forknum != XLogBlockHeadGetForkNum(blockhead)) {
         return false;
     }
@@ -219,6 +222,7 @@ void XLogBlockInitRedoBlockInfo(XLogBlockHead *blockhead, RedoBufferTag *blockin
     blockinfo->rnode.dbNode = XLogBlockHeadGetDbNode(blockhead);
     blockinfo->rnode.relNode = XLogBlockHeadGetRelNode(blockhead);
     blockinfo->rnode.bucketNode = XLogBlockHeadGetBucketId(blockhead);
+    blockinfo->rnode.opt = XLogBlockHeadGetCompressOpt(blockhead);
     blockinfo->forknum = XLogBlockHeadGetForkNum(blockhead);
     blockinfo->blkno = XLogBlockHeadGetBlockNum(blockhead);
     blockinfo->pblk = XLogBlockHeadGetPhysicalBlock(blockhead);
@@ -305,7 +309,7 @@ void XLogRecSetBlockCommonState(XLogReaderState *record, XLogBlockParseEnum bloc
     blockparse->blockhead.spcNode = filenode.rnode.node.spcNode;
     blockparse->blockhead.dbNode = filenode.rnode.node.dbNode;
     blockparse->blockhead.bucketNode = filenode.rnode.node.bucketNode;
-
+    blockparse->blockhead.opt = filenode.rnode.node.opt;
     blockparse->blockhead.blkno = filenode.segno;
     blockparse->blockhead.forknum = filenode.forknumber;
 
@@ -1288,6 +1292,8 @@ void XLogBlockDataCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoB
             break;
         case RM_UBTREE2_ID:
             UBTree2RedoDataBlock(blockhead, blockdatarec, bufferinfo);
+        case RM_HASH_ID:
+            HashRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
         case RM_XLOG_ID:
             xlog_redo_data_block(blockhead, blockdatarec, bufferinfo);
@@ -1417,7 +1423,7 @@ void XLogBlockDdlCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoBu
     rnode.dbNode = blockhead->dbNode;
     rnode.relNode = blockhead->relNode;
     rnode.bucketNode = blockhead->bucketNode;
-
+    rnode.opt = blockhead->opt;
     switch (blockddlrec->blockddltype) {
         case BLOCK_DDL_CREATE_RELNODE:
             smgr_redo_create(rnode, blockhead->forknum, blockddlrec->mainData);
@@ -1486,7 +1492,7 @@ void XLogBlockSegDdlDoRealAction(XLogBlockHead* blockhead, void* blockrecbody, R
     rnode.dbNode = blockhead->dbNode;
     rnode.relNode = blockhead->relNode;
     rnode.bucketNode = blockhead->bucketNode;
-
+    rnode.opt = blockhead->opt;
     switch (segddlrec->blockddlrec.blockddltype) {
         case BLOCK_DDL_TRUNCATE_RELNODE:
             xlog_block_segpage_redo_truncate(rnode, blockhead, segddlrec);
@@ -1511,7 +1517,7 @@ void XLogBlockDdlDoSmgrAction(XLogBlockHead *blockhead, void *blockrecbody, Redo
     rnode.dbNode = blockhead->dbNode;
     rnode.relNode = blockhead->relNode;
     rnode.bucketNode = blockhead->bucketNode;
-
+    rnode.opt = blockhead->opt;
     switch (blockddlrec->blockddltype) {
         case BLOCK_DDL_CREATE_RELNODE:
             smgr_redo_create(rnode, blockhead->forknum, blockddlrec->mainData);

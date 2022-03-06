@@ -452,9 +452,6 @@ static void ResourceOwnerReleaseInternal(
             MemoryContextDelete(memContext);
             ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, memContext);
         }
-
-        /* Clean up index scans too */
-        ReleaseResources_hash();
     }
 
     t_thrd.utils_cxt.CurrentResourceOwner = save;

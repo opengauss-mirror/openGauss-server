@@ -34,6 +34,7 @@
 #include "access/xlog.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
+#include "storage/page_compression.h"
 #include "storage/pmsignal.h"
 #include "storage/checksum.h"
 #ifdef ENABLE_MOT
@@ -115,6 +116,9 @@ static void send_xlog_location();
 static void send_xlog_header(const char *linkpath);
 static void save_xlogloc(const char *xloglocation);
 static XLogRecPtr GetMinArchiveSlotLSN(void);
+
+/* compressed Function */
+static void SendCompressedFile(char* readFileName, int basePathLen, struct stat& statbuf, bool missingOk, int64* size);
 
 /*
  * save xlog location
@@ -1259,6 +1263,35 @@ static bool IsDCFPath(const char *pathname)
     return false;
 }
 
+#define SEND_DIR_ADD_SIZE(size, statbuf) ((size) = (size) + (((statbuf).st_size + 511) & ~511) + BUILD_PATH_LEN)
+
+/**
+ * send file or compressed file
+ * @param sizeOnly send or not
+ * @param pathbuf path
+ * @param pathBufLen pathLen
+ * @param basepathlen subfix of path
+ * @param statbuf path stat
+ */
+static void SendRealFile(bool sizeOnly, char* pathbuf, size_t pathBufLen, int basepathlen, struct stat* statbuf)
+{
+    int64 size = 0;
+    // we must ensure the page integrity when in IncrementalCheckpoint
+    if (!sizeOnly && g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
+        IsCompressedFile(pathbuf, strlen(pathbuf)) != COMPRESSED_TYPE_UNKNOWN) {
+        SendCompressedFile(pathbuf, basepathlen, (*statbuf), true, &size);
+    } else {
+        bool sent = false;
+        if (!sizeOnly) {
+            sent = sendFile(pathbuf, pathbuf + basepathlen + 1, statbuf, true);
+        }
+        if (sent || sizeOnly) {
+            /* Add size, rounded up to 512byte block */
+            SEND_DIR_ADD_SIZE(size, (*statbuf));
+        }
+    }
+}
+
 /*
  * Include all files from the given directory in the output tar stream. If
  * 'sizeonly' is true, we just calculate a total length and return it, without
@@ -1557,15 +1590,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
             if (!skip_this_dir)
                 size += sendDir(pathbuf, basepathlen, sizeonly, tablespaces, sendtblspclinks);
         } else if (S_ISREG(statbuf.st_mode)) {
-            bool sent = false;
-
-            if (!sizeonly)
-                sent = sendFile(pathbuf, pathbuf + basepathlen + 1, &statbuf, true);
-
-            if (sent || sizeonly) {
-                /* Add size, rounded up to 512byte block */
-                size = size + ((statbuf.st_size + 511) & ~511) + BUILD_PATH_LEN;
-            }
+            SendRealFile(sizeonly, pathbuf, strlen(pathbuf), basepathlen, &statbuf);
         } else
             ereport(WARNING, (errmsg("skipping special file \"%s\"", pathbuf)));
     }
@@ -1692,6 +1717,15 @@ bool is_row_data_file(const char *path, int *segNo, UndoFileType *undoFileType)
     int nmatch;
     char *fname = NULL;
 
+   /* Skip compressed page files */
+    size_t pathLen = strlen(path);
+    if (pathLen >= 4) {
+        const char* suffix = path + pathLen - 4;
+        if (strncmp(suffix, "_pca", 4) == 0 || strncmp(suffix, "_pcd", 4) == 0) {
+            return false;
+        }
+    }
+
     if ((fname = strstr((char *)path, "pg_tblspc/")) != NULL) {
         nmatch = sscanf_s(fname, "pg_tblspc/%u/%*[^/]/%u/%s", &spcNode, &dbNode, buf, sizeof(buf));
         if (nmatch == 3) {
@@ -1809,6 +1843,245 @@ static void SendTableSpaceForBackup(basebackup_options* opt, List* tablespaces, 
     }
 }
 
+/**
+ * init buf_block if not yet; repalloc PqSendBuffer if necessary
+ */
+static void SendFilePreInit(void)
+{
+    if (t_thrd.basebackup_cxt.buf_block == NULL) {
+        MemoryContext oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+        t_thrd.basebackup_cxt.buf_block = (char *)palloc0(TAR_SEND_SIZE);
+        MemoryContextSwitchTo(oldcxt);
+    }
+
+    /*
+     * repalloc to `MaxBuildAllocSize' in one time, to avoid many small step repalloc in `pq_putmessage_noblock'
+     * and low performance.
+     */
+    if (INT2SIZET(t_thrd.libpq_cxt.PqSendBufferSize) < MaxBuildAllocSize) {
+        t_thrd.libpq_cxt.PqSendBuffer = (char *)repalloc(t_thrd.libpq_cxt.PqSendBuffer, MaxBuildAllocSize);
+        t_thrd.libpq_cxt.PqSendBufferSize = MaxBuildAllocSize;
+    }
+}
+
+/**
+ * check file
+ * @param readFileName
+ * @param statbuf
+ * @param supress error if missingOk is false when file is not found
+ * @return return null if file.size > MAX_TAR_MEMBER_FILELEN or file cant found
+ */
+static FILE *SizeCheckAndAllocate(char *readFileName, const struct stat &statbuf, bool missingOk)
+{
+    /*
+     * Some compilers will throw a warning knowing this test can never be true
+     * because pgoff_t can't exceed the compared maximum on their platform.
+     */
+    if (statbuf.st_size > MAX_TAR_MEMBER_FILELEN) {
+        ereport(WARNING, (errcode(ERRCODE_NAME_TOO_LONG),
+                          errmsg("archive member \"%s\" too large for tar format", readFileName)));
+        return NULL;
+    }
+
+    FILE *fp = AllocateFile(readFileName, "rb");
+    if (fp == NULL) {
+        if (errno == ENOENT && missingOk)
+            return NULL;
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", readFileName)));
+    }
+    return fp;
+
+}
+
+static void TransferPcaFile(const char *readFileName, int basePathLen, const struct stat &statbuf,
+                            PageCompressHeader *transfer,
+                            size_t len)
+{
+    const char *tarfilename = readFileName + basePathLen + 1;
+    _tarWriteHeader(tarfilename, NULL, (struct stat*)(&statbuf));
+    char *data = (char *) transfer;
+    size_t lenBuffer = len;
+    while (lenBuffer > 0) {
+        size_t transferLen = Min(TAR_SEND_SIZE, lenBuffer);
+        if (pq_putmessage_noblock('d', data, transferLen)) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
+        }
+        data = data + transferLen;
+        lenBuffer -= transferLen;
+    }
+    size_t pad = ((len + 511) & ~511) - len;
+    if (pad > 0) {
+        securec_check(memset_s(t_thrd.basebackup_cxt.buf_block, pad, 0, pad), "", "");
+        (void) pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, pad);
+    }
+}
+
+static void FileStat(char* path, struct stat* fileStat)
+{
+    if (stat(path, fileStat) != 0) {
+        if (errno != ENOENT) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m", path)));
+        }
+    }
+}
+
+static void SendCompressedFile(char* readFileName, int basePathLen, struct stat& statbuf, bool missingOk, int64* size)
+{
+    char* tarfilename = readFileName + basePathLen + 1;
+    SendFilePreInit();
+    FILE* fp = SizeCheckAndAllocate(readFileName, statbuf, missingOk);
+    if (fp == NULL) {
+        return;
+    }
+
+    size_t readFileNameLen = strlen(readFileName);
+    /* dont send pca file */
+    if (readFileNameLen < 4 || strncmp(readFileName + readFileNameLen - 4, "_pca", 4) == 0 ||
+        strncmp(readFileName + readFileNameLen - 4, "_pcd", 4) != 0) {
+        FreeFile(fp);
+        return;
+    }
+
+    char tablePath[MAXPGPATH] = {0};
+    securec_check_c(memcpy_s(tablePath, MAXPGPATH, readFileName, readFileNameLen - 4), "", "");
+    int segmentNo = 0;
+    UndoFileType undoFileType = UNDO_INVALID;
+    if (!is_row_data_file(tablePath, &segmentNo, &undoFileType)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("%s is not a relation file.", tablePath)));
+    }
+
+    char pcaFilePath[MAXPGPATH];
+    securec_check_c(memcpy_s(pcaFilePath, MAXPGPATH, readFileName, readFileNameLen), "", "");
+    pcaFilePath[readFileNameLen - 1] = 'a';
+
+    FILE* pcaFile = AllocateFile(pcaFilePath, "rb");
+    if (pcaFile == NULL) {
+        if (errno == ENOENT && missingOk) {
+            FreeFile(fp);
+            return;
+        }
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", pcaFilePath)));
+    }
+
+    uint16 chunkSize = ReadChunkSize(pcaFile, pcaFilePath, MAXPGPATH);
+
+    struct stat pcaStruct;
+    FileStat((char*)pcaFilePath, &pcaStruct);
+
+    size_t pcaFileLen = SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize);
+    PageCompressHeader* map = pc_mmap_real_size(fileno(pcaFile), pcaFileLen, true);
+    if (map == MAP_FAILED) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                errmsg("Failed to mmap page compression address file %s: %m", pcaFilePath)));
+    }
+
+    PageCompressHeader* transfer = (PageCompressHeader*)palloc0(pcaFileLen);
+    /* decompressed page buffer, avoid frequent allocation */
+    BlockNumber blockNum = 0;
+    size_t chunkIndex = 1;
+    off_t totalLen = 0;
+    off_t sendLen = 0;
+    /* send the pkg header containing msg like file size */
+    BlockNumber totalBlockNum = (BlockNumber)pg_atomic_read_u32(&map->nblocks);
+
+    /* some chunks may have been allocated but not used.
+     * Reserve 0 chunks for avoiding the error when the size of a compressed block extends */
+    auto reservedChunks = 0;
+    securec_check(memcpy_s(transfer, pcaFileLen, map, pcaFileLen), "", "");
+    decltype(statbuf.st_size) realSize = (map->allocated_chunks + reservedChunks)  * chunkSize;
+    statbuf.st_size = statbuf.st_size >= realSize ? statbuf.st_size : realSize;
+    _tarWriteHeader(tarfilename, NULL, (struct stat*)(&statbuf));
+    bool* onlyExtend = (bool*)palloc0(totalBlockNum * sizeof(bool));
+
+    /* allocated in advance to prevent repeated allocated */
+    char pageBuffer[BLCKSZ];
+    ReadBlockChunksStruct rbStruct{map, pageBuffer, BLCKSZ, fp, segmentNo, readFileName};
+    for (blockNum = 0; blockNum < totalBlockNum; blockNum++) {
+        PageCompressAddr* addr = GET_PAGE_COMPRESS_ADDR(transfer, chunkSize, blockNum);
+        /* skip some blocks which only extends. The size of blocks is 0. */
+        if (addr->nchunks == 0) {
+            onlyExtend[blockNum] = true;
+            continue;
+        }
+        /* read block to t_thrd.basebackup_cxt.buf_block */
+        size_t bufferSize = TAR_SEND_SIZE - sendLen;
+        size_t len = ReadAllChunkOfBlock(t_thrd.basebackup_cxt.buf_block + sendLen, bufferSize, blockNum, rbStruct);
+        /* merge Blocks */
+        sendLen += len;
+        if (totalLen + (off_t)len > statbuf.st_size) {
+            ReleaseMap(map, readFileName);
+            ereport(ERROR,
+                (errcode_for_file_access(),
+                    errmsg("some blocks in %s had been changed. Retry backup please. PostBlocks:%u, currentReadBlocks "
+                           ":%u, transferSize: %lu. totalLen: %lu, len: %lu",
+                        readFileName,
+                        totalBlockNum,
+                        blockNum,
+                        statbuf.st_size,
+                        totalLen,
+                        len)));
+        }
+        if (sendLen > TAR_SEND_SIZE - BLCKSZ) {
+            if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, sendLen)) {
+                ReleaseMap(map, readFileName);
+                ereport(ERROR, (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
+            }
+            sendLen = 0;
+        }
+        uint8 nchunks = len / chunkSize;
+        addr->nchunks = addr->allocated_chunks = nchunks;
+        for (size_t i = 0; i < nchunks; i++) {
+            addr->chunknos[i] = chunkIndex++;
+        }
+        addr->checksum = AddrChecksum32(blockNum, addr, chunkSize);
+        totalLen += len;
+    }
+    ReleaseMap(map, readFileName);
+
+    if (sendLen != 0) {
+        if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, sendLen)) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
+        }
+    }
+
+    /* If the file was truncated while we were sending it, pad it with zeros */
+    if (totalLen < statbuf.st_size) {
+        securec_check(memset_s(t_thrd.basebackup_cxt.buf_block, TAR_SEND_SIZE, 0, TAR_SEND_SIZE), "", "");
+        while (totalLen < statbuf.st_size) {
+            size_t cnt = Min(TAR_SEND_SIZE, statbuf.st_size - totalLen);
+            (void)pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, cnt);
+            totalLen += cnt;
+        }
+    }
+
+    size_t pad = ((totalLen + 511) & ~511) - totalLen;
+    if (pad > 0) {
+        securec_check(memset_s(t_thrd.basebackup_cxt.buf_block, pad, 0, pad), "", "");
+        (void)pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, pad);
+    }
+    SEND_DIR_ADD_SIZE(*size, statbuf);
+
+    // allocate chunks of some pages which only extend
+    for (size_t blockNum = 0; blockNum < totalBlockNum; ++blockNum) {
+        if (onlyExtend[blockNum]) {
+            PageCompressAddr* addr = GET_PAGE_COMPRESS_ADDR(transfer, chunkSize, blockNum);
+            for (size_t i = 0; i < addr->allocated_chunks; i++) {
+                addr->chunknos[i] = chunkIndex++;
+            }
+        }
+    }
+    transfer->nblocks = transfer->last_synced_nblocks = blockNum;
+    transfer->last_synced_allocated_chunks = transfer->allocated_chunks = chunkIndex;
+    TransferPcaFile(pcaFilePath, basePathLen, pcaStruct, transfer, pcaFileLen);
+
+    SEND_DIR_ADD_SIZE(*size, pcaStruct);
+    FreeFile(pcaFile);
+    FreeFile(fp);
+    pfree(transfer);
+    pfree(onlyExtend);
+}
+
 /*
  * Given the member, write the TAR header & send the file.
  *
@@ -1832,39 +2105,11 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
     const int MAX_RETRY_LIMIT = 60;
     int retryCnt = 0;
     UndoFileType undoFileType = UNDO_INVALID;
-
-    if (t_thrd.basebackup_cxt.buf_block == NULL) {
-        MemoryContext oldcxt = NULL;
-
-        oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-        t_thrd.basebackup_cxt.buf_block = (char *)palloc0(TAR_SEND_SIZE);
-        MemoryContextSwitchTo(oldcxt);
-    }
-
-    /*
-     * repalloc to `MaxBuildAllocSize' in one time, to avoid many small step repalloc in `pq_putmessage_noblock'
-     * and low performance.
-     */
-    if (INT2SIZET(t_thrd.libpq_cxt.PqSendBufferSize) < MaxBuildAllocSize) {
-        t_thrd.libpq_cxt.PqSendBuffer = (char *)repalloc(t_thrd.libpq_cxt.PqSendBuffer, MaxBuildAllocSize);
-        t_thrd.libpq_cxt.PqSendBufferSize = MaxBuildAllocSize;
-    }
-
-    /*
-     * Some compilers will throw a warning knowing this test can never be true
-     * because pgoff_t can't exceed the compared maximum on their platform.
-     */
-    if (statbuf->st_size > MAX_FILE_SIZE_LIMIT) {
-        ereport(WARNING, (errcode(ERRCODE_NAME_TOO_LONG),
-                          errmsg("archive member \"%s\" too large for tar format", tarfilename)));
-        return false;
-    }
-
-    fp = AllocateFile(readfilename, "rb");
+    
+    SendFilePreInit();
+    fp = SizeCheckAndAllocate(readfilename, *statbuf, missing_ok);
     if (fp == NULL) {
-        if (errno == ENOENT && missing_ok)
-            return false;
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", readfilename)));
+        return false;
     }
 
     isNeedCheck = is_row_data_file(readfilename, &segNo, &undoFileType);

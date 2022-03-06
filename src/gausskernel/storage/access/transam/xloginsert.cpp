@@ -511,7 +511,8 @@ XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, int bucket_id, bool istoast)
      * The caller can set rmgr bits and XLR_SPECIAL_REL_UPDATE; the rest are
      * reserved for use by me.
      */
-    if ((info & ~(XLR_RMGR_INFO_MASK | XLR_SPECIAL_REL_UPDATE | XLR_BTREE_UPGRADE_FLAG | XLR_IS_TOAST)) != 0) {
+    if ((info & ~(XLR_RMGR_INFO_MASK | XLR_SPECIAL_REL_UPDATE |
+         XLR_BTREE_UPGRADE_FLAG | XLR_REL_COMPRESS | XLR_IS_TOAST)) != 0) {
         ereport(PANIC, (errmsg("invalid xlog info mask %hhx", info)));
     }
 
@@ -717,6 +718,12 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         bool samerel = false;
         bool tde = false;
 
+        // must be uncompressed table during upgrade
+        bool isCompressedTable = regbuf->rnode.opt != 0;
+        if (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION) {
+            Assert(!isCompressedTable);
+        }
+
         if (!regbuf->in_use)
             continue;
 
@@ -864,7 +871,7 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
             samerel = false;
         prev_regbuf = regbuf;
 
-        if (!samerel && IsSegmentFileNode(regbuf->rnode)) {
+        if (!samerel && (IsSegmentFileNode(regbuf->rnode) || isCompressedTable)) {
             Assert(bkpb.id <= XLR_MAX_BLOCK_ID);
             bkpb.id += BKID_HAS_BUCKET_OR_SEGPAGE;
         }
@@ -880,9 +887,21 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         }
 
         if (!samerel) {
-            if (IsSegmentFileNode(regbuf->rnode)) {
-                XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
-                hashbucket_flag = true;
+            if (IsSegmentFileNode(regbuf->rnode) || isCompressedTable) {
+                if (IsSegmentFileNode(regbuf->rnode)) {
+                    XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
+                    hashbucket_flag = true;
+                } else if (isCompressedTable) {
+                    if (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION) {
+                        Assert(!isCompressedTable);
+                        RelFileNodeV2 relFileNodeV2;
+                        RelFileNodeV2Copy(relFileNodeV2, regbuf->rnode);
+                        XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNodeV2), &regbuf->rnode, remained_size);
+                    } else {
+                        info |= XLR_REL_COMPRESS;
+                        XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
+                    }
+                }
             } else {
                 XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNodeOld), &regbuf->rnode, remained_size);
                 no_hashbucket_flag = true;

@@ -246,6 +246,8 @@ int GetRemoteConnInfo(char* remoteAddress, char* remoteReadConnInfo, int len)
  * @IN spcnode: tablespace id
  * @IN dbnode: database id
  * @IN relnode: relfilenode
+ * @IN bucketnode: bucketnode
+ * @IN opt: compressed table options
  * @IN/OUT forknum: forknum
  * @IN/OUT blocknum: block number
  * @IN/OUT blocksize: block size
@@ -284,7 +286,7 @@ extern int RemoteGetPage(char* remoteAddress, RepairBlockKey *key, uint32 blocks
         tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
                            "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, '%lu', %u, '%lu', false, %d);",
                            key->relfilenode.spcNode, key->relfilenode.dbNode, key->relfilenode.relNode,
-                           key->relfilenode.bucketNode, key->forknum, key->blocknum, blocksize, lsn, timeout);
+                           key->relfilenode.bucketNode, key->relfilenode.opt, key->forknum, key->blocknum, blocksize, lsn, timeout);
     }
 
     securec_check_ss(tnRet, "", "");

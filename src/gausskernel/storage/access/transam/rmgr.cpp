@@ -29,6 +29,7 @@
 #include "access/gin.h"
 #include "access/gist_private.h"
 #include "access/hash.h"
+#include "access/hash_xlog.h"
 #include "access/heapam.h"
 #include "access/ustore/knl_uredo.h"
 #include "access/multixact.h"

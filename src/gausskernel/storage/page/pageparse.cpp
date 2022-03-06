@@ -105,6 +105,10 @@ static void formatBitmap(const unsigned char *start, int len, char bit1, char bi
 void PrepForRead(char *path, int64 blocknum, char *relation_type, char *outputFilename, RelFileNode *relnode,
     bool parse_page)
 {
+    if (CalculateCompressMainForkSize(path, true) != 0) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), (errmsg("compressed table file is not allowed here."))));
+    }
     char *pathFirstpart = (char *)palloc(MAXFNAMELEN * sizeof(char));
     errno_t rc = memset_s(pathFirstpart, MAXFNAMELEN, 0, MAXFNAMELEN);
     securec_check(rc, "\0", "\0");
@@ -133,7 +137,7 @@ void PrepForRead(char *path, int64 blocknum, char *relation_type, char *outputFi
             (errmsg("The tablespace oid is 0. Please check the first parameter path. "
                 "If you are not sure about the table path, please check pg_relation_filepath."))));
     RelFileNodeRelCopy(*relnode, relfilenode.rnode.node);
-
+    relnode->opt = 0;
     char *pagesuffix = "page";
     char *xlogsuffix = "xlog";
     rc = snprintf_s(outputFilename + (int)strlen(outputFilename), MAXFILENAME, MAXFILENAME - 1, "%s/%u_%u_%u_%d.%s",
@@ -496,6 +500,7 @@ static void CheckSegment(RelFileNode *relnode, ForkNumber forkNum)
     relnodeHead->dbNode = relnode->dbNode;
     relnodeHead->relNode = 1;
     relnodeHead->bucketNode = relnode->bucketNode;
+    relnodeHead->opt = relnode->opt;
     Buffer buffer_temp = ReadBufferFast(spc, *relnodeHead, forkNum, relnode->relNode, RBM_NORMAL);
     if (!BufferIsValid(buffer_temp))
         ereport(ERROR, (errcode_for_file_access(), errmsg("Segment Head is invalid %u/%u/%u %d %u",
