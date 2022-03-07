@@ -1084,6 +1084,57 @@ select t1.id,t1.pid,t1.name from test_hcb_ptb t1 start with not exists(select * 
    1 |   0 | 中国
 (6 rows)
 
+-- test sublibk pull is no allowed in swcb converted cases
+explain (costs off)
+select id,pid,level
+from test_hcb_ptb
+where exists (
+    select id
+    from test_place t
+    where t.id=test_hcb_ptb.id
+)
+start with id=151 connect by prior pid=id;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   Filter: (alternatives: SubPlan 2 or hashed SubPlan 3)
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_9
+           ->  Recursive Union
+                 ->  Seq Scan on test_hcb_ptb
+                       Filter: (id = 151)
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_hcb_ptb.id = tmp_reuslt."test_hcb_ptb@pid")
+                       ->  Seq Scan on test_hcb_ptb
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+   SubPlan 2
+     ->  Seq Scan on test_place t
+           Filter: (id = tmp_reuslt."test_hcb_ptb@id")
+   SubPlan 3
+     ->  Seq Scan on test_place t
+(18 rows)
+
+select id,pid,level
+from test_hcb_ptb
+where exists (
+    select id
+    from test_place t
+    where t.id=test_hcb_ptb.id
+)
+start with id=151 connect by prior pid=id;
+ id  | pid | level 
+-----+-----+-------
+ 151 | 141 |     1
+ 141 | 131 |     2
+ 131 | 121 |     3
+ 121 | 111 |     4
+ 111 |  11 |     5
+  11 |   1 |     6
+   1 |   0 |     7
+(7 rows)
+
 drop table test_place;
 -- test where quals pushdown
 drop table if exists brand_sw3 cascade;

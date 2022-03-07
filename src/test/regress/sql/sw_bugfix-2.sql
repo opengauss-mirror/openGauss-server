@@ -393,6 +393,27 @@ drop table t_customer;
 -- test correlated sublink
 create table test_place as select id, name, tex from test_hcb_ptb;
 select t1.id,t1.pid,t1.name from test_hcb_ptb t1 start with not exists(select * from test_place where id=t1.id and id !=141) connect by prior pid=id;
+
+-- test sublibk pull is no allowed in swcb converted cases
+explain (costs off)
+select id,pid,level
+from test_hcb_ptb
+where exists (
+    select id
+    from test_place t
+    where t.id=test_hcb_ptb.id
+)
+start with id=151 connect by prior pid=id;
+
+select id,pid,level
+from test_hcb_ptb
+where exists (
+    select id
+    from test_place t
+    where t.id=test_hcb_ptb.id
+)
+start with id=151 connect by prior pid=id;
+
 drop table test_place;
 
 -- test where quals pushdown

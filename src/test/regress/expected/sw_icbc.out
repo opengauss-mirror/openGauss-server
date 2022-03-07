@@ -452,8 +452,8 @@ where not exists (select 1 from t1 where test.id = t1.id)
 start with test.id = 1 connect by prior test.id = test.pid;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Hash Anti Join  (cost=19.42..22.29 rows=82 width=40)
-   Hash Cond: (tmp_reuslt."test@id" = t1.id)
+ CTE Scan on tmp_reuslt  (cost=18.22..121.28 rows=46 width=40)
+   Filter: (NOT (alternatives: SubPlan 2 or hashed SubPlan 3))
    CTE tmp_reuslt
      ->  StartWith Operator  (cost=0.00..18.22 rows=91 width=10)
            Start With pseudo atts: RUITR, array_key_1
@@ -465,10 +465,12 @@ start with test.id = 1 connect by prior test.id = test.pid;
                        ->  Seq Scan on t1 test  (cost=0.00..1.09 rows=9 width=10)
                        ->  Hash  (cost=0.20..0.20 rows=10 width=4)
                              ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
-   ->  CTE Scan on tmp_reuslt  (cost=0.00..1.82 rows=91 width=40)
-   ->  Hash  (cost=1.09..1.09 rows=9 width=4)
-         ->  Seq Scan on t1  (cost=0.00..1.09 rows=9 width=4)
-(16 rows)
+   SubPlan 2
+     ->  Seq Scan on t1  (cost=0.00..1.11 rows=1 width=0)
+           Filter: (tmp_reuslt."test@id" = id)
+   SubPlan 3
+     ->  Seq Scan on t1  (cost=0.00..1.09 rows=9 width=4)
+(18 rows)
 
 --multiple tables case
 explain (costs off) select * from t1, t2 where t1.id = t2.id start with t1.id = t2.id and t1.id = 1 connect by prior t1.id = t1.pid;
