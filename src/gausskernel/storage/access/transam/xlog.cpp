@@ -395,6 +395,7 @@ static bool CheckForStandbyTrigger(void);
 static void xlog_outrec(StringInfo buf, XLogReaderState *record);
 #endif
 static void pg_start_backup_callback(int code, Datum arg);
+static void DoAbortBackupCallback(int code, Datum arg);
 static void AbortExcluseBackupCallback(int code, Datum arg);
 static bool read_tablespace_map(List **tablespaces);
 static bool read_backup_label(XLogRecPtr *checkPointLoc, bool *backupEndRequired, bool *backupFromStandby,
@@ -14688,7 +14689,26 @@ void do_pg_abort_backup(void)
     u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
 
     StopSuspendWalInsert(lastlrc);
-    u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
+}
+
+/*
+ * Error cleanup callback for do_pg_abort_backup
+ */
+static void DoAbortBackupCallback(int code, Datum arg)
+{
+    do_pg_abort_backup();
+}
+
+/*
+ * Register a handler that will warn about unterminated backups at the end of
+ * session, unless this has already been done.
+ */
+void RegisterPersistentAbortBackupHandler(void)
+{
+    if (u_sess->proc_cxt.registerAbortBackupHandlerdone)
+        return;
+    on_shmem_exit(DoAbortBackupCallback, BoolGetDatum(true));
+    u_sess->proc_cxt.registerAbortBackupHandlerdone = true;
 }
 
 /*

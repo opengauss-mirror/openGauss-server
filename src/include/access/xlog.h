@@ -768,6 +768,7 @@ extern XLogRecPtr GetDDLDelayStartPtr(void);
 extern XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long long* consensusPaxosIdx = NULL);
 extern XLogRecPtr StandbyDoStopBackup(char *labelfile);
 extern void do_pg_abort_backup(void);
+extern void RegisterPersistentAbortBackupHandler(void);
 extern void RegisterAbortExclusiveBackup();
 extern void enable_delay_xlog_recycle(bool isRedo = false);
 extern void disable_delay_xlog_recycle(bool isRedo = false);

@@ -170,13 +170,7 @@ Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
     DIR *dir;
     char startxlogstr[MAXFNAMELEN];
     errno_t errorno = EOK;
-    MemoryContext oldContext;
 
-    u_sess->probackup_context = AllocSetContextCreate(u_sess->top_mem_cxt, "probackup context",
-                                                      ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
-                                                      ALLOCSET_DEFAULT_MAXSIZE);
-    oldContext = MemoryContextSwitchTo(u_sess->probackup_context);
-    
     SessionBackupState status = u_sess->proc_cxt.sessionBackupState;
 
     if (status == SESSION_BACKUP_NON_EXCLUSIVE)
@@ -196,7 +190,15 @@ Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                  errmsg("a  backup is already in progress in this session")));
 
+        RegisterPersistentAbortBackupHandler();
+
         startpoint = do_pg_start_backup(backupidstr, fast, &labelfile,dir, &tblspcmapfile, NULL,false,true);
+        
+        if (u_sess->probackup_context == NULL) {
+            u_sess->probackup_context = AllocSetContextCreate(u_sess->top_mem_cxt, "probackup context",
+                                                              ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                                              ALLOCSET_DEFAULT_MAXSIZE);
+        }
         u_sess->proc_cxt.LabelFile = MemoryContextStrdup(u_sess->probackup_context, labelfile);
         if (tblspcmapfile != NULL) {
             u_sess->proc_cxt.TblspcMapFile = MemoryContextStrdup(u_sess->probackup_context, tblspcmapfile);
@@ -210,8 +212,6 @@ Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
     securec_check_ss(errorno, "", "");
 
     PG_RETURN_TEXT_P(cstring_to_text(startxlogstr));
-
-    MemoryContextSwitchTo(oldContext);
 }
 
 /*
@@ -223,7 +223,7 @@ Datum pg_stop_backup_v2(PG_FUNCTION_ARGS)
     ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
     TupleDesc    tupdesc;
     Tuplestorestate *tupstore;
-    MemoryContext perqueryctx, oldcontext, oldcontext2;
+    MemoryContext perqueryctx, oldcontext;
     Datum        values[3];
     bool         nulls[3];
     XLogRecPtr stoppoint;
@@ -246,8 +246,6 @@ Datum pg_stop_backup_v2(PG_FUNCTION_ARGS)
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                      errmsg("non-exclusive backup is not in progress")));
     }
-
-    oldcontext2 = MemoryContextSwitchTo(u_sess->probackup_context);
 
     /* check to see if caller supports us returning a tuplestore */
     if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
@@ -304,8 +302,6 @@ Datum pg_stop_backup_v2(PG_FUNCTION_ARGS)
 
     tuplestore_putvalues(tupstore, tupdesc, values, nulls);
     tuplestore_donestoring(tupstore);
-
-    MemoryContextSwitchTo(oldcontext2);
 
     return (Datum) 0;
 }
