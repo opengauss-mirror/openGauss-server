@@ -12,18 +12,18 @@
 \! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
 -- 查看是否线程数修改成功
 \! sleep 5
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "show audit_thread_num;";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num;";
  audit_thread_num 
 ------------------
  3
 (1 row)
 
 -- 产生dml_action 审计日志
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "CREATE TABLE T_TEST_MULTI_THREAD_SPACE(COL1 int4 DEFAULT 1, COL2 VARCHAR(1024) DEFAULT 'test_multi_thread_space', COL3 int4 DEFAULT 1, COL4 text DEFAULT 'null')";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CREATE TABLE T_TEST_MULTI_THREAD_SPACE(COL1 int4 DEFAULT 1, COL2 VARCHAR(1024) DEFAULT 'test_multi_thread_space', COL3 int4 DEFAULT 1, COL4 text DEFAULT 'null')";
 CREATE TABLE
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "CREATE OR REPLACE PROCEDURE TRANSACTION_TEST_MULTI_THREAD_SPACE() AS BEGIN FOR i IN 0..3000000 LOOP INSERT INTO T_TEST_MULTI_THREAD_SPACE(COL1, COL2,COL3) VALUES (i, 'test_multi_thread_space',2); COMMIT; END LOOP; END;";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CREATE OR REPLACE PROCEDURE TRANSACTION_TEST_MULTI_THREAD_SPACE() AS BEGIN FOR i IN 0..3000000 LOOP INSERT INTO T_TEST_MULTI_THREAD_SPACE(COL1, COL2,COL3) VALUES (i, 'test_multi_thread_space',2); COMMIT; END LOOP; END;";
 CREATE PROCEDURE
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c " CALL TRANSACTION_TEST_MULTI_THREAD_SPACE();";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c " CALL TRANSACTION_TEST_MULTI_THREAD_SPACE();";
  transaction_test_multi_thread_space 
 -------------------------------------
  
@@ -48,7 +48,7 @@ delete oldest files
 \! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
 -- 再次查看是否线程数修改成功
 \! sleep 5
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "show audit_thread_num;";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num;";
  audit_thread_num 
 ------------------
  1

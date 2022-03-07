@@ -13,18 +13,18 @@ select pg_sleep(1);
 \! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
 -- 查看线程数是否改为 3
 \! sleep 5
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "show audit_thread_num";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
  audit_thread_num 
 ------------------
  3
 (1 row)
 
 -- 产生dml_action 审计日志
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c " CREATE TABLE T_TEST_MULTI_THREAD_ROTATION_SIZE(COL1 int4 DEFAULT 1,COL2 VARCHAR(1024) DEFAULT 'test_rotation_size')";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c " CREATE TABLE T_TEST_MULTI_THREAD_ROTATION_SIZE(COL1 int4 DEFAULT 1,COL2 VARCHAR(1024) DEFAULT 'test_rotation_size')";
 CREATE TABLE
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "CREATE OR REPLACE PROCEDURE TRANSACTION_MULTI_THREAD_ROTATION_SIZE() AS BEGIN FOR i IN 0..1000000 LOOP INSERT INTO T_TEST_MULTI_THREAD_ROTATION_SIZE(COL1, COL2) VALUES (i, 'test_multi_thread_rotation_size'); COMMIT; END LOOP; END;";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CREATE OR REPLACE PROCEDURE TRANSACTION_MULTI_THREAD_ROTATION_SIZE() AS BEGIN FOR i IN 0..1000000 LOOP INSERT INTO T_TEST_MULTI_THREAD_ROTATION_SIZE(COL1, COL2) VALUES (i, 'test_multi_thread_rotation_size'); COMMIT; END LOOP; END;";
 CREATE PROCEDURE
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "CALL TRANSACTION_MULTI_THREAD_ROTATION_SIZE()";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CALL TRANSACTION_MULTI_THREAD_ROTATION_SIZE()";
  transaction_multi_thread_rotation_size 
 ----------------------------------------
  
@@ -43,7 +43,7 @@ all the logs are less than 2.1M
 \! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
 -- 查看线程数是否恢复 1
 \! sleep 5
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "show audit_thread_num";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
  audit_thread_num 
 ------------------
  1
