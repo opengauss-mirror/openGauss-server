@@ -910,9 +910,7 @@ static void DropIndexes(const char* indexName)
     appendStringInfo(&query, "drop index IF EXISTS snapshot.%s", indexName);
     if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
         pfree_ext(query.data);
-        ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_DATA_EXCEPTION),
-            errmsg("create index failed"), errdetail("drop index snapshot.%s execute error", indexName),
-            errcause("System error."), erraction("Check whether the query can be executed")));
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),errmsg("drop index failed")));
     }
     pfree_ext(query.data);
 }
@@ -1153,11 +1151,7 @@ void SnapshotNameSpace::CreateIndexes(const char* views)
             views, views);
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
             pfree_ext(query.data);
-            ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_DATA_EXCEPTION),
-                errmsg("create WDR snapshot index failed"),
-                errdetail("create index snapshot.snap_%s_idx execute error", views),
-                errcause("System error."),
-                erraction("Check whether the query can be executed")));
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),errmsg("create WDR snapshot index failed")));
         }
     }
     pfree_ext(query.data);
