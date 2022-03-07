@@ -785,7 +785,7 @@ exception
 end;
 /
 select p2();
-ERROR:  transaction statement in store procedure used as sql to get value is not supported
+ERROR:  can not use commit rollback in Complex SQL
 CONTEXT:  PL/pgSQL function p1() line 12 at FOR with integer loop variable
 referenced column: p1
 referenced column: c1
@@ -830,14 +830,14 @@ end;
 /
 select p2();
 number of failures: 8
-error: 1 array index: 2 messagecode: 1282 errormessage: transaction statement in store procedure used as sql to get value is not supported
-error: 2 array index: 3 messagecode: 1282 errormessage: transaction statement in store procedure used as sql to get value is not supported
-error: 3 array index: 4 messagecode: 1282 errormessage: transaction statement in store procedure used as sql to get value is not supported
-error: 4 array index: 5 messagecode: 1282 errormessage: transaction statement in store procedure used as sql to get value is not supported
-error: 5 array index: 6 messagecode: 1282 errormessage: transaction statement in store procedure used as sql to get value is not supported
-error: 6 array index: 7 messagecode: 1282 errormessage: transaction statement in store procedure used as sql to get value is not supported
-error: 7 array index: 8 messagecode: 1282 errormessage: transaction statement in store procedure used as sql to get value is not supported
-error: 8 array index: 9 messagecode: 1282 errormessage: transaction statement in store procedure used as sql to get value is not supported
+error: 1 array index: 2 messagecode: 1282 errormessage: can not use commit rollback in Complex SQL
+error: 2 array index: 3 messagecode: 1282 errormessage: can not use commit rollback in Complex SQL
+error: 3 array index: 4 messagecode: 1282 errormessage: can not use commit rollback in Complex SQL
+error: 4 array index: 5 messagecode: 1282 errormessage: can not use commit rollback in Complex SQL
+error: 5 array index: 6 messagecode: 1282 errormessage: can not use commit rollback in Complex SQL
+error: 6 array index: 7 messagecode: 1282 errormessage: can not use commit rollback in Complex SQL
+error: 7 array index: 8 messagecode: 1282 errormessage: can not use commit rollback in Complex SQL
+error: 8 array index: 9 messagecode: 1282 errormessage: can not use commit rollback in Complex SQL
 successfully inserted: 2rows
  p2 
 ----

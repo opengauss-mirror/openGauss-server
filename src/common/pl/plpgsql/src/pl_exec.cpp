@@ -5445,7 +5445,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     bool has_alloc = false;
 
     TransactionId oldTransactionId = SPI_get_top_transaction_id();
-
+ 
     /*
      * On the first call for this statement generate the plan, and detect
      * whether the statement is INSERT/UPDATE/DELETE/MERGE
@@ -5477,7 +5477,19 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     if (ENABLE_CN_GPC && g_instance.plan_cache->CheckRecreateSPICachePlan(expr->plan)) {
             g_instance.plan_cache->RecreateSPICachePlan(expr->plan);
     }
-
+#ifndef ENABLE_MULTIPLE_NODES
+    ListCell* l = NULL;
+    bool isforbid = true;
+    bool savedisAllowCommitRollback = false;
+    bool needResetErrMsg = false;
+    foreach (l, SPI_plan_get_plan_sources(expr->plan)) {
+        CachedPlanSource* plansource = (CachedPlanSource*)lfirst(l);
+        isforbid = CheckElementParsetreeTag(plansource->raw_parse_tree);
+        if (isforbid) {
+            needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_COMPL_SQL);
+        }
+    }
+#endif
     /*
      * Set up ParamListInfo (hook function and possibly data values)
      */
@@ -5539,7 +5551,11 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     // This is used for nested STP. If the transaction Id changed,
     // then need to create new econtext for the TopTransaction.
     stp_check_transaction_and_create_econtext(estate,oldTransactionId);
-    
+#ifndef ENABLE_MULTIPLE_NODES
+    if (isforbid) {
+        stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
+    }
+#endif 
     plpgsql_estate = NULL;
 
     /*
