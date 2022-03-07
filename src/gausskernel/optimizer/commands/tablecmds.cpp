@@ -1103,7 +1103,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
     bool isUstore = false;
     bool assignedStorageType = false;
 
-    TableCreateSupport tableCreateSupport{false,false,false,false,false,false};
+    TableCreateSupport tableCreateSupport{COMPRESS_TYPE_NONE, false, false, false, false, false};
     (void)isOrientationSet(options, NULL, false);
     foreach (cell, options) {
         DefElem* def = (DefElem*)lfirst(cell);
@@ -1134,7 +1134,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("It is not allowed to assign version option for non-dfs table.")));
         } else {
-            SetOneOfCompressOption(def->defname, &tableCreateSupport);
+            SetOneOfCompressOption(def, &tableCreateSupport);
         }
 
         if (pg_strcasecmp(def->defname, "orientation") == 0 && pg_strcasecmp(defGetString(def), ORIENTATION_ORC) == 0) {

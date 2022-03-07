@@ -1288,7 +1288,7 @@ void CompressedFileTruncate(const char *path, const RewindCompressInfo *rewindCo
         truncate_target_file(pcdPath, max_used_chunkno * chunkSize);
     }
     pc_munmap(map);
-    pg_log(PG_PROGRESS, "CompressedFileTruncate: %s\n", path);
+    pg_log(PG_DEBUG, "CompressedFileTruncate: %s\n", path);
 }
 
 void OpenCompressedPcaFile(const char* fileName, int32 chunkSize, int32 algorithm, bool rebuild)

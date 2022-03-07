@@ -586,7 +586,7 @@ static void CompressedFileCopy(const file_entry_t* entry, bool rebuild)
     if (PQputCopyData(conn, linebuf, strlen(linebuf)) != 1) {
         pg_fatal("could not send COPY data: %s", PQerrorMessage(conn));
     }
-    pg_log(PG_PROGRESS, "CompressedFileCopy:%s", linebuf);
+    pg_log(PG_DEBUG, "CompressedFileCopy: %s", linebuf);
 }
 
 static void CompressedFileRemove(const file_entry_t* entry)
@@ -598,7 +598,7 @@ static void CompressedFileRemove(const file_entry_t* entry)
     remove_target_file(dst, false);
     FormatPathToPcd(path, dst, MAXPGPATH);
     remove_target_file(dst, false);
-    pg_log(PG_PROGRESS, "CompressedFileRemove: %s\n", path);
+    pg_log(PG_DEBUG, "CompressedFileRemove: %s\n", path);
 }
 
 /*

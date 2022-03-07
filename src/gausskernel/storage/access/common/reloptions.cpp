@@ -2935,10 +2935,11 @@ bool is_cstore_option(char relkind, Datum reloptions)
     return result;
 }
 
-void SetOneOfCompressOption(const char* defname, TableCreateSupport* tableCreateSupport)
+void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSupport)
 {
+    auto defname = defElem->defname;
     if (pg_strcasecmp(defname, "compresstype") == 0) {
-        tableCreateSupport->compressType = true;
+        tableCreateSupport->compressType = defGetInt64(defElem);
     } else if (pg_strcasecmp(defname, "compress_chunk_size") == 0) {
         tableCreateSupport->compressChunkSize = true;
     } else if (pg_strcasecmp(defname, "compress_prealloc_chunks") == 0) {
@@ -2962,5 +2963,9 @@ void CheckCompressOption(TableCreateSupport *tableCreateSupport)
     if (!tableCreateSupport->compressByteConvert && tableCreateSupport->compressDiffConvert) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
                         errmsg("compress_diff_convert should be used with compress_byte_convert.")));
+    }
+    if (tableCreateSupport->compressType != COMPRESS_TYPE_ZSTD && tableCreateSupport->compressLevel) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+            errmsg("compress_level should be used with ZSTD algorithm.")));
     }
 }

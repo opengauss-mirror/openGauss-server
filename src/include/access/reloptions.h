@@ -132,7 +132,7 @@ typedef struct {
 } relopt_parse_elt;
 
 struct TableCreateSupport {
-    bool compressType;
+    int compressType;
     bool compressLevel;
     bool compressChunkSize;
     bool compressPreAllocChunks;
@@ -301,7 +301,8 @@ extern void forbid_to_set_options_for_timeseries_tbl(List* options);
 extern List* RemoveRelOption(List* options, const char* optName, bool* removed);
 void RowTblCheckCompressionOption(List *options, int8 rowCompress = REL_CMPRS_PAGE_PLAIN);
 void RowTblCheckHashBucketOption(List* options, StdRdOptions* std_opt);
-void SetOneOfCompressOption(const char *defname, TableCreateSupport *tableCreateSupport);
+void ForbidUserToSetCompressedOptions(List *options);
+void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport *tableCreateSupport);
 void CheckCompressOption(TableCreateSupport *tableCreateSupport);
 void ForbidUserToSetCompressedOptions(List *options);
 #endif /* RELOPTIONS_H */
