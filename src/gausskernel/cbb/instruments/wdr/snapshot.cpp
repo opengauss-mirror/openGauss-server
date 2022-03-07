@@ -87,7 +87,7 @@ void init_curr_snapid(void);
 void CreateTable(const char** views, int numViews, bool ismultidbtable);
 void InitTables(void);
 void CreateSnapStatTables(void);
-void CreateIndexes(void);
+void CreateIndexes(const char* views);
 void CreateSequence(void);
 void UpdateSnapEndTime(uint64 curr_snapid);
 void GetQueryStr(StringInfoData& query, const char* viewname, uint64 curr_snapid, const char* dbname);
@@ -903,6 +903,20 @@ void SnapshotNameSpace::CreateSnapStatTables(void)
     CreateStatTable(createSnapshot, tablename2);
 }
 
+static void DropIndexes(const char* indexName)
+{
+    StringInfoData query;
+    initStringInfo(&query);
+    appendStringInfo(&query, "drop index IF EXISTS snapshot.%s", indexName);
+    if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
+        pfree_ext(query.data);
+        ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_DATA_EXCEPTION),
+            errmsg("create index failed"), errdetail("drop index snapshot.%s execute error", indexName),
+            errcause("System error."), erraction("Check whether the query can be executed")));
+    }
+    pfree_ext(query.data);
+}
+
 void SnapshotNameSpace::InitTables()
 {
     SnapshotNameSpace::CreateSnapStatTables();
@@ -915,7 +929,10 @@ void SnapshotNameSpace::InitTables()
     SnapshotNameSpace::CreateTable(lastDbRelatedViews, numViews, false);
     numViews = COUNT_ARRAY_SIZE(lastStatViews);
     SnapshotNameSpace::CreateTable(lastStatViews, numViews, true);
-    SnapshotNameSpace::CreateIndexes();
+    DropIndexes("snap_summary_statio_indexes_name");
+    DropIndexes("snap_summary_statio_tables_name");
+    DropIndexes("snap_summary_stat_indexes_name");
+    DropIndexes("snap_class_info_name");
 }
 
 void SnapshotNameSpace::CreateTable(const char** views, int numViews, bool isSharedViews)
@@ -949,6 +966,8 @@ void SnapshotNameSpace::CreateTable(const char** views, int numViews, bool isSha
             }
             pfree(snapColAttrType);
         }
+        /* create index on snapshot table */
+        SnapshotNameSpace::CreateIndexes(views[i]);
     }
     pfree_ext(query.data);
 }
@@ -1114,74 +1133,31 @@ void SnapshotNameSpace::InsertDatabaseData(const char* dbname, uint64 curr_snapi
     pfree_ext(sql.data);
 }
 
-static bool IsNeedCreateIndex(const char* indexName)
-{
-    Datum colval;
-    bool isNull = false;
-    StringInfoData query;
-
-    initStringInfo(&query);
-    /* check the index which is existing or not */
-    appendStringInfo(&query, "select count(*) from pg_class where relname = '%s' and relkind = 'i'", indexName);
-    colval = GetDatumValue(query.data, 0, 0, &isNull);
-    if (DatumGetInt32(colval)) {
-        return false;
-    }
-    pfree_ext(query.data);
-    return true;
-}
 /*
  In order to accelerate query for awr report, the index of some tables need to create
  The index is created immediately after whose table has existed at the start phase
 */
-void SnapshotNameSpace::CreateIndexes(void)
+void SnapshotNameSpace::CreateIndexes(const char* views)
 {
+    bool isnull = false;
     StringInfoData query;
     initStringInfo(&query);
-
-    /* snap_summary_statio_all_indexes */
-    if (IsNeedCreateIndex("snap_summary_statio_indexes_name")) {
-        appendStringInfo(&query,
-            "create index snap_summary_statio_indexes_name on"
-            " snapshot.snap_summary_statio_all_indexes(db_name, snap_schemaname, snap_relname, snap_indexrelname);");
-
-        if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("create index failed")));
-        }
-    }
-
-    /* snap_summary_statio_all_tables */
-    if (IsNeedCreateIndex("snap_summary_statio_tables_name")) {
+    appendStringInfo(&query,
+        "select count(*) from pg_indexes where schemaname = 'snapshot' and "
+        "tablename = 'snap_%s' and indexname = 'snap_%s_idx'",
+        views, views);
+    Datum indexNum = GetDatumValue(query.data, 0, 0, &isnull);
+    if (!DatumGetInt32(indexNum)) {
         resetStringInfo(&query);
-        appendStringInfo(&query,
-            "create index snap_summary_statio_tables_name on"
-            " snapshot.snap_summary_statio_all_tables(db_name, snap_schemaname, snap_relname);");
-
+        appendStringInfo(&query, "create index snapshot.snap_%s_idx on snapshot.snap_%s(snapshot_id)",
+            views, views);
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("create index failed")));
-        }
-    }
-
-    /* snap_summary_stat_all_indexes */
-    if (IsNeedCreateIndex("snap_summary_stat_indexes_name")) {
-        resetStringInfo(&query);
-        appendStringInfo(&query,
-            "create index snap_summary_stat_indexes_name on"
-            " snapshot.snap_summary_stat_all_indexes(db_name, snap_schemaname, snap_relname, snap_indexrelname);");
-
-        if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("create index failed")));
-        }
-    }
-
-    /* snap_class_vital_info */
-    if (IsNeedCreateIndex("snap_class_info_name")) {
-        resetStringInfo(&query);
-        appendStringInfo(&query,
-            "create index snap_class_info_name on"
-            " snapshot.snap_class_vital_info(db_name, snap_schemaname, snap_relname);");
-        if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("create index failed")));
+            pfree_ext(query.data);
+            ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_DATA_EXCEPTION),
+                errmsg("create WDR snapshot index failed"),
+                errdetail("create index snapshot.snap_%s_idx execute error", views),
+                errcause("System error."),
+                erraction("Check whether the query can be executed")));
         }
     }
     pfree_ext(query.data);
