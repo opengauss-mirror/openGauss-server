@@ -983,10 +983,10 @@ int StartLogicalLogWorkers(char* dbUser, char* dbName, char* slotname, List *opt
         ParseDecodingOptions(&g_Logicaldispatcher[slotId].pOptions, options);
         errno_t rc = memcpy_s(g_Logicaldispatcher[slotId].slotName, NAMEDATALEN, slotname, strlen(slotname));
         securec_check(rc, "", "");
+
+        StartLogicalDecodeWorkers(parallelDecodeNum, slotId, dbUser, dbName, slotname);
         g_Logicaldispatcher[slotId].readWorker = CreateLogicalReadWorker(slotId, dbUser, dbName, slotname, options);
         g_Logicaldispatcher[slotId].readWorker->tid = StartDecodeReadWorker(g_Logicaldispatcher[slotId].readWorker);
-        if (g_Logicaldispatcher[slotId].readWorker != NULL)
-            StartLogicalDecodeWorkers(parallelDecodeNum, slotId, dbUser, dbName, slotname);
 
         WaitWorkerReady(slotId);
         knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
