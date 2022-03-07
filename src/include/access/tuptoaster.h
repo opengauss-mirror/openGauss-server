@@ -296,5 +296,7 @@ inline Datum fetch_real_lob_if_need(Datum toast_pointer)
     return ret;
 }
 
+extern HeapTuple ctid_get_tuple(Relation relation, ItemPointer tid);
+
 #endif /* TUPTOASTER_H */
 

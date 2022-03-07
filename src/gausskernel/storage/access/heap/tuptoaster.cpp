@@ -44,6 +44,7 @@
 #include "commands/vacuum.h"
 #include "utils/snapmgr.h"
 #include "mb/pg_wchar.h"
+#include "access/tableam.h"
 
 #undef TOAST_DEBUG
 
@@ -2900,3 +2901,32 @@ struct varlena * toast_pointer_fetch_data(TupleTableSlot* varSlot, Form_pg_attri
     return toast_pointer_lob;
 }
 
+HeapTuple ctid_get_tuple(Relation relation, ItemPointer tid)
+{
+    Buffer user_buf = InvalidBuffer;
+    HeapTuple tuple = NULL;
+    HeapTuple new_tuple = NULL;
+    TM_Result result;
+  
+    /* alloc memory for old tuple and set tuple id */
+    tuple = (HeapTupleData *)heaptup_alloc(BLCKSZ);
+    tuple->t_data = (HeapTupleHeader)((char *)tuple + HEAPTUPLESIZE);
+    Assert(tid != NULL);
+    tuple->t_self = *tid;
+    
+    if (tableam_tuple_fetch(relation, SnapshotAny, tuple, &user_buf, false, NULL)) {
+        result = HeapTupleSatisfiesUpdate(tuple, GetCurrentCommandId(true), user_buf, false);
+        if (result != TM_Ok) {
+            ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("The tuple is updated, please use 'for update'.")));
+        }
+        
+        new_tuple = heapCopyTuple((HeapTuple)tuple, relation->rd_att, NULL);
+        ReleaseBuffer(user_buf);
+    } else {
+        heap_close(relation, NoLock);
+        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("The tuple is not found")));
+    }
+    heap_freetuple(tuple);
+
+    return new_tuple;
+}
