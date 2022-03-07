@@ -31,7 +31,7 @@ add a new log after interval-- 60 seconds
 \! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
 -- 查看线程数是否恢复 1
 \! sleep 5
-\! @abs_bindir@/gsql -r -p 27500 -d postgres -c "show audit_thread_num";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
  audit_thread_num 
 ------------------
  1
