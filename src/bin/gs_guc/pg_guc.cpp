@@ -2547,10 +2547,6 @@ int main(int argc, char** argv)
         hba_param = ((char**)pg_malloc_zero(arraysize * sizeof(char *)));
         config_value = ((char**)pg_malloc_zero(arraysize * sizeof(char*)));
     }
-    if (false == allocate_memory_list()) {
-        write_stderr(_("ERROR: Failed to allocate memory to list.\n"));
-        exit(1);
-    }
 
     key_mode = SERVER_MODE;
     /*
@@ -2769,8 +2765,54 @@ int main(int argc, char** argv)
         do_advice();
         exit(1);
     }
+    char arguments[MAX_BUF_SIZE] = {0x00};
+    for (int i = 0; i < argc; i++) {
+        if ((strlen(arguments) + strlen(argv[i])) >= (MAX_BUF_SIZE - 2)) {
+            if (*arguments) {
+                (void)write_log("The gs_guc run with the following arguments: [%s].\n", arguments);
+            }
+            (void)write_log("The gs_guc run with the following arguments: [%s].\n", argv[i]);
+            rc = memset_s(arguments, MAX_BUF_SIZE, 0, MAX_BUF_SIZE - 1);
+            securec_check_c(rc, "\0", "\0");
+            continue;
+        }
+        errno_t rc = strcat_s(arguments, MAX_BUF_SIZE, argv[i]);
+        size_t len = strlen(arguments);
+        if (rc != EOK) {
+            break;
+        }
+        arguments[len] = ' ';
+        arguments[len + 1] = '\0';
+    }
+    if (*arguments) {
+        (void)write_log("The gs_guc run with the following arguments: [%s].\n", arguments);
+    }
 
     check_encrypt_options();
+    
+    if (ctl_command == ENCRYPT_KEY_COMMAND) {
+        process_encrypt_cmd(pgdata_D, pgdata_C, pgdata_R);
+        (void)write_log("gs_guc encrypt %s\n", loginfo);
+    } else if (ctl_command == GENERATE_KEY_COMMAND) {
+        doGenerateOperation(pgdata_D, loginfo);
+    }
+
+    if (ctl_command == ENCRYPT_KEY_COMMAND || ctl_command == GENERATE_KEY_COMMAND) {
+        GS_FREE(g_prefix);
+        GS_FREE(g_plainkey);
+        GS_FREE(g_cipherkey);
+        GS_FREE(key_username);
+        GS_FREE(pgdata_D);
+        GS_FREE(pgdata_R);
+        GS_FREE(pgdata_C);
+        return 0;
+    }
+
+    if (false == allocate_memory_list()) {
+        write_stderr(_("ERROR: Failed to allocate memory to list.\n"));
+        exit(1);
+    }
+
     if (ctl_command != ENCRYPT_KEY_COMMAND && ctl_command != GENERATE_KEY_COMMAND && (!bhave_param && !is_hba_conf)) {
         write_stderr(_("%s: the form of this command is incorrect\n"), progname);
         do_advice();
@@ -2832,30 +2874,6 @@ int main(int argc, char** argv)
     // log output redirect
     init_log(PROG_NAME);
 
-    /* print the log about arguments of gs_guc */
-    char arguments[MAX_BUF_SIZE] = {0x00};
-    for (int i = 0; i < argc; i++) {
-        if ((strlen(arguments) + strlen(argv[i])) >= (MAX_BUF_SIZE - 2)) {
-            if (*arguments) {
-                (void)write_log("The gs_guc run with the following arguments: [%s].\n", arguments);
-            }
-            (void)write_log("The gs_guc run with the following arguments: [%s].\n", argv[i]);
-            rc = memset_s(arguments, MAX_BUF_SIZE, 0, MAX_BUF_SIZE - 1);
-            securec_check_c(rc, "\0", "\0");
-            continue;
-        }
-        errno_t rc = strcat_s(arguments, MAX_BUF_SIZE, argv[i]);
-        size_t len = strlen(arguments);
-        if (rc != EOK) {
-            break;
-        }
-        arguments[len] = ' ';
-        arguments[len + 1] = '\0';
-    }
-    if (*arguments) {
-        (void)write_log("The gs_guc run with the following arguments: [%s].\n", arguments);
-    }
-
     if ((true == is_hba_conf) &&
         ((nodetype != INSTANCE_COORDINATOR) && (nodetype != INSTANCE_DATANODE))) {
         write_stderr(_("%s: authentication operation (-h) is not supported for \"gtm\" or \"gtm_proxy\"\n"), progname);
@@ -2863,53 +2881,37 @@ int main(int argc, char** argv)
         exit(1);
     }
 
-    if (ctl_command == ENCRYPT_KEY_COMMAND) {
-        process_encrypt_cmd(pgdata_D, pgdata_C, pgdata_R);
-        (void)write_log("gs_guc encrypt %s\n", loginfo);
-    } else if (ctl_command == GENERATE_KEY_COMMAND) {
-        doGenerateOperation(pgdata_D, loginfo);
-    } else {
-        // the number of -Z is equal to 2
-        if (node_type_number == LARGE_INSTANCE_NUM) {
-            if (node_type_value[0] == node_type_value[1]) {
-                (void)write_stderr("When the number of -Z is equal to 2, the value must be different.\n");
-                exit(1);
-            }
-
-            for (int index = 0; index < LARGE_INSTANCE_NUM; index++) {
-                if (node_type_value[index] != INSTANCE_COORDINATOR && node_type_value[index] != INSTANCE_DATANODE) {
-                    (void)write_stderr("ERROR: When the number of -Z is equal to 2, the parameter value of -Z must be "
-                                       "coordinator or datanode.\n");
-                    exit(1);
-                }
-                checkLcName(node_type_value[index]);
-            }
-            nodetype = INSTANCE_COORDINATOR;
-
-            if (0 != validate_cluster_guc_options(nodename, nodetype, instance_name, pgdata_D)) {
-                exit(1);
-            }
-            process_cluster_guc_option(nodename, nodetype, instance_name, pgdata_D);
-        } else {
-            checkLcName(nodetype);
-            if (0 != validate_cluster_guc_options(nodename, nodetype, instance_name, pgdata_D)) {
-                exit(1);
-            }
-            process_cluster_guc_option(nodename, nodetype, instance_name, pgdata_D);
+    // the number of -Z is equal to 2
+    if (node_type_number == LARGE_INSTANCE_NUM) {
+        if (node_type_value[0] == node_type_value[1]) {
+            (void)write_stderr("When the number of -Z is equal to 2, the value must be different.\n");
+            exit(1);
         }
+
+        for (int index = 0; index < LARGE_INSTANCE_NUM; index++) {
+            if (node_type_value[index] != INSTANCE_COORDINATOR && node_type_value[index] != INSTANCE_DATANODE) {
+                (void)write_stderr("ERROR: When the number of -Z is equal to 2, the parameter value of -Z must be "
+                                   "coordinator or datanode.\n");
+                exit(1);
+            }
+            checkLcName(node_type_value[index]);
+        }
+        nodetype = INSTANCE_COORDINATOR;
+
+        if (0 != validate_cluster_guc_options(nodename, nodetype, instance_name, pgdata_D)) {
+            exit(1);
+        }
+        process_cluster_guc_option(nodename, nodetype, instance_name, pgdata_D);
+    } else {
+        checkLcName(nodetype);
+        if (0 != validate_cluster_guc_options(nodename, nodetype, instance_name, pgdata_D)) {
+            exit(1);
+        }
+        process_cluster_guc_option(nodename, nodetype, instance_name, pgdata_D);
     }
 
-    GS_FREE(g_prefix);
-    GS_FREE(g_plainkey);
-    GS_FREE(g_cipherkey);
-    GS_FREE(key_username);
     GS_FREE(pgdata_D);
-    GS_FREE(pgdata_R);
-    GS_FREE(pgdata_C);
     GS_FREE(instance_name);
-
-    if (ctl_command == ENCRYPT_KEY_COMMAND || ctl_command == GENERATE_KEY_COMMAND)
-        return 0;
 
     nRet = print_guc_result((const char*)nodename);
     GS_FREE(nodename);
