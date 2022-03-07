@@ -1107,7 +1107,7 @@ static MdfdVec *mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
 {
     MdfdVec *mdfd = NULL;
     char *path = NULL;
-    File fd;
+    File fd = -1;
     RelFileNodeForkNum filenode;
     uint32 flags = O_RDWR | PG_BINARY;
 
@@ -2603,9 +2603,29 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
     ADIO_END();
 
     /* open the file */
+    if (RecoveryInProgress() && CheckFileRepairHashTbl(reln->smgr_rnode.node, forknum, segno) &&
+        (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess())) {
+        fd = openrepairfile(fullpath, filenode);
+        if (fd < 0) {
+            pfree(fullpath);
+            return NULL;
+        } else {
+            ereport(LOG, (errmsg("[file repair] open repair file %s.repair", fullpath)));
+        }
+    } else {
+        fd = DataFileIdOpenFile(fullpath, filenode, O_RDWR | PG_BINARY | oflags, 0600);
+    }
+
+    if (fd < 0) {
+        pfree(fullpath);
+        return NULL;
+    }
+    
     int fd_pca = -1;
     int fd_pcd = -1;
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
+        FileClose(fd);
+        fd = -1;
         fd_pca = OpenPcaFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
         if (fd_pca < 0) {
             pfree(fullpath);
@@ -2617,27 +2637,9 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
             return NULL;
         }
         SetupPageCompressMemoryMap(fd_pca, reln->smgr_rnode.node, filenode);
-    } else {
-
-        if (RecoveryInProgress() && CheckFileRepairHashTbl(reln->smgr_rnode.node, forknum, segno) &&
-            (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess())) {
-            fd = openrepairfile(fullpath, filenode);
-            if (fd < 0) {
-                pfree(fullpath);
-                return NULL;
-            } else {
-                ereport(LOG, (errmsg("[file repair] open repair file %s.repair", fullpath)));
-            }
-        } else {
-            fd = DataFileIdOpenFile(fullpath, filenode, O_RDWR | PG_BINARY | oflags, 0600);
-        }
     }
 
     pfree(fullpath);
-
-    if (fd < 0) {
-        return NULL;
-    }
 
     /* allocate an mdfdvec entry for it */
     v = _fdvec_alloc();
