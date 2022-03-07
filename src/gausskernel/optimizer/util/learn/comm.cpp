@@ -409,6 +409,7 @@ bool TryConnectRemoteServer(AiEngineConnInfo* conninfo, char** buf)
     if (!CheckConnParams(conninfo)) {
         return false;
     }
+    bool exceptionCaught = false;
 
     PG_TRY();
     {
@@ -444,14 +445,19 @@ bool TryConnectRemoteServer(AiEngineConnInfo* conninfo, char** buf)
     }
     PG_CATCH();
     {
+        exceptionCaught = true;
         t_thrd.int_cxt.ImmediateInterruptOK = immediateInterruptOKOld;
         DestoryAiHandle(connHandle);
         if (buf != NULL) {
             *buf = NULL;
         }
-        return false;
+        FlushErrorState();
     }
     PG_END_TRY();
+    if (exceptionCaught) {
+        return false;
+    }
+
     if (buf != NULL) {
         *buf = pstrdup(connHandle->rec_buf);
     }
