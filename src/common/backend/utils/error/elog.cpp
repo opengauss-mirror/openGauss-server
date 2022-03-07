@@ -3945,6 +3945,10 @@ void getElevelAndSqlstate(int* eLevel, int* sqlState)
     *sqlState = t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth].sqlerrcode;
 }
 
+/*
+ * When the SQL statement is truncated, this function cannot perform normal password masking.
+ * maskPassword will return null if the statement does not need to be masked or any error occurs.
+ */
 char* maskPassword(const char* query_string)
 {
     char* mask_string = NULL;
