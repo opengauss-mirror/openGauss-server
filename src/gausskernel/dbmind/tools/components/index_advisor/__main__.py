@@ -15,10 +15,10 @@ import sys
 import os
 
 try:
-    from dbmind.components.sqldiag import main
+    from dbmind.components.index_advisor import main
 except ImportError:
     libpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
     sys.path.append(libpath)
-    from sqldiag import main
+    from index_advisor import main
 
 main(sys.argv[1:])
