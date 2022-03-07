@@ -32,7 +32,9 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4434;
 CREATE FUNCTION pg_catalog.gs_stat_undo(OUT curr_used_zone_count int4, OUT top_used_zones text, OUT curr_used_undo_size int4,
 OUT undo_threshold int4, OUT oldest_xid_in_undo oid, OUT oldest_xmin oid, OUT total_undo_chain_len oid, OUT max_undo_chain_len oid,
 OUT create_undo_file_count int4, OUT discard_undo_file_count int4)
-RETURNS record LANGUAGE INTERNAL as 'gs_stat_undo';--create system relation gs_db_privilege and its indexes
+RETURNS record LANGUAGE INTERNAL as 'gs_stat_undo';
+
+--create system relation gs_db_privilege and its indexes
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 5566, 5567, 0, 0;
 CREATE TABLE pg_catalog.gs_db_privilege
 (
@@ -113,46 +115,3 @@ CREATE OR REPLACE FUNCTION pg_catalog.pg_logical_get_area_changes(start_lsn text
  LANGUAGE internal
  NOT FENCED NOT SHIPPABLE COST 1000
 AS $function$pg_logical_get_area_changes$function$;
--- adding system table pg_publication
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 6130, 6141, 0, 0;
-
-CREATE TABLE IF NOT EXISTS pg_catalog.pg_publication
-(
-    pubname name NOCOMPRESS,
-    pubowner oid NOCOMPRESS,
-    puballtables bool NOCOMPRESS,
-    pubinsert bool NOCOMPRESS,
-    pubupdate bool NOCOMPRESS,
-    pubdelete bool NOCOMPRESS
-) WITH OIDS;
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 6120;
-CREATE UNIQUE INDEX pg_publication_oid_index ON pg_catalog.pg_publication USING BTREE(oid OID_OPS);
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 6121;
-CREATE UNIQUE INDEX pg_publication_pubname_index ON pg_catalog.pg_publication USING BTREE(pubname);
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-
-GRANT SELECT ON TABLE pg_catalog.pg_publication TO PUBLIC;
-
--- adding system table pg_publication_rel
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 6132, 6142, 0, 0;
-
-CREATE TABLE IF NOT EXISTS pg_catalog.pg_publication_rel
-(
-    prpubid oid NOCOMPRESS NOT NULL,
-    prrelid oid NOCOMPRESS NOT NULL
-) WITH OIDS;
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 6122;
-CREATE UNIQUE INDEX pg_publication_rel_oid_index ON pg_catalog.pg_publication_rel USING BTREE(oid OID_OPS);
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 6123;
-CREATE UNIQUE INDEX pg_publication_rel_map_index ON pg_catalog.pg_publication_rel USING BTREE(prrelid, prpubid);
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-
-GRANT SELECT ON TABLE pg_catalog.pg_publication_rel TO PUBLIC;

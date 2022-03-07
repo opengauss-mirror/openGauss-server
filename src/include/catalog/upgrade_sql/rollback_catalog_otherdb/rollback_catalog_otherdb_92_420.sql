@@ -1,236 +1,4 @@
-declare
-    has_version_proc boolean;
-    have_column boolean;
-begin
-    select case when count(*)=1 then true else false end as has_version_proc from (select * from pg_proc where proname = 'working_version_num' limit 1) into has_version_proc;
-    if has_version_proc = true then
-        select working_version_num >= 92458 as have_column from working_version_num() into have_column;
-    end if;
-
-    if have_column = false then
-        DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_all_args_nsp_index;
-    else
-        DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_all_args_nsp_index;
-        SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 9666;
-        CREATE UNIQUE INDEX pg_catalog.pg_proc_proname_all_args_nsp_index on pg_catalog.pg_proc USING BTREE(proname name_ops, allargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops);
-        SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-        REINDEX INDEX pg_catalog.pg_proc_proname_all_args_nsp_index;
-    end if;
-end;
-DROP INDEX IF EXISTS pg_catalog.gs_uid_relid_index;
-DROP TYPE IF EXISTS pg_catalog.gs_uid;
-DROP TABLE IF EXISTS pg_catalog.gs_uid;
-DROP FUNCTION IF EXISTS pg_catalog.gs_stat_wal_entrytable(int8);
-DROP FUNCTION IF EXISTS pg_catalog.gs_walwriter_flush_position();
-DROP FUNCTION IF EXISTS pg_catalog.gs_walwriter_flush_stat(int4);
-DROP FUNCTION IF EXISTS pg_catalog.gs_stat_undo();--drop system function has_any_privilege(user, privilege)
-DROP FUNCTION IF EXISTS pg_catalog.has_any_privilege(name, text);
-
---drop system view gs_db_privileges
-DROP VIEW IF EXISTS pg_catalog.gs_db_privileges;
-
---drop indexes on system relation gs_db_privilege
-DROP INDEX IF EXISTS gs_db_privilege_oid_index;
-DROP INDEX IF EXISTS gs_db_privilege_roleid_index;
-DROP INDEX IF EXISTS gs_db_privilege_roleid_privilege_type_index;
-
---drop type gs_db_privilege
-DROP TYPE IF EXISTS pg_catalog.gs_db_privilege;
-
---drop system relation gs_db_privilege
-DROP TABLE IF EXISTS pg_catalog.gs_db_privilege;
-DROP FUNCTION IF EXISTS pg_catalog.gs_undo_record(int8);
-DROP FUNCTION IF EXISTS pg_catalog.gs_undo_meta(int4, int4, int4);
-DROP FUNCTION IF EXISTS pg_catalog.gs_undo_translot(int4, int4);
-DROP FUNCTION IF EXISTS pg_catalog.gs_index_verify(oid, oid);
-DROP FUNCTION IF EXISTS pg_catalog.gs_index_recycle_queue(oid, oid, oid);DROP FUNCTION IF EXISTS pg_catalog.pg_logical_get_area_changes() cascade;
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-do $$DECLARE
-ans boolean;
-func boolean;
-user_name text;
-query_str text;
-BEGIN
-
-    select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
-    if ans = true then
-        select case when count(*)=1 then true else false end as func from (select * from pg_proc where proname='local_double_write_stat' limit 1) into func;
-        DROP FUNCTION IF EXISTS pg_catalog.local_double_write_stat();
-        DROP FUNCTION IF EXISTS pg_catalog.remote_double_write_stat();
-        DROP VIEW IF EXISTS DBE_PERF.global_double_write_status CASCADE;
-        if func = true then
-            SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 4384;
-            CREATE FUNCTION pg_catalog.local_double_write_stat
-            (
-				OUT node_name pg_catalog.text,
-				OUT curr_dwn pg_catalog.int8,
-				OUT curr_start_page pg_catalog.int8,
-				OUT file_trunc_num pg_catalog.int8,
-				OUT file_reset_num pg_catalog.int8,
-				OUT total_writes pg_catalog.int8,
-				OUT low_threshold_writes pg_catalog.int8,
-				OUT high_threshold_writes pg_catalog.int8,
-				OUT total_pages pg_catalog.int8,
-				OUT low_threshold_pages pg_catalog.int8,
-				OUT high_threshold_pages pg_catalog.int8
-            ) RETURNS SETOF record LANGUAGE INTERNAL STABLE as 'local_double_write_stat';
-
-            SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 4385;
-            CREATE FUNCTION pg_catalog.remote_double_write_stat
-            (
-				OUT node_name pg_catalog.text,
-				OUT curr_dwn pg_catalog.int8,
-				OUT curr_start_page pg_catalog.int8,
-				OUT file_trunc_num pg_catalog.int8,
-				OUT file_reset_num pg_catalog.int8,
-				OUT total_writes pg_catalog.int8,
-				OUT low_threshold_writes pg_catalog.int8,
-				OUT high_threshold_writes pg_catalog.int8,
-				OUT total_pages pg_catalog.int8,
-				OUT low_threshold_pages pg_catalog.int8,
-				OUT high_threshold_pages pg_catalog.int8
-            ) RETURNS SETOF record LANGUAGE INTERNAL STABLE as 'remote_double_write_stat';
-
-            CREATE OR REPLACE VIEW dbe_perf.global_double_write_status AS
-    			SELECT node_name, curr_dwn, curr_start_page, file_trunc_num, file_reset_num,
-           		total_writes, low_threshold_writes, high_threshold_writes,
-           		total_pages, low_threshold_pages, high_threshold_pages
-    		FROM pg_catalog.local_double_write_stat();
-
-            REVOKE ALL on DBE_PERF.global_double_write_status FROM PUBLIC;
-
-            SELECT SESSION_USER INTO user_name;
-            query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE DBE_PERF.global_double_write_status TO ' || quote_ident(user_name) || ';';
-            EXECUTE IMMEDIATE query_str;
-
-            GRANT SELECT ON TABLE DBE_PERF.global_double_write_status TO PUBLIC;
-            SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-        end if;
-    end if;
-END$$;
-
-do $$DECLARE
-ans boolean;
-func boolean;
-user_name text;
-query_str text;
-has_version_proc boolean;
-no_file_id boolean;
-BEGIN
-    no_file_id = true;
-    select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
-    if ans = true then
-        select case when count(*)=1 then true else false end as func from (select * from pg_proc where proname='local_double_write_stat' limit 1) into func;
-        select case when count(*)=1 then true else false end as has_version_proc from (select * from pg_proc where proname = 'working_version_num' limit 1) into has_version_proc;
-        if has_version_proc = true  then
-            select working_version_num < 92568 as no_file_id from working_version_num() into no_file_id;
-        end if;
-
-        DROP FUNCTION IF EXISTS pg_catalog.local_double_write_stat();
-        DROP FUNCTION IF EXISTS pg_catalog.remote_double_write_stat();
-        DROP VIEW IF EXISTS DBE_PERF.global_double_write_status CASCADE;
-        if func = true then
-            if no_file_id = true then
-                SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 4384;
-                CREATE FUNCTION pg_catalog.local_double_write_stat
-                (
-                    OUT node_name pg_catalog.text,
-                    OUT curr_dwn pg_catalog.int8,
-                    OUT curr_start_page pg_catalog.int8,
-                    OUT file_trunc_num pg_catalog.int8,
-                    OUT file_reset_num pg_catalog.int8,
-                    OUT total_writes pg_catalog.int8,
-                    OUT low_threshold_writes pg_catalog.int8,
-                    OUT high_threshold_writes pg_catalog.int8,
-                    OUT total_pages pg_catalog.int8,
-                    OUT low_threshold_pages pg_catalog.int8,
-                    OUT high_threshold_pages pg_catalog.int8
-                ) RETURNS SETOF record LANGUAGE INTERNAL STABLE as 'local_double_write_stat';
-
-                SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 4385;
-                CREATE FUNCTION pg_catalog.remote_double_write_stat
-                (
-                    OUT node_name pg_catalog.text,
-                    OUT curr_dwn pg_catalog.int8,
-                    OUT curr_start_page pg_catalog.int8,
-                    OUT file_trunc_num pg_catalog.int8,
-                    OUT file_reset_num pg_catalog.int8,
-                    OUT total_writes pg_catalog.int8,
-                    OUT low_threshold_writes pg_catalog.int8,
-                    OUT high_threshold_writes pg_catalog.int8,
-                    OUT total_pages pg_catalog.int8,
-                    OUT low_threshold_pages pg_catalog.int8,
-                    OUT high_threshold_pages pg_catalog.int8
-                ) RETURNS SETOF record LANGUAGE INTERNAL STABLE as 'remote_double_write_stat';
-
-                CREATE OR REPLACE VIEW dbe_perf.global_double_write_status AS
-                    SELECT node_name, curr_dwn, curr_start_page, file_trunc_num, file_reset_num,
-                    total_writes, low_threshold_writes, high_threshold_writes,
-                    total_pages, low_threshold_pages, high_threshold_pages
-                FROM pg_catalog.local_double_write_stat();
-            else
-                SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 4384;
-                CREATE FUNCTION pg_catalog.local_double_write_stat
-                (
-                    OUT node_name pg_catalog.text,
-                    OUT file_id pg_catalog.int8,
-                    OUT curr_dwn pg_catalog.int8,
-                    OUT curr_start_page pg_catalog.int8,
-                    OUT file_trunc_num pg_catalog.int8,
-                    OUT file_reset_num pg_catalog.int8,
-                    OUT total_writes pg_catalog.int8,
-                    OUT low_threshold_writes pg_catalog.int8,
-                    OUT high_threshold_writes pg_catalog.int8,
-                    OUT total_pages pg_catalog.int8,
-                    OUT low_threshold_pages pg_catalog.int8,
-                    OUT high_threshold_pages pg_catalog.int8
-                ) RETURNS SETOF record LANGUAGE INTERNAL STABLE as 'local_double_write_stat';
-
-                SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 4385;
-                CREATE FUNCTION pg_catalog.remote_double_write_stat
-                (
-                    OUT node_name pg_catalog.text,
-                    OUT file_id pg_catalog.int8,
-                    OUT curr_dwn pg_catalog.int8,
-                    OUT curr_start_page pg_catalog.int8,
-                    OUT file_trunc_num pg_catalog.int8,
-                    OUT file_reset_num pg_catalog.int8,
-                    OUT total_writes pg_catalog.int8,
-                    OUT low_threshold_writes pg_catalog.int8,
-                    OUT high_threshold_writes pg_catalog.int8,
-                    OUT total_pages pg_catalog.int8,
-                    OUT low_threshold_pages pg_catalog.int8,
-                    OUT high_threshold_pages pg_catalog.int8
-                ) RETURNS SETOF record LANGUAGE INTERNAL STABLE as 'remote_double_write_stat';
-
-                CREATE OR REPLACE VIEW dbe_perf.global_double_write_status AS
-                    SELECT node_name, file_id, curr_dwn, curr_start_page, file_trunc_num, file_reset_num,
-                    total_writes, low_threshold_writes, high_threshold_writes,
-                    total_pages, low_threshold_pages, high_threshold_pages
-                FROM pg_catalog.local_double_write_stat();
-            end if;
-
-            REVOKE ALL on DBE_PERF.global_double_write_status FROM PUBLIC;
-            SELECT SESSION_USER INTO user_name;
-            query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE DBE_PERF.global_double_write_status TO ' || quote_ident(user_name) || ';';
-            EXECUTE IMMEDIATE query_str;
-
-            GRANT SELECT ON TABLE DBE_PERF.global_double_write_status TO PUBLIC;
-            SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-        end if;
-    end if;
-END$$;
-
-DO $DO$
-DECLARE
-ans boolean;
-BEGIN
-  select case when count(*)=1 then true else false end as ans from (select * from pg_tables where tablename = 'snap_global_double_write_status' and schemaname = 'snapshot' limit 1) into ans;
-  if ans = true then
-    alter table snapshot.snap_global_double_write_status
-                DROP COLUMN IF EXISTS snap_file_id;
-  end if;
-END$DO$;SET search_path TO information_schema;
+SET search_path TO information_schema;
 
 -- element_types is generated by data_type_privileges
 DROP VIEW IF EXISTS information_schema.element_types CASCADE;
@@ -269,8 +37,7 @@ CREATE VIEW information_schema.column_domain_usage AS
           AND a.attrelid = c.oid
           AND a.atttypid = t.oid
           AND t.typtype = 'd'
-          AND c.relkind IN ('r', 'm', 'v', 'f')
-          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
+          AND c.relkind IN ('r', 'v', 'f')
           AND a.attnum > 0
           AND NOT a.attisdropped
           AND pg_has_role(t.typowner, 'USAGE');
@@ -301,7 +68,7 @@ CREATE VIEW information_schema.column_privileges AS
                   pr_c.relowner
            FROM (SELECT oid, relname, relnamespace, relowner, (aclexplode(coalesce(relacl, acldefault('r', relowner)))).*
                  FROM pg_class
-                 WHERE relkind IN ('r', 'm', 'v', 'f')
+                 WHERE relkind IN ('r', 'v', 'f')
                 ) pr_c (oid, relname, relnamespace, relowner, grantor, grantee, prtype, grantable),
                 pg_attribute a
            WHERE a.attrelid = pr_c.oid
@@ -323,7 +90,7 @@ CREATE VIEW information_schema.column_privileges AS
                 ) pr_a (attrelid, attname, grantor, grantee, prtype, grantable),
                 pg_class c
            WHERE pr_a.attrelid = c.oid
-                 AND relkind IN ('r', 'm', 'v', 'f')
+                 AND relkind IN ('r', 'v', 'f')
          ) x,
          pg_namespace nc,
          pg_authid u_grantor,
@@ -337,7 +104,6 @@ CREATE VIEW information_schema.column_privileges AS
           AND x.grantee = grantee.oid
           AND x.grantor = u_grantor.oid
           AND x.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'REFERENCES', 'COMMENT')
-          AND (x.relname not like 'mlog_%' AND x.relname not like 'matviewmap_%')
           AND (pg_has_role(u_grantor.oid, 'USAGE')
                OR pg_has_role(grantee.oid, 'USAGE')
                OR grantee.rolname = 'PUBLIC');
@@ -359,8 +125,7 @@ CREATE VIEW information_schema.column_udt_usage AS
     WHERE a.attrelid = c.oid
           AND a.atttypid = t.oid
           AND nc.oid = c.relnamespace
-          AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind in ('r', 'm', 'v', 'f')
-          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
+          AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind in ('r', 'v', 'f')
           AND pg_has_role(coalesce(bt.typowner, t.typowner), 'USAGE');
 
 CREATE VIEW information_schema.columns AS
@@ -477,9 +242,7 @@ CREATE VIEW information_schema.columns AS
 
     WHERE (NOT pg_is_other_temp_schema(nc.oid))
 
-          AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind in ('r', 'm', 'v', 'f')
-
-          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
+          AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind in ('r', 'v', 'f')
 
           AND (pg_has_role(c.relowner, 'USAGE')
                OR has_column_privilege(c.oid, a.attnum,
@@ -512,13 +275,11 @@ CREATE VIEW information_schema.table_privileges AS
          ) AS grantee (oid, rolname)
 
     WHERE c.relnamespace = nc.oid
-          AND c.relkind IN ('r', 'm', 'v')
-          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
+          AND c.relkind IN ('r', 'v')
           AND c.grantee = grantee.oid
           AND c.grantor = u_grantor.oid
-          AND (c.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER')
-               OR c.prtype IN ('ALTER', 'DROP', 'COMMENT', 'INDEX', 'VACUUM')
-          )
+          AND c.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER' ,
+                           'ALTER', 'DROP', 'COMMENT', 'INDEX', 'VACUUM')
           AND (pg_has_role(u_grantor.oid, 'USAGE')
                OR pg_has_role(grantee.oid, 'USAGE')
                OR grantee.rolname = 'PUBLIC');
@@ -531,7 +292,6 @@ CREATE VIEW information_schema.tables AS
            CAST(
              CASE WHEN nc.oid = pg_my_temp_schema() THEN 'LOCAL TEMPORARY'
                   WHEN c.relkind = 'r' THEN 'BASE TABLE'
-                  WHEN c.relkind = 'm' THEN 'MATERIALIZED VIEW'
                   WHEN c.relkind = 'v' THEN 'VIEW'
                   WHEN c.relkind = 'f' THEN 'FOREIGN TABLE'
                   ELSE null END
@@ -555,8 +315,7 @@ CREATE VIEW information_schema.tables AS
     FROM pg_namespace nc JOIN pg_class c ON (nc.oid = c.relnamespace)
            LEFT JOIN (pg_type t JOIN pg_namespace nt ON (t.typnamespace = nt.oid)) ON (c.reloftype = t.oid)
 
-    WHERE c.relkind IN ('r', 'm', 'v', 'f')
-          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
+    WHERE c.relkind IN ('r', 'v', 'f')
           AND (NOT pg_is_other_temp_schema(nc.oid))
           AND (pg_has_role(c.relowner, 'USAGE')
                OR has_table_privilege(c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
@@ -588,8 +347,7 @@ CREATE VIEW information_schema.view_column_usage AS
           AND dt.refclassid = 'pg_catalog.pg_class'::regclass
           AND dt.refobjid = t.oid
           AND t.relnamespace = nt.oid
-          AND t.relkind IN ('r', 'm', 'v', 'f')
-          AND (t.relname not like 'mlog_%' AND t.relname not like 'matviewmap_%')
+          AND t.relkind IN ('r', 'v', 'f')
           AND t.oid = a.attrelid
           AND dt.refobjsubid = a.attnum
           AND pg_has_role(t.relowner, 'USAGE');
@@ -618,8 +376,7 @@ CREATE VIEW information_schema.view_table_usage AS
           AND dt.refclassid = 'pg_catalog.pg_class'::regclass
           AND dt.refobjid = t.oid
           AND t.relnamespace = nt.oid
-          AND t.relkind IN ('r', 'm', 'v', 'f')
-          AND (t.relname not like 'mlog_%' AND t.relname not like 'matviewmap_%')
+          AND t.relkind IN ('r', 'v', 'f')
           AND pg_has_role(t.relowner, 'USAGE');
 
 CREATE VIEW information_schema.data_type_privileges AS
@@ -714,8 +471,7 @@ CREATE VIEW information_schema.element_types AS
                   a.attnum, a.atttypid, a.attcollation
            FROM pg_class c, pg_attribute a
            WHERE c.oid = a.attrelid
-                 AND c.relkind IN ('r', 'm', 'v', 'f', 'c')
-                 AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
+                 AND c.relkind IN ('r', 'v', 'f', 'c')
                  AND attnum > 0 AND NOT attisdropped
 
            UNION ALL
@@ -756,36 +512,6 @@ CREATE VIEW information_schema.element_types AS
               ( SELECT object_schema, object_name, object_type, dtd_identifier
                     FROM data_type_privileges );
 
-do $$DECLARE
-    user_name text;
-    query_str text;
-BEGIN
-    SELECT SESSION_USER INTO user_name;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.element_types TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.data_type_privileges TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.role_column_grants TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.role_table_grants TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.column_domain_usage TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.column_privileges TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.column_udt_usage TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.columns TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.table_privileges TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.tables TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.view_column_usage TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-    query_str := 'GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON information_schema.view_table_usage TO ' || quote_ident(user_name) || ';';
-    EXECUTE IMMEDIATE query_str;
-END$$;
 
 GRANT SELECT ON information_schema.element_types TO PUBLIC;
 GRANT SELECT ON information_schema.data_type_privileges TO PUBLIC;
