@@ -1992,66 +1992,8 @@ DROP FUNCTION IF EXISTS pg_catalog.gs_read_file_from_remote(oid, oid, oid, integ
 DROP FUNCTION IF EXISTS pg_catalog.gs_read_file_size_from_remote(oid, oid, oid, integer, integer, xid, integer) CASCADE;
 
 DROP FUNCTION IF EXISTS pg_catalog.gs_read_segment_block_from_remote(integer, integer, integer, smallint, integer, xid, integer, xid, integer, integer) CASCADE;
--- deleting system view
-DROP VIEW IF EXISTS pg_catalog.pg_publication_tables;
-DROP VIEW IF EXISTS pg_catalog.pg_stat_subscription;
-DROP VIEW IF EXISTS pg_catalog.pg_replication_origin_status;
 
--- deleting function pg_replication_origin_create
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_create(IN node_name text, OUT replication_origin_oid oid) CASCADE;
-
--- deleting function pg_replication_origin_drop
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_drop(IN node_name text, OUT replication_origin_oid oid) CASCADE;
-
--- deleting function pg_replication_origin_oid
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_oid(IN node_name text, OUT replication_origin_oid oid) CASCADE;
-
--- deleting function pg_replication_origin_session_setup
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_session_setup(IN node_name text) CASCADE;
-
--- deleting function pg_replication_origin_session_reset
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_session_reset() CASCADE;
-
--- deleting function pg_replication_origin_session_is_setup
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_session_is_setup() CASCADE;
-
--- deleting function pg_replication_origin_session_progress
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_session_progress(IN flush boolean) CASCADE;
-
--- deleting function pg_replication_origin_xact_setup
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_xact_setup(IN origin_lsn text, IN origin_timestamp timestamp with time zone) CASCADE;
-
--- deleting function pg_replication_origin_xact_reset
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_xact_reset() CASCADE;
-
--- deleting function pg_replication_origin_advance
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_advance(IN node_name text, IN lsn text) CASCADE;
-
--- deleting function pg_replication_origin_progress
-DROP FUNCTION IF EXISTS pg_catalog.pg_replication_origin_progress(IN node_name text, IN flush boolean) CASCADE;
-
--- deleting function pg_show_replication_origin_status
-DROP FUNCTION IF EXISTS pg_catalog.pg_show_replication_origin_status(OUT local_id oid, OUT external_id text, OUT remote_lsn text, OUT local_lsn text) CASCADE;
-
--- deleting function pg_get_publication_tables
-DROP FUNCTION IF EXISTS pg_catalog.pg_get_publication_tables(IN pubname text, OUT relid oid) CASCADE;
-
--- deleting function pg_stat_get_subscription
-DROP FUNCTION IF EXISTS pg_catalog.pg_stat_get_subscription(IN subid oid, OUT subid oid, OUT pid integer, OUT received_lsn text, OUT last_msg_send_time timestamp with time zone, OUT last_msg_receipt_time timestamp with time zone, OUT latest_end_lsn text, OUT latest_end_time timestamp with time zone) CASCADE;
-
--- deleting system table pg_subscription
-
-DROP INDEX IF EXISTS pg_catalog.pg_subscription_oid_index;
-DROP INDEX IF EXISTS pg_catalog.pg_subscription_subname_index;
-DROP TYPE IF EXISTS pg_catalog.pg_subscription;
-DROP TABLE IF EXISTS pg_catalog.pg_subscription;
-
--- deleting system table pg_replication_origin
-
-DROP INDEX IF EXISTS pg_catalog.pg_replication_origin_roident_index;
-DROP INDEX IF EXISTS pg_catalog.pg_replication_origin_roname_index;
-DROP TYPE IF EXISTS pg_catalog.pg_replication_origin;
-DROP TABLE IF EXISTS pg_catalog.pg_replication_origin;DROP FUNCTION IF EXISTS pg_catalog.gs_explain_model(text) cascade;
+DROP FUNCTION IF EXISTS pg_catalog.gs_explain_model(text) cascade;
 DROP FUNCTION IF EXISTS pg_catalog.db4ai_predict_by_float8_array(text, VARIADIC "any") cascade;
 DROP FUNCTION IF EXISTS pg_catalog.db4ai_predict_by_bool(text, VARIADIC "any") cascade;
 DROP FUNCTION IF EXISTS pg_catalog.db4ai_predict_by_float4(text, VARIADIC "any") cascade;
@@ -2321,18 +2263,6 @@ CREATE OR REPLACE FUNCTION pg_catalog.gs_read_block_from_remote(integer, integer
  STRICT NOT FENCED NOT SHIPPABLE
 AS $function$gs_read_block_from_remote$function$;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-DROP FUNCTION IF EXISTS pg_catalog.array_remove(anyarray, anyelement) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.array_replace(anyarray, anyelement, anyelement) CASCADE;
-DROP AGGREGATE IF EXISTS pg_catalog.last(anyelement) CASCADE;
-DROP AGGREGATE IF EXISTS pg_catalog.first(anyelement) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.last_transition(anyelement, anyelement) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.first_transition(anyelement, anyelement) CASCADE;
-
-
-DROP AGGREGATE IF EXISTS pg_catalog.max(inet) CASCADE;
-DROP AGGREGATE IF EXISTS pg_catalog.min(inet) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.network_larger(inet, inet) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.network_smaller(inet, inet) CASCADE;
 
 DROP FUNCTION IF EXISTS pg_catalog.pg_buffercache_pages() CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4130;
