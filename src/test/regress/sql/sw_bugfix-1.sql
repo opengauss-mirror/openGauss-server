@@ -431,3 +431,13 @@ DROP TABLE IF EXISTS start;
 DROP TABLE IF EXISTS connect;
 DROP TABLE IF EXISTS siblings;
 DROP TABLE IF EXISTS prior;
+
+-- test where clause pushdown result correctness
+create table xt1(id int, lid int, name text);
+create table xt2(idd int, lidd int, name text);
+insert into xt1 values(1,null,'A'),(2,1,'B'),(3,2,'C');
+insert into xt2 values(1,null,'A'),(2,1,'B'),(3,2,'C'), (4,3,'D');
+select * from xt2,xt1 where xt1.id=xt2.idd and xt1.id!=2 start with id=2 connect by prior id=lid;
+select * from xt2,xt1 where xt1.id=xt2.idd and xt1.id=3 start with id=2 connect by prior id=lid;
+drop table if exists xt1;
+drop table if exists xt2;

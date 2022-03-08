@@ -477,6 +477,7 @@ explain (costs off) select * from t1, t2 where t1.id = t2.id start with t1.id = 
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
+   Filter: ("t1@id" = "t2@id")
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1
@@ -495,7 +496,7 @@ explain (costs off) select * from t1, t2 where t1.id = t2.id start with t1.id = 
                                    ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
                              ->  Seq Scan on t2
-(19 rows)
+(20 rows)
 
 explain (costs off) select * from t1 join t2 on t1.id = t2.id start with t1.id = t2.id and t1.id = 1 connect by prior t1.id = t1.pid;
                                  QUERY PLAN                                  
@@ -525,6 +526,7 @@ explain (costs off) select * from t1, (select * from t2) as test where t1.id = t
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
+   Filter: ("t1@id" = "test@id")
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1
@@ -543,7 +545,7 @@ explain (costs off) select * from t1, (select * from t2) as test where t1.id = t
                                    ->  WorkTable Scan on tmp_reuslt
                        ->  Hash
                              ->  Seq Scan on t2
-(19 rows)
+(20 rows)
 
 explain (costs off) select id, (select id from t2 start with t2.id = t1.id connect by t2.id = t1.id limit 1) from t1 where id = 1;
 ERROR:  START WITH CONNECT BY clauses must have at least one prior key.
