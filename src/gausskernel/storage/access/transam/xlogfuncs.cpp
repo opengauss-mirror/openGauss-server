@@ -2389,7 +2389,11 @@ Datum gs_pitr_archive_slot_force_advance(PG_FUNCTION_ARGS)
             signal_child(g_instance.archive_thread_info.obsArchPID[i], SIGUSR2, -1);
         }
     }
-    g_instance.roach_cxt.isXLogForceRecycled = false;
+    if (IS_PGXC_COORDINATOR) {
+        g_instance.roach_cxt.isXLogForceRecycled = false;
+    } else {
+        g_instance.roach_cxt.forceAdvanceSlotTigger = true;
+    }
     rc = snprintf_s(location, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X/%08X",
         (uint32)(archiveSlotLocNow >> 32), (uint32)(archiveSlotLocNow));
     securec_check_ss(rc, "\0", "\0");

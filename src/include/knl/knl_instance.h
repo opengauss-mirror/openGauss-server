@@ -1061,6 +1061,7 @@ typedef struct knl_g_roach_context {
     char* targetTimeInPITR;
     char* globalBarrierRecordForPITR;
     bool isXLogForceRecycled;
+    bool forceAdvanceSlotTigger;
     bool isGtmFreeCsn;
     char* targetRestoreTimeFromMedia;
 } knl_g_roach_context;

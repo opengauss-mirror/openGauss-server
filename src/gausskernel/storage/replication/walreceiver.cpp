@@ -1908,6 +1908,9 @@ static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_mes
             (uint32)(archive_xlog_message->targetLsn))));
     }
     volatile unsigned int *pitr_task_status = &archive_task->pitr_task_status;
+    if (archive_xlog_message->targetLsn == InvalidXLogRecPtr) {
+        pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
+    }
     unsigned int expected = PITR_TASK_NONE;
     int failed_times = 0;
     /* lock for archiver get PITR_TASK_GET flag, but works on old task . 

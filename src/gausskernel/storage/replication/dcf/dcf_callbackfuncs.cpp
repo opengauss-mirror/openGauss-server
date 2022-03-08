@@ -585,6 +585,9 @@ static void ProcessArchiveXlogMessage(uint32 srcNodeID, const char* msg, uint32 
                                static_cast<uint32>(archive_xlog_message->targetLsn))));
     }
     volatile unsigned int *pitr_task_status = &archive_task_status->pitr_task_status;
+    if (archive_xlog_message->targetLsn == InvalidXLogRecPtr) {
+        pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
+    }
     unsigned int expected = PITR_TASK_NONE;
     int failed_times = 0;
     /* 
