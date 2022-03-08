@@ -20816,29 +20816,36 @@ static void renamePartitionIndexes(Oid partitionedTableOid, Oid partitionOid, ch
  * Description	:
  * Notes		:
  */
-static void heap_truncate_one_part_new(const AlterTableCmd* cmd, Relation rel, Oid srcPartOid) {
+static void heap_truncate_one_part_new(const AlterTableCmd* cmd, Relation partRel, Oid srcPartOid,
+    Relation rel = InvalidRelation)
+{
     Partition srcPart = NULL;
     bool renameTargetPart = false;
     char* destPartitionName = NULL;
 
-    Oid destPartOid = AddTemporaryPartitionForAlterPartitions(cmd, rel, srcPartOid, &renameTargetPart);
+    Oid destPartOid = AddTemporaryPartitionForAlterPartitions(cmd, partRel, srcPartOid, &renameTargetPart);
 
-    List* indexList = RelationGetSpecificKindIndexList(rel, false);
+    List* indexList = NULL;
+    if (RelationIsPartitionOfSubPartitionTable(partRel) && RelationIsValid(rel)) {
+        indexList = RelationGetSpecificKindIndexList(rel, false);
+    } else {
+        indexList = RelationGetSpecificKindIndexList(partRel, false);
+    }
     char** partitionIndexNames = getPartitionIndexesName(srcPartOid, indexList);
 
-    srcPart = partitionOpen(rel, srcPartOid, AccessExclusiveLock);
+    srcPart = partitionOpen(partRel, srcPartOid, AccessExclusiveLock);
     destPartitionName = pstrdup(PartitionGetPartitionName(srcPart));
-    partitionClose(rel, srcPart, NoLock);
+    partitionClose(partRel, srcPart, NoLock);
 
     CommandCounterIncrement();
-    fastDropPartition(rel, srcPartOid, "TRUNCATE PARTITION");
+    fastDropPartition(partRel, srcPartOid, "TRUNCATE PARTITION");
 
     CommandCounterIncrement();
-    renamePartitionIndexes(rel->rd_id, destPartOid, partitionIndexNames, indexList);
+    renamePartitionIndexes(partRel->rd_id, destPartOid, partitionIndexNames, indexList);
 
     if (renameTargetPart) {
         CommandCounterIncrement();
-        renamePartitionInternal(rel->rd_id, destPartOid, destPartitionName);
+        renamePartitionInternal(partRel->rd_id, destPartOid, destPartitionName);
     }
 
     list_free_ext(indexList);
@@ -20861,13 +20868,20 @@ static void ATExecTruncatePartitionForSubpartitionTable(Relation rel, Oid partOi
     }
     foreach (subPartOidCell, subPartOidList) {
         Oid subPartOid = lfirst_oid(subPartOidCell);
+        bool all_ubtree = true;
 
-        AlterSubPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid, subPartOid);
         if (cmd->alterGPI) {
             /* Delete subpartition tuples in GPI and add parent to pending vacuum list */
-            DeleteGPITuplesForSubPartition(RelationGetRelid(rel), partOid, subPartOid);
+            all_ubtree = DeleteGPITuplesForSubPartition(RelationGetRelid(rel), partOid, subPartOid);
+            AlterSubPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid, subPartOid);
         }
-        heap_truncate_one_part(partRel, subPartOid);
+
+        if (all_ubtree) {
+            /* If no nbtree global index exists */
+            heap_truncate_one_part(partRel, subPartOid);
+        } else {
+            heap_truncate_one_part_new(cmd, partRel, subPartOid, rel);
+        }
         pgstat_report_truncate(subPartOid, partRel->rd_id, partRel->rd_rel->relisshared);
     }
 
@@ -21029,6 +21043,7 @@ static void ATExecTruncateSubPartition(Relation rel, AlterTableCmd* cmd)
     List* oidList = NULL;
     List* relid = lappend_oid(NULL, rel->rd_id);
     Oid subPartOid = InvalidOid;
+    bool all_ubtree = true;
 
     oidList = heap_truncate_find_FKs(relid);
     if (PointerIsValid(oidList)) {
@@ -21066,17 +21081,21 @@ static void ATExecTruncateSubPartition(Relation rel, AlterTableCmd* cmd)
     Partition part = partitionOpen(rel, partOid, AccessExclusiveLock);
     Relation partRel = partitionGetRelation(rel, part);
 
-    AlterSubPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid, subPartOid);
-
     if (!cmd->alterGPI) {
         // Unusable Global Index
         ATUnusableGlobalIndex(rel);
     } else {
         /* Delete subpartition tuples in GPI and add parent to pending vacuum list */
-        DeleteGPITuplesForSubPartition(RelationGetRelid(rel), partOid, subPartOid);
+        all_ubtree = DeleteGPITuplesForSubPartition(RelationGetRelid(rel), partOid, subPartOid);
+        AlterSubPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid, subPartOid);
     }
 
-    heap_truncate_one_part(partRel, subPartOid);
+    if (all_ubtree) {
+        /* If no nbtree global index exists */
+        heap_truncate_one_part(partRel, subPartOid);
+    } else {
+        heap_truncate_one_part_new(cmd, partRel, subPartOid, rel);
+    }
     pgstat_report_truncate(subPartOid, partRel->rd_id, partRel->rd_rel->relisshared);
 
     releaseDummyRelation(&partRel);
@@ -24406,11 +24425,11 @@ static char* GenTemporaryPartitionName(Relation partTableRel, int sequence)
 
 #ifndef ENABLE_MULTIPLE_NODES
 static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *partDef, Oid bucketOid,
-    bool *isTimestamptz, StorageType stype, Datum new_reloptions)
+    bool *isTimestamptz, StorageType stype, Datum new_reloptions, bool isSubpartition)
 {
 #else
 static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *partDef,
-    Oid bucketOid, bool *isTimestamptz, StorageType stype)
+    Oid bucketOid, bool *isTimestamptz, StorageType stype, bool isSubpartition)
 {
     Datum new_reloptions = (Datum)0;
 #endif
@@ -24426,7 +24445,9 @@ static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *p
                 (Datum)new_reloptions,
                 isTimestamptz,
                 stype,
-                AccessExclusiveLock);
+                AccessExclusiveLock,
+                NULL,
+                isSubpartition);
             break;
         case T_ListPartitionDefState:
             newPartOid = HeapAddListPartition(pgPartRel,
@@ -24437,7 +24458,9 @@ static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *p
                 partTableRel->rd_rel->relowner,
                 (Datum)new_reloptions,
                 isTimestamptz,
-                stype);
+                stype,
+                NULL,
+                isSubpartition);
             break;
         case T_HashPartitionDefState:
             newPartOid = HeapAddHashPartition(pgPartRel,
@@ -24448,7 +24471,9 @@ static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *p
                 partTableRel->rd_rel->relowner,
                 (Datum)new_reloptions,
                 isTimestamptz,
-                stype);
+                stype,
+                NULL,
+                isSubpartition);
             break;
         default:
             ereport(ERROR,
@@ -24480,17 +24505,20 @@ static Oid AddTemporaryPartition(Relation partTableRel, Node* partDef)
     Datum rel_reloptions;
     Datum new_reloptions;
     List* old_reloptions = NIL;
+    bool isPartitionOfSubPartition = RelationIsPartitionOfSubPartitionTable(partTableRel);
 
     bool* isTimestamptz = CheckPartkeyHasTimestampwithzone(partTableRel);
     bucketOid = RelationGetBucketOid(partTableRel);
     pgPartRel = relation_open(PartitionRelationId, RowExclusiveLock);
 
     /* add new partition entry in pg_partition */
-    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(partTableRel->rd_id));
+    Oid relOid = isPartitionOfSubPartition ?
+                 ObjectIdGetDatum(partTableRel->parentId) : ObjectIdGetDatum(partTableRel->rd_id);
+    tuple = SearchSysCache1(RELOID, relOid);
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR,
                 (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                 (errmsg("cache lookup failed"), errdetail("cache lookup failed for relation %u", partTableRel->rd_id),
+                 (errmsg("cache lookup failed"), errdetail("cache lookup failed for relation %u", relOid),
                   errcause("The oid of the target relation is invalid."),
                   erraction("Check whether the target relation is correct."))));
     }
@@ -24508,18 +24536,25 @@ static Oid AddTemporaryPartition(Relation partTableRel, Node* partDef)
     /* Temporary tables do not use segment-page */
 #ifndef ENABLE_MULTIPLE_NODES
     newPartOid = GetNewPartitionOid(pgPartRel, partTableRel, partDef, bucketOid,
-        isTimestamptz, RelationGetStorageType(partTableRel), new_reloptions);
+        isTimestamptz, RelationGetStorageType(partTableRel), new_reloptions, isPartitionOfSubPartition);
 #else
-    newPartOid = GetNewPartitionOid(
-        pgPartRel, partTableRel, partDef, bucketOid, isTimestamptz, RelationGetStorageType(partTableRel));
+    newPartOid = GetNewPartitionOid(pgPartRel, partTableRel, partDef, bucketOid, isTimestamptz,
+        RelationGetStorageType(partTableRel), isPartitionOfSubPartition);
+
 #endif
     // We must bump the command counter to make the newly-created
     // partition tuple visible for opening.
     CommandCounterIncrement();
 
-    addIndexForPartition(partTableRel, newPartOid);
+    if (isPartitionOfSubPartition) {
+        Relation rel = heap_open(partTableRel->parentId, AccessShareLock);
+        addIndexForPartition(rel, newPartOid);
+        heap_close(rel, NoLock);
+    } else {
+        addIndexForPartition(partTableRel, newPartOid);
+    }
 
-    addToastTableForNewPartition(partTableRel, newPartOid);
+    addToastTableForNewPartition(partTableRel, newPartOid, isPartitionOfSubPartition);
 
     // invalidate relation
     CacheInvalidateRelcache(partTableRel);

@@ -5862,7 +5862,7 @@ void AddGPIForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid)
  * @@GaussDB@@
  * Target : This routine is used to scan partition tuples and delete them from all global partition indexes.
  */
-void ScanPartitionDeleteGPITuples(Relation partTableRel, Relation partRel, const List* indexRelList, 
+void ScanPartitionDeleteGPITuples(Relation partTableRel, Relation partRel, const List* indexRelList,
     const List* indexInfoList)
 {
     TableScanDesc scan = NULL;
@@ -5893,9 +5893,8 @@ void ScanPartitionDeleteGPITuples(Relation partTableRel, Relation partRel, const
             Relation indexRel = (Relation)lfirst(cell);
             IndexInfo* indexInfo = static_cast<IndexInfo*>(lfirst(cell1));
 
-            if (!RelationIsUstoreIndex(indexRel)) {
-                continue; /* only ubtree have index_delete routine */
-            }
+            /* only ubtree have index_delete routine */
+            Assert(RelationIsUstoreIndex(indexRel));
 
             Datum values[tupleDesc->natts];
             bool isNull[tupleDesc->natts];
@@ -5988,7 +5987,7 @@ bool DeleteGPITuplesForPartition(Oid partTableOid, Oid partOid)
  * Description	:
  * Notes		:
  */
-void DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid)
+bool DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid)
 {
     Relation partTableRel = NULL;
     Relation partRel = NULL;
@@ -5999,6 +5998,7 @@ void DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOi
     List* indexRelList = NIL;
     List* indexInfoList = NIL;
     ListCell* cell = NULL;
+    bool all_ubtree = true;
 
     partTableRel = heap_open(partTableOid, AccessShareLock);
     part = partitionOpen(partTableRel, partOid, AccessShareLock);
@@ -6011,6 +6011,12 @@ void DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOi
         Oid indexOid = lfirst_oid(cell);
         Relation indexRel = relation_open(indexOid, RowExclusiveLock);
         IndexInfo* indexInfo = BuildIndexInfo(indexRel);
+
+        if (!RelationIsUstoreIndex(indexRel)) {
+            all_ubtree = false;
+            relation_close(indexRel, RowExclusiveLock);
+            continue;
+        }
 
         indexRelList = lappend(indexRelList, indexRel);
         indexInfoList = lappend(indexInfoList, indexInfo);
@@ -6033,6 +6039,8 @@ void DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOi
     releaseDummyRelation(&partRel);
     partitionClose(partTableRel, part, NoLock);
     heap_close(partTableRel, NoLock);
+
+    return all_ubtree;
 }
 
 void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset, int2 bktId)

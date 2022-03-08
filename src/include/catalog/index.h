@@ -240,7 +240,7 @@ extern void AddGPIForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid)
 void AddCBIForPartition(Relation partTableRel, Relation tempTableRel, const List* indexRelList, 
     const List* indexDestOidList);
 extern bool DeleteGPITuplesForPartition(Oid partTableOid, Oid partOid);
-extern void DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid);
+extern bool DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid);
 extern void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset, int2 bktId);
 extern bool RecheckIndexTuple(IndexScanDesc scan, TupleTableSlot *slot);
 extern void SetIndexCreateExtraArgs(IndexCreateExtraArgs* extra, Oid psortOid, bool isPartition, bool isGlobal,
