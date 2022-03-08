@@ -548,12 +548,12 @@ function decompress()
         fi
     elif [ -f "/etc/openEuler-release" ]
     then
-        kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr a-z A-Z)
+        kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}')
     elif [ -f "/etc/centos-release" ]
     then
-        kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr a-z A-Z)
+        kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}')
     else
-        kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr a-z A-Z)
+        kernel=$(lsb_release -d | awk -F ' ' '{print $2}')
     fi
     log "kernel: ${kernel}"
 
@@ -564,7 +564,8 @@ function decompress()
     then
         platform=64
     fi
-    bin_name="GaussDB-Kernel-.*-${kernel}-${platform}bit"
+    platform_arch=$(uname -p)
+    bin_name="openGauss-Lite.*-${kernel}-${platform_arch}"
 	bin_res=$(ls -a | grep -E "${bin_name}.bin")
 	if [ "${bin_res}" = "" ]
 	then
@@ -597,7 +598,7 @@ function decompress()
 		die "copy binary files *.bin and version.cfg to install path error"
 	fi
 	cd ${app_path}
-	./*.bin
+	tar -zxf ${bin_name}.bin
 	if [ $? -ne 0 ]
 	then
 		die "decompress binary files (*.bin) error"

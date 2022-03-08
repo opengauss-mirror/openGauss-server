@@ -693,10 +693,10 @@
 ./lib/liblz4.so.1.9.2
 ./lib/libcjson.so
 ./lib/libcjson.so.1
-./lib/libcjson.so.1.7.13
+./lib/libcjson.so.1.7.14
 ./lib/libcjson_utils.so
 ./lib/libcjson_utils.so.1
-./lib/libcjson_utils.so.1.7.13
+./lib/libcjson_utils.so.1.7.14
 ./lib/libstdc++.so.6
 ./lib/libgcc_s.so.1
 ./lib/libgomp.so
@@ -708,7 +708,7 @@
 ./lib/libzstd.so.1.5.0
 ./lib/libcurl.so
 ./lib/libcurl.so.4
-./lib/libcurl.so.4.6.0
+./lib/libcurl.so.4.7.0
 ./lib/libxgboost.so
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
@@ -920,3 +920,5 @@
 ./include/libpq-int.h
 ./include/pqcomm.h
 ./include/pqexpbuffer.h
+[version]
+2.1.0
