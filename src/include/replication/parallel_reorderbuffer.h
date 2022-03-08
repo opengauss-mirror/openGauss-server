@@ -340,12 +340,15 @@ struct ParallelReorderBuffer {
      * ontop of reorderbuffer.c
      */
 
+    /* cached ParallelReorderBufferTXNs */
+    dlist_head cached_transactions;
+    Size nr_cached_transactions;
 
-    /* cached ReorderBufferChanges */
+    /* cached ParallelReorderBufferChanges */
     dlist_head cached_changes;
     Size nr_cached_changes;
 
-    /* cached ReorderBufferTupleBufs */
+    /* cached ParallelReorderBufferTupleBufs */
     slist_head cached_tuplebufs;
     Size nr_cached_tuplebufs;
     TransactionId lastRunningXactOldestXmin;
