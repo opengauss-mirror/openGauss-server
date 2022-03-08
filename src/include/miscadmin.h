@@ -91,6 +91,7 @@ extern const uint32 SCAN_BATCH_MODE_VERSION_NUM;
 extern const uint32 PUBLICATION_VERSION_NUM;
 extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 extern const uint32 SUPPORT_HASH_XLOG_VERSION_NUM;
+extern const uint32 PITR_INIT_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

@@ -132,6 +132,8 @@ bool InplaceUpgradePrecommit = false;
 
 const uint32 DISASTER_READ_VERSION_NUM = 92592;
 
+const uint32 PITR_INIT_VERSION_NUM = 92599;
+
 #ifdef PGXC
 bool useLocalXid = false;
 #endif

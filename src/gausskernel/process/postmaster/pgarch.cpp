@@ -1200,6 +1200,26 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
     return NULL;
 }
 
+static XLogRecPtr GetLastTaskLsnFromServer(ArchiveSlotConfig* obs_archive_slot)
+{
+    ArchiveXlogMessage obs_archive_info;
+    XLogRecPtr pitr_task_last_lsn;
+
+    if (archive_replication_get_last_xlog(&obs_archive_info, &obs_archive_slot->archive_config) == 0) {
+        pitr_task_last_lsn =  obs_archive_info.targetLsn;
+        ereport(LOG,
+            (errmsg("initLastTaskLsn update lsn to  %X/%X from server", (uint32)(pitr_task_last_lsn >> 32),
+            (uint32)(pitr_task_last_lsn))));
+    } else {
+        XLogRecPtr targetLsn = GetFlushRecPtr();
+        pitr_task_last_lsn = targetLsn - (targetLsn % XLogSegSize);
+        ereport(LOG,
+            (errmsg("initLastTaskLsn update lsn to  %X/%X from local", (uint32)(pitr_task_last_lsn >> 32),
+            (uint32)(pitr_task_last_lsn))));
+    }
+    return pitr_task_last_lsn;
+}
+
 static void InitArchiverLastTaskLsn(ArchiveSlotConfig* obs_archive_slot)
 {
     struct timeval tv;
@@ -1216,8 +1236,19 @@ static void InitArchiverLastTaskLsn(ArchiveSlotConfig* obs_archive_slot)
             ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[*slot_idx];
             SpinLockAcquire(&slot->mutex);
             if (slot->in_use == true && slot->archive_config != NULL) {
-                t_thrd.arch.pitr_task_last_lsn = slot->data.restart_lsn;
-                SpinLockRelease(&slot->mutex);
+                /*
+                 * In old version(<92599), the last task lsn is initialized from archive server or current flush
+                 * position, but in new version is initialized from local slot.
+                 * During the upgrade, the local restart lsn may be 0, so initialize it with old version way.
+                 */
+                if (slot->data.restart_lsn == InvalidXLogRecPtr &&
+                    t_thrd.proc->workingVersionNum < PITR_INIT_VERSION_NUM) {
+                    SpinLockRelease(&slot->mutex);
+                    t_thrd.arch.pitr_task_last_lsn = GetLastTaskLsnFromServer(obs_archive_slot);
+                } else {
+                    t_thrd.arch.pitr_task_last_lsn = slot->data.restart_lsn;
+                    SpinLockRelease(&slot->mutex);
+                }
             } else {
                 SpinLockRelease(&slot->mutex);
                 ereport(ERROR, (errcode_for_file_access(), errmsg("slot idx not valid, obs slot %X/%X not advance ",
