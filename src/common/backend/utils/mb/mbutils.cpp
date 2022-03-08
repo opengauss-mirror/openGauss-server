@@ -825,19 +825,15 @@ int pg_mbstrlen_with_len_eml(const char* mbstr, int limit, int eml)
     return len;
 }
 
-int pg_mbstrlen_with_len_toast(const char* mbstr, int* limit)
+int pg_mbstrlen_with_len_toast(const char* mbstr, int* limit, int* mblen)
 {
     int len = 0;
 
-    /* optimization for single byte encoding */
-    if (pg_database_encoding_max_length() == 1) {
-        return *limit;
-    }
     while (*limit > 0 && *mbstr) {
-        int l = pg_mblen(mbstr);
+        *mblen = pg_mblen(mbstr);
 
-        *limit -= l;
-        mbstr += l;
+        *limit -= (*mblen);
+        mbstr += (*mblen);
         len++;
     }
     return len;

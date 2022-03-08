@@ -218,7 +218,7 @@ struct varlena *heap_tuple_untoast_attr_slice(struct varlena *attr, int64 slice_
 
         return heap_tuple_untoast_attr_slice(redirect.pointer, slice_offset, slice_length);
     } else if (VARATT_IS_HUGE_TOAST_POINTER(attr)) {
-        return toast_huge_fetch_datum_slice(attr, slice_offset, slice_length);
+        return toast_huge_fetch_datum_slice(attr, slice_offset - 1, slice_length);
     } else {
         preslice = attr;
     }
@@ -366,31 +366,43 @@ int64 calculate_huge_length(text *t)
     bool isnull;
     int2 bucketid;
     int64 len = 0;
+    t_thrd.lob_cxt.lobCtx = AllocSetContextCreate(t_thrd.top_mem_cxt, "lob calculate length context",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     struct varatt_external toast_pointer;
     struct varatt_lob_external large_toast_pointer;
     VARATT_EXTERNAL_GET_HUGE_POINTER(large_toast_pointer, t);
-
     Relation toastrel = heap_open(large_toast_pointer.va_toastrelid, AccessShareLock);
     Relation toastidx = index_open(toastrel->rd_rel->reltoastidxid, AccessShareLock);
     TupleDesc toast_tup_desc = toastrel->rd_att;
     ScanKeyInit(&toastkey, (AttrNumber)1, BTEqualStrategyNumber, F_OIDEQ,
         ObjectIdGetDatum(large_toast_pointer.va_valueid));
     toastscan = systable_beginscan_ordered(toastrel, toastidx, SnapshotToast, 1, &toastkey);
-
     int offset = 0;
+    int mblen = 0;
     while ((ttup = systable_getnext_ordered(toastscan, ForwardScanDirection)) != NULL) {
         chunk = DatumGetPointer(fastgetattr(ttup, CHUNK_DATA_ATTR, toast_tup_desc, &isnull));
         VARATT_EXTERNAL_GET_POINTER_B(toast_pointer, chunk, bucketid);
+        MemoryContext oldCxt = MemoryContextSwitchTo(t_thrd.lob_cxt.lobCtx);
         text *result = heap_tuple_untoast_attr((varlena *)chunk);
         const char* str = VARDATA_ANY(result);
         int limit = VARSIZE_ANY_EXHDR(result);
+        /* including character encoding, avoiding truncate */
+        if (offset > 0) {
+            len++;
+            str += offset;
+            limit -= offset;
+            offset = 0;
+            mblen = 0;
+        }
 
-        /* multibyte string may be truncated! */
-        limit += offset;
-        len += (int64)pg_mbstrlen_with_len_toast(str - offset, &limit);
-        offset = limit;
+        len += (int64)pg_mbstrlen_with_len_toast(str, &limit, &mblen);
+        if (limit != 0) {
+            Assert(limit < 0 && mblen > 0);
+            offset = limit * (-1);
+        }
+        MemoryContextSwitchTo(oldCxt);
+        MemoryContextReset(t_thrd.lob_cxt.lobCtx);
     }
-    Assert(offset == 0);
     systable_endscan_ordered(toastscan);
     index_close(toastidx, AccessShareLock);
     heap_close(toastrel, AccessShareLock);
@@ -2767,17 +2779,17 @@ static struct varlena *toast_huge_fetch_datum_slice(struct varlena *attr, int64 
             sliceoffset -= (toast_pointer.va_rawsize - VARHDRSZ);
             continue;
         } else {
-            if (length < (toast_pointer.va_rawsize - sliceoffset + 1)) {
+            if (length <= ((toast_pointer.va_rawsize - VARHDRSZ) - sliceoffset)) {
                 curlength = length;
             } else {
-                curlength = toast_pointer.va_rawsize - sliceoffset + 1;
+                curlength = (toast_pointer.va_rawsize - VARHDRSZ) - sliceoffset;
             }
             first_chunk = heap_tuple_untoast_attr_slice((varlena *)chunk, sliceoffset, curlength);
             rc = memcpy_s(VARDATA(result) + totallength, length, VARDATA(first_chunk), curlength);
             securec_check(rc, "", "");
             length -= curlength;
             totallength += curlength;
-            sliceoffset = 1;
+            sliceoffset = 0;
         }
         if (length == 0) {
             break;
@@ -2808,7 +2820,7 @@ struct varlena *toast_huge_write_datum_slice(struct varlena *attr1, struct varle
 
     VARATT_EXTERNAL_GET_HUGE_POINTER(large_toast_pointer, attr1);
 
-    if (sliceoffset < 1 || sliceoffset > large_toast_pointer.va_rawsize) {
+    if (sliceoffset < 0 || sliceoffset > large_toast_pointer.va_rawsize) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_CHUNK_VALUE), errmsg("offset(%lu) is invalid.", sliceoffset)));
     }
 
@@ -2837,16 +2849,16 @@ struct varlena *toast_huge_write_datum_slice(struct varlena *attr1, struct varle
             continue;
         }
         first_chunk = heap_tuple_untoast_attr((varlena *)chunk);
-        if (length < (toast_pointer.va_rawsize - VARHDRSZ - sliceoffset + 1)) {
+        if (length <= (toast_pointer.va_rawsize - VARHDRSZ - sliceoffset)) {
             curlength = length;
         } else {
-            curlength = toast_pointer.va_rawsize - VARHDRSZ - sliceoffset + 1;
+            curlength = toast_pointer.va_rawsize - VARHDRSZ - sliceoffset;
         }
-        rc = memcpy_s(VARDATA(first_chunk) + sliceoffset - 1, curlength, VARDATA(attr2) + totallength, curlength);
+        rc = memcpy_s(VARDATA(first_chunk) + sliceoffset, curlength, VARDATA(attr2) + totallength, curlength);
         securec_check(rc, "", "");
         length -= curlength;
         totallength += curlength;
-        sliceoffset = 1;
+        sliceoffset = 0;
         toast_huge_fetch_and_append_datum(toastrel, toastidx, first_chunk, &firstchunkid, residx);
     }
     systable_endscan_ordered(toastscan);
