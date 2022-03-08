@@ -293,3 +293,10 @@ class PrometheusClient(TsdbClient):
                 "HTTP Status Code {} ({!r})".format(response.status_code, response.content)
             )
         return _standardize(data)
+
+    def timestamp(self):
+        seq = self.get_current_metric_value('prometheus_remote_storage_highest_timestamp_in_seconds')
+        if len(seq) == 0 or len(seq[0]) == 0:
+            return 0
+        return seq[0].timestamps[0]
+

@@ -11,6 +11,7 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
+import time
 from datetime import datetime, timedelta
 
 
@@ -48,3 +49,8 @@ class TsdbClient(object):
                               params: dict = None):
         """get metric target from tsdb"""
         pass
+
+    def timestamp(self):
+        """get the current unix-timestamp from the time-series database."""
+        return int(time.time() * 1000)
+

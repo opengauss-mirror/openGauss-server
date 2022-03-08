@@ -153,25 +153,28 @@ class MultiProcessingRFHandler(RotatingFileHandler):
 
         self._queue = multiprocessing.Queue(-1)
         self._should_exit = False
-        self._receiv_thr = threading.Thread(target=self._receive)
+        self._receiv_thr = threading.Thread(target=self._receive, name='LoggingReceiverThread')
+        self._receiv_thr.daemon = True
         self._receiv_thr.start()
 
     def _receive(self):
         while True:
             try:
-                record = self._queue.get_nowait()
+                if self._should_exit and self._queue.empty():
+                    break
+                record = self._queue.get(timeout=.2)
                 super().emit(record)
-            except Empty:
-                time.sleep(.1)
             except (KeyboardInterrupt, SystemExit):
                 raise
-            except EOFError:
+            except (OSError, EOFError):
                 break
+            except Empty:
+                pass
             except:
                 traceback.print_exc(file=sys.stderr)
-            if self._should_exit and self._queue.empty():
-                break
-
+        self._queue.close()
+        self._queue.join_thread()
+ 
     def _send(self, s):
         self._queue.put_nowait(s)
 
@@ -181,6 +184,7 @@ class MultiProcessingRFHandler(RotatingFileHandler):
                 record.msg = record.msg % record.args
                 record.args = None
             if record.exc_info:
+                self.format(record)
                 record.exc_info = None
             self._send(record)
         except (KeyboardInterrupt, SystemExit):
@@ -189,8 +193,10 @@ class MultiProcessingRFHandler(RotatingFileHandler):
             self.handleError(record)
 
     def close(self):
-        super().close()
-        self._should_exit = True
+        if not self._should_exit:
+            self._should_exit = True
+            self._receiv_thr.join(5)
+            super().close()
 
 
 class ExceptionCatch:

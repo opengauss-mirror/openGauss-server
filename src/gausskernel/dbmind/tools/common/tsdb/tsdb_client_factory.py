@@ -12,6 +12,7 @@
 # See the Mulan PSL v2 for more details.
 
 import threading
+import time
 
 from dbmind.common.exceptions import ApiClientException
 from dbmind.common.tsdb.tsdb_client import TsdbClient
@@ -46,3 +47,9 @@ class TsdbClientFactory(object):
             cls.tsdb_client = client
         if cls.tsdb_client is None:
             raise ApiClientException("Failed to init TSDB client, please check config file")
+
+        if abs(cls.tsdb_client.timestamp() - time.time() * 1000) > 60 * 1000:  # threshold is 1 minute.
+            raise ApiClientException('Found clock drift between TSDB client and server, '
+                                     'please check and synchronize system clocks.')
+
+

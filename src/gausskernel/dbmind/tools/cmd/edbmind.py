@@ -14,6 +14,7 @@
 
 import logging
 import os
+import threading
 import signal
 import sys
 import traceback
@@ -55,7 +56,6 @@ def _check_confpath(confpath):
 def _process_clean(force=False):
     global_vars.worker.terminate(cancel_futures=force)
     TimedTaskManager.stop()
-    logging.shutdown()
 
 
 def signal_handler(signum, frame):
@@ -67,7 +67,10 @@ def signal_handler(signum, frame):
     elif signum == signal.SIGUSR2:
         # used for debugging
         utils.write_to_terminal('Stack frames:', color='green')
-        traceback.print_stack(frame)
+        for th in threading.enumerate():
+            print(th)
+            traceback.print_stack(sys._current_frames()[th.ident])
+            print()
     elif signum == signal.SIGTERM:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         logging.info('DBMind received exit signal.')
