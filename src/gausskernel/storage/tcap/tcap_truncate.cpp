@@ -87,6 +87,8 @@
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/inval.h"
+#include "utils/knl_partcache.h"
+#include "utils/knl_relcache.h"
 #include "utils/lsyscache.h"
 #include "utils/relcache.h"
 #include "utils/snapmgr.h"
@@ -149,7 +151,7 @@ void TrRelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, voi
     relation->rd_newRelfilenodeSubid = GetCurrentSubTransactionId();
 
     /* ... and now we have eoxact cleanup work to do */
-    u_sess->relcache_cxt.need_eoxact_work = true;
+    SetRelCacheNeedEOXActWork(true);
 }
 
 void TrPartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid, void *baseDesc)
@@ -185,7 +187,7 @@ void TrPartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId
     part->pd_newRelfilenodeSubid = GetCurrentSubTransactionId();
 
     /* ... and now we have eoxact cleanup work to do */
-    u_sess->cache_cxt.part_cache_need_eoxact_work = true;
+    SetPartCacheNeedEOXActWork(true);
 }
 
 bool TrCheckRecyclebinTruncate(const TruncateStmt *stmt)
@@ -412,7 +414,7 @@ void TrDoPurgeObjectTruncate(TrObjDesc *desc)
     heap_close(rbRel, RowExclusiveLock);
 
     /* ... and now we have eoxact cleanup work to do */
-    u_sess->relcache_cxt.need_eoxact_work = true;
+    SetRelCacheNeedEOXActWork(true);
 
     /*
      * CommandCounterIncrement here to ensure that preceding changes are all

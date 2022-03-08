@@ -39,7 +39,7 @@ public:
         m_bucket_list.ResetContent();
         invalid_entries.ResetInitFlag();
         m_global_partdefcache = NULL;
-        part_cache_need_eoxact_work = false;
+        PartCacheNeedEOXActWork = false;
         m_is_inited = false;
         m_db_id = InvalidOid;
     }
@@ -64,7 +64,7 @@ public:
     Partition PartitionIdGetPartition(Oid part_oid, StorageType storage_type);
 
 public:
-    bool part_cache_need_eoxact_work;
+    bool PartCacheNeedEOXActWork;
 
 private:
     void InsertPartitionIntoGlobal(Partition part, uint32 hash_value);

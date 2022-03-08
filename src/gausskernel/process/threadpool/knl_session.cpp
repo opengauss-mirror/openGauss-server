@@ -985,7 +985,7 @@ static void knl_u_relcache_init(knl_u_relcache_context* relcache_cxt)
     relcache_cxt->criticalSharedRelcachesBuilt = false;
     relcache_cxt->relcacheInvalsReceived = 0L;
     relcache_cxt->initFileRelationIds = NIL;
-    relcache_cxt->need_eoxact_work = false;
+    relcache_cxt->RelCacheNeedEOXActWork = false;
     relcache_cxt->OpClassCache = NULL;
     relcache_cxt->pgclassdesc = NULL;
     relcache_cxt->pgindexdesc = NULL;
@@ -1174,7 +1174,7 @@ static void knl_u_cache_init(knl_u_cache_context* cache_cxt)
 
     cache_cxt->PartitionIdCache = NULL;
     cache_cxt->BucketIdCache = NULL;
-    cache_cxt->part_cache_need_eoxact_work = false;
+    cache_cxt->PartCacheNeedEOXActWork = false;
     cache_cxt->bucket_cache_need_eoxact_work = false;
     cache_cxt->dn_hash_table = NULL;
 }

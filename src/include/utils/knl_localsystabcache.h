@@ -38,7 +38,7 @@ public:
     {
         m_is_inited = false;
         local_systupcaches = NULL;
-        need_eoxact_work = false;
+        CatCacheNeedEOXActWork = false;
     }
 
     void ResetInitFlag(bool include_shared)
@@ -54,13 +54,13 @@ public:
 
     void AtEOXact_CatCache(bool isCommit)
     {
-        if (!need_eoxact_work) {
+        if (!CatCacheNeedEOXActWork) {
             return;
         }
         for (int cache_id = 0; cache_id < SysCacheSize; cache_id++) {
             local_systupcaches[cache_id]->AtEOXact_CatCache(isCommit);
         }
-        need_eoxact_work = false;
+        CatCacheNeedEOXActWork = false;
     }
 
     /* systup may be shared table cache. not cleaned when cleardb */
@@ -166,7 +166,7 @@ public:
             }
             local_systupcaches[cache_id]->PrepareToInvalidateCacheTuple(tuple, newtuple, function);
         }
-        need_eoxact_work = true;
+        CatCacheNeedEOXActWork = true;
     }
 
     void CreateObject();
@@ -270,6 +270,6 @@ private:
     }
 
     bool m_is_inited;
-    bool need_eoxact_work;
+    bool CatCacheNeedEOXActWork;
 };
 #endif

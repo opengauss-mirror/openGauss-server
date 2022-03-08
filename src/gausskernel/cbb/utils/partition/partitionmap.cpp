@@ -936,7 +936,7 @@ void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap)
         }
     } else {
         oldMap->isDirty = true;
-        SetLocalRelCacheNeedEOXactWork(true);
+        SetRelCacheNeedEOXActWork(true);
         elog(LOG, "map refcount is not zero when RebuildPartitonMap ");
     }
 }

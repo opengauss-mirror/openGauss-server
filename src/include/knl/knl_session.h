@@ -1879,7 +1879,7 @@ typedef struct knl_u_relcache_context {
     /*
      * This flag lets us optimize away work in AtEO(Sub)Xact_RelationCache().
      */
-    bool need_eoxact_work;
+    bool RelCacheNeedEOXActWork;
 
     HTAB* OpClassCache;
 
@@ -2309,7 +2309,7 @@ typedef struct knl_u_cache_context {
 
     struct HTAB* dn_hash_table;
 
-    bool part_cache_need_eoxact_work;
+    bool PartCacheNeedEOXActWork;
 
     bool bucket_cache_need_eoxact_work; 
 

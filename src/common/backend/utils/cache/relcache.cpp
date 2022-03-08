@@ -4161,7 +4161,7 @@ void AtEOXact_RelationCache(bool isCommit)
      * transaction, even though we could clear it at subtransaction end in
      * some cases.
      */
-    if (!u_sess->relcache_cxt.need_eoxact_work
+    if (!GetRelCacheNeedEOXActWork()
 #ifdef USE_ASSERT_CHECKING
         && !assert_enabled
 #endif
@@ -4253,7 +4253,7 @@ void AtEOXact_RelationCache(bool isCommit)
     }
 
     /* Once done with the transaction, we can reset u_sess->relcache_cxt.need_eoxact_work */
-    u_sess->relcache_cxt.need_eoxact_work = false;
+    SetRelCacheNeedEOXActWork(false);
 }
 
 /*
@@ -4276,7 +4276,7 @@ void AtEOSubXact_RelationCache(bool isCommit, SubTransactionId mySubid, SubTrans
      * Skip the relcache scan if nothing to do --- see notes for
      * AtEOXact_RelationCache.
      */
-    if (!u_sess->relcache_cxt.need_eoxact_work)
+    if (!GetRelCacheNeedEOXActWork())
         return;
 
     hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
@@ -4416,7 +4416,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     rel->rd_newRelfilenodeSubid = InvalidSubTransactionId;
 
     /* must flag that we have rels created in this transaction */
-    SetLocalRelCacheNeedEOXactWork(true);
+    SetRelCacheNeedEOXActWork(true);
 
     /*
      * create a new tuple descriptor from the one passed in.  We do this
@@ -4784,7 +4784,7 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, Multi
      */
     relation->rd_newRelfilenodeSubid = GetCurrentSubTransactionId();
     /* ... and now we have eoxact cleanup work to do */
-    SetLocalRelCacheNeedEOXactWork(true);
+    SetRelCacheNeedEOXActWork(true);
 }
 
 RelFileNodeBackend CreateNewRelfilenode(Relation relation, TransactionId freezeXid)
@@ -6064,7 +6064,7 @@ void RelationSetIndexList(Relation relation, List* indexIds, Oid oidIndex)
     relation->rd_pkindex = InvalidOid;
     relation->rd_indexvalid = 2; /* mark list as forced */
     /* must flag that we have a forced index list */
-    SetLocalRelCacheNeedEOXactWork(true);
+    SetRelCacheNeedEOXActWork(true);
 }
 
 /*

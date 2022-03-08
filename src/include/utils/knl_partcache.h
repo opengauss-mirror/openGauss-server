@@ -105,21 +105,21 @@ extern Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, 
         }                                                                                                          \
     } while (0)
 
-inline bool PartCacheNeedEoxactWork()
+inline bool GetPartCacheNeedEOXActWork()
 {
     if (EnableLocalSysCache()) {
-        return t_thrd.lsc_cxt.lsc->partdefcache.part_cache_need_eoxact_work;
+        return t_thrd.lsc_cxt.lsc->partdefcache.PartCacheNeedEOXActWork;
     } else {
-        return u_sess->cache_cxt.part_cache_need_eoxact_work;
+        return u_sess->cache_cxt.PartCacheNeedEOXActWork;
     }
 }
 
-inline void SetPartCacheNeedEoxactWork(bool value)
+inline void SetPartCacheNeedEOXActWork(bool value)
 {
     if (EnableLocalSysCache()) {
-        t_thrd.lsc_cxt.lsc->partdefcache.part_cache_need_eoxact_work = value;
+        t_thrd.lsc_cxt.lsc->partdefcache.PartCacheNeedEOXActWork = value;
     } else {
-        u_sess->cache_cxt.part_cache_need_eoxact_work = value;
+        u_sess->cache_cxt.PartCacheNeedEOXActWork = value;
     }
 }
 #endif

@@ -124,7 +124,7 @@ public:
      */
     List *initFileRelationIds;
 
-    bool need_eoxact_work;
+    bool RelCacheNeedEOXActWork;
 
     struct tupleDesc *m_pgclassdesc;
     struct tupleDesc *m_pgindexdesc;

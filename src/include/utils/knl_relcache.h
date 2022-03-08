@@ -194,21 +194,21 @@ inline void AddLocalRelCacheInvalsReceived(int value)
     }
 }
 
-inline bool LocalRelCacheNeedEOXactWork()
+inline bool GetRelCacheNeedEOXActWork()
 {
     if (EnableLocalSysCache()) {
-        return t_thrd.lsc_cxt.lsc->tabdefcache.need_eoxact_work;
+        return t_thrd.lsc_cxt.lsc->tabdefcache.RelCacheNeedEOXActWork;
     } else {
-        return u_sess->relcache_cxt.need_eoxact_work;
+        return u_sess->relcache_cxt.RelCacheNeedEOXActWork;
     }
 }
 
-inline void SetLocalRelCacheNeedEOXactWork(bool value)
+inline void SetRelCacheNeedEOXActWork(bool value)
 {
     if (EnableLocalSysCache()) {
-        t_thrd.lsc_cxt.lsc->tabdefcache.need_eoxact_work = value;
+        t_thrd.lsc_cxt.lsc->tabdefcache.RelCacheNeedEOXActWork = value;
     } else {
-        u_sess->relcache_cxt.need_eoxact_work = value;
+        u_sess->relcache_cxt.RelCacheNeedEOXActWork = value;
     }
 }
 
