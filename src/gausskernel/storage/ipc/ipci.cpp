@@ -463,6 +463,9 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.audit_cxt.global_audit_context);
         int thread_num = g_instance.attr.attr_security.audit_thread_num;
         g_instance.pid_cxt.PgAuditPID = (ThreadId*)palloc0(sizeof(ThreadId) * thread_num);
+        if (g_instance.audit_cxt.index_file_lock == NULL) {
+            g_instance.audit_cxt.index_file_lock = LWLockAssign(LWTRANCHE_AUDIT_INDEX_WAIT);
+        }
         (void)MemoryContextSwitchTo(oldcontext);
     }
 

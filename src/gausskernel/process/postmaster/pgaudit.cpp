@@ -807,11 +807,11 @@ void pgaudit_stop_all(void)
 {
     for (int i = 0; i < g_instance.audit_cxt.thread_num; ++i) {
         if (g_instance.pid_cxt.PgAuditPID[i] != 0) {
+            Assert(!dummyStandbyMode);
             signal_child(g_instance.pid_cxt.PgAuditPID[i], SIGQUIT, -1);
         }
     }
     audit_process_cxt_exit();
-    ereport(LOG, (errmsg("parameter audit_enabled is set to false, terminate auditor process.")));
 }
 
 /*
@@ -2416,7 +2416,7 @@ static void pgaudit_indextbl_init_new(void)
     return;
 }
 
-static void pgaudit_udpate_maxnum()
+static void pgaudit_update_maxnum()
 {
     errno_t errorno = EOK;
     int thread_num = g_instance.attr.attr_security.audit_thread_num;
@@ -2428,15 +2428,19 @@ static void pgaudit_udpate_maxnum()
     /* curidx and latest_idx should be updated later from old index table file */
     new_indextbl->begidx = 0;
     new_indextbl->maxnum = u_sess->attr.attr_security.Audit_RemainThreshold + 1;
+    new_indextbl->last_audit_time = g_instance.audit_cxt.audit_indextbl->last_audit_time;
+    new_indextbl->thread_num = g_instance.audit_cxt.audit_indextbl->thread_num;
 
     if (g_instance.audit_cxt.audit_indextbl->count > 0) {
         AuditIndexItem *item = NULL;
         uint32 latest_idx = g_instance.audit_cxt.audit_indextbl->latest_idx;
+        uint32 last_idx = (latest_idx == 0) ? (g_instance.audit_cxt.audit_indextbl->maxnum - 1): (latest_idx - 1);
         uint32 index = g_instance.audit_cxt.audit_indextbl->begidx;
         uint32 pos = new_indextbl->begidx;
         do {
             item = g_instance.audit_cxt.audit_indextbl->data + index;
-            errorno = memcpy_s(new_indextbl->data + pos, (new_indextbl_data_lenth - pos), item, sizeof(AuditIndexItem));
+            errorno = memcpy_s(new_indextbl->data + pos, (new_indextbl_data_lenth - (pos * sizeof(AuditIndexItem))),
+                               item, sizeof(AuditIndexItem));
             securec_check(errorno, "\0", "\0");
             new_indextbl->count++;
 
@@ -2444,11 +2448,11 @@ static void pgaudit_udpate_maxnum()
              * finished copy old index table file from range [begin, latest_idx)
              * then update new index table file curidxes
              */
-            if (index == (latest_idx - 1)) {
+            if (index == last_idx) {
                 for (int i = 0; i < thread_num; ++i) {
-                    new_indextbl->curidx[i] = pos - thread_num + i;
+                    new_indextbl->curidx[i] = pos - thread_num + 1 + i;
                 }
-                new_indextbl->latest_idx = pos;
+                new_indextbl->latest_idx = pos + 1;
                 break;
             }
 
@@ -2486,7 +2490,7 @@ static void pgaudit_reset_indexfile()
     /* If file remain threshold parameter changed, than copy the old audit index table to the new table */
     if (old_maxnum != (uint32)u_sess->attr.attr_security.Audit_RemainThreshold + 1) {
         LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
-        pgaudit_udpate_maxnum();
+        pgaudit_update_maxnum();
         LWLockRelease(g_instance.audit_cxt.index_file_lock);
     }
 
@@ -2995,17 +2999,19 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
      * load the index audit table from global index audit table instance
      * then use the local thread one when iterate all audit files
      */
+    pgaudit_read_indexfile(audit_dir);
     LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
-    t_thrd.audit.audit_indextbl = NULL;
-    int indextbl_len =
-        (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size;
-    t_thrd.audit.audit_indextbl = (AuditIndexTableNew *)palloc0(indextbl_len);
-    error_t errorno =
-        memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
-    securec_check(errorno, "\0", "\0");
-
+    pfree_ext(t_thrd.audit.audit_indextbl);
+    if (g_instance.audit_cxt.audit_indextbl != NULL) {
+        int indextbl_len =
+            (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size;
+        t_thrd.audit.audit_indextbl = (AuditIndexTableNew *)palloc0(indextbl_len);
+        error_t errorno =
+            memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
+        securec_check(errorno, "\0", "\0");
+    }
     LWLockRelease(g_instance.audit_cxt.index_file_lock);
-    
+
     per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
     oldcontext = MemoryContextSwitchTo(per_query_ctx);
 
@@ -3016,8 +3022,6 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
 
     MemoryContextSwitchTo(oldcontext);
 
-    ereport(DEBUG1,
-            (errmsg("pg_query_audit count: %d indextbl_len: %d", t_thrd.audit.audit_indextbl->count, indextbl_len)));
     if (begtime < endtime && t_thrd.audit.audit_indextbl != NULL && t_thrd.audit.audit_indextbl->count > 0) {
         bool satisfied = false;
         uint32 index = 0;
@@ -3072,14 +3076,17 @@ Datum pg_delete_audit(PG_FUNCTION_ARGS)
      * load the index audit table from global index audit table instance
      * then use the local thread one when iterate all audit files
      */
+    pgaudit_read_indexfile(g_instance.attr.attr_security.Audit_directory);
     LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
     pfree_ext(t_thrd.audit.audit_indextbl);
-    int indextbl_len =
-        (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size;
-    t_thrd.audit.audit_indextbl = (AuditIndexTableNew *)palloc0(indextbl_len);
-    error_t errorno =
-        memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
-    securec_check(errorno, "\0", "\0");
+    if (g_instance.audit_cxt.audit_indextbl != NULL) {
+        int indextbl_len =
+            (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size;
+        t_thrd.audit.audit_indextbl = (AuditIndexTableNew *)palloc0(indextbl_len);
+        error_t errorno =
+            memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
+        securec_check(errorno, "\0", "\0");
+    }
     LWLockRelease(g_instance.audit_cxt.index_file_lock);
 
     int thread_num = g_instance.audit_cxt.thread_num;
