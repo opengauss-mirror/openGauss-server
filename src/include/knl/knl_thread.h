@@ -978,10 +978,6 @@ typedef struct knl_t_index_context {
     struct BTVacInfo* btvacinfo;
 } knl_t_index_context;
 
-typedef struct knl_t_lob_context {
-    MemoryContext lobCtx;
-} knl_t_lob_context;
-
 typedef struct knl_t_wlmthrd_context {
     /* thread level node group */
     struct WLMNodeGroupInfo* thread_node_group;
@@ -3385,7 +3381,6 @@ typedef struct knl_thrd_context {
     knl_t_apply_launcher_context applylauncher_cxt;
     knl_t_apply_worker_context applyworker_cxt;
     knl_t_publication_context publication_cxt;
-    knl_t_lob_context lob_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

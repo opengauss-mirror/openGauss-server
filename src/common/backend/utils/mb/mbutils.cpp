@@ -825,15 +825,15 @@ int pg_mbstrlen_with_len_eml(const char* mbstr, int limit, int eml)
     return len;
 }
 
-int pg_mbstrlen_with_len_toast(const char* mbstr, int* limit, int* mblen)
+int pg_mbstrlen_with_len_toast(const char* mbstr, int* limit)
 {
     int len = 0;
 
     while (*limit > 0 && *mbstr) {
-        *mblen = pg_mblen(mbstr);
+        int l = pg_mblen(mbstr);
 
-        *limit -= (*mblen);
-        mbstr += (*mblen);
+        *limit -= l;
+        mbstr += l;
         len++;
     }
     return len;

@@ -218,7 +218,7 @@ struct varlena *heap_tuple_untoast_attr_slice(struct varlena *attr, int64 slice_
 
         return heap_tuple_untoast_attr_slice(redirect.pointer, slice_offset, slice_length);
     } else if (VARATT_IS_HUGE_TOAST_POINTER(attr)) {
-        return toast_huge_fetch_datum_slice(attr, slice_offset - 1, slice_length);
+        return toast_huge_fetch_datum_slice(attr, slice_offset, slice_length);
     } else {
         preslice = attr;
     }
@@ -362,13 +362,11 @@ int64 calculate_huge_length(text *t)
     ScanKeyData toastkey;
     SysScanDesc toastscan;
     HeapTuple ttup;
-    Pointer chunk;
     bool isnull;
-    int2 bucketid;
     int64 len = 0;
-    t_thrd.lob_cxt.lobCtx = AllocSetContextCreate(t_thrd.top_mem_cxt, "lob calculate length context",
+    int offset = 0;
+    MemoryContext fetchLobContext = AllocSetContextCreate(CurrentMemoryContext, "lob calculate length context",
         ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-    struct varatt_external toast_pointer;
     struct varatt_lob_external large_toast_pointer;
     VARATT_EXTERNAL_GET_HUGE_POINTER(large_toast_pointer, t);
     Relation toastrel = heap_open(large_toast_pointer.va_toastrelid, AccessShareLock);
@@ -377,35 +375,36 @@ int64 calculate_huge_length(text *t)
     ScanKeyInit(&toastkey, (AttrNumber)1, BTEqualStrategyNumber, F_OIDEQ,
         ObjectIdGetDatum(large_toast_pointer.va_valueid));
     toastscan = systable_beginscan_ordered(toastrel, toastidx, SnapshotToast, 1, &toastkey);
-    int offset = 0;
-    int mblen = 0;
     while ((ttup = systable_getnext_ordered(toastscan, ForwardScanDirection)) != NULL) {
-        chunk = DatumGetPointer(fastgetattr(ttup, CHUNK_DATA_ATTR, toast_tup_desc, &isnull));
-        VARATT_EXTERNAL_GET_POINTER_B(toast_pointer, chunk, bucketid);
-        MemoryContext oldCxt = MemoryContextSwitchTo(t_thrd.lob_cxt.lobCtx);
+        Pointer chunk = DatumGetPointer(fastgetattr(ttup, CHUNK_DATA_ATTR, toast_tup_desc, &isnull));
+        MemoryContext oldCxt = MemoryContextSwitchTo(fetchLobContext);
         text *result = heap_tuple_untoast_attr((varlena *)chunk);
         const char* str = VARDATA_ANY(result);
         int limit = VARSIZE_ANY_EXHDR(result);
         /* including character encoding, avoiding truncate */
         if (offset > 0) {
-            len++;
+            if (limit <= offset) {
+                offset -= limit;
+                continue;
+            }
             str += offset;
             limit -= offset;
             offset = 0;
-            mblen = 0;
         }
 
-        len += (int64)pg_mbstrlen_with_len_toast(str, &limit, &mblen);
+        len += (int64)pg_mbstrlen_with_len_toast(str, &limit);
         if (limit != 0) {
-            Assert(limit < 0 && mblen > 0);
-            offset = limit * (-1);
+            Assert(limit < 0);
+            offset = -limit;
         }
         MemoryContextSwitchTo(oldCxt);
-        MemoryContextReset(t_thrd.lob_cxt.lobCtx);
+        MemoryContextReset(fetchLobContext);
     }
+    Assert(offset == 0);
     systable_endscan_ordered(toastscan);
     index_close(toastidx, AccessShareLock);
     heap_close(toastrel, AccessShareLock);
+    MemoryContextDelete(fetchLobContext);
     return len;
 }
 
@@ -2746,6 +2745,16 @@ static struct varlena* toast_fetch_datum_slice(struct varlena* attr, int64 slice
     return result;
 }
 
+/* ----------
+ * toast_huge_fetch_datum_slice -
+ *
+ * return a Datum from the chunks saved in the toast relation
+ *    attr: large_toast_pointer in user table
+ *    sliceoffset: byte offset, from 0
+ *    length: byte length
+ *
+ * ----------
+ */
 static struct varlena *toast_huge_fetch_datum_slice(struct varlena *attr, int64 sliceoffset, int32 length)
 {
     ScanKeyData toastkey;
@@ -2803,6 +2812,17 @@ static struct varlena *toast_huge_fetch_datum_slice(struct varlena *attr, int64 
     return result;
 }
 
+/* ----------
+ * toast_huge_write_datum_slice -
+ *
+ * return a Datum from the chunks saved in the toast relation
+ *    attr1: large_toast_pointer in user table
+ *    attr2: less than 1G data
+ *    sliceoffset: byte offset, from 0
+ *    length: byte length
+ *
+ * ----------
+ */
 struct varlena *toast_huge_write_datum_slice(struct varlena *attr1, struct varlena *attr2, int64 sliceoffset,
     int32 length)
 {
