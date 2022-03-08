@@ -14644,11 +14644,22 @@ XLogRecPtr StandbyDoStopBackup(char *labelfile)
     }
     startPoint = (((uint64)hi) << 32) | lo;
     remaining = strchr(labelfile, '\n') + 1; /* %n is not portable enough */
+
+    XLogRecPtr minRecoveryPoint;
     LWLockAcquire(ControlFileLock, LW_SHARED);
     stopPoint = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
+    minRecoveryPoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
     LWLockRelease(ControlFileLock);
     if (XLByteLE(stopPoint, startPoint)) {
         stopPoint = GetXLogReplayRecPtr(NULL);
+    }
+
+    if (XLByteLT(stopPoint, minRecoveryPoint)) {
+        stopPoint = minRecoveryPoint;
+    }
+
+    if (XLByteLT(stopPoint, g_instance.comm_cxt.predo_cxt.redoPf.read_ptr)) {
+        stopPoint = g_instance.comm_cxt.predo_cxt.redoPf.read_ptr;
     }
     return stopPoint;
 }
