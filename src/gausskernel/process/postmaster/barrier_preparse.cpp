@@ -173,10 +173,11 @@ void BarrierPreParseMain(void)
     XLogReaderState *xlogreader = NULL;
     char *errormsg = NULL;
     XLogPageReadPrivate readprivate;
-    XLogRecPtr startLSN;
-    XLogRecPtr preStartLSN;
+    XLogRecPtr startLSN = InvalidXLogRecPtr;
+    XLogRecPtr preStartLSN = InvalidXLogRecPtr;
+    XLogRecPtr lastReadLSN = InvalidXLogRecPtr;
     bool found = false;
-    XLogRecPtr barrierLSN;
+    XLogRecPtr barrierLSN = InvalidXLogRecPtr;
     char *xLogBarrierId = NULL;
     char barrierId[MAX_BARRIER_ID_LENGTH] = {0};
     const uint32 shiftSize = 32;
@@ -258,6 +259,8 @@ void BarrierPreParseMain(void)
 
         found = false;
         preStartLSN = startLSN;
+        ereport(DEBUG1, (errmsg("[BarrierPreParse] start to preparse at: %08X/%08X",
+            (uint32)(startLSN >> shiftSize), (uint32)startLSN)));
         startLSN = XLogFindNextRecord(xlogreader, startLSN);
         if (XLogRecPtrIsInvalid(startLSN)) {
             startLSN = preStartLSN;
@@ -276,6 +279,7 @@ void BarrierPreParseMain(void)
             if (record == NULL) {
                 break;
             }
+            lastReadLSN = xlogreader->EndRecPtr;
             uint8 info = XLogRecGetInfo(xlogreader) & ~XLR_INFO_MASK;
             if (NEED_INSERT_INTO_HASH) {
                 xLogBarrierId = XLogRecGetData(xlogreader);
@@ -305,7 +309,7 @@ void BarrierPreParseMain(void)
             SetBarrieID(barrierId, barrierLSN);
         }
 
-        startLSN = XLogRecPtrIsInvalid(xlogreader->ReadRecPtr) ? preStartLSN : xlogreader->ReadRecPtr;
+        startLSN = XLogRecPtrIsInvalid(lastReadLSN) ? preStartLSN : lastReadLSN;
 
         if (XLogRecPtrIsInvalid(xlogreader->ReadRecPtr) && errormsg) {
             ereport(LOG, (errmsg("[BarrierPreParse] preparse thread get an error info %s", errormsg)));
