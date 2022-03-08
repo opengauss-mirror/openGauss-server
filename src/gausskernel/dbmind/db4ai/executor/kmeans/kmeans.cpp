@@ -1041,7 +1041,7 @@ HyperparameterDefinition kmeans_hyperparameter_definitions[] = {
     HYPERPARAMETER_INT4("verbose", 0, 0, true, 2, true, HyperparametersKMeans, verbosity, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("num_centroids", 1, 1, true, 1000000, true, HyperparametersKMeans, num_centroids,
                         HP_NO_AUTOML()),
-    HYPERPARAMETER_INT4("max_iterations", 10, 1, true, INT32_MAX, true, HyperparametersKMeans, num_iterations,
+    HYPERPARAMETER_INT4("max_iterations", 10, 1, true, ITER_MAX, true, HyperparametersKMeans, num_iterations,
                         HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("num_features", 0, 1, true, INT32_MAX, true, HyperparametersKMeans, n_features, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("batch_size", 1000, 1, true, 1000000, true, HyperparametersKMeans, batch_size, HP_NO_AUTOML()),

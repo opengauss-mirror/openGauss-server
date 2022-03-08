@@ -258,7 +258,7 @@ static HyperparameterDefinition pca_hyperparameter_definitions[] = {
     HYPERPARAMETER_INT4("number_components", 1, 1, true, INT32_MAX, true, HyperparametersGD, number_dimensions,
                         HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("batch_size", 1000, 1, true, INT32_MAX, true, HyperparametersGD, batch_size, HP_NO_AUTOML()),
-    HYPERPARAMETER_INT4("max_iterations", 100, 1, true, INT32_MAX, true, HyperparametersGD, max_iterations,
+    HYPERPARAMETER_INT4("max_iterations", 100, 1, true, ITER_MAX, true, HyperparametersGD, max_iterations,
                         HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("max_seconds", 0, 0, true, INT32_MAX, true, HyperparametersGD, max_seconds, HP_NO_AUTOML()),
     HYPERPARAMETER_FLOAT8("tolerance", 0.0005, 0.0, true, DBL_MAX, true, HyperparametersGD, tolerance, HP_NO_AUTOML()),

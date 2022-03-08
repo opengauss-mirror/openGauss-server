@@ -270,7 +270,7 @@ typedef struct HyperparametersGD {
     HYPERPARAMETER_FLOAT8("learning_rate", 0.8, 0.0, false, DBL_MAX, true, \
                         HyperparametersGD, learning_rate, \
                         HP_AUTOML_FLOAT(1E-6, 1E3, 9, ProbabilityDistribution::LOG_RANGE)), \
-    HYPERPARAMETER_INT4("max_iterations", 100, 1, true, INT32_MAX, true, \
+    HYPERPARAMETER_INT4("max_iterations", 100, 1, true, ITER_MAX, true, \
                         HyperparametersGD, max_iterations, \
                         HP_AUTOML_INT(1, 100, 10, ProbabilityDistribution::LOG_RANGE)), \
     HYPERPARAMETER_INT4("max_seconds", 0, 0, true, INT32_MAX, true, \
