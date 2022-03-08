@@ -63,7 +63,7 @@ class Daemon:
         RUNNING = 1
 
     def __init__(self, pid_file, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
-        self.pid_file = os.path.abspath(pid_file)
+        self.pid_file = os.path.realpath(pid_file)
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr

@@ -35,7 +35,7 @@ from dbmind.metadatabase.dao.dynamic_config import dynamic_config_set, dynamic_c
 def initialize_and_check_config(confpath, interactive=False):
     if not os.path.exists(confpath):
         raise SetupError('Not found the directory %s.' % confpath)
-    confpath = os.path.abspath(confpath)  # in case of dir changed.
+    confpath = os.path.realpath(confpath)  # in case of dir changed.
     os.chdir(confpath)
     dbmind_conf_path = os.path.join(confpath, constants.CONFILE_NAME)
     dynamic_config_path = os.path.join(confpath, constants.DYNAMIC_CONFIG)

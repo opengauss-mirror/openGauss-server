@@ -126,7 +126,7 @@ def load_sys_configs(confile):
 class ConfigUpdater:
     def __init__(self, filepath):
         self.config = ConfigParser(inline_comment_prefixes=None)
-        self.filepath = os.path.abspath(filepath)
+        self.filepath = os.path.realpath(filepath)
         self.fp = None
         self.readonly = True
 

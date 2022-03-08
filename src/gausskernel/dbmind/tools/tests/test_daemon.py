@@ -20,7 +20,7 @@ import dbmind.common.process
 from dbmind.common.daemon import Daemon
 from dbmind.common.platform import WIN32
 
-BASEPATH = os.path.abspath(os.path.dirname(__file__))
+BASEPATH = os.path.realpath(os.path.dirname(__file__))
 PID_NAME = 'tester.pid'
 
 

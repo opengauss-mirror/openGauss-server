@@ -17,7 +17,7 @@ import os
 try:
     from dbmind.components.xtuner.tuner.main import main
 except ImportError:
-    libpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+    libpath = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..')
     sys.path.append(libpath)
 
     from xtuner.tuner.main import main

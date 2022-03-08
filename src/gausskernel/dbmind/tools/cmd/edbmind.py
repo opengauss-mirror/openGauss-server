@@ -90,7 +90,7 @@ class DBMindMain(Daemon):
         if not _check_confpath(confpath):
             raise SetupError("Invalid directory '%s', please set up first." % confpath)
 
-        self.confpath = os.path.abspath(confpath)
+        self.confpath = os.path.realpath(confpath)
         self.worker = None
 
         pid_file = os.path.join(confpath, constants.PIDFILE_NAME)

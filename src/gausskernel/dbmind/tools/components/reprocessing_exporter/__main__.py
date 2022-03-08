@@ -16,7 +16,7 @@ import os
 try:
     from dbmind.components.reprocessing_exporter import main
 except ImportError:
-    libpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+    libpath = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..')
     sys.path.append(libpath)
     from reprocessing_exporter import main
 
