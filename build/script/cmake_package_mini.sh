@@ -45,11 +45,11 @@ fi
 if [ X"$kernel" == X"euleros" ]; then
     dist_version="EULER"
 elif [ X"$kernel" == X"centos" ]; then
-    dist_version="CENTOS"
+    dist_version="CentOS"
 elif [ X"$kernel" == X"openeuler" ]; then
-    dist_version="OPENEULER"
+    dist_version="openEuler"
 else
-    echo "Only support EulerOS platform."
+    echo "Only support EulerOS|Centos|openEuler platform."
     echo "Kernel is $kernel"
     exit 1
 fi
@@ -62,14 +62,14 @@ cpus_num=$(grep -w processor /proc/cpuinfo|wc -l)
 PLATFORM_ARCH=$(uname -p)
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
     ARCHITECTURE_EXTRA_FLAG=_euleros2.0_${ext_version}_$PLATFORM_ARCH
-    release_file_list="opengauss_release_list_${kernel}_${PLATFORM_ARCH}_mini_single"
+    release_file_list="aarch64_lite_list"
 else
     ARCHITECTURE_EXTRA_FLAG=_euleros2.0_sp5_${PLATFORM_ARCH}
-    release_file_list="opengauss_release_list_${kernel}_mini_single"
+    release_file_list="x86_64_lite_list"
 fi
 
 ##default install version storage path
-declare mppdb_version='GaussDB Kernel'
+declare mppdb_version='openGauss Lite'
 declare mppdb_name_for_package="$(echo ${mppdb_version} | sed 's/ /-/g')"
 declare package_path='./'
 declare version_number=''
@@ -282,7 +282,7 @@ fi
 ## declare all package name
 #######################################################################
 declare version_string="${mppdb_name_for_package}-${version_number}"
-declare package_pre_name="${version_string}-${dist_version}-${PLATFORM}bit"
+declare package_pre_name="${version_string}-${dist_version}-${PLATFORM_ARCH}"
 declare server_package_name="${package_pre_name}.${install_package_format}.gz"
 
 declare libpq_package_name="${package_pre_name}-Libpq.${install_package_format}.gz"
@@ -629,7 +629,11 @@ function target_file_copy()
 
     #generate bin file
     echo  "Begin generate ${bin_name}  bin file..."  >> "$LOG_FILE" 2>&1
-    ${p7zpath}/7z a -t7z -sfx "${bin_name}" "$2/*" >> "$LOG_FILE" 2>&1
+    curpath=$(pwd)
+    cd $2
+    tar -zcf ${bin_name} .  >> "$LOG_FILE" 2>&1
+    mv ${bin_name} ${curpath}
+    cd ${curpath}
     if [ $? -ne 0 ]; then
         echo "Please check and makesure '7z' exist. "
         die "generate ${bin_name} failed."
