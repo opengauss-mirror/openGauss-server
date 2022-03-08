@@ -1081,6 +1081,7 @@ extern TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
     CBIScanDesc cbiScan, CUDescScan* cudesc);
 extern bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
     GPIScanDesc gpiScan, CBIScanDesc cbiScan, CUDescScan* cudescScan, BTCheckElement* element);
+extern bool CheckPartitionIsInvisible(GPIScanDesc gpiScan);
 
 /*
  * prototypes for functions in nbtpage.c
