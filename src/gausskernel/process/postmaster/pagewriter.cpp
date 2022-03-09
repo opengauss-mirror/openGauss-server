@@ -1216,9 +1216,12 @@ static void HandlePageWriterMainInterrupts()
         ProcessConfigFile(PGC_SIGHUP);
     }
 
-    if (t_thrd.pagewriter_cxt.sync_requested) {
+    if (t_thrd.pagewriter_cxt.sync_requested || t_thrd.pagewriter_cxt.sync_retry) {
         t_thrd.pagewriter_cxt.sync_requested = false;
+
+        t_thrd.pagewriter_cxt.sync_retry = true;
         PageWriterSyncWithAbsorption();
+        t_thrd.pagewriter_cxt.sync_retry = false;
     }
 
     /* main thread should finally exit. */
