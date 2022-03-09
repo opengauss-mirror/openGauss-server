@@ -68,7 +68,6 @@ void ParseHeap3Op(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
 void ParseUheapOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, ParallelDecodeReaderWorker *worker);
 extern Pointer GetXlrec(XLogReaderState *record);
 
-static const int toastMask = 1 << 8;
 /*
  * After initially parsing the log, put tuple change into the queue
  * and wait for the decoder thread to parse it.
@@ -84,7 +83,7 @@ static const int toastMask = 1 << 8;
 static bool ParallelFilterByOrigin(ParallelLogicalDecodingContext *ctx, RepOriginId origin_id)
 {
     ParallelDecodingData* data = (ParallelDecodingData *)ctx->output_plugin_private;
-    origin_id &= toastMask - 1;
+    origin_id = (int)((uint32)(origin_id) & TOAST_MASK);
     if (data->pOptions.only_local && origin_id != InvalidRepOriginId) {
         return true;
     }
@@ -554,10 +553,10 @@ void ParseInsertXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     }
 
     /*
-     * Reuse the origin field in the log. If bit 8 is non-zero,
+     * Reuse the origin field in the log. If the highest bit is non-zero,
      * the current table is considered to be toast table.
      */
-    bool istoast = (((XLogRecGetOrigin(r)) & toastMask) != 0);
+    bool istoast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
     if (istoast) {
         ereport(DEBUG2, (errmsg("ParallelDecodeInsert %d", istoast)));
     }
@@ -632,7 +631,7 @@ void ParseUInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
 
-    bool isToast = (((XLogRecGetOrigin(r)) & toastMask) != 0);
+    bool isToast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
     SplicingToastTuple(change, ctx, &needDecode, isToast, worker, false);
     if (needDecode) {
         PutChangeQueue(slotId, change);
@@ -703,10 +702,10 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
         return;
 
     /*
-     * Reuse the origin field in the log. If bit 8 is non-zero,
+     * Reuse the origin field in the log. If the highest bit is non-zero,
      * the current table is considered to be toast table.
      */
-    bool istoast = (((XLogRecGetOrigin(r)) & toastMask) != 0);
+    bool istoast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
 
     change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
     change->action = PARALLEL_REORDER_BUFFER_CHANGE_UPDATE;
@@ -769,7 +768,7 @@ void ParseUUpdate(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
         return;
     }
 
-    bool isToast = (((XLogRecGetOrigin(r)) & toastMask) != 0);
+    bool isToast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
     ParallelReorderBufferChange *change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
     change->action = PARALLEL_REORDER_BUFFER_CHANGE_UUPDATE;
     change->lsn = ctx->reader->ReadRecPtr;
@@ -819,7 +818,7 @@ void ParseDeleteXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     int rc = 0;
     Size datalen = 0;
     bool needDecode = false;
-    bool istoast = (((XLogRecGetOrigin(r)) & toastMask) != 0);
+    bool istoast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
     if (istoast) {
         ereport(DEBUG2, (errmsg("ParallelDecodeDelete %d", istoast)));
     }
@@ -880,7 +879,7 @@ void ParseUDelete(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     int slotId = worker->slotId;
     RelFileNode targetNode = {0, 0, 0, 0};
     bool needDecode = false;
-    bool isToast = (((XLogRecGetOrigin(r)) & toastMask) != 0);
+    bool isToast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
     xlrec = (XlUHeapDelete *)UGetXlrec(r);
     CommitSeqNo curCSN = *(CommitSeqNo *)((char *)xlrec + SizeOfUHeapDelete);
 

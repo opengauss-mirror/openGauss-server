@@ -45,6 +45,9 @@
 /* Maximum number of max replication slots */
 #define MAX_REPLICATION_SLOT_NUM 100
 
+/* FLag and mask for TOAST in parallel decoding */
+#define TOAST_FLAG ((uint32)1 << 31)
+#define TOAST_MASK (((uint32)1 << 31) - 1)
 
 typedef void (*LogicalOutputPluginWriterWrite)(
     struct LogicalDecodingContext* lr, XLogRecPtr Ptr, TransactionId xid, bool last_write);

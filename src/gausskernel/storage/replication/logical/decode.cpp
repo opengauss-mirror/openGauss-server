@@ -890,7 +890,6 @@ static void AreaDecodeHeapOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
     }
 }
 
-
 static void DecodeUheapOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 {
     uint8 info = XLogRecGetInfo(buf->record) & XLOG_UHEAP_OPMASK;
@@ -974,12 +973,9 @@ static void AreaDecodeUheapOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
     }
 }
 
-
-
 bool FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id)
 {
-    const int toastMask = (1 << 8) - 1;
-    origin_id &= toastMask;
+    origin_id = (int)((uint32)(origin_id) & TOAST_MASK);
 
     if (ctx->callbacks.filter_by_origin_cb == NULL)
         return false;
@@ -1042,8 +1038,6 @@ static void AreaDecodingChange(ReorderBufferChange *change, LogicalDecodingConte
     }
     RelationClose(relation);
 }
-
-
 
 /*
  * Consolidated commit record handling between the different form of commit
