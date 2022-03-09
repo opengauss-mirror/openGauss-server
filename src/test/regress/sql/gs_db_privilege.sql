@@ -136,7 +136,7 @@ REVOKE UPDATE ANY TABLE FROM db_priv_user1,db_priv_user2,db_priv_user3,db_priv_u
 --function has_any_privilege
 RESET ROLE;
 GRANT UPDATE ANY TABLE TO db_priv_user1 WITH ADMIN OPTION;
-SELECT * FROM gs_db_privileges ORDER BY rolename;
+SELECT * FROM gs_db_privileges ORDER BY rolename, admin_option;
 
 SELECT has_any_privilege('db_priv_user','SELECT ANY TABLE'); --error
 SELECT has_any_privilege('db_priv_user1','SELECT ANY   TABLE'); --error
