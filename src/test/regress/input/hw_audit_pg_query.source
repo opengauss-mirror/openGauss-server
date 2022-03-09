@@ -1,0 +1,30 @@
+-- 显示允许审计日志记录状态
+show audit_enabled;
+
+-- 修改guc参数 允许审计日志记录状态设为off 重启
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "audit_enabled=off" > /dev/null 2>&1
+
+-- 重启数据库 等待1s
+select pg_sleep(1);
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! sleep 5
+
+-- 显示允许审计日志记录状态
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_enabled";
+
+-- 在审计日志记录关闭状态下 新建用户
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CREATE USER test_pg_query PASSWORD 'test_pwd@123'";
+
+-- 查询审计日志 create user
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "select object_name,detail_info from pg_query_audit('2002-03-09 00:00:00','2032-03-09 24:00:00') where detail_info like 'CREATE USER%'";
+
+-- 恢复guc参数 审计日志记录状态 重启
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "audit_enabled" > /dev/null 2>&1
+\! sleep 1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! sleep 5
+
+-- 显示允许审计日志记录状态
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_enabled";

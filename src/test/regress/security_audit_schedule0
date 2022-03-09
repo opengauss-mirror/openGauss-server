@@ -1,10 +1,10 @@
 # ------------------
 # # Database security audit
 # # ---------------
+test: hw_audit_pg_query
 test: hw_audit_space
 test: hw_audit_rotation_interval
 test: hw_audit_rotation_size
-
 #--------------------
 # # Multi thread
 #-------------------
