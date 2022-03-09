@@ -561,7 +561,7 @@ insert into xcrem_employee select * from xcrem_temptable;
          Hash Cond: (e.workdept = xcrem_employee.workdept)
          Join Filter: ((e.edlevel)::numeric > (avg(xcrem_employee.edlevel)))
          ->  Seq Scan on public.xcrem_employee e
-               Output: e.ctid, e.edlevel, e.workdept
+               Output: e.ctid, e.workdept, e.edlevel
          ->  Hash
                Output: (avg(xcrem_employee.edlevel)), xcrem_employee.workdept
                ->  HashAggregate
@@ -600,7 +600,7 @@ insert into xcrem_employee select * from xcrem_temptable;
          Hash Cond: ("substring"((e.workdept)::text, 1, 1) = ("substring"((xcrem_employee.workdept)::text, 1, 1)))
          Join Filter: (e.salary > (avg(xcrem_employee.salary)))
          ->  Seq Scan on public.xcrem_employee e
-               Output: e.ctid, e.salary, e.workdept
+               Output: e.ctid, e.workdept, e.salary
          ->  Hash
                Output: (avg(xcrem_employee.salary)), ("substring"((xcrem_employee.workdept)::text, 1, 1))
                ->  HashAggregate
