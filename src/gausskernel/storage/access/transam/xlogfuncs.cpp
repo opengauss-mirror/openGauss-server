@@ -1705,6 +1705,7 @@ Datum gs_hadr_has_barrier_creator(PG_FUNCTION_ARGS)
  */
 Datum gs_hadr_in_recovery(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("Must be system admin or operator admin in operation mode to gs_hadr_has_barrier_creator."))));
@@ -1712,7 +1713,9 @@ Datum gs_hadr_in_recovery(PG_FUNCTION_ARGS)
     if (knl_g_get_redo_finish_status()) {
         PG_RETURN_BOOL(false);
     }
-
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
     PG_RETURN_BOOL(true);
 }
 
@@ -2009,6 +2012,7 @@ Datum gs_get_hadr_key_cn(PG_FUNCTION_ARGS)
 
 Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("Must be system admin or operator admin in operation mode to gs_streaming_dr_switchover."))));
@@ -2028,11 +2032,15 @@ Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
 #else
     CreateHadrSwitchoverBarrier();
 #endif
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
     PG_RETURN_BOOL(true);
 }
 
 Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     XLogRecPtr switchoverLsn = g_instance.streaming_dr_cxt.switchoverBarrierLsn;
     XLogRecPtr flushLsn = InvalidXLogRecPtr;
     bool isInteractionCompleted = false;
@@ -2070,10 +2078,15 @@ Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
     } else {
         PG_RETURN_BOOL(false);
     }
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+    PG_RETURN_BOOL(false);
+#endif
 }
 
 Datum gs_streaming_dr_get_switchover_barrier(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("Must be system admin or operator admin in operation mode to gs_streaming_dr_get_switchover_barrier."))));
@@ -2115,6 +2128,9 @@ Datum gs_streaming_dr_get_switchover_barrier(PG_FUNCTION_ARGS)
             PG_RETURN_BOOL(true);
         }
     }
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
 
     PG_RETURN_BOOL(false);
 }
