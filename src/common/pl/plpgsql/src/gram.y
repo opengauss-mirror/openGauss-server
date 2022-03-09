@@ -2958,7 +2958,10 @@ for_control		: for_variable K_IN
                                 if ($1.rec)
                                 {
 #ifndef ENABLE_MULTIPLE_NODES
-                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && IMPLICIT_FOR_LOOP_VARIABLE) {
+                                    /* only A format and not in upgrade, IMPLICIT_FOR_LOOP_VARIABLE is valid */
+                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT
+                                        && IMPLICIT_FOR_LOOP_VARIABLE
+                                        && u_sess->attr.attr_common.upgrade_mode == 0) {
                                         BuildForQueryVariable(expr1, &newp->row, &newp->rec, $1.name, $1.lineno);
                                         check_assignable((PLpgSQL_datum *)newp->rec ?
                                             (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
@@ -2978,7 +2981,10 @@ for_control		: for_variable K_IN
                                 else if ($1.row)
                                 {
 #ifndef ENABLE_MULTIPLE_NODES
-                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && IMPLICIT_FOR_LOOP_VARIABLE) {
+                                    /* only A format and not in upgrade, IMPLICIT_FOR_LOOP_VARIABLE is valid */
+                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT
+                                        && IMPLICIT_FOR_LOOP_VARIABLE
+                                        && u_sess->attr.attr_common.upgrade_mode == 0) {
                                         BuildForQueryVariable(expr1, &newp->row, &newp->rec, $1.name, $1.lineno);
                                         check_assignable((PLpgSQL_datum *)newp->rec ?
                                             (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
@@ -2998,7 +3004,10 @@ for_control		: for_variable K_IN
                                 else if ($1.scalar)
                                 {
 #ifndef ENABLE_MULTIPLE_NODES
-                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && IMPLICIT_FOR_LOOP_VARIABLE) {
+                                    /* only A format and not in upgrade, IMPLICIT_FOR_LOOP_VARIABLE is valid */
+                                    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT
+                                        && IMPLICIT_FOR_LOOP_VARIABLE
+                                        && u_sess->attr.attr_common.upgrade_mode == 0) {
                                         BuildForQueryVariable(expr1, &newp->row, &newp->rec, $1.name, $1.lineno);
                                         check_assignable((PLpgSQL_datum *)newp->rec ?
                                             (PLpgSQL_datum *)newp->rec : (PLpgSQL_datum *)newp->row, @1);
