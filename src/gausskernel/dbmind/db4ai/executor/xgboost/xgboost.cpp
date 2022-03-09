@@ -226,7 +226,8 @@ const char *xgboost_tree_method_str[] = {"auto", "exact", "approx", "hist", "gpu
 const char *xgboost_eval_metric_str[] = {"rmse", "rmsle", "map", "mae", "auc", "aucpr" };
 static HyperparameterDefinition xgboost_hyperparameter_definitions[] = {
     HYPERPARAMETER_INT4("n_iter", 10, 1, true, ITER_MAX, true, HyperparamsXGBoost, n_iterations, HP_NO_AUTOML()),
-    HYPERPARAMETER_INT4("batch_size", 10000, 1, true, MAX_BATCH_SIZE, true, HyperparamsXGBoost, batch_size, HP_NO_AUTOML()),
+    HYPERPARAMETER_INT4("batch_size", 10000, 1, true, MAX_BATCH_SIZE, true, HyperparamsXGBoost, batch_size,
+                        HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("max_depth", 5, 0, true, INT32_MAX, true, HyperparamsXGBoost, max_depth, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("min_child_weight", 1, 0, true, INT32_MAX, true, HyperparamsXGBoost, min_child_weight,
                         HP_NO_AUTOML()),

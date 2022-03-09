@@ -25,6 +25,8 @@ CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET r
 ERROR:  Hyperparameter seed must be in the range [0,2147483647]
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH nthread=-1;
 ERROR:  Hyperparameter nthread must be in the range [0,100]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH nthread=101;
+ERROR:  Hyperparameter nthread must be in the range [0,100]
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH booster=10;
 ERROR:  Hyperparameter booster must be a string
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH tree_method=10;
