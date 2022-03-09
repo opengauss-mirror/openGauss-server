@@ -4236,6 +4236,19 @@ static void inline ClearYylval(const core_YYSTYPE *yylval)
     securec_check(rc, "\0", "\0");
 }
 
+static int get_reallen_of_credential(char *param)
+{
+    int len = 0;
+    for (int i = 0; param[i] != '\0'; i++) {
+        if (param[i] == '\'') {
+            len += 2;
+        } else {
+            len++;
+        }
+    }
+    return len;
+}
+
 /*
  * Mask the password in statment CREATE ROLE, CREATE USER, ALTER ROLE, ALTER USER, CREATE GROUP
  * SET ROLE, CREATE DATABASE LINK, and some function
@@ -4253,6 +4266,8 @@ static char* mask_Password_internal(const char* query_string)
     char* mask_string = NULL;
     /* the function list need mask */
     const char* funcs[] = {"dblink_connect", "create_credential", "pg_create_physical_replication_slot_extern"};
+    bool is_create_credential = false;
+    bool is_create_credential_passwd = false;
     int funcNum = sizeof(funcs) / sizeof(funcs[0]);
     bool isCreateSlot = false;
     int position[16] = {0};
@@ -4415,7 +4430,18 @@ static char* mask_Password_internal(const char* query_string)
                 /* Calcute the difference between origin password length and mask password length */
                 position[idx] -= truncateLen;
 
-                length[idx] = strlen(yylval.str);
+                if (!is_create_credential) {
+                    length[idx] = strlen(yylval.str);
+                } else if (isPassword) {
+                    is_create_credential_passwd = true;
+                    length[idx] = strlen(yylval.str);
+                } else {
+                    if (idx == 2 && !is_create_credential_passwd) {
+                        length[idx] = get_reallen_of_credential(yylval.str);
+                    } else {
+                        length[idx] = 0;
+                    }
+                }
                 ++idx;
 
                 /* record the conninfo start pos, we will use it to calculate the actual length of conninfo */
@@ -4604,8 +4630,11 @@ static char* mask_Password_internal(const char* query_string)
                         /* first, check funcs[] */
                         for (i = 0; i < funcNum; ++i) {
                             if (pg_strcasecmp(yylval.str, funcs[i]) == 0) {
+                                is_create_credential = false;
                                 if (pg_strcasecmp(yylval.str, "pg_create_physical_replication_slot_extern") == 0) {
                                     isCreateSlot = true;
+                                } else if (pg_strcasecmp(yylval.str, "create_credential") == 0) {
+                                    is_create_credential = true;
                                 }
                                 curStmtType = 8;
                                 break;
