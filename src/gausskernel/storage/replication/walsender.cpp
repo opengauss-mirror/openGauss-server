@@ -3014,8 +3014,10 @@ static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage *reply, bool *needRef
     }
     if ((walsnd->log_ctrl.apply_rate >> SHIFT_SPEED) > 1) {
         if (calculate_time_diff > CALCULATE_INTERVAL_MILLISECOND || IsRtoRpoOverTarget()) {
-            walsnd->log_ctrl.apply_rate = LogCtrlCountBigSpeed(walsnd->log_ctrl.apply_rate,
-                                                              (uint64)(periodTotalApply / calculate_time_diff));
+            if (needApply != 0) {
+                walsnd->log_ctrl.apply_rate = LogCtrlCountBigSpeed(walsnd->log_ctrl.apply_rate,
+                                                                  (uint64)(periodTotalApply / calculate_time_diff));
+            }
             walsnd->log_ctrl.prev_calculate_time = reply->sendTime;
         }
     } else {
