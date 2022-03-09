@@ -5535,10 +5535,6 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
 
     plpgsql_estate = estate;
 
-#ifndef ENABLE_MULTIPLE_NODES
-    t_thrd.xact_cxt.isSelectInto = stmt->into;
-#endif
-
     /*
      * Execute the plan
      */
@@ -5747,7 +5743,6 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
 
     estate->cursor_return_data = saved_cursor_data;
     estate->cursor_return_numbers =  saved_cursor_numbers;
-    t_thrd.xact_cxt.isSelectInto = false;
     return PLPGSQL_RC_OK;
 }
 

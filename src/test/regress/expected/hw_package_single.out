@@ -582,6 +582,7 @@ begin
 end;
 /
 call test_lob_write_nodyna();
+ezz
  test_lob_write_nodyna 
 -----------------------
  
@@ -590,8 +591,8 @@ call test_lob_write_nodyna();
 select * from test_clob;
  a |  b  
 ---+-----
+ 2 | zzz
  1 | dbc
- 2 | ezz
 (2 rows)
 
 create or replace procedure test_blob_write
@@ -639,7 +640,7 @@ call test_clob_append();
 select * from test_clob;
  a |   b    
 ---+--------
- 2 | ezz
+ 2 | zzz
  1 | dbcddd
 (2 rows)
 
