@@ -49,6 +49,7 @@ int find_gucoption(
 void get_conninfo(const char* filename);
 
 extern PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term = 0);
+extern PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 term = 0);
 int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
 extern int replconn_num;

@@ -3504,8 +3504,9 @@ static void do_help(void)
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
 #endif
     printf(_("\nCommon options:\n"));
-    printf(_("  -b,  --mode=MODE	 the mode of building the datanode.MODE can be \"full\", \"incremental\", "
-             "\"auto\"\n"));
+    printf(_("  -b,  --mode=MODE    the mode of building the datanode or coordinator."
+             "MODE can be \"full\", \"incremental\", "
+             "\"auto\", \"standby_full\"\n"));
     printf(_("  -D, --pgdata=DATADIR   location of the database storage area\n"));
     printf(_("  -s, --silent           only print errors, no informational messages\n"));
     printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
@@ -3582,7 +3583,7 @@ static void do_help(void)
 #endif
     printf(_("\nBuild connection option:\n"));
     printf(_("  -r, --recvtimeout=INTERVAL    time that receiver waits for communication from server (in seconds)\n"));
-    printf(_("  -C, connector    CN/DN connect to CN for build\n"));
+    printf(_("  -C, connector    CN/DN connect to specified CN/DN for build\n"));
 
 #if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     printf("\nReport bugs to GaussDB support.\n");
@@ -3841,7 +3842,7 @@ static void do_build_stop(pgpid_t pid)
     }
 
     do_wait = true;
-    if (build_mode == FULL_BUILD) {
+    if (build_mode == FULL_BUILD || build_mode == STANDBY_FULL_BUILD) {
         shutdown_mode = IMMEDIATE_MODE;
         sig = SIGQUIT;
         do_stop(true);
@@ -3925,6 +3926,11 @@ static void do_build(uint32 term)
     else if (build_mode == INC_BUILD && conn_str != NULL) {
         createRewindFile(pg_data);
         do_incremental_build_xlog();
+    }
+    /* standby DN full build from standby DN */
+    else if (build_mode == STANDBY_FULL_BUILD) {
+        createRewindFile(pg_data);
+        do_actual_build(term);
     }
 }
 
@@ -4173,7 +4179,11 @@ static void do_actual_build(uint32 term)
 
     read_ssl_confval();
 
-    backup_main(pg_data, term);
+    if (build_mode == STANDBY_FULL_BUILD) {
+        backup_main(pg_data, term, true);
+    } else {
+        backup_main(pg_data, term, false);
+    }
 
     pg_log(PG_WARNING, _("build completed(%s).\n"), pg_data);
 
@@ -4182,7 +4192,7 @@ static void do_actual_build(uint32 term)
      * Standby DN incremental build from Primary DN auto start.
      * If connect string is not empty,CN/DN will be started by caller.
      */
-    if (conn_str == NULL) {
+    if (conn_str == NULL || (build_mode == STANDBY_FULL_BUILD && conn_str != NULL)) {
         /* cascade standby will use use pgha_opt directly */
         if (pgha_opt == NULL || strstr(pgha_opt, "cascade_standby") == NULL) {
             /* pg_ctl start -M standby  */
@@ -4720,16 +4730,19 @@ int main(int argc, char** argv)
             argc, argv, "a:b:cD:l:m:M:N:n:o:p:P:r:sS:t:U:wWZ:dqL:T:", long_options, &option_index)) != -1)
 #else
         while ((c = getopt_long(
-            argc, argv, "b:cD:l:m:M:N:o:p:P:r:sS:t:U:wWZ:dqL:T:", long_options, &option_index)) != -1)
+            argc, argv, "b:cD:l:m:M:N:o:p:P:r:sS:t:U:wWZ:C:dqL:T:", long_options, &option_index)) != -1)
 #endif
 #endif
         {
             switch (c) {
                 case 'b': {
-                    if (strcmp(optarg, "full") == 0)
+                    if (strcmp(optarg, "full") == 0) {
                         build_mode = FULL_BUILD;
-                    else if (strcmp(optarg, "incremental") == 0)
+                    } else if (strcmp(optarg, "incremental") == 0) {
                         build_mode = INC_BUILD;
+                    } else if (strcmp(optarg, "standby_full") == 0) {
+                        build_mode = STANDBY_FULL_BUILD;
+                    }
                     break;
                 }
                 case 'D': {
@@ -5222,17 +5235,38 @@ int main(int argc, char** argv)
             break;
 #endif
         case BUILD_COMMAND:
-            if (conn_str != NULL)
-                pg_log(PG_PROGRESS,
-                    _("gs_ctl %s build ,datadir is %s,conn_str is \'%s\'\n"),
-                    build_mode == FULL_BUILD ? "full" : "incremental",
-                    pg_data,
-                    conn_str);
-            else
-                pg_log(PG_PROGRESS,
-                    _("gs_ctl %s build ,datadir is %s\n"),
-                    build_mode == FULL_BUILD ? "full" : "incremental",
-                    pg_data);
+            if (conn_str != NULL) {
+                if (build_mode == FULL_BUILD) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl full build ,datadir is %s,conn_str is \'%s\'\n"),
+                        pg_data,
+                        conn_str);
+                } else if (build_mode == STANDBY_FULL_BUILD) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl standby full build ,datadir is %s,conn_str is \'%s\'\n"),
+                        pg_data,
+                        conn_str);
+                } else {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl incremental build ,datadir is %s,conn_str is \'%s\'\n"),
+                        pg_data,
+                        conn_str);
+                }
+            } else {
+                if (build_mode == FULL_BUILD) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl full build ,datadir is %s\n"),
+                        pg_data);
+                } else if (build_mode == STANDBY_FULL_BUILD) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl standby full build ,datadir is %s\n"),
+                        pg_data);
+                } else {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl incremental build ,datadir is %s\n"),
+                        pg_data);
+                }
+            }
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_build(term);
                 (void)pg_ctl_unlock(lockfile);

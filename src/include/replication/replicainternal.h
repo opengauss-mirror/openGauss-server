@@ -77,7 +77,7 @@ typedef enum {
     MODE_REBUILD
 } HaRebuildReason;
 
-typedef enum { NONE_BUILD = 0, AUTO_BUILD, FULL_BUILD, INC_BUILD } BuildMode;
+typedef enum { NONE_BUILD = 0, AUTO_BUILD, FULL_BUILD, INC_BUILD, STANDBY_FULL_BUILD } BuildMode;
 
 typedef struct buildstate {
     BuildMode build_mode;

@@ -59,6 +59,7 @@
 
 /* Global options */
 char* basedir = NULL;
+bool isBuildFromStandby = false;
 char format = 'p'; /* p(lain)/t(ar) */
 char* label = "gs_ctl full build";
 bool showprogress = true;
@@ -452,6 +453,7 @@ typedef struct {
     char* sysidentifier;
     int timeline;
     uint32 term;
+    bool isBuildFromStandby;
 } logstreamer_param;
 
 static int LogStreamerMain(logstreamer_param* param)
@@ -459,7 +461,11 @@ static int LogStreamerMain(logstreamer_param* param)
     int ret = 0;
 
     /* get second connection info in child process for the sake of memmory leak */
-    param->bgconn = check_and_conn(standby_connect_timeout, standby_recv_timeout, param->term);
+    if (param->isBuildFromStandby) {
+        param->bgconn = check_and_conn_for_standby(standby_connect_timeout, standby_recv_timeout, param->term);
+    } else {
+        param->bgconn = check_and_conn(standby_connect_timeout, standby_recv_timeout, param->term);
+    }
     if (param->bgconn == NULL) {
         return 1;
     }
@@ -503,6 +509,7 @@ void StartLogStreamer(
     param->timeline = timeline;
     param->sysidentifier = sysidentifier;
     param->term = primaryTerm;
+    param->isBuildFromStandby = isBuildFromStandby;
 
     /* Convert the starting position */
     if (sscanf_s(startpos, "%X/%X", &hi, &lo) != 2) {
@@ -1019,6 +1026,62 @@ bool CreateBuildtagFile(const char* fulltagname)
     return true;
 }
 
+bool ModifyControlFile(const char* dirname)
+{
+    ControlFileData controlFileNew;
+    char controlFilePath[MAXPGPATH] = {0};
+    size_t size = 0;
+    int writelen;
+    int fd = -1;
+    int ss = 0;
+    char* buffer = NULL;
+    char writeBuf[PG_CONTROL_SIZE];
+    errno_t errorNo = EOK;
+
+    buffer = slurpFile(dirname, "global/pg_control", &size);
+    if (buffer == NULL) {
+        pg_log(PG_WARNING, _("could not read anything from file pg_control. \n"));
+        disconnect_and_exit(1);
+        return false;
+    }
+    errorNo = memcpy_s(&controlFileNew, sizeof(ControlFileData), buffer, sizeof(ControlFileData));
+    securec_check_c(errorNo, "\0", "\0");
+    controlFileNew.state = DB_IN_ARCHIVE_RECOVERY;
+    INIT_CRC32C(controlFileNew.crc);
+    COMP_CRC32C(controlFileNew.crc, (char*)&controlFileNew, offsetof(ControlFileData, crc));
+    FIN_CRC32C(controlFileNew.crc);
+    errorNo = memset_s(writeBuf, PG_CONTROL_SIZE, 0, PG_CONTROL_SIZE);
+    securec_check_c(errorNo, "", "");
+    errorNo = memcpy_s(writeBuf, PG_CONTROL_SIZE, &controlFileNew, sizeof(ControlFileData));
+    securec_check_c(errorNo, "", "");
+    ss = snprintf_s(controlFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/global/pg_control", dirname);
+    securec_check_ss_c(ss, "\0", "\0");
+
+    int mode = O_WRONLY | O_CREAT | PG_BINARY;
+    int flags = 0600;
+    fd = open(controlFilePath, mode, flags);
+    if (fd < 0) {
+        pg_log(PG_WARNING, ("could not open pg_control file. \n"));
+        disconnect_and_exit(1);
+        return false;
+    }
+    if (lseek(fd, 0, SEEK_SET) == -1) {
+        (void)close(fd);
+        fd = -1;
+        pg_log(PG_WARNING, "could not seek in target file \"%s\"\n", controlFilePath);
+        disconnect_and_exit(1);
+        return false;
+    }
+    writelen = write(fd, writeBuf, PG_CONTROL_SIZE);
+    if (writelen != PG_CONTROL_SIZE) {
+        pg_log(PG_WARNING, "could not write in target file \"%s\"\n", controlFilePath);
+        disconnect_and_exit(1);
+        return false;
+    }
+    close(fd);
+    return true;
+}
+
 static void BaseBackup(const char* dirname, uint32 term)
 {
     PGresult* res = NULL;
@@ -1060,7 +1123,11 @@ static void BaseBackup(const char* dirname, uint32 term)
     get_conninfo(conf_file);
 
     /* find a available conn */
-    streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
+    if (isBuildFromStandby) {
+        streamConn = check_and_conn_for_standby(standby_connect_timeout, standby_recv_timeout, term);
+    } else {
+        streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
+    }
     if (streamConn == NULL) {
         show_full_build_process("could not connect to server.");
         disconnect_and_exit(1);
@@ -1127,15 +1194,19 @@ static void BaseBackup(const char* dirname, uint32 term)
      */
     (void)PQsetRwTimeout(streamConn, Max(BUILD_RW_TIMEOUT, standby_recv_timeout));
     (void)PQescapeStringConn(streamConn, escaped_label, label, sizeof(escaped_label), &i);
+    if (isBuildFromStandby) {
+        fastcheckpoint = false;
+    }
     nRet = snprintf_s(current_path,
         MAXPGPATH,
         sizeof(current_path) - 1,
-        "BASE_BACKUP LABEL '%s' %s %s %s %s",
+        "BASE_BACKUP LABEL '%s' %s %s %s %s %s",
         escaped_label,
         showprogress ? "PROGRESS" : "",
         includewal && !streamwal ? "WAL" : "",
         fastcheckpoint ? "FAST" : "",
-        includewal ? "NOWAIT" : "");
+        includewal ? "NOWAIT" : "",
+        isBuildFromStandby ? "BUILDSTANDBY" : "");
     securec_check_ss_c(nRet, "", "");
 
     if (PQsendQuery(streamConn, current_path) == 0) {
@@ -1463,6 +1534,11 @@ static void BaseBackup(const char* dirname, uint32 term)
     nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dirname);
     securec_check_ss_c(nRet, "\0", "\0");
     DeleteAlreadyDropedFile(tblspcPath, true);
+
+    if (isBuildFromStandby) {
+        (void)ModifyControlFile(dirname);
+    }
+
 }
 
 /*
@@ -1471,13 +1547,14 @@ static void BaseBackup(const char* dirname, uint32 term)
  * Description        :
  * Notes            :
  */
-void backup_main(char* dir, uint32 term)
+void backup_main(char* dir, uint32 term, bool isFromStandby)
 {
     if (dir == NULL) {
         pg_log(PG_PRINT, "%s: parameters dir is NULL.\n", progname);
         exit(1);
     } else {
         basedir = dir;
+        isBuildFromStandby = isFromStandby;
     }
     /* program name */
     progname = "gs_ctl";

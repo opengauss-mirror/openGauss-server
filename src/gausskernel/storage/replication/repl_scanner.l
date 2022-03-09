@@ -95,6 +95,7 @@ IDENTIFY_CHANNEL	{ return K_IDENTIFY_CHANNEL; }
 IDENTIFY_AZ		{ return K_IDENTIFY_AZ; }
 LABEL			{ return K_LABEL; }
 NOWAIT			{ return K_NOWAIT; }
+BUILDSTANDBY            { return K_BUILDSTANDBY; }
 PROGRESS			{ return K_PROGRESS; }
 WAL			{ return K_WAL; }
 TABLESPACE_MAP			{ return K_TABLESPACE_MAP; }

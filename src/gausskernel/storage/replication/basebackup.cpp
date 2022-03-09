@@ -55,6 +55,7 @@ typedef struct {
     bool nowait;
     bool includewal;
     bool sendtblspcmapfile;
+    bool isBuildFromStandby;
 } basebackup_options;
 
 #define BUILD_PATH_LEN 2560 /* (MAXPGPATH*2 + 512) */
@@ -103,6 +104,7 @@ static void SendXlogRecPtrResult(XLogRecPtr ptr);
 static void send_xlog_location();
 static void send_xlog_header(const char *linkpath);
 static void save_xlogloc(const char *xloglocation);
+static void SendTableSpaceForBackup(basebackup_options* opt, List* tablespaces, char* labelfile, char* tblspc_map_file);
 
 /*
  * save xlog location
@@ -230,14 +232,21 @@ static void base_backup_cleanup(int code, Datum arg)
  */
 static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 {
+    XLogRecPtr startptr;
     XLogRecPtr endptr;
     char *labelfile = NULL;
     char* tblspc_map_file = NULL;
     List* tablespaces = NIL;
 
-    XLogRecPtr startptr =
-        do_pg_start_backup(opt->label, opt->fastcheckpoint, &labelfile, tblspcdir, &tblspc_map_file, &tablespaces,
+    if (opt->isBuildFromStandby) {
+        startptr = StandbyDoStartBackup(opt->label, &labelfile, &tblspc_map_file, &tablespaces,
+            tblspcdir, opt->progress);
+    } else {
+        startptr =
+            do_pg_start_backup(opt->label, opt->fastcheckpoint, &labelfile, tblspcdir, &tblspc_map_file, &tablespaces,
             opt->progress, opt->sendtblspcmapfile);
+    }
+
     /* Get the slot minimum LSN */
     ReplicationSlotsComputeRequiredXmin(false);
     ReplicationSlotsComputeRequiredLSN(NULL);
@@ -262,88 +271,14 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
     SendXlogRecPtrResult(startptr);
 
     PG_ENSURE_ERROR_CLEANUP(base_backup_cleanup, (Datum)0);
-    {
-        ListCell *lc = NULL;
-        /* Add a node for the base directory at the end */
-        tablespaceinfo *ti = (tablespaceinfo *)palloc0(sizeof(tablespaceinfo));
-        ti->size = opt->progress ? sendDir(".", 1, true, tablespaces, true) : -1;
-        tablespaces = (List *)lappend(tablespaces, ti);
-
-        /* Send tablespace header */
-        SendBackupHeader(tablespaces);
-
-        /* Send off our tablespaces one by one */
-        foreach (lc, tablespaces) {
-            tablespaceinfo *iterti = (tablespaceinfo *)lfirst(lc);
-            StringInfoData buf;
-
-            /* Send CopyOutResponse message */
-            pq_beginmessage(&buf, 'H');
-            pq_sendbyte(&buf, 0);  /* overall format */
-            pq_sendint16(&buf, 0); /* natts */
-            pq_endmessage_noblock(&buf);
-
-            /* In the main tar, include the backup_label first. */
-            if (iterti->path == NULL)
-                sendFileWithContent(BACKUP_LABEL_FILE, labelfile);
-
-            /*
-             * if the tblspc created in datadir , the files under tblspc do not send,
-             * and send them as normal under datadir,
-             * so we just send these tblspcs only once.
-             */
-            if (iterti->path != NULL) {
-                /* Skip the tablespace if it's created in GAUSSDATA */
-                sendTablespace(iterti->path, false);
-            } else {
-                /* Then the tablespace_map file, if required... */
-                if (tblspc_map_file && opt->sendtblspcmapfile) {
-                    sendFileWithContent(TABLESPACE_MAP, tblspc_map_file);
-                    sendDir(".", 1, false, tablespaces, false);
-                } else
-                    sendDir(".", 1, false, tablespaces, true);
-            }
-
-            /* In the main tar, include pg_control last. */
-            if (iterti->path == NULL) {
-                struct stat statbuf;
-                TimeLineID primay_tli = 0;
-                char path[MAXPGPATH] = {0};
-
-                if (lstat(XLOG_CONTROL_FILE, &statbuf) != 0) {
-                    LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
-                    XlogCopyStartPtr = InvalidXLogRecPtr;
-                    LWLockRelease(FullBuildXlogCopyStartPtrLock);
-                    ereport(ERROR, (errcode_for_file_access(),
-                                    errmsg("could not stat control file \"%s\": %m", XLOG_CONTROL_FILE)));
-                }
-
-                sendFile(XLOG_CONTROL_FILE, XLOG_CONTROL_FILE, &statbuf, false);
-                /* In the main tar, include the last timeline history file at last. */
-                primay_tli = t_thrd.xlog_cxt.ThisTimeLineID;
-                while (primay_tli > 1) {
-                    TLHistoryFilePath(path, primay_tli);
-                    if (lstat(path, &statbuf) == 0)
-                        sendFile(path, path, &statbuf, false);
-                    primay_tli--;
-                }
-            }
-
-            /*
-             * If we're including WAL, and this is the main data directory we
-             * don't terminate the tar stream here. Instead, we will append
-             * the xlog files below and terminate it then. This is safe since
-             * the main data directory is always sent *last*.
-             */
-            if (opt->includewal && iterti->path == NULL) {
-                Assert(lnext(lc) == NULL);
-            } else
-                pq_putemptymessage_noblock('c'); /* CopyDone */
-        }
-    }
+    SendTableSpaceForBackup(opt, tablespaces, labelfile, tblspc_map_file);
     PG_END_ENSURE_ERROR_CLEANUP(base_backup_cleanup, (Datum)0);
 
-    endptr = do_pg_stop_backup(labelfile, !opt->nowait);
+    if (opt->isBuildFromStandby) {
+        endptr = StandbyDoStopBackup(labelfile);
+    } else {
+        endptr = do_pg_stop_backup(labelfile, !opt->nowait);
+    }
 
     if (opt->includewal) {
         /*
@@ -626,6 +561,7 @@ static void parse_basebackup_options(List *options, basebackup_options *opt)
     bool o_fast = false;
     bool o_nowait = false;
     bool o_wal = false;
+    bool o_buildstandby = false;
     bool o_tablespace_map = false;
     errno_t rc = memset_s(opt, sizeof(*opt), 0, sizeof(*opt));
     securec_check(rc, "", "");
@@ -656,6 +592,12 @@ static void parse_basebackup_options(List *options, basebackup_options *opt)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("duplicate option \"%s\"", defel->defname)));
             opt->includewal = true;
             o_wal = true;
+        } else if (strcmp(defel->defname, "buildstandby") == 0) {
+            if (o_buildstandby) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("duplicate option \"%s\"", defel->defname)));
+            }
+            opt->isBuildFromStandby = true;
+            o_buildstandby = true;
         } else if (strcmp(defel->defname, "tablespace_map") == 0) {
             if (o_tablespace_map) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("duplicate option \"%s\"", defel->defname)));
@@ -1578,6 +1520,89 @@ bool is_row_data_file(const char *path, int *segNo)
     }
     return false;
 }
+
+
+static void SendTableSpaceForBackup(basebackup_options* opt, List* tablespaces, char* labelfile, char* tblspc_map_file)
+{
+    ListCell *lc = NULL;
+    /* Add a node for the base directory at the end */
+    tablespaceinfo *ti = (tablespaceinfo *)palloc0(sizeof(tablespaceinfo));
+    ti->size = opt->progress ? sendDir(".", 1, true, tablespaces, true) : -1;
+    tablespaces = (List *)lappend(tablespaces, ti);
+
+    /* Send tablespace header */
+    SendBackupHeader(tablespaces);
+
+    /* Send off our tablespaces one by one */
+    foreach (lc, tablespaces) {
+        tablespaceinfo *iterti = (tablespaceinfo *)lfirst(lc);
+        StringInfoData buf;
+
+        /* Send CopyOutResponse message */
+        pq_beginmessage(&buf, 'H');
+        pq_sendbyte(&buf, 0);  /* overall format */
+        pq_sendint16(&buf, 0); /* natts */
+        pq_endmessage_noblock(&buf);
+
+        /* In the main tar, include the backup_label first. */
+        if (iterti->path == NULL)
+            sendFileWithContent(BACKUP_LABEL_FILE, labelfile);
+
+        /*
+         * if the tblspc created in datadir , the files under tblspc do not send,
+         * and send them as normal under datadir,
+         * so we just send these tblspcs only once.
+         */
+        if (iterti->path != NULL) {
+            /* Skip the tablespace if it's created in GAUSSDATA */
+            sendTablespace(iterti->path, false);
+        } else {
+            /* Then the tablespace_map file, if required... */
+            if (tblspc_map_file && opt->sendtblspcmapfile) {
+                sendFileWithContent(TABLESPACE_MAP, tblspc_map_file);
+                sendDir(".", 1, false, tablespaces, false);
+            } else
+                sendDir(".", 1, false, tablespaces, true);
+        }
+
+        /* In the main tar, include pg_control last. */
+        if (iterti->path == NULL) {
+            struct stat statbuf;
+            TimeLineID primay_tli = 0;
+            char path[MAXPGPATH] = {0};
+
+            if (lstat(XLOG_CONTROL_FILE, &statbuf) != 0) {
+                LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
+                XlogCopyStartPtr = InvalidXLogRecPtr;
+                LWLockRelease(FullBuildXlogCopyStartPtrLock);
+                ereport(ERROR, (errcode_for_file_access(),
+                                errmsg("could not stat control file \"%s\": %m", XLOG_CONTROL_FILE)));
+            }
+
+            sendFile(XLOG_CONTROL_FILE, XLOG_CONTROL_FILE, &statbuf, false);
+            /* In the main tar, include the last timeline history file at last. */
+            primay_tli = t_thrd.xlog_cxt.ThisTimeLineID;
+            while (primay_tli > 1) {
+                TLHistoryFilePath(path, primay_tli);
+                if (lstat(path, &statbuf) == 0)
+                    sendFile(path, path, &statbuf, false);
+                primay_tli--;
+            }
+        }
+
+        /*
+         * If we're including WAL, and this is the main data directory we
+         * don't terminate the tar stream here. Instead, we will append
+         * the xlog files below and terminate it then. This is safe since
+         * the main data directory is always sent *last*.
+         */
+        if (opt->includewal && iterti->path == NULL) {
+            Assert(lnext(lc) == NULL);
+        } else
+            pq_putemptymessage_noblock('c'); /* CopyDone */
+    }
+}
+
 /*
  * Given the member, write the TAR header & send the file.
  *

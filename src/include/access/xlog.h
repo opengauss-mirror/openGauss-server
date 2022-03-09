@@ -424,12 +424,15 @@ extern void heap_xlog_bcm_new_page(xl_heap_logical_newpage* xlrec, RelFileNode n
  */
 extern XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfile, DIR* tblspcdir,
     char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfile);
+extern XLogRecPtr StandbyDoStartBackup(const char* backupidstr, char** labelFile, char** tblSpcMapFile,
+    List** tableSpaces, DIR* tblSpcDir, bool infoTbsSize);
 extern void set_start_backup_flag(bool startFlag);
 extern bool get_startBackup_flag(void);
 extern bool check_roach_start_backup(const char *slotName);
 extern bool GetDelayXlogRecycle(void);
 extern XLogRecPtr GetDDLDelayStartPtr(void);
 extern XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive);
+extern XLogRecPtr StandbyDoStopBackup(char *labelfile);
 extern void do_pg_abort_backup(void);
 extern void RegisterAbortExclusiveBackup();
 extern void enable_delay_xlog_recycle(bool isRedo = false);
