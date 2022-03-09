@@ -80,8 +80,11 @@ static MemoryContext g_xgboostMcxt = NULL;
 #define safe_xgboost(call) { \
     int err = (call);        \
     if (err != 0) {          \
+        char *str = const_cast<char*>(g_xgboostApi->XGBGetLastError());    \
+        char *res = strchr(str, '\n');       \
+        *res = '\0';                        \
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE), \
-                errmsg("%s:%d: error in %s: %s\n", __FILE__, __LINE__, #call, g_xgboostApi->XGBGetLastError()))); \
+                errmsg("%s:%d: error in: %s\n", __FILE__, __LINE__, str))); \
         }                                                                                                         \
     }
 
@@ -548,12 +551,6 @@ static void xgboost_run(AlgorithmAPI *self, TrainModelState *pstate, Model **mod
                     reinterpret_cast<HyperparamsXGBoost const *>(pstate->config->hyperparameters[0]));
 
     ModelTuple const *outer_tuple_slot = nullptr;
-
-    // Check max_depth parameter
-    if (xg_hyperp->max_depth == 0 && (0 != strcmp(xgboost_boost_str[BOOST_GBLINEAR_IDX], xg_hyperp->booster))) {
-        ereport(ERROR, (errmodule(MOD_DB4AI),
-                errmsg("Max_depth must be larger than 0 when booster is non_linear value.")));
-    }
 
     load_xgboost_library();
 
