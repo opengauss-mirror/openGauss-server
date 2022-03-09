@@ -4020,7 +4020,8 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     errmsg("can not accept connection in pending mode.")));
         } else {
 #ifdef ENABLE_MULTIPLE_NODES
-            if (STANDBY_MODE == hashmdata->current_mode && (!IS_DISASTER_RECOVER_MODE || GTM_FREE_MODE)) {
+            if (STANDBY_MODE == hashmdata->current_mode && (!IS_DISASTER_RECOVER_MODE || GTM_FREE_MODE ||
+                                                            g_instance.attr.attr_storage.recovery_parse_workers > 1)) {
                 ereport(ERROR, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("can not accept connection in standby mode.")));
             }
