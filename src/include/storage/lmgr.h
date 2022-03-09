@@ -98,6 +98,7 @@ extern void UnlockPartitionOid(Oid relid, uint32 seq, LOCKMODE lockmode);
 extern void LockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode);
 extern bool ConditionalLockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode);
 extern void UnlockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode);
+extern void UnlockPartitionSeqIfHeld(Oid relid, uint32 seq, LOCKMODE lockmode);
 
 extern bool ConditionalLockPartitionWithRetry(Relation relation, Oid partitionId, LOCKMODE lockmode);
 

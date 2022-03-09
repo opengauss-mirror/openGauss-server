@@ -40,6 +40,7 @@
 #include "access/htup.h"
 #include "storage/lock/lock.h"
 #include "access/heapam.h"
+#include "storage/lmgr.h"
 
 #define MAX_PARTITIONKEY_NUM 4
 #define MAX_PARTITION_NUM 1048575    /* update LEN_PARTITION_PREFIX as well ! */
@@ -62,16 +63,12 @@
 #define ADD_PARTITION_ACTION (MAX_PARTITION_NUM + 1)
 
 /*
- * We acquire a AccessExclusiveLock on ADD_PARTITION_ACTION before we decide
- * to add an interval partition to prevent parallel complaints.
+ * We add ADD_PARTITION_ACTION sequence lock to prevent parallel complaints.
  */
-#define lockRelationForAddIntervalPartition(relation) \
-    LockPartition(RelationGetRelid(relation), ADD_PARTITION_ACTION, \
-    AccessExclusiveLock, PARTITION_SEQUENCE_LOCK);
-
-#define unLockRelationForAddIntervalPartition(relation) \
-    UnlockPartition(RelationGetRelid(relation), ADD_PARTITION_ACTION, \
-    AccessExclusiveLock, PARTITION_SEQUENCE_LOCK);
+extern void LockRelationForAddIntervalPartition(Relation rel);
+extern void LockRelationForAccessIntervalPartitionTab(Relation rel);
+extern void UnlockRelationForAccessIntervalPartTabIfHeld(Relation rel);
+extern void UnlockRelationForAddIntervalPartition(Relation rel);
 
 typedef void (*PartitionNameGetPartidCallback) (Oid partitioned_relation, const char *partition_name, Oid partId,
     Oid oldPartId, char partition_type, void *callback_arg, LOCKMODE callbackobj_lockMode);
