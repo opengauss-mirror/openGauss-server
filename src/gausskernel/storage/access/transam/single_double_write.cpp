@@ -148,7 +148,7 @@ void dw_generate_single_file()
     char *unaligned_buf = NULL;
 
     if (file_exists(SINGLE_DW_FILE_NAME)) {
-        ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW), "DW single flush file already exists"));
+        ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW), errmsg("DW single flush file already exists")));
     }
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("DW bootstrap single flush file")));
@@ -561,7 +561,8 @@ void dw_generate_new_single_file()
     char *unaligned_buf = NULL;
 
     if (file_exists(SINGLE_DW_FILE_NAME)) {
-        ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW), "DW single flush file already exists"));
+        ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
+            errmsg("DW single flush file already exists")));
     }
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("DW bootstrap new single flush file")));

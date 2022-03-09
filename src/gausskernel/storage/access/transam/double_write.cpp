@@ -1176,7 +1176,8 @@ void dw_file_check_rebuild()
          * Probably the gaussdb was killed during the first time startup after build, resulting in a half-written
          * DW file. So, log a warning message and remove the residual DW file.
          */
-        ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW), "batch flush DW file exists, deleting it"));
+        ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW),
+            errmsg("batch flush DW file exists, deleting it")));
 
         if (unlink(OLD_DW_FILE_NAME) != 0) {
             ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
@@ -1189,7 +1190,8 @@ void dw_file_check_rebuild()
          * Probably the gaussdb was killed during the first time startup after build, resulting in a half-written
          * DW file. So, log a warning message and remove the residual DW file.
          */
-        ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW), "single flush DW file exists, deleting it"));
+        ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW),
+            errmsg("single flush DW file exists, deleting it")));
 
         if (unlink(SINGLE_DW_FILE_NAME) != 0) {
             ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
@@ -1199,7 +1201,7 @@ void dw_file_check_rebuild()
 
     /* read meta file and remove batch file then remove meta file */
     if (file_exists(DW_META_FILE)) {
-        ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW), "batch meta file exists, deleting it"));
+        ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW), errmsg("batch meta file exists, deleting it")));
         fd = dw_open_file(DW_META_FILE);
         dw_recover_batch_meta_file(fd, &batch_meta_file);
         close(fd);
@@ -1390,7 +1392,7 @@ static void dw_file_cxt_init_batch(int id, dw_batch_file_context *batch_file_cxt
     if (batch_file_cxt->fd == -1) {
         ereport(PANIC,
             (errcode_for_file_access(), errmodule(MOD_DW),
-            errmsg("Could not open file \"%s\"", batch_file_cxt->file_name)));
+                errmsg("Could not open file \"%s\"", batch_file_cxt->file_name)));
     }
 
     buf_size = DW_MEM_CTX_MAX_BLOCK_SIZE_FOR_NOHBK;
@@ -1768,22 +1770,22 @@ void dw_init(bool shut_down)
         if (file_exists(OLD_DW_FILE_NAME)) {
             /* If the double write is disabled, log a warning message and remove the residual DW file. */
             ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW),
-                    "batch flush DW file exists, deleting it when the double write is disabled"));
+                errmsg("batch flush DW file exists, deleting it when the double write is disabled")));
 
             if (unlink(OLD_DW_FILE_NAME) != 0) {
                 ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
-                                errmsg("Could not remove the residual batch flush DW single flush file")));
+                    errmsg("Could not remove the residual batch flush DW single flush file")));
             }
         }
 
         if (file_exists(SINGLE_DW_FILE_NAME)) {
             /* If the double write is disabled, log a warning message and remove the single DW file. */
             ereport(WARNING, (errcode_for_file_access(), errmodule(MOD_DW),
-                    "single flush DW file exists, deleting it when the double write is disabled"));
+                errmsg("single flush DW file exists, deleting it when the double write is disabled")));
 
             if (unlink(SINGLE_DW_FILE_NAME) != 0) {
                 ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
-                                errmsg("Could not remove the residual single flush DW single flush file")));
+                    errmsg("Could not remove the residual single flush DW single flush file")));
             }
         }
 
