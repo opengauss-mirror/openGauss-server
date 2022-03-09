@@ -1044,7 +1044,7 @@ HyperparameterDefinition kmeans_hyperparameter_definitions[] = {
     HYPERPARAMETER_INT4("max_iterations", 10, 1, true, ITER_MAX, true, HyperparametersKMeans, num_iterations,
                         HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("num_features", 0, 1, true, INT32_MAX, true, HyperparametersKMeans, n_features, HP_NO_AUTOML()),
-    HYPERPARAMETER_INT4("batch_size", 1000, 1, true, 1000000, true, HyperparametersKMeans, batch_size, HP_NO_AUTOML()),
+    HYPERPARAMETER_INT4("batch_size", 1000, 1, true, MAX_BATCH_SIZE, true, HyperparametersKMeans, batch_size, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("seed", 0, 0, true, INT32_MAX, true, HyperparametersKMeans, external_seed,
                         HP_AUTOML_INT(1, INT32_MAX, 1, ProbabilityDistribution::UNIFORM_RANGE)),
     HYPERPARAMETER_FLOAT8("tolerance", 0.00001, 0.0, false, 1.0, true, HyperparametersKMeans, tolerance,

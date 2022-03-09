@@ -226,13 +226,13 @@ const char *xgboost_tree_method_str[] = {"auto", "exact", "approx", "hist", "gpu
 const char *xgboost_eval_metric_str[] = {"rmse", "rmsle", "map", "mae", "auc", "aucpr" };
 static HyperparameterDefinition xgboost_hyperparameter_definitions[] = {
     HYPERPARAMETER_INT4("n_iter", 10, 1, true, ITER_MAX, true, HyperparamsXGBoost, n_iterations, HP_NO_AUTOML()),
-    HYPERPARAMETER_INT4("batch_size", 10000, 1, true, INT32_MAX, true, HyperparamsXGBoost, batch_size, HP_NO_AUTOML()),
+    HYPERPARAMETER_INT4("batch_size", 10000, 1, true, MAX_BATCH_SIZE, true, HyperparamsXGBoost, batch_size, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("max_depth", 5, 0, true, INT32_MAX, true, HyperparamsXGBoost, max_depth, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("min_child_weight", 1, 0, true, INT32_MAX, true, HyperparamsXGBoost, min_child_weight,
                         HP_NO_AUTOML()),
-    HYPERPARAMETER_FLOAT8("gamma", 0.0, 0.0, true, 1, true, HyperparamsXGBoost, gamma, HP_NO_AUTOML()),
+    HYPERPARAMETER_FLOAT8("gamma", 0.0, 0.0, true, DBL_MAX, true, HyperparamsXGBoost, gamma, HP_NO_AUTOML()),
     HYPERPARAMETER_FLOAT8("eta", 0.3, 0.0, true, 1, true, HyperparamsXGBoost, eta, HP_NO_AUTOML()),
-    HYPERPARAMETER_INT4("nthread", 1, 0, true, INT32_MAX, true, HyperparamsXGBoost, nthread, HP_NO_AUTOML()),
+    HYPERPARAMETER_INT4("nthread", 1, 0, true, 100, true, HyperparamsXGBoost, nthread, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("verbosity", 1, 0, true, 3, true, HyperparamsXGBoost, verbosity, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("seed", 0, 0, true, INT32_MAX, true, HyperparamsXGBoost, seed,
                         HP_AUTOML_INT(1, INT32_MAX, 1, ProbabilityDistribution::UNIFORM_RANGE)),

@@ -14,13 +14,13 @@ CREATE MODEL m using logistic_regression FEATURES size,lot FROM db4ai_houses;
 ERROR:  Supervised ML algorithms require TARGET clause
 -- Errors with semantic validation of hyperparameters
 CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with batch_size = 0, seed=1;
-ERROR:  Hyperparameter batch_size must be in the range [1,2147483647]
+ERROR:  Hyperparameter batch_size must be in the range [1,1048575]
 CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with decay = 0.0, seed=1;
 ERROR:  Hyperparameter decay must be in the range (0,1.7976931e+308]
 CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with learning_rate = 0.0, seed=1;
 ERROR:  Hyperparameter learning_rate must be in the range (0,1.7976931e+308]
 CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_iterations = 0, seed=1;
-ERROR:  Hyperparameter max_iterations must be in the range [1,2147483647]
+ERROR:  Hyperparameter max_iterations must be in the range [1,10000]
 CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_seconds = -1, seed=1;
 ERROR:  Hyperparameter max_seconds must be in the range [0,2147483647]
 CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with optimizer = nogd, seed=1;

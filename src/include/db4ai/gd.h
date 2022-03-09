@@ -261,7 +261,7 @@ typedef struct HyperparametersGD {
 } HyperparametersGD;
 
 #define GD_HYPERPARAMETERS_SUPERVISED \
-    HYPERPARAMETER_INT4("batch_size", 1000, 1, true, INT32_MAX, true, \
+    HYPERPARAMETER_INT4("batch_size", 1000, 1, true, MAX_BATCH_SIZE, true, \
                         HyperparametersGD, batch_size, \
                         HP_AUTOML_INT(1, 10000, 4, ProbabilityDistribution::LOG_RANGE)), \
     HYPERPARAMETER_FLOAT8("decay", 0.95, 0.0, false, DBL_MAX, true, \

@@ -26,6 +26,7 @@
 #include "utils/timestamp.h"
 
 #define ITER_MAX 10000
+#define MAX_BATCH_SIZE  0x0fffff
 
 uint64_t time_diff(struct timespec *time_p1, struct timespec *time_p2);
 double interval_to_sec(double time_interval);
