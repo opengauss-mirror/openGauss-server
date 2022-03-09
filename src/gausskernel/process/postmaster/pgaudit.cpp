@@ -1470,7 +1470,6 @@ static void pgaudit_cleanup(void)
         if (g_instance.audit_cxt.audit_indextbl->count > 0) {
             --g_instance.audit_cxt.audit_indextbl->count;
         }
-        g_instance.audit_cxt.audit_indextbl->begidx = (index + 1) % g_instance.audit_cxt.audit_indextbl->maxnum;
         errorno = memset_s(item, sizeof(AuditIndexItem), 0, sizeof(AuditIndexItem));
         securec_check(errorno, "\0", "\0");
 
@@ -1486,7 +1485,9 @@ static void pgaudit_cleanup(void)
         if (index == earliest_idx) {
             break;
         }
+
         /* udpate audit index for next loop  */
+        g_instance.audit_cxt.audit_indextbl->begidx = (index + 1) % g_instance.audit_cxt.audit_indextbl->maxnum;
         index = g_instance.audit_cxt.audit_indextbl->begidx;
     }
     LWLockRelease(g_instance.audit_cxt.index_file_lock);
