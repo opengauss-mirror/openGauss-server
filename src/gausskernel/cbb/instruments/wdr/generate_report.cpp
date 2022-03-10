@@ -2116,7 +2116,7 @@ static void GlobalTableIndex(report_params* params)
         "WHERE i.snapshot_id = %ld) AS snap_1"
         " ON (snap_2.snap_relid = snap_1.snap_relid AND snap_2.snap_indexrelid = snap_1.snap_indexrelid AND "
         " snap_2.db_name = snap_1.db_name AND snap_2.snap_schemaname = snap_1.snap_schemaname) "
-        " order by snap_2.db_name, snap_2.snap_schemaname limit 200;",
+        " order by \"Index Tuple Read\" limit 200;",
         params->end_snap_id,
         params->end_snap_id,
         params->begin_snap_id,

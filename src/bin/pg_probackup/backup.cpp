@@ -27,6 +27,10 @@
 #include "file.h"
 #include "common/fe_memutils.h"
 
+/* list of dirs which will not to be backuped
+   it will be backuped up in external dirs  */
+parray *pgdata_nobackup_dir = NULL;
+
 static int standby_message_timeout_local = 10 ;	/* 10 sec = default */
 static XLogRecPtr stop_backup_lsn = InvalidXLogRecPtr;
 static XLogRecPtr stop_stream_lsn = InvalidXLogRecPtr;
@@ -739,6 +743,11 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     /* clean external directories list */
     if (external_dirs)
         free_dir_list(external_dirs);
+
+    if (pgdata_nobackup_dir) {
+        free_dir_list(pgdata_nobackup_dir);
+    }
+    pgdata_nobackup_dir = NULL;
 
     /* Cleanup */
     if (backup_list)
@@ -2409,6 +2418,7 @@ check_external_for_tablespaces(parray *external_list, PGconn *backup_conn)
     int i = 0;
     int j = 0;
     char    *tablespace_path = NULL;
+    bool    in_pgdata = false;
     const char  *query = (const char *)"SELECT pg_catalog.pg_tablespace_location(oid) "
                                 "FROM pg_catalog.pg_tablespace;";
 
@@ -2418,11 +2428,21 @@ check_external_for_tablespaces(parray *external_list, PGconn *backup_conn)
     if (!res)
         elog(ERROR, "Failed to get list of tablespaces");
 
+    pgdata_nobackup_dir = parray_new();
+
     for (i = 0; i < res->ntups; i++)
     {
+        char    full_path[MAXPGPATH] = {0};
+        char    rel_path[MAXPGPATH] = {0};
         tablespace_path = PQgetvalue(res, i, 0);
         if (strlen(tablespace_path) == 0) {
             continue;
+        }
+
+        if (!is_absolute_path(tablespace_path)) {
+            join_path_components(rel_path, PG_RELATIVE_TBLSPC_DIR, tablespace_path);
+            join_path_components(full_path, instance_config.pgdata, rel_path);
+            tablespace_path = full_path;
         }
 
         canonicalize_path(tablespace_path);
@@ -2439,6 +2459,13 @@ check_external_for_tablespaces(parray *external_list, PGconn *backup_conn)
                 elog(WARNING, "External directory path (-E option) \"%s\" "
                         "is in tablespace directory \"%s\"",
                         tablespace_path, external_path);
+
+            in_pgdata = path_is_prefix_of_path(instance_config.pgdata, external_path);
+            if (in_pgdata &&
+                strcmp(external_path, tablespace_path) == 0) {
+                char *no_backup_dir = pg_strdup(rel_path);
+                parray_append(pgdata_nobackup_dir, no_backup_dir);
+            }
         }
     }
     PQclear(res);
@@ -2525,9 +2552,9 @@ static bool PathContainPath(const char* path1, const char* path2)
         size_t path2Len = strlen(path2);
         if (path1Len == path2Len) {
             return false;
-        } else if ((path2Len == (path1Len + 1)) && !IS_DIR_SEP(path2[path1Len - 1])) {
+        } else if ((path2Len >= (path1Len + 1)) && !IS_DIR_SEP(path2[path1Len])) {
             return false;
-        } else if ((path2Len == (path1Len + 1)) && IS_DIR_SEP(path2[path1Len - 1])) {
+        } else if ((path2Len >= (path1Len + 1)) && IS_DIR_SEP(path2[path1Len])) {
             return true;
         } else {
             return false;
