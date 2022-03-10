@@ -6718,7 +6718,7 @@ failed:
         xlrec.locking_xid = xid;
         xlrec.offnum = ItemPointerGetOffsetNumber(&tuple->t_self);
         xlrec.xid_is_mxact = ((new_infomask & HEAP_XMAX_IS_MULTI) != 0);
-        xlrec.shared_lock = (mode == LockTupleShared);
+        xlrec.shared_lock = (mode == LockTupleShared || mode == LockTupleKeyShare);
         xlrec.infobits_set = ComputeInfobits(new_infomask, tuple->t_data->t_infomask2);
         xlrec.lock_updated = false;
         useOldXlog = t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM ||
@@ -7260,10 +7260,8 @@ l4:
             xlrec.xid_is_mxact = ((new_infomask & HEAP_XMAX_IS_MULTI) != 0);
             xlrec.infobits_set = ComputeInfobits(new_infomask, new_infomask2);
             xlrec.lock_updated = true;
-            /*
-             * We don't record shared_lock, this field is reserverd for compatibility
-             * This xlog can only be record in new version
-             */
+            xlrec.shared_lock = (mode == LockTupleShared || mode == LockTupleKeyShare);
+
             XLogRegisterData((char *)&xlrec, SizeOfHeapLock);
 
             recptr = XLogInsert(RM_HEAP_ID, XLOG_HEAP_LOCK | XLOG_TUPLE_LOCK_UPGRADE_FLAG);
