@@ -1567,7 +1567,7 @@ TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin, bool bRecen
      * possible. We need to do so if we're computing the global limit (rel =
      * NULL) or if the passed relation is a catalog relation of some kind.
      */
-    if ((rel == NULL || RelationIsAccessibleInLogicalDecoding(rel)) &&
+    if ((rel != NULL && RelationIsAccessibleInLogicalDecoding(rel)) &&
         TransactionIdIsValid(replication_slot_catalog_xmin) &&
         NormalTransactionIdPrecedes(replication_slot_catalog_xmin, result))
         result = replication_slot_catalog_xmin;
