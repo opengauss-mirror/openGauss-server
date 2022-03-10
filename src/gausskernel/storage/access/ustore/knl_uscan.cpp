@@ -1193,6 +1193,10 @@ Buffer UHeapIndexBuildNextBlock(UHeapScanDesc scan)
     }
     scan->rs_base.rs_ntuples = 0;
     scan->rs_cutup = NULL;
+    if (BufferIsValid(scan->rs_base.rs_cbuf)) {
+        ReleaseBuffer(scan->rs_base.rs_cbuf);
+        scan->rs_base.rs_cbuf = InvalidBuffer;
+    }
 
     if (blkno >= scan->rs_base.rs_nblocks) {
         return InvalidBuffer; /* we are done */
@@ -1202,6 +1206,7 @@ Buffer UHeapIndexBuildNextBlock(UHeapScanDesc scan)
     /* read the next page, and lock with exclusive mode */
     Buffer buf = ReadBufferExtended(scan->rs_base.rs_rd, MAIN_FORKNUM, blkno, RBM_NORMAL, scan->rs_base.rs_strategy);
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+    scan->rs_base.rs_cbuf = buf;
     return buf;
 }
 
@@ -1274,7 +1279,8 @@ bool UHeapIndexBuildNextPage(UHeapScanDesc scan)
     scan->rs_base.rs_ntuples = ntup;
     scan->rs_base.rs_cindex = 0;
 
-    UnlockReleaseBuffer(buf);
+    /* drop the lock but keep the pin */
+    LockBuffer(buf, BUFFER_LOCK_UNLOCK);
     return true;
 }
 
