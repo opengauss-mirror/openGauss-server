@@ -11827,6 +11827,10 @@ void CreateCheckPoint(int flags)
             if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoff_xid)) {
                 cutoff_xid = globalXmin;
             }
+            TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+            if (TransactionIdIsNormal(oldestXidInUndo) && TransactionIdPrecedes(oldestXidInUndo, cutoff_xid)) {
+                cutoff_xid = oldestXidInUndo;
+            }
             TruncateCSNLOG(cutoff_xid);
             t_thrd.checkpoint_cxt.last_truncate_log_time = now;
         }
@@ -12622,6 +12626,10 @@ bool CreateRestartPoint(int flags)
             TransactionId cutoffXid = GetOldestXmin(NULL);
             if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoffXid)) {
                 cutoffXid = globalXmin;
+            }
+            TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+            if (TransactionIdIsNormal(oldestXidInUndo) && TransactionIdPrecedes(oldestXidInUndo, cutoffXid)) {
+                cutoffXid = oldestXidInUndo;
             }
             TruncateCSNLOG(cutoffXid);
             t_thrd.checkpoint_cxt.last_truncate_log_time = now;
