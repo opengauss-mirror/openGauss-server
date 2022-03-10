@@ -480,7 +480,7 @@ URecVector* FetchUndoRecordRange(    __inout UndoRecPtr *startUrp,
         }
 
         totalSize += urec->MemoryRecordSize();
-        if (totalSize > maxUndoApplySize) {
+        if (totalSize >= maxUndoApplySize) {
             *startUrp = currUrp;
             break;
         }

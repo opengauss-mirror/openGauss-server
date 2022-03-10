@@ -21,6 +21,9 @@
 #include "access/ustore/knl_uundovec.h"
 #include "utils/rel.h"
 
+/* Maximum size of the cache of undo records in a single rollback, 64M. */
+const uint64 MAX_UNDO_APPLY_SIZE = 64 * 1024 * 1024;
+
 typedef struct RollbackRequestsHashKey {
     TransactionId xid;
     UndoRecPtr startUndoPtr;
