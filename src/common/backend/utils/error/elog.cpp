@@ -4254,6 +4254,7 @@ static char* mask_Password_internal(const char* query_string)
     /* the function list need mask */
     const char* funcs[] = {"dblink_connect", "create_credential", "pg_create_physical_replication_slot_extern"};
     int funcNum = sizeof(funcs) / sizeof(funcs[0]);
+    bool isCreateSlot = false;
     int position[16] = {0};
     int length[16] = {0};
     int idx = 0;
@@ -4603,6 +4604,9 @@ static char* mask_Password_internal(const char* query_string)
                         /* first, check funcs[] */
                         for (i = 0; i < funcNum; ++i) {
                             if (pg_strcasecmp(yylval.str, funcs[i]) == 0) {
+                                if (pg_strcasecmp(yylval.str, "pg_create_physical_replication_slot_extern") == 0) {
+                                    isCreateSlot = true;
+                                }
                                 curStmtType = 8;
                                 break;
                             }
@@ -4967,7 +4971,13 @@ static char* mask_Password_internal(const char* query_string)
         pfree_ext(yyextra.literalbuf);
     }
 
-    return mask_string;
+    if (isCreateSlot) {
+        pfree(mask_string);
+        return MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY),
+            "select * from pg_create_physical_replication_slot_extern");
+    } else {
+        return mask_string;
+    }
 }
 
 static void eraseSingleQuotes(char* query_string)
