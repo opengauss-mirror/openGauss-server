@@ -4265,11 +4265,10 @@ static char* mask_Password_internal(const char* query_string)
     bool isPassword = false;
     char* mask_string = NULL;
     /* the function list need mask */
-    const char* funcs[] = {"dblink_connect", "create_credential", "pg_create_physical_replication_slot_extern"};
+    const char* funcs[] = {"dblink_connect", "create_credential"};
     bool is_create_credential = false;
     bool is_create_credential_passwd = false;
     int funcNum = sizeof(funcs) / sizeof(funcs[0]);
-    bool isCreateSlot = false;
     int position[16] = {0};
     int length[16] = {0};
     int idx = 0;
@@ -4280,7 +4279,8 @@ static char* mask_Password_internal(const char* query_string)
     YYLTYPE conninfoStartPos = 0; /* connection start postion for CreateSubscriptionStmt */
 
     /* the functions need to mask all contents */
-    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128", "gs_encrypt", "gs_decrypt"};
+    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128", "gs_encrypt", "gs_decrypt",
+        "pg_create_physical_replication_slot_extern"};
     int funCryptNum = sizeof(funCrypt) / sizeof(funCrypt[0]);
     bool isCryptFunc = false;
 
@@ -4631,9 +4631,7 @@ static char* mask_Password_internal(const char* query_string)
                         for (i = 0; i < funcNum; ++i) {
                             if (pg_strcasecmp(yylval.str, funcs[i]) == 0) {
                                 is_create_credential = false;
-                                if (pg_strcasecmp(yylval.str, "pg_create_physical_replication_slot_extern") == 0) {
-                                    isCreateSlot = true;
-                                } else if (pg_strcasecmp(yylval.str, "create_credential") == 0) {
+                                if (pg_strcasecmp(yylval.str, "create_credential") == 0) {
                                     is_create_credential = true;
                                 }
                                 curStmtType = 8;
@@ -5000,13 +4998,8 @@ static char* mask_Password_internal(const char* query_string)
         pfree_ext(yyextra.literalbuf);
     }
 
-    if (isCreateSlot) {
-        pfree(mask_string);
-        return MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY),
-            "select * from pg_create_physical_replication_slot_extern");
-    } else {
-        return mask_string;
-    }
+    return mask_string;
+
 }
 
 static void eraseSingleQuotes(char* query_string)
