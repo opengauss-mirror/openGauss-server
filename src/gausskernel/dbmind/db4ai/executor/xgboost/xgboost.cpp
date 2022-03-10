@@ -84,7 +84,7 @@ static MemoryContext g_xgboostMcxt = NULL;
         char *res = strchr(str, '\n');       \
         *res = '\0';                        \
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE), \
-                errmsg("%s", strrchr(str,':') + 1))); \
+                errmsg("%s", strrchr(str, ':') + 1))); \
         }                                                                                                         \
     }
 
