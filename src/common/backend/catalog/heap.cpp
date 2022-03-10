@@ -6327,6 +6327,8 @@ Oid AddNewIntervalPartition(Relation rel, void* insertTuple)
      */
     CommandCounterIncrement();
 
+    UpdatePgObjectChangecsn(RelationGetRelid(rel), rel->rd_rel->relkind);
+
     return newPartOid;
 }
 

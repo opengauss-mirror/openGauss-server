@@ -6159,6 +6159,11 @@ void renamePartition(RenameStmt* stmt)
 
     /* Do the work */
     renamePartitionInternal(partitionedTableOid, partitionOid, stmt->newname);
+
+    Relation parentRel = heap_openrv(stmt->relation, AccessExclusiveLock);
+    Oid relid = RelationGetRelid(parentRel);
+    UpdatePgObjectChangecsn(relid, parentRel->rd_rel->relkind);
+    heap_close(parentRel, NoLock);
 }
 
 /*
@@ -6232,6 +6237,11 @@ void renamePartitionIndex(RenameStmt* stmt)
 
     /* Do the work */
     renamePartitionInternal(partitionedTableIndexOid, partitionIndexOid, stmt->newname);
+
+    Oid parRelOid = IndexGetRelation(partitionedTableIndexOid, false);
+    Relation partRel = RelationIdGetRelation(parRelOid);
+    UpdatePgObjectChangecsn(parRelOid, partRel->rd_rel->relkind);
+    RelationClose(partRel);
 }
 
 /*
