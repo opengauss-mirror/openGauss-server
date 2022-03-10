@@ -244,7 +244,8 @@ bool SensitiveStrCheck(const char* target)
     
     if (strstr(target_copy, "PASSWORD") != NULL || strstr(target_copy, "IDENTIFIED") != NULL ||
         strstr(target_copy, "GS_ENCRYPT_AES128") != NULL || strstr(target_copy, "GS_DECRYPT_AES128") != NULL ||
-        strstr(target_copy, "GS_ENCRYPT") != NULL || strstr(target_copy, "GS_DECRYPT") != NULL) {
+        strstr(target_copy, "GS_ENCRYPT") != NULL || strstr(target_copy, "GS_DECRYPT") != NULL ||
+        strstr(target_copy, "PG_CREATE_PHYSICAL_REPLICATION_SLOT_EXTERN") != NULL) {
         free(target_copy);
         return TRUE;
     } else {
