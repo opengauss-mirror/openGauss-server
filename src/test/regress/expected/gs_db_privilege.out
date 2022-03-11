@@ -242,7 +242,7 @@ DETAIL:  Permission denied to revoke update any table.
 --function has_any_privilege
 RESET ROLE;
 GRANT UPDATE ANY TABLE TO db_priv_user1 WITH ADMIN OPTION;
-SELECT * FROM gs_db_privileges ORDER BY rolename;
+SELECT * FROM gs_db_privileges ORDER BY rolename, admin_option;
    rolename    |  privilege_type  | admin_option 
 ---------------+------------------+--------------
  db_priv_user1 | delete any table | no

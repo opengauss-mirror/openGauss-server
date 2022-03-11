@@ -837,7 +837,7 @@ test: pg_compatibility
 # autonomous transaction Test
 
 #test jdbc pbe for bypass
-#test: bypass_pbe
+test: bypass_pbe
 #test: partition for hash list
 test: pbe_hash_list_partition 
 test: hw_partition_list_insert
