@@ -4,25 +4,28 @@
 
 
 
-- [什么是openGauss](#什么是openGauss)
+- [什么是openGauss](#什么是opengauss)
 - [安装](#安装)
-    - [创建配置文件](#创建配置文件)
-    - [初始化安装环境](#初始化安装环境)
-    - [执行安装](#执行安装)
-- [卸载openGauss](#卸载openGauss)
+  - [创建配置文件](#创建配置文件)
+  - [初始化安装环境](#初始化安装环境)
+  - [执行安装](#执行安装)
+  - [卸载openGauss](#卸载opengauss)
+    - [**执行卸载**](#执行卸载)
+    - [**一键式环境清理**](#一键式环境清理)
 - [编译](#编译)
-    - [概述](#概述)
-    - [操作系统和软件依赖要求](#操作系统和软件依赖要求)
-    - [下载openGauss](#下载openGauss)
-    - [编译第三方软件](#编译第三方软件)
-    - [使用build.sh编译](#使用build编译)
-    - [使用命令编译](#使用命令编译)
-    - [编译安装包](#编译安装包)
+  - [概述](#概述)
+  - [操作系统和软件依赖要求](#操作系统和软件依赖要求)
+  - [下载openGauss](#下载opengauss)
+  - [编译第三方软件](#编译第三方软件)
+  - [代码编译](#代码编译)
+      - [使用build.sh编译代码](#使用buildsh编译代码)
+      - [使用命令编译代码](#使用命令编译代码)
+  - [编译安装包](#编译安装包)
 - [快速入门](#快速入门)
 - [文档](#文档)
 - [社区](#社区)
-    - [治理](#治理)
-    - [交流](#交流)
+  - [治理](#治理)
+  - [交流](#交流)
 - [贡献](#贡献)
 - [发行说明](#发行说明)
 - [许可证](#许可证)
@@ -401,8 +404,16 @@ https://opengauss.org/zh/
 
 可以通过以下网站获取编译好的binarylibs。下载后请解压缩并重命名为**binarylibs**。
 
-https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz
+各版本和分支对应编译好的三方库二进制地址如下：
 
+| 版本和分支            | 下载路径            |
+| ------------- | --------------- |
+| 1.0.0  | https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.0.0/openGauss-third_party_binarylibs.tar.gz      |
+| 1.1.0  | https://opengauss.obs.cn-south-1.myhuaweicloud.com/1.1.0/openGauss-third_party_binarylibs.tar.gz      |
+| 2.0.0 2.0.1  |   https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz    |
+| 2.1.0  |   https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.1.0/openGauss-third_party_binarylibs.tar.gz    |
+| 3.0.0  |    https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/openGauss-third_party_binarylibs.tar.gz   |
+| master |    https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/openGauss-third_party_binarylibs.tar.gz   |
 
 现在我们已经拥有完整的openGauss代码，把它存储在以下目录中（以sda为例）。
 

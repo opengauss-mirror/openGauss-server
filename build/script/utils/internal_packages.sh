@@ -52,6 +52,9 @@ function target_file_copy()
     copy_files_list "$1" $2
 
     cp ${SCRIPT_DIR}/version.cfg ${BUILD_DIR}/temp
+
+    # package simpleInstall dir 
+    cp -rf ${SCRIPT_DIR}/../../simpleInstall ${BUILD_DIR}/temp
     if [ $? -ne 0 ]; then
         die "copy ${SCRIPT_DIR}/version.cfg to ${BUILD_DIR}/temp failed"
     fi
