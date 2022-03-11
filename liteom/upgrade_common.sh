@@ -386,25 +386,21 @@ function check_pkg() {
       kernel="EULER"
     fi
   elif [[ -f "/etc/openEuler-release" ]]; then
-    kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr a-z A-Z)
+    kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}')
   elif [[ -f "/etc/centos-release" ]]; then
-    kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr a-z A-Z)
+    kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}')
   else
-    kernel=$(lsb_release -d | awk -F ' ' '{print $2}' | tr a-z A-Z)
+    kernel=$(lsb_release -d | awk -F ' ' '{print $2}')
   fi
   log "kernel: ${kernel}"
 
   #detect platform information.
-  platform=32
-  bit=$(getconf LONG_BIT)
-  if [[ "$bit" -eq 64 ]]; then
-    platform=64
-  fi
-  binname="GaussDB-Kernel-.*-${platform}bit"
+  platform_arch=$(uname -p)
+  bin_name="openGauss-Lite.*-${kernel}-${platform_arch}"
   binfile=$(ls -a | grep -E "${binname}.bin")
   shafile=${binfile%.*}.sha256
   if [[ ! -f "${binfile}" ]] || [[ ! -f "${shafile}" ]]; then
-    die "bin or sha256 file not exit for the platform ${kernel}-${platform}bit!" ${err_upgrade_pre}
+    die "bin or sha256 file not exit for the platform ${kernel}-${platform_arch}!" ${err_upgrade_pre}
   fi
   sha_expect=$(cat ${shafile})
   sha_current=$(sha256sum ${binfile} | awk '{print $1}')
@@ -461,8 +457,8 @@ function decompress_pkg() {
     fi
   fi
 
-  if cp "$binfile" "$GAUSS_TMP_PATH"/install_bin_"$new_version" && cd "$GAUSS_TMP_PATH"/install_bin_"$new_version" && chmod u+x "$binfile" \
-  && ./"$binfile" > /dev/null && rm -f "$binfile"; then
+  if cp "$binfile" "$GAUSS_TMP_PATH"/install_bin_"$new_version" && cd "$GAUSS_TMP_PATH"/install_bin_"$new_version" && tar -zxf "$binfile" \
+  && rm -f "$binfile"; then
 
     log "Decompress $binfile successfully."
   else
