@@ -718,7 +718,7 @@ static FileInfo *leadSortedScanFiles(const char* parent, const char *input_file_
         }
         file_name++;
         if (num >= file_info_num) {
-            file_infos = repallocFileInfo(file_infos, file_info_num + ERRMSG_MAX_NUM, ERRMSG_MAX_NUM);
+            file_infos = repallocFileInfo(file_infos, file_info_num + ERRMSG_MAX_NUM, file_info_num);
             file_info_num = file_info_num + ERRMSG_MAX_NUM;
             if (file_infos == NULL) {
                 (void)fclose(file);
