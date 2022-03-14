@@ -695,7 +695,7 @@
 #define PG_VERSION "9.2.4"
 
 /* openGauss version as a string */
-#define OPENGAUSS_VERSION "2.1.0"
+#define OPENGAUSS_VERSION "3.0.0"
 
 /* Gaussdb version as a string*/
 #define DEF_GS_VERSION "(GaussDB A 8.0.0 build 21f07aff) compiled at 2020-03-17 10:59:07 commit 7431 last mr 12039 debug"

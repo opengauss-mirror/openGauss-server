@@ -198,7 +198,7 @@ ENDMACRO(CHECK_CC_ENABLE)
 
 function(GET_VERSIONSTR_FROMGIT ret)
     set(PG_VERSION "9.2.4")
-    set(OPENGAUSS_VERSION "2.1.0")
+    set(OPENGAUSS_VERSION "3.0.0")
     execute_process(
         COMMAND ${CMAKE_SOURCE_DIR}/${openGauss}/cmake/src/buildfunction.sh --s ${PROJECT_TRUNK_DIR} OUTPUT_VARIABLE GS_VERSION_STR)
     set(PG_VERSION "${PG_VERSION}" PARENT_SCOPE)
