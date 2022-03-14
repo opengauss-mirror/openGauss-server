@@ -1329,7 +1329,7 @@ static bool apply_batch_flush_pages(PageWriterProc* pgwr)
 
 static void ckpt_pagewriter_sub_thread_loop()
 {
-    uint32 rc;
+    uint32 rc = 0;
     uint64 now;
     uint32 total_flush_pages;
     uint32 old_running_num;
@@ -1352,9 +1352,11 @@ static void ckpt_pagewriter_sub_thread_loop()
         proc_exit(0);
     }
 
-    /* Wait first */
-    rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_LATCH_SET | WL_POSTMASTER_DEATH,
-        (long)u_sess->attr.attr_storage.pageWriterSleep  /* ms */);
+    if (!t_thrd.pagewriter_cxt.shutdown_requested) {
+        /* Wait first */
+        rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_LATCH_SET | WL_POSTMASTER_DEATH,
+            (long)u_sess->attr.attr_storage.pageWriterSleep  /* ms */);
+    }
 
     if (rc & WL_POSTMASTER_DEATH) {
         gs_thread_exit(1);
