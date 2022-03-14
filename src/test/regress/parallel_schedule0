@@ -26,7 +26,7 @@ test: index_advisor
 test: pl_debugger_server pl_debugger_client
 test: update_for_wait_s1 update_for_wait_s2
 test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt
-test: large_sequence int16 forall_save_exceptions gs_dump_sequence
+test: large_sequence int16 gs_dump_sequence
 test: gs_dump_tableof
 test: analyze_commands
 #test: single_node_job
