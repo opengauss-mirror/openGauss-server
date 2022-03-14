@@ -1,8 +1,9 @@
 --------------------------------------------------------------
 -- add new type  jsonb
 --------------------------------------------------------------
+DROP TYPE IF EXISTS pg_catalog._jsonb;
 DROP TYPE IF EXISTS pg_catalog.jsonb;
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 3802, 0, b;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 3802, 3807, b;
 CREATE TYPE pg_catalog.jsonb;
 
 DROP FUNCTION IF EXISTS pg_catalog.jsonb_in(cstring) CASCADE;
