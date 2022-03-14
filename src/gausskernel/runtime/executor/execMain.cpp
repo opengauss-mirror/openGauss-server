@@ -588,7 +588,7 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
     if (send_tuples)
         (*dest->rStartup)(dest, operation, queryDesc->tupDesc);
 
-    if (queryDesc->plannedstmt->bucketMap != NULL) {
+    if (queryDesc->plannedstmt->bucketMap[0] != NULL) {
         u_sess->exec_cxt.global_bucket_map = queryDesc->plannedstmt->bucketMap[0];
         u_sess->exec_cxt.global_bucket_cnt = queryDesc->plannedstmt->bucketCnt[0];
     } else {
