@@ -3205,7 +3205,7 @@ typedef struct knl_t_lsc_context {
 typedef struct knl_t_apply_launcher_context {
     /* Flags set by signal handlers */
     volatile sig_atomic_t got_SIGHUP;
-    volatile sig_atomic_t got_SIGUSR2;
+    volatile sig_atomic_t newWorkerRequest;
     volatile sig_atomic_t got_SIGTERM;
     bool onCommitLauncherWakeup;
     ApplyLauncherShmStruct *applyLauncherShm;

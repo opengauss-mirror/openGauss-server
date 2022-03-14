@@ -1050,7 +1050,7 @@ static void knl_t_autovacuum_init(knl_t_autovacuum_context* autovacuum_cxt)
 static void KnlTApplyLauncherInit(knl_t_apply_launcher_context* applyLauncherCxt)
 {
     applyLauncherCxt->got_SIGHUP = false;
-    applyLauncherCxt->got_SIGUSR2 = false;
+    applyLauncherCxt->newWorkerRequest = false;
     applyLauncherCxt->got_SIGTERM = false;
     applyLauncherCxt->onCommitLauncherWakeup = false;
     applyLauncherCxt->applyLauncherShm = NULL;
