@@ -2195,7 +2195,7 @@ PACKAGE_VERSION='9.2.4'
 # Postgres-XC 1.1devel is based on PostgreSQL 9.2.4
 PACKAGE_XC_VERSION='1.1'
 # openGauss is based on PostgreSQL 9.2.4 and it will be the Kernel of GaussDB database
-OPENGAUSS_VERSION='2.1.0'
+OPENGAUSS_VERSION='3.0.0'
 
 cat >>confdefs.h <<_ACEOF
 #define PG_VERSION "$PACKAGE_VERSION"

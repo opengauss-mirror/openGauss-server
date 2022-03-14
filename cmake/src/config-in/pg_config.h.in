@@ -714,7 +714,7 @@
 #define PGXC_VERSION_NUM 
 
 /* openGauss version as a number string */
-#define OPENGAUSS_VERSION_NUM_STR "2.1.0" 
+#define OPENGAUSS_VERSION_NUM_STR "3.0.0" 
 
 /* A string containing the version number, platform, and C compiler */
 #define PG_VERSION_STR "@PG_VERSION_STR@"
