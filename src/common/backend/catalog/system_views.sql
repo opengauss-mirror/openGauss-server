@@ -245,7 +245,7 @@ CREATE VIEW pg_rlspolicies AS
         END AS policypermissive,
         CASE
             WHEN pol.polroles = '{0}' THEN
-                string_to_array('public', ' ')
+                pg_catalog.string_to_array('public', ' ')
             ELSE
                 ARRAY
                 (
@@ -549,33 +549,33 @@ REVOKE ALL on pg_statistic FROM public;
 REVOKE ALL on pg_statistic_ext FROM public;
 
 CREATE VIEW pg_locks AS
-    SELECT * FROM pg_lock_status() AS L;
+    SELECT * FROM pg_catalog.pg_lock_status() AS L;
 
 CREATE VIEW pg_cursors AS
-    SELECT * FROM pg_cursor() AS C;
+    SELECT * FROM pg_catalog.pg_cursor() AS C;
 
 CREATE VIEW pg_available_extensions AS
     SELECT E.name, E.default_version, X.extversion AS installed_version,
            E.comment
-      FROM pg_available_extensions() AS E
+      FROM pg_catalog.pg_available_extensions() AS E
            LEFT JOIN pg_extension AS X ON E.name = X.extname;
 
 CREATE VIEW pg_available_extension_versions AS
     SELECT E.name, E.version, (X.extname IS NOT NULL) AS installed,
            E.superuser, E.relocatable, E.schema, E.requires, E.comment
-      FROM pg_available_extension_versions() AS E
+      FROM pg_catalog.pg_available_extension_versions() AS E
            LEFT JOIN pg_extension AS X
              ON E.name = X.extname AND E.version = X.extversion;
 
 CREATE VIEW pg_prepared_xacts AS
     SELECT P.transaction, P.gid, P.prepared,
            U.rolname AS owner, D.datname AS database
-    FROM pg_prepared_xact() AS P
+    FROM pg_catalog.pg_prepared_xact() AS P
          LEFT JOIN pg_authid U ON P.ownerid = U.oid
          LEFT JOIN pg_database D ON P.dbid = D.oid;
 
 CREATE VIEW pg_prepared_statements AS
-    SELECT * FROM pg_prepared_statement() AS P;
+    SELECT * FROM pg_catalog.pg_prepared_statement() AS P;
 
 CREATE VIEW pg_seclabels AS
 SELECT
@@ -719,7 +719,7 @@ FROM
 	JOIN pg_authid rol ON l.classoid = rol.tableoid AND l.objoid = rol.oid;
 
 CREATE VIEW pg_settings AS
-    SELECT * FROM pg_show_all_settings() AS A;
+    SELECT * FROM pg_catalog.pg_show_all_settings() AS A;
 
 CREATE RULE pg_settings_u AS
     ON UPDATE TO pg_settings
@@ -733,13 +733,13 @@ CREATE RULE pg_settings_n AS
 GRANT SELECT, UPDATE ON pg_settings TO PUBLIC;
 
 CREATE VIEW pg_timezone_abbrevs AS
-    SELECT * FROM pg_timezone_abbrevs();
+    SELECT * FROM pg_catalog.pg_timezone_abbrevs();
 
 CREATE VIEW pg_timezone_names AS
-    SELECT * FROM pg_timezone_names();
+    SELECT * FROM pg_catalog.pg_timezone_names();
     
 CREATE VIEW pg_control_group_config AS
-    SELECT * FROM pg_control_group_config();
+    SELECT * FROM pg_catalog.pg_control_group_config();
 
 -- Statistics views
 
@@ -824,7 +824,7 @@ CREATE VIEW pg_statio_all_tables AS
             pg_catalog.pg_stat_get_blocks_hit(C.oid) AS heap_blks_hit,
             pg_catalog.sum(pg_catalog.pg_stat_get_blocks_fetched(I.indexrelid) -
                 pg_catalog.pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_read,
-            pg_catalog.sum(pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_hit,
+            pg_catalog.sum(pg_catalog.pg_stat_get_blocks_hit(I.indexrelid))::bigint AS idx_blks_hit,
             pg_catalog.pg_stat_get_blocks_fetched(T.oid) -
                     pg_catalog.pg_stat_get_blocks_hit(T.oid) AS toast_blks_read,
             pg_catalog.pg_stat_get_blocks_hit(T.oid) AS toast_blks_hit,
@@ -882,7 +882,7 @@ CREATE VIEW pg_statio_all_indexes AS
             N.nspname AS schemaname,
             C.relname AS relname,
             I.relname AS indexrelname,
-            pg_stat_get_blocks_fetched(I.oid) -
+            pg_catalog.pg_stat_get_blocks_fetched(I.oid) -
                     pg_catalog.pg_stat_get_blocks_hit(I.oid) AS idx_blks_read,
             pg_catalog.pg_stat_get_blocks_hit(I.oid) AS idx_blks_hit
     FROM pg_class C JOIN
@@ -906,7 +906,7 @@ CREATE VIEW pg_statio_all_sequences AS
             C.oid AS relid,
             N.nspname AS schemaname,
             C.relname AS relname,
-            pg_stat_get_blocks_fetched(C.oid) -
+            pg_catalog.pg_stat_get_blocks_fetched(C.oid) -
                     pg_catalog.pg_stat_get_blocks_hit(C.oid) AS blks_read,
             pg_catalog.pg_stat_get_blocks_hit(C.oid) AS blks_hit
     FROM pg_class C
@@ -1141,7 +1141,7 @@ SELECT
 FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
 WHERE S.pid = T.threadid;
 
-CREATE OR REPLACE FUNCTION gs_wlm_get_all_user_resource_info()
+CREATE OR REPLACE FUNCTION pg_catalog.gs_wlm_get_all_user_resource_info()
 RETURNS setof record                    
 AS $$                                                                      
 DECLARE                                                                    
@@ -1162,7 +1162,7 @@ DECLARE
 LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE VIEW pg_total_user_resource_info_oid AS
-SELECT * FROM gs_wlm_get_all_user_resource_info() AS
+SELECT * FROM pg_catalog.gs_wlm_get_all_user_resource_info() AS
 (userid Oid, 
  used_memory int, 
  total_memory int, 
@@ -1228,7 +1228,7 @@ create table gs_wlm_user_resource_history
 
 REVOKE all on gs_wlm_user_resource_history FROM public;
 
-CREATE OR REPLACE FUNCTION gs_wlm_persistent_user_resource_info()
+CREATE OR REPLACE FUNCTION pg_catalog.gs_wlm_persistent_user_resource_info()
 RETURNS setof record
 AS $$
 DECLARE
@@ -1270,7 +1270,7 @@ create table gs_wlm_instance_history
 
 REVOKE ALL on gs_wlm_instance_history FROM public;
 
-CREATE OR REPLACE FUNCTION create_wlm_instance_statistics_info()
+CREATE OR REPLACE FUNCTION pg_catalog.create_wlm_instance_statistics_info()
 RETURNS int
 AS $$
 DECLARE
@@ -1612,18 +1612,18 @@ CREATE VIEW gs_wlm_workload_records AS
     WHERE P.query_pid = S.threadpid AND
             S.usesysid = U.oid;	
 
-CREATE VIEW gs_os_run_info AS SELECT * FROM pv_os_run_info();
-CREATE VIEW gs_session_memory_context AS SELECT * FROM pv_session_memory_detail();
-CREATE VIEW gs_thread_memory_context AS SELECT * FROM pv_thread_memory_detail();
-CREATE VIEW gs_shared_memory_detail AS SELECT * FROM pg_shared_memory_detail();
-CREATE VIEW gs_instance_time AS SELECT * FROM pv_instance_time();
-CREATE VIEW gs_session_time AS SELECT * FROM pv_session_time();
-CREATE VIEW gs_session_memory AS SELECT * FROM pv_session_memory();
-CREATE VIEW gs_total_memory_detail AS SELECT * FROM pv_total_memory_detail();
-CREATE VIEW pg_total_memory_detail AS SELECT * FROM pv_total_memory_detail();
-CREATE VIEW gs_redo_stat AS SELECT * FROM pg_stat_get_redo_stat();
-CREATE VIEW gs_session_stat AS SELECT * FROM pv_session_stat();
-CREATE VIEW gs_file_stat AS SELECT * FROM pg_stat_get_file_stat();
+CREATE VIEW gs_os_run_info AS SELECT * FROM pg_catalog.pv_os_run_info();
+CREATE VIEW gs_session_memory_context AS SELECT * FROM pg_catalog.pv_session_memory_detail();
+CREATE VIEW gs_thread_memory_context AS SELECT * FROM pg_catalog.pv_thread_memory_detail();
+CREATE VIEW gs_shared_memory_detail AS SELECT * FROM pg_catalog.pg_shared_memory_detail();
+CREATE VIEW gs_instance_time AS SELECT * FROM pg_catalog.pv_instance_time();
+CREATE VIEW gs_session_time AS SELECT * FROM pg_catalog.pv_session_time();
+CREATE VIEW gs_session_memory AS SELECT * FROM pg_catalog.pv_session_memory();
+CREATE VIEW gs_total_memory_detail AS SELECT * FROM pg_catalog.pv_total_memory_detail();
+CREATE VIEW pg_total_memory_detail AS SELECT * FROM pg_catalog.pv_total_memory_detail();
+CREATE VIEW gs_redo_stat AS SELECT * FROM pg_catalog.pg_stat_get_redo_stat();
+CREATE VIEW gs_session_stat AS SELECT * FROM pg_catalog.pv_session_stat();
+CREATE VIEW gs_file_stat AS SELECT * FROM pg_catalog.pg_stat_get_file_stat();
 
 CREATE OR REPLACE FUNCTION pg_catalog.gs_session_memory_detail_tp(OUT sessid TEXT, OUT sesstype TEXT, OUT contextname TEXT, OUT level INT2, OUT parent TEXT, OUT totalsize INT8, OUT freesize INT8, OUT usedsize INT8)
 RETURNS setof record
@@ -1718,7 +1718,7 @@ BEGIN
 END; $$
 LANGUAGE plpgsql NOT FENCED;
 
-CREATE VIEW gs_session_memory_detail AS SELECT * FROM gs_session_memory_detail_tp() ORDER BY sessid;
+CREATE VIEW gs_session_memory_detail AS SELECT * FROM pg_catalog.gs_session_memory_detail_tp() ORDER BY sessid;
 
 CREATE VIEW pg_stat_replication AS
     SELECT
@@ -1754,7 +1754,7 @@ CREATE VIEW pg_replication_slots AS
             L.catalog_xmin,
             L.restart_lsn,
             L.dummy_standby
-    FROM pg_get_replication_slots() AS L
+    FROM pg_catalog.pg_get_replication_slots() AS L
             LEFT JOIN pg_database D ON (L.datoid = D.oid);
 
 
@@ -1819,17 +1819,17 @@ CREATE VIEW pg_stat_xact_user_functions AS
 
 CREATE VIEW pg_stat_bgwriter AS
     SELECT
-        pg_stat_get_bgwriter_timed_checkpoints() AS checkpoints_timed,
-        pg_stat_get_bgwriter_requested_checkpoints() AS checkpoints_req,
-        pg_stat_get_checkpoint_write_time() AS checkpoint_write_time,
-        pg_stat_get_checkpoint_sync_time() AS checkpoint_sync_time,
-        pg_stat_get_bgwriter_buf_written_checkpoints() AS buffers_checkpoint,
-        pg_stat_get_bgwriter_buf_written_clean() AS buffers_clean,
-        pg_stat_get_bgwriter_maxwritten_clean() AS maxwritten_clean,
-        pg_stat_get_buf_written_backend() AS buffers_backend,
-        pg_stat_get_buf_fsync_backend() AS buffers_backend_fsync,
-        pg_stat_get_buf_alloc() AS buffers_alloc,
-        pg_stat_get_bgwriter_stat_reset_time() AS stats_reset;
+        pg_catalog.pg_stat_get_bgwriter_timed_checkpoints() AS checkpoints_timed,
+        pg_catalog.pg_stat_get_bgwriter_requested_checkpoints() AS checkpoints_req,
+        pg_catalog.pg_stat_get_checkpoint_write_time() AS checkpoint_write_time,
+        pg_catalog.pg_stat_get_checkpoint_sync_time() AS checkpoint_sync_time,
+        pg_catalog.pg_stat_get_bgwriter_buf_written_checkpoints() AS buffers_checkpoint,
+        pg_catalog.pg_stat_get_bgwriter_buf_written_clean() AS buffers_clean,
+        pg_catalog.pg_stat_get_bgwriter_maxwritten_clean() AS maxwritten_clean,
+        pg_catalog.pg_stat_get_buf_written_backend() AS buffers_backend,
+        pg_catalog.pg_stat_get_buf_fsync_backend() AS buffers_backend_fsync,
+        pg_catalog.pg_stat_get_buf_alloc() AS buffers_alloc,
+        pg_catalog.pg_stat_get_bgwriter_stat_reset_time() AS stats_reset;
 
 CREATE VIEW pg_user_mappings AS
     SELECT
@@ -1856,7 +1856,7 @@ REVOKE ALL on pg_user_mapping FROM public;
 -- these functions are added for supporting default format transformation
 CREATE OR REPLACE FUNCTION pg_catalog.to_char(NUMERIC)
 RETURNS VARCHAR2
-AS $$ SELECT CAST(numeric_out($1) AS VARCHAR2) $$
+AS $$ SELECT CAST(pg_catalog.numeric_out($1) AS VARCHAR2) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.to_char(INT2)
@@ -1891,7 +1891,7 @@ LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.to_number(TEXT)
 RETURNS NUMERIC
-AS $$ SELECT pg_catalog.numeric_in(textout($1), 0::Oid, -1) $$
+AS $$ SELECT pg_catalog.numeric_in(pg_catalog.textout($1), 0::Oid, -1) $$
 LANGUAGE SQL  STRICT IMMUTABLE NOT FENCED;
 
 CREATE CAST (VARCHAR2 AS RAW) WITH FUNCTION pg_catalog.hextoraw(text) AS IMPLICIT;
@@ -2413,7 +2413,7 @@ begin
 	end if;
 	--source string to source_array
 	for i in 1..pg_catalog.length($1) loop
-		if substr($1,i,1) ~ '\n' then
+		if pg_catalog.substr($1,i,1) ~ '\n' then
 			if position = i then
 				source_array(source_line) := '\n';
 			else
@@ -2469,12 +2469,12 @@ begin
 			exit;
 		end if;
 	end loop;
-	if left($2,1) = '^' then
+	if pg_catalog.left($2,1) = '^' then
 		regex_temp := pg_catalog.substr($2,2);
 	else
 		regex_temp := $2;
 	end if;
-	if right($2,1) = '$' then
+	if pg_catalog.right($2,1) = '$' then
 		regex_temp := pg_catalog.substr(regex_temp,1,pg_catalog.length(regex_temp)-1);
 	end if;
 	if flag then
@@ -2497,7 +2497,7 @@ begin
 			return false;
 		end if;
 	end loop;
-	case right($3, 1) 
+	case pg_catalog.right($3, 1)
 		when 'i' then return $1 ~* $2;
 		when 'c' then return $1 ~ $2;
 		when 'm' then return pg_catalog.regex_like_m($1,$2);
@@ -2523,13 +2523,13 @@ SQL_STMT VARCHAR2(500);
 fail_cursor REFCURSOR;
 success_cursor REFCURSOR;
 BEGIN
-	SELECT text(oid) FROM pg_catalog.pg_authid WHERE rolname=SESSION_USER INTO user_id;
+	SELECT pg_catalog.text(oid) FROM pg_catalog.pg_authid WHERE rolname=SESSION_USER INTO user_id;
 	SELECT SESSION_USER INTO user_name;
 	SELECT pg_catalog.CURRENT_DATABASE() INTO db_name;
 	IF flag = true THEN 
 		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo FROM pg_catalog.pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
-					type IN (''login_success'') AND username =' || quote_literal(user_name) || 
-					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';
+					type IN (''login_success'') AND username =' || pg_catalog.quote_literal(user_name) ||
+					' AND database =' || pg_catalog.quote_literal(db_name) || ' AND userid =' || pg_catalog.quote_literal(user_id) || ';';
 		OPEN success_cursor FOR EXECUTE SQL_STMT;		
 		--search bottom up for all the success login info
 		FETCH LAST FROM success_cursor into username, database, logintime, mytype, result, client_conninfo;
@@ -2540,8 +2540,8 @@ BEGIN
 		CLOSE success_cursor;
 	ELSE 
 		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo FROM pg_catalog.pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
-					type IN (''login_success'', ''login_failed'') AND username =' || quote_literal(user_name) || 
-					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';
+					type IN (''login_success'', ''login_failed'') AND username =' || pg_catalog.quote_literal(user_name) ||
+					' AND database =' || pg_catalog.quote_literal(db_name) || ' AND userid =' || pg_catalog.quote_literal(user_id) || ';';
 		OPEN fail_cursor FOR EXECUTE SQL_STMT;
 		--search bottom up 
 		FETCH LAST FROM fail_cursor into username, database, logintime, mytype, result, client_conninfo;
@@ -2580,15 +2580,15 @@ success_cursor REFCURSOR;
 mybackendid bigint;
 curSessionFound boolean;
 BEGIN
-	SELECT text(oid) FROM pg_catalog.pg_authid WHERE rolname=SESSION_USER INTO user_id;
+	SELECT pg_catalog.text(oid) FROM pg_catalog.pg_authid WHERE rolname=SESSION_USER INTO user_id;
 	SELECT SESSION_USER INTO user_name;
 	SELECT pg_catalog.CURRENT_DATABASE() INTO db_name;
 	SELECT pg_catalog.pg_backend_pid() INTO mybackendid;
 	curSessionFound = false;	
 	IF flag = true THEN 
 		SQL_STMT := 'SELECT username,database,time,type,result,client_conninfo, pg_catalog.split_part(thread_id,''@'',1) backendid FROM pg_catalog.pg_query_audit(''1970-1-1'',''9999-12-31'') WHERE 
-					type IN (''login_success'') AND username =' || quote_literal(user_name) || 
-					' AND database =' || quote_literal(db_name) || ' AND userid =' || quote_literal(user_id) || ';';
+					type IN (''login_success'') AND username =' || pg_catalog.quote_literal(user_name) ||
+					' AND database =' || pg_catalog.quote_literal(db_name) || ' AND userid =' || pg_catalog.quote_literal(user_id) || ';';
 		OPEN success_cursor FOR EXECUTE SQL_STMT;		
 		--search bottom up for all the success login info
 		FETCH LAST FROM success_cursor into username, database, logintime, mytype, result, client_conninfo, backendid;
@@ -2785,14 +2785,14 @@ DECLARE
     execute_query text;
     BEGIN
         if row_num = 0 then
-            EXECUTE 'select count(1) from ' || table_name into tolal_num;
-            execute_query = 'select seqNum, count(1) as num
-                            from (select table_data_skewness(row(' || column_name ||'), ''H'') as seqNum from ' || table_name ||
+            EXECUTE 'select pg_catalog.count(1) from ' || table_name into tolal_num;
+            execute_query = 'select seqNum, pg_catalog.count(1) as num
+                            from (select pg_catalog.table_data_skewness(row(' || column_name ||'), ''H'') as seqNum from ' || table_name ||
                             ') group by seqNum order by num DESC';
         else
             tolal_num = row_num;
-            execute_query = 'select seqNum, count(1) as num
-                            from (select table_data_skewness(row(' || column_name ||'), ''H'') as seqNum from ' || table_name ||
+            execute_query = 'select seqNum, pg_catalog.count(1) as num
+                            from (select pg_catalog.table_data_skewness(row(' || column_name ||'), ''H'') as seqNum from ' || table_name ||
                             ' limit ' || row_num ||') group by seqNum order by num DESC';
         end if;
 
@@ -2965,11 +2965,11 @@ DECLARE
 							ec_username,
 							ec_query,
 							ec_libodbc_type
-						FROM pg_stat_get_wlm_ec_operator_info(0) where ec_operator > 0';
+						FROM pg_catalog.pg_stat_get_wlm_ec_operator_info(0) where ec_operator > 0';
 		
-        query_plan_str := 'SELECT * FROM gs_stat_get_wlm_plan_operator_info(0)';
+        query_plan_str := 'SELECT * FROM pg_catalog.gs_stat_get_wlm_plan_operator_info(0)';
 
-		query_str := 'SELECT * FROM pg_stat_get_wlm_operator_info(1)';
+		query_str := 'SELECT * FROM pg_catalog.pg_stat_get_wlm_operator_info(1)';
 		
 		IF flag > 0 THEN
 			EXECUTE 'INSERT INTO gs_wlm_ec_operator_info ' || query_ec_str;
@@ -3060,7 +3060,7 @@ DECLARE
             dop = row_data.query_dop;
             condition = row_data.condition;
             projection = row_data.projection;
-            query_str_encode := 'SELECT encode_plan_node($tag$'|| operation ||'$tag$,$tag$'|| orientation ||'$tag$,$tag$'|| strategy ||'$tag$,$tag$ '|| options || '$tag$,$tag$'|| dop ||'$tag$,$tag$' || condition || '$tag$,$tag$' || projection || '$tag$) as result;';
+            query_str_encode := 'SELECT pg_catalog.encode_plan_node($tag$'|| operation ||'$tag$,$tag$'|| orientation ||'$tag$,$tag$'|| strategy ||'$tag$,$tag$ '|| options || '$tag$,$tag$'|| dop ||'$tag$,$tag$' || condition || '$tag$,$tag$' || projection || '$tag$) as result;';
             EXECUTE query_str_encode INTO encoded_data;
             encode = encoded_data.result;
         return next;
@@ -3255,7 +3255,7 @@ DECLARE
 		IF row_info_data.parttype = 'n' THEN
 			query_str := 'SELECT relname,oid from pg_class where oid= '||row_info_data.reldeltarelid||'';
 			EXECUTE(query_str) INTO row_data;
-			query_select_str := 'select count(*) from cstore.' || row_data.relname || '';
+			query_select_str := 'select pg_catalog.count(*) from cstore.' || row_data.relname || '';
 			EXECUTE (query_select_str) INTO live_tuple;
 			query_size_str := 'select * from pg_catalog.pg_relation_size(' || row_data.oid || ')';
 			EXECUTE (query_size_str) INTO data_size;
@@ -3268,7 +3268,7 @@ DECLARE
 				query_str := 'SELECT relname,oid from pg_class where  oid = '||row_part_info.reldeltarelid||'';
 				part_name := row_part_info.relname;
 				FOR row_data IN EXECUTE(query_str) LOOP
-					query_select_str := 'select count(*) from cstore.' || row_data.relname || '';
+					query_select_str := 'select pg_catalog.count(*) from cstore.' || row_data.relname || '';
 					EXECUTE (query_select_str) INTO live_tuple;
 					query_size_str := 'select * from pg_catalog.pg_relation_size(' || row_data.oid || ')';
 					EXECUTE (query_size_str) INTO data_size;
@@ -3321,7 +3321,7 @@ DECLARE
 	BEGIN                                                                   	
 		query_database_oid := 'SELECT datname FROM pg_database WHERE datallowconn = true order by datname';
 		for databse_name in EXECUTE(query_database_oid) LOOP
-			unlock_str = format('SELECT * FROM pg_catalog.pgxc_unlock_for_sp_database(''%s'')', databse_name.datname);
+			unlock_str = pg_catalog.format('SELECT * FROM pg_catalog.pgxc_unlock_for_sp_database(''%s'')', databse_name.datname);
 			begin
 				EXECUTE(unlock_str) into unlock_result;
 				if unlock_result = 'f' then
@@ -3522,11 +3522,11 @@ CREATE VIEW pg_catalog.gs_db_privileges AS
     FROM pg_catalog.gs_db_privilege;
 
 CREATE OR REPLACE VIEW pg_catalog.gs_gsc_memory_detail AS
-    SELECT db_id, sum(totalsize) AS totalsize, sum(freesize) AS freesize, sum(usedsize) AS usedsize 
+    SELECT db_id, pg_catalog.sum(totalsize) AS totalsize, pg_catalog.sum(freesize) AS freesize, pg_catalog.sum(usedsize) AS usedsize
     FROM (
         SELECT 
-        	CASE WHEN contextname like '%GlobalSysDBCacheEntryMemCxt%' THEN substring(contextname, 29)
-        	ELSE substring(parent, 29) END AS db_id,
+        	CASE WHEN contextname like '%GlobalSysDBCacheEntryMemCxt%' THEN pg_catalog.substring(contextname, 29)
+        	ELSE pg_catalog.substring(parent, 29) END AS db_id,
         	totalsize,
         	freesize,
         	usedsize

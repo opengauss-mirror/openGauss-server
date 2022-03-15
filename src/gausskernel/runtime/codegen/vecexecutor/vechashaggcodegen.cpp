@@ -81,9 +81,7 @@ int VecHashAggCodeGen::GetAlignedScale(Expr* node)
             } else if (opexpr->opno == NUMERICMULOID)
                 resscale = lscale + rscale;
             else
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                        errmodule(MOD_LLVM),
+                ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmodule(MOD_LLVM),
                         errmsg("Unsupported operation %u in FastAgg.", opexpr->opno)));
         } break;
         case T_Var: {
@@ -478,6 +476,17 @@ void VecHashAggCodeGen::SonicHashAggCodeGen(VecAggState* node)
         llvmCodeGen->addFunctionToMCJit(jitted_sonicbatchagg, reinterpret_cast<void**>(&(node->jitted_sonicbatchagg)));
 }
 
+/* Check if existing tuple is unique */
+static void VecAggCheckUnique(VecAgg* vecagg, GsCodeGen::LlvmBuilder* builder)
+{
+    const char* errorstr = "more than one row returned by a subquery used as an expression";
+
+    if (vecagg->unique_check) {
+        /* If uniqueness is not checked, the result is incorrect. */
+        DebugerCodeGen::CodeGenElogInfo(builder, ERROR, errorstr);
+    }
+}
+
 template <bool isSglTbl>
 llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
 {
@@ -656,9 +665,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
 
         llvm::Function* func_hashbatch = HashBatchCodeGen(node, i, rehash);
         if (func_hashbatch == NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                    errmodule(MOD_LLVM),
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmodule(MOD_LLVM),
                     errmsg("Failed on generating HashBatchCodeGen!\n")));
         }
 
@@ -777,9 +784,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     for (i = 0; i < numkeys; i++) {
         llvm::Function* func_matchonekey = MatchOneKeyCodeGen(node, i);
         if (NULL == func_matchonekey) {
-            ereport(ERROR,
-                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                    errmodule(MOD_LLVM),
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmodule(MOD_LLVM),
                     errmsg("Failed on generating MatchOneKey Function!\n")));
         }
 
@@ -806,6 +811,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
      * hash cell and go to next tuple.
      */
     builder.SetInsertPoint(key_match);
+    VecAggCheckUnique(vecagg, &builder);
     /* get hashAggRunner.BaseAggRunner.m_Loc[phi_idx] */
     Vals4[0] = Datum_0;
     Vals4[1] = int32_0;
@@ -1041,9 +1047,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
 
         llvm::Function* func_hashbatch = HashBatchCodeGen(node, i, rehash);
         if (func_hashbatch == NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                    errmodule(MOD_LLVM),
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmodule(MOD_LLVM),
                     errmsg("Failed on generating HashBatchCodeGen!\n")));
         }
 
@@ -1204,8 +1208,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     for (i = 0; i < numkeys; i++) {
         llvm::Function* func_matchonekey = MatchOneKeyCodeGen(node, i);
         if (NULL == func_matchonekey) {
-            ereport(ERROR,
-                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                     errmodule(MOD_LLVM),
                     errmsg("Failed on generating MatchOneKey Function!\n")));
         }
@@ -1233,6 +1236,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
      * hash cell and go to next tuple.
      */
     builder.SetInsertPoint(key_match);
+    VecAggCheckUnique(vecagg, &builder);
     /* get hashAggRunner.BaseAggRunner.m_Loc[phi_idx] */
     Vals4[0] = Datum_0;
     Vals4[1] = int32_0;

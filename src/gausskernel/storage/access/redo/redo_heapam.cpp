@@ -151,6 +151,32 @@ void HeapXlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *
     PageSetLSN(page, buffer->lsn);
 }
 
+void HeapXlogInvalidOperatorPage(RedoBufferInfo *buffer, void *blkdata, Size datalen)
+{
+    Page page = buffer->pageinfo.page;
+    if (datalen > 0) {
+        OffsetNumber *offsets = (OffsetNumber *)blkdata;
+        OffsetNumber *offsets_end = (OffsetNumber *)((char *)offsets + datalen);
+        HeapTupleData tuple;
+
+        while (offsets < offsets_end) {
+            /* offsets[] entries are one-based */
+            ItemId lp = PageGetItemId(page, *offsets);
+
+            tuple.t_data = (HeapTupleHeader)PageGetItem(page, lp);
+            tuple.t_len = ItemIdGetLength(lp);
+            HeapTupleCopyBaseFromPage(&tuple, page);
+            ItemPointerSet(&(tuple.t_self), buffer->blockinfo.blkno, *offsets);
+
+            heap_invalid_invisible_tuple(&tuple);
+
+            offsets++;
+        }
+    }
+
+    PageSetLSN(page, buffer->lsn);
+}
+
 void HeapXlogVisibleOperatorPage(RedoBufferInfo *buffer, void *recorddata)
 {
     xl_heap_visible *xlrec = (xl_heap_visible *)recorddata;
@@ -1083,6 +1109,45 @@ static XLogRecParseState *HeapXlogFreezeParseBlock(XLogReaderState *record, uint
     return recordstatehead;
 }
 
+static XLogRecParseState *HeapXlogInvalidParseBlock(XLogReaderState *record, uint32 *blocknum)
+{
+    *blocknum = 1;
+    XLogRecParseState *blockstate = NULL;
+    XLogRecParseState *recordstatehead = NULL;
+
+    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+    XLogRecSetBlockDataState(record, HEAP_FREEZE_ORIG_BLOCK_NUM, recordstatehead);
+
+    /*
+     * In Hot Standby mode, ensure that there's no queries running which still consider the
+     * invalid xids as running.
+     */
+    if (g_supportHotStandby) {
+        (*blocknum)++;
+        /* need notify hot standby */
+        XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+        if (blockstate == NULL) {
+            return NULL;
+        }
+        /* get cutoff xid */
+        xl_heap_invalid *xlrecInvalid = (xl_heap_invalid *)XLogRecGetData(record);
+        TransactionId cutoff_xid = xlrecInvalid->cutoff_xid;
+        RelFileNode rnode;
+
+        XLogRecGetBlockTag(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &rnode, NULL, NULL);
+
+        RelFileNodeForkNum filenode =
+            RelFileNodeForkNumFill(&rnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
+        XLogRecSetBlockCommonState(record, BLOCK_DATA_INVALIDMSG_TYPE, filenode, blockstate);
+        XLogRecSetInvalidMsgState(&blockstate->blockparse.extra_rec.blockinvalidmsg, cutoff_xid);
+    }
+
+    return recordstatehead;
+}
+
 static XLogRecParseState *HeapXlogCleanParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
     xl_heap_clean *xlrec = (xl_heap_clean *)XLogRecGetData(record);
@@ -1526,6 +1591,19 @@ static void HeapXlogFreezeBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
     }
 }
 
+static void HeapXlogInvalidBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+{
+    XLogBlockDataParse *datadecode = blockdatarec;
+    XLogRedoAction action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
+    if (action == BLK_NEEDS_REDO) {
+        Size blkdatalen;
+        char *blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
+        Assert(blkdata != NULL);
+        HeapXlogInvalidOperatorPage(bufferinfo, (void *)blkdata, blkdatalen);
+        MakeRedoBufferDirty(bufferinfo);
+    }
+}
+
 static void HeapXlogCleanBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
@@ -1638,6 +1716,9 @@ XLogRecParseState *Heap3RedoParseToBlock(XLogReaderState *record, uint32 *blockn
             break;
         case XLOG_HEAP3_REWRITE:
             break;
+        case XLOG_HEAP3_INVALID:
+            recordblockstate = HeapXlogInvalidParseBlock(record, blocknum);
+            break;
         default:
             ereport(PANIC, (errmsg("Heap3RedoParseToBlock: unknown op code %u", info)));
     }
@@ -1653,6 +1734,9 @@ void Heap3RedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatar
         case XLOG_HEAP3_NEW_CID:
             break;
         case XLOG_HEAP3_REWRITE:
+            break;
+        case XLOG_HEAP3_INVALID:
+            HeapXlogInvalidBlock(blockhead, blockdatarec, bufferinfo);
             break;
         default:
             ereport(PANIC, (errmsg("heap3_redo_block: unknown op code %u", info)));

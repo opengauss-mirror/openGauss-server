@@ -473,7 +473,7 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
     part->pd_newRelfilenodeSubid = InvalidSubTransactionId;
 
     /* must flag that we have rels created in this transaction */
-    SetPartCacheNeedEoxactWork(true);
+    SetPartCacheNeedEOXActWork(true);
 
     /*
      * initialize partition tuple form (caller may add/override data later)
@@ -986,7 +986,7 @@ void AtEOXact_PartitionCache(bool isCommit)
      * transaction, even though we could clear it at subtransaction end in
      * some cases.
      */
-    if (!u_sess->cache_cxt.part_cache_need_eoxact_work
+    if (!GetPartCacheNeedEOXActWork()
 #ifdef USE_ASSERT_CHECKING
         && !assert_enabled
 #endif
@@ -1040,7 +1040,7 @@ void AtEOXact_PartitionCache(bool isCommit)
     }
 
     /* Once done with the transaction, we can reset need_eoxact_work */
-    u_sess->cache_cxt.part_cache_need_eoxact_work = false;
+    SetPartCacheNeedEOXActWork(false);
 }
 
 /*
@@ -1063,7 +1063,7 @@ void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTran
      * Skip the relcache scan if nothing to do --- see notes for
      * AtEOXact_PartitionCache.
      */
-    if (!u_sess->cache_cxt.part_cache_need_eoxact_work)
+    if (!GetPartCacheNeedEOXActWork())
         return;
 
     hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
@@ -1705,7 +1705,7 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     part->pd_newRelfilenodeSubid = GetCurrentSubTransactionId();
 
     /* ... and now we have eoxact cleanup work to do */
-    SetPartCacheNeedEoxactWork(true);
+    SetPartCacheNeedEOXActWork(true);
 }
 
 static void PartitionParseRelOptions(Partition partition, HeapTuple tuple)

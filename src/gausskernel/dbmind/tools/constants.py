@@ -15,11 +15,10 @@ import os
 __version__ = '1.0.0'
 __description__ = 'openGauss DBMind: An autonomous platform for openGauss'
 
-DBMIND_PATH = os.path.dirname(os.path.abspath(__file__))
+DBMIND_PATH = os.path.dirname(os.path.realpath(__file__))
 MISC_PATH = os.path.join(DBMIND_PATH, 'misc')
 
 CONFILE_NAME = 'dbmind.conf'  # the name of configuration file
-CONFILE_HEADER_NAME = 'dbmind.conf.header'
 PIDFILE_NAME = 'dbmind.pid'
 LOGFILE_NAME = 'dbmind.log'
 METRIC_MAP_CONFIG = 'metric_map.conf'

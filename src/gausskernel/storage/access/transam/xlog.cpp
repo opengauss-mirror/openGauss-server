@@ -395,6 +395,7 @@ static bool CheckForStandbyTrigger(void);
 static void xlog_outrec(StringInfo buf, XLogReaderState *record);
 #endif
 static void pg_start_backup_callback(int code, Datum arg);
+static void DoAbortBackupCallback(int code, Datum arg);
 static void AbortExcluseBackupCallback(int code, Datum arg);
 static bool read_tablespace_map(List **tablespaces);
 static bool read_backup_label(XLogRecPtr *checkPointLoc, bool *backupEndRequired, bool *backupFromStandby,
@@ -7433,6 +7434,10 @@ void TruncateAndRemoveXLogForRoachRestore(XLogReaderState *record)
         XLogRecPtrIsValid(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint)) {
         ereport(FATAL, (errmsg("truncate xlog LSN is before consistent recovery point")));
     }
+
+    /* wal receiver and wal receiver writer must be stopped before we truncate xlog */
+    ShutdownWalRcv();
+
     uint32 xlogOff;
     XLogSegNo xlogsegno;
     char xlogFileName[1024] = {0};
@@ -11822,6 +11827,10 @@ void CreateCheckPoint(int flags)
             if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoff_xid)) {
                 cutoff_xid = globalXmin;
             }
+            TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+            if (TransactionIdIsNormal(oldestXidInUndo) && TransactionIdPrecedes(oldestXidInUndo, cutoff_xid)) {
+                cutoff_xid = oldestXidInUndo;
+            }
             TruncateCSNLOG(cutoff_xid);
             t_thrd.checkpoint_cxt.last_truncate_log_time = now;
         }
@@ -12618,6 +12627,10 @@ bool CreateRestartPoint(int flags)
             if (TransactionIdIsNormal(globalXmin) && TransactionIdPrecedes(globalXmin, cutoffXid)) {
                 cutoffXid = globalXmin;
             }
+            TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+            if (TransactionIdIsNormal(oldestXidInUndo) && TransactionIdPrecedes(oldestXidInUndo, cutoffXid)) {
+                cutoffXid = oldestXidInUndo;
+            }
             TruncateCSNLOG(cutoffXid);
             t_thrd.checkpoint_cxt.last_truncate_log_time = now;
         }
@@ -12654,18 +12667,24 @@ static XLogSegNo CalcRecycleSegNo(XLogRecPtr curInsert, XLogRecPtr quorumMinRequ
         XLByteToSeg(curInsert - maxKeepSize, SegNoCanRecycled);
     }
 
-    if (!XLByteEQ(quorumMinRequired, InvalidXLogRecPtr)) {
-        XLogSegNo quorumMinSegNo;
-        XLByteToSeg(quorumMinRequired, quorumMinSegNo);
-        if (quorumMinSegNo < SegNoCanRecycled) {
-            SegNoCanRecycled = quorumMinSegNo;
+    /*
+     * For asynchronous replication, we do not care connected sync standbys,
+     * since standby build won't block xact commit on master.
+     */
+    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        if (!XLByteEQ(quorumMinRequired, InvalidXLogRecPtr)) {
+            XLogSegNo quorumMinSegNo;
+            XLByteToSeg(quorumMinRequired, quorumMinSegNo);
+            if (quorumMinSegNo < SegNoCanRecycled) {
+                SegNoCanRecycled = quorumMinSegNo;
+            }
         }
     }
 
     if (!XLByteEQ(minToolsRequired, InvalidXLogRecPtr)) {
         XLogSegNo minToolsSegNo;
         XLByteToSeg(minToolsRequired, minToolsSegNo);
-        if (minToolsSegNo < SegNoCanRecycled) {
+        if (minToolsSegNo < SegNoCanRecycled && minToolsSegNo > 0) {
             SegNoCanRecycled = minToolsSegNo;
         }
     }
@@ -12787,6 +12806,7 @@ static XLogSegNo CalculateCNRecycleSegNoForStreamingHadr(XLogRecPtr curInsert, X
 static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curInsert)
 {
     XLogSegNo segno;
+    XLogSegNo wal_keep_segno;
     XLogRecPtr keep;
     XLogRecPtr xlogcopystartptr;
     ReplicationSlotState repl_slot_state;
@@ -12803,6 +12823,8 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
     } else {
         segno = segno - (uint32)u_sess->attr.attr_storage.wal_keep_segments;
     }
+
+    wal_keep_segno = segno;
 
     ReplicationSlotsComputeRequiredLSN(&repl_slot_state);
     keep = repl_slot_state.min_required;
@@ -12862,9 +12884,7 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
      * 3.When standby is not alive in dummy standby mode, just keep log.
      * 4.Notice the users if slot is invalid
      */
-    if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE &&
-        u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH &&
-        t_thrd.syncrep_cxt.SyncRepConfig != NULL) {
+    if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) {
         if (WalSndInProgress(SNDROLE_PRIMARY_BUILDSTANDBY) ||
             pg_atomic_read_u32(&g_instance.comm_cxt.current_gsrewind_count) > 0) {
             /* segno = 1 show all file should be keep */
@@ -12900,12 +12920,18 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo *logSegNo, XLogRecPtr curIns
                     "is bigger than max keep size: %lu", maxKeepSize)));
             }
         }
+
         if (XLByteEQ(keep, InvalidXLogRecPtr) && repl_slot_state.exist_in_use &&
             !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
             /* there are slots and lsn is invalid, we keep it */
             segno = 1;
             ereport(WARNING, (errmsg("invalid replication slot recptr"),
                               errhint("Check slot configuration or setup standby/secondary")));
+        }
+
+        /* take wal_keep_segments into consideration */
+        if (wal_keep_segno < segno) {
+            segno = wal_keep_segno;
         }
     }
 
@@ -14626,11 +14652,22 @@ XLogRecPtr StandbyDoStopBackup(char *labelfile)
     }
     startPoint = (((uint64)hi) << 32) | lo;
     remaining = strchr(labelfile, '\n') + 1; /* %n is not portable enough */
+
+    XLogRecPtr minRecoveryPoint;
     LWLockAcquire(ControlFileLock, LW_SHARED);
     stopPoint = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
+    minRecoveryPoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
     LWLockRelease(ControlFileLock);
     if (XLByteLE(stopPoint, startPoint)) {
         stopPoint = GetXLogReplayRecPtr(NULL);
+    }
+
+    if (XLByteLT(stopPoint, minRecoveryPoint)) {
+        stopPoint = minRecoveryPoint;
+    }
+
+    if (XLByteLT(stopPoint, g_instance.comm_cxt.predo_cxt.redoPf.read_ptr)) {
+        stopPoint = g_instance.comm_cxt.predo_cxt.redoPf.read_ptr;
     }
     return stopPoint;
 }
@@ -14671,7 +14708,26 @@ void do_pg_abort_backup(void)
     u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
 
     StopSuspendWalInsert(lastlrc);
-    u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
+}
+
+/*
+ * Error cleanup callback for do_pg_abort_backup
+ */
+static void DoAbortBackupCallback(int code, Datum arg)
+{
+    do_pg_abort_backup();
+}
+
+/*
+ * Register a handler that will warn about unterminated backups at the end of
+ * session, unless this has already been done.
+ */
+void RegisterPersistentAbortBackupHandler(void)
+{
+    if (u_sess->proc_cxt.registerAbortBackupHandlerdone)
+        return;
+    on_shmem_exit(DoAbortBackupCallback, BoolGetDatum(true));
+    u_sess->proc_cxt.registerAbortBackupHandlerdone = true;
 }
 
 /*

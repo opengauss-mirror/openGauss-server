@@ -425,6 +425,7 @@ static void pgarch_MainLoop(void)
                 XLogRecPtr replayPtr;
                 bool got_recptr = false;
                 bool amSync = false;
+                int retryTimes = 3;
                 /* FlushPtr <= ConsensusPtr on DCF mode */
                 if (IS_PGXC_COORDINATOR || g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
                     flushPtr = GetFlushRecPtr();
@@ -441,8 +442,16 @@ static void pgarch_MainLoop(void)
                             "and init last lsn is %08X%08X", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32),
                             (uint32)t_thrd.arch.pitr_task_last_lsn)));
                     }
-                    got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
-                    if (got_recptr != true) {
+                    while (retryTimes--) {
+                        got_recptr =
+                            SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
+                        if (got_recptr == true) {
+                            break;
+                        } else {
+                            pg_usleep(1000000L);
+                        }
+                    }
+                    if (got_recptr == false) {
                         ereport(ERROR,
                             (errmsg("pgarch_ArchiverObsCopyLoop failed when call SyncRepGetSyncRecPtr")));
                     }
@@ -739,6 +748,10 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
                     (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
             pg_usleep(1000000L); /* wait a bit before retrying */
         } else {
+            if (g_instance.roach_cxt.isXLogForceRecycled && !g_instance.roach_cxt.forceAdvanceSlotTigger) {
+                g_instance.roach_cxt.isXLogForceRecycled = false;
+                ereport(LOG, (errmsg("PgArch force advance slot success")));
+            }
             gettimeofday(&tv, NULL);
             currTimestamp = TIME_GET_MILLISEC(tv);
             t_thrd.arch.pitr_task_last_lsn = targetLsn;
@@ -1026,6 +1039,11 @@ static void pgarch_archiveRoachForPitrStandby()
             (uint32)(archive_task_status->archive_task.targetLsn), 
             archive_task_status->archive_task.term, 
             archive_task_status->archive_task.sub_term)));
+    if (archive_task_status->archive_task.targetLsn == InvalidXLogSegPtr) {
+        volatile unsigned int *pitr_task_status = &archive_task_status->pitr_task_status;
+        pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
+        ereport(LOG, (errmsg("PgArch standby receive invalid lsn for slot force advance")));
+    }
     if (ArchiveReplicationAchiver(&archive_task_status->archive_task) == 0) {
         archive_task_status->pitr_finish_result = true;
     } else {
@@ -1057,6 +1075,11 @@ static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn)
     archive_task_status->archive_task.tli = get_controlfile_timeline();
     archive_task_status->archive_task.term = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file, 
         g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
+    if (g_instance.roach_cxt.forceAdvanceSlotTigger) {
+        archive_task_status->archive_task.targetLsn = InvalidXLogRecPtr;
+        g_instance.roach_cxt.forceAdvanceSlotTigger = false;
+        ereport(LOG, (errmsg("PgArch need force advance this time in primary")));
+    }
     /* subterm update when walsender changed */
     int rc = strcpy_s(archive_task_status->archive_task.slot_name, NAMEDATALEN, t_thrd.arch.slot_name);
     securec_check(rc, "\0", "\0");
@@ -1085,8 +1108,8 @@ static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn)
         return false;
     }
     /*
-    * check targetLsn and g_instance.archive_obs_cxt.archive_task.targetLsn for deal message with wrong order
-    */
+     * check targetLsn and g_instance.archive_obs_cxt.archive_task.targetLsn for deal message with wrong order
+     */
     if (archive_task_status->pitr_finish_result == true 
         && XLByteEQ(archive_task_status->archive_task.targetLsn, targetLsn)) {
         archive_task_status->pitr_finish_result = false;
@@ -1191,6 +1214,26 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
     return NULL;
 }
 
+static XLogRecPtr GetLastTaskLsnFromServer(ArchiveSlotConfig* obs_archive_slot)
+{
+    ArchiveXlogMessage obs_archive_info;
+    XLogRecPtr pitr_task_last_lsn;
+
+    if (archive_replication_get_last_xlog(&obs_archive_info, &obs_archive_slot->archive_config) == 0) {
+        pitr_task_last_lsn =  obs_archive_info.targetLsn;
+        ereport(LOG,
+            (errmsg("initLastTaskLsn update lsn to  %X/%X from server", (uint32)(pitr_task_last_lsn >> 32),
+            (uint32)(pitr_task_last_lsn))));
+    } else {
+        XLogRecPtr targetLsn = GetFlushRecPtr();
+        pitr_task_last_lsn = targetLsn - (targetLsn % XLogSegSize);
+        ereport(LOG,
+            (errmsg("initLastTaskLsn update lsn to  %X/%X from local", (uint32)(pitr_task_last_lsn >> 32),
+            (uint32)(pitr_task_last_lsn))));
+    }
+    return pitr_task_last_lsn;
+}
+
 static void InitArchiverLastTaskLsn(ArchiveSlotConfig* obs_archive_slot)
 {
     struct timeval tv;
@@ -1207,8 +1250,19 @@ static void InitArchiverLastTaskLsn(ArchiveSlotConfig* obs_archive_slot)
             ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[*slot_idx];
             SpinLockAcquire(&slot->mutex);
             if (slot->in_use == true && slot->archive_config != NULL) {
-                t_thrd.arch.pitr_task_last_lsn = slot->data.restart_lsn;
-                SpinLockRelease(&slot->mutex);
+                /*
+                 * In old version(<92599), the last task lsn is initialized from archive server or current flush
+                 * position, but in new version is initialized from local slot.
+                 * During the upgrade, the local restart lsn may be 0, so initialize it with old version way.
+                 */
+                if (slot->data.restart_lsn == InvalidXLogRecPtr &&
+                    t_thrd.proc->workingVersionNum < PITR_INIT_VERSION_NUM) {
+                    SpinLockRelease(&slot->mutex);
+                    t_thrd.arch.pitr_task_last_lsn = GetLastTaskLsnFromServer(obs_archive_slot);
+                } else {
+                    t_thrd.arch.pitr_task_last_lsn = slot->data.restart_lsn;
+                    SpinLockRelease(&slot->mutex);
+                }
             } else {
                 SpinLockRelease(&slot->mutex);
                 ereport(ERROR, (errcode_for_file_access(), errmsg("slot idx not valid, obs slot %X/%X not advance ",

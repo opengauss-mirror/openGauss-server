@@ -3401,7 +3401,7 @@ void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer bu
  *
  * Note: Only the dead tuple of pg_partition needs to be verified in the current code.
  */
-bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc)
+bool HeapKeepInvisibleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc)
 {
     static KeepInvisbleOpt keepInvisibleArray[] = {
         {PartitionRelationId, Anum_pg_partition_parttype, PartitionLocalIndexSkipping},

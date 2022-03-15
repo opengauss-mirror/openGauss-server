@@ -64,10 +64,12 @@ typedef void (*ResourceReleaseCallback)(ResourceReleasePhase phase, bool isCommi
 extern ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, MemoryContext memCxt);
 extern void ResourceOwnerRelease(ResourceOwner owner, ResourceReleasePhase phase, bool isCommit, bool isTopLevel);
 extern void ResourceOwnerDelete(ResourceOwner owner);
+extern void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source);
 extern ResourceOwner ResourceOwnerGetParent(ResourceOwner owner);
 extern ResourceOwner ResourceOwnerGetNextChild(ResourceOwner owner);
 extern const char * ResourceOwnerGetName(ResourceOwner owner);
 extern ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner);
+extern MemoryContext ResourceOwnerGetMemCxt(ResourceOwner owner);
 extern void ResourceOwnerNewParent(ResourceOwner owner, ResourceOwner newparent);
 
 /* support for buffer refcount management */

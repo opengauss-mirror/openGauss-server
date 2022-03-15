@@ -170,13 +170,7 @@ Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
     DIR *dir;
     char startxlogstr[MAXFNAMELEN];
     errno_t errorno = EOK;
-    MemoryContext oldContext;
 
-    u_sess->probackup_context = AllocSetContextCreate(u_sess->top_mem_cxt, "probackup context",
-                                                      ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
-                                                      ALLOCSET_DEFAULT_MAXSIZE);
-    oldContext = MemoryContextSwitchTo(u_sess->probackup_context);
-    
     SessionBackupState status = u_sess->proc_cxt.sessionBackupState;
 
     if (status == SESSION_BACKUP_NON_EXCLUSIVE)
@@ -196,7 +190,15 @@ Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                  errmsg("a  backup is already in progress in this session")));
 
+        RegisterPersistentAbortBackupHandler();
+
         startpoint = do_pg_start_backup(backupidstr, fast, &labelfile,dir, &tblspcmapfile, NULL,false,true);
+        
+        if (u_sess->probackup_context == NULL) {
+            u_sess->probackup_context = AllocSetContextCreate(u_sess->top_mem_cxt, "probackup context",
+                                                              ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
+                                                              ALLOCSET_DEFAULT_MAXSIZE);
+        }
         u_sess->proc_cxt.LabelFile = MemoryContextStrdup(u_sess->probackup_context, labelfile);
         if (tblspcmapfile != NULL) {
             u_sess->proc_cxt.TblspcMapFile = MemoryContextStrdup(u_sess->probackup_context, tblspcmapfile);
@@ -210,8 +212,6 @@ Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
     securec_check_ss(errorno, "", "");
 
     PG_RETURN_TEXT_P(cstring_to_text(startxlogstr));
-
-    MemoryContextSwitchTo(oldContext);
 }
 
 /*
@@ -223,7 +223,7 @@ Datum pg_stop_backup_v2(PG_FUNCTION_ARGS)
     ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
     TupleDesc    tupdesc;
     Tuplestorestate *tupstore;
-    MemoryContext perqueryctx, oldcontext, oldcontext2;
+    MemoryContext perqueryctx, oldcontext;
     Datum        values[3];
     bool         nulls[3];
     XLogRecPtr stoppoint;
@@ -246,8 +246,6 @@ Datum pg_stop_backup_v2(PG_FUNCTION_ARGS)
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                      errmsg("non-exclusive backup is not in progress")));
     }
-
-    oldcontext2 = MemoryContextSwitchTo(u_sess->probackup_context);
 
     /* check to see if caller supports us returning a tuplestore */
     if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
@@ -304,8 +302,6 @@ Datum pg_stop_backup_v2(PG_FUNCTION_ARGS)
 
     tuplestore_putvalues(tupstore, tupdesc, values, nulls);
     tuplestore_donestoring(tupstore);
-
-    MemoryContextSwitchTo(oldcontext2);
 
     return (Datum) 0;
 }
@@ -1709,6 +1705,7 @@ Datum gs_hadr_has_barrier_creator(PG_FUNCTION_ARGS)
  */
 Datum gs_hadr_in_recovery(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("Must be system admin or operator admin in operation mode to gs_hadr_has_barrier_creator."))));
@@ -1716,7 +1713,9 @@ Datum gs_hadr_in_recovery(PG_FUNCTION_ARGS)
     if (knl_g_get_redo_finish_status()) {
         PG_RETURN_BOOL(false);
     }
-
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
     PG_RETURN_BOOL(true);
 }
 
@@ -2013,6 +2012,7 @@ Datum gs_get_hadr_key_cn(PG_FUNCTION_ARGS)
 
 Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("Must be system admin or operator admin in operation mode to gs_streaming_dr_switchover."))));
@@ -2032,11 +2032,15 @@ Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
 #else
     CreateHadrSwitchoverBarrier();
 #endif
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
     PG_RETURN_BOOL(true);
 }
 
 Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     XLogRecPtr switchoverLsn = g_instance.streaming_dr_cxt.switchoverBarrierLsn;
     XLogRecPtr flushLsn = InvalidXLogRecPtr;
     bool isInteractionCompleted = false;
@@ -2074,10 +2078,15 @@ Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
     } else {
         PG_RETURN_BOOL(false);
     }
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+    PG_RETURN_BOOL(false);
+#endif
 }
 
 Datum gs_streaming_dr_get_switchover_barrier(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("Must be system admin or operator admin in operation mode to gs_streaming_dr_get_switchover_barrier."))));
@@ -2119,6 +2128,9 @@ Datum gs_streaming_dr_get_switchover_barrier(PG_FUNCTION_ARGS)
             PG_RETURN_BOOL(true);
         }
     }
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+#endif
 
     PG_RETURN_BOOL(false);
 }
@@ -2377,7 +2389,11 @@ Datum gs_pitr_archive_slot_force_advance(PG_FUNCTION_ARGS)
             signal_child(g_instance.archive_thread_info.obsArchPID[i], SIGUSR2, -1);
         }
     }
-    g_instance.roach_cxt.isXLogForceRecycled = false;
+    if (IS_PGXC_COORDINATOR) {
+        g_instance.roach_cxt.isXLogForceRecycled = false;
+    } else {
+        g_instance.roach_cxt.forceAdvanceSlotTigger = true;
+    }
     rc = snprintf_s(location, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X/%08X",
         (uint32)(archiveSlotLocNow >> 32), (uint32)(archiveSlotLocNow));
     securec_check_ss(rc, "\0", "\0");

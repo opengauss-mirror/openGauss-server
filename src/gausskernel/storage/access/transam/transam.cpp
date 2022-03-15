@@ -74,7 +74,7 @@ CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isComm
      * Before going to the commit log manager, check our single item cache to
      * see if we didn't just check the transaction status a moment ago.
      */
-    if ((snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) &&
+    if ((snapshot == NULL || (!IsVersionMVCCSnapshot(snapshot) && !(snapshot->satisfies == SNAPSHOT_DECODE_MVCC))) &&
         TransactionIdEquals(transactionId, t_thrd.xact_cxt.cachedFetchCSNXid)) {
         t_thrd.xact_cxt.latestFetchCSNXid = t_thrd.xact_cxt.cachedFetchCSNXid;
         t_thrd.xact_cxt.latestFetchCSN = t_thrd.xact_cxt.cachedFetchCSN;
@@ -98,15 +98,15 @@ RETRY:
      * If the XID is older than RecentGlobalXmin, check the clog. Otherwise
      * check the csnlog.
      */
-    if (!isMvcc || GTM_LITE_MODE) {
+    if (snapshot != NULL && snapshot->satisfies == SNAPSHOT_DECODE_MVCC) {
+        xid = GetReplicationSlotCatalogXmin();
+    } else if (!isMvcc || GTM_LITE_MODE) {
         TransactionId recentGlobalXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
         if (!TransactionIdIsValid(recentGlobalXmin)) {
             xid = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
         } else {
             xid = recentGlobalXmin;
         }
-    } else if (snapshot != NULL && snapshot->satisfies == SNAPSHOT_DECODE_MVCC) {
-        xid = GetReplicationSlotCatalogXmin();
     } else if (snapshot != NULL && IsMVCCSnapshot(snapshot)) {
         xid = snapshot->xmin;
     } else {

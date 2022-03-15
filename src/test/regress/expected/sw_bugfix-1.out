@@ -430,6 +430,7 @@ explain (costs off) select t1.ID,t1.VCH,pid,NAME,PTEX from TEST_HCB_FQB t1,TEST_
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
  CTE Scan on tmp_reuslt
+   Filter: ("t1@id" = "t2@id")
    CTE tmp_reuslt
      ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1
@@ -448,7 +449,7 @@ explain (costs off) select t1.ID,t1.VCH,pid,NAME,PTEX from TEST_HCB_FQB t1,TEST_
                                    ->  WorkTable Scan on tmp_reuslt
                                    ->  Hash
                                          ->  Seq Scan on test_hcb_fqb t1
-(19 rows)
+(20 rows)
 
 CREATE OR REPLACE FUNCTION test_hcb_pro1(i_id in int) return int
 AS
@@ -1470,3 +1471,22 @@ DROP TABLE IF EXISTS start;
 DROP TABLE IF EXISTS connect;
 DROP TABLE IF EXISTS siblings;
 DROP TABLE IF EXISTS prior;
+-- test where clause pushdown result correctness
+create table xt1(id int, lid int, name text);
+create table xt2(idd int, lidd int, name text);
+insert into xt1 values(1,null,'A'),(2,1,'B'),(3,2,'C');
+insert into xt2 values(1,null,'A'),(2,1,'B'),(3,2,'C'), (4,3,'D');
+select * from xt2,xt1 where xt1.id=xt2.idd and xt1.id!=2 start with id=2 connect by prior id=lid;
+ idd | lidd | name | id | lid | name 
+-----+------+------+----+-----+------
+   3 |    2 | C    |  3 |   2 | C
+(1 row)
+
+select * from xt2,xt1 where xt1.id=xt2.idd and xt1.id=3 start with id=2 connect by prior id=lid;
+ idd | lidd | name | id | lid | name 
+-----+------+------+----+-----+------
+   3 |    2 | C    |  3 |   2 | C
+(1 row)
+
+drop table if exists xt1;
+drop table if exists xt2;

@@ -187,7 +187,7 @@ typedef enum {
 } TimeCostPosition;
 
 /*
-for extreme rto  
+for extreme rto
 thread                step1                     step2                 step3                 step4
                step5                 step6                step7        step8
 redo batch          get a record           redo record(total)   update stanbystate        parse xlog
@@ -733,7 +733,7 @@ typedef struct knl_t_xlog_context {
     struct HTAB* invalid_page_tab;
 
     struct HTAB* remain_segs;
-    
+
     /* state maintained across calls */
     uint32 sendId;
     int sendFile;
@@ -926,7 +926,7 @@ typedef struct knl_t_shemem_ptr_context {
      */
     union LWLockPadded *mainLWLockArray;
 
-    // for GTT table to track sessions and their usage of GTTs 
+    // for GTT table to track sessions and their usage of GTTs
     struct gtt_ctl_data* gtt_shared_ctl;
     struct HTAB* active_gtt_shared_hash;
 
@@ -1228,7 +1228,7 @@ typedef struct knl_t_audit_context {
     FILE *policyauditFile;
     Latch sysAuditorLatch;
     time_t last_pgaudit_start_time;
-    struct AuditIndexTable* audit_indextbl;
+    struct AuditIndexTableNew* audit_indextbl;
     char pgaudit_filepath[MAXPGPATH];
 
     int cur_thread_idx;
@@ -1567,6 +1567,7 @@ typedef struct knl_t_pagewriter_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
     volatile sig_atomic_t sync_requested;
+    volatile sig_atomic_t sync_retry;
     int page_writer_after;
     int pagewriter_id;
     uint64 next_flush_time;
@@ -1813,7 +1814,7 @@ typedef struct knl_t_utils_context {
     bool gs_mp_inited;
 
     /* Memory Protecting need flag */
-    bool memNeedProtect; 
+    bool memNeedProtect;
 
     /* Track memory usage in chunks at individual thread level */
     int32 trackedMemChunks;
@@ -2724,7 +2725,7 @@ typedef struct knl_t_storage_context {
     struct HTAB* DataFileIdCache;
     /* Thread shared Seg Spc cache */
     struct HTAB* SegSpcCache;
-    
+
     struct HTAB* uidHashCache;
     struct HTAB* DisasterCache;
     /*
@@ -3258,7 +3259,7 @@ typedef struct knl_thrd_context {
     MemoryContext top_mem_cxt;
     MemoryContextGroup* mcxt_group;
     knl_t_lsc_context lsc_cxt;
-	
+
 	/* variables to support comm proxy */
     CommSocketOption comm_sock_option;
     CommEpollOption comm_epoll_option;

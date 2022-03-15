@@ -203,12 +203,11 @@ bool normalized_unique_querystring(Query* query, const char* query_string, char*
     }
 
     bool result = true;
-    char* norm_query = NULL;
+    char *norm_query = NULL, *mask_str = NULL;
     int encoding = GetDatabaseEncoding();
     int query_len;
     pgssJumbleState jstate;
-    errno_t rc;
-    rc = memset_s(&jstate, sizeof(jstate), 0, sizeof(jstate));
+    errno_t rc = memset_s(&jstate, sizeof(jstate), 0, sizeof(jstate));
     securec_check(rc, "\0", "\0");
 
     query_len = strlen(query_string);
@@ -220,6 +219,12 @@ bool normalized_unique_querystring(Query* query, const char* query_string, char*
             if (norm_query == NULL) {
                 result = false;
             }
+        }
+    } else {
+        mask_str = maskPassword(query_string);
+        if (mask_str != NULL) {
+            query_string = mask_str;
+            query_len = strlen(mask_str);
         }
     }
 
@@ -235,6 +240,7 @@ bool normalized_unique_querystring(Query* query, const char* query_string, char*
                 query_string = builtin_unique_sql->unique_sql;
                 query_len = builtin_unique_sql->unique_sql_len;
             }
+
             if (query_len > buf_len) {
                 query_len = pg_encoding_mbcliplen(encoding, query_string, query_len,
                     g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
@@ -245,6 +251,7 @@ bool normalized_unique_querystring(Query* query, const char* query_string, char*
         }
     }
 
+    pfree_ext(mask_str);
     return result;
 }
 /*

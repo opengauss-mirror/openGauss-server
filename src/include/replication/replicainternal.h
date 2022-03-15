@@ -191,7 +191,9 @@ typedef enum {
 extern bool data_catchup;
 extern bool wal_catchup;
 extern BuildMode build_mode;
+extern bool is_cross_region_build; /* for stream disaster recovery cluster */
 #define IS_CROSS_CLUSTER_BUILD (build_mode == CROSS_CLUSTER_FULL_BUILD || \
                                 build_mode == CROSS_CLUSTER_INC_BUILD || \
-                                build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD)
+                                build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD || \
+                                is_cross_region_build)
 #endif /* _REPLICA_INTERNAL_H */

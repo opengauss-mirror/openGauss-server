@@ -1051,9 +1051,11 @@ static IndexBulkDeleteResult** lazy_scan_heap(
         OffsetNumber offnum, maxoff;
         bool tupgone = false;
         bool hastup = false;
-        bool keepThisInvisbleTuple = false;
+        bool keepThisInvisibleTuple = false;
         int prev_dead_count;
+        OffsetNumber invalid[MaxOffsetNumber];
         OffsetNumber frozen[MaxOffsetNumber];
+        int ninvalid = 0;
         int nfrozen;
         Size freespace;
         bool all_visible_according_to_vm = false;
@@ -1335,7 +1337,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
             tuple.t_bucketId = RelationGetBktid(onerel);
             HeapTupleCopyBaseFromPage(&tuple, page);
             tupgone = false;
-            keepThisInvisbleTuple = false;
+            keepThisInvisibleTuple = false;
 
             if (u_sess->attr.attr_storage.enable_debug_vacuum)
                 t_thrd.utils_cxt.pRelatedRel = onerel;
@@ -1358,8 +1360,8 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                      * cheaper to get rid of it in the next pruning pass than
                      * to treat it like an indexed tuple.
                      */
-                    keepThisInvisbleTuple = HeapKeepInvisbleTuple(&tuple, RelationGetDescr(onerel));
-                    if (HeapTupleIsHotUpdated(&tuple) || HeapTupleIsHeapOnly(&tuple) || keepThisInvisbleTuple) {
+                    keepThisInvisibleTuple = HeapKeepInvisibleTuple(&tuple, RelationGetDescr(onerel));
+                    if (HeapTupleIsHotUpdated(&tuple) || HeapTupleIsHeapOnly(&tuple) || keepThisInvisibleTuple) {
                         nkeep += 1;
                     } else {
                         tupgone = true; /* we can delete the tuple */
@@ -1437,8 +1439,15 @@ static IndexBulkDeleteResult** lazy_scan_heap(
 
                 tups_vacuumed += 1;
                 has_dead_tuples = true;
-            } else if (keepThisInvisbleTuple) {
-                vacrelstats->hasKeepInvisbleTuples = true;
+            } else if (keepThisInvisibleTuple) {
+                if (t_thrd.proc->workingVersionNum >= INVALID_INVISIBLE_TUPLE_VERSION
+                    && !HeapTupleIsHotUpdated(&tuple)) {
+                    heap_invalid_invisible_tuple(&tuple);
+                    Assert(tuple.t_tableOid == PartitionRelationId);
+                    invalid[ninvalid++] = offnum;
+                } else {
+                    vacrelstats->hasKeepInvisbleTuples = true;
+                }
             } else {
                 num_tuples += 1;
                 hastup = true;
@@ -1469,6 +1478,23 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                 recptr = log_heap_freeze(onerel, buf, u_sess->cmd_cxt.FreezeLimit,
                                          changedMultiXid ?  u_sess->cmd_cxt.MultiXactFrzLimit : InvalidMultiXactId,
                                          frozen, nfrozen);
+                PageSetLSN(page, recptr);
+            }
+            END_CRIT_SECTION();
+            if (TransactionIdPrecedes(((HeapPageHeader)page)->pd_xid_base, u_sess->utils_cxt.RecentXmin)) {
+                if (u_sess->utils_cxt.RecentXmin - ((HeapPageHeader)page)->pd_xid_base > CHANGE_XID_BASE)
+                    (void)heap_change_xidbase_after_freeze(onerel, buf);
+            }
+        }
+
+        if (ninvalid > 0) {
+            START_CRIT_SECTION();
+            MarkBufferDirty(buf);
+            if (RelationNeedsWAL(onerel)) {
+                XLogRecPtr recptr;
+
+                recptr = log_heap_invalid(onerel, buf, u_sess->cmd_cxt.FreezeLimit,
+                                          invalid, ninvalid);
                 PageSetLSN(page, recptr);
             }
             END_CRIT_SECTION();

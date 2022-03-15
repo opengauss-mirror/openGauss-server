@@ -3945,6 +3945,10 @@ void getElevelAndSqlstate(int* eLevel, int* sqlState)
     *sqlState = t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth].sqlerrcode;
 }
 
+/*
+ * When the SQL statement is truncated, this function cannot perform normal password masking.
+ * maskPassword will return null if the statement does not need to be masked or any error occurs.
+ */
 char* maskPassword(const char* query_string)
 {
     char* mask_string = NULL;
@@ -4232,6 +4236,19 @@ static void inline ClearYylval(const core_YYSTYPE *yylval)
     securec_check(rc, "\0", "\0");
 }
 
+static int get_reallen_of_credential(char *param)
+{
+    int len = 0;
+    for (int i = 0; param[i] != '\0'; i++) {
+        if (param[i] == '\'') {
+            len += 2;
+        } else {
+            len++;
+        }
+    }
+    return len;
+}
+
 /*
  * Mask the password in statment CREATE ROLE, CREATE USER, ALTER ROLE, ALTER USER, CREATE GROUP
  * SET ROLE, CREATE DATABASE LINK, and some function
@@ -4248,7 +4265,9 @@ static char* mask_Password_internal(const char* query_string)
     bool isPassword = false;
     char* mask_string = NULL;
     /* the function list need mask */
-    const char* funcs[] = {"dblink_connect", "create_credential", "pg_create_physical_replication_slot_extern"};
+    const char* funcs[] = {"dblink_connect", "create_credential"};
+    bool is_create_credential = false;
+    bool is_create_credential_passwd = false;
     int funcNum = sizeof(funcs) / sizeof(funcs[0]);
     int position[16] = {0};
     int length[16] = {0};
@@ -4260,7 +4279,8 @@ static char* mask_Password_internal(const char* query_string)
     YYLTYPE conninfoStartPos = 0; /* connection start postion for CreateSubscriptionStmt */
 
     /* the functions need to mask all contents */
-    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128", "gs_encrypt", "gs_decrypt"};
+    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128", "gs_encrypt", "gs_decrypt",
+        "pg_create_physical_replication_slot_extern"};
     int funCryptNum = sizeof(funCrypt) / sizeof(funCrypt[0]);
     bool isCryptFunc = false;
 
@@ -4365,10 +4385,11 @@ static char* mask_Password_internal(const char* query_string)
                         if (subQueryLen < childStmtLen) {
                             /* Need more space, enlarge length is (childStmtLen - subQueryLen) */
                             maskStringLen += (childStmtLen - subQueryLen) + 1;
-                            char* maskStrNew = (char*)selfpalloc0(maskStringLen);
+                            char* maskStrNew = (char*)MemoryContextAllocZero(
+                                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), maskStringLen);
                             rc = memcpy_s(maskStrNew, maskStringLen, mask_string, strlen(mask_string));
                             securec_check(rc, "\0", "\0");
-                            selfpfree(mask_string);
+                            pfree_ext(mask_string);
                             mask_string = maskStrNew;
                         }
 
@@ -4409,7 +4430,18 @@ static char* mask_Password_internal(const char* query_string)
                 /* Calcute the difference between origin password length and mask password length */
                 position[idx] -= truncateLen;
 
-                length[idx] = strlen(yylval.str);
+                if (!is_create_credential) {
+                    length[idx] = strlen(yylval.str);
+                } else if (isPassword) {
+                    is_create_credential_passwd = true;
+                    length[idx] = strlen(yylval.str);
+                } else {
+                    if (idx == 2 && !is_create_credential_passwd) {
+                        length[idx] = get_reallen_of_credential(yylval.str);
+                    } else {
+                        length[idx] = 0;
+                    }
+                }
                 ++idx;
 
                 /* record the conninfo start pos, we will use it to calculate the actual length of conninfo */
@@ -4463,10 +4495,11 @@ static char* mask_Password_internal(const char* query_string)
                         if (length[i] < maskLen) {
                             /* need more space. */
                             int plen = strlen(mask_string) + maskLen - length[i] + 1;
-                            char* maskStrNew = (char*)selfpalloc0(plen);
+                            char* maskStrNew = (char*)MemoryContextAllocZero(
+                                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), plen);
                             rc = memcpy_s(maskStrNew, plen, mask_string, strlen(mask_string));
                             securec_check(rc, "\0", "\0");
-                            selfpfree(mask_string);
+                            pfree_ext(mask_string);
                             mask_string = maskStrNew;
                         }
 
@@ -4597,6 +4630,10 @@ static char* mask_Password_internal(const char* query_string)
                         /* first, check funcs[] */
                         for (i = 0; i < funcNum; ++i) {
                             if (pg_strcasecmp(yylval.str, funcs[i]) == 0) {
+                                is_create_credential = false;
+                                if (pg_strcasecmp(yylval.str, "create_credential") == 0) {
+                                    is_create_credential = true;
+                                }
                                 curStmtType = 8;
                                 break;
                             }
@@ -4962,6 +4999,7 @@ static char* mask_Password_internal(const char* query_string)
     }
 
     return mask_string;
+
 }
 
 static void eraseSingleQuotes(char* query_string)

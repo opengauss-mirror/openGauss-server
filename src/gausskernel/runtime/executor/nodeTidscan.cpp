@@ -768,7 +768,11 @@ static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate)
         lock = (relistarget ? RowExclusiveLock : AccessShareLock);
         tidstate->ss.lockMode = lock;
 
-        Assert(plan->scan.itrs == plan->scan.pruningInfo->ls_rangeSelectedPartitions->length);
+        if (plan->scan.pruningInfo->ls_rangeSelectedPartitions != NULL) {
+            plan->scan.itrs = plan->scan.pruningInfo->ls_rangeSelectedPartitions->length;
+        } else {
+            plan->scan.itrs = 0;
+        }
 
         foreach (cell, part_seqs) {
             Oid table_partitionid = InvalidOid;

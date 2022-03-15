@@ -1148,6 +1148,15 @@ void UnlockPartitionSeq(Oid relid, uint32 seq, LOCKMODE lockmode)
     (void)LockRelease(&tag, lockmode, false);
 }
 
+void UnlockPartitionSeqIfHeld(Oid relid, uint32 seq, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+
+    SetLocktagPartitionSeq(&tag, relid, seq);
+
+    ReleaseLockIfHeld(&tag, lockmode, false);
+}
+
 void LockPartitionVacuum(Relation prel, Oid partId, LOCKMODE lockmode)
 {
     PartitionIdentifier* partIdentifier = NULL;

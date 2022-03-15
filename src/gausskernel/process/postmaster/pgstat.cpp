@@ -3532,9 +3532,29 @@ void pgstat_report_activity(BackendState state, const char* cmd_str)
     beentry->st_state_start_timestamp = current_timestamp;
 
     if (cmd_str != NULL) {
-        rc = memcpy_s(
-            (char*)beentry->st_activity, g_instance.attr.attr_common.pgstat_track_activity_query_size, cmd_str, len);
-        securec_check(rc, "\0", "\0");
+        char *mask_string = NULL;
+        if (len == g_instance.attr.attr_common.pgstat_track_activity_query_size - 1 &&
+            t_thrd.mem_cxt.mask_password_mem_cxt != NULL) {
+            /* mask the cmd_str when the cmd_str is truncated. */
+            mask_string = maskPassword(cmd_str);
+        }
+
+        /* If mask successfully, store the mask_string. Otherwise, the cmd_str is recorded. */
+        if (mask_string == NULL) {
+            rc = memcpy_s((char*)beentry->st_activity, g_instance.attr.attr_common.pgstat_track_activity_query_size,
+                cmd_str, len);
+            securec_check(rc, "\0", "\0");
+        } else {
+            int copy_len = strlen(mask_string);
+            if (len < copy_len) {
+                copy_len = len;
+            }
+            rc = memcpy_s((char*)beentry->st_activity, g_instance.attr.attr_common.pgstat_track_activity_query_size,
+                mask_string, copy_len);
+            securec_check(rc, "\0", "\0");
+            pfree(mask_string);
+        }
+
         beentry->st_activity[len] = '\0';
         beentry->st_activity_start_timestamp = start_timestamp;
     }

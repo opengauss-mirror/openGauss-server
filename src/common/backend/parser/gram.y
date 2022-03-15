@@ -19590,6 +19590,11 @@ for_locking_items:
 for_locking_item:
 			FOR UPDATE hint_string locked_rels_list opt_nowait
 				{
+                    if (u_sess->parser_cxt.isTimeCapsule) {
+						u_sess->parser_cxt.isTimeCapsule = false;
+                      	ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                         errmsg("SELECT TIMECAPSULE FOR UPDATE is not supported.")));
+                    }
 					LockingClause *n = makeNode(LockingClause);
 					n->lockedRels = $4;
 					n->forUpdate = TRUE;
@@ -20193,22 +20198,22 @@ timecapsule_clause:
 			TIMECAPSULE opt_timecapsule_clause { $$ = $2; }
 
 opt_timecapsule_clause:
-			CSN a_expr
+			 CSN {u_sess->parser_cxt.isTimeCapsule = true;} a_expr
 				{
 					TcapFeatureEnsure();
 					RangeTimeCapsule *n = makeNode(RangeTimeCapsule);
 					n->tvtype = TV_VERSION_CSN;
-					n->tvver = (Node *)$2;
-					n->location = @2;
+					n->tvver = (Node *)$3;
+					n->location = @3;
 					$$ = (Node *) n;
 				}
-			| TIMESTAMP a_expr
+			| TIMESTAMP {u_sess->parser_cxt.isTimeCapsule = true;} a_expr
 				{
 					TcapFeatureEnsure();
 					RangeTimeCapsule *n = makeNode(RangeTimeCapsule);
 					n->tvtype = TV_VERSION_TIMESTAMP;
-					n->tvver = (Node *)$2;
-					n->location = @2;
+					n->tvver = (Node *)$3;
+					n->location = @3;
 					$$ = (Node *) n;
 				}
 		;

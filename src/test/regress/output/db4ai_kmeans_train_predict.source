@@ -742,7 +742,7 @@ CONTEXT:  referenced column: centroid_id
 -- Wrong parameters
 -- Number of iterations
 CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 0, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
-ERROR:  Hyperparameter max_iterations must be in the range [1,2147483647]
+ERROR:  Hyperparameter max_iterations must be in the range [1,10000]
 -- Number of centroids
 CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 0, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
 ERROR:  Hyperparameter num_centroids must be in the range [1,1000000]
@@ -755,9 +755,9 @@ CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivar
 ERROR:  Hyperparameter tolerance must be in the range (0,1]
 -- Batch size
 CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 0, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
-ERROR:  Hyperparameter batch_size must be in the range [1,1000000]
-CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000001, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
-ERROR:  Hyperparameter batch_size must be in the range [1,1000000]
+ERROR:  Hyperparameter batch_size must be in the range [1,1048575]
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1048576, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+ERROR:  Hyperparameter batch_size must be in the range [1,1048575]
 -- Num of features (not matching the data)
 CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 9, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
 NOTICE:  *** Initial statistics gathered:

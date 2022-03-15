@@ -57,7 +57,7 @@ def show(metric, host, start_time, end_time):
                 for row_ in result:
                     row = [str(getattr(row_, field)).strip() for field in field_names]
                     csv_writer.writerow(row)
-            write_to_terminal('Dumped file is %s.' % os.path.abspath(dump_file_name))
+            write_to_terminal('Dumped file is %s.' % os.path.realpath(dump_file_name))
         elif char == 'N':
             print(output_table)
             print('(%d rows)' % nb_rows)

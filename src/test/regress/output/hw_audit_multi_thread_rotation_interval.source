@@ -1,0 +1,39 @@
+-- 设置guc参数 时间轮询 线程数为3
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_rotation_interval=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/  -c "audit_thread_num=3" > /dev/null 2>&1
+-- 重启数据库 等待1s
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\! @abs_bindir@/gs_ctl stop -D  @abs_srcdir@/tmp_check/datanode1/   > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+-- 查看线程数是否改为 3
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
+ audit_thread_num 
+------------------
+ 3
+(1 row)
+
+-- 间隔60s 获取pg_audit 中最新adt文件编号 查看是否生成了6个adt文件
+\! num1=$(expr $(ls @abs_srcdir@/tmp_check/datanode1/pg_audit -l | grep "^-" | wc -l) - 2) && sleep 1m && num2=$(expr $(ls @abs_srcdir@/tmp_check/datanode1/pg_audit -l | grep "^-" | wc -l) - 2) && diff=$(expr $num2 - $num1) && echo $diff && [[ $diff == 3 ]] && echo 'add a new log after interval-- 60 seconds' || echo 'fail to add new logs'
+3
+add a new log after interval-- 60 seconds
+-- 恢复guc参数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_rotation_interval" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/  -c "audit_thread_num" > /dev/null 2>&1
+-- 重启数据库 等待1s
+\! sleep 1
+\! @abs_bindir@/gs_ctl stop -D  @abs_srcdir@/tmp_check/datanode1/   > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+-- 查看线程数是否恢复 1
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
+ audit_thread_num 
+------------------
+ 1
+(1 row)
+

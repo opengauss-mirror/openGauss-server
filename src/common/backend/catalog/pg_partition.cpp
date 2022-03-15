@@ -1425,3 +1425,41 @@ Oid GetBaseRelOidOfParition(Relation relation)
     return relation->parentId;
 }
 
+/* NB: all operations on ADD_PARTITION_ACTION sequence lock must use TopTransactionResourceOwner. */
+void LockRelationForAddIntervalPartition(Relation rel)
+{
+    ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+    LockPartition(RelationGetRelid(rel), ADD_PARTITION_ACTION,
+        AccessExclusiveLock, PARTITION_SEQUENCE_LOCK);
+    t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+}
+
+void LockRelationForAccessIntervalPartitionTab(Relation rel)
+{
+    ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+    LockPartition(RelationGetRelid(rel), ADD_PARTITION_ACTION,
+        AccessShareLock, PARTITION_SEQUENCE_LOCK);
+    t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+}
+
+void UnlockRelationForAccessIntervalPartTabIfHeld(Relation rel)
+{
+    ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+
+    UnlockPartitionSeqIfHeld(RelationGetRelid(rel), ADD_PARTITION_ACTION, AccessShareLock);
+    t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+}
+
+void UnlockRelationForAddIntervalPartition(Relation rel)
+{
+    ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+
+    UnlockPartition(RelationGetRelid(rel), ADD_PARTITION_ACTION,
+        AccessExclusiveLock, PARTITION_SEQUENCE_LOCK);
+    t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+}
+

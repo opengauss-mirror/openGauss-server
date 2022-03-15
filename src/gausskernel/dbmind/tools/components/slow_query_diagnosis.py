@@ -51,7 +51,7 @@ def show(query, start_time, end_time):
             dump_file_name = 'slow_queries_%s.txt' % int(time.time())
             with open(dump_file_name, 'w+') as fp:
                 fp.write(str(output_table))
-            write_to_terminal('Dumped file is %s.' % os.path.abspath(dump_file_name))
+            write_to_terminal('Dumped file is %s.' % os.path.realpath(dump_file_name))
         elif char == 'N':
             print(output_table)
             print('(%d rows)' % nb_rows)

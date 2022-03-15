@@ -166,10 +166,10 @@ class Knob:
             return
 
         self._scale = self._max - self._min
-        if self._scale < 0:
+        if self._scale <= 0:
             raise ValueError('Knob %s is incorrectly configured. '
                              'The max value must be greater than '
-                             'or equal to the min value.' % self.name)
+                             'the min value.' % self.name)
         if type(self.user_set) is str:
             self.current = self.to_numeric(self.user_set)
         elif type(self.user_set) in (int, float):

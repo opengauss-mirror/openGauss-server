@@ -222,6 +222,8 @@ static bool relIsDeltaNode(PlannerInfo* root, RelOptInfo* relOptInfo);
 
 static void ModifyWorktableWtParam(Node* planNode, int oldWtParam, int newWtParam);
 
+static bool ScanQualsViolateNotNullConstr(PlannerInfo* root, RelOptInfo* rel, Path* best_path);
+
 #define SATISFY_INFORMATIONAL_CONSTRAINT(joinPlan, joinType)                                                    \
     (u_sess->attr.attr_sql.enable_constraint_optimization && true == innerPlan((joinPlan))->hasUniqueResults && \
         JOIN_SEMI != (joinType) && JOIN_ANTI != (joinType))
@@ -752,9 +754,47 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
      */
     if (root->hasPseudoConstantQuals) {
         plan = create_gating_plan(root, plan, scan_clauses);
+    } else if (ScanQualsViolateNotNullConstr(root, rel, best_path)) {
+        /*
+        * If there is IS NULL qual on a known NOT-NULL attribute, insert a Result node to prevent needless execution.
+        */
+        plan = (Plan*)make_result(root, plan->targetlist, (Node*)list_make1(makeBoolConst(false, false)), plan);
     }
 
     return plan;
+}
+
+static bool IsScanPath(NodeTag type)
+{
+    return (
+        type == T_CStoreScan || type == T_CStoreIndexScan || type == T_CStoreIndexHeapScan || type == T_SeqScan ||
+        type == T_DfsScan || type == T_IndexScan || type == T_IndexOnlyScan || type == T_BitmapHeapScan
+    );
+}
+
+static bool ScanQualsViolateNotNullConstr(PlannerInfo* root, RelOptInfo* rel, Path* best_path)
+{
+    /* For now, we only support table scan optimization */
+    if (rel->rtekind != RTE_RELATION || !IsScanPath(best_path->pathtype)) {
+        return false;
+    }
+
+    List* scan_clauses = rel->baserestrictinfo;
+    ListCell* lc = NULL;
+    foreach (lc, scan_clauses) {
+        Node* clause = (Node*)lfirst(lc);
+        if (IsA(clause, RestrictInfo) && IsA(((RestrictInfo*)clause)->clause, NullTest)) {
+            NullTest* expr = (NullTest*)((RestrictInfo*)clause)->clause;
+            /* For attribute with NOT-NULL constraint, IS-NULL expression can be short-circuited */
+            if (expr->nulltesttype != IS_NULL || !IsA(expr->arg, Var)) {
+                continue;
+            }
+            if (check_var_nonnullable(root->parse, (Node*)expr->arg)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /*

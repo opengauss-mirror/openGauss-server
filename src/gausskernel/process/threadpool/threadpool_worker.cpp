@@ -185,6 +185,8 @@ void ThreadPoolWorker::WaitMission()
      * before we serve next session we must keep us clean.
      */
     PreventSignal();
+
+    MemoryContext old = CurrentMemoryContext;
     while (true) {
         /* we should keep the thread clean for next Session. */
         CleanThread();
@@ -222,7 +224,7 @@ void ThreadPoolWorker::WaitMission()
             break;
         }
     }
-
+    MemoryContextSwitchTo(old);
     (void)disable_session_sig_alarm();
     /* now we can accept signal. out of this, we rely on signal handle. */
     AllowSignal();

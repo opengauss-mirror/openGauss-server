@@ -39,9 +39,11 @@
 extern void *internal_load_library(const char *libname);
 extern bool PMstateIsRun(void);
 static void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_content = NULL);
+#ifndef ENABLE_LITE_MODE
 static XLogRecPtr create_physical_replication_slot_for_backup(const char* slot_name, bool is_dummy, char* extra);
 static XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, bool is_dummy, char* extra,
     XLogRecPtr currFlushPtr = InvalidXLogRecPtr);
+#endif
 static void slot_advance(const char* slotname, XLogRecPtr &moveto, NameData &database, char *EndLsn, bool for_backup = false);
 
 
@@ -259,6 +261,7 @@ Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
  */
 Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_LITE_MODE
     Name name = PG_GETARG_NAME(0);
     bool isDummyStandby = PG_GETARG_BOOL(1);
     XLogRecPtr currFlushPtr = InvalidXLogRecPtr;
@@ -299,7 +302,6 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
     if (for_backup) {
         restart_lsn = create_physical_replication_slot_for_backup(NameStr(*name), isDummyStandby, extra_content);
     } else {
-#ifndef ENABLE_LITE_MODE
         if (isNeedRecycleXlog) {
             ArchiveConfig* archive_config = formArchiveConfigFromStr(extra_content, false);
             XLogRecPtr switchPtr = InvalidXLogRecPtr;
@@ -318,7 +320,6 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
         }
         currFlushPtr -= currFlushPtr % XLogSegSize;
         ereport(LOG, (errmsg("create archive slot, start point %lu", currFlushPtr)));
-#endif
         restart_lsn = create_physical_replication_slot_for_archive(NameStr(*name), isDummyStandby, extra_content,
             currFlushPtr);
     }
@@ -342,6 +343,10 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
 
     pfree_ext(extra_content);
     PG_RETURN_DATUM(result);
+#else
+    FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
+    PG_RETURN_DATUM(0);
+#endif
 }
 
 void create_logical_replication_slot(const Name name, Name plugin, bool isDummyStandby, Oid databaseId,
@@ -1103,6 +1108,7 @@ bool is_archive_slot(ReplicationSlotPersistentData data)
     return GET_SLOT_EXTRA_DATA_LENGTH(data) != 0;
 }
 
+#ifndef ENABLE_LITE_MODE
 XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, bool is_dummy, char* extra_content,
     XLogRecPtr currFlushPtr)
 {
@@ -1169,6 +1175,7 @@ XLogRecPtr create_physical_replication_slot_for_backup(const char* slot_name, bo
 
     return restart_lsn;
 }
+#endif
 
 void init_instance_slot()
 {

@@ -33,8 +33,6 @@
 #include "utils/builtins.h"
 
 namespace undo {
-static uint64 g_maxUndoSizePerTrans = 0;
-
 void AllocateTransSlot(UndoSlotPtr slotPtr, UndoZone *zone, TransactionId xid, UndoPersistence upersistence)
 {
     TransactionSlot *slot = zone->AllocTransactionSlot(slotPtr, xid, u_sess->proc_cxt.MyDatabaseId);
@@ -67,9 +65,10 @@ bool CheckNeedSwitch(UndoPersistence upersistence, uint64 size, UndoRecPtr undoP
 void RollbackIfUndoExceeds(TransactionId xid, uint64 size)
 {
     t_thrd.undo_cxt.transUndoSize += size;
-    if ((!t_thrd.xlog_cxt.InRecovery) && (t_thrd.undo_cxt.transUndoSize > g_maxUndoSizePerTrans)) {
+    uint64 transUndoThresholdSize = (uint64)u_sess->attr.attr_storage.undo_limit_size_transaction * BLCKSZ;
+    if ((!t_thrd.xlog_cxt.InRecovery) && (t_thrd.undo_cxt.transUndoSize > transUndoThresholdSize)) {
         ereport(ERROR, (errmsg(UNDOFORMAT("xid %lu, the undo size %lu of the transaction exceeds the threshold %lu."),
-            xid, t_thrd.undo_cxt.transUndoSize, g_maxUndoSizePerTrans)));
+            xid, t_thrd.undo_cxt.transUndoSize, transUndoThresholdSize)));
     }
     return;
 }
@@ -365,7 +364,7 @@ void InitUndoCountThreshold()
     uint32 maxThreadNum = 0;
     
 
-    if (g_instance.attr.attr_common.enable_thread_pool) {
+    if (ENABLE_THREAD_POOL) {
         maxThreadNum = g_threadPoolControler->GetThreadNum();
     }
 
@@ -571,8 +570,6 @@ void RecoveryUndoSystemMeta(void)
         }
         g_instance.undo_cxt.undoTotalSize = 0;
         g_instance.undo_cxt.undoMetaSize = 0;
-        g_maxUndoSizePerTrans =
-            (uint64)u_sess->attr.attr_storage.undo_limit_size_transaction * BLCKSZ;
         /* Recover undospace meta. */
         undo::UndoZone::RecoveryUndoZone(fd);
         /* Recover undospace meta. */

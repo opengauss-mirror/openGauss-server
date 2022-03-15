@@ -458,8 +458,8 @@ typedef struct knl_g_audit_context {
     /* audit logs */
     char index_file_path[MAXPGPATH];
     LWLock *index_file_lock;
-    struct AuditIndexTable* audit_indextbl;
-    struct AuditIndexTableOld* audit_indextbl_old;
+    struct AuditIndexTableNew* audit_indextbl;
+    struct AuditIndexTable* audit_indextbl_old;
     uint64 pgaudit_totalspace;
 
     /* audit thread */
@@ -1061,6 +1061,7 @@ typedef struct knl_g_roach_context {
     char* targetTimeInPITR;
     char* globalBarrierRecordForPITR;
     bool isXLogForceRecycled;
+    bool forceAdvanceSlotTigger;
     bool isGtmFreeCsn;
     char* targetRestoreTimeFromMedia;
 } knl_g_roach_context;

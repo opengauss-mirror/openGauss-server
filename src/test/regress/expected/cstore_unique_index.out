@@ -105,8 +105,8 @@ create unique index on part_t1 using cbtree (a, c) local;
  c      | integer | 
  d      | integer | 
 Indexes:
-    "part_t1_pkey" PRIMARY KEY, cbtree (a, b) LOCAL(PARTITION p1_a_b_idx, PARTITION p2_a_b_idx, PARTITION p3_a_b_idx, PARTITION p4_a_b_idx)  TABLESPACE pg_default
-    "part_t1_a_c_idx" UNIQUE, cbtree (a, c) LOCAL(PARTITION p1_a_c_idx, PARTITION p2_a_c_idx, PARTITION p3_a_c_idx, PARTITION p4_a_c_idx)  TABLESPACE pg_default
+    "part_t1_pkey" PRIMARY KEY, cbtree (a, b) LOCAL TABLESPACE pg_default
+    "part_t1_a_c_idx" UNIQUE, cbtree (a, c) LOCAL TABLESPACE pg_default
 Partition By RANGE(a)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 

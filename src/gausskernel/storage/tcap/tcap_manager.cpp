@@ -301,7 +301,9 @@ static bool TrFetchOrinameImpl(Oid nspId, const char *oriname, TrObjType type,
     while ((tup = systable_getnext(sd)) != NULL) {
         Form_pg_recyclebin rbForm = (Form_pg_recyclebin)GETSTRUCT(tup);
         if ((rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_TABLE) ||
-            (rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_INDEX)) {
+            (rbForm->rcytype != type && rbForm->rcytype == RB_OBJ_INDEX) ||
+            (operMode == RB_OPER_RESTORE_DROP && rbForm->rcyoperation != 'd') ||
+            (operMode == RB_OPER_RESTORE_TRUNCATE && rbForm->rcyoperation != 't')) {
             continue;
         }
 
@@ -337,6 +339,12 @@ bool TrFetchName(const char *rcyname, TrObjType type, TrObjDesc *desc, TrOperMod
             ereport(ERROR,
                 (errmsg("The recycle object \"%s\" type mismatched.", rcyname)));
         }
+        if ((operMode == RB_OPER_RESTORE_DROP && rbForm->rcyoperation != 'd') ||
+            (operMode == RB_OPER_RESTORE_TRUNCATE && rbForm->rcyoperation != 't')) {
+            ereport(ERROR,
+                (errmsg("recycle object \"%s\" desired does not exist", rcyname)));
+        }
+        
         found = true;
         TrDescRead(desc, tup);
     }

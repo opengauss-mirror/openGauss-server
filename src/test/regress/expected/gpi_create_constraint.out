@@ -56,9 +56,9 @@ Indexes:
     "gpi_table1_c1_tableoid_idx" btree (c1) TABLESPACE pg_default
     "idx10_gpi_table1" btree (c1) TABLESPACE pg_default
     "idx1_gpi_table1" btree (c1) TABLESPACE pg_default
-    "idx3_gpi_table1" btree (c2) LOCAL(PARTITION p0_gpi_table1_c2_idx, PARTITION p1_gpi_table1_c2_idx, PARTITION p2_gpi_table1_c2_idx, PARTITION p3_gpi_table1_c2_idx)  TABLESPACE pg_default
-    "idx4_gpi_table1" btree ((c1 + 10)) LOCAL(PARTITION p0_gpi_table1_expr_idx, PARTITION p1_gpi_table1_expr_idx, PARTITION p2_gpi_table1_expr_idx, PARTITION p3_gpi_table1_expr_idx)  TABLESPACE pg_default
-    "idx5_gpi_table1" btree (c1, c2) LOCAL(PARTITION p0_gpi_table1_c1_c2_idx, PARTITION p1_gpi_table1_c1_c2_idx, PARTITION p2_gpi_table1_c1_c2_idx, PARTITION p3_gpi_table1_c1_c2_idx)  TABLESPACE pg_default
+    "idx3_gpi_table1" btree (c2) LOCAL TABLESPACE pg_default
+    "idx4_gpi_table1" btree ((c1 + 10)) LOCAL TABLESPACE pg_default
+    "idx5_gpi_table1" btree (c1, c2) LOCAL TABLESPACE pg_default
 Partition By RANGE(c1)
 Number of partitions: 4 (View pg_partition to check each partition range.)
 

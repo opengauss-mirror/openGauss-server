@@ -125,7 +125,7 @@ create index on normal_test.tbl_partition(id) local WITH (compresstype=2,compres
 --------+---------+-----------+---------+--------------+-------------
  id     | integer |           | plain   |              | 
 Indexes:
-    "tbl_partition_id_idx" btree (id) LOCAL(PARTITION p0_id_idx, PARTITION p10_id_idx, PARTITION p11_id_idx, PARTITION p2_id_idx, PARTITION p3_id_idx, PARTITION p4_id_idx, PARTITION p5_id_idx, PARTITION p6_id_idx, PARTITION p7_id_idx)  WITH (compresstype=2, compress_chunk_size=1024) TABLESPACE pg_default
+    "tbl_partition_id_idx" btree (id) LOCAL WITH (compresstype=2, compress_chunk_size=1024) TABLESPACE pg_default
 --?.*
 --?.*
 Has OIDs: no

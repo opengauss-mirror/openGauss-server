@@ -67,6 +67,43 @@
 #include "utils/fmgroids.h"
 #include "access/heapam.h"
 
+/*
+ * Check whether the current statement supports Stream based on the status of 'context' and 'query'.
+ * If Stream is supported, a copy of the 'query' is returned as a backup in case generating a plan
+ * with Stream fails.
+ */
+static Query* check_shippable(bool *stream_unsupport, Query* query, shipping_context* context)
+{
+    if (u_sess->attr.attr_sql.rewrite_rule & PARTIAL_PUSH) {
+        *stream_unsupport = !context->query_shippable;
+    } else {
+        *stream_unsupport = !context->global_shippable;
+    }
+
+    if (u_sess->attr.attr_sql.enable_dngather) {
+        u_sess->opt_cxt.is_dngather_support = !context->disable_dn_gather;
+    } else {
+        u_sess->opt_cxt.is_dngather_support = false;
+    }
+
+    /* single node do not support parallel query in cursor */
+    if (query->utilityStmt && IsA(query->utilityStmt, DeclareCursorStmt)) {
+        *stream_unsupport = true;
+    }
+
+    if (*stream_unsupport || !IS_STREAM) {
+        output_unshipped_log();
+        set_stream_off();
+    } else {
+        /*
+         * make a copy of query, so we can retry to create an unshippable plan
+         * when we fail to generate a stream plan
+         */
+        return (Query*)copyObject(query);
+    }
+    return NULL;
+}
+
 PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundParams)
 {
     PlannedStmt* result = NULL;
@@ -91,33 +128,7 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
         (void)stream_walker((Node*)query, (void*)(&context));
         disable_unshipped_log(query, &context);
 
-        if (u_sess->attr.attr_sql.rewrite_rule & PARTIAL_PUSH) {
-            stream_unsupport = !context.query_shippable;
-        } else {
-            stream_unsupport = !context.global_shippable;
-        }
-
-        if (u_sess->attr.attr_sql.enable_dngather) {
-            u_sess->opt_cxt.is_dngather_support = !context.disable_dn_gather;
-        } else {
-            u_sess->opt_cxt.is_dngather_support = false;
-        }
-
-        /* single node do not support parallel query in cursor */
-        if (query->utilityStmt && IsA(query->utilityStmt, DeclareCursorStmt)) {
-            stream_unsupport = true;
-        }
-
-        if (stream_unsupport || !IS_STREAM) {
-            output_unshipped_log();
-            set_stream_off();
-        } else {
-            /*
-             * make a copy of query, so we can retry to create an unshippable plan
-             * when we fail to generate a stream plan
-             */
-            re_query = (Query*)copyObject(query);
-        }
+        re_query = check_shippable(&stream_unsupport, query, &context);
     } else {
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
@@ -141,9 +152,26 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
      */
     MemoryContext current_context = CurrentMemoryContext;
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
-    ResourceOwner tempOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "pgxc_planner",
-        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
-    t_thrd.utils_cxt.CurrentResourceOwner = tempOwner;
+    ResourceOwner tempOwner = NULL;
+    /*
+     * If the stream-plan is not used, the currentOwner is used to trace resources instead of
+     * applying for a temporary owner. This prevents the "memory temporarily unavailable" error
+     * caused by memory stacking.
+     */
+    if (IS_STREAM_PLAN) {
+        /*
+         * If the stream-plan is used, a temporary owner is used to trace resources. This helps release
+         * resources in a unified manner when a stream-plan fails to be generated, preventing resource
+         * leakage.
+         */
+        tempOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "pgxc_planner",
+            /*
+             * The memory context of the temporary owner must be the same as the currentOwner to ensure
+             * that they have the same lifecycle
+             */
+            ResourceOwnerGetMemCxt(currentOwner));
+        t_thrd.utils_cxt.CurrentResourceOwner = tempOwner;
+    }
 
     /* we need Coordinator for evaluation, invoke standard planner */
     PG_TRY();
@@ -175,8 +203,19 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
             result->ng_use_planA = use_planA;
             ReSetNgQueryMem(result);
         }
-        /* release resource applied in standard_planner */
-        t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+        /* If tempOwner is not NULL, the current plan is a stream-plan using the SMP technology. */
+        if (tempOwner != NULL) {
+            /*
+             * When the stream-plan is successfully generated, the temporary owner tracks the
+             * resources opened during the plan generation. Now we put the resources of the
+             * stream-plan into the currentOwner for tracking, and release the tempOwner to
+             * further reduce the memory. This greatly avoid the "memory temporarily unavailable"
+             * error, caused by a large amount of SQLs being executed in a transaction/procedure.
+             */
+            ResourceOwnerConcat(currentOwner, tempOwner);
+            t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+            ResourceOwnerDelete(tempOwner);
+        }
     }
     PG_CATCH();
     {
@@ -198,11 +237,13 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
              * Release resources applied in standard_planner, release the tempOwner and reinstate the currentOwner
              * before PG_RE_THROW().
              */
-            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
-            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_LOCKS, false, false);
-            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
-            t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
-            ResourceOwnerDelete(tempOwner);
+            if (tempOwner != NULL) {
+                ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
+                ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_LOCKS, false, false);
+                ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
+                t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+                ResourceOwnerDelete(tempOwner);
+            }
             MemoryContextSwitchTo(ecxt);
             PG_RE_THROW();
         }
@@ -216,11 +257,13 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
         }
 
         /* release resource applied in standard_planner of the PG_TRY. */
-        ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
-        ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_LOCKS, false, false);
-        ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
-        t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
-        ResourceOwnerDelete(tempOwner);
+        if (tempOwner != NULL) {
+            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
+            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_LOCKS, false, false);
+            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
+            t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+            ResourceOwnerDelete(tempOwner);
+        }
 
 #ifdef STREAMPLAN
         if (OidIsValid(lc_replan_nodegroup)) {

@@ -19,7 +19,7 @@ from dbmind import constants, global_vars
 from dbmind.cmd.config_utils import (
     ConfigUpdater, check_config_validity,
     DynamicConfig, load_sys_configs,
-    NULL_TYPE, ENCRYPTED_SIGNAL
+    NULL_TYPE, ENCRYPTED_SIGNAL, DBMIND_CONF_HEADER
 )
 from dbmind.cmd.edbmind import SKIP_LIST
 from dbmind.common import utils, security
@@ -35,7 +35,7 @@ from dbmind.metadatabase.dao.dynamic_config import dynamic_config_set, dynamic_c
 def initialize_and_check_config(confpath, interactive=False):
     if not os.path.exists(confpath):
         raise SetupError('Not found the directory %s.' % confpath)
-    confpath = os.path.abspath(confpath)  # in case of dir changed.
+    confpath = os.path.realpath(confpath)  # in case of dir changed.
     os.chdir(confpath)
     dbmind_conf_path = os.path.join(confpath, constants.CONFILE_NAME)
     dynamic_config_path = os.path.join(confpath, constants.DYNAMIC_CONFIG)
@@ -70,7 +70,7 @@ def initialize_and_check_config(confpath, interactive=False):
             for section, section_comment in config.sections(SKIP_LIST):
                 for option, value, inline_comment in config.items(section):
                     valid, invalid_reason = check_config_validity(
-                        section, option, value, inline_comment
+                        section, option, value
                     )
                     if not valid:
                         raise SetupError(
@@ -151,7 +151,10 @@ def setup_directory_interactive(confpath):
             utils.write_to_terminal(section_comment, color='yellow')
             # Get each configuration item.
             for option, values in config.items(section):
-                default_value, inline_comment = map(str.strip, values.rsplit('#', 1))
+                try:
+                    default_value, inline_comment = map(str.strip, values.rsplit('#', 1))
+                except ValueError:
+                    default_value, inline_comment = values.strip(), ''
                 # If not set default value, the default value is null.
                 if default_value.strip() == '':
                     default_value = NULL_TYPE
@@ -170,7 +173,7 @@ def setup_directory_interactive(confpath):
                         input_value = default_value
 
                     valid, invalid_reason = check_config_validity(
-                        section, option, input_value, inline_comment
+                        section, option, input_value
                     )
                     if not valid:
                         utils.write_to_terminal(
@@ -190,8 +193,7 @@ def setup_directory_interactive(confpath):
     # output configurations
     with open(file=config_dst, mode='w+') as fp:
         # Add header comments (including license and notice).
-        with open(file=os.path.join(confpath, constants.CONFILE_HEADER_NAME)) as header_fp:
-            fp.writelines(header_fp.readlines())
+        fp.write(DBMIND_CONF_HEADER)
         config.write(fp)
 
     initialize_and_check_config(confpath, interactive=True)
@@ -221,8 +223,7 @@ def setup_directory(confpath):
     with open(file=os.path.join(confpath, constants.CONFILE_NAME), mode='r+') as fp:
         old = fp.readlines()
         # Add header comments (including license and notice).
-        with open(file=os.path.join(constants.MISC_PATH, constants.CONFILE_HEADER_NAME)) as header_fp:
-            fp.seek(0)
-            fp.writelines(header_fp.readlines())
+        fp.seek(0)
+        fp.write(DBMIND_CONF_HEADER)
         fp.writelines(old)
     utils.write_to_terminal("Configure directory '%s' has been created successfully." % confpath, color='green')

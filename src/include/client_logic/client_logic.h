@@ -61,3 +61,4 @@ void get_column_setting_description(StringInfo buffer, const ObjectAddress* obje
 void get_cached_column_description(StringInfo buffer, const ObjectAddress* object);
 void get_global_setting_args_description(StringInfo buffer, const ObjectAddress* object);
 void get_column_setting_args_description(StringInfo buffer, const ObjectAddress* object);
+extern Datum get_client_info(PG_FUNCTION_ARGS);

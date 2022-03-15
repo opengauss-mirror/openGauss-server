@@ -132,8 +132,8 @@ def check_time_legality(time_string):
 def is_valid_conf(filepath):
     if os.path.exists(filepath):
         file_abs_path = filepath
-    elif os.path.exists(os.path.abspath(os.path.join(os.getcwd(), filepath))):
-        file_abs_path = os.path.abspath(os.path.join(os.getcwd(), filepath))
+    elif os.path.exists(os.path.realpath(os.path.join(os.getcwd(), filepath))):
+        file_abs_path = os.path.realpath(os.path.join(os.getcwd(), filepath))
     else:
         print("FATAL: Not found the configuration file %s." % filepath, file=sys.stderr)
         return False

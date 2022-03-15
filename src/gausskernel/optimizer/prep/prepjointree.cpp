@@ -107,8 +107,10 @@ static Node *pull_up_sublinks_targetlist(PlannerInfo *root, Node *node,
                               Node *jtnode, Relids *relids,
                               Node **newTargetList,
                               Node *whereQuals);
+
 #ifndef ENABLE_MULTIPLE_NODES
 static bool find_rownum_in_quals(PlannerInfo *root);
+static bool contains_swctes(const PlannerInfo *root);
 #endif
 
 /*
@@ -154,6 +156,34 @@ void replace_empty_jointree(Query *parse)
     parse->jointree->fromlist = list_make1(rtr);
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * helper function to check if SWCB ctes contaisn in current SubQuery, normally help us to
+ * idenfity if it is OK to appy SWCB related optimization steps
+ */
+static bool contains_swctes(const PlannerInfo *root)
+{
+    if (root->parse == NULL || root->parse->cteList == NIL) {
+        return false;
+    }
+
+    List     *cteList = root->parse->cteList;
+    ListCell *lc = NULL;
+    bool      found = false;
+    foreach(lc, cteList) {
+        CommonTableExpr *cte = (CommonTableExpr *)lfirst(lc);
+
+        /* check if cte from parse->ctelist is a swcb converted */
+        if (cte->swoptions != NULL) {
+            found = true;
+            break;
+        }
+    }
+
+    return found;
+}
+#endif
+
 /*
  * pull_up_sublinks
  *		Attempt to pull up ANY and EXISTS SubLinks to be treated as
@@ -190,6 +220,11 @@ void pull_up_sublinks(PlannerInfo* root)
 #ifndef ENABLE_MULTIPLE_NODES
     /* if quals include rownum, forbid pulling up sublinks */
     if (find_rownum_in_quals(root)) {
+        return;
+    }
+
+    /* check existance of SWCB converted */
+    if (contains_swctes(root)) {
         return;
     }
 #endif

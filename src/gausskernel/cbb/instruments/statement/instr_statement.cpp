@@ -1399,12 +1399,10 @@ void instr_stmt_report_basic_info()
     }
     if (to_update_db_name || to_update_user_name || to_update_client_addr) {
         ResourceOwner old_cur_owner = t_thrd.utils_cxt.CurrentResourceOwner;
-        MemoryContext old_ctx = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
-        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Full/Slow SQL",
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(old_cur_owner, "Full/Slow SQL",
             THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX));
-        (void)MemoryContextSwitchTo(old_ctx);
 
-        old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+        MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
         if (to_update_db_name) {
             u_sess->statement_cxt.db_name = get_database_name(beentry->st_databaseid);
         }

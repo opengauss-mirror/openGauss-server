@@ -763,7 +763,9 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                     if (curPartOid != gpiScan->currPartOid) {
                         GPISetCurrPartOid(gpiScan, curPartOid);
                         if (!GPIGetNextPartRelation(gpiScan, CurrentMemoryContext, AccessShareLock)) {
-                            ItemIdMarkDead(curitemid);
+                            if (CheckPartitionIsInvisible(gpiScan)) {
+                                ItemIdMarkDead(curitemid);
+                            }
                             opaque->btpo_flags |= BTP_HAS_GARBAGE;
                             if (nbuf != InvalidBuffer) {
                                 MarkBufferDirtyHint(nbuf, true);

@@ -2303,6 +2303,41 @@ void LockReleaseCurrentOwner(void)
     }
 }
 
+/* clear all info of CurrentResourceOwner in locallock and release the lock if no other owners. */
+void ReleaseLockIfHeld(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
+{
+    LOCKMETHODID lockmethodid = locktag->locktag_lockmethodid;
+    LockMethod lockMethodTable;
+    LOCALLOCKTAG localtag;
+    LOCALLOCK *locallock = NULL;
+
+    CHECK_LOCKMETHODID(lockmethodid);
+    lockMethodTable = LockMethods[lockmethodid];
+    CHECK_LOCKMODE(lockmode, lockMethodTable);
+
+#ifdef LOCK_DEBUG
+    if (LOCK_DEBUG_ENABLED(locktag))
+        ereport(LOG, (errmsg("ReleaseLockIfHeld: lock [%u,%u] %s", locktag->locktag_field1, locktag->locktag_field2,
+                             lockMethodTable->lockModeNames[lockmode])));
+#endif
+
+    /*
+     * Find the LOCALLOCK entry for this lock and lockmode
+     */
+    errno_t rc = memset_s(&localtag, sizeof(localtag), 0, sizeof(localtag)); /* must clear padding */
+    securec_check(rc, "", "");
+    localtag.lock = *locktag;
+    localtag.mode = lockmode;
+
+    locallock = (LOCALLOCK *)hash_search(t_thrd.storage_cxt.LockMethodLocalHash, (void *)&localtag, HASH_FIND, NULL);
+    if ((locallock == NULL) || locallock->nLocks <= 0) {
+        ereport(LOG, (errmsg("you don't own a lock of type %s", lockMethodTable->lockModeNames[lockmode])));
+        return;
+    }
+
+    ReleaseLockIfHeld(locallock, sessionLock);
+}
+
 /*
  * ReleaseLockIfHeld
  *		Release any session-level locks on this lockable object if sessionLock

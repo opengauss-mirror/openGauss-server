@@ -4020,7 +4020,8 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     errmsg("can not accept connection in pending mode.")));
         } else {
 #ifdef ENABLE_MULTIPLE_NODES
-            if (STANDBY_MODE == hashmdata->current_mode && (!IS_DISASTER_RECOVER_MODE || GTM_FREE_MODE)) {
+            if (STANDBY_MODE == hashmdata->current_mode && (!IS_DISASTER_RECOVER_MODE || GTM_FREE_MODE ||
+                                                            g_instance.attr.attr_storage.recovery_parse_workers > 1)) {
                 ereport(ERROR, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("can not accept connection in standby mode.")));
             }
@@ -4669,9 +4670,9 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.SysLoggerPID, SIGHUP);
         /* signal the auditor process */
         if (g_instance.pid_cxt.PgAuditPID != NULL) {
-            Assert(!dummyStandbyMode);
             for (int i = 0; i < g_instance.audit_cxt.thread_num; ++i) {
                 if (g_instance.pid_cxt.PgAuditPID[i] != 0) {
+                    Assert(!dummyStandbyMode);
                     signal_child(g_instance.pid_cxt.PgAuditPID[i], SIGHUP);
                 }
             }
@@ -6073,7 +6074,6 @@ static void reaper(SIGNAL_ARGS)
                  * nothing left for it to do.
                  */
                 if (g_instance.pid_cxt.PgAuditPID != NULL) {
-                    Assert(!dummyStandbyMode);
                     pgaudit_stop_all();
                 }
             } else {
@@ -6354,8 +6354,8 @@ static void reaper(SIGNAL_ARGS)
         if (g_instance.pid_cxt.PgAuditPID != NULL) {
             bool is_audit_thread = false;
             for (int i = 0; i < g_instance.audit_cxt.thread_num; ++i) {
-                Assert(!dummyStandbyMode);
                 if (pid == g_instance.pid_cxt.PgAuditPID[i]) {
+                    Assert(!dummyStandbyMode);
                     g_instance.pid_cxt.PgAuditPID[i] = 0;
                     is_audit_thread = true; 
                     if (!EXIT_STATUS_0(exitstatus))
@@ -7211,7 +7211,6 @@ static void PostmasterStateMachine(void)
 
                     /*  signal the auditor process */
                     if (g_instance.pid_cxt.PgAuditPID != NULL) {
-                        Assert(!dummyStandbyMode);
                         pgaudit_stop_all();
                     }
 

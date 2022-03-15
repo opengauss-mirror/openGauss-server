@@ -3014,8 +3014,10 @@ static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage *reply, bool *needRef
     }
     if ((walsnd->log_ctrl.apply_rate >> SHIFT_SPEED) > 1) {
         if (calculate_time_diff > CALCULATE_INTERVAL_MILLISECOND || IsRtoRpoOverTarget()) {
-            walsnd->log_ctrl.apply_rate = LogCtrlCountBigSpeed(walsnd->log_ctrl.apply_rate,
-                                                              (uint64)(periodTotalApply / calculate_time_diff));
+            if (needApply != 0) {
+                walsnd->log_ctrl.apply_rate = LogCtrlCountBigSpeed(walsnd->log_ctrl.apply_rate,
+                                                                  (uint64)(periodTotalApply / calculate_time_diff));
+            }
             walsnd->log_ctrl.prev_calculate_time = reply->sendTime;
         }
     } else {
@@ -4210,6 +4212,11 @@ static void InitWalSnd(void)
                 walsnd->lastRequestTimestamp = GetCurrentTimestamp();
                 rc = memset_s(g_instance.streaming_dr_cxt.targetBarrierId, MAX_BARRIER_ID_LENGTH, 0,
                               sizeof(g_instance.streaming_dr_cxt.targetBarrierId));
+                securec_check(rc, "\0", "\0");
+                SpinLockAcquire(&g_instance.streaming_dr_cxt.mutex);
+                rc = memset_s(g_instance.streaming_dr_cxt.currentBarrierId, MAX_BARRIER_ID_LENGTH, 0,
+                              sizeof(g_instance.streaming_dr_cxt.currentBarrierId));
+                SpinLockRelease(&g_instance.streaming_dr_cxt.mutex);
                 securec_check(rc, "\0", "\0");
             }
             walsnd->isTermChanged = false;
@@ -6875,9 +6882,11 @@ static void ProcessHadrReplyMessage()
     HadrReplyMessage hadrReply;
     pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&hadrReply, sizeof(HadrReplyMessage));
     SpinLockAcquire(&g_instance.streaming_dr_cxt.mutex);
-    int rc = strncpy_s((char *)g_instance.streaming_dr_cxt.targetBarrierId, MAX_BARRIER_ID_LENGTH,
-        hadrReply.targetBarrierId, MAX_BARRIER_ID_LENGTH - 1);
-    securec_check(rc, "\0", "\0");
+    if (BARRIER_LT((char *)g_instance.streaming_dr_cxt.targetBarrierId, (char *)hadrReply.targetBarrierId)) {
+        int rc = strncpy_s((char *)g_instance.streaming_dr_cxt.targetBarrierId, MAX_BARRIER_ID_LENGTH,
+            hadrReply.targetBarrierId, MAX_BARRIER_ID_LENGTH - 1);
+        securec_check(rc, "\0", "\0");
+    }
     SpinLockRelease(&g_instance.streaming_dr_cxt.mutex);
 }
 

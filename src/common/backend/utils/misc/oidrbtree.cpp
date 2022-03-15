@@ -26,15 +26,6 @@
 #include "utils/oidrbtree.h"
 #include "utils/memutils.h"
 
-MemoryContext GetOidRBTreeMemory()
-{
-    if (!t_thrd.security_policy_cxt.OidRBTreeMemoryContext) {
-        t_thrd.security_policy_cxt.OidRBTreeMemoryContext = AllocSetContextCreate(TopMemoryContext, "OidRBTreeMemory",
-            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-    }
-    return t_thrd.security_policy_cxt.OidRBTreeMemoryContext;
-}
-
 void DeleteOidRBTreeMemory()
 {
     if (t_thrd.security_policy_cxt.OidRBTreeMemoryContext != NULL) {
@@ -72,9 +63,7 @@ static void OidRBCombine(RBNode* existing, const RBNode* newdata, void* arg)
 /* Allocator function for oid rbtree */
 static RBNode* OidRBAlloc(void* arg)
 {
-    MemoryContext oldContext = MemoryContextSwitchTo(GetOidRBTreeMemory());
     OidRBNode* oidRBNode = static_cast<OidRBNode*>(palloc(sizeof(OidRBNode)));
-    (void)MemoryContextSwitchTo(oldContext);
     return (RBNode*)oidRBNode;
 }
 
@@ -87,9 +76,7 @@ static void OidRBDealloc(RBNode* rbNode, void* arg)
 
 OidRBTree* CreateOidRBTree()
 {
-    MemoryContext oldContext = MemoryContextSwitchTo(GetOidRBTreeMemory());
     OidRBTree* oidRBTree = rb_create(sizeof(OidRBNode), OidRBComparator, OidRBCombine, OidRBAlloc, OidRBDealloc, NULL);
-    (void)MemoryContextSwitchTo(oldContext);
     return oidRBTree;
 }
 
@@ -97,14 +84,12 @@ static List* OidRBTreeGetNodeList(OidRBTree& oidRBtree)
 {
     List* nodeList = NIL;
     OidRBTree* tree = &oidRBtree;
-    MemoryContext oldContext = MemoryContextSwitchTo(GetOidRBTreeMemory());
     rb_begin_iterate(tree, InvertedWalk);
     RBNode *node = rb_iterate(tree);
     while (node != NULL) {
         nodeList = lappend(nodeList, node);
         node = rb_iterate(tree);
     }
-    (void)MemoryContextSwitchTo(oldContext);
     return nodeList;
 }
 

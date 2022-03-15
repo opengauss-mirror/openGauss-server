@@ -203,7 +203,7 @@ typedef struct AuditIndexItem {
  * Brief        : audit index table
  * Description    :
  */
-typedef struct AuditIndexTable {
+typedef struct AuditIndexTableNew {
     uint32 maxnum;                          /* max count of the audit index item */
     uint32 begidx;                          /* the position of the first audit index item */
     uint32 thread_num;                      /* the running audit thread num */
@@ -212,25 +212,25 @@ typedef struct AuditIndexTable {
     uint32 count;                           /* the count of the audit index item */
     pg_time_t last_audit_time;              /* the audit time of the latest audit record */
     AuditIndexItem data[1];
-} AuditIndexTable;
+} AuditIndexTableNew;
 
 /*
  * Brief        : old audit index table
  * Description    :
  */
-typedef struct AuditIndexTableOld {
+typedef struct AuditIndexTable {
     uint32 maxnum;             /* max count of the audit index item */
     uint32 begidx;             /* the position of the first audit index item */
     uint32 curidx;             /* the position of the current audit index item */
     uint32 count;              /* the count of the audit index item */
     pg_time_t last_audit_time; /* the audit time of the latest audit record */
     AuditIndexItem data[1];
-} AuditIndexTableOld;
+} AuditIndexTable;
 
 static const char audit_indextbl_file[] = "index_table_new";
 static const char audit_indextbl_old_file[] = "index_table";
-static const int indextbl_header_size = offsetof(AuditIndexTable, data);
-static const int old_indextbl_header_size = offsetof(AuditIndexTableOld, data);
+static const int indextbl_header_size = offsetof(AuditIndexTableNew, data);
+static const int old_indextbl_header_size = offsetof(AuditIndexTable, data);
 
 static const char* AuditTypeDescs[] = {"unknown",
                                        "login_success",
@@ -401,7 +401,6 @@ static void pgaudit_indexfile_upgrade(void);
 static void pgaudit_indexfile_sync(const char* mode, bool allow_errors);
 static void pgaudit_rewrite_indexfile(void);
 static void pgaudit_indextbl_init_new(void);
-void extracted836(errno_t &errorno, int thread_num);
 static void pgaudit_reset_indexfile();
 static const char* pgaudit_string_field(AuditData* adata, int num);
 static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS], 
@@ -808,11 +807,11 @@ void pgaudit_stop_all(void)
 {
     for (int i = 0; i < g_instance.audit_cxt.thread_num; ++i) {
         if (g_instance.pid_cxt.PgAuditPID[i] != 0) {
+            Assert(!dummyStandbyMode);
             signal_child(g_instance.pid_cxt.PgAuditPID[i], SIGQUIT, -1);
         }
     }
     audit_process_cxt_exit();
-    ereport(LOG, (errmsg("parameter audit_enabled is set to false, terminate auditor process.")));
 }
 
 /*
@@ -1471,7 +1470,6 @@ static void pgaudit_cleanup(void)
         if (g_instance.audit_cxt.audit_indextbl->count > 0) {
             --g_instance.audit_cxt.audit_indextbl->count;
         }
-        g_instance.audit_cxt.audit_indextbl->begidx = (index + 1) % g_instance.audit_cxt.audit_indextbl->maxnum;
         errorno = memset_s(item, sizeof(AuditIndexItem), 0, sizeof(AuditIndexItem));
         securec_check(errorno, "\0", "\0");
 
@@ -1487,7 +1485,9 @@ static void pgaudit_cleanup(void)
         if (index == earliest_idx) {
             break;
         }
+
         /* udpate audit index for next loop  */
+        g_instance.audit_cxt.audit_indextbl->begidx = (index + 1) % g_instance.audit_cxt.audit_indextbl->maxnum;
         index = g_instance.audit_cxt.audit_indextbl->begidx;
     }
     LWLockRelease(g_instance.audit_cxt.index_file_lock);
@@ -2018,7 +2018,7 @@ static void pgaudit_read_indexfile(const char* audit_directory)
     struct stat statbuf;
     char tblfile_path[MAXPGPATH] = {0};
     size_t nread = 0;
-    AuditIndexTable indextbl;
+    AuditIndexTableNew indextbl;
 
     int rc = snprintf_s(tblfile_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", audit_directory, audit_indextbl_file);
     securec_check_intval(rc,,);
@@ -2057,7 +2057,7 @@ static void pgaudit_read_indexfile(const char* audit_directory)
         pfree_ext(g_instance.audit_cxt.audit_indextbl);
 
         /* read the whole audit index table */
-        g_instance.audit_cxt.audit_indextbl = (AuditIndexTable *)MemoryContextAllocZero(
+        g_instance.audit_cxt.audit_indextbl = (AuditIndexTableNew *)MemoryContextAllocZero(
             g_instance.audit_cxt.global_audit_context,
             (indextbl.maxnum * sizeof(AuditIndexItem) + indextbl_header_size));
         errorno =
@@ -2258,7 +2258,7 @@ static void pgaudit_rewrite_indexfile(void)
     FILE* fp = NULL;
     char tblfile_path[MAXPGPATH] = {0};
     size_t nread = 0;
-    AuditIndexTableOld old_index_tbl;
+    AuditIndexTable old_index_tbl;
 
     int rc = snprintf_s(tblfile_path,
         MAXPGPATH,
@@ -2288,7 +2288,7 @@ static void pgaudit_rewrite_indexfile(void)
         pfree_ext(g_instance.audit_cxt.audit_indextbl);
         pfree_ext(g_instance.audit_cxt.audit_indextbl_old);
         /* read the whole audit index table */
-        g_instance.audit_cxt.audit_indextbl_old = (AuditIndexTableOld *)MemoryContextAllocZero(
+        g_instance.audit_cxt.audit_indextbl_old = (AuditIndexTable *)MemoryContextAllocZero(
             g_instance.audit_cxt.global_audit_context,
             (old_index_tbl.maxnum * sizeof(AuditIndexItem) + old_indextbl_header_size));
         errorno = memcpy_s(g_instance.audit_cxt.audit_indextbl_old,
@@ -2296,7 +2296,7 @@ static void pgaudit_rewrite_indexfile(void)
             &old_index_tbl, old_indextbl_header_size);
         securec_check(errorno, "\0", "\0");
         /* rewrite old index table to new index table */
-        g_instance.audit_cxt.audit_indextbl = (AuditIndexTable *)MemoryContextAllocZero(
+        g_instance.audit_cxt.audit_indextbl = (AuditIndexTableNew *)MemoryContextAllocZero(
             g_instance.audit_cxt.global_audit_context,
             (old_index_tbl.maxnum * sizeof(AuditIndexItem) + indextbl_header_size));
         g_instance.audit_cxt.audit_indextbl->maxnum = old_index_tbl.maxnum;
@@ -2334,7 +2334,7 @@ static void pgaudit_indextbl_init_new(void)
     if (g_instance.audit_cxt.audit_indextbl == NULL) {
         ereport(LOG, (errmsg("pgaudit_indextbl_init_new first init")));
         g_instance.audit_cxt.audit_indextbl =
-            (AuditIndexTable *)MemoryContextAllocZero(g_instance.audit_cxt.global_audit_context,
+            (AuditIndexTableNew *)MemoryContextAllocZero(g_instance.audit_cxt.global_audit_context,
             (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size);
         g_instance.audit_cxt.audit_indextbl->maxnum = u_sess->attr.attr_security.Audit_RemainThreshold + 1;
         g_instance.audit_cxt.audit_indextbl->count = 0; /* audit files count will be updated by auditfile_open */
@@ -2417,27 +2417,31 @@ static void pgaudit_indextbl_init_new(void)
     return;
 }
 
-static void pgaudit_udpate_maxnum()
+static void pgaudit_update_maxnum()
 {
     errno_t errorno = EOK;
     int thread_num = g_instance.attr.attr_security.audit_thread_num;
 
     int new_indextbl_data_lenth = (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem);
-    AuditIndexTable *new_indextbl = (AuditIndexTable *)MemoryContextAllocZero(
+    AuditIndexTableNew *new_indextbl = (AuditIndexTableNew *)MemoryContextAllocZero(
         g_instance.audit_cxt.global_audit_context, new_indextbl_data_lenth + indextbl_header_size);
 
     /* curidx and latest_idx should be updated later from old index table file */
     new_indextbl->begidx = 0;
     new_indextbl->maxnum = u_sess->attr.attr_security.Audit_RemainThreshold + 1;
+    new_indextbl->last_audit_time = g_instance.audit_cxt.audit_indextbl->last_audit_time;
+    new_indextbl->thread_num = g_instance.audit_cxt.audit_indextbl->thread_num;
 
     if (g_instance.audit_cxt.audit_indextbl->count > 0) {
         AuditIndexItem *item = NULL;
         uint32 latest_idx = g_instance.audit_cxt.audit_indextbl->latest_idx;
+        uint32 last_idx = (latest_idx == 0) ? (g_instance.audit_cxt.audit_indextbl->maxnum - 1): (latest_idx - 1);
         uint32 index = g_instance.audit_cxt.audit_indextbl->begidx;
         uint32 pos = new_indextbl->begidx;
         do {
             item = g_instance.audit_cxt.audit_indextbl->data + index;
-            errorno = memcpy_s(new_indextbl->data + pos, (new_indextbl_data_lenth - pos), item, sizeof(AuditIndexItem));
+            errorno = memcpy_s(new_indextbl->data + pos, (new_indextbl_data_lenth - (pos * sizeof(AuditIndexItem))),
+                               item, sizeof(AuditIndexItem));
             securec_check(errorno, "\0", "\0");
             new_indextbl->count++;
 
@@ -2445,11 +2449,11 @@ static void pgaudit_udpate_maxnum()
              * finished copy old index table file from range [begin, latest_idx)
              * then update new index table file curidxes
              */
-            if (index == (latest_idx - 1)) {
+            if (index == last_idx) {
                 for (int i = 0; i < thread_num; ++i) {
-                    new_indextbl->curidx[i] = pos - thread_num + i;
+                    new_indextbl->curidx[i] = pos - thread_num + 1 + i;
                 }
-                new_indextbl->latest_idx = pos;
+                new_indextbl->latest_idx = pos + 1;
                 break;
             }
 
@@ -2487,7 +2491,7 @@ static void pgaudit_reset_indexfile()
     /* If file remain threshold parameter changed, than copy the old audit index table to the new table */
     if (old_maxnum != (uint32)u_sess->attr.attr_security.Audit_RemainThreshold + 1) {
         LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
-        pgaudit_udpate_maxnum();
+        pgaudit_update_maxnum();
         LWLockRelease(g_instance.audit_cxt.index_file_lock);
     }
 
@@ -2996,17 +3000,19 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
      * load the index audit table from global index audit table instance
      * then use the local thread one when iterate all audit files
      */
+    pgaudit_read_indexfile(audit_dir);
     LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
-    t_thrd.audit.audit_indextbl = NULL;
-    int indextbl_len =
-        (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size;
-    t_thrd.audit.audit_indextbl = (AuditIndexTable *)palloc0(indextbl_len);
-    error_t errorno =
-        memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
-    securec_check(errorno, "\0", "\0");
-
+    pfree_ext(t_thrd.audit.audit_indextbl);
+    if (g_instance.audit_cxt.audit_indextbl != NULL) {
+        int indextbl_len =
+            (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size;
+        t_thrd.audit.audit_indextbl = (AuditIndexTableNew *)palloc0(indextbl_len);
+        error_t errorno =
+            memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
+        securec_check(errorno, "\0", "\0");
+    }
     LWLockRelease(g_instance.audit_cxt.index_file_lock);
-    
+
     per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
     oldcontext = MemoryContextSwitchTo(per_query_ctx);
 
@@ -3017,8 +3023,6 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
 
     MemoryContextSwitchTo(oldcontext);
 
-    ereport(DEBUG1,
-            (errmsg("pg_query_audit count: %d indextbl_len: %d", t_thrd.audit.audit_indextbl->count, indextbl_len)));
     if (begtime < endtime && t_thrd.audit.audit_indextbl != NULL && t_thrd.audit.audit_indextbl->count > 0) {
         bool satisfied = false;
         uint32 index = 0;
@@ -3073,14 +3077,17 @@ Datum pg_delete_audit(PG_FUNCTION_ARGS)
      * load the index audit table from global index audit table instance
      * then use the local thread one when iterate all audit files
      */
+    pgaudit_read_indexfile(g_instance.attr.attr_security.Audit_directory);
     LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
     pfree_ext(t_thrd.audit.audit_indextbl);
-    int indextbl_len =
-        (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size;
-    t_thrd.audit.audit_indextbl = (AuditIndexTable *)palloc0(indextbl_len);
-    error_t errorno =
-        memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
-    securec_check(errorno, "\0", "\0");
+    if (g_instance.audit_cxt.audit_indextbl != NULL) {
+        int indextbl_len =
+            (u_sess->attr.attr_security.Audit_RemainThreshold + 1) * sizeof(AuditIndexItem) + indextbl_header_size;
+        t_thrd.audit.audit_indextbl = (AuditIndexTableNew *)palloc0(indextbl_len);
+        error_t errorno =
+            memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
+        securec_check(errorno, "\0", "\0");
+    }
     LWLockRelease(g_instance.audit_cxt.index_file_lock);
 
     int thread_num = g_instance.audit_cxt.thread_num;

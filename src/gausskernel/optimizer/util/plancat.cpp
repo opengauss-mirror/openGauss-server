@@ -316,7 +316,7 @@ static void acquireSamplesForPartitionedRelation(
                     continue;
                 }
 
-                part = partitionOpen(relation, partitionOid, lmode);
+                part = partitionOpen(relation, partitionOid, NoLock);
                 currentPartPages = PartitionGetNumberOfBlocksInFork(relation, part, MAIN_FORKNUM, true);
                 partitionClose(relation, part, lmode);
 

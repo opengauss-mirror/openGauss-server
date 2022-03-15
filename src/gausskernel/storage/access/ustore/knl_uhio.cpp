@@ -51,7 +51,15 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
     BlockNumber     targetBlock;
     BlockNumber     otherBlock;
     bool            needLock = false;
-    bool last_page_tested = false;
+
+    /*
+     * Blocks that extended one by one are different from bulk-extend blocks, and
+     * are not recorded into FSM. As its creator session close this realtion, they
+     * can not be used by any other body. It is especially obvious for partition
+     * bulk insert. Here, if no avaiable found in FSM, we check the last block to
+     * reuse the 'leaked free space' mentioned earlier.
+     */
+    bool test_last_block = false;
 
     len = SHORTALIGN(len);
     /*
@@ -125,7 +133,6 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
             if (nblocks > 0) {
                 targetBlock = nblocks - 1;
             }
-            last_page_tested = true;
         }
     }
 
@@ -147,7 +154,13 @@ loop:
         if (otherBuffer == InvalidBuffer) {
             /* easy case */
             buffer = ReadBufferBI(relation, targetBlock, bistate);
-            LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+            if (!TryLockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE, !test_last_block)) {
+                Assert(test_last_block);
+                ReleaseBuffer(buffer);
+
+                /* someone is using this block, give up and extend. */
+                break;
+            }
         } else if (otherBlock == targetBlock) {
             buffer = otherBuffer;
             /* also easy case */
@@ -220,12 +233,12 @@ loop:
          *
          * The best is to record all pages into FSM using bulk-extend in later.
          */
-        if (targetBlock == InvalidBlockNumber && !last_page_tested) {
+        if (targetBlock == InvalidBlockNumber && !test_last_block && otherBuffer == InvalidBuffer) {
             BlockNumber nblocks = RelationGetNumberOfBlocks(relation);
             if (nblocks > 0) {
                 targetBlock = nblocks - 1;
             }
-            last_page_tested = true;
+            test_last_block = true;
         }
     }
 

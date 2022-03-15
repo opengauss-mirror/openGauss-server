@@ -337,6 +337,8 @@ const char* heap3_type_name(uint8 subtype)
         return "heap3_new_cid";
     } else if (info == XLOG_HEAP3_REWRITE) {
         return "heap3_rewrite";
+    } else if (info == XLOG_HEAP3_INVALID) {
+        return "heap3_invalid";
     } else {
         return "unkown_type";
     }
@@ -350,6 +352,26 @@ void heap3_desc(StringInfo buf, XLogReaderState *record)
         appendStringInfo(buf, "XLOG_HEAP_NEW_CID");
     } else if (info == XLOG_HEAP3_REWRITE) {
         appendStringInfo(buf, "XLOG_HEAP2_REWRITE");
-    } else
+    } else if (info == XLOG_HEAP3_INVALID) {
+        xl_heap_invalid *xlrecInvalid = (xl_heap_invalid *)XLogRecGetData(record);
+
+        appendStringInfo(buf, "invalid: cutoff xid %lu", xlrecInvalid->cutoff_xid);
+
+        if (!XLogRecHasBlockImage(record, 0)) {
+            Size datalen;
+            OffsetNumber *offsets = (OffsetNumber *)XLogRecGetBlockData(record, 0, &datalen);
+            if (datalen > 0) {
+                OffsetNumber *offsets_end = (OffsetNumber *)((char *)offsets + datalen);
+
+                appendStringInfo(buf, " offsets: [");
+                while (offsets < offsets_end) {
+                    appendStringInfo(buf, " %d ", *offsets);
+                    offsets++;
+                }
+                appendStringInfo(buf, "]");
+            }
+        }
+    } else {
         appendStringInfo(buf, "UNKNOWN");
+    }
 }

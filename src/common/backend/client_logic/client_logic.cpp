@@ -50,6 +50,7 @@
 #include "tcop/utility.h"
 #include "pgxc/pgxc.h"
 #include "utils/fmgroids.h"
+#include "funcapi.h"
 
 const size_t ENCRYPTED_VALUE_MIN_LENGTH = 170;
 const size_t ENCRYPTED_VALUE_MAX_LENGTH = 1024;
@@ -1323,4 +1324,29 @@ ClientLogicColumnRef *get_column_enc_def(Oid rel_oid, const char *col_name)
     ReleaseSysCache(cek_tup);
 
     return enc_def;
+}
+
+Datum get_client_info(PG_FUNCTION_ARGS)
+{
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*)fcinfo->resultinfo;
+    TupleDesc tupdesc;
+    Tuplestorestate* tupstore = NULL;
+    const int COLUMN_NUM = 2;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+    tupdesc = CreateTemplateTupleDesc(COLUMN_NUM, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "sid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "client_info", TEXTOID, -1, 0);
+ 
+    tupstore = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+ 
+    (void)MemoryContextSwitchTo(oldcontext);
+    if (ENABLE_THREAD_POOL) {
+        g_threadPoolControler->GetSessionCtrl()->getSessionClientInfo(rsinfo->setResult, rsinfo->setDesc);
+    }
+ 
+    tuplestore_donestoring(rsinfo->setResult);
+    return (Datum)0;
 }

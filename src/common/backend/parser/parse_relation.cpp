@@ -1134,6 +1134,11 @@ Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockm
         TryUnlockAllAccounts();
     }
 
+    if (rel->partMap && rel->partMap->type == PART_TYPE_INTERVAL) {
+        /* take AccessShareLock on ADD_PARTITION_ACTION to avoid concurrency with new partition operations. */
+        LockRelationForAccessIntervalPartitionTab(rel);
+    }
+
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         if (u_sess->attr.attr_sql.enable_parallel_ddl && !isFirstNode && isCreateView) {
             UnlockRelation(rel, lockmode);

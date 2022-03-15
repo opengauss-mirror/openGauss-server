@@ -454,6 +454,15 @@ void ExplainQuery(
          */
         if (es.format == EXPLAIN_FORMAT_TEXT)
             appendStringInfoString(es.str, "Query rewrites to nothing\n");
+
+        /*
+         * In centralized mode, non-stream plans only support EXPLAIN_NORMAL.
+         * So set explain_perf_mode to EXPLAIN_NORMAL here.
+         */
+        if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL &&
+            !(IS_STREAM_PLAN && u_sess->exec_cxt.under_stream_runtime)) {
+            t_thrd.explain_cxt.explain_perf_mode = EXPLAIN_NORMAL;
+        }
     } else {
         ListCell* l = NULL;
 

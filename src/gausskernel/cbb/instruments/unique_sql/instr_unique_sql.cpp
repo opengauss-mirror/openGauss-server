@@ -494,30 +494,6 @@ void UpdateUniqueSQLVecSortStats(Batchsortstate* state, uint64 spill_count, Time
     }
 }
 
-static void mask_unique_sql_str(UniqueSQL* unique_sql)
-{
-    errno_t rc;
-
-    /* hide password */
-    if (unique_sql->unique_sql != NULL) {
-        char* mask_str = NULL;
-        mask_str = maskPassword(unique_sql->unique_sql);
-        if (mask_str != NULL) {
-            rc = memset_s(unique_sql->unique_sql, UNIQUE_SQL_MAX_LEN - 1, 0, UNIQUE_SQL_MAX_LEN - 1);
-            securec_check(rc, "\0", "\0");
-
-            /* after calling maskPassword, mask_str can be longer than original string,
-             * now the length of masked password('*..*') is fixed to 'password_min_length'(GUC) */
-            size_t valid_mask_len = strlen(mask_str) > (size_t)(UNIQUE_SQL_MAX_LEN - 1)
-                                        ? (size_t)(UNIQUE_SQL_MAX_LEN - 1)
-                                        : strlen(mask_str);
-            rc = memcpy_s(unique_sql->unique_sql, UNIQUE_SQL_MAX_LEN - 1, mask_str, valid_mask_len);
-            securec_check(rc, "\0", "\0");
-            pfree(mask_str);
-        }
-    }
-}
-
 static void set_unique_sql_string_in_entry(UniqueSQL* entry, Query* query, const char* sql, int32 multi_sql_offset)
 {
     errno_t rc = EOK;
@@ -536,7 +512,6 @@ static void set_unique_sql_string_in_entry(UniqueSQL* entry, Query* query, const
         // generate and store normalized query string
         if (normalized_unique_querystring(query, sql, entry->unique_sql, UNIQUE_SQL_MAX_LEN - 1,
             multi_sql_offset)) {
-            mask_unique_sql_str(entry);
             entry->unique_sql = trim(entry->unique_sql);
         } else {
             ereport(LOG,

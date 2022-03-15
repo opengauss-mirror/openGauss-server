@@ -12,11 +12,13 @@
 # See the Mulan PSL v2 for more details.
 
 import sys
+import os
 
 try:
     from dbmind.components.sqldiag import main
 except ImportError:
-    sys.path.append('..')
+    libpath = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..')
+    sys.path.append(libpath)
     from sqldiag import main
 
 main(sys.argv[1:])

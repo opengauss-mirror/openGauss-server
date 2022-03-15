@@ -20,7 +20,7 @@ from dbmind.common.utils import where_am_i
 
 def list_components():
     """Return all components in current directory."""
-    curr_dir = os.path.abspath(os.path.dirname(__file__))
+    curr_dir = os.path.realpath(os.path.dirname(__file__))
     components = list(
         map(lambda tup: tup[1],
             pkgutil.iter_modules((curr_dir,)))

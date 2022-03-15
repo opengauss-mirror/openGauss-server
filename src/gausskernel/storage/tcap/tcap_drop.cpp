@@ -1252,6 +1252,9 @@ void TrDrop(const DropStmt* drop, const ObjectAddresses *objects, DropBehavior b
     TrUpdateBaseid(&baseDesc);
     relation_close(baseRel, NoLock);
 
+    Oid relid = RelationGetRelid(baseRel);
+    UpdatePgObjectChangecsn(relid, baseRel->rd_rel->relkind);
+
     /*
      * Drop all the objects in the proper order.
      */

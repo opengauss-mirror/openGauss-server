@@ -37,7 +37,29 @@ RETURNS text LANGUAGE INTERNAL STABLE STRICT AS 'sys_connect_by_path';
 ------
 -- int16
 ------
+-- drop operators that depends on int16 first.
+do $$
+BEGIN
+    for ans in select case when count(*) = 1 then true else false end as ans from (select typname from pg_type where typname = 'int16' limit 1)
+    LOOP
+        if ans.ans = true then
+            DROP OPERATOR IF EXISTS pg_catalog.=(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog.<>(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog.<(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog.<=(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog.>(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog.>=(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog.+(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog.-(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog.*(int16, int16) CASCADE;
+            DROP OPERATOR IF EXISTS pg_catalog./(int16, int16) CASCADE;
+        end if;
+        exit;
+    END LOOP;
+END$$;
+
 DROP TYPE IF EXISTS pg_catalog.int16 CASCADE;
+DROP TYPE IF EXISTS pg_catalog._int16 CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 34, 0, b;
 CREATE TYPE pg_catalog.int16;
 

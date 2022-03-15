@@ -422,7 +422,7 @@ void ProcessSyncRequests(void)
                         (errmsg("could not fsync file \"%s\": %m, this relation has been remove", path)));
                     break;
                 }
-                
+
                 /*
                  * Absorb incoming requests and check to see if a cancel arrived
                  * for this relation fork.

@@ -214,8 +214,6 @@ public:
     bool is_closed;
     /* mark pgxcpoolreload flag, flush relcache's locatorinfo->nodelist */
     bool got_pool_reload;
-    /* record other palloc on lsc */
-    int64 other_space;
     /* record rel's index and rule cxt */
     int64 rel_index_rule_space;
     /* record abort count, which may cause memory leak
@@ -223,6 +221,7 @@ public:
     uint64 abort_count;
     /* record concurrent rd locks on syscache */
     GSCRdLockInfo rdlock_info;
+    double cur_swapout_ratio;
 private:
     void Init();
     void CreateCatBucket();

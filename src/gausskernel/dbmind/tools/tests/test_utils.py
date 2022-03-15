@@ -16,7 +16,7 @@ import os
 from dbmind.constants import METRIC_MAP_CONFIG, MISC_PATH
 from dbmind.common import utils
 
-CURR_DIR = os.path.abspath(os.path.dirname(__file__))
+CURR_DIR = os.path.realpath(os.path.dirname(__file__))
 
 
 def test_read_simple_conf_file():

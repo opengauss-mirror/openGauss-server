@@ -16,7 +16,7 @@ except ImportError:
     import sys
     import os
 
-    curr_path = os.path.dirname(os.path.abspath(__file__))
+    curr_path = os.path.dirname(os.path.realpath(__file__))
     root_path = os.path.dirname(curr_path)
     sys.path.append(root_path)
     from dbmind.cmd import main

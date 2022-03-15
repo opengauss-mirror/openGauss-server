@@ -356,7 +356,7 @@ void LocalSysTupCache::InitPhase2Impl()
 {
     Assert(m_is_inited);
     Assert(!m_is_inited_phase2);
-    Assert(m_db_id == InvalidOid);
+    /* CacheIdGetGlobalSysTupCache maybe fail when memory fault */
     Assert(m_global_systupcache == NULL);
     /* for now we even dont know which db to connect */
     if (m_relinfo.cc_relisshared) {
@@ -509,7 +509,7 @@ LocalCatCTup *LocalSysTupCache::SearchTupleInternal(int nkeys, Datum v1, Datum v
     /* if not found, search from global cache */
     if (unlikely(!found)) {
         ct = SearchTupleFromGlobal(arguments, hash_value, hash_index, level);
-        if (ct == NULL) {
+        if (unlikely(ct == NULL)) {
             return NULL;
         }
     }
@@ -529,8 +529,10 @@ LocalCatCTup *LocalSysTupCache::SearchTupleInternal(int nkeys, Datum v1, Datum v
         cc_neg_hits++;
         ct = NULL;
     }
+    if (unlikely(!found)) {
+        RemoveTailTupleElements(hash_index);
+    }
 
-    RemoveTailTupleElements(hash_index);
     return ct;
 }
 
@@ -665,15 +667,16 @@ LocalCatCList *LocalSysTupCache::SearchListInternal(int nkeys, Datum v1, Datum v
         CACHE2_elog(DEBUG2, "SearchLocalCatCacheList(%s): found list", m_relinfo.cc_relname);
         cc_lhits++;
         found = true;
+        ResourceOwnerRememberLocalCatCList(LOCAL_SYSDB_RESOWNER, cl);
         break;
     }
 
     if (unlikely(!found)) {
         cl = SearchListFromGlobal(nkeys, arguments, hash_value, level);
+        ResourceOwnerRememberLocalCatCList(LOCAL_SYSDB_RESOWNER, cl);
+        RemoveTailListElements();
     }
-    ResourceOwnerRememberLocalCatCList(LOCAL_SYSDB_RESOWNER, cl);
 
-    RemoveTailListElements();
     return cl;
 }
 
@@ -817,12 +820,14 @@ LocalCatCTup *LocalSysTupCache::SearchLocalCatCTupleForProcAllArgs(
      */
     if (likely(ct->global_ct != NULL)) {
         CACHE3_elog(DEBUG2, "SearchLocalCatCache(%s): found in bucket %d", m_relinfo.cc_relname, hash_index);
+        ResourceOwnerEnlargeLocalCatCTup(LOCAL_SYSDB_RESOWNER);
         ct->refcount++;
         cc_hits++;
         ResourceOwnerRememberLocalCatCTup(LOCAL_SYSDB_RESOWNER, ct);
     }
-
-    RemoveTailTupleElements(hash_index);
+    if (unlikely(!found)) {
+        RemoveTailTupleElements(hash_index);
+    }
 
     pfree_ext(argModes);
     return ct;

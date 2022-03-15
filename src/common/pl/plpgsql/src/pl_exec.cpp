@@ -258,7 +258,7 @@ static PLpgSQL_rec* copyPLpgsqlRec(PLpgSQL_rec* src);
 static PLpgSQL_recfield* copyPLpgsqlRecfield(PLpgSQL_recfield* src);
 static List* invalid_depend_func_and_packgae(Oid pkgOid);
 static void ReportCompileConcurrentError(const char* objName, bool isPackage);
-
+static Datum CopyFcinfoArgValue(Oid typOid, Datum value);
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
  * validating a given linenumber
@@ -838,9 +838,7 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
 #ifndef ENABLE_MULTIPLE_NODES
     uint64 sessionId = IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
     /* add session package values to global for autonm session, to restore package values */
-    if (OidIsValid(func->fn_oid)) {
-        BuildSessionPackageRuntimeForAutoSession(sessionId, u_sess->autonomous_parent_sessionid, &estate, func);
-    }
+    BuildSessionPackageRuntimeForAutoSession(sessionId, u_sess->autonomous_parent_sessionid, &estate, func);
 #endif
 
     /* Statement concatenation. If the block is an anonymous block, the entire anonymous block is returned. */
@@ -1011,8 +1009,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
 
 #ifndef ENABLE_MULTIPLE_NODES
     check_debug(func, &estate);
-    bool isExecAutoFunc = OidIsValid(func->fn_oid) &&
-        u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0;
+    bool isExecAutoFunc = u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0;
     /* when exec autonomous transaction procedure, need update package values by parent session */
     if (isExecAutoFunc) {
         initAutoSessionPkgsValue(u_sess->autonomous_parent_sessionid);
@@ -1083,12 +1080,12 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
                     while (argmodes[outArgCnt] == PROARGMODE_OUT) {
                         outArgCnt++;
                     }
-                    var->value = fcinfo->arg[outArgCnt];
+                    var->value = CopyFcinfoArgValue(fcinfo->argTypes[outArgCnt], fcinfo->arg[outArgCnt]);
                     var->isnull = fcinfo->argnull[outArgCnt];
                     var->freeval = false;
                     outArgCnt++;
                 } else {
-                    var->value = fcinfo->arg[i];
+                    var->value = CopyFcinfoArgValue(fcinfo->argTypes[i], fcinfo->arg[i]);
                     var->isnull = fcinfo->argnull[i];
                     var->freeval = false;
                 }
@@ -1467,6 +1464,25 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
      * Return the function's result
      */
     return estate.retval;
+}
+
+static Datum CopyFcinfoArgValue(Oid typOid, Datum value)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    return value;
+#endif
+    if (!OidIsValid(typOid)) {
+        return value;
+    }
+    /*
+     * For centralized database, package value may be in param.
+     * In this case, the value should be copyed, becaues the ref
+     * value may be influenced by procedure.
+     */
+    bool typByVal = false;
+    int16 typLen;
+    get_typlenbyval(typOid, &typLen, &typByVal);
+    return datumCopy(value, typByVal, typLen);
 }
 
 static void RecordSetGeneratedField(PLpgSQL_rec *recNew)
@@ -4580,16 +4596,10 @@ static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt
             case PLPGSQL_DTYPE_VAR: {
                 PLpgSQL_var* var = (PLpgSQL_var*)retvar;
                 Datum value = var->value;
-                if (is_external_clob(var->datatype->typoid, var->isnull, value)) {
-                    bool is_null = false;
-                    bool is_have_huge_clob = false;
-                    struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
-                    value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-                    if (is_have_huge_clob) {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("huge clob do not support as return parameter")));
-                    }
+                if (is_huge_clob(var->datatype->typoid, var->isnull, value)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("huge clob do not support as return parameter")));
                 }
                 if (need_param_seperation) {
                     estate->paramval = value;
@@ -5435,7 +5445,7 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     bool has_alloc = false;
 
     TransactionId oldTransactionId = SPI_get_top_transaction_id();
-
+ 
     /*
      * On the first call for this statement generate the plan, and detect
      * whether the statement is INSERT/UPDATE/DELETE/MERGE
@@ -5467,7 +5477,19 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     if (ENABLE_CN_GPC && g_instance.plan_cache->CheckRecreateSPICachePlan(expr->plan)) {
             g_instance.plan_cache->RecreateSPICachePlan(expr->plan);
     }
-
+#ifndef ENABLE_MULTIPLE_NODES
+    ListCell* l = NULL;
+    bool isforbid = true;
+    bool savedisAllowCommitRollback = false;
+    bool needResetErrMsg = false;
+    foreach (l, SPI_plan_get_plan_sources(expr->plan)) {
+        CachedPlanSource* plansource = (CachedPlanSource*)lfirst(l);
+        isforbid = CheckElementParsetreeTag(plansource->raw_parse_tree);
+        if (isforbid) {
+            needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_COMPL_SQL);
+        }
+    }
+#endif
     /*
      * Set up ParamListInfo (hook function and possibly data values)
      */
@@ -5513,10 +5535,6 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
 
     plpgsql_estate = estate;
 
-#ifndef ENABLE_MULTIPLE_NODES
-    t_thrd.xact_cxt.isSelectInto = stmt->into;
-#endif
-
     /*
      * Execute the plan
      */
@@ -5529,7 +5547,11 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     // This is used for nested STP. If the transaction Id changed,
     // then need to create new econtext for the TopTransaction.
     stp_check_transaction_and_create_econtext(estate,oldTransactionId);
-    
+#ifndef ENABLE_MULTIPLE_NODES
+    if (isforbid) {
+        stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
+    }
+#endif 
     plpgsql_estate = NULL;
 
     /*
@@ -5721,7 +5743,6 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
 
     estate->cursor_return_data = saved_cursor_data;
     estate->cursor_return_numbers =  saved_cursor_numbers;
-    t_thrd.xact_cxt.isSelectInto = false;
     return PLPGSQL_RC_OK;
 }
 
@@ -5900,6 +5921,9 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
     bool savedisAllowCommitRollback = false;
     bool needResetErrMsg = false;
     needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_USED_AS_EXPR);
+#else
+    /* Saves the status of whether to send commandId. */
+    bool saveSetSendCommandId = IsSendCommandId();
 #endif
     /*
      * First we evaluate the string expression after the EXECUTE keyword. Its
@@ -5994,6 +6018,8 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
             FormatCallStack* plcallstack = t_thrd.log_cxt.call_stack;
 #ifndef ENABLE_MULTIPLE_NODES
             estate_cursor_set(plcallstack);
+#else
+            SetSendCommandId(saveSetSendCommandId);
 #endif
             if (plcallstack != NULL) {
                 t_thrd.log_cxt.call_stack = plcallstack->prev;
@@ -6003,6 +6029,10 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
             PG_RE_THROW();
         }
         PG_END_TRY();
+
+#ifdef ENABLE_MULTIPLE_NODES
+        SetSendCommandId(saveSetSendCommandId);
+#endif
 
         /*
          * This is used for nested STP. If the transaction Id changed,
@@ -6485,7 +6515,10 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
                     errmsg("cursor \"%s\" already in use in OPEN statement.", curname)));
         }
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
+    /* In distributed mode, the commandId is sent when a cursor is opened. */
+    SetSendCommandId(true);
+#endif
     /* ----------
      * Process the OPEN according to it's type.
      * ----------
@@ -7395,16 +7428,10 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
             MemoryContext oldcontext = NULL;
             AttrNumber attrno = ((PLpgSQL_arrayelem*)target)->assignattrno;
 
-            if (is_external_clob(valtype, *isNull, value)) {
-                bool is_null = false;
-                bool is_have_huge_clob = false;
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
-                value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-                if (is_have_huge_clob) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("huge clob do not support as array element.")));
-                }
+            if (is_huge_clob(valtype, *isNull, value)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("huge clob do not support as array element.")));
             }
             /*
              * We need to do subscript evaluation, which might require
@@ -7683,16 +7710,10 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
             MemoryContext oldcontext = NULL;
             AttrNumber attrno = ((PLpgSQL_tableelem*)target)->assignattrno;
 
-            if (is_external_clob(valtype, *isNull, value)) {
-                bool is_null = false;
-                bool is_have_huge_clob = false;
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
-                value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-                if (is_have_huge_clob) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("huge clob do not support as table of element.")));
-                }
+            if (is_huge_clob(valtype, *isNull, value)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("huge clob do not support as table of element.")));
             }
 
             /*
@@ -7965,17 +7986,6 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
             /*
              * Target has a assign list
              */
-            if (is_external_clob(valtype, *isNull, value)) {
-                bool is_null = false;
-                bool is_have_huge_clob = false;
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
-                value = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-                if (is_have_huge_clob) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("huge clob do not support as record element.")));
-                }
-            }
             PLpgSQL_assignlist* assignvar = (PLpgSQL_assignlist*)target;
             List* assignlist = assignvar->assignlist;
             PLpgSQL_datum* assigntarget = estate->datums[assignvar->targetno];
@@ -9422,7 +9432,7 @@ static Datum exec_eval_expr(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool*
 static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples,
                            Portal* portalP, bool isCollectParam)
 {
-    ParamListInfo paramLI;
+    ParamListInfo paramLI = NULL;
     int rc;
 
     /*
@@ -9437,8 +9447,12 @@ static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long m
 
     /*
      * Set up ParamListInfo (hook function and possibly data values)
+     * For validation estate->datums should be NULL, since there is
+     * no parameter set vo validation
      */
-    paramLI = setup_param_list(estate, expr);
+    if (estate->datums) {
+        paramLI = setup_param_list(estate, expr);
+    }
 
     /*
      * If a portal was requested, put the query into the portal
@@ -10646,12 +10660,6 @@ static void exec_move_row(PLpgSQL_execstate* estate,
                         valtype = InvalidOid;
                     }
 
-                    if (valtype == CLOBOID && !isnull && VARATT_IS_HUGE_TOAST_POINTER(value)) {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("huge clob do not support as record element.")));
-                    }
-
                     /* accept function's return value for cursor */
                     if (isnull == false && CheckTypeIsCursor(row, valtype, fnum) &&
                         estate->cursor_return_data != NULL) {
@@ -10773,17 +10781,10 @@ HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, Tuple
             exec_eval_datum(estate, estate->datums[row->varnos[i]], &fieldtypeid, &fieldtypmod, &dvalues[i], &nulls[i]);
         }
 
-        if (is_external_clob(fieldtypeid, nulls[i], dvalues[i])) {
-            bool is_null = false;
-            bool is_have_huge_clob = false;
-            struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(dvalues[i]));
-            dvalues[i] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
-            if (is_have_huge_clob) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("huge clob do not support concat a row")));
-            }
-            nulls[i] = is_null;
+        if (is_huge_clob(fieldtypeid, nulls[i], dvalues[i])) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("huge clob do not support concat a row")));
         }
 
         if (estate->is_exception && fieldtypeid == REFCURSOROID) {

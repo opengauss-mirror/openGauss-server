@@ -957,8 +957,7 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         *(scratch++) = XLR_BLOCK_ID_ORIGIN;
         remained_size--;
         if (istoast && t_thrd.proc->workingVersionNum >= PARALLEL_DECODE_VERSION_NUM && XLogLogicalInfoActive()) {
-            const int toastFlag = 1 << 8;
-            m_session_id |= toastFlag;
+            m_session_id = (int)((uint32)(m_session_id) | TOAST_FLAG);
         }
         XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(m_session_id), &m_session_id, remained_size);
     }

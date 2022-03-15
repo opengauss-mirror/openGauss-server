@@ -1201,7 +1201,7 @@ CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivar
 
 -- Batch size
 CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 0, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
-CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000001, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1048576, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
 
 -- Num of features (not matching the data)
 CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 9, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;

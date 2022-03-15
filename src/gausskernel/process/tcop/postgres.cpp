@@ -7082,6 +7082,7 @@ void RemoveTempNamespace()
                     u_sess->catalog_cxt.myTempToastNamespace = InvalidOid;
                 }
             }
+            pfree_ext(str.data);
         }
         PG_CATCH();
         {
@@ -9236,6 +9237,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                                               InvalidTransactionTimeline, ss_need_sync_wait_all);
                         /* quickly set my recent global xmin */
                         u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
+                        u_sess->utils_cxt.RecentGlobalCatalogXmin = GetOldestCatalogXmin();
                     }
                 }
                 /* check gtm mode, remote should be false, local cannot be true */

@@ -25,6 +25,7 @@
 
 #include "bin/elog.h"
 #include "nodes/pg_list.h"
+#include "replication/replicainternal.h"
 #include "storage/smgr/fd.h"
 #include "utils/builtins.h"
 #include "utils/datetime.h"
@@ -64,6 +65,7 @@ char g_buildprimary_slotname[MAX_VALUE_LEN] = {0};
 char g_str_replication_type[MAX_VALUE_LEN] = {0};
 int g_replconn_idx = -1;
 int g_replication_type = -1;
+bool is_cross_region_build = false;
 #define RT_WITH_DUMMY_STANDBY 0
 #define RT_WITH_MULTI_STANDBY 1
 
@@ -576,7 +578,9 @@ void get_conninfo(const char* filename)
         exit(1);
     }
 
-    if (IS_CROSS_CLUSTER_BUILD) {
+    if (build_mode == CROSS_CLUSTER_FULL_BUILD || build_mode == CROSS_CLUSTER_INC_BUILD ||
+        build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD) {
+        /* For shared storage cluster */
         conninfo_para = config_para_cross_cluster_build;
     } else {
         conninfo_para = config_para_build;
@@ -864,10 +868,11 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
 
         tnRet = memset_s(repl_conninfo_str, MAXPGPATH, 0, MAXPGPATH);
         securec_check_ss_c(tnRet, "", "");
+        is_cross_region_build = false;
         if (register_username != NULL && register_password != NULL) {
             if (*register_username == '.') {
                     register_username += 2;
-                }
+            }
             tnRet = snprintf_s(repl_conninfo_str,
                 sizeof(repl_conninfo_str),
                 sizeof(repl_conninfo_str) - 1,
@@ -882,6 +887,7 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
                 repl_conn_info.remoteport,
                 conn_timeout,
                 recv_timeout, register_username, register_password);
+            is_cross_region_build = true;
         } else {
             tnRet = snprintf_s(repl_conninfo_str,
                 sizeof(repl_conninfo_str),

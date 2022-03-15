@@ -1,0 +1,51 @@
+-- 设置guc 参数 记录DML审计日志 线程数为3 轮询空间大小2.1M
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_rotation_size=2048" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state=1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/  -c "audit_thread_num=3" > /dev/null 2>&1
+-- 重启数据库 等待1s
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\! @abs_bindir@/gs_ctl stop -D  @abs_srcdir@/tmp_check/datanode1/   > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+-- 查看线程数是否改为 3
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
+ audit_thread_num 
+------------------
+ 3
+(1 row)
+
+-- 产生dml_action 审计日志
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c " CREATE TABLE T_TEST_MULTI_THREAD_ROTATION_SIZE(COL1 int4 DEFAULT 1,COL2 VARCHAR(1024) DEFAULT 'test_rotation_size')";
+CREATE TABLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CREATE OR REPLACE PROCEDURE TRANSACTION_MULTI_THREAD_ROTATION_SIZE() AS BEGIN FOR i IN 0..1000000 LOOP INSERT INTO T_TEST_MULTI_THREAD_ROTATION_SIZE(COL1, COL2) VALUES (i, 'test_multi_thread_rotation_size'); COMMIT; END LOOP; END;";
+CREATE PROCEDURE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CALL TRANSACTION_MULTI_THREAD_ROTATION_SIZE()";
+ transaction_multi_thread_rotation_size 
+----------------------------------------
+ 
+(1 row)
+
+-- 提取新生成的文件大小 与2.1M比较 全部小于2.1M 为执行成功
+\! flag=0 && for i in $(find @abs_srcdir@/tmp_check/datanode1/pg_audit -newermt $(date -d "-75 seconds" +%H:%M:%S) -name "*_adt"); do size=$(du -h --exclude=index_table_new $i  | grep -oP '\d*\.\d+M'); if [[ $size > '2.1M' ]]; then flag=1; echo $size; echo $i; fi; done && [[ "$flag" == 0 ]] && echo 'all the logs are less than 2.1M' || echo 'error -- some logs exceed limit'
+all the logs are less than 2.1M
+-- 恢复guc参数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_rotation_size" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/  -c "audit_thread_num" > /dev/null 2>&1
+-- 重启数据库 等待1s
+\! sleep 1
+\! @abs_bindir@/gs_ctl stop -D  @abs_srcdir@/tmp_check/datanode1/   > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+-- 查看线程数是否恢复 1
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
+ audit_thread_num 
+------------------
+ 1
+(1 row)
+

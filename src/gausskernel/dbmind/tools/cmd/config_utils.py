@@ -11,25 +11,57 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 import os
-import re
 from configparser import ConfigParser
 from configparser import NoSectionError, NoOptionError
 
 from dbmind import constants
 from dbmind.common import security
 from dbmind.common.exceptions import InvalidPasswordException, ConfigSettingError
-from dbmind.metadatabase.dao.dynamic_config import dynamic_config_get, dynamic_config_set
 from dbmind.common.utils import write_to_terminal
+from dbmind.metadatabase.dao.dynamic_config import dynamic_config_get, dynamic_config_set
+
+DBMIND_CONF_HEADER = """\
+# Copyright (c) 2022 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
+# Notice:
+# 1. (null) explicitly represents empty or null. Meanwhile blank represents undefined.
+# 2. DBMind encrypts password parameters. Hence, there is no plain-text password after initialization.
+# 3. Users can only configure the plain-text password in this file before initializing
+#    (that is, using the --initialize option),
+#    and then if users want to modify the password-related information,
+#    users need to use the 'set' sub-command to achieve.
+# 4. If users use relative path in this file, the current working directory is the directory where this file is located.
+"""
 
 NULL_TYPE = '(null)'  # empty text.
 ENCRYPTED_SIGNAL = 'Encrypted->'
 
+# Used by check_config_validity().
+CONFIG_OPTIONS = {
+    'TSDB-name': ['prometheus'],
+    'METADATABASE-dbtype': ['sqlite', 'opengauss', 'postgresql'],
+    'WORKER-type': ['local', 'dist'],
+    'LOG-level': ['DEBUG', 'INFO', 'WARNING', 'ERROR']
+}
 
-def check_config_validity(section, option, value, inline_comment=None):
+
+def check_config_validity(section, option, value):
     config_item = '%s-%s' % (section, option)
     # exceptional cases:
     if config_item == 'METADATABASE-port':
         return True, None
+
     # normal inspection process:
     if 'port' in option:
         valid_port = str.isdigit(value) and 0 < int(value) <= 65535
@@ -38,16 +70,14 @@ def check_config_validity(section, option, value, inline_comment=None):
     if 'database' in option:
         if value == NULL_TYPE or value.strip() == '':
             return False, 'Unspecified database name'
-    if 'Options:' in inline_comment:
-        # determine setting option whether choose from option list.
-        results = re.findall(r'Options: (.*)?\.', inline_comment)
-        if len(results) > 0:
-            options = list(map(str.strip, results[0].split(',')))
-            if value not in options:
-                return False, 'Invalid choice: %s' % value
+
+    options = CONFIG_OPTIONS.get(config_item)
+    if options and value not in options:
+        return False, 'Invalid choice: %s' % value
+
     if 'dbtype' in option and value == 'opengauss':
         write_to_terminal(
-            'WARN: default PostgresSQL connector (psycopg2-binary) does not support openGauss.\n'
+            'WARN: default PostgreSQL connector (psycopg2-binary) does not support openGauss.\n'
             'It would help if you compiled psycopg2 with openGauss manually or '
             'created a connection user after setting the GUC password_encryption_type to 1.',
             color='yellow'
@@ -96,13 +126,16 @@ def load_sys_configs(confile):
 class ConfigUpdater:
     def __init__(self, filepath):
         self.config = ConfigParser(inline_comment_prefixes=None)
-        self.filepath = os.path.abspath(filepath)
+        self.filepath = os.path.realpath(filepath)
         self.fp = None
         self.readonly = True
 
     def get(self, section, option):
         value = self.config.get(section, option)
-        default_value, inline_comment = map(str.strip, value.rsplit('#', 1))
+        try:
+            default_value, inline_comment = map(str.strip, value.rsplit('#', 1))
+        except ValueError:
+            default_value, inline_comment = value.strip(), ''
         if default_value == '':
             default_value = NULL_TYPE
         return default_value, inline_comment
@@ -132,10 +165,7 @@ class ConfigUpdater:
             # output configurations
             self.fp.truncate(0)
             self.fp.seek(0)
-            with open(
-                    file=os.path.join(constants.MISC_PATH, constants.CONFILE_HEADER_NAME)
-            ) as header_fp:
-                self.fp.writelines(header_fp.readlines())
+            self.fp.write(DBMIND_CONF_HEADER)
             self.config.write(self.fp)
             self.fp.flush()
         self.fp.close()
@@ -163,7 +193,7 @@ def set_config_parameter(confpath, section: str, option: str, value: str):
                 old_value, comment = config.get(section, option)
             except (NoSectionError, NoOptionError):
                 raise ConfigSettingError('Not found the parameter %s-%s.' % (section, option))
-            valid, reason = check_config_validity(section, option, value, comment)
+            valid, reason = check_config_validity(section, option, value)
             if not valid:
                 raise ConfigSettingError('Incorrect value due to %s.' % reason)
             # If user wants to change password, we should encrypt the plain-text password first.

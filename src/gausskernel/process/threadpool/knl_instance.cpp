@@ -685,6 +685,7 @@ static void knl_g_roach_init(knl_g_roach_context* roach_cxt)
     roach_cxt->targetTimeInPITR = NULL;
     roach_cxt->globalBarrierRecordForPITR = NULL;
     roach_cxt->isXLogForceRecycled = false;
+    roach_cxt->forceAdvanceSlotTigger = false;
     roach_cxt->isGtmFreeCsn = false;
     roach_cxt->targetRestoreTimeFromMedia = NULL;
 }

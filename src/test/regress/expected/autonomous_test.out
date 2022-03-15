@@ -2007,3 +2007,82 @@ CONTEXT:  referenced column: p1
 
 drop package pck1;
 NOTICE:  drop cascades to function public.p1(integer,integer)
+-- anoymous block with autonomous
+create or replace package pck1 as
+type r1 is record(a int, b int);
+va int;
+vb r1;
+vc varchar2(20);
+end pck1;
+/
+declare
+begin
+pck1.va := 1;
+pck1.vb := (2,3);
+pck1.vc := 'before auto';
+end;
+/
+-- (a) autonomous anoymous block 
+declare
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1.va: %',pck1.va;
+raise info 'pck1.vb: %',pck1.vb;
+raise info 'pck1.vc: %',pck1.vc;
+pck1.va := 11;
+pck1.vb := (22,33);
+pck1.vc := 'after auto';
+end;
+/
+INFO:  pck1.va: 1
+
+INFO:  pck1.vb: (2,3)
+
+INFO:  pck1.vc: before auto
+
+declare
+begin
+raise info 'pck1.va: %',pck1.va;
+raise info 'pck1.vb: %',pck1.vb;
+raise info 'pck1.vc: %',pck1.vc;
+pck1.va := 111;
+pck1.vb := (222,333);
+pck1.vc := 'before after auto';
+end;
+/
+INFO:  pck1.va: 11
+INFO:  pck1.vb: (22,33)
+INFO:  pck1.vc: after auto
+-- (b) autonomous anoymous block with error
+declare
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1.va: %',pck1.va;
+raise info 'pck1.vb: %',pck1.vb;
+raise info 'pck1.vc: %',pck1.vc;
+pck1.va := 1111;
+pck1.vb := (2222,3333);
+pck1.vc := 'after after auto';
+pck1.va := 3/0;
+end;
+/
+INFO:  pck1.va: 111
+
+INFO:  pck1.vb: (222,333)
+
+INFO:  pck1.vc: before after auto
+
+ERROR:  ERROR:  division by zero
+CONTEXT:  SQL statement "SELECT 3/0"
+PL/pgSQL function inline_code_block line 10 at assignment
+
+declare
+begin
+raise info 'pck1.va: %',pck1.va;
+raise info 'pck1.vb: %',pck1.vb;
+raise info 'pck1.vc: %',pck1.vc;
+end;
+/
+INFO:  pck1.va: 1111
+INFO:  pck1.vb: (2222,3333)
+INFO:  pck1.vc: after after auto

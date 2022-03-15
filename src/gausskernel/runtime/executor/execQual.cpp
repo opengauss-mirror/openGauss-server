@@ -152,6 +152,7 @@ static Datum ExecEvalGroupingIdExpr(
     GroupingIdExprState* gstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
 extern struct varlena *heap_tuple_fetch_and_copy(Relation rel, struct varlena *attr, bool needcheck);
+static void check_huge_clob_paramter(FunctionCallInfoData* fcinfo, bool is_have_huge_clob);
 
 THR_LOCAL PLpgSQL_execstate* plpgsql_estate = NULL;
 
@@ -1692,6 +1693,7 @@ static ExprDoneCond ExecEvalFuncArgs(
     i = 0;
     econtext->is_cursor = false;
     u_sess->plsql_cxt.func_tableof_index = NIL;
+    bool is_have_huge_clob = false;
     foreach (arg, argList) {
         ExprState* argstate = (ExprState*)lfirst(arg);
         ExprDoneCond thisArgIsDone;
@@ -1719,6 +1721,9 @@ static ExprDoneCond ExecEvalFuncArgs(
         }
         fcinfo->argTypes[i] = argstate->resultType;
         econtext->is_cursor = false;
+        if (is_huge_clob(fcinfo->argTypes[i], fcinfo->argnull[i], fcinfo->arg[i])) {
+            is_have_huge_clob = true;
+        }
 
         if (thisArgIsDone != ExprSingleResult) {
             /*
@@ -1734,6 +1739,7 @@ static ExprDoneCond ExecEvalFuncArgs(
         }
         i++;
     }
+    check_huge_clob_paramter(fcinfo, is_have_huge_clob);
 
     Assert(i == fcinfo->nargs);
 
@@ -2401,10 +2407,8 @@ static Datum ExecMakeFunctionResultNoSets(
         if (has_refcursor && fcinfo->argTypes[i] == REFCURSOROID)
             econtext->is_cursor = true;
         fcinfo->arg[i] = ExecEvalExpr(argstate, econtext, &fcinfo->argnull[i], NULL);
-        if (is_external_clob(fcinfo->argTypes[i], fcinfo->argnull[i], fcinfo->arg[i])) {
-            bool is_null = false;
-            struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[i]));
-            fcinfo->arg[i] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null, &is_have_huge_clob);
+        if (is_huge_clob(fcinfo->argTypes[i], fcinfo->argnull[i], fcinfo->arg[i])) {
+            is_have_huge_clob = true;
         }
         ExecTableOfIndexInfo execTableOfIndexInfo;
         initExecTableOfIndexInfo(&execTableOfIndexInfo, econtext);
@@ -2457,18 +2461,25 @@ static Datum ExecMakeFunctionResultNoSets(
 
     pgstat_init_function_usage(fcinfo, &fcusage);
 
-    if (fcinfo->flinfo->fn_addr != textcat && is_have_huge_clob) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("huge clob do not support as function in parameter")));
-    }
     fcinfo->isnull = false;
+    check_huge_clob_paramter(fcinfo, is_have_huge_clob);
     if (u_sess->instr_cxt.global_instr != NULL && fcinfo->flinfo->fn_addr == plpgsql_call_handler) {
         StreamInstrumentation* save_global_instr = u_sess->instr_cxt.global_instr;
         u_sess->instr_cxt.global_instr = NULL;
         result = FunctionCallInvoke(fcinfo);   // node will be free at here or else;
         u_sess->instr_cxt.global_instr = save_global_instr;
     } else {
+        if (fcinfo->argTypes[0] == CLOBOID && fcinfo->argTypes[1] == CLOBOID && fcinfo->flinfo->fn_addr == textcat) {
+            bool is_null = false;
+            if (fcinfo->arg[0] != 0 && VARATT_IS_EXTERNAL_LOB(fcinfo->arg[0])) {
+                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[0]));
+                fcinfo->arg[0] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
+            }
+            if (fcinfo->arg[1] != 0 && VARATT_IS_EXTERNAL_LOB(fcinfo->arg[1])) {
+                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(fcinfo->arg[1]));
+                fcinfo->arg[1] = fetch_lob_value_from_tuple(lob_pointer, InvalidOid, &is_null);
+            }
+        }    
         result = FunctionCallInvoke(fcinfo);
     }
     *isNull = fcinfo->isnull;
@@ -5967,12 +5978,11 @@ int ExecCleanTargetListLength(List* targetlist)
     return len;
 }
 
-HeapTuple get_tuple(Relation relation, ItemPointer tid)
+static HeapTuple get_tuple(Relation relation, ItemPointer tid)
 {
     Buffer user_buf = InvalidBuffer;
     HeapTuple tuple = NULL;
     HeapTuple new_tuple = NULL;
-    TM_Result result;
 
     /* alloc mem for old tuple and set tuple id */
     tuple = (HeapTupleData *)heaptup_alloc(BLCKSZ);
@@ -5981,11 +5991,6 @@ HeapTuple get_tuple(Relation relation, ItemPointer tid)
     tuple->t_self = *tid;
     
     if (heap_fetch(relation, SnapshotAny, tuple, &user_buf, false, NULL)) {
-        result = HeapTupleSatisfiesUpdate(tuple, GetCurrentCommandId(true), user_buf, false);
-        if (result != TM_Ok) {
-            ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("Failed to get tuple")));
-        }
-
         new_tuple = heapCopyTuple((HeapTuple)tuple, relation->rd_att, NULL);
         ReleaseBuffer(user_buf);
     } else {
@@ -5997,6 +6002,21 @@ HeapTuple get_tuple(Relation relation, ItemPointer tid)
     return new_tuple;
 }
 
+static void check_huge_clob_paramter(FunctionCallInfoData* fcinfo, bool is_have_huge_clob)
+{
+    if (!is_have_huge_clob || IsSystemObjOid(fcinfo->flinfo->fn_oid)) {
+        return;
+    }
+    Oid schema_oid = get_func_namespace(fcinfo->flinfo->fn_oid);
+    if (IsPackageSchemaOid(schema_oid)) {
+        return;
+    }
+    ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("huge clob do not support as function in parameter")));
+}
+
+
 bool is_external_clob(Oid type_oid, bool is_null, Datum value)
 {
     if (type_oid == CLOBOID && !is_null && VARATT_IS_EXTERNAL_LOB(value)) {
@@ -6005,7 +6025,37 @@ bool is_external_clob(Oid type_oid, bool is_null, Datum value)
     return false;
 }
 
-Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid, bool* is_null, bool* is_huge_clob)
+bool is_huge_clob(Oid type_oid, bool is_null, Datum value)
+{
+    if (!is_external_clob(type_oid, is_null, value)) {
+        return false;
+    }
+
+    struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(value));
+    bool is_huge_clob = false;
+    /* get relation by relid */
+    ItemPointerData tuple_ctid;
+    tuple_ctid.ip_blkid.bi_hi = lob_pointer->bi_hi;
+    tuple_ctid.ip_blkid.bi_lo = lob_pointer->bi_lo;
+    tuple_ctid.ip_posid = lob_pointer->ip_posid;
+    Relation relation = heap_open(lob_pointer->relid, RowExclusiveLock);
+    HeapTuple origin_tuple = get_tuple(relation, &tuple_ctid);
+    if (!HeapTupleIsValid(origin_tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("cache lookup failed for tuple from relation %u", lob_pointer->relid)));
+    }
+    bool attr_is_null = false;
+    Datum attr = fastgetattr(origin_tuple, lob_pointer->columid, relation->rd_att, &attr_is_null);
+    if (!attr_is_null && VARATT_IS_HUGE_TOAST_POINTER(attr)) {
+        is_huge_clob = true;
+    }
+    heap_close(relation, NoLock);
+    heap_freetuple(origin_tuple);
+    return is_huge_clob;
+}
+
+Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid, bool* is_null)
 {
     /* get relation by relid */
     ItemPointerData tuple_ctid;
@@ -6021,9 +6071,7 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
     }
 
     Datum attr = fastgetattr(origin_tuple, lob_pointer->columid, relation->rd_att, is_null);
-    if (!*is_null && VARATT_IS_HUGE_TOAST_POINTER(attr) && is_huge_clob != NULL) {
-        *is_huge_clob = true;
-    }
+
 
     if (!OidIsValid(update_oid)) {
         heap_close(relation, NoLock);
@@ -6033,9 +6081,7 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
     if (*is_null) {
         new_attr = (Datum)0;
     } else {
-        if (VARATT_IS_SHORT(attr) || VARATT_IS_EXTERNAL(attr)) {
-            new_attr = PointerGetDatum(attr);
-        } else if (VARATT_IS_HUGE_TOAST_POINTER(attr)) {
+        if (VARATT_IS_HUGE_TOAST_POINTER(attr)) {
             if (unlikely(origin_tuple->tupTableType == UHEAP_TUPLE)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_NAME),
@@ -6046,6 +6092,8 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
             struct varlena *new_value = heap_tuple_fetch_and_copy(update_rel, old_value, false);
             new_attr = PointerGetDatum(new_value);
             heap_close(update_rel, NoLock);
+        } else if (VARATT_IS_SHORT(attr) || VARATT_IS_EXTERNAL(attr) || VARATT_IS_4B(attr)) {
+            new_attr = PointerGetDatum(attr);
         } else {
             ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR),
                     errmsg("lob value which fetch from tuple type is not recognized."), 
@@ -6113,20 +6161,9 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
             if (VARATT_IS_EXTERNAL_LOB(values[resind])) {
                 struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(values[resind]));
                 bool is_null = false;
-                if (econtext->ecxt_scantuple != NULL) {
-                    Oid update_oid = ((HeapTuple)(econtext->ecxt_scantuple->tts_tuple))->t_tableOid;
-                    values[resind] = fetch_lob_value_from_tuple(lob_pointer, update_oid, &is_null, NULL);
-                } else {
-                    ItemPointerData tuple_ctid;
-                    tuple_ctid.ip_blkid.bi_hi = lob_pointer->bi_hi;
-                    tuple_ctid.ip_blkid.bi_lo = lob_pointer->bi_lo;
-                    tuple_ctid.ip_posid = lob_pointer->ip_posid;
-                    Relation relation = heap_open(lob_pointer->relid, RowExclusiveLock);
-                    HeapTuple origin_tuple = get_tuple(relation, &tuple_ctid);
-                    Datum attr = fastgetattr(origin_tuple, lob_pointer->columid, relation->rd_att, &is_null);
-                    values[resind] = attr;
-                    heap_close(relation, NoLock);
-                }
+                Oid update_oid = econtext->ecxt_scantuple != NULL ?
+                    ((HeapTuple)(econtext->ecxt_scantuple->tts_tuple))->t_tableOid : InvalidOid;
+                values[resind] = fetch_lob_value_from_tuple(lob_pointer, update_oid, &is_null);
                 isnull[resind] = is_null;
             }
         }

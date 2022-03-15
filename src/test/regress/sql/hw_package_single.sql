@@ -345,6 +345,110 @@ end;
 select proc_test1('1','');
 
 drop procedure proc_test1;
+
+--test write+update
+create table test_clob(a int, b clob);
+create table test_blob(a int, b blob);
+
+insert into test_clob values(1, 'abc');
+insert into test_clob values(2, 'zzz');
+
+insert into test_blob values(1, 'abc');
+insert into test_blob values(2, 'fffffff');
+
+create or replace procedure test_clob_write
+as
+    dest_clob clob;
+	PSV_SQL varchar(100);
+begin
+    PSV_SQL := 'select b from test_clob where a = 1';
+    EXECUTE IMMEDIATE PSV_SQL into dest_clob;
+    dbe_lob.write(dest_clob, 1, 1, 'ddd');
+    return;
+end;
+/
+call test_clob_write();
+select * from test_clob;
+
+create or replace procedure test_lob_write_nodyna
+as
+declare
+    dest_clob clob;
+begin
+    select b from test_clob where a = 2 into dest_clob;
+    dbe_lob.write(dest_clob, 1, 1, 'eeee'); 
+    DBE_OUTPUT.print_line(dest_clob);
+    return;
+end;
+/
+
+call test_lob_write_nodyna();
+select * from test_clob;
+
+create or replace procedure test_blob_write
+as
+    dest_blob blob;
+	PSV_SQL varchar(100);
+begin
+    PSV_SQL := 'select b from test_blob where a = 1';
+    EXECUTE IMMEDIATE PSV_SQL into dest_blob;
+    dbe_lob.write(dest_blob, 1, 1, 'ddd');
+    return;
+end;
+/
+call test_blob_write();
+select * from test_blob;
+
+--test append+update
+create or replace procedure test_clob_append
+as
+    dest_clob clob;
+	PSV_SQL varchar(100);
+begin
+    PSV_SQL := 'select b from test_clob where a = 1';
+    EXECUTE IMMEDIATE PSV_SQL into dest_clob;
+    dbe_lob.append(dest_clob, 'ddd');
+    return;
+end;
+/
+
+call test_clob_append();
+select * from test_clob;
+
+create or replace procedure test_blob_append
+as
+    dest_blob blob;
+	PSV_SQL varchar(100);
+begin
+    PSV_SQL := 'select b from test_blob where a = 1';
+    EXECUTE IMMEDIATE PSV_SQL into dest_blob;
+    dbe_lob.append(dest_blob, 'ddd');
+    return;
+end;
+/
+
+call test_blob_append();
+select * from test_blob;
+
+--test read
+create or replace procedure test_clob_read
+as
+    dest_clob clob;
+	buf clob;
+	PSV_SQL varchar(100);
+begin
+    PSV_SQL := 'select b from test_clob where a = 1';
+	EXECUTE IMMEDIATE PSV_SQL into dest_clob;
+	dbe_lob.read(dest_clob, 1, 1, buf);
+    DBE_OUTPUT.print_line(buf);
+	return;
+end;
+/
+
+call test_clob_read();
+
+drop table if exists test_clob;
+
 \c regression;
 drop database IF EXISTS pl_test_pkg_single;
 

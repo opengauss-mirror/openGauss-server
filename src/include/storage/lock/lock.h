@@ -660,6 +660,7 @@ extern LockAcquireResult LockAcquireExtended(const LOCKTAG *locktag, LOCKMODE lo
                                              bool report_memory_error, bool allow_con_update = false, int waitSec = 0);
 extern void AbortStrongLockAcquire(void);
 extern bool LockRelease(const LOCKTAG* locktag, LOCKMODE lockmode, bool sessionLock);
+extern void ReleaseLockIfHeld(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock);
 extern void LockReleaseAll(LOCKMETHODID lockmethodid, bool allLocks);
 extern void Check_FastpathBit();
 

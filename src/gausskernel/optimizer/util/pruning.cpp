@@ -460,17 +460,21 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
     context->pruningType = PruningPartition;
 
     if (rel->partMap != NULL && (rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH)) {
+        // for List/Hash partitioned table
         result = partitionEqualPruningWalker(rel->partMap->type, expr, context);
     } else {
+        // for Range/Interval partitioned table
         result = partitionPruningWalker(expr, context);
     }
 
     if (result->exprPart != NULL || result->paramArg != NULL) {
         Param* paramArg = (Param *)copyObject(result->paramArg);
+        bool isPbeSinlePartition = result->isPbeSinlePartition;
         destroyPruningResult(result);
         result = getFullPruningResult(rel);
         result->expr = expr;
         result->paramArg = paramArg;
+        result->isPbeSinlePartition = isPbeSinlePartition;
         return result;
     }
     /* Never happen, just to be self-contained */
@@ -535,10 +539,12 @@ PruningResult* partitionPruningWalker(Expr* expr, PruningContext* pruningCtx)
                 result = makeNode(PruningResult);
                 result->state = PRUNING_RESULT_FULL;
             }
+            result->isPbeSinlePartition = false;
         } break;
         default: {
             result = makeNode(PruningResult);
             result->state = PRUNING_RESULT_FULL;
+            result->isPbeSinlePartition = false;
         } break;
     }
 
@@ -619,6 +625,7 @@ static PruningResult* partitionPruningFromBoolExpr(const BoolExpr* expr, Pruning
     if (expr->boolop == NOT_EXPR) {
         result = makeNode(PruningResult);
         result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
         return result;
     }
 
@@ -638,6 +645,7 @@ static PruningResult* partitionPruningFromBoolExpr(const BoolExpr* expr, Pruning
             break;
         case OR_EXPR:
             result = unionChildPruningResult(resultList, context);
+            result->isPbeSinlePartition = false;
             break;
         case NOT_EXPR:
         default:
@@ -750,6 +758,7 @@ static PruningResult* partitionPruningFromNullTest(NullTest* expr, PruningContex
     }
 
     result->state = PRUNING_RESULT_SUBSET;
+    result->isPbeSinlePartition = true;
 
     result->bm_rangeSelectedPartitions = bms_make_singleton(partMap->rangeElementsNum - 1);
 
@@ -832,6 +841,7 @@ static PruningResult* intersectChildPruningResult(const List* resultList, Prunin
         AssertEreport(iteratorResult, MOD_OPT, "iteratorResult context is NNULL.");
         if (iteratorResult->state == PRUNING_RESULT_EMPTY) {
             result->state = PRUNING_RESULT_EMPTY;
+            result->isPbeSinlePartition = false;
             return result;
         } else if (iteratorResult->state == PRUNING_RESULT_FULL) {
             continue;
@@ -875,10 +885,14 @@ static PruningResult* intersectChildPruningResult(const List* resultList, Prunin
 
             if (BoundaryIsEmpty(result->boundary)) {
                 result->state = PRUNING_RESULT_EMPTY;
+                result->isPbeSinlePartition = false;
                 break;
             }
 
             result->state = PRUNING_RESULT_SUBSET;
+        }
+        if (result->state != PRUNING_RESULT_EMPTY && iteratorResult->isPbeSinlePartition) {
+            result->isPbeSinlePartition = true;
         }
     }
 
@@ -886,6 +900,7 @@ static PruningResult* intersectChildPruningResult(const List* resultList, Prunin
         destroyPruningResult(result);
         result = makeNode(PruningResult);
         result->state = PRUNING_RESULT_EMPTY;
+        result->isPbeSinlePartition = false;
         result->intervalOffset = -1;
     }
 
@@ -981,6 +996,7 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr
     if (T_Var != nodeTag(larg) || (T_ArrayExpr != nodeTag(rarg) && T_Const != nodeTag(rarg))) {
         result = makeNode(PruningResult);
         result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
         return result;
     }
 
@@ -1079,6 +1095,7 @@ static PruningResult* partitionPruningFromScalarArrayOpExpr
     } else {
         result = makeNode(PruningResult);
         result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
         return result;
     }
 }
@@ -1258,6 +1275,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     /* length of args MUST be 2 */
     if (!PointerIsValid(expr) || list_length(expr->args) != 2 || !PointerIsValid(opName = get_opname(expr->opno))) {
         result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
         return result;
     }
 
@@ -1296,6 +1314,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
         ((T_Const == nodeTag(rightArg) || T_Param == nodeTag(rightArg)
         || T_OpExpr == nodeTag(rightArg)) && T_Var == nodeTag(leftArg)))) {
         result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;
         return result;
     }
 
@@ -1325,6 +1344,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
         if (context->rte != NULL &&
             context->rte->relid != context->relation->rd_id) {
             result->state = PRUNING_RESULT_FULL;
+            result->isPbeSinlePartition = false;
             return result;
         }
     } else {
@@ -1334,6 +1354,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
             paramArg != NULL ||
             exprPart != NULL) {
             result->state = PRUNING_RESULT_FULL;
+            result->isPbeSinlePartition = false;
             return result;
         }
     }
@@ -1351,25 +1372,32 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     if (exprPart != NULL) {
         if (!PartitionMapIsRange(partMap)) {
             result->state = PRUNING_RESULT_FULL;
+            result->isPbeSinlePartition = false;
             return result;
         } else {
             result->exprPart = exprPart;
             result->state = PRUNING_RESULT_SUBSET;
+            result->isPbeSinlePartition = false;
             return result;
         }
     } else if (paramArg != NULL) {
         if (paramArg->paramkind != PARAM_EXTERN || !PartitionMapIsRange(partMap)) {
             result->state = PRUNING_RESULT_FULL;
+            result->isPbeSinlePartition = false;
             return result;
         } else {
             result->paramArg = paramArg;
             result->state = PRUNING_RESULT_SUBSET;
+            if (0 == strcmp("=", opName)) {
+                result->isPbeSinlePartition = true;
+            }
             return result;
         }
     }
 
     if (constArg->constisnull) {
         result->state = PRUNING_RESULT_EMPTY;
+        result->isPbeSinlePartition = false;
         return result;
     }
 
@@ -1377,6 +1405,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     result->boundary = makePruningBoundary(partKeyNum);
 
     boundary = result->boundary;
+    result->isPbeSinlePartition = false;
 
     /* decide the const is the top or bottom of boundary */
     if ((0 == strcmp(">", opName) && rightArgIsConst) || (0 == strcmp("<", opName) && !rightArgIsConst)) {
@@ -1409,6 +1438,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
 
         boundary->state = PRUNING_RESULT_SUBSET;
         result->state = PRUNING_RESULT_SUBSET;
+        result->isPbeSinlePartition = true;
     } else if ((0 == strcmp("<=", opName) && rightArgIsConst) || (0 == strcmp(">=", opName) && !rightArgIsConst)) {
         boundary->maxClose[attrOffset] = true;
         boundary->max[attrOffset] = PointerGetDatum(constArg);

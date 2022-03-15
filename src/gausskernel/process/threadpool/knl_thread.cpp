@@ -1151,6 +1151,8 @@ static void knl_t_bgwriter_init(knl_t_bgwriter_context* bgwriter_cxt)
 static void knl_t_pagewriter_init(knl_t_pagewriter_context* pagewriter_cxt)
 {
     pagewriter_cxt->got_SIGHUP = false;
+    pagewriter_cxt->sync_requested = false;
+    pagewriter_cxt->sync_retry = false;
     pagewriter_cxt->shutdown_requested = false;
     pagewriter_cxt->page_writer_after = WRITEBACK_MAX_PENDING_FLUSHES;
     pagewriter_cxt->pagewriter_id = -1;
@@ -1495,7 +1497,7 @@ static void knl_t_postmaster_init(knl_t_postmaster_context* postmaster_cxt)
     rc = memset_s(postmaster_cxt->CrossClusterReplConnArray, MAX_REPLNODE_NUM * sizeof(replconninfo*), 0,
         MAX_REPLNODE_NUM * sizeof(replconninfo*));
     securec_check(rc, "\0", "\0");
-    rc = memset_s(postmaster_cxt->CrossClusterReplConnChanged, MAX_REPLNODE_NUM * sizeof(bool), 0, 
+    rc = memset_s(postmaster_cxt->CrossClusterReplConnChanged, MAX_REPLNODE_NUM * sizeof(bool), 0,
                   MAX_REPLNODE_NUM * sizeof(bool));
     securec_check(rc, "\0", "\0");
 
@@ -1678,7 +1680,7 @@ knl_t_uheap_stats_init(knl_t_uheap_stats_context* uheap_stats_cxt)
 }
 #endif
 
-void KnlDcfContextInit(knl_t_dcf_context* dcfContext) 
+void KnlDcfContextInit(knl_t_dcf_context* dcfContext)
 {
     dcfContext->isDcfShmemInited = false;
     dcfContext->is_dcf_thread = false;
@@ -1709,7 +1711,7 @@ void knl_thread_init(knl_thread_role role)
     t_thrd.mcxt_group->Init(t_thrd.top_mem_cxt);
     MemoryContextSeal(t_thrd.top_mem_cxt);
     MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
-    
+
     KnlLscContextInit(&t_thrd.lsc_cxt);
     /* CommProxy Support */
     t_thrd.comm_sock_option = g_default_invalid_sock_opt;

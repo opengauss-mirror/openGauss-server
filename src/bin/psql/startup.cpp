@@ -46,8 +46,6 @@ PsqlSettings pset;
 /* Used for change child process name in gsql parallel execute mode. */
 char* argv_para;
 int argv_num;
-static int PASSWORD_STR_LEN = 9;
-static bool dbname_alloced = false;
 static bool is_pipeline = false;
 static bool is_interactive = true;
 #ifndef ENABLE_MULTIPLE_NODES
@@ -630,6 +628,10 @@ int main(int argc, char* argv[])
 
         /* Stored connection and guc info for new connections in gsql parallel mode. */
         values_free[3] = true;
+        if (options.dbname != NULL) {
+            /* When we use a new dbname or exit the program, we need to free the value. */
+            values_free[4] = true; /* The dbname index is 4 */
+        }
 
         pset.connInfo.keywords = keywords;
         pset.connInfo.values = values;
@@ -828,6 +830,12 @@ int main(int argc, char* argv[])
     for (int i = 0; i < PARAMS_ARRAY_SIZE; i++) {
         if (pset.connInfo.values_free[i] && NULL != pset.connInfo.values[i]) {
             if (strlen(pset.connInfo.values[i]) != 0) {
+                /* Erase the connection information in the memory. */
+                rc = memset_s(pset.connInfo.values[i],
+                              strlen(pset.connInfo.values[i]),
+                              0,
+                              strlen(pset.connInfo.values[i]));
+                securec_check_c(rc, "\0", "\0");
                 free(pset.connInfo.values[i]);
                 pset.connInfo.values[i] = NULL;
             }
@@ -858,13 +866,6 @@ int main(int argc, char* argv[])
     pset.max_retry_times = 0;
     ResetQueryRetryController();
     EmptyRetryErrcodesList(pset.errcodes_list);
-
-    if (dbname_alloced) {
-        rc = memset_s(options.dbname, strlen(options.dbname), 0, strlen(options.dbname));
-        securec_check_c(rc, "\0", "\0");
-        free(options.dbname);
-        options.dbname = NULL;
-    }
 
     return successResult;
 }
@@ -1014,7 +1015,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     bool is_action_file = false;
     /* Database Security: Data importing/dumping support AES128. */
     char* dencrypt_key = NULL;
-    char* needmask = NULL;
+    char* dbname = NULL;
     errno_t rc = EOK;
 #ifdef USE_READLINE
     useReadline = false;
@@ -1054,9 +1055,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 }
                 break;
             case 'd':
-                options->dbname = pg_strdup(optarg);
-                dbname_alloced = true;
-                needmask = optarg;
+                dbname = optarg;
                 break;
             case 'e':
                 if (!SetVariable(pset.vars, "ECHO", "queries")) {
@@ -1263,10 +1262,8 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
      * if we still have arguments, use it as the database name and username
      */
     while (argc - optind >= 1) {
-        if (options->dbname == NULL) {
-            options->dbname = pg_strdup(argv[optind]);
-            dbname_alloced = true;
-            needmask = argv[optind];
+        if (dbname == NULL) {
+            dbname = argv[optind];
         } else if (options->username == NULL) {
             options->username = argv[optind];
         } else if (!pset.quiet) {
@@ -1276,21 +1273,25 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
         optind++;
     }
 
-    if (needmask != NULL) {
+    /* mask Password information stored in dbname */
+    if (dbname != NULL) {
+        /* Save a copy for connection before masking the password. */
+        options->dbname = pg_strdup(dbname);
+
         /* mask informations in URI string. */
-        if (strncmp(options->dbname, "postgresql://", strlen("postgresql://")) == 0) {
-            char *off_argv = needmask + strlen("postgresql://");
+        if (strncmp(dbname, "postgresql://", strlen("postgresql://")) == 0) {
+            char *off_argv = dbname + strlen("postgresql://");
             rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
             check_memset_s(rc);
-        } else if (strncmp(options->dbname, "postgres://", strlen("postgres://")) == 0) {
-            char *off_argv = needmask + strlen("postgres://");
+        } else if (strncmp(dbname, "postgres://", strlen("postgres://")) == 0) {
+            char *off_argv = dbname + strlen("postgres://");
             rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
             check_memset_s(rc);
         }
-        /* mask password */
+        /* mask password in key/value string. */
         char *temp = NULL;
-        if ((temp = strstr(needmask, "password")) != NULL) {
-            char *off_argv = temp + PASSWORD_STR_LEN;
+        if ((temp = strstr(dbname, "password")) != NULL) {
+            char *off_argv = temp + strlen("password");
             rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
             check_memset_s(rc);
         }

@@ -383,7 +383,7 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
 
     Assert (IsA(rustate, RecursiveUnionState));
 
-    if (IsConnectByLevelStartWithPlan(swplan)) {
+    if (IsConnectByLevelStartWithPlan(swplan) || node->sw_keyAttnum == 0) {
         /* for connect by level case, we do not do cycle check */
         return false;
     }

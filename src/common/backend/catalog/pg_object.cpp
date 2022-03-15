@@ -377,6 +377,9 @@ void UpdatePgObjectChangecsn(Oid objectOid, PgObjectType objectType)
     if (!CheckObjectExist(objectOid, objectType)) {
         return;
     }
+    if (u_sess->exec_cxt.isExecTrunc) {
+        return;
+    }
     relation = heap_open(PgObjectRelationId, RowExclusiveLock);
     tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
     if (!HeapTupleIsValid(tup)) {

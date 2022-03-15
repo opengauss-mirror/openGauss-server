@@ -29,7 +29,7 @@ from . import controller
 from . import service
 from .. import __version__
 
-ROOT_DIR_PATH = os.path.abspath(
+ROOT_DIR_PATH = os.path.realpath(
     os.path.join(os.path.dirname(__file__), '..')
 )
 
@@ -70,7 +70,7 @@ def wipe_off_password(dsn):
 
 def path_type(path):
     if os.path.exists(path):
-        return os.path.abspath(path)
+        return os.path.realpath(path)
     else:
         raise argparse.ArgumentTypeError('%s is not a valid path.' % path)
 
@@ -102,7 +102,7 @@ def parse_argv(argv):
     parser.add_argument('--ssl-certfile', type=path_type, help='set the path of ssl certificate file')
     parser.add_argument('--parallel', default=5, type=int,
                         help='not collect pg_settings.yml metrics.')
-    parser.add_argument('--log.filepath', type=os.path.abspath, default=os.path.join(os.getcwd(), DEFAULT_LOGFILE),
+    parser.add_argument('--log.filepath', type=os.path.realpath, default=os.path.join(os.getcwd(), DEFAULT_LOGFILE),
                         help='the path to log')
     parser.add_argument('--log.level', default='info', choices=('debug', 'info', 'warn', 'error', 'fatal'),
                         help='only log messages with the given severity or above.'

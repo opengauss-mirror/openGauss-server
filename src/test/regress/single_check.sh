@@ -370,9 +370,9 @@ case $DO_CMD in
     --fastcheck_single|fastcheck_single)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_single parallel_schedule0$part make_fastcheck_postgresql.conf "${args_val}" ;;
-   --fastcheck_single_audit|fastcheck_single_audit)
+    --fastcheck_single_audit|fastcheck_single_audit)
         args_val="-d 1 -c 0 -p $p -r 1 "
-        real_regresscheck_single_audit security_audit_schedule0$part make_fastcheck_postgresql.conf "${args_val}" ;;
+        real_regresscheck_single_audit security_audit_schedule0$part make_fastcheck_audit_postgresql.conf "${args_val}" ;;
     --fastcheck_lite|fastcheck_lite)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_single parallel_schedule.lite$part make_fastcheck_postgresql.conf "${args_val}" ;;

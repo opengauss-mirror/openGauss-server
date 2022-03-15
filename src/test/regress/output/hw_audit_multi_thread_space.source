@@ -1,0 +1,56 @@
+-- 设置 guc参数  记录 dml 审计日志 & 审计日志上限 512M & 基于空间
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_resource_policy = 1" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_space_limit = 512MB" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state= 1" > /dev/null 2>&1
+-- 修改 guc参数  线程从1 增加到 3 & 审计SCHEMA USER 对象的CREATE、DROP、ALTER操作 & 不记录set操作审计日志 
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_thread_num=3" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=6" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_set_parameter=0" > /dev/null 2>&1
+-- 重启数据库 等待1s
+\! sleep 1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+-- 查看是否线程数修改成功
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num;";
+ audit_thread_num 
+------------------
+ 3
+(1 row)
+
+-- 产生dml_action 审计日志
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CREATE TABLE T_TEST_MULTI_THREAD_SPACE(COL1 int4 DEFAULT 1, COL2 VARCHAR(1024) DEFAULT 'test_multi_thread_space', COL3 int4 DEFAULT 1, COL4 text DEFAULT 'null')";
+CREATE TABLE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "CREATE OR REPLACE PROCEDURE TRANSACTION_TEST_MULTI_THREAD_SPACE() AS BEGIN FOR i IN 0..3000000 LOOP INSERT INTO T_TEST_MULTI_THREAD_SPACE(COL1, COL2,COL3) VALUES (i, 'test_multi_thread_space',2); COMMIT; END LOOP; END;";
+CREATE PROCEDURE
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c " CALL TRANSACTION_TEST_MULTI_THREAD_SPACE();";
+ transaction_test_multi_thread_space 
+-------------------------------------
+ 
+(1 row)
+
+-- 查看 pg_audit 文件总大小 是否超过设置的512M
+\! (( $(du -h --exclude=done @abs_srcdir@/tmp_check/datanode1/pg_audit | grep -oP '\d*M' | grep -oP '\d*') > 530  )) && echo 'size of total logs exceeds upper limit' || echo 'size of total logs not exceeds upper limit --512M'
+size of total logs not exceeds upper limit --512M
+-- 获取 pg_audit 中最早建立的adt文件编号 与原编号 0_adt 比较 观察是否删除了最早的日志文件
+\!  [[ $(echo $(ls @abs_srcdir@/tmp_check/datanode1/pg_audit -tr | head -2 | xargs) | tr -cd "[0-9]") > 1 ]] && echo 'delete oldest files' || echo 'fail to delete oldest files'
+delete oldest files
+-- 恢复guc参数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_resource_policy" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_space_limit" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_dml_state" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_thread_num" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_set_parameter" > /dev/null 2>&1
+-- 重启数据库 等待1s
+\! sleep 1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+-- 再次查看是否线程数修改成功
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num;";
+ audit_thread_num 
+------------------
+ 1
+(1 row)
+

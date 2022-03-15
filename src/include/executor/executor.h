@@ -280,6 +280,7 @@ extern void initExecTableOfIndexInfo(ExecTableOfIndexInfo* execTableOfIndexInfo,
 extern bool ExecEvalParamExternTableOfIndexById(ExecTableOfIndexInfo* execTableOfIndexInfo);
 extern void ExecEvalParamExternTableOfIndex(Node* node, ExecTableOfIndexInfo* execTableOfIndexInfo);
 extern bool is_external_clob(Oid type_oid, bool is_null, Datum value);
+extern bool is_huge_clob(Oid type_oid, bool is_null, Datum value);
 
 /*
  * prototypes from functions in execTuples.c

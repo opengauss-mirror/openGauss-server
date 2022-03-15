@@ -367,7 +367,7 @@ void LocalTabDefCache::Init()
 
     relcacheInvalsReceived = 0;
     initFileRelationIds = NIL;
-    need_eoxact_work = false;
+    RelCacheNeedEOXActWork = false;
 
     g_bucketmap_cache = NIL;
     max_bucket_map_size = BUCKET_MAP_SIZE;
@@ -816,8 +816,9 @@ void LocalTabDefCache::RememberToFreeTupleDescAtEOX(TupleDesc td)
 {
     if (EOXactTupleDescArray == NULL) {
         MemoryContext oldcxt = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
-        EOXactTupleDescArrayLen = 16;
-        EOXactTupleDescArray = (TupleDesc *)palloc(EOXactTupleDescArrayLen * sizeof(TupleDesc));
+        const int default_len = 16;
+        EOXactTupleDescArray = (TupleDesc *)palloc(default_len * sizeof(TupleDesc));
+        EOXactTupleDescArrayLen = default_len;
         NextEOXactTupleDescNum = 0;
         MemoryContextSwitchTo(oldcxt);
     } else if (NextEOXactTupleDescNum >= EOXactTupleDescArrayLen) {
@@ -873,7 +874,7 @@ void LocalTabDefCache::AtEOXact_RelationCache(bool isCommit)
      * transaction, even though we could clear it at subtransaction end in
      * some cases.
      */
-    if (!LocalRelCacheNeedEOXactWork()
+    if (!GetRelCacheNeedEOXActWork()
 #ifdef USE_ASSERT_CHECKING
         && !assert_enabled
 #endif
@@ -962,7 +963,7 @@ void LocalTabDefCache::AtEOXact_RelationCache(bool isCommit)
         }
     }
     /* Once done with the transaction, we can reset u_sess->relcache_cxt.need_eoxact_work */
-    SetLocalRelCacheNeedEOXactWork(false);
+    SetRelCacheNeedEOXActWork(false);
 }
 
 /*
@@ -979,7 +980,7 @@ void LocalTabDefCache::AtEOSubXact_RelationCache(bool isCommit, SubTransactionId
      * Skip the relcache scan if nothing to do --- see notes for
      * AtEOXact_RelationCache.
      */
-    if (!LocalRelCacheNeedEOXactWork())
+    if (!GetRelCacheNeedEOXActWork())
         return;
 
     Dlelem *bucket_elt;
@@ -1117,7 +1118,7 @@ void LocalTabDefCache::ResetInitFlag()
 
     relcacheInvalsReceived = 0;
     initFileRelationIds = NIL;
-    need_eoxact_work = false;
+    RelCacheNeedEOXActWork = false;
 
     g_bucketmap_cache = NIL;
     max_bucket_map_size = 0;

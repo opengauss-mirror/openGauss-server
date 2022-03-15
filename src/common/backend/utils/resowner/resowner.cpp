@@ -39,7 +39,9 @@
 #include "catalog/pg_hashbucket_fn.h"
 
 /*
- * ResourceOwner objects look like this
+ * ResourceOwner objects look like this. When tracking new types of resource,
+ * you must at least add the 'Remember' interface for that resource and adapt
+ * the 'ResourceOwnerConcat' function.
  */
 typedef struct ResourceOwnerData {
     ResourceOwner parent;     /* NULL if no parent (toplevel owner) */
@@ -543,6 +545,174 @@ void ResourceOwnerDelete(ResourceOwner owner)
 }
 
 /*
+ * Part 1 of 'ResourceOwnerConcat'. Concatenate the top 12 resources of two owners.
+ */
+static void ResourceOwnerConcatPart1(ResourceOwner target, ResourceOwner source)
+{
+    int i;
+
+    for (i = 0; i < source->nbuffers; i++) {
+        ResourceOwnerEnlargeBuffers(target);
+        ResourceOwnerRememberBuffer(target, source->buffers[i]);
+    }
+
+    for (i = 0; i < source->nlocalcatclist; i++) {
+        ResourceOwnerEnlargeLocalCatCList(target);
+        ResourceOwnerRememberLocalCatCList(target, source->localcatclists[i]);
+    }
+
+    for (i = 0; i < source->nlocalcatctup; i++) {
+        ResourceOwnerEnlargeLocalCatCTup(target);
+        ResourceOwnerRememberLocalCatCTup(target, source->localcatctups[i]);
+    }
+
+    for (i = 0; i < source->nglobalcatctup; i++) {
+        ResourceOwnerEnlargeGlobalCatCTup(target);
+        ResourceOwnerRememberGlobalCatCTup(target, source->globalcatctups[i]);
+    }
+
+    for (i = 0; i < source->nglobalcatclist; i++) {
+        ResourceOwnerEnlargeGlobalCatCList(target);
+        ResourceOwnerRememberGlobalCatCList(target, source->globalcatclists[i]);
+    }
+
+    for (i = 0; i < source->nglobalbaseentry; i++) {
+        ResourceOwnerEnlargeGlobalBaseEntry(target);
+        ResourceOwnerRememberGlobalBaseEntry(target, source->globalbaseentries[i]);
+    }
+
+    for (i = 0; i < source->nglobaldbentry; i++) {
+        ResourceOwnerEnlargeGlobalDBEntry(target);
+        ResourceOwnerRememberGlobalDBEntry(target, source->globaldbentries[i]);
+    }
+
+    for (i = 0; i < source->nglobalisexclusive; i++) {
+        ResourceOwnerEnlargeGlobalIsExclusive(target);
+        ResourceOwnerRememberGlobalIsExclusive(target, source->globalisexclusives[i]);
+    }
+
+    for (i = 0; i < source->ncatrefs; i++) {
+        ResourceOwnerEnlargeCatCacheRefs(target);
+        ResourceOwnerRememberCatCacheRef(target, source->catrefs[i]);
+    }
+
+    for (i = 0; i < source->ncatlistrefs; i++) {
+        ResourceOwnerEnlargeCatCacheListRefs(target);
+        ResourceOwnerRememberCatCacheListRef(target, source->catlistrefs[i]);
+    }
+
+    for (i = 0; i < source->nrelrefs; i++) {
+        ResourceOwnerEnlargeRelationRefs(target);
+        ResourceOwnerRememberRelationRef(target, source->relrefs[i]);
+    }
+
+    for (i = 0; i < source->npartrefs; i++) {
+        ResourceOwnerEnlargePartitionRefs(target);
+        ResourceOwnerRememberPartitionRef(target, source->partrefs[i]);
+    }
+}
+
+/*
+ * Part 2 of 'ResourceOwnerConcat'. Concatenate the remaining resources of two owners.
+ */
+static void ResourceOwnerConcatPart2(ResourceOwner target, ResourceOwner source)
+{
+    int i;
+
+    for (i = 0; i < source->nfakerelrefs; i++) {
+        dlist_push_tail(&(target->fakerelrefs_list), dlist_pop_head_node(&(source->fakerelrefs_list)));
+        target->nfakerelrefs++;
+    }
+
+    for (i = 0; i < source->nfakepartrefs; i++) {
+        ResourceOwnerEnlargeFakepartRefs(target);
+        ResourceOwnerRememberFakepartRef(target, source->fakepartrefs[i]);
+    }
+
+    for (i = 0; i < source->nplanrefs; i++) {
+        ResourceOwnerEnlargePlanCacheRefs(target);
+        ResourceOwnerRememberPlanCacheRef(target, source->planrefs[i]);
+    }
+
+    for (i = 0; i < source->ntupdescs; i++) {
+        ResourceOwnerEnlargeTupleDescs(target);
+        ResourceOwnerRememberTupleDesc(target, source->tupdescs[i]);
+    }
+
+    for (i = 0; i < source->nsnapshots; i++) {
+        ResourceOwnerEnlargeSnapshots(target);
+        ResourceOwnerRememberSnapshot(target, source->snapshots[i]);
+    }
+
+    for (i = 0; i < source->nfiles; i++) {
+        ResourceOwnerEnlargeFiles(target);
+        ResourceOwnerRememberFile(target, source->files[i]);
+    }
+
+    for (i = 0; i < source->nDataCacheSlots; i++) {
+        ResourceOwnerEnlargeDataCacheSlot(target);
+        ResourceOwnerRememberDataCacheSlot(target, source->dataCacheSlots[i]);
+    }
+
+    for (i = 0; i < source->nMetaCacheSlots; i++) {
+        ResourceOwnerEnlargeMetaCacheSlot(target);
+        ResourceOwnerRememberMetaCacheSlot(target, source->metaCacheSlots[i]);
+    }
+
+    for (i = 0; i < source->nPthreadMutex; i++) {
+        ResourceOwnerEnlargePthreadMutex(target);
+        ResourceOwnerRememberPthreadMutex(target, source->pThdMutexs[i]);
+    }
+
+    for (i = 0; i < source->nPthreadRWlock; i++) {
+        ResourceOwnerEnlargePthreadRWlock(target);
+        ResourceOwnerRememberPthreadRWlock(target, source->pThdRWlocks[i]);
+    }
+
+    for (i = 0; i < source->npartmaprefs; i++) {
+        ResourceOwnerEnlargePartitionMapRefs(target);
+        ResourceOwnerRememberPartitionMapRef(target, source->partmaprefs[i]);
+    }
+
+    for (i = 0; i < source->nglobalMemContext; i++) {
+        ResourceOwnerEnlargeGMemContext(target);
+        ResourceOwnerRememberGMemContext(target, source->globalMemContexts[i]);
+    }
+}
+
+/* ResourceOwnerConcat
+ *              Concatenate two owners.
+ *
+ * The resources traced by the 'source' are placed in the 'target' for tracing.
+ * The advantage is that the memory occupied by the 'source' owner can be released
+ * to reduce the memory consumed by tracing resources. When using a stream-plan,
+ * this is useful for preventing "memory is temporarily unavailable" error when
+ * executing a large number of SQLs in a single transaction/procedure.
+ *
+ * Note: After the invoking is complete, the memory of the 'source' should be release.
+ */
+void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source)
+{
+    Assert(target && source);
+    /*
+     * When modifying the structure of ResourceOwnerData, note that the ResourceOwnerConcat
+     * function needs to be adapted when tracing new types of resources.
+     */
+    Assert(sizeof(ResourceOwnerData) == 448); /* The current size of ResourceOwnerData is 448 */
+
+    while (source->firstchild != NULL) {
+        ResourceOwnerConcat(target, source->firstchild);
+    }
+
+    /*
+     * ResourceOwner traces too many resources. To reduce cyclomatic complexity,
+     * the Concatenate operation is divided into two parts.
+     */
+    ResourceOwnerConcatPart1(target, source);
+    ResourceOwnerConcatPart2(target, source);
+}
+
+/*
  * Fetch parent of a ResourceOwner (returns NULL if top-level owner)
  */
 ResourceOwner ResourceOwnerGetParent(ResourceOwner owner)
@@ -573,6 +743,14 @@ const char* ResourceOwnerGetName(ResourceOwner owner)
 ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner)
 {
     return owner->firstchild;
+}
+
+/*
+ * Fetch memory context of a ResourceOwner
+ */
+MemoryContext ResourceOwnerGetMemCxt(ResourceOwner owner)
+{
+    return owner->memCxt;
 }
 
 /*

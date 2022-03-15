@@ -6052,6 +6052,9 @@ static Datum gs_calculate_encrypted_sm3_password(const char* password, const cha
 Datum calculate_encrypted_password(bool is_encrypted, const char* password, const char* rolname, 
                                    const char* salt_string)
 {
+    if (password == NULL || password[0] == '\0') {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("The password could not be NULL.")));
+    }
     errno_t rc = EOK;
     char encrypted_md5_password[MD5_PASSWD_LEN + 1] = {0};
     Datum datum_value;

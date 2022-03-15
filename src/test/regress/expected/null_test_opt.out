@@ -1,0 +1,100 @@
+create schema null_test_opt_nsp;
+set search_path = null_test_opt_nsp;
+create table t(a int, b int not null);
+insert into t values(1, 1);
+explain (costs off) select * from t where b is null order by 1, 2;
+            QUERY PLAN             
+-----------------------------------
+ Sort
+   Sort Key: a, b
+   ->  Result
+         One-Time Filter: false
+         ->  Seq Scan on t
+               Filter: (b IS NULL)
+(6 rows)
+
+select * from t where b is null order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+explain (costs off) select * from t where b is not null order by 1, 2;
+     QUERY PLAN      
+---------------------
+ Sort
+   Sort Key: a, b
+   ->  Seq Scan on t
+(3 rows)
+
+select * from t where b is not null order by 1, 2;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+explain (costs off) select * from t where b is null or b is not null order by 1, 2;
+     QUERY PLAN      
+---------------------
+ Sort
+   Sort Key: a, b
+   ->  Seq Scan on t
+(3 rows)
+
+select * from t where b is null or b is not null order by 1, 2;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+explain (costs off) select * from t where b is null or a = 1 order by 1, 2;
+                QUERY PLAN                
+------------------------------------------
+ Sort
+   Sort Key: a, b
+   ->  Seq Scan on t
+         Filter: ((b IS NULL) OR (a = 1))
+(4 rows)
+
+select * from t where b is null or a = 1 order by 1, 2;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+explain (costs off) select * from t where b is null and a = 1 order by 1, 2;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Sort
+   Sort Key: b
+   ->  Result
+         One-Time Filter: false
+         ->  Seq Scan on t
+               Filter: ((b IS NULL) AND (a = 1))
+(6 rows)
+
+select * from t where b is null and a = 1 order by 1, 2;
+ a | b 
+---+---
+(0 rows)
+
+explain (costs off) select * from t tt1 join t tt2 on tt1.a = tt2.b where tt1.a is null;
+               QUERY PLAN                
+-----------------------------------------
+ Hash Join
+   Hash Cond: (tt1.a = tt2.b)
+   ->  Seq Scan on t tt1
+         Filter: (a IS NULL)
+   ->  Hash
+         ->  Result
+               One-Time Filter: false
+               ->  Seq Scan on t tt2
+                     Filter: (b IS NULL)
+(9 rows)
+
+select * from t tt1 join t tt2 on tt1.a = tt2.b where tt1.a is null;
+ a | b | a | b 
+---+---+---+---
+(0 rows)
+
+drop schema null_test_opt_nsp cascade;
+NOTICE:  drop cascades to table t

@@ -28,6 +28,11 @@ from dbmind.common.types import Sequence
 from dbmind.common.types.misc import SlowQuery
 from dbmind.metadatabase import dao
 
+
+# Singleton pattern with starving formula
+# will capture exception in the main thread.
+TsdbClientFactory.get_tsdb_client()
+
 # Notice: 'DISTINGUISHING_INSTANCE_LABEL' is a magic string, i.e., our own name.
 # Thus, not all collection agents (such as Prometheus's openGauss-exporter)
 # distinguish different instance addresses through this one.

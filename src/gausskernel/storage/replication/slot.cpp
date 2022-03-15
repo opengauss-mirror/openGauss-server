@@ -705,7 +705,8 @@ static void ReplicationSlotDropAcquired(void)
     } else {
         volatile ReplicationSlot *vslot = slot;
 
-        bool fail_softly = GET_SLOT_PERSISTENCY(slot->data) == RS_EPHEMERAL;
+        bool fail_softly = GET_SLOT_PERSISTENCY(slot->data) == RS_EPHEMERAL ||
+            (GET_SLOT_PERSISTENCY(slot->data) == RS_PERSISTENT && slot->extra_content != NULL);
         SpinLockAcquire(&slot->mutex);
         vslot->active = false;
         SpinLockRelease(&slot->mutex);
@@ -2171,18 +2172,22 @@ void AdvanceArchiveSlot(XLogRecPtr restart_pos)
         ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[*slot_idx];
         SpinLockAcquire(&slot->mutex);
         if (slot->in_use == true && slot->archive_config != NULL) {
+            t_thrd.slot_cxt.MyReplicationSlot = slot;
             slot->data.restart_lsn = restart_pos;
             extra_content = slot->extra_content;
+            SpinLockRelease(&slot->mutex);
         } else {
+            SpinLockRelease(&slot->mutex);
             ereport(WARNING,
                 (errcode_for_file_access(), errmsg("slot idx not valid, obs slot %X/%X not advance ",
                     (uint32)(restart_pos >> 32), (uint32)(restart_pos))));
         }
-        SpinLockRelease(&slot->mutex);
+
         if (extra_content == NULL) {
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("archive thread could not get slot extra content when advance slot.")));
         }
+        ReplicationSlotMarkDirty();
         log_slot_advance(&slot->data, extra_content);
     }
 }

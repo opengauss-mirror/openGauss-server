@@ -402,7 +402,7 @@ class IndexAdvisor:
                         '(' + column[0] + ')', (' ' + column[1] if column[1] else ''))
                     print(statement)
         # save integrate indexes result
-        integrate_indexes_file = os.path.join(os.path.dirname(workload_file_path),
+        integrate_indexes_file = os.path.join(os.path.realpath(os.path.dirname(workload_file_path)),
                                               'index_result.json')
         for table, indexes in self.integrate_indexes['currentIndexes'].items():
             self.integrate_indexes['historyIndexes'][table] = \
@@ -901,8 +901,8 @@ def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes
 
 
 def get_last_indexes_result(input_path):
-    last_indexes_result_file = os.path.join(
-        os.path.dirname(input_path), 'index_result.json')
+    last_indexes_result_file = os.path.join(os.path.realpath(
+        os.path.dirname(input_path)), 'index_result.json')
     integrate_indexes = {'historyIndexes': {}}
     if os.path.exists(last_indexes_result_file):
         try:
@@ -949,9 +949,10 @@ def check_parameter(args):
     MAX_INDEX_NUM = args.max_index_num
     ENABLE_MULTI_NODE = args.multi_node
     MAX_INDEX_STORAGE = args.max_index_storage
-    if args.U and args.U != getpass.getuser() and not args.W:
-        raise ValueError('Enter the \'-W\' parameter for user '
-                         + args.U + ' when executing the script.')
+    # check if the password contains illegal characters
+    is_legal = re.search(r'^[A-Za-z0-9~!@#%^*\-_=+?,.]+$', args.W)
+    if not is_legal:
+        raise ValueError("The password contains illegal characters.")
 
 
 def main(argv):
@@ -964,7 +965,7 @@ def main(argv):
     arg_parser.add_argument(
         "-U", help="Username for database log-in", action=CheckValid)
     arg_parser.add_argument(
-        "f", help="File containing workload queries (One query per line)")
+        "f", help="File containing workload queries (One query per line)", action=CheckValid)
     arg_parser.add_argument("--schema", help="Schema name for the current business data",
                             required=True, action=CheckValid)
     arg_parser.add_argument(

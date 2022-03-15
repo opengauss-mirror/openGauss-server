@@ -82,7 +82,6 @@ static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int key
 static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel);
 static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapshot, bool* all_dead,
                              CUDescScan* cudescScan);
-static bool CheckPartitionIsInvisible(GPIScanDesc gpiScan);
 
 /*
  *	_bt_doinsert() -- Handle insertion of a single index tuple in the tree.
@@ -2400,7 +2399,7 @@ static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapsh
     }
 }
 
-static bool CheckPartitionIsInvisible(GPIScanDesc gpiScan)
+bool CheckPartitionIsInvisible(GPIScanDesc gpiScan)
 {
     if (OidRBTreeMemberOid(gpiScan->invisiblePartTreeForVacuum, gpiScan->currPartOid)) {
         return true;

@@ -250,6 +250,73 @@ delete from test_bypass_sql_partition where col1 <= 11 and col1 >= 15;
 delete from test_bypass_sql_partition where col1 > 10;
 delete from test_bypass_sql_partition where col1 < 10;
 delete from test_bypass_sql_partition where col1 >= 10 and col1 <= 30;
+
+create table t1(
+crcrd_acg_setl_dt char(8) not null,
+cst_id char(18),
+multi_tenancy_id char(5)
+)
+partition by range (multi_tenancy_id, crcrd_acg_setl_dt)
+(
+	partition p1 values less than ('CN000', '20191201'),
+    partition p2 values less than ('CN000', '20200201'),
+	partition p3 values less than ('CN000', '20200202'),
+	partition p4 values less than ('CN000', '20200203'),
+	partition p5 values less than ('CN000', '20200204'),
+	partition p6 values less than ('ZZZZZ', '21000101')
+)
+enable row movement
+;
+ 
+create index on t1(crcrd_acg_setl_dt, cst_id, multi_tenancy_id) local;
+ 
+insert into t1 values('20200201', '107190000103394943', 'CN000');
+insert into t1 values('20200225', '107190000103394943', 'CN000');
+insert into t1 values('20200228', '107190000103394943', 'CN000');
+insert into t1 values('20200301', '107190000103394943', 'CN000');
+insert into t1 values('20200310', '107190000103394943', 'CN000');
+ 
+set enable_seqscan = off;
+ 
+select max(crcrd_acg_setl_dt) from t1 where cst_id='107190000103394943' and multi_tenancy_id = 'CN000';
+ 
+prepare p1 as select max(crcrd_acg_setl_dt) from t1 where cst_id=$1 and multi_tenancy_id = $2;
+ 
+execute p1 ('107190000103394943','CN000');
+deallocate p1;
+
+drop table t1;
+drop table test_range_pt;
+create table test_range_pt (a int, b int, c int)
+partition by range(a)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (maxvalue)
+)ENABLE ROW MOVEMENT;
+insert into test_range_pt values(1,1),(2001,2),(3001,3),(4001,4),(5001,5);
+ 
+create index idx1 on test_range_pt(a) local;
+prepare p1 as select max(a) from test_range_pt where a>$1;
+execute p1 (1);
+deallocate p1;
+select max(a) from test_range_pt where a>b+1;
+drop table test_range_pt;
+drop table test_list_lt1;
+create table test_list_lt1 (a int, b int )
+partition by list(a)
+(
+	partition p1 values (2000),
+	partition p2 values (3000),
+	partition p3 values (4000)
+) ;
+prepare p1 as select * from test_list_lt1 where  a = $1 and ctid = '(0,1)';
+execute p1 (1);
+deallocate p1;
+drop table test_list_lt1;
+
 reset enable_partition_opfusion;
 drop table test_bypass_sql_partition;
 

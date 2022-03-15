@@ -12,9 +12,9 @@ CREATE MODEL m using xgboost_binary_logistic FROM db4ai_rain;
 ERROR:  Supervised ML algorithms require FEATURES clause
 -- Errors with semantic validation of hyperparameters
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH n_iter=-1;
-ERROR:  Hyperparameter n_iter must be in the range [1,2147483647]
+ERROR:  Hyperparameter n_iter must be in the range [1,10000]
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH batch_size=0;
-ERROR:  Hyperparameter batch_size must be in the range [1,2147483647]
+ERROR:  Hyperparameter batch_size must be in the range [1,1048575]
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH max_depth=-1;
 ERROR:  Hyperparameter max_depth must be in the range [0,2147483647]
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH min_child_weight=-1;
@@ -24,7 +24,9 @@ ERROR:  Hyperparameter eta must be in the range [0,1]
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH seed=-1;
 ERROR:  Hyperparameter seed must be in the range [0,2147483647]
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH nthread=-1;
-ERROR:  Hyperparameter nthread must be in the range [0,2147483647]
+ERROR:  Hyperparameter nthread must be in the range [0,100]
+CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH nthread=101;
+ERROR:  Hyperparameter nthread must be in the range [0,100]
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH booster=10;
 ERROR:  Hyperparameter booster must be a string
 CREATE MODEL m USING xgboost_binary_logistic FEATURES rainfall, temp9am TARGET raintoday FROM db4ai_rain WITH tree_method=10;

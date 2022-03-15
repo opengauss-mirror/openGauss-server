@@ -5546,6 +5546,39 @@ void LockBuffer(Buffer buffer, int mode)
 }
 
 /*
+ * Try to acquire the content_lock for the buffer if must_wait is false.
+ * If the content lock is not available, return FALSE with no side-effects.
+ */
+bool TryLockBuffer(Buffer buffer, int mode, bool must_wait)
+{
+    Assert(BufferIsValid(buffer));
+
+    /* without tries, act as LockBuffer */
+    if (must_wait) {
+        LockBuffer(buffer, mode);
+        return true;
+    }
+
+    /* local buffers need no lock */
+    if (BufferIsLocal(buffer)) {
+        return true;
+    }
+
+    volatile BufferDesc *buf = GetBufferDescriptor(buffer - 1);
+
+    if (mode == BUFFER_LOCK_SHARE) {
+        return LWLockConditionalAcquire(buf->content_lock, LW_SHARED);
+    } else if (mode == BUFFER_LOCK_EXCLUSIVE) {
+        return LWLockConditionalAcquire(buf->content_lock, LW_EXCLUSIVE);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+            (errmsg("unrecognized buffer lock mode for TryLockBuffer: %d", mode))));
+    }
+
+    return false;
+}
+
+/*
  * Acquire the content_lock for the buffer, but only if we don't have to wait.
  *
  * This assumes the caller wants BUFFER_LOCK_EXCLUSIVE mode.

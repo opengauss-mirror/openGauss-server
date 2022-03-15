@@ -871,12 +871,14 @@ static void ExecuteBarrier(const char* id, bool isSwitchoverBarrier)
 
     /* Only obs-based disaster recovery needs the following processing */
     if (g_instance.archive_obs_cxt.archive_slot_num != 0 && g_instance.archive_obs_cxt.barrier_lsn_info != NULL) {
+#ifdef ENABLE_MULTIPLE_NODES
         if (IS_HADR_BARRIER(id) || IS_CSN_BARRIER(id)) {
             SpinLockAcquire(&g_instance.archive_obs_cxt.barrier_lock);
             SaveAllNodeBarrierLsnInfo(id, conn_handles);
             g_instance.archive_obs_cxt.barrier_lsn_info[connCnt].barrierLsn = recptr;
             SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
         }
+#endif
 
         if (t_thrd.role == BARRIER_CREATOR && !isSwitchoverBarrier) {
             UpdateGlobalBarrierListOnMedia(id, g_instance.attr.attr_common.PGXCNodeName);
@@ -1017,7 +1019,7 @@ static void RequestXLogFromStream()
 
 static void barrier_redo_pause(char* barrierId)
 {
-    if (!is_barrier_pausable(barrierId)) {
+    if (!is_barrier_pausable(barrierId) || t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME_OBS) {
         return;
     }
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
@@ -1035,7 +1037,7 @@ static void barrier_redo_pause(char* barrierId)
             SpinLockRelease(&walrcv->mutex);
             pg_usleep(1000L);
             RedoInterruptCallBack();
-            if(IS_OBS_DISASTER_RECOVER_MODE) {
+            if (IS_OBS_DISASTER_RECOVER_MODE) {
                 update_recovery_barrier();
             } else if (IS_DISASTER_RECOVER_MODE) {
                 RequestXLogFromStream();

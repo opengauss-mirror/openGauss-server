@@ -80,8 +80,11 @@ static MemoryContext g_xgboostMcxt = NULL;
 #define safe_xgboost(call) { \
     int err = (call);        \
     if (err != 0) {          \
+        char *str = const_cast<char*>(g_xgboostApi->XGBGetLastError());    \
+        char *res = strchr(str, '\n');       \
+        *res = '\0';                        \
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE), \
-                errmsg("%s:%d: error in %s: %s\n", __FILE__, __LINE__, #call, g_xgboostApi->XGBGetLastError()))); \
+                errmsg("%s", strrchr(str, ':') + 1))); \
         }                                                                                                         \
     }
 
@@ -225,14 +228,15 @@ const char *xgboost_boost_str[]       = {"gbtree", "gblinear", "dart"};
 const char *xgboost_tree_method_str[] = {"auto", "exact", "approx", "hist", "gpu_hist"};
 const char *xgboost_eval_metric_str[] = {"rmse", "rmsle", "map", "mae", "auc", "aucpr" };
 static HyperparameterDefinition xgboost_hyperparameter_definitions[] = {
-    HYPERPARAMETER_INT4("n_iter", 10, 1, true, INT32_MAX, true, HyperparamsXGBoost, n_iterations, HP_NO_AUTOML()),
-    HYPERPARAMETER_INT4("batch_size", 10000, 1, true, INT32_MAX, true, HyperparamsXGBoost, batch_size, HP_NO_AUTOML()),
+    HYPERPARAMETER_INT4("n_iter", 10, 1, true, ITER_MAX, true, HyperparamsXGBoost, n_iterations, HP_NO_AUTOML()),
+    HYPERPARAMETER_INT4("batch_size", 10000, 1, true, MAX_BATCH_SIZE, true, HyperparamsXGBoost, batch_size,
+                        HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("max_depth", 5, 0, true, INT32_MAX, true, HyperparamsXGBoost, max_depth, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("min_child_weight", 1, 0, true, INT32_MAX, true, HyperparamsXGBoost, min_child_weight,
                         HP_NO_AUTOML()),
-    HYPERPARAMETER_FLOAT8("gamma", 0.0, 0.0, true, 1, true, HyperparamsXGBoost, gamma, HP_NO_AUTOML()),
+    HYPERPARAMETER_FLOAT8("gamma", 0.0, 0.0, true, DBL_MAX, true, HyperparamsXGBoost, gamma, HP_NO_AUTOML()),
     HYPERPARAMETER_FLOAT8("eta", 0.3, 0.0, true, 1, true, HyperparamsXGBoost, eta, HP_NO_AUTOML()),
-    HYPERPARAMETER_INT4("nthread", 1, 0, true, INT32_MAX, true, HyperparamsXGBoost, nthread, HP_NO_AUTOML()),
+    HYPERPARAMETER_INT4("nthread", 1, 0, true, 100, true, HyperparamsXGBoost, nthread, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("verbosity", 1, 0, true, 3, true, HyperparamsXGBoost, verbosity, HP_NO_AUTOML()),
     HYPERPARAMETER_INT4("seed", 0, 0, true, INT32_MAX, true, HyperparamsXGBoost, seed,
                         HP_AUTOML_INT(1, INT32_MAX, 1, ProbabilityDistribution::UNIFORM_RANGE)),
@@ -547,12 +551,6 @@ static void xgboost_run(AlgorithmAPI *self, TrainModelState *pstate, Model **mod
                     reinterpret_cast<HyperparamsXGBoost const *>(pstate->config->hyperparameters[0]));
 
     ModelTuple const *outer_tuple_slot = nullptr;
-
-    // Check max_depth parameter
-    if (xg_hyperp->max_depth == 0 && (0 != strcmp(xgboost_boost_str[BOOST_GBLINEAR_IDX], xg_hyperp->booster))) {
-        ereport(ERROR, (errmodule(MOD_DB4AI),
-                errmsg("Max_depth must be larger than 0 when booster is non_linear value.")));
-    }
 
     load_xgboost_library();
 

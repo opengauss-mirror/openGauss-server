@@ -42,6 +42,7 @@ typedef struct SessionPackageRuntime
     List* portalContext;
     List* portalData;
     List* funcValInfo;
+    bool is_insert_gs_source;
 } SessionPackageRuntime;
 
 typedef struct GPRCValue

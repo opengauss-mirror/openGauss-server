@@ -280,6 +280,7 @@ static void knl_u_parser_init(knl_u_parser_context* parser_cxt)
     parser_cxt->ddl_pbe_context = NULL;
     parser_cxt->in_package_function_compile = false;
     parser_cxt->isCreateFuncOrProc = false;
+    parser_cxt->isTimeCapsule = false;
 }
 
 static void knl_u_advisor_init(knl_u_advisor_context* adv_cxt) 
@@ -441,6 +442,7 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->RecentDataXmin = FirstNormalTransactionId;
     utils_cxt->RecentGlobalXmin = InvalidTransactionId;
     utils_cxt->RecentGlobalDataXmin = InvalidTransactionId;
+    utils_cxt->RecentGlobalCatalogXmin = InvalidTransactionId;
 
     utils_cxt->cn_xc_maintain_mode = false;
     utils_cxt->snapshot_source = SNAPSHOT_UNDEFINED;
@@ -812,6 +814,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->is_delete_function = false;
     plsql_cxt->have_error = false;
     plsql_cxt->client_info = NULL;
+    pthread_mutex_init(&plsql_cxt->client_info_lock, NULL);
     plsql_cxt->sess_cxt_htab = NULL;
     plsql_cxt->have_error = false;
     plsql_cxt->stp_savepoint_cnt = 0;
@@ -841,6 +844,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->cur_exception_cxt = NULL;
     plsql_cxt->pragma_autonomous = false;
     plsql_cxt->ActiveLobToastOid = InvalidOid;
+    plsql_cxt->is_insert_gs_source = false;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
@@ -981,7 +985,7 @@ static void knl_u_relcache_init(knl_u_relcache_context* relcache_cxt)
     relcache_cxt->criticalSharedRelcachesBuilt = false;
     relcache_cxt->relcacheInvalsReceived = 0L;
     relcache_cxt->initFileRelationIds = NIL;
-    relcache_cxt->need_eoxact_work = false;
+    relcache_cxt->RelCacheNeedEOXActWork = false;
     relcache_cxt->OpClassCache = NULL;
     relcache_cxt->pgclassdesc = NULL;
     relcache_cxt->pgindexdesc = NULL;
@@ -1170,7 +1174,7 @@ static void knl_u_cache_init(knl_u_cache_context* cache_cxt)
 
     cache_cxt->PartitionIdCache = NULL;
     cache_cxt->BucketIdCache = NULL;
-    cache_cxt->part_cache_need_eoxact_work = false;
+    cache_cxt->PartCacheNeedEOXActWork = false;
     cache_cxt->bucket_cache_need_eoxact_work = false;
     cache_cxt->dn_hash_table = NULL;
 }

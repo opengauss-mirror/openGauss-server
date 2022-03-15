@@ -1911,6 +1911,14 @@ create table test(a int);
 create view v_test as select * from test;
 CREATE OR REPLACE RULE v_delete as ON DELETE TO v_test DO INSTEAD NOTHING;
 delete from v_test;
+set explain_perf_mode=pretty;
+explain delete from v_test;
+        QUERY PLAN         
+---------------------------
+ Query rewrites to nothing
+(1 row)
+
+reset explain_perf_mode;
 drop table test cascade;
 NOTICE:  drop cascades to view v_test
 -- end

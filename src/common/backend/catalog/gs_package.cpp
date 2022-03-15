@@ -1105,8 +1105,29 @@ static List* BuildFuncInfoList(PLpgSQL_execstate* estate)
 void BuildSessionPackageRuntimeForAutoSession(uint64 sessionId, uint64 parentSessionId,
     PLpgSQL_execstate* estate, PLpgSQL_function* func)
 {
-    SessionPackageRuntime* parentSessionPkgs = NULL;
+    MemoryContext pkgRuntimeCtx = AllocSetContextCreate(CurrentMemoryContext,
+                                                        "SessionPackageRuntime",
+                                                        ALLOCSET_SMALL_MINSIZE,
+                                                        ALLOCSET_SMALL_INITSIZE,
+                                                        ALLOCSET_DEFAULT_MAXSIZE);
+    MemoryContext oldCtx = MemoryContextSwitchTo(pkgRuntimeCtx);
+    SessionPackageRuntime* resultSessionPkgs = (SessionPackageRuntime*)palloc0(sizeof(SessionPackageRuntime));
+    resultSessionPkgs->context = pkgRuntimeCtx;
 
+    /* doing insert gs_source, no need to restore package value */
+    if (func->is_insert_gs_source) {
+        resultSessionPkgs->is_insert_gs_source = true;
+        g_instance.global_session_pkg->Add(sessionId, resultSessionPkgs);
+        MemoryContextSwitchTo(oldCtx);
+        MemoryContextDelete(resultSessionPkgs->context);
+        return;
+    }
+
+    if (u_sess->plsql_cxt.plpgsqlpkg_dlist_objects != NULL) {
+        CopyCurrentSessionPkgs(resultSessionPkgs, u_sess->plsql_cxt.plpgsqlpkg_dlist_objects);
+    }
+
+    SessionPackageRuntime* parentSessionPkgs = NULL;
     /* get parent session pkgs, build current session pkgs need include them */
     if (parentSessionId != 0) {
         if (!u_sess->plsql_cxt.not_found_parent_session_pkgs) {
@@ -1119,17 +1140,6 @@ void BuildSessionPackageRuntimeForAutoSession(uint64 sessionId, uint64 parentSes
                 parentSessionPkgs = u_sess->plsql_cxt.auto_parent_session_pkgs;
             }
         }
-    }
-    MemoryContext pkgRuntimeCtx = AllocSetContextCreate(CurrentMemoryContext,
-                                                        "SessionPackageRuntime",
-                                                        ALLOCSET_SMALL_MINSIZE,
-                                                        ALLOCSET_SMALL_INITSIZE,
-                                                        ALLOCSET_DEFAULT_MAXSIZE);
-    MemoryContext oldCtx = MemoryContextSwitchTo(pkgRuntimeCtx);
-    SessionPackageRuntime* resultSessionPkgs = (SessionPackageRuntime*)palloc0(sizeof(SessionPackageRuntime));
-    resultSessionPkgs->context = pkgRuntimeCtx;
-    if (u_sess->plsql_cxt.plpgsqlpkg_dlist_objects != NULL) {
-        CopyCurrentSessionPkgs(resultSessionPkgs, u_sess->plsql_cxt.plpgsqlpkg_dlist_objects);
     }
 
     if (parentSessionPkgs) {
@@ -1387,6 +1397,9 @@ void initAutoSessionPkgsValue(uint64 sessionId)
     if (sessionPkgs->runtimes == NULL) {
         return;
     }
+    if (sessionPkgs->is_insert_gs_source) {
+        return;
+    }
 
     foreach(cell, sessionPkgs->runtimes) {
         pkgState = (PackageRuntimeState*)lfirst(cell);
@@ -1510,11 +1523,7 @@ void initAutonomousPkgValue(PLpgSQL_package* targetPkg, uint64 sessionId)
 
 List *processAutonmSessionPkgs(PLpgSQL_function* func, PLpgSQL_execstate* estate, bool isAutonm)
 {
-    List *autonmsList = NULL;
-    /* ignore inline_code_block function */
-    if (!OidIsValid(func->fn_oid)) {
-        return NULL;
-    }
+    List *autonmsList = NIL;
 
     uint64 currentSessionId = IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
 
@@ -1525,6 +1534,13 @@ List *processAutonmSessionPkgs(PLpgSQL_function* func, PLpgSQL_execstate* estate
          * sessionpkgs from g_instance.global_session_pkg
          */
         uint64 automnSessionId = u_sess->SPI_cxt.autonomous_session->current_attach_sessionid;
+        if (func->is_insert_gs_source) {
+            /* doing insert gs_source, need do noting */
+            g_instance.global_session_pkg->Remove(automnSessionId);
+            g_instance.global_session_pkg->Remove(currentSessionId);
+            return NIL;
+        }
+
         SessionPackageRuntime* sessionpkgs = g_instance.global_session_pkg->Fetch(automnSessionId);
         RestoreAutonmSessionPkgs(sessionpkgs);
         if (sessionpkgs != NULL) {
@@ -1546,7 +1562,11 @@ List *processAutonmSessionPkgs(PLpgSQL_function* func, PLpgSQL_execstate* estate
          * and restore package values by it.
          */
         if (u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0) {
-            BuildSessionPackageRuntimeForParentSession(currentSessionId, estate);
+            /* doing insert gs_source, need do noting */
+            if (u_sess->plsql_cxt.auto_parent_session_pkgs == NULL
+                || !u_sess->plsql_cxt.auto_parent_session_pkgs->is_insert_gs_source) {
+                BuildSessionPackageRuntimeForParentSession(currentSessionId, estate);
+            }
             /* autonomous session will be reused by next autonomous procedure, need clean it */
             if (u_sess->plsql_cxt.auto_parent_session_pkgs != NULL) {
                 MemoryContextDelete(u_sess->plsql_cxt.auto_parent_session_pkgs->context);
@@ -1560,11 +1580,6 @@ List *processAutonmSessionPkgs(PLpgSQL_function* func, PLpgSQL_execstate* estate
 
 void processAutonmSessionPkgsInException(PLpgSQL_function* func)
 {
-    /* ignore inline_code_block function */
-    if (!OidIsValid(func->fn_oid)) {
-        return;
-    }
-
     uint64 currentSessionId = IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
 
     if (IsAutonomousTransaction(func->action->isAutonomous)) {
@@ -1578,6 +1593,13 @@ void processAutonmSessionPkgsInException(PLpgSQL_function* func)
             return;
         }
         uint64 automnSessionId = u_sess->SPI_cxt.autonomous_session->current_attach_sessionid;
+        if (func->is_insert_gs_source) {
+            /* doing insert gs_source, need do noting */
+            g_instance.global_session_pkg->Remove(automnSessionId);
+            g_instance.global_session_pkg->Remove(currentSessionId);
+            return;
+        }
+
         SessionPackageRuntime* sessionpkgs = g_instance.global_session_pkg->Fetch(automnSessionId);
         RestoreAutonmSessionPkgs(sessionpkgs);
         if (sessionpkgs != NULL) {
@@ -1596,7 +1618,11 @@ void processAutonmSessionPkgsInException(PLpgSQL_function* func)
          * and restore package values by it.
          */
         if (u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0) {
-            BuildSessionPackageRuntimeForParentSession(currentSessionId, NULL);
+            /* doing insert gs_source, need do noting */
+            if (u_sess->plsql_cxt.auto_parent_session_pkgs == NULL
+                || !u_sess->plsql_cxt.auto_parent_session_pkgs->is_insert_gs_source) {
+                BuildSessionPackageRuntimeForParentSession(currentSessionId, NULL);
+            }
             /* autonomous session will be reused by next autonomous procedure, need clean it */
             if (u_sess->plsql_cxt.auto_parent_session_pkgs != NULL) {
                 MemoryContextDelete(u_sess->plsql_cxt.auto_parent_session_pkgs->context);

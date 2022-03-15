@@ -57,12 +57,13 @@ void GetCsnBarrierName(char* barrierRet, bool isSwitchoverBarrier)
     struct timeval tv;
     int rc;
     CommitSeqNo csn;
-    
-    gettimeofday(&tv, NULL);
+
     if (GTM_MODE)
         csn = GetCSNGTM();
     else
         csn = CommitCSNGTM(false);
+
+    gettimeofday(&tv, NULL);
 
     if (isSwitchoverBarrier) {
         rc = snprintf_s(barrierRet, BARRIER_NAME_LEN, BARRIER_NAME_LEN - 1, CSN_SWITCHOVER_BARRIER_PATTREN_STR, csn);
@@ -206,6 +207,7 @@ uint64 GetObsFirstCNBarrierTimeline(const List *archiveSlotNames)
     return timeline;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 static void AllocBarrierLsnInfo(int nodeSize)
 {
     int rc;
@@ -216,6 +218,7 @@ static void AllocBarrierLsnInfo(int nodeSize)
         sizeof(ArchiveBarrierLsnInfo) * nodeSize);
     securec_check(rc, "", "");
 }
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
 static void BarrierCreatorPoolerReload(void) 
@@ -402,6 +405,7 @@ void barrier_creator_main(void)
             long time_diff = last_barrier_time - current_time;
             ereport(LOG, (errmsg("[BarrierCreator] current time %ld is smaller than barrier time %ld, and sleep %ld ms",
                                  current_time, last_barrier_time, time_diff)));
+            CHECK_FOR_INTERRUPTS();
             pg_usleep(time_diff * 1000L);
         } while (1);
         if (t_thrd.barrier_creator_cxt.is_first_barrier) {
@@ -410,6 +414,7 @@ void barrier_creator_main(void)
         }
 #ifdef ENABLE_MULTIPLE_NODES
         while (!START_AUTO_CSN_BARRIER) {
+            CHECK_FOR_INTERRUPTS();
             pg_usleep(1000000L);
         }
 #endif
@@ -436,6 +441,7 @@ void barrier_creator_main(void)
                 t_thrd.barrier_creator_cxt.barrier_update_last_time_info = (BarrierUpdateLastTimeInfo*)palloc0(
                     sizeof(BarrierUpdateLastTimeInfo) * g_instance.attr.attr_storage.max_replication_slots);
             }
+#ifdef ENABLE_MULTIPLE_NODES
             if (g_instance.archive_obs_cxt.barrier_lsn_info == NULL) {
                 int nodeSize = *t_thrd.pgxc_cxt.shmemNumCoords + *t_thrd.pgxc_cxt.shmemNumDataNodes;
                 AllocBarrierLsnInfo(nodeSize);
@@ -443,6 +449,7 @@ void barrier_creator_main(void)
                 g_instance.archive_obs_cxt.max_node_cnt = nodeSize;
                 SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
             }
+#endif
             archiveSlotNames = GetAllArchiveSlotsName();
             if (archiveSlotNames == NIL || archiveSlotNames->length == 0) {
                 ereport(WARNING, (errmsg("[BarrierCreator] could not get archive slot name when barrier start")));

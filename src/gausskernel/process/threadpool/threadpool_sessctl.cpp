@@ -568,6 +568,65 @@ void ThreadPoolSessControl::getSessionMemoryDetail(Tuplestorestate* tupStore,
     PG_END_TRY();
 }
 
+void ThreadPoolSessControl::calculateClientInfo(
+    knl_session_context* sess, Tuplestorestate* tupStore, TupleDesc tupDesc)
+{
+    /* build one tuple and save it in tuplestore. */
+    const int COLUMN_NUM = 2;
+    Datum values[COLUMN_NUM] = {0};
+    bool nulls[COLUMN_NUM] = {false};
+ 
+    values[0] = Int64GetDatum(sess->session_id);
+    if (sess->plsql_cxt.client_info != NULL) {
+        values[1] = CStringGetTextDatum(sess->plsql_cxt.client_info);
+    } else {
+        nulls[1] = true;
+    }
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+ 
+void ThreadPoolSessControl::getSessionClientInfo(Tuplestorestate* tupStore, TupleDesc tupDesc)
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = NULL;
+    knl_sess_control* sess = NULL;
+ 
+    PG_TRY();
+    {
+        HOLD_INTERRUPTS();
+        alock.lock();
+ 
+        /* collect all the Memory Context status, put in data */
+        elem = DLGetHead(&m_activelist);
+ 
+        while (elem != NULL) {
+            ctrl = (knl_sess_control*)DLE_VAL(elem);
+            sess = ctrl;
+            if (ctrl->sess) {
+                (void)syscalllockAcquire(&ctrl->sess->plsql_cxt.client_info_lock);
+                calculateClientInfo(ctrl->sess, tupStore, tupDesc);
+                (void)syscalllockRelease(&ctrl->sess->plsql_cxt.client_info_lock);
+            }
+            elem = DLGetSucc(elem);
+        }
+        alock.unLock();
+        sess = NULL;
+ 
+        RESUME_INTERRUPTS();
+    }
+    PG_CATCH();
+    {
+        if (sess != NULL) {
+            ctrl = sess;
+            (void)syscalllockRelease(&ctrl->sess->plsql_cxt.client_info_lock);
+        }
+        alock.unLock();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
 void ThreadPoolSessControl::getSessionMemoryContextInfo(const char* ctx_name,
     StringInfoData* buf, knl_sess_control** sess)
 {

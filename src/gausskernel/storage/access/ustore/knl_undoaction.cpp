@@ -35,6 +35,14 @@ static UHeapDiskTuple CopyTupleFromUndoRecord(Relation relation, UndoRecord *und
 static void RestoreXactFromUndoRecord(UndoRecord *undorecord, Buffer buffer, UHeapDiskTuple tuple);
 static void LogUHeapUndoActions(UHeapUndoActionWALInfo *walInfo, Relation rel);
 
+static int GetUndoApplySize()
+{
+    uint64 undoApplySize = (uint64)u_sess->attr.attr_memory.maintenance_work_mem * 1024L;
+    uint64 applySize = MAX_UNDO_APPLY_SIZE > undoApplySize ? undoApplySize : MAX_UNDO_APPLY_SIZE;
+    Assert(applySize <= MAX_UNDO_APPLY_SIZE);
+    return (int)applySize;
+}
+
 /*
  * execute_undo_actions - Execute the undo actions
  *
@@ -49,10 +57,7 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
     Assert(toUrecptr != INVALID_UNDO_REC_PTR && fromUrecptr != INVALID_UNDO_REC_PTR);
     Assert(slotPtr != INVALID_UNDO_REC_PTR);
     Assert(fullXid  != InvalidTransactionId);
-    int undoApplySize = u_sess->attr.attr_memory.maintenance_work_mem * 1024L;
-
-    /* setting maintenance_work_mem atleast 2GB will cause an overflow */
-    undoApplySize = (undoApplySize < 0) ? INT_MAX : undoApplySize;
+    int undoApplySize = GetUndoApplySize();
     UndoRecPtr urecPtr = fromUrecptr;
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
     urec->SetUrp(toUrecptr);
@@ -165,10 +170,7 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
 void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, TransactionId xid)
 {
     UndoRecPtr urp = fromUrp;
-    int undoApplySize = u_sess->attr.attr_memory.maintenance_work_mem * 1024L;
-
-    /* setting maintenance_work_mem atleast 2GB will cause an overflow */
-    undoApplySize = (undoApplySize < 0) ? INT_MAX : undoApplySize;
+    int undoApplySize = GetUndoApplySize();
 
     /*
      * Fetch the multiple undo records which can fit into undoApplySize;

@@ -596,6 +596,9 @@ void BlockUnsupportedDDL(const Node* parsetree)
             if (stmt->relation) {
                 relid = RangeVarGetRelid(stmt->relation, AccessShareLock, true);
                 if (OidIsValid(relid)) {
+                    /* release index lock before lock table to avoid deadlock */
+                    UnlockRelationOid(relid, AccessShareLock);
+
                     Relation relation = relation_open(relid, NoLock);
                     bool inRedis = false;
 
@@ -608,8 +611,6 @@ void BlockUnsupportedDDL(const Node* parsetree)
                         relation_close(heapRelation, AccessShareLock);
                     }
                     relation_close(relation, NoLock);
-                    UnlockRelationOid(relid, AccessShareLock);
-
                     if (inRedis) {
                         ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

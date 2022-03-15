@@ -402,6 +402,10 @@ static void PredpushHintDesc(PredpushHint* hint, StringInfo buf)
 
     relnamesToBuf(base_hint.relnames, buf);
 
+    if (hint->dest_name != NULL) {
+        appendStringInfo(buf, ", %s", hint->dest_name);
+    }
+
     if (hint->candidates != NULL)
         appendStringInfo(buf, ")");
 
@@ -3326,6 +3330,50 @@ static void transform_skew_hint(PlannerInfo* root, Query* parse, List* skew_hint
 }
 
 /*
+ * Check Predpush hint rely on each other.
+ */
+static void check_predpush_cycle_hint(PlannerInfo *root,
+                                      List *predpush_hint_list,
+                                      PredpushHint *predpush_hint)
+{
+    ListCell *lc = NULL;
+
+    if (bms_num_members(predpush_hint->candidates) != 1) {
+        return;
+    }
+
+    if (predpush_hint->dest_id == 0) {
+        return;
+    }
+
+    int cur_dest = predpush_hint->dest_id;
+    foreach(lc, predpush_hint_list) {
+        PredpushHint *prev_hint = (PredpushHint *)lfirst(lc);
+
+        if (prev_hint == predpush_hint) {
+            break;
+        }
+
+        if (bms_num_members(prev_hint->candidates) != 1) {
+            continue;
+        }
+
+        if (prev_hint->dest_id == 0) {
+            continue;
+        }
+
+        int prev_dest = prev_hint->dest_id;
+        if (bms_is_member(prev_dest, predpush_hint->candidates) &&
+            bms_is_member(cur_dest, prev_hint->candidates)) {
+            append_warning_to_list(
+                root, (Hint*)predpush_hint, "Error hint:%s, Predpush cannot rely on each other.", hint_string);
+        }
+    }
+
+    return;
+}
+
+/*
  * @Description: Transform predpush hint into processible type, including:
  *  transfrom subquery name
  * @in root: query level info.
@@ -3350,6 +3398,7 @@ static void transform_predpush_hint(PlannerInfo* root, Query* parse, List* predp
         }
 
         predpush_hint->dest_id = relid;
+        check_predpush_cycle_hint(root, predpush_hint_list, predpush_hint);
     }
 
     return;

@@ -24,7 +24,7 @@ from . import dao
 from . import service
 from .. import __version__
 
-CURR_DIR = os.path.abspath(
+CURR_DIR = os.path.realpath(
     os.path.join(os.path.dirname(__file__), '..')
 )
 DEFAULT_YAML = 'reprocessing_exporter.yml'
@@ -35,7 +35,7 @@ with tempfile.NamedTemporaryFile(suffix='.pid') as fp:
 
 def path_type(path):
     if os.path.exists(path):
-        return os.path.abspath(path)
+        return os.path.realpath(path)
     else:
         raise argparse.ArgumentTypeError('%s is not a valid path.' % path)
 
@@ -56,7 +56,7 @@ def parse_argv(argv):
                         help='listen port to expose metrics and web interface')
     parser.add_argument('--collector.config', type=path_type, default=os.path.join(CURR_DIR, DEFAULT_YAML),
                         help='according to the content of the yaml file for metric collection')
-    parser.add_argument('--log.filepath', type=os.path.abspath,
+    parser.add_argument('--log.filepath', type=os.path.realpath,
                         default=os.path.join(os.getcwd(), DEFAULT_LOGFILE),
                         help='the path to log')
     parser.add_argument('--log.level', default='info', choices=('debug', 'info', 'warn', 'error', 'fatal'),

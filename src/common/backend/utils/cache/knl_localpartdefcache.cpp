@@ -211,7 +211,7 @@ void LocalPartDefCache::Init()
     }
     m_global_partdefcache = t_thrd.lsc_cxt.lsc->GetGlobalPartDefCache();
     m_db_id = t_thrd.lsc_cxt.lsc->my_database_id;
-    part_cache_need_eoxact_work = false;
+    PartCacheNeedEOXActWork = false;
     m_is_inited = true;
 }
 
@@ -298,7 +298,7 @@ void LocalPartDefCache::AtEOXact_PartitionCache(bool isCommit)
      * transaction, even though we could clear it at subtransaction end in
      * some cases.
      */
-    if (!part_cache_need_eoxact_work
+    if (!GetPartCacheNeedEOXActWork()
 #ifdef USE_ASSERT_CHECKING
         && !assert_enabled
 #endif
@@ -356,7 +356,7 @@ void LocalPartDefCache::AtEOXact_PartitionCache(bool isCommit)
     }
 
     /* Once done with the transaction, we can reset need_eoxact_work */
-    part_cache_need_eoxact_work = false;
+    SetPartCacheNeedEOXActWork(false);
 }
 
 void LocalPartDefCache::AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid,
@@ -366,7 +366,7 @@ void LocalPartDefCache::AtEOSubXact_PartitionCache(bool isCommit, SubTransaction
      * Skip the relcache scan if nothing to do --- see notes for
      * AtEOXact_PartitionCache.
      */
-    if (!part_cache_need_eoxact_work)
+    if (!GetPartCacheNeedEOXActWork())
         return;
 
     Dlelem *bucket_elt;

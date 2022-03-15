@@ -285,6 +285,7 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
                             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                                 errmsg("temporary tables cannot specify a schema name")));
                 }
+                pfree_ext(errDetail);
                 errDetail = get_relname_relid_extend(
                     relation->relname, u_sess->catalog_cxt.myTempNamespace, &relId, isSupportSynonym, refSynOid);
             }
@@ -293,6 +294,7 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
 
             /* use exact schema given */
             namespaceId = LookupExplicitNamespace(relation->schemaname);
+            pfree_ext(errDetail);
             errDetail = get_relname_relid_extend(relation->relname, namespaceId, &relId, isSupportSynonym, refSynOid);
 
             if (OidIsValid(relId) && namespaceId == u_sess->catalog_cxt.myTempNamespace)
@@ -300,6 +302,7 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
         } else {
             /* search the namespace path */
             if (isSupportSynonym) {
+                pfree_ext(errDetail);
                 errDetail = RelnameGetRelidExtended(relation->relname, &relId, refSynOid, detailInfo);
             } else {
                 relId = RelnameGetRelid(relation->relname, detailInfo);
@@ -419,8 +422,8 @@ Oid RangeVarGetRelidExtended(const RangeVar* relation, LOCKMODE lockmode, bool m
             /* Skipping report error, but store the error detail info and report later. */
             appendStringInfo(detailInfo, _("%s"), errDetail);
         }
-        pfree_ext(errDetail);
     }
+    pfree_ext(errDetail);
 
     if (!OidIsValid(relId) && !missing_ok) {
         if (relation->schemaname)

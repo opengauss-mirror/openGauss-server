@@ -417,6 +417,8 @@ typedef struct knl_u_parser_context {
 
     /* this is used in parser.gram.y not in plpgsql */
     bool isCreateFuncOrProc;
+    
+    bool isTimeCapsule;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {
@@ -562,7 +564,7 @@ typedef struct knl_u_utils_context {
      * for the convenience of TransactionIdIsInProgress: even in bootstrap
      * mode, we don't want it to say that BootstrapTransactionId is in progress.
      *
-     * RecentGlobalXmin and RecentGlobalDataXmin are initialized to
+     * RecentGlobalXmin, RecentGlobalDataXmin, RecentGlobalCatalogXmin are initialized to
      * InvalidTransactionId, to ensure that no one tries to use a stale
      * value. Readers should ensure that it has been set to something else
      * before using it.
@@ -576,6 +578,9 @@ typedef struct knl_u_utils_context {
     TransactionId RecentGlobalXmin;
 
     TransactionId RecentGlobalDataXmin;
+
+    /* recent global catalog xmin, consider replication slot catalog xmin */
+    TransactionId RecentGlobalCatalogXmin;
 
     /* Global snapshot data */
     bool cn_xc_maintain_mode;
@@ -1537,6 +1542,7 @@ typedef struct knl_u_plpgsql_context {
     bool is_delete_function;
     bool is_package_instantiation;
     char* client_info;
+    pthread_mutex_t client_info_lock;
     char sess_cxt_name[128];
     HTAB* sess_cxt_htab;
     bool have_error;
@@ -1582,10 +1588,12 @@ typedef struct knl_u_plpgsql_context {
     uint64 parent_session_id;
     ThreadId parent_thread_id;
     MemoryContext parent_context; /* parent_context from parent session */
+
     Oid ActiveLobToastOid;
     struct ExceptionContext* cur_exception_cxt;
     bool pragma_autonomous; /* save autonomous flag */
     char* debug_query_string;
+    bool is_insert_gs_source; /* is doing insert gs_source? */
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
@@ -1871,7 +1879,7 @@ typedef struct knl_u_relcache_context {
     /*
      * This flag lets us optimize away work in AtEO(Sub)Xact_RelationCache().
      */
-    bool need_eoxact_work;
+    bool RelCacheNeedEOXActWork;
 
     HTAB* OpClassCache;
 
@@ -2301,7 +2309,7 @@ typedef struct knl_u_cache_context {
 
     struct HTAB* dn_hash_table;
 
-    bool part_cache_need_eoxact_work;
+    bool PartCacheNeedEOXActWork;
 
     bool bucket_cache_need_eoxact_work; 
 

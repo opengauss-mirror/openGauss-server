@@ -80,6 +80,7 @@ For example:
   * verbose:  0 (no output), 1 (less output), or 2 (full output)
   
 # Hyperparameter list for 'xgboost_regression_logistic', 'xgboost_binary_logistic', 'xgboost_regression_gamma' and 'xgboost_regression_squarederror':
+  * n_iter: Maximum iterations until convergence
   * batch_size: Number of tuples in each processing batch
   * booster: Which booster to use, e.g., gbtree, gblinear or dart (default: gbtree)
   * tree_method: The tree construction algorithm used in XGBoost. Choices: auto, exact, approx, hist, gpu_hist (gpu_hist only supported with GPU)
