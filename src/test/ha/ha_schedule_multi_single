@@ -12,3 +12,4 @@ multi_standby_single/xlog_redo_apply_delay
 #multi_standby_single/most_available
 multi_standby_single/failover_with_data
 multi_standby_single/hash_index
+multi_standby_single/consistency.sh

@@ -725,11 +725,17 @@ void HeapXlogLockOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool isT
             htup->t_infomask2 |= HEAP_KEYS_UPDATED;
         }
     }
-    HeapTupleHeaderClearHotUpdated(htup);
+    /*
+     * Clear relevant update flags, but only if the modified infomask says
+     * there's no update.
+     */
+    if (HEAP_XMAX_IS_LOCKED_ONLY(htup->t_infomask, htup->t_infomask2)) {
+        HeapTupleHeaderClearHotUpdated(htup);
+        /* Make sure there is no forward chain link in t_ctid */
+        ItemPointerSet(&htup->t_ctid, buffer->blockinfo.blkno, xlrec->offnum);
+    }
     HeapTupleHeaderSetXmax(page, htup, xlrec->locking_xid);
     HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
-    /* Make sure there is no forward chain link in t_ctid */
-    ItemPointerSet(&htup->t_ctid, buffer->blockinfo.blkno, xlrec->offnum);
 
     PageSetLSN(page, buffer->lsn);
 }
