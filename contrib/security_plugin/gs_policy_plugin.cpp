@@ -97,6 +97,7 @@ PG_MODULE_MAGIC;
 
 extern "C" void _PG_init(void);
 extern "C" void _PG_fini(void);
+extern "C" void set_gsaudit_prehook(ProcessUtility_hook_type func);
 
 #define POLICY_STR_BUFF_LEN 512
 #define POLICY_TMP_BUFF_LEN 256
@@ -1781,7 +1782,7 @@ void install_audit_hook()
      * preserve the chains.
      */
     next_ExecutorStart_hook = ExecutorStart_hook;
-    next_ProcessUtility_hook = ProcessUtility_hook;
+    set_gsaudit_prehook(ProcessUtility_hook);
 
     /*
      * Install audit hooks, the interface for GaussDB kernel user as below
@@ -1819,6 +1820,19 @@ void install_label_hook()
     if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
         verify_label_hook = is_label_exist;
     }
+}
+
+/*
+ * This function is used for setting prev_ProcessUtility to rewrite
+ * standard_ProcessUtility by other extension.
+ */
+void set_gsaudit_prehook(ProcessUtility_hook_type func)
+{
+    if (next_ProcessUtility_hook != NULL) {
+        ereport(WARNING, (errmsg("next_ProcessUtility_hook in security_plugin cannot be set since it's not null")));
+        return;
+    }
+    next_ProcessUtility_hook = func;
 }
 
 /*

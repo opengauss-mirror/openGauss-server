@@ -94,6 +94,7 @@
 #include "instruments/instr_workload.h"
 #include "gs_policy/policy_common.h"
 #include "utils/knl_relcache.h"
+#include "commands/extension.h"
 #ifndef WIN32_ONLY_COMPILER
 #include "dynloader.h"
 #else
@@ -2703,6 +2704,10 @@ void PostgresInitializer::InitExtensionVariable()
         if (init_session_vars != NULL)
             (*init_session_vars)();
     }
+    
+    /* check whether the extension has been created */
+    const char* b_sql_plugin = "b_sql_plugin";
+    u_sess->attr.attr_sql.b_sql_plugin = CheckIfExtensionExists(b_sql_plugin);
 }
 
 void PostgresInitializer::FinishInit()
