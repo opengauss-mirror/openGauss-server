@@ -1,0 +1,16 @@
+-- I4AWQH issue
+drop database if exists gs_dump_encrypt;
+create database gs_dump_encrypt;
+\c gs_dump_encrypt
+drop schema if exists dumptest;
+create schema dumptest;
+CREATE TABLE dumptest.dept(deptno NUMBER(2),dname VARCHAR2(14),loc VARCHAR2 (13));
+insert into dumptest.dept values(10,'财务','北京');
+insert into dumptest.dept values(20,'研发','上海');
+insert into dumptest.dept values(30,'销售','武汉');
+insert into dumptest.dept values(40,'生产','西安');
+\! @abs_bindir@/gs_dump gs_dump_encrypt -p @portstring@ --with-encryption=AES128 --with-key=12345f7A90123456 -n dumptest -f @abs_bindir@/gs_dump_encrypt.sql > @abs_bindir@/gs_dump_encrypt.log 2>&1 ; echo $?
+drop schema dumptest cascade;
+\! @abs_bindir@/gsql -dgs_dump_encrypt -p @portstring@ -f @abs_bindir@/gs_dump_encrypt.sql --with-key=12345f7A90123456 > @abs_bindir@/gsql_encrypt.log 2>&1 ; echo $?
+\c gs_dump_encrypt
+select * from dumptest.dept;
