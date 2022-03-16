@@ -3886,6 +3886,13 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
         port->guc_options = NIL;
     }
 
+    /* subscription is allowed to use HA port only, the auth check also done in HA port */
+    if (u_sess->proc_cxt.clientIsSubscription && !IsHAPort(u_sess->proc_cxt.MyProcPort)) {
+            ereport(elevel,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("subcription should connect HA port")));
+    }
+
     /*  Inner tool with local sha256 will not be authenicated. */
     if (clientIsCmAgent || clientIsGsClean || clientIsOM || u_sess->proc_cxt.clientIsGsroach || clientIsWDRXdb ||
         clientIsRemoteRead || u_sess->proc_cxt.clientIsGsCtl || u_sess->proc_cxt.clientIsGsrewind ||
