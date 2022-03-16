@@ -3806,7 +3806,7 @@ static text* pg_get_expr_worker(text* expr, Oid relid, const char* relname, int 
     exprstr = text_to_cstring(expr);
 
     /* Convert expression to node tree */
-    node = (Node*)stringToNode(exprstr);
+    node = (Node*)stringToNode_skip_extern_fields(exprstr);
 
     pfree_ext(exprstr);
 
