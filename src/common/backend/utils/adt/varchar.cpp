@@ -675,7 +675,7 @@ Datum bpcharlen(PG_FUNCTION_ARGS)
     int len;
 
     /* get number of bytes, ignoring trailing spaces */
-    if (DB_IS_CMPT(PG_FORMAT)) {
+    if (DB_IS_CMPT(PG_FORMAT | B_FORMAT)) {
         len = bcTruelen(arg);
     } else {
         len = VARSIZE_ANY_EXHDR(arg);
