@@ -155,23 +155,33 @@
 
 #ifdef ENABLE_LLVM_COMPILE
 /* The whole intrinsic methods are listed in include/llvm/IR/IntrinsicEnums.inc */
-#if LLVM_MAJOR_VERSION == 10
+#ifdef LLVM_MAJOR_VERSION
+
+#if (LLVM_MAJOR_VERSION - LLVM_MAJOR_VERSION -1 == 1)
+#error LLVM version was defined as empty.
+#else
+#if (LLVM_MAJOR_VERSION == 10)
 const int llvm_prefetch = 217;
 const int llvm_sadd_with_overflow = 229;
 const int llvm_smul_with_overflow = 236;
 const int llvm_ssub_with_overflow = 241;
-#elif LLVM_MAJOR_VERSION == 11
+#elif (LLVM_MAJOR_VERSION == 11)
 const int llvm_prefetch = 225;
 const int llvm_sadd_with_overflow = 239;
 const int llvm_smul_with_overflow = 247;
 const int llvm_ssub_with_overflow = 252;
-#elif LLVM_MAJOR_VERSION == 12
+#elif (LLVM_MAJOR_VERSION == 12)
 const int llvm_prefetch = 225;
 const int llvm_sadd_with_overflow = 240;
 const int llvm_smul_with_overflow = 250;
 const int llvm_ssub_with_overflow = 256;
 #else
 #error Un-supported LLVM version.
+#endif
+#endif
+
+#else
+#error LLVM version is not defined.
 #endif
 
 /*
