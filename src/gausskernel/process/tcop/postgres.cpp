@@ -48,7 +48,9 @@
 #include "catalog/pg_database.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_extension.h"
 #include "commands/async.h"
+#include "commands/extension.h"
 #include "commands/matview.h"
 #include "commands/prepare.h"
 #include "commands/user.h"
@@ -819,6 +821,22 @@ void client_read_ended(void)
     }
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+#define INIT_PLUGIN_OBJECT "init_plugin_object"
+void InitBSqlPluginHookIfNeeded()
+{
+    const char* b_sql_plugin = "b_sql_plugin";
+    CFunInfo tmpCF;
+    if (!CheckIfExtensionExists(b_sql_plugin)) {
+        return;
+    }
+
+    tmpCF = load_external_function(b_sql_plugin, INIT_PLUGIN_OBJECT, false, false);
+    if (tmpCF.user_fn != NULL) {
+        ((void* (*)(void))(tmpCF.user_fn))();
+    }
+}
+#endif
 
 /*
  * Do raw parsing (only).
@@ -847,11 +865,9 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist)
 
     List* (*parser_hook)(const char*, List**) = raw_parser;
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_sql.enable_custom_parser) {
-        int id = GetCustomParserId();
-        if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
-            parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
-        }
+    int id = GetCustomParserId();
+    if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
+        parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
     }
 #endif
     raw_parsetree_list = parser_hook(query_string, query_string_locationlist);
@@ -7554,6 +7570,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     /* init param hash table for sending set message */
     if (IS_PGXC_COORDINATOR)
         init_set_params_htab();
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
+        InitBSqlPluginHookIfNeeded();
+    }
+#endif
 
     /*
      * Remember stand-alone backend startup time

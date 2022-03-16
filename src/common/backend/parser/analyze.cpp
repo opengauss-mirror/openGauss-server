@@ -287,6 +287,10 @@ Query* transformTopLevelStmt(ParseState* pstate, Node* parseTree, bool isFirstNo
         }
     }
 
+    if (u_sess->hook_cxt.transformStmtHook != NULL) {
+        return
+            ((transformStmtFunc)(u_sess->hook_cxt.transformStmtHook))(pstate, parseTree, isFirstNode, isCreateView);
+    }
     return transformStmt(pstate, parseTree, isFirstNode, isCreateView);
 }
 

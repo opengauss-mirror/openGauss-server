@@ -1175,6 +1175,10 @@ void CreateExtension(CreateExtensionStmt* stmt)
         FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
     }
 
+    if (pg_strcasecmp(stmt->extname, "b_sql_plugin") == 0 && !DB_IS_CMPT(B_FORMAT)) {
+        ereport(ERROR,
+            (errmsg("please create extension \"%s\" with B type DBCOMPATIBILITY", stmt->extname)));
+    }
     /* Check extension name validity before any filesystem access */
     check_valid_extension_name(stmt->extname);
 
@@ -1413,6 +1417,10 @@ void CreateExtension(CreateExtensionStmt* stmt)
     }
 
     u_sess->exec_cxt.extension_is_valid = true;
+
+    if (pg_strcasecmp(stmt->extname, "b_sql_plugin") == 0) {
+         u_sess->attr.attr_sql.b_sql_plugin = true;
+    }
 
     /*
      * Insert new tuple into pg_extension, and create dependency entries.
@@ -2916,4 +2924,27 @@ void RepallocSessionVarsArrayIfNecessary()
         securec_check(rc, "", "");
         u_sess->attr.attr_common.extension_session_vars_array_size = currExtensionNum * 2;
     }
+}
+
+bool CheckIfExtensionExists(const char* extname)
+{
+    Relation rel;
+    ScanKeyData entry[1];
+    SysScanDesc scandesc;
+    HeapTuple tuple;
+    bool isExists = false;
+
+    /* search pg_extension to check if extension exists. */
+    rel = heap_open(ExtensionRelationId, AccessShareLock);
+    ScanKeyInit(&entry[0], Anum_pg_extension_extname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(extname));
+    scandesc = systable_beginscan(rel, ExtensionNameIndexId, true, NULL, 1, entry);
+    tuple = systable_getnext(scandesc);
+
+    isExists = HeapTupleIsValid(tuple);
+
+    systable_endscan(scandesc);
+
+    heap_close(rel, AccessShareLock);
+
+    return isExists;
 }

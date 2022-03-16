@@ -88,6 +88,8 @@ typedef struct AnalyzerRoutine {
     transformSelectStmtHook transSelect;
 } AnalyzerRoutine;
 
+typedef Query* (*transformStmtFunc)(ParseState* pstate, Node* parseTree, bool isFirstNode, bool isCreateView);
+
 extern void transformOperatorPlus(ParseState* pstate, Node** whereClause);
 extern bool IsColumnRefPlusOuterJoin(const ColumnRef* cf);
 extern PlusJoinRTEItem* makePlusJoinRTEItem(RangeTblEntry* rte, bool hasplus);

@@ -769,6 +769,10 @@ static void init_session_share_memory()
 #endif
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+extern void InitBSqlPluginHookIfNeeded();
+#endif
+
 static bool InitSession(knl_session_context* session)
 {
     /* non't send ereport to client now */
@@ -842,6 +846,13 @@ static bool InitSession(knl_session_context* session)
     char* username = session->proc_cxt.MyProcPort->user_name;
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitSession();
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
+        InitBSqlPluginHookIfNeeded();
+    }
+#endif
+
     Assert(CheckMyDatabaseMatch());
 
     SetProcessingMode(NormalProcessing);

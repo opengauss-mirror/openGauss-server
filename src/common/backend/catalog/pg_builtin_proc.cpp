@@ -52,6 +52,10 @@ static_assert(sizeof(false) == sizeof(char), "illegal bool size");
 static struct HTAB* nameHash = NULL;
 static struct HTAB* oidHash = NULL;
 
+/* for b_sql_plugin */
+struct HTAB* b_nameHash = NULL;
+struct HTAB* b_oidHash = NULL;
+
 const int g_nfuncgroups = sizeof(g_func_groups) / sizeof(FuncGroup);
 
 static const int MAX_PROC_NAME_LEN = NAMEDATALEN;
@@ -114,7 +118,11 @@ static const FuncGroup* NameHashTableAccess(HASHACTION action, const char* name,
 
     Assert(name != NULL);
 
-    result = (HashEntryNameToFuncGroup *)hash_search(nameHash, &temp_name, action, &found);
+    if (DB_IS_CMPT(B_FORMAT) && b_nameHash != NULL && u_sess->attr.attr_sql.b_sql_plugin) {
+        result = (HashEntryNameToFuncGroup *)hash_search(b_nameHash, &temp_name, action, &found);
+    } else {
+        result = (HashEntryNameToFuncGroup *)hash_search(nameHash, &temp_name, action, &found);
+    }
     if (action == HASH_ENTER) {
         Assert(!found);
         result->group = group;
@@ -136,7 +144,11 @@ static const Builtin_func* OidHashTableAccess(HASHACTION action, Oid oid, const 
     bool found = false;
     Assert(oid > 0);
 
-    result = (HashEntryOidToBuiltinFunc *)hash_search(oidHash, &oid, action, &found);
+    if (DB_IS_CMPT(B_FORMAT) && b_oidHash != NULL && u_sess->attr.attr_sql.b_sql_plugin) {
+        result = (HashEntryOidToBuiltinFunc *)hash_search(b_oidHash, &oid, action, &found);
+    } else {
+        result = (HashEntryOidToBuiltinFunc *)hash_search(oidHash, &oid, action, &found);
+    }
     if (action == HASH_ENTER) {
         Assert(!found);
         result->func = func;
