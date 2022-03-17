@@ -227,6 +227,9 @@ Datum to_tsvector(PG_FUNCTION_ARGS)
 {
     ts_check_feature_disable();
     text* in = PG_GETARG_TEXT_P(0);
+    
+    FUNC_CHECK_HUGE_POINTER(false, in, "to_txvector()");
+    
     Oid cfgId;
 
     cfgId = getTSCurrentConfig(true);

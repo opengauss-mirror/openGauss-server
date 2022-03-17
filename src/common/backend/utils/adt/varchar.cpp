@@ -705,6 +705,8 @@ Datum bpcharoctetlen(PG_FUNCTION_ARGS)
 {
     Datum arg = PG_GETARG_DATUM(0);
 
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), DatumGetPointer(arg), "bpcharoctetlen()");
+
     /* We need not detoast the input at all */
     PG_RETURN_INT32(toast_raw_datum_size(arg) - VARHDRSZ);
 }

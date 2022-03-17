@@ -323,6 +323,16 @@ typedef enum {
 #define VARATT_IS_1B_E(PTR) ((((varattrib_1b*)(PTR))->va_header) == 0x80)
 #define VARATT_IS_HUGE_TOAST_POINTER(PTR) ((((varattrib_1b*)(PTR))->va_header) == 0x80 && \
     ((((varattrib_1b_e*)(PTR))->va_tag) & 0x01) == 0x01)
+
+#define FUNC_CHECK_HUGE_POINTER(is_null, ptr, funcName)                                                      \
+    do {                                                                                                     \
+        if (!is_null && unlikely(VARATT_IS_HUGE_TOAST_POINTER((varlena *)ptr))) {                                      \
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),                                        \
+                errmsg("%s could not support larger than 1GB clob/blob data", funcName),                     \
+                    errcause("parameter larger than 1GB"), erraction("parameter must less than 1GB")));      \
+        }                                                                                                    \
+    } while (0)
+
 #define VARATT_NOT_PAD_BYTE(PTR) (*((uint8*)(PTR)) != 0)
 
 /* VARSIZE_4B() should only be used on known-aligned data */
@@ -345,6 +355,16 @@ typedef enum {
 #define VARATT_IS_1B_E(PTR) ((((varattrib_1b*)(PTR))->va_header) == 0x01)
 #define VARATT_IS_HUGE_TOAST_POINTER(PTR) ((((varattrib_1b*)(PTR))->va_header) == 0x01 && \
     ((((varattrib_1b_e*)(PTR))->va_tag) >> 7) == 0x01)
+
+#define FUNC_CHECK_HUGE_POINTER(is_null, ptr, funcName)                                                      \
+    do {                                                                                                     \
+        if (!is_null && VARATT_IS_HUGE_TOAST_POINTER((varlena *)ptr)) {                                      \
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),                                        \
+                errmsg("%s could not support larger than 1GB clob/blob data", funcName),                     \
+                    errcause("parameter larger than 1GB"), erraction("parameter must less than 1GB")));      \
+        }                                                                                                    \
+    } while (0)
+
 #define VARATT_NOT_PAD_BYTE(PTR) (*((uint8*)(PTR)) != 0)
 
 /* VARSIZE_4B() should only be used on known-aligned data */
