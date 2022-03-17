@@ -501,3 +501,8 @@ WHERE true CONNECT BY EXISTS (
     test_hcb_ptb as ref_7
 ) 
 LIMIT 169;
+
+create table t123(id int, lid int, name text);
+insert into t123 values(1,null,'A'),(2,1,'B'),(3,2,'C');
+with t2 as (select * from t123 where id!=10) select level,t.* from (select * from t2 where id!=10 order by id) t start with t.id=2 connect by prior t.id=t.lid;
+drop table t123;
