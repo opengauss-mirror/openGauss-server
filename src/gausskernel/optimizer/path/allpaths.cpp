@@ -932,7 +932,7 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
 
         if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
             RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;
-            pruningRatio = rel->partItrs / partMmap->rangeElementsNum;
+            pruningRatio = (double)rel->partItrs / partMmap->rangeElementsNum;
         }
 
         heap_close(relation, NoLock);
