@@ -2109,6 +2109,19 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
                 return false;
             }
 
+            /* Forbid vacuum full on shared relation during upgrade, to protect global/pg_filenode.map not changed */
+            if (u_sess->attr.attr_common.upgrade_mode != 0 && rel != NULL &&
+                relid < FirstBootstrapObjectId && rel->rd_rel->relisshared &&
+                t_thrd.proc->workingVersionNum < RELMAP_4K_VERSION_NUM) {
+                ereport(NOTICE,
+                        (errcode(ERRCODE_E_R_E_MODIFYING_SQL_DATA_NOT_PERMITTED),
+                         errmsg("skipping \"%s\" --- VACUUM FULL on shared relation is not allowed during upgrade",
+                             RelationGetRelationName(rel))));
+                relation_close(rel, AccessShareLock);
+                proc_snapshot_and_transaction();
+                return false;
+            }
+
             if (rel != NULL)
                 relation_close(rel, AccessShareLock);
         }
