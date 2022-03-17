@@ -349,6 +349,7 @@ Datum pg_convert_to_nocase(PG_FUNCTION_ARGS)
     Datum dest_encoding_name = PG_GETARG_DATUM(1);
     Datum src_encoding_name = DirectFunctionCall1(namein, CStringGetDatum(u_sess->mb_cxt.DatabaseEncoding->name));
     Datum result;
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), DatumGetPointer(string), "pg_convert()");
 
     /*
      * pg_convert expects a bytea as its first argument. We're passing it a

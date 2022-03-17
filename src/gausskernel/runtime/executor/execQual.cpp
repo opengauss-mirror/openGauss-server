@@ -6157,17 +6157,19 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
         isClobAndNotNull = (IsA(tle->expr, Param)) && (!isnull[resind]) && (((Param*)tle->expr)->paramtype == CLOBOID
             || ((Param*)tle->expr)->paramtype == BLOBOID);
         if (isClobAndNotNull) {
-            /* if type is lob pointer, we should fetch real value from tuple. */
-            if (VARATT_IS_EXTERNAL_LOB(values[resind])) {
-                struct varatt_lob_pointer* lob_pointer = (varatt_lob_pointer*)(VARDATA_EXTERNAL(values[resind]));
-                bool is_null = false;
+            /* if is big lob, fetch and copy from toast */
+            if (VARATT_IS_HUGE_TOAST_POINTER(values[resind])) {
+                Datum new_attr = (Datum)0;
                 Oid update_oid = econtext->ecxt_scantuple != NULL ?
                     ((HeapTuple)(econtext->ecxt_scantuple->tts_tuple))->t_tableOid : InvalidOid;
-                values[resind] = fetch_lob_value_from_tuple(lob_pointer, update_oid, &is_null);
-                isnull[resind] = is_null;
+                Relation update_rel = heap_open(update_oid, RowExclusiveLock);
+                struct varlena *old_value = (struct varlena *)DatumGetPointer(values[resind]);
+                struct varlena *new_value = heap_tuple_fetch_and_copy(update_rel, old_value,true);
+                new_attr = PointerGetDatum(new_value);
+                heap_close(update_rel, NoLock);
+                values[resind] = new_attr;
             }
         }
-
         ELOG_FIELD_NAME_END;
 
         if (itemIsDone[resind] != ExprSingleResult) {
@@ -6314,9 +6316,6 @@ TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone)
     if (numSimpleVars > 0) {
         Datum* values = slot->tts_values;
         bool* isnull = slot->tts_isnull;
-#ifndef ENABLE_MULTIPLE_NODES    
-        Datum* lobPointers = slot->tts_lobPointers;
-#endif
         int* varSlotOffsets = projInfo->pi_varSlotOffsets;
         int* varNumbers = projInfo->pi_varNumbers;
         int i;
@@ -6330,26 +6329,7 @@ TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDone)
 
                 Assert (varNumber < varSlot->tts_tupleDescriptor->natts);
                 Assert (i < slot->tts_tupleDescriptor->natts);
-#ifndef ENABLE_MULTIPLE_NODES   
-                Form_pg_attribute attr = varSlot->tts_tupleDescriptor->attrs[varNumber];
-                if (t_thrd.xact_cxt.isSelectInto && (attr->atttypid == CLOBOID || attr->atttypid == BLOBOID)) {
-                    struct varlena *toast_pointer_lob = NULL;
-                    toast_pointer_lob = toast_pointer_fetch_data(varSlot, attr, varNumber);
-                    Assert(toast_pointer_lob != NULL);
-                    if (!projInfo->pi_topPlan) {
-                        values[i] = varSlot->tts_values[varNumber];
-                        lobPointers[i] = PointerGetDatum(toast_pointer_lob);
-                    } else {
-                        values[i] = PointerGetDatum(toast_pointer_lob);
-                        lobPointers[i] = (Datum)0;
-                    }
-                } else {
-                    values[i] = varSlot->tts_values[varNumber];
-                    lobPointers[i] = (Datum)0;
-                }
-#else
                 values[i] = varSlot->tts_values[varNumber];
-#endif
                 isnull[i] = varSlot->tts_isnull[varNumber];
             }
         } else {

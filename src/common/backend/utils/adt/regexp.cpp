@@ -598,6 +598,8 @@ Datum regexp_replace(PG_FUNCTION_ARGS)
 
     if (pattern == NULL)
         PG_RETURN_TEXT_P(src);
+    
+    FUNC_CHECK_HUGE_POINTER(false, src, "to_txvector()");
 
     re = RE_compile_and_cache(pattern, re_flags.cflags, PG_GET_COLLATION());
     result = replace_text_regexp(src, (void*)re, r, position, occurrence);
@@ -880,6 +882,8 @@ Datum regexp_count(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
+    FUNC_CHECK_HUGE_POINTER(false, src, "regexp_count()");
+
     re_flags.glob = true;
     regexp_matches_ctx* matchctx = setup_regexp_matches(src, pattern, &re_flags,
                                                         PG_GET_COLLATION(), false, false, position - 1);
@@ -1039,6 +1043,8 @@ Datum regexp_matches(PG_FUNCTION_ARGS)
 {
     FuncCallContext* funcctx = NULL;
     regexp_matches_ctx* matchctx = NULL;
+
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), PG_GETARG_TEXT_PP(0), "regexp_matches()");
 
     if (SRF_IS_FIRSTCALL()) {
         text* pattern = PG_GETARG_TEXT_PP(1);
@@ -1278,6 +1284,8 @@ Datum regexp_split_to_table(PG_FUNCTION_ARGS)
     FuncCallContext* funcctx = NULL;
     regexp_matches_ctx* splitctx = NULL;
 
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), PG_GETARG_TEXT_PP(0), "regexp_split_to_table()");
+
     if (SRF_IS_FIRSTCALL()) {
         text* pattern = PG_GETARG_TEXT_PP(1);
         text* flags = PG_GETARG_TEXT_PP_IF_EXISTS(2);
@@ -1340,6 +1348,8 @@ Datum regexp_split_to_array(PG_FUNCTION_ARGS)
     regexp_matches_ctx* splitctx = NULL;
     text* flags = PG_GETARG_TEXT_PP_IF_EXISTS(2);
     pg_re_flags re_flags;
+
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), PG_GETARG_TEXT_PP(0), "regexp_split_to_array()");
 
     /* Determine options */
     parse_re_flags(&re_flags, flags);

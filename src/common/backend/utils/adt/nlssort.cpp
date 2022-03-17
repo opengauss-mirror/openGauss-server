@@ -62,6 +62,8 @@ Datum nlssort(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), PG_GETARG_TEXT_P(0), "nlssort()");
+
     nlssort_arg = text_to_cstring(PG_GETARG_TEXT_P(1));
     if (check_nlssort_args(nlssort_arg, &sort_method)) {
         /* the first argument is null or "" */
