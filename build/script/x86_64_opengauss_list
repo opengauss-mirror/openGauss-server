@@ -1160,6 +1160,7 @@
 ./include/postgresql/server/commands/trigger.h
 ./include/postgresql/server/executor/spi.h
 ./include/postgresql/server/access/ustore/undo/knl_uundotype.h
+./include/postgresql/server/access/ustore/undo/knl_uundoapi.h
 ./include/postgresql/server/access/ustore/knl_uheap.h
 ./include/postgresql/server/access/ustore/knl_utuple.h
 ./include/postgresql/server/access/ustore/knl_utype.h

@@ -1031,6 +1031,7 @@
 ./include/postgresql/server/gstrace/gstrace_infra.h
 ./include/postgresql/server/extension_dependency.h
 ./include/postgresql/server/access/ustore/undo/knl_uundotype.h
+./include/postgresql/server/access/ustore/undo/knl_uundoapi.h
 ./include/postgresql/server/access/ustore/knl_uheap.h
 ./include/postgresql/server/access/ustore/knl_utuple.h
 ./include/postgresql/server/access/ustore/knl_utype.h
