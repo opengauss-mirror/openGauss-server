@@ -331,6 +331,11 @@ void AddStartWithTargetRelInfo(ParseState* pstate, Node* relNode,
             startInfo->aliasname = sub->alias->aliasname;
         }
 
+        SelectStmt *substmt = (SelectStmt*)sub->subquery;
+        if (substmt->withClause == NULL) {
+            substmt->withClause = (WithClause*)copyObject(pstate->origin_with);
+        }
+
         startInfo->rte = rte;
         startInfo->rtr = rtr;
         startInfo->rtekind = rte->rtekind;
