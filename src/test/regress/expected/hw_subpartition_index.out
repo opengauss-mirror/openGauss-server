@@ -51,15 +51,19 @@ CREATE INDEX range_list_idx ON range_list(month_code) LOCAL
 );
 -- test subpartition index scan
 explain (costs off) select * from range_list where month_code = '201902';
-                      QUERY PLAN                       
--------------------------------------------------------
+                           QUERY PLAN                            
+-----------------------------------------------------------------
  Partition Iterator
    Iterations: 1, Sub Iterations: 2
-   ->  Partitioned Seq Scan on range_list
-         Filter: ((month_code)::text = '201902'::text)
+   ->  Partitioned Bitmap Heap Scan on range_list
+         Recheck Cond: ((month_code)::text = '201902'::text)
          Selected Partitions:  1
          Selected Subpartitions:  ALL
-(6 rows)
+         ->  Partitioned Bitmap Index Scan on range_list_idx
+               Index Cond: ((month_code)::text = '201902'::text)
+               Selected Partitions:  1
+               Selected Subpartitions:  ALL
+(10 rows)
 
 select * from range_list where month_code = '201902' order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 

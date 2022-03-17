@@ -302,7 +302,7 @@ void PrepForRead(char* path, int64 blocknum, bool is_segment, RelFileNode *relno
         if (NULL != bucketNodestr) {
             bucketNodestr += 2; /* delete first two chars: _b */
             int _bucketNode;
-            flag = StrToInt32(bucketNodestr, &_bucketNode);   // carrottodo
+            flag = StrToInt32(bucketNodestr, &_bucketNode);
             if (!flag) {
                 ereport(ERROR, (errmsg("Can not covert %s to int32 type. \n", bucketNodestr)));
             }
