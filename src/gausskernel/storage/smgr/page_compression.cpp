@@ -384,7 +384,6 @@ size_t ReadAllChunkOfBlock(char *dst, size_t destLen, BlockNumber blockNumber, R
                 (ERRCODE_INVALID_PARAMETER_VALUE,
                         errmsg("blocknum \"%u\" exceeds max block number", blockNumber)));
     }
-    char* pageBuffer = rbStruct.pageBuffer;
     const char* fileName = rbStruct.fileName;
     decltype(PageCompressHeader::chunk_size) chunkSize = header->chunk_size;
     decltype(ReadBlockChunksStruct::segmentNo) segmentNo = rbStruct.segmentNo;
@@ -416,12 +415,22 @@ size_t ReadAllChunkOfBlock(char *dst, size_t destLen, BlockNumber blockNumber, R
         if (nchunks == 0) {
             break;
         }
-        if (DecompressPage(dst, pageBuffer, header->algorithm) == BLCKSZ) {
-            PageHeader phdr = PageHeader(pageBuffer);
-            BlockNumber blkNo = blockNumber + segmentNo * ((BlockNumber)RELSEG_SIZE);
-            if (PageIsNew(phdr) || pg_checksum_page(pageBuffer, blkNo) == phdr->pd_checksum) {
-                break;
-            }
+        char *data = NULL;
+        size_t dataLen;
+        uint32 crc32;
+        if (PageIs8BXidHeapVersion(dst)) {
+            HeapPageCompressData *heapPageData = (HeapPageCompressData *)dst;
+            data = heapPageData->data;
+            dataLen = heapPageData->size;
+            crc32 = heapPageData->crc32;
+        } else {
+            PageCompressData *heapPageData = (PageCompressData *)dst;
+            data = heapPageData->data;
+            dataLen = heapPageData->size;
+            crc32 = heapPageData->crc32;
+        }
+        if (DataBlockChecksum(data, dataLen, true) == crc32) {
+            break;
         }
 
         if (tryCount < MAX_RETRY_LIMIT) {

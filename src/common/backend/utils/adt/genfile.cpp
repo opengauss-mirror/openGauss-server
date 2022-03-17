@@ -370,11 +370,8 @@ static void ReadBinaryFileBlocksFirstCall(PG_FUNCTION_ARGS, int32 startBlockNum,
     if (fp == NULL) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", pcdFilePath)));
     }
-    char* pageBuffer = (char*)palloc(BLCKSZ);
     itemState->pcaFile = pcaFile;
     itemState->rbStruct.header = map;
-    itemState->rbStruct.pageBuffer = pageBuffer;
-    itemState->rbStruct.pageBufferLen = BLCKSZ;
     itemState->rbStruct.fp = fp;
     itemState->rbStruct.segmentNo = segmentNo;
     itemState->rbStruct.fileName = pcdFilePath;

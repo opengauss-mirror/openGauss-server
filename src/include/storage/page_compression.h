@@ -88,8 +88,6 @@ typedef struct PageCompressAddr {
 
 struct ReadBlockChunksStruct {
     PageCompressHeader* header;  // header: pca file
-    char* pageBuffer;            // pageBuffer: decompressed page
-    size_t pageBufferLen;
     FILE* fp;              // fp: table fp
     int segmentNo;
     char* fileName;        // fileName: for error report

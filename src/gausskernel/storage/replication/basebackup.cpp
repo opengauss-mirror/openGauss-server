@@ -1997,8 +1997,7 @@ static void SendCompressedFile(char* readFileName, int basePathLen, struct stat&
     bool* onlyExtend = (bool*)palloc0(totalBlockNum * sizeof(bool));
 
     /* allocated in advance to prevent repeated allocated */
-    char pageBuffer[BLCKSZ];
-    ReadBlockChunksStruct rbStruct{map, pageBuffer, BLCKSZ, fp, segmentNo, readFileName};
+    ReadBlockChunksStruct rbStruct{map, fp, segmentNo, readFileName};
     for (blockNum = 0; blockNum < totalBlockNum; blockNum++) {
         PageCompressAddr* addr = GET_PAGE_COMPRESS_ADDR(transfer, chunkSize, blockNum);
         /* skip some blocks which only extends. The size of blocks is 0. */
