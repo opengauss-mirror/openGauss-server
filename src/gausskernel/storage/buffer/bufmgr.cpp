@@ -1360,6 +1360,7 @@ void PageListBackWrite(uint32 *buf_list, int32 nbufs, uint32 flags = 0, SMgrRela
             Assert(smgrReln->smgr_rnode.node.dbNode == bufHdr->tag.rnode.dbNode);
             Assert(smgrReln->smgr_rnode.node.relNode == bufHdr->tag.rnode.relNode);
             Assert(smgrReln->smgr_rnode.node.bucketNode == bufHdr->tag.rnode.bucketNode);
+            Assert(smgrReln->smgr_rnode.node.opt == bufHdr->tag.rnode.opt);
             
             /* PageListBackWrite: jeh XLogFlush blocking? */
             /*
@@ -1985,7 +1986,8 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                     .spcNode = spc->spcNode,
                     .dbNode = spc->dbNode,
                     .relNode = pblk->relNode,
-                    .bucketNode = SegmentBktId
+                    .bucketNode = SegmentBktId,
+                    .opt = 0
                 };
                 seg_physical_read(spc, fakenode, forkNum, pblk->block, (char *)bufBlock);
                 if (PageIsVerified((Page)bufBlock, pblk->block)) {
@@ -4446,7 +4448,8 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             .spcNode = spc->spcNode,
             .dbNode = spc->dbNode,
             .relNode = bufdesc->seg_fileno,
-            .bucketNode = SegmentBktId
+            .bucketNode = SegmentBktId,
+            .opt = 0
         };
         seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno, bufToWrite, false);
     } else {
@@ -6532,6 +6535,7 @@ int ckpt_buforder_comparator(const void *pa, const void *pb)
     } else { /* should not be the same block ... */
         return 1;
     }
+	/* do not need to compare opt */
 }
 
 /*

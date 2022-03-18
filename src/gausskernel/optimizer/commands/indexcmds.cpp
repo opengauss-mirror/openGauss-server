@@ -514,6 +514,15 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
 
+    TableCreateSupport indexCreateSupport{COMPRESS_TYPE_NONE, false, false, false, false, false};
+    ListCell *cell = NULL;
+    foreach (cell, stmt->options) {
+        DefElem *defElem = (DefElem *)lfirst(cell);
+        SetOneOfCompressOption(defElem, &indexCreateSupport);
+    }
+
+    CheckCompressOption(&indexCreateSupport);
+
     /* Forbidden to create gin index on ustore table. */
     if (rel->rd_tam_type == TAM_USTORE) {
         if (strcmp(stmt->accessMethod, "btree") == 0) {
@@ -1054,13 +1063,21 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
-    TableCreateSupport indexCreateSupport{COMPRESS_TYPE_NONE, false, false, false, false, false};
-    ListCell* cell = NULL;
-    foreach (cell, stmt->options) {
-        DefElem* defElem = (DefElem*)lfirst(cell);
-        SetOneOfCompressOption(defElem, &indexCreateSupport);
+    if (indexCreateSupport.compressType || HasCompressOption(&indexCreateSupport)) {
+        foreach (cell, stmt->options) {
+            DefElem *defElem = (DefElem *)lfirst(cell);
+            if (pg_strcasecmp(defElem->defname, "storage_type") == 0 &&
+                pg_strcasecmp(defGetString(defElem), "ustore") == 0) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("Can not use compress option in ustore index.")));
+            }
+            if (pg_strcasecmp(defElem->defname, "segment") == 0 && defGetBoolean(defElem)) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("Can not use compress option in segment storage.")));
+            }
+        }
     }
-    
+
     CheckCompressOption(&indexCreateSupport);
     /*
      * Parse AM-specific options, convert to text array form, validate.

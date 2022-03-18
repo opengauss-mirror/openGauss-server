@@ -396,6 +396,7 @@ void TrDoPurgeObjectTruncate(TrObjDesc *desc)
         rnode.dbNode = (rnode.spcNode == GLOBALTABLESPACE_OID) ? InvalidOid :
                         u_sess->proc_cxt.MyDatabaseId;
         rnode.relNode = rbForm->rcyrelfilenode;
+        rnode.opt = 0;
         rnode.bucketNode = InvalidBktId;
 
         /*

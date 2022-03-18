@@ -9649,6 +9649,7 @@ void addBadBlockStat(const RelFileNode* relfilenode, ForkNumber forknum)
     hash_key.relfilenode.dbNode = relfilenode->dbNode;
     hash_key.relfilenode.relNode = relfilenode->relNode;
     hash_key.relfilenode.bucketNode = relfilenode->bucketNode;
+    hash_key.relfilenode.opt = relfilenode->opt;
     hash_key.forknum = forknum;
 
     bool found = false;

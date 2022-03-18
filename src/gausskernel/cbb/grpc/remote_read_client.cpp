@@ -284,9 +284,10 @@ extern int RemoteGetPage(char* remoteAddress, RepairBlockKey *key, uint32 blocks
                        pblk->block, timeout);
     } else {
         tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
-                           "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, '%lu', %u, '%lu', false, %d);",
+                           "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, %d, '%lu', %u, '%lu', false, %d);",
                            key->relfilenode.spcNode, key->relfilenode.dbNode, key->relfilenode.relNode,
-                           key->relfilenode.bucketNode, key->relfilenode.opt, key->forknum, key->blocknum, blocksize, lsn, timeout);
+                           key->relfilenode.bucketNode, (int2)key->relfilenode.opt, key->forknum, key->blocknum,
+                           blocksize, lsn, timeout);
     }
 
     securec_check_ss(tnRet, "", "");

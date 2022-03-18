@@ -1102,7 +1102,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
     bool createWithOrientationRow = false; /* To mark whether table have been create with(orientation = row) */
     bool isUstore = false;
     bool assignedStorageType = false;
-
+    bool segment = false;
     TableCreateSupport tableCreateSupport{COMPRESS_TYPE_NONE, false, false, false, false, false};
     (void)isOrientationSet(options, NULL, false);
     foreach (cell, options) {
@@ -1133,6 +1133,8 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("It is not allowed to assign version option for non-dfs table.")));
+        } else if (pg_strcasecmp(def->defname, "segment") == 0){
+            segment = true;
         } else {
             SetOneOfCompressOption(def, &tableCreateSupport);
         }
@@ -1160,7 +1162,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
         res = lappend(options, def);
     }
 
-    bool noSupportTable = isCStore || isTsStore || relkind != RELKIND_RELATION ||
+    bool noSupportTable = segment || isUstore || isCStore || isTsStore || relkind != RELKIND_RELATION ||
                           stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED ||
                           stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
                           stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP;

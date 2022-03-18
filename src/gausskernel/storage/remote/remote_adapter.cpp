@@ -282,8 +282,8 @@ int StandbyReadPageforPrimary(RepairBlockKey key, uint32 blocksize, uint64 lsn, 
         }
     }
 
-    RelFileNode relfilenode {key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode,
-        key.relfilenode.bucketNode};
+    RelFileNode relfilenode{key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode,
+                            key.relfilenode.bucketNode, key.relfilenode.opt};
 
     if (NULL != pblk) {
         SegPageLocation loc = seg_get_physical_location(relfilenode, key.forknum, key.blocknum);
@@ -383,6 +383,7 @@ Datum gs_read_file_from_remote(PG_FUNCTION_ARGS)
     rnode.dbNode = PG_GETARG_UINT32(parano++);
     rnode.relNode = PG_GETARG_UINT32(parano++);
     rnode.bucketNode = PG_GETARG_INT32(parano++);
+    rnode.opt = 0;
     forknum = PG_GETARG_INT32(parano++);
     blockstart = PG_GETARG_INT32(parano++);
     lsn = (uint64)PG_GETARG_TRANSACTIONID(parano++);
@@ -443,6 +444,7 @@ Datum gs_read_file_size_from_remote(PG_FUNCTION_ARGS)
     rnode.dbNode = PG_GETARG_UINT32(parano++);
     rnode.relNode = PG_GETARG_UINT32(parano++);
     rnode.bucketNode = PG_GETARG_INT32(parano++);
+    rnode.opt = 0;
     forknum = PG_GETARG_INT32(parano++);
     lsn = (uint64)PG_GETARG_TRANSACTIONID(parano++);
     timeout = PG_GETARG_INT32(parano++);
@@ -555,7 +557,8 @@ int ReadFileByReadDisk(SegSpace* spc, RemoteReadFileKey *key, char* bufBlock, Bl
             .spcNode = key->relfilenode.spcNode,
             .dbNode = key->relfilenode.dbNode,
             .relNode = key->relfilenode.relNode,
-            .bucketNode = SegmentBktId
+            .bucketNode = SegmentBktId,
+            .opt = 0
         };
 SEG_RETRY:
         seg_physical_read(spc, fakenode, key->forknum, blocknum, (char *)bufBlock);

@@ -7174,6 +7174,7 @@ void push_unlink_rel_to_hashtbl(ColFileNodeRel *xnodes, int nrels)
                 entry->rnode.dbNode = colFileNode.filenode.dbNode;
                 entry->rnode.relNode = colFileNode.filenode.relNode;
                 entry->rnode.bucketNode = colFileNode.filenode.bucketNode;
+                entry->rnode.opt = colFileNode.filenode.opt;
                 entry->maxSegNo = -1;
                 del_rel_num++;
             }

@@ -2912,6 +2912,7 @@ void RecordBadBlockAndPushToRemote(XLogBlockDataParse *datadecode, PageErrorType
     key.relfilenode.dbNode = state->blockparse.blockhead.dbNode;
     key.relfilenode.relNode = state->blockparse.blockhead.relNode;
     key.relfilenode.bucketNode = state->blockparse.blockhead.bucketNode;
+    key.relfilenode.opt = state->blockparse.blockhead.opt;
     key.forknum = state->blockparse.blockhead.forknum;
     key.blocknum = state->blockparse.blockhead.blkno;
 

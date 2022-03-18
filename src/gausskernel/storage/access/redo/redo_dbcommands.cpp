@@ -65,6 +65,7 @@ XLogRecParseState *DatabaseXlogCommonParseToBlock(XLogReaderState *record, uint3
     }
 
     rnode.bucketNode = InvalidBktId;
+    rnode.opt = 0;
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
 

@@ -1686,6 +1686,7 @@ UndoFileType CheckUndoPath(const char* fname, int* segNo)
     rnode.dbNode = InvalidOid;
     rnode.relNode = InvalidOid;
     rnode.bucketNode = InvalidBktId;
+    rnode.opt = 0;
     /* undo file and undo transaction slot file Checking */
     if (sscanf_s(fname, "undo/permanent/%05X.%07zX", &rnode.relNode, segNo) == MATCH_TWO) {
         return UNDO_RECORD;
