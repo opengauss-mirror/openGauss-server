@@ -2197,7 +2197,8 @@ bool is_node_internal_connection(hbaPort* port)
         } else {
             replconninfo = u_sess->attr.attr_storage.ReplConnInfoArr[i];
         }
-        if (replconninfo && *replconninfo != '\0' && strcasestr(replconninfo, remote_host) != NULL) {
+        if (replconninfo && *replconninfo != '\0' && (strcasestr(replconninfo, remote_host) != NULL ||
+            strcasestr(replconninfo, port->remote_host) != NULL)) {
             ereport(DEBUG2, (errmsg("remote host is:%s in replconninfo %s", remote_host, replconninfo)));
             return true;
         }
