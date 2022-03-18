@@ -4514,6 +4514,15 @@ void truncate_check_rel(Relation rel)
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog", RelationGetRelationName(rel))));
 
+    /* Forbid truncate on shared relation during upgrade, to protect global/pg_filenode.map not changed */
+    if (u_sess->attr.attr_common.upgrade_mode != 0 &&
+        rel->rd_id < FirstBootstrapObjectId && rel->rd_rel->relisshared &&
+        t_thrd.proc->workingVersionNum < RELMAP_4K_VERSION_NUM) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("cannot truncate shared relation during upgrade")));
+    }
+
     /*
      * Don't allow truncate on temp tables of other backends ... their local
      * buffer manager is not going to cope.

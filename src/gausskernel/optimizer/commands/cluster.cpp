@@ -421,6 +421,15 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
         return;
     }
 
+    /* Forbid cluster on shared relation during upgrade, to protect global/pg_filenode.map not changed */
+    if (u_sess->attr.attr_common.upgrade_mode != 0 &&
+        tableOid < FirstBootstrapObjectId && OldHeap->rd_rel->relisshared &&
+        t_thrd.proc->workingVersionNum < RELMAP_4K_VERSION_NUM) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("cannot cluster shared relation during upgrade")));
+    }
+
     /*
      * Since we may open a new transaction for each relation, we have to check
      * that the relation still is what we think it is.
