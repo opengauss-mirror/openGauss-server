@@ -109,6 +109,7 @@ endif
 	$(INSTALL_DATA) lite/memory_lite.h '$(DESTDIR)$(includedir_server)/lite/memory_lite.h'
 # These headers are needed by postgis
 	$(INSTALL_DATA) access/ustore/undo/knl_uundotype.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundotype.h'
+	$(INSTALL_DATA) access/ustore/undo/knl_uundoapi.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundoapi.h'
 	$(INSTALL_DATA) access/ustore/knl_uheap.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uheap.h'
 	$(INSTALL_DATA) access/ustore/knl_utuple.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_utuple.h'
 	$(INSTALL_DATA) access/ustore/knl_utype.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_utype.h'
