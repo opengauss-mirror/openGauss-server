@@ -775,11 +775,6 @@ void ExceptionalCondition(const char* conditionName, const char* errorType, cons
     abort();
 }
 
-// see to relmappper.cpp
-//
-#define MAX_MAPPINGS 62 /* 62 * 8 + 16 = 512 */
-#define RELMAPPER_FILENAME "pg_filenode.map"
-#define RELMAPPER_FILEMAGIC 0x592717     /* version ID value */
 #define RELCACHE_INIT_FILEMAGIC 0x573266 /* version ID value */
 
 typedef struct PgClass_table {
@@ -3179,6 +3174,35 @@ read_failed:
     return result;
 }
 
+static int ReadOldVersionRelmapFile(char *buffer, FILE *fd)
+{
+    errno_t rc;
+    char oldMapCache[RELMAP_SIZE_OLD];
+    int readByte = fread(oldMapCache, 1, RELMAP_SIZE_OLD, fd);
+    rc = memcpy_s(buffer, sizeof(RelMapFile), oldMapCache, MAPPING_LEN_OLDMAP_HEAD);
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(
+        buffer + offsetof(RelMapFile, crc), MAPPING_LEN_TAIL, oldMapCache + MAPPING_LEN_OLDMAP_HEAD, MAPPING_LEN_TAIL);
+    securec_check(rc, "\0", "\0");
+    return readByte;
+}
+
+static void DoRelMapCrcCheck(const RelMapFile* mapfile, int32 magicNum)
+{
+    pg_crc32 crc;
+    /* verify the CRC */
+    INIT_CRC32(crc);
+    if (IS_NEW_RELMAP(magicNum)) {
+        COMP_CRC32(crc, (char*)mapfile, offsetof(RelMapFile, crc));
+    } else {
+        COMP_CRC32(crc, (char*)mapfile, MAPPING_LEN_OLDMAP_HEAD);
+    }
+    FIN_CRC32(crc);
+    if (!EQ_CRC32(crc, (pg_crc32)(mapfile->crc))) {
+        fprintf(stdout, "WARNING: relmap crc check failed!");
+    }
+}
+
 static int parse_filenodemap_file(char* filename)
 {
     char buffer[sizeof(RelMapFile)];
@@ -3189,6 +3213,9 @@ static int parse_filenodemap_file(char* filename)
     char* pg_class_map[MAX_PG_CLASS_ID];
     char* pg_class = NULL;
     int i = 0;
+    int32 magicNum;
+    int32 relmapSize;
+    int32 relmapMaxMappings;
 
     for (i = 0; i < MAX_PG_CLASS_ID; i++) {
         pg_class_map[i] = NULL;
@@ -3203,17 +3230,34 @@ static int parse_filenodemap_file(char* filename)
     fseek(fd, 0, SEEK_END);
     size = ftell(fd);
     rewind(fd);
-    result = fread(buffer, 1, sizeof(RelMapFile), fd);
-    if (sizeof(RelMapFile) != result) {
+
+    result = fread(&magicNum, 1, sizeof(int32), fd);
+    rewind(fd);
+    if (result != sizeof(int32)) {
+        fprintf(stderr, "Reading magic error");
+        return false;
+    }
+
+    if (IS_NEW_RELMAP(magicNum)) {
+        result = fread(buffer, 1, sizeof(RelMapFile), fd);
+        relmapSize = RELMAP_SIZE_NEW;
+        relmapMaxMappings = MAX_MAPPINGS_4K;
+    } else {
+        result = ReadOldVersionRelmapFile(buffer, fd);
+        relmapSize = RELMAP_SIZE_OLD;
+        relmapMaxMappings = MAX_MAPPINGS;
+    }
+    if ((size_t)relmapSize != result) {
         fprintf(stderr, "Reading error");
         return false;
     }
 
     mapfile = (RelMapFile*)buffer;
+    DoRelMapCrcCheck(mapfile, magicNum);
     fprintf(stdout, "Magic number: 0x%x\n", mapfile->magic);
     fprintf(stdout, "Number of mappings: %u\n", mapfile->num_mappings);
     fprintf(stdout, "Mapping pairs:\n");
-    for (i = 0; i < MAX_MAPPINGS; i++) {
+    for (i = 0; i < relmapMaxMappings; i++) {
         if (0 == mapfile->mappings[i].mapoid && 0 == mapfile->mappings[i].mapfilenode)
             break;
 
