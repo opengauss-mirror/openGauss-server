@@ -115,10 +115,7 @@
 /*
  * For the new created type, we have to bind the typname and typnamespace information
  * so that the data node can decode it.
- * But in single node, we don't need it.
  */
-#ifdef ENABLE_MULTIPLE_NODES
-
 #define WRITE_TYPEINFO_WITHOID(typid)                                                \
     if ((typid) >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(typid)) { \
         char* exprtypename = NULL;                                                   \
@@ -154,14 +151,6 @@
             WRITE_TYPEINFO_WITHOID(typid)      \
         }                                      \
     } while (0)
-#else  /* not def ENABLE_MULTIPLE_NODES */
-
-#define WRITE_TYPEINFO_WITHOID(typid)       ((void)0)
-#define WRITE_TYPEINFO_FIELD(fldname)       ((void)0)
-#define WRITE_TYPEINFO_LIST(fldname)        ((void)0)
-#define WRITE_TYPEINFO_ARRAY(fldname, size) ((void)0)
-
-#endif  /* ENABLE_MULTIPLE_NODES */
 
 /*
  * Write full-text search configuration's name out of its oid
