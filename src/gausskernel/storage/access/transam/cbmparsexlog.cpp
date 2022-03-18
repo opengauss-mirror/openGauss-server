@@ -1172,6 +1172,12 @@ static void TrackRelStorageDrop(XLogReaderState *record)
 
         ColFileNodeCopy(&colFileNodeData, colFileNodeRel);
 
+        /* set opt to compressOpt if FORKNUM is compress forknum */
+        if (IS_COMPRESS_DELETE_FORK(colFileNodeData.forknum)) {
+            SET_OPT_BY_NEGATIVE_FORK(colFileNodeData.filenode, colFileNodeData.forknum);
+            colFileNodeData.forknum = MAIN_FORKNUM;
+        }
+
         /* Logic relfilenode delete is ignored */
         if (IsSegmentFileNode(colFileNodeData.filenode)) {
             continue;

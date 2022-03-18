@@ -7167,6 +7167,10 @@ void push_unlink_rel_to_hashtbl(ColFileNodeRel *xnodes, int nrels)
         DelFileTag *entry = NULL;
 
         ColFileNodeCopy(&colFileNode, colFileNodeRel);
+        if (IS_COMPRESS_DELETE_FORK(colFileNode.forknum)) {
+            SET_OPT_BY_NEGATIVE_FORK(colFileNode.filenode, colFileNode.forknum);
+            colFileNode.forknum = MAIN_FORKNUM;
+        }
         if (!IsValidColForkNum(colFileNode.forknum) && !IsSegmentFileNode(colFileNode.filenode)) {
             entry = (DelFileTag*)hash_search(relfilenode_hashtbl, &(colFileNode.filenode), HASH_ENTER, &found);
             if (!found) {
@@ -7212,7 +7216,10 @@ static void unlink_relfiles(_in_ ColFileNodeRel *xnodes, _in_ int nrels)
         ColFileNodeRel *colFileNodeRel = xnodes + i;
 
         ColFileNodeCopy(&colFileNode, colFileNodeRel);
-
+        if (IS_COMPRESS_DELETE_FORK(colFileNode.forknum)) {
+            SET_OPT_BY_NEGATIVE_FORK(colFileNode.filenode, colFileNode.forknum);
+            colFileNode.forknum = MAIN_FORKNUM;
+        }
         if (!IsValidColForkNum(colFileNode.forknum)) {
             RelFileNode relFileNode = colFileNode.filenode;
             ForkNumber fork;
@@ -7815,6 +7822,10 @@ void xactApplyXLogDropRelation(XLogReaderState *record)
         ColFileNodeRel *nodeRel = xnodes + i;
 
         ColFileNodeCopy(&node, nodeRel);
+        if (IS_COMPRESS_DELETE_FORK(node.forknum)) {
+            SET_OPT_BY_NEGATIVE_FORK(node.filenode, node.forknum);
+            node.forknum = MAIN_FORKNUM;
+        }
         if (!IsValidColForkNum(node.forknum)) {
             for (int fork = 0; fork <= MAX_FORKNUM; fork++)
                 XLogDropRelation(node.filenode, fork);

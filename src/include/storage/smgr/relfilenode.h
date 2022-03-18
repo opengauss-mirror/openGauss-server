@@ -31,6 +31,9 @@ typedef enum {
  */
 typedef int ForkNumber;
 
+/* used for delete forknum */
+#define COMPRESS_FORKNUM -9
+
 #define SEGMENT_EXT_8192_FORKNUM -8
 #define SEGMENT_EXT_1024_FORKNUM -7
 #define SEGMENT_EXT_128_FORKNUM -6

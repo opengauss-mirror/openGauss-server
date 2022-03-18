@@ -6535,7 +6535,7 @@ int ckpt_buforder_comparator(const void *pa, const void *pb)
     } else { /* should not be the same block ... */
         return 1;
     }
-	/* do not need to compare opt */
+    /* do not need to compare opt */
 }
 
 /*

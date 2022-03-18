@@ -220,6 +220,12 @@ void PRTrackDropFiles(HTAB *redoItemHash, XLogBlockDdlParse *ddlParse, XLogRecPt
         ColFileNode colFileNode;
         ColFileNodeRel *colFileNodeRel = xnodes + i;
         ColFileNodeCopy(&colFileNode, colFileNodeRel);
+
+        if (IS_COMPRESS_DELETE_FORK(colFileNode.forknum)) {
+            SET_OPT_BY_NEGATIVE_FORK(colFileNode.filenode, colFileNode.forknum);
+            colFileNode.forknum = MAIN_FORKNUM;
+        }
+
         if (!IsValidColForkNum(colFileNode.forknum)) {
             for (int i = 0; i < MAX_FORKNUM; ++i)
                 PRTrackRelTruncate(redoItemHash, colFileNode.filenode, i, 0);

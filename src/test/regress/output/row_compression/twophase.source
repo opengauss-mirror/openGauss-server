@@ -1,0 +1,44 @@
+create schema "compress_2PC";
+create table "compress_2PC".file_count(id int, count int);
+checkpoint;
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into \"compress_2PC\".file_count values(1, `find @abs_srcdir@ | wc -l`)"
+INSERT 0 1
+-- create rollback
+start transaction;
+create table "compress_2PC".normal(a text,b integer);
+create table "compress_2PC".compress(a text,b integer) with (compresstype=2);
+rollback;
+-- drop commit
+create table "compress_2PC".normal(id int);
+create table "compress_2PC".compress(id int) with (compresstype=2);
+start transaction;
+drop table "compress_2PC".normal;
+drop table "compress_2PC".compress;
+commit;
+-- 2pc create rollback
+begin;
+create table "compress_2PC".test_abort1(a text,b integer) with (compresstype=2);
+create table "compress_2PC".test_abort2(a text,b integer) with (compresstype=2);
+create table "compress_2PC".test_abort3(a text,b integer);
+prepare transaction 'the first prepare transaction';
+rollback prepared 'the first prepare transaction';
+--2pc drop rollback
+create table "compress_2PC".test_commit1(a text,b integer) with (compresstype=2);
+create table "compress_2PC".test_commit2(a text,b integer) with (compresstype=2);
+create table "compress_2PC".test_commit3(a text,b integer);
+begin;
+drop table "compress_2PC".test_commit1;
+drop table"compress_2PC". test_commit2;
+drop table "compress_2PC".test_commit3;
+prepare transaction 'the first prepare transaction';
+commit prepared 'the first prepare transaction';
+-- checkpoint
+checkpoint;
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into \"compress_2PC\".file_count values(2, `find @abs_srcdir@ | wc -l`)"
+INSERT 0 1
+select count(distinct(count)) from "compress_2PC".file_count;
+ count 
+-------
+     1
+(1 row)
+

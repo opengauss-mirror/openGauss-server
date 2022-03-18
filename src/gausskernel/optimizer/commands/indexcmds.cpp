@@ -1077,8 +1077,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             }
         }
     }
-
-    CheckCompressOption(&indexCreateSupport);
     /*
      * Parse AM-specific options, convert to text array form, validate.
      */
