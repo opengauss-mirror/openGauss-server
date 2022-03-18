@@ -401,13 +401,6 @@ THR_LOCAL bool skip_read_extern_fields = false;
     token = pg_strtok(&length); /* skip :fldname */ \
     local_node->fldname = _readBitmapset()
 
-/*
- * For the new created type, we have to bind the typname and typnamespace information
- * so that the data node can decode it.
- * But in single node, we don't need it.
- */
-#ifdef ENABLE_MULTIPLE_NODES
-
 #define READ_TYPEINFO_FIELD(fldname)                                                                          \
     do {                                                                                                      \
         if (local_node->fldname >= FirstBootstrapObjectId) {                                                  \
@@ -469,14 +462,6 @@ THR_LOCAL bool skip_read_extern_fields = false;
             READ_TYPEINFO(local_node->fldname[i]);                        \
         }                                                                 \
     } while (0);
-#else  /* not def ENABLE_MULTIPLE_NODES */
-
-#define READ_TYPEINFO_FIELD(fldname)      ((void)0)
-#define READ_TYPEINFO(typePtr)            ((void)0)
-#define READ_TYPEINFO_LIST(fldname)       ((void)0)
-#define READ_TYPINFO_ARRAY(fldname, size) ((void)0)
-
-#endif  /* ENABLE_MULTIPLE_NODES */
 
 /* read full-text search configuratio's oid from its name */
 #define READ_CFGINFO_FIELD(fldname1, fldname2)                                                                        \
