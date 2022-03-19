@@ -98,6 +98,7 @@ XLogRecParseState *tblspc_xlog_common_parse_to_block(XLogReaderState *record, ui
     relnode.dbNode = InvalidOid;
     relnode.relNode = InvalidOid;
     relnode.bucketNode = InvalidBktId;
+    relnode.opt = 0;
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
     if (recordstatehead == NULL) {

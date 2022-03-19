@@ -294,6 +294,7 @@ XLogRecParseState *xact_xlog_commit_parse_to_block(XLogReaderState *record, XLog
     relnode.spcNode = InvalidOid;
     relnode.relNode = InvalidOid;
     relnode.bucketNode = InvalidBktId;
+    relnode.opt = 0;
 
     (*blocknum)++;
     XLogParseBufferAllocListStateFunc(record, &blockstate, &recordstatehead);

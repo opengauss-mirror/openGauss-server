@@ -71,13 +71,13 @@ static void SeqRemoteReadFile();
 static void checkOtherFile(RepairFileKey key, uint32 max_segno, uint64 size);
 static void PushBadFileToRemoteHashTbl(RepairFileKey key);
 
-#define COMPARE_REPAIR_PAGE_KEY(key1, key2) \
-    ((key1).relfilenode.relNode == (key2).relfilenode.relNode &&     \
-    (key1).relfilenode.dbNode == (key2).relfilenode.dbNode &&        \
-    (key1).relfilenode.spcNode == (key2).relfilenode.spcNode &&       \
-    (key1).relfilenode.bucketNode == (key2).relfilenode.bucketNode && \
-    (key1).forknum == (key2).forknum &&                               \
-    (key1).blocknum == (key2).blocknum)
+#define COMPARE_REPAIR_PAGE_KEY(key1, key2)                                                  \
+    ((key1).relfilenode.relNode == (key2).relfilenode.relNode &&                             \
+     (key1).relfilenode.dbNode == (key2).relfilenode.dbNode &&                               \
+     (key1).relfilenode.spcNode == (key2).relfilenode.spcNode &&                             \
+     (key1).relfilenode.bucketNode == (key2).relfilenode.bucketNode &&                       \
+     (key1).relfilenode.opt == (key2).relfilenode.opt && (key1).forknum == (key2).forknum && \
+     (key1).blocknum == (key2).blocknum)
 
 #define NOT_SUPPORT_PAGE_REPAIR \
     (g_instance.attr.attr_common.cluster_run_mode == RUN_MODE_STANDBY ||        \
@@ -935,6 +935,7 @@ static void PushBadFileToRemoteHashTbl(RepairFileKey key)
         entry->key.relfilenode.dbNode = key.relfilenode.dbNode;
         entry->key.relfilenode.spcNode = key.relfilenode.spcNode;
         entry->key.relfilenode.bucketNode = key.relfilenode.bucketNode;
+        entry->key.relfilenode.opt = key.relfilenode.opt;
         entry->key.forknum = key.forknum;
         entry->key.segno = key.segno;
         entry->min_recovery_point = min_recovery_point;
@@ -1438,6 +1439,7 @@ bool CheckAllSegmentFileRepair(RepairFileKey key, uint32 max_segno)
         temp_key.relfilenode.dbNode = key.relfilenode.dbNode;
         temp_key.relfilenode.spcNode = key.relfilenode.spcNode;
         temp_key.relfilenode.bucketNode = key.relfilenode.bucketNode;
+        temp_key.relfilenode.bucketNode = key.relfilenode.opt;
         temp_key.forknum = key.forknum;
         temp_key.segno = i;
 
@@ -1460,6 +1462,7 @@ bool CheckAllSegmentFileRepair(RepairFileKey key, uint32 max_segno)
             rename_key.relfilenode.dbNode = key.relfilenode.dbNode;
             rename_key.relfilenode.spcNode = key.relfilenode.spcNode;
             rename_key.relfilenode.bucketNode = key.relfilenode.bucketNode;
+            rename_key.relfilenode.opt = key.relfilenode.opt;
             rename_key.forknum = key.forknum;
             rename_key.segno = i;
 
@@ -1484,6 +1487,7 @@ bool CheckAllSegmentFileRepair(RepairFileKey key, uint32 max_segno)
             change_key.relfilenode.dbNode = key.relfilenode.dbNode;
             change_key.relfilenode.spcNode = key.relfilenode.spcNode;
             change_key.relfilenode.bucketNode = key.relfilenode.bucketNode;
+            change_key.relfilenode.opt = key.relfilenode.opt;
             change_key.forknum = key.forknum;
             change_key.segno = i;
 
@@ -1600,6 +1604,7 @@ static void checkOtherFile(RepairFileKey key, uint32 max_segno, uint64 size)
         temp_key.relfilenode.dbNode = key.relfilenode.dbNode;
         temp_key.relfilenode.spcNode = key.relfilenode.spcNode;
         temp_key.relfilenode.bucketNode = key.relfilenode.bucketNode;
+        temp_key.relfilenode.opt = key.relfilenode.opt;
         temp_key.forknum = key.forknum;
         temp_key.segno = i;
 

@@ -174,7 +174,8 @@ void eg_ctrl_init(SegSpace *spc, SegExtentGroup *seg, int extent_size, ForkNumbe
     seg->rnode = {.spcNode = spc->spcNode,
                   .dbNode = spc->dbNode,
                   .relNode = EXTENT_SIZE_TO_TYPE(extent_size),
-                  .bucketNode = SegmentBktId};
+                  .bucketNode = SegmentBktId,
+                  .opt = 0};
     seg->forknum = forknum;
     seg->map_head_entry = DF_MAP_HEAD_PAGE;
 

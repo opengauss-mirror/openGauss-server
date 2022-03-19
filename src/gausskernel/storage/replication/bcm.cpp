@@ -144,6 +144,7 @@ void createBCMFile(Relation rel, int col)
     hd->node.relNode = rel->rd_node.relNode;
     hd->node.spcNode = rel->rd_node.spcNode;
     hd->node.bucketNode = rel->rd_node.bucketNode;
+    hd->node.opt = 0;
     hd->blockSize = col > 0 ? CUAlignUtils::GetCuAlignSizeColumnId(col) : BLCKSZ; /* defaut size for ROW_STORE */
 
     if (col > 0)

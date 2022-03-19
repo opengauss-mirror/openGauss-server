@@ -71,6 +71,23 @@ void initRepairBadBlockStat()
     }
 }
 
+static void UnsupportedPageRepair(const char *path)
+{
+    char pcaPath[MAXPGPATH];
+    int rc = 0;
+    rc = snprintf_s(pcaPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s_pca", t_thrd.proc_cxt.DataDir, path);
+    securec_check_ss(rc, "\0", "\0");
+
+    char pcdPath[MAXPGPATH];
+    rc = snprintf_s(pcdPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s_pcd", t_thrd.proc_cxt.DataDir, path);
+    struct stat pcaStat;
+    struct stat pcdStat;
+    bool pcaState = stat(pcaPath, &pcaStat) == 0;
+    bool pcdState = stat(pcdPath, &pcdStat) == 0;
+    if (pcaState || pcdState) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), (errmsg("Compressed Table is not allowed here."))));
+    }
+}
 
 /* BatchClearBadBlock
  *          clear global_repair_bad_block_stat hashtable entry when the relation drop or truncate.
@@ -167,6 +184,7 @@ void UpdateRepairTime(const RelFileNode &rnode, ForkNumber forknum, BlockNumber 
     key.relfilenode.dbNode = rnode.dbNode;
     key.relfilenode.relNode = rnode.relNode;
     key.relfilenode.bucketNode = rnode.bucketNode;
+    key.relfilenode.opt = 0;
     key.forknum = forknum;
     key.blocknum = blocknum;
 
@@ -208,6 +226,7 @@ void addGlobalRepairBadBlockStat(const RelFileNodeBackend &rnode, ForkNumber for
     key.relfilenode.dbNode = rnode.node.dbNode;
     key.relfilenode.relNode = rnode.node.relNode;
     key.relfilenode.bucketNode = rnode.node.bucketNode;
+    key.relfilenode.opt = 0;
     key.forknum = forknum;
     key.blocknum = blocknum;
 
@@ -360,6 +379,7 @@ bool tryRepairPage(int blocknum, bool is_segment, RelFileNode *relnode, int time
         logicalRelNode.spcNode = relnode->spcNode;
         logicalRelNode.dbNode = relnode->dbNode;
         logicalRelNode.bucketNode = SegmentBktId;
+        logicalRelNode.opt = 0;
         logicalBlocknum = loc.blocknum;
     }
 
@@ -576,6 +596,8 @@ Datum gs_repair_page(PG_FUNCTION_ARGS)
     bool is_segment = PG_GETARG_BOOL(2);
     int32 timeout = PG_GETARG_INT32(3);
 
+    UnsupportedPageRepair(path);
+    
     bool result = repairPage(path, blockNum, is_segment, timeout);
     PG_RETURN_BOOL(result);
 }
@@ -602,6 +624,8 @@ Datum gs_repair_file(PG_FUNCTION_ARGS)
     char* path = text_to_cstring(PG_GETARG_TEXT_P(1));
     int32 timeout = PG_GETARG_INT32(2);
 
+    UnsupportedPageRepair(path);
+	
     if (!CheckRelDataFilePath(path)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             (errmsg("The input path(%s) is an incorrect relation file path input. \n", path))));
@@ -780,6 +804,8 @@ Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
     int j = 1;
     XLogPhyBlock pblk = {0, 0, 0};
 
+    UnsupportedPageRepair(path);
+    
     /* build tupdesc for result tuples */
     tupdesc = CreateTemplateTupleDesc(REPAIR_BLOCK_STAT_NATTS, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "node_name", TEXTOID, -1, 0);
@@ -854,14 +880,13 @@ Datum gs_read_segment_block_from_remote(PG_FUNCTION_ARGS)
     uint32 dbNode = PG_GETARG_UINT32(1);
     uint32 relNode = PG_GETARG_UINT32(2);
     int16 bucketNode = PG_GETARG_INT16(3);
-    uint16 opt = PG_GETARG_INT16(4);
-    int32 forkNum = PG_GETARG_INT32(5);
-    uint64 blockNum = (uint64)PG_GETARG_TRANSACTIONID(6);
-    uint32 blockSize = PG_GETARG_UINT32(7);
-    uint64 lsn = (uint64)PG_GETARG_TRANSACTIONID(8);
-    uint32 seg_relNode = PG_GETARG_UINT32(9);
-    uint32 seg_block = PG_GETARG_UINT32(10);
-    int32 timeout = PG_GETARG_INT32(11);
+    int32 forkNum = PG_GETARG_INT32(4);
+    uint64 blockNum = (uint64)PG_GETARG_TRANSACTIONID(5);
+    uint32 blockSize = PG_GETARG_UINT32(6);
+    uint64 lsn = (uint64)PG_GETARG_TRANSACTIONID(7);
+    uint32 seg_relNode = PG_GETARG_UINT32(8);
+    uint32 seg_block = PG_GETARG_UINT32(9);
+    int32 timeout = PG_GETARG_INT32(10);
 
     XLogPhyBlock pblk = {
         .relNode = seg_relNode,
@@ -874,7 +899,7 @@ Datum gs_read_segment_block_from_remote(PG_FUNCTION_ARGS)
     key.relfilenode.dbNode = dbNode;
     key.relfilenode.relNode = relNode;
     key.relfilenode.bucketNode = bucketNode;
-    key.relfilenode.opt = opt;
+    key.relfilenode.opt = 0;
     key.forknum = forkNum;
     key.blocknum = blockNum;
 
@@ -1114,7 +1139,8 @@ List* getSegmentBadFiles(List* spcList, List* badFileItems)
             .spcNode = lfirst_oid(currentCell),
             .dbNode = u_sess->proc_cxt.MyDatabaseId,
             .relNode = 1,
-            .bucketNode = SegmentBktId
+            .bucketNode = SegmentBktId,
+            .opt = 0
         };
         char* segmentDir = relSegmentDir(relFileNode, MAIN_FORKNUM);
         List* segmentFiles = getSegmentMainFilesPath(segmentDir, '/', 5);
@@ -1576,7 +1602,8 @@ bool gsRepairCsnOrCLog(char* path, int timeout)
         .spcNode = (uint32)transType,
         .dbNode = 0,
         .relNode = logName,
-        .bucketNode = InvalidBktId
+        .bucketNode = InvalidBktId,
+        .opt = 0
     };
 
     RemoteReadFileKey repairFileKey = {

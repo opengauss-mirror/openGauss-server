@@ -561,6 +561,7 @@ static void gtt_storage_removeall(int code, Datum arg)
             rnode.spcNode = gtt_rnode->spcnode;
             rnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
             rnode.relNode = gtt_rnode->relfilenode;
+            rnode.opt = 0;
             rnode.bucketNode = InvalidBktId;
             srel = smgropen(rnode, BackendIdForTempRelations);
 

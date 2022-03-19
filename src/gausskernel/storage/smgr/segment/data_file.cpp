@@ -764,7 +764,7 @@ int seg_unlink_filetag(const FileTag *ftag, char *path)
 void segForgetDatabaseFsyncRequests(Oid dbid)
 {
     FileTag tag;
-    RelFileNode rnode = {.spcNode = 0, .dbNode = dbid, .relNode = 0, .bucketNode = InvalidBktId};
+    RelFileNode rnode = {.spcNode = 0, .dbNode = dbid, .relNode = 0, .bucketNode = InvalidBktId, .opt = 0};
 
     tag.rnode = rnode;
     tag.handler = SYNC_HANDLER_SEGMENT;

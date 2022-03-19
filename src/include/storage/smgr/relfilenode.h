@@ -135,12 +135,13 @@ typedef struct RelFileNodeOld
     } while(0)
 
 #define RelFileNodeCopy(relFileNode, relFileNodeRel, bucketid) \
-    do { \
-        (relFileNode).spcNode = (relFileNodeRel).spcNode; \
-        (relFileNode).dbNode = (relFileNodeRel).dbNode; \
-        (relFileNode).relNode = (relFileNodeRel).relNode; \
-        (relFileNode).bucketNode = (bucketid); \
-    } while(0)
+    do {                                                       \
+        (relFileNode).spcNode = (relFileNodeRel).spcNode;      \
+        (relFileNode).dbNode = (relFileNodeRel).dbNode;        \
+        (relFileNode).relNode = (relFileNodeRel).relNode;      \
+        (relFileNode).bucketNode = (bucketid);                 \
+        (relFileNode).opt = 0;                                 \
+    } while (0)
 
 #define RelFileNodeV2Copy(relFileNodeV2, relFileNode)          \
     do {                                                       \
@@ -291,14 +292,15 @@ static inline StorageType forknum_get_storage_type(const ForkNumber& forknum)
     return (StorageType)(((uint)forknum & 0xC000) >> 14);
 }
 
-#define ColFileNodeCopy(colFileNode, colFileNodeRel) \
-    do { \
-        (colFileNode)->filenode.spcNode = (colFileNodeRel)->filenode.spcNode; \
-        (colFileNode)->filenode.dbNode = (colFileNodeRel)->filenode.dbNode; \
-        (colFileNode)->filenode.relNode = (colFileNodeRel)->filenode.relNode; \
+#define ColFileNodeCopy(colFileNode, colFileNodeRel)                                          \
+    do {                                                                                      \
+        (colFileNode)->filenode.spcNode = (colFileNodeRel)->filenode.spcNode;                 \
+        (colFileNode)->filenode.dbNode = (colFileNodeRel)->filenode.dbNode;                   \
+        (colFileNode)->filenode.relNode = (colFileNodeRel)->filenode.relNode;                 \
+        (colFileNode)->filenode.opt = 0;                                                      \
         (colFileNode)->filenode.bucketNode = forknum_get_bucketid((colFileNodeRel)->forknum); \
-        (colFileNode)->forknum = forknum_get_forknum((colFileNodeRel)->forknum); \
-        (colFileNode)->ownerid= (colFileNodeRel)->ownerid; \
-   } while(0)
+        (colFileNode)->forknum = forknum_get_forknum((colFileNodeRel)->forknum);              \
+        (colFileNode)->ownerid = (colFileNodeRel)->ownerid;                                   \
+    } while (0)
 
 #endif /* RELFILENODE_H */

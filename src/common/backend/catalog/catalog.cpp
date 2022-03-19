@@ -491,6 +491,7 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
     securec_check(rc, "\0", "\0");
     filenode.rnode.node.spcNode = DEFAULTTABLESPACE_OID;
     filenode.rnode.node.bucketNode = InvalidBktId;
+    filenode.rnode.node.opt = 0;
     filenode.rnode.backend = InvalidBackendId;
 
     if (0 == strncmp(token, "global", 7)) {

@@ -187,7 +187,8 @@ RelFileNode EXTENT_GROUP_RNODE(SegSpace *spc, ExtentSize extentSize)
     return {.spcNode = spc->spcNode,
             .dbNode = spc->dbNode,
             .relNode = EXTENT_SIZE_TO_TYPE(extentSize),
-            .bucketNode = SegmentBktId};
+            .bucketNode = SegmentBktId,
+            .opt = 0};
 }
 
 void seg_head_update_xlog(Buffer head_buffer, SegmentHead *seg_head, int level0_slot,

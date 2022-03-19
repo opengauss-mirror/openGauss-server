@@ -1815,7 +1815,12 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
     static THR_LOCAL Oid lstSpc = InvalidOid;
 
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        return mdread_pc(reln, forknum, blocknum, buffer) ? SMGR_RD_OK : SMGR_RD_CRC_ERROR;
+        bool success = mdread_pc(reln, forknum, blocknum, buffer);
+        if (success && PageIsVerified((Page)buffer, blocknum)) {
+            return SMGR_RD_OK;
+        } else {
+            return SMGR_RD_CRC_ERROR;
+        }
     }
 
     (void)INSTR_TIME_SET_CURRENT(startTime);

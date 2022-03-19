@@ -962,6 +962,7 @@ static void push_unlink_rel_one_fork_to_hashtbl(RelFileNode node, ForkNumber for
         entry->forkrnode.rnode.dbNode = key.rnode.dbNode;
         entry->forkrnode.rnode.relNode = key.rnode.relNode;
         entry->forkrnode.rnode.bucketNode = key.rnode.bucketNode;
+        entry->forkrnode.rnode.opt = key.rnode.opt;
         entry->forkrnode.forkNum = key.forkNum;
         entry->maxSegNo = -1;
         del_rel_num++;

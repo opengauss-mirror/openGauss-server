@@ -173,12 +173,13 @@ typedef enum {
 
 
 /* Populate a RelFileNode from an UndoRecPtr. */
-#define UNDO_PTR_ASSIGN_REL_FILE_NODE(rfn, urp, dbId)     \
-    do {                                                \
-        (rfn).spcNode = DEFAULTTABLESPACE_OID;          \
-        (rfn).dbNode = dbId;                            \
-        (rfn).relNode = UNDO_PTR_GET_REL_NODE(urp); \
-        (rfn).bucketNode = InvalidBktId;                \
+#define UNDO_PTR_ASSIGN_REL_FILE_NODE(rfn, urp, dbId) \
+    do {                                              \
+        (rfn).spcNode = DEFAULTTABLESPACE_OID;        \
+        (rfn).dbNode = dbId;                          \
+        (rfn).relNode = UNDO_PTR_GET_REL_NODE(urp);   \
+        (rfn).bucketNode = InvalidBktId;              \
+        (rfn).opt = 0;                                \
     } while (false);
 
 #define DECLARE_NODE_COUNT()                                                                      \

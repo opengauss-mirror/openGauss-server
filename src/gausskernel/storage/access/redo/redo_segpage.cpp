@@ -67,6 +67,7 @@ static XLogRecParseState *segpage_redo_parse_space_drop(XLogReaderState *record,
     rnode.spcNode = *(Oid *)data;
     rnode.dbNode = *(Oid *)(data + sizeof(Oid));
     rnode.relNode = InvalidOid;
+    rnode.opt = 0;
     rnode.bucketNode = InvalidBktId;
 
     (*blocknum)++;
@@ -425,6 +426,7 @@ void SegPageRedoSpaceShrink(XLogBlockHead *blockhead)
     rnode.dbNode = blockhead->dbNode;
     rnode.relNode = blockhead->relNode;
     rnode.bucketNode = blockhead->bucketNode;
+    rnode.opt = 0;
     char *path = relpathperm(rnode, blockhead->forknum);
     ereport(LOG, (errmsg("call space shrink files, filename: %s, xlog lsn: %lX", path, blockhead->end_ptr)));
     pfree(path);

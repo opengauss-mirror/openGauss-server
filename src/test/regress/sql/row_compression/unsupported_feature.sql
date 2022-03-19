@@ -50,3 +50,11 @@ alter table unspported_feature.t_rowcompress_0007 set (compress_byte_convert=tru
 alter table unspported_feature.t_rowcompress_0007 set (compress_level=31); --failed
 create table unspported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2); -- failed
 create table unspported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=2,compress_level=2); -- success
+
+CREATE TABLE unspported_feature.index_test(id int, c1 text);
+-- ustore
+CREATE TABLE unspported_feature.ustore_table(id int, c1 text) WITH(compresstype=2, storage_type=ustore); --failed
+CREATE INDEX tbl_pc_idx1 on unspported_feature.index_test(c1) WITH(compresstype=2, storage_type=ustore); --failed
+-- segment
+CREATE TABLE unspported_feature.segment_table(id int, c1 text) WITH(compresstype=2, segment=on);  --failed
+CREATE INDEX on unspported_feature.index_test(c1) WITH(compresstype=2, segment=on); --faled
