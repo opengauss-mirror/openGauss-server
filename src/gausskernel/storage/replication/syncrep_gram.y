@@ -66,8 +66,8 @@ static void syncrep_yyerror(YYLTYPE *yylloc,
 
 %token <str> NAME NUM JUNK ANY FIRST
 
-%type <config> result standby_config
-%type <list> standby_list
+%type <config> standby_config_simplify standby_config_complete
+%type <list> result standby_config standby_config_combination standby_list
 %type <str> standby_name
 
 %start result
@@ -78,9 +78,22 @@ result:
 	;
 
 standby_config:
+		standby_config_simplify						{ $$ = list_make1($1); }
+		| standby_config_combination				{ $$ = $1; }
+	;
+
+standby_config_combination:
+		standby_config_complete											{ $$ = list_make1($1);  }
+		| standby_config_combination ',' standby_config_complete		{ $$ = lappend($1, $3); }
+	;
+
+standby_config_simplify:
 		standby_list				{ $$ = create_syncrep_config("1", $1, SYNC_REP_PRIORITY); }
 		| NUM '(' standby_list ')'	{ $$ = create_syncrep_config($1, $3, SYNC_REP_PRIORITY); pfree($1); }
-		| ANY NUM '(' standby_list ')'   { $$ = create_syncrep_config($2, $4, SYNC_REP_QUORUM); pfree($2); }
+	;
+
+standby_config_complete:
+		ANY NUM '(' standby_list ')'   { $$ = create_syncrep_config($2, $4, SYNC_REP_QUORUM); pfree($2); }
 		| FIRST NUM '(' standby_list ')' { $$ = create_syncrep_config($2, $4, SYNC_REP_PRIORITY); pfree($2); }
 	;
 

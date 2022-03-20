@@ -74,12 +74,20 @@ volatile bool most_available_sync = false;
 const int MAX_SYNC_REP_RETRY_COUNT = 1000;
 const int SYNC_REP_SLEEP_DELAY = 1000;
 
+typedef enum SyncStandbyNumState {
+    STANDBIES_EMPTY = 0,
+    STANDBIES_NOT_ENOUGH,
+    STANDBIES_ENOUGH
+} SyncStandbyNumState;
+static SyncStandbyNumState check_sync_standbys_num(const List* sync_standbys);
+static bool judge_sync_standbys_num(const List* sync_standbys, SyncStandbyNumState* state);
+
 static void SyncRepQueueInsert(int mode);
 static bool SyncRepCancelWait(void);
 static void SyncRepWaitCompletionQueue();
 static void SyncRepNotifyComplete();
 
-static int SyncRepGetStandbyPriority(void);
+static void SyncRepGetStandbyGroupAndPriority(int* gid, int* prio);
 #ifndef ENABLE_MULTIPLE_NODES
 static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTime);
 #endif
@@ -87,7 +95,6 @@ static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* write
                                        XLogRecPtr* replayPtr, List* sync_standbys);
 static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr,
                                           XLogRecPtr* replayPtr, List* sync_standbys, uint8 nth);
-
 
 static void SyncPaxosQueueInsert(void);
 static void SyncPaxosCancelWait(void);
@@ -98,13 +105,56 @@ static bool SyncRepQueueIsOrderedByLSN(int mode);
 static bool SyncPaxosQueueIsOrderedByLSN(void);
 #endif
 
-static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standbys = NULL);
-static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, List** catchup_standbys = NULL);
+static List *SyncRepGetSyncStandbysPriority(bool *am_sync, int groupid, List** catchup_standbys = NULL);
+static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, int groupid, List** catchup_standbys = NULL);
+static inline void free_sync_standbys_list(List* sync_standbys);
+static bool judge_sync_standbys_num(const List* sync_standbys, SyncStandbyNumState* state);
 static int cmp_lsn(const void *a, const void *b);
-static bool DelayIntoMostAvaSync(bool checkSyncNum, int curSyncNum = 0);
+static bool DelayIntoMostAvaSync(bool checkSyncNum, SyncStandbyNumState state = STANDBIES_EMPTY);
+
+typedef struct TransContext {
+    /* for global */
+    List* source;
+    bool has_star;
+    List *existers;
+    int SyncRepAllCount;
+    int SyncRepMinPossib;
+
+    /* for each group*/
+    SyncRepConfigData* conf;
+    bool is_star;
+
+    /* results */
+    bool success;
+    List *SyncRepConfig;
+    int SyncRepConfigGroups;
+    int SyncRepMaxPossib;
+} TransContext;
+static TransContext* create_transform_context();
+static void bind_transform_context(TransContext *tcxt, SyncRepConfigData *conf);
+static void advance_transform_result(TransContext *tcxt);
+static void finalize_transform_result(TransContext *tcxt);
+static void clear_transform_context(TransContext *tcxt);
+static void destroy_transform_context(TransContext *tcxt);
+static bool analyze_star_and_num(TransContext *tcxt);
+static bool analyze_duplicate_names(TransContext *tcxt);
+static void transform_synchronous_standby_names(TransContext *tcxt);
 
 #define CATCHUP_XLOG_DIFF(ptr1, ptr2, amount) \
     XLogRecPtrIsInvalid(ptr1) ? false : (XLByteDifference(ptr2, ptr1) < amount)
+
+/*
+ * sync_standbys_list is a two-dimensional array means sync standby nodes in groups
+ * The structure is as follows: List[IntList[int, int,...], IntList[int, int, ...], ...]
+ */
+static inline void free_sync_standbys_list(List* sync_standbys)
+{
+    ListCell *lc = NULL;
+    foreach(lc, sync_standbys) {
+        list_free((List*)lfirst(lc));
+    }
+    list_free(sync_standbys);
+}
 
 /*
  * Determine whether to wait for standby catching up, if requested by user.
@@ -481,15 +531,19 @@ void SyncRepCleanupAtProcExit(void)
  */
 void SyncRepInitConfig(void)
 {
+    int group;
     int priority;
 
     /*
      * Determine if we are a potential sync standby and remember the result
      * for handling replies from standby.
      */
-    priority = SyncRepGetStandbyPriority();
-    if (t_thrd.walsender_cxt.MyWalSnd->sync_standby_priority != priority) {
+    SyncRepGetStandbyGroupAndPriority(&group, &priority);
+    if (t_thrd.walsender_cxt.MyWalSnd->sync_standby_group != group ||
+        t_thrd.walsender_cxt.MyWalSnd->sync_standby_priority != priority) {
         LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
+
+        t_thrd.walsender_cxt.MyWalSnd->sync_standby_group = group;
         t_thrd.walsender_cxt.MyWalSnd->sync_standby_priority = priority;
 
         /*
@@ -499,8 +553,8 @@ void SyncRepInitConfig(void)
         SyncRepCheckSyncStandbyAlive();
 
         LWLockRelease(SyncRepLock);
-        ereport(DEBUG1, (errmsg("standby \"%s\" now has synchronous standby priority %d",
-                                u_sess->attr.attr_common.application_name, priority)));
+        ereport(DEBUG1, (errmsg("standby \"%s\" now has synchronous standby group and priority: %d %d",
+                                u_sess->attr.attr_common.application_name, group, priority)));
     }
 }
 
@@ -558,13 +612,15 @@ void SyncRepReleaseWaiters(void)
      */
     if (t_thrd.syncrep_cxt.announce_next_takeover && am_sync) {
         t_thrd.syncrep_cxt.announce_next_takeover = false;
-        if (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY) {
-            ereport(LOG, (errmsg("standby \"%s\" is now a synchronous standby with priority %d",
+        if (GetWalsndSyncRepConfig(t_thrd.walsender_cxt.MyWalSnd)->syncrep_method == SYNC_REP_PRIORITY) {
+            ereport(LOG, (errmsg("standby \"%s\" is now a synchronous standby with group and priority: %d %d",
                                  u_sess->attr.attr_common.application_name,
+                                 t_thrd.walsender_cxt.MyWalSnd->sync_standby_group,
                                  t_thrd.walsender_cxt.MyWalSnd->sync_standby_priority)));
         } else {
-            ereport(LOG, (errmsg("standby \"%s\" is now a candidate for quorum synchronous standby",
-                                 u_sess->attr.attr_common.application_name)));
+            ereport(LOG, (errmsg("standby \"%s\" is now a candidate for quorum synchronous standby in group: %d",
+                                 u_sess->attr.attr_common.application_name,
+                                 t_thrd.walsender_cxt.MyWalSnd->sync_standby_group)));
         }
     }
 
@@ -609,6 +665,30 @@ void SyncRepReleaseWaiters(void)
                     numapply, (uint32)(replayPtr >> 32), (uint32)replayPtr)));
 }
 
+static SyncStandbyNumState check_sync_standbys_num(const List* sync_standbys)
+{
+    if (t_thrd.syncrep_cxt.SyncRepConfig == NULL)
+        return STANDBIES_ENOUGH;
+
+    ListCell* lc = NULL;
+    List* per_group = NIL;
+    int gid = 0;
+    int alive = 0;
+    SyncStandbyNumState res = STANDBIES_ENOUGH;
+
+    foreach(lc, sync_standbys) {
+        per_group = (List*)lfirst(lc);
+        if (list_length(per_group) < t_thrd.syncrep_cxt.SyncRepConfig[gid]->num_sync)
+            res = STANDBIES_NOT_ENOUGH;
+
+        alive += list_length(per_group);
+        gid++;
+    }
+
+    if (alive == 0) res = STANDBIES_EMPTY;
+    return res;
+}
+
 /*
  * Check whether to delay the time of entering most_available_sync mode.
  *
@@ -617,7 +697,7 @@ void SyncRepReleaseWaiters(void)
  * when the number of sync standby is not qualified.
  * Otherwise it's set to true.
  */
-static bool DelayIntoMostAvaSync(bool checkSyncNum, int curSyncNum)
+static bool DelayIntoMostAvaSync(bool checkSyncNum, SyncStandbyNumState state)
 {
     bool result = false;
 
@@ -629,10 +709,11 @@ static bool DelayIntoMostAvaSync(bool checkSyncNum, int curSyncNum)
         List *sync_standbys = NIL;
         bool am_sync = false;
         sync_standbys = SyncRepGetSyncStandbys(&am_sync);
-        curSyncNum = list_length(sync_standbys);
+        state = check_sync_standbys_num(sync_standbys);
+        free_sync_standbys_list(sync_standbys);
     }
 
-    if (curSyncNum == t_thrd.syncrep_cxt.SyncRepConfig->num_sync) {
+    if (state == STANDBIES_ENOUGH) {
         if (t_thrd.walsender_cxt.WalSndCtl->keep_sync_window_start != 0) {
             t_thrd.walsender_cxt.WalSndCtl->keep_sync_window_start = 0;
             t_thrd.walsender_cxt.WalSndCtl->out_keep_sync_window = false;
@@ -656,6 +737,25 @@ static bool DelayIntoMostAvaSync(bool checkSyncNum, int curSyncNum)
     }
 
     return result;
+}
+
+/*
+ * In a particular scenario, when most_available_sync is true, primary only wait 
+ * the alive sync standbys, even if the quantity does not meet the configuration 
+ * requirements.
+ */
+static bool judge_sync_standbys_num(const List* sync_standbys, SyncStandbyNumState* state)
+{
+    *state = check_sync_standbys_num(sync_standbys);
+
+    if (*state == STANDBIES_ENOUGH) {
+        DelayIntoMostAvaSync(false, STANDBIES_ENOUGH);  // just for refresh keep_sync_window if needed
+        return true;
+    }
+    if (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && !DelayIntoMostAvaSync(false, *state)) {
+        return true;
+    }
+    return false;
 }
 
 /*
@@ -683,14 +783,13 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
     /*
      * Quick exit if we are not managing a sync standby (or not check for check_am_sync is false)
      * or there are not enough synchronous standbys.
-     * but in a particular scenario, when most_available_sync is true, primary only wait the alive sync standbys
-     * if list_length(sync_standbys) doesn't satisfy t_thrd.syncrep_cxt.SyncRepConfig->num_sync.
+     * or most_available_sync is working and allow some standby nodes to be missing.
      */
-    int cur_num_sync_standbys = list_length(sync_standbys);
-    if ((!(*am_sync) && check_am_sync) || t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
-        ((!t_thrd.walsender_cxt.WalSndCtl->most_available_sync || DelayIntoMostAvaSync(false, cur_num_sync_standbys)) &&
-         cur_num_sync_standbys < t_thrd.syncrep_cxt.SyncRepConfig->num_sync)) {
-        list_free(sync_standbys);
+    SyncStandbyNumState state;
+    if ((!(*am_sync) && check_am_sync) ||
+        t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
+        !judge_sync_standbys_num(sync_standbys, &state)) {
+        free_sync_standbys_list(sync_standbys);
         return false;
     }
 
@@ -707,20 +806,29 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
      * we can use SyncRepGetOldestSyncRecPtr() to calculate the synced
      * positions even in a quorum-based sync replication.
      */
-    if (list_length(sync_standbys) == 0) {
+    if (state == STANDBIES_EMPTY) {
         /* deal with sync standbys list is empty when most available sync mode is on */
         *writePtr = GetXLogWriteRecPtr();
         *flushPtr = GetFlushRecPtr();
         *receivePtr = *writePtr;
         *replayPtr = *flushPtr;
-    } else if (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY) {
-        SyncRepGetOldestSyncRecPtr(receivePtr, writePtr, flushPtr, replayPtr, sync_standbys);
-    } else if (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_QUORUM) {
-        SyncRepGetNthLatestSyncRecPtr(receivePtr, writePtr, flushPtr, replayPtr, sync_standbys,
-                                      t_thrd.syncrep_cxt.SyncRepConfig->num_sync);
+    } else {
+        int i = 0;
+        ListCell *lc = NULL;
+        foreach(lc, sync_standbys) {
+            List *per_group = (List*)lfirst(lc);
+            if (per_group == NIL) {
+                /* do nothing, this group of sync standbys are all offline or no sync standbys. */
+            } else if (t_thrd.syncrep_cxt.SyncRepConfig[i]->syncrep_method == SYNC_REP_PRIORITY) {
+                SyncRepGetOldestSyncRecPtr(receivePtr, writePtr, flushPtr, replayPtr, per_group);
+            } else {
+                SyncRepGetNthLatestSyncRecPtr(receivePtr, writePtr, flushPtr, replayPtr,
+                    per_group, t_thrd.syncrep_cxt.SyncRepConfig[i]->num_sync);
+            }
+            i++;
+        }
     }
-
-    list_free(sync_standbys);
+    free_sync_standbys_list(sync_standbys);
     return true;
 }
 
@@ -742,8 +850,8 @@ static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTi
     /* Get standbys that are considered as synchronous at this moment. */
     sync_standbys = SyncRepGetSyncStandbys(&am_sync, &catchup_standbys);
     /* Skip here if there is at lease one sync standby, or no standby in catchup. */
-    if (list_length(sync_standbys) > 0 || list_length(catchup_standbys) == 0) {
-        list_free(sync_standbys);
+    if (check_sync_standbys_num(sync_standbys) != STANDBIES_EMPTY || list_length(catchup_standbys) == 0) {
+        free_sync_standbys_list(sync_standbys);
         list_free(catchup_standbys);
         return false;
     }
@@ -766,7 +874,7 @@ static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTi
         }
     }
 
-    list_free(sync_standbys);
+    free_sync_standbys_list(sync_standbys);
     list_free(catchup_standbys);
     return true;
 }
@@ -860,10 +968,14 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
     }
 
     /* Get Nth latest Write, Flush, Apply positions */
-    *receivePtr = receive_array[nth - 1];
-    *writePtr = write_array[nth - 1];
-    *flushPtr = flush_array[nth - 1];
-    *replayPtr = apply_array[nth - 1];
+    if (XLogRecPtrIsInvalid(*writePtr) || XLByteLE(write_array[nth - 1], *writePtr))
+        *writePtr = write_array[nth - 1];
+    if (XLogRecPtrIsInvalid(*flushPtr) || XLByteLE(flush_array[nth - 1], *flushPtr))
+        *flushPtr = flush_array[nth - 1];
+    if (XLogRecPtrIsInvalid(*receivePtr) || XLByteLE(receive_array[nth - 1], *receivePtr))
+        *receivePtr = receive_array[nth - 1];
+    if (XLogRecPtrIsInvalid(*replayPtr) || XLByteLE(apply_array[nth - 1], *replayPtr))
+        *replayPtr = apply_array[nth - 1];
 
     pfree(receive_array);
     receive_array = NULL;
@@ -893,47 +1005,56 @@ static int cmp_lsn(const void *a, const void *b)
 
 /*
  * Check if we are in the list of sync standbys, and if so, determine
- * priority sequence. Return priority if set, or zero to indicate that
+ * priority sequence. Return groupid and priority if set, or zero to indicate that
  * we are not a potential sync standby.
  *
  * Compare the parameter SyncRepStandbyNames against the application_name
  * for this WALSender, or allow any name if we find a wildcard "*".
  */
-static int SyncRepGetStandbyPriority(void)
+static void SyncRepGetStandbyGroupAndPriority(int* gid, int* prio)
 {
     const char *standby_name = NULL;
+    int group;
     int priority;
     bool found = false;
+
+    *gid = 0;
+    *prio = 0;
 
     /*
      * Since synchronous cascade replication is not allowed, we always set the
      * priority of cascading walsender to zero.
      */
     if (AM_WAL_STANDBY_SENDER || AM_WAL_SHARE_STORE_SENDER || AM_WAL_HADR_DNCN_SENDER || AM_WAL_DB_SENDER)
-        return 0;
+        return;
 
     if (!SyncStandbysDefined() || t_thrd.syncrep_cxt.SyncRepConfig == NULL || !SyncRepRequested())
-        return 0;
+        return;
 
-    standby_name = t_thrd.syncrep_cxt.SyncRepConfig->member_names;
-    for (priority = 1; priority <= t_thrd.syncrep_cxt.SyncRepConfig->nmembers; priority++) {
-        if (pg_strcasecmp(standby_name, u_sess->attr.attr_common.application_name) == 0 ||
-            strcmp(standby_name, "*") == 0) {
-            found = true;
-            break;
+    for (group = 0; group < t_thrd.syncrep_cxt.SyncRepConfigGroups && !found; group++) {
+        standby_name = t_thrd.syncrep_cxt.SyncRepConfig[group]->member_names;
+        for (priority = 1; priority <= t_thrd.syncrep_cxt.SyncRepConfig[group]->nmembers; priority++) {
+            if (pg_strcasecmp(standby_name, u_sess->attr.attr_common.application_name) == 0 ||
+                strcmp(standby_name, "*") == 0) {
+                Assert(!(group > 1 && strcmp(standby_name, "*") == 0));
+                found = true;
+                break;
+            }
+            standby_name += strlen(standby_name) + 1;
         }
-        standby_name += strlen(standby_name) + 1;
     }
 
     if (!found) {
-        return 0;
+        return;
     }
 
     /*
      * In quorum-based sync replication, all the standbys in the list
      * have the same priority, one.
      */
-    return (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY) ? priority : 1;
+    *gid = group - 1;
+    *prio = (t_thrd.syncrep_cxt.SyncRepConfig[group - 1]->syncrep_method == SYNC_REP_PRIORITY) ? priority : 1;
+    return;
 }
 
 /*
@@ -1154,9 +1275,16 @@ List *SyncRepGetSyncStandbys(bool *am_sync, List** catchup_standbys)
     if (t_thrd.syncrep_cxt.SyncRepConfig == NULL)
         return NIL;
 
-    return (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY)
-                ? SyncRepGetSyncStandbysPriority(am_sync, catchup_standbys)
-                : SyncRepGetSyncStandbysQuorum(am_sync, catchup_standbys);
+    List* results = NIL;
+    for(int i = 0; i < t_thrd.syncrep_cxt.SyncRepConfigGroups; i++) {
+        if (t_thrd.syncrep_cxt.SyncRepConfig[i]->syncrep_method == SYNC_REP_PRIORITY) {
+            results = lappend(results, SyncRepGetSyncStandbysPriority(am_sync, i,catchup_standbys));
+        } else {
+            results = lappend(results, SyncRepGetSyncStandbysQuorum(am_sync, i, catchup_standbys));
+        }
+    }
+
+    return results;
 }
 
 /*
@@ -1169,13 +1297,13 @@ List *SyncRepGetSyncStandbys(bool *am_sync, List** catchup_standbys)
  * On return, *am_sync is set to true if this walsender is connecting to
  * sync standby. Otherwise it's set to false.
  */
-static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, List** catchup_standbys)
+static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, int groupid, List** catchup_standbys)
 {
     List *result = NIL;
     int i;
     volatile WalSnd *walsnd = NULL; /* Use volatile pointer to prevent code rearrangement */
 
-    Assert(t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_QUORUM);
+    Assert(t_thrd.syncrep_cxt.SyncRepConfig[groupid]->syncrep_method == SYNC_REP_QUORUM);
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
@@ -1185,7 +1313,7 @@ static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, List** catchup_standbys
             continue;
 
         /* Must be synchronous */
-        if (walsnd->sync_standby_priority == 0)
+        if (walsnd->sync_standby_priority == 0 || walsnd->sync_standby_group != groupid)
             continue;
 
         if ((walsnd->state == WALSNDSTATE_CATCHUP || walsnd->peer_state == CATCHUP_STATE) &&
@@ -1230,7 +1358,7 @@ static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, List** catchup_standbys
  * On return, *am_sync is set to true if this walsender is connecting to
  * sync standby. Otherwise it's set to false.
  */
-static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standbys)
+static List *SyncRepGetSyncStandbysPriority(bool *am_sync, int groupid, List** catchup_standbys)
 {
     List *result = NIL;
     List *pending = NIL;
@@ -1242,9 +1370,9 @@ static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standb
     bool am_in_pending = false;
     volatile WalSnd *walsnd = NULL; /* Use volatile pointer to prevent code rearrangement */
 
-    Assert(t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY);
+    Assert(t_thrd.syncrep_cxt.SyncRepConfig[groupid]->syncrep_method == SYNC_REP_PRIORITY);
 
-    lowest_priority = t_thrd.syncrep_cxt.SyncRepConfig->nmembers;
+    lowest_priority = t_thrd.syncrep_cxt.SyncRepConfig[groupid]->nmembers;
     next_highest_priority = lowest_priority + 1;
 
     /*
@@ -1261,7 +1389,7 @@ static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standb
 
         /* Must be synchronous */
         this_priority = walsnd->sync_standby_priority;
-        if (this_priority == 0)
+        if (this_priority == 0 || walsnd->sync_standby_group != groupid)
             continue;
 
         if ((walsnd->state == WALSNDSTATE_CATCHUP || walsnd->peer_state == CATCHUP_STATE) && 
@@ -1286,7 +1414,7 @@ static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standb
             result = lappend_int(result, i);
             if (am_sync != NULL && walsnd == t_thrd.walsender_cxt.MyWalSnd)
                 *am_sync = true;
-            if (list_length(result) == t_thrd.syncrep_cxt.SyncRepConfig->num_sync) {
+            if (list_length(result) == t_thrd.syncrep_cxt.SyncRepConfig[groupid]->num_sync) {
                 list_free(pending);
                 return result; /* Exit if got enough sync standbys */
             }
@@ -1311,7 +1439,7 @@ static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standb
      * Consider all pending standbys as sync if the number of them plus
      * already-found sync ones is lower than the configuration requests.
      */
-    if (list_length(result) + list_length(pending) <= t_thrd.syncrep_cxt.SyncRepConfig->num_sync) {
+    if (list_length(result) + list_length(pending) <= t_thrd.syncrep_cxt.SyncRepConfig[groupid]->num_sync) {
         bool needfree = (result != NIL && pending != NIL);
 
         /*
@@ -1355,9 +1483,9 @@ static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standb
                 /*
                  * We should always exit here after the scan of pending list
                  * starts because we know that the list has enough elements to
-                 * reach SyncRepConfig->num_sync.
+                 * reach SyncRepConfig[groupid]->num_sync.
                  */
-                if (list_length(result) == t_thrd.syncrep_cxt.SyncRepConfig->num_sync) {
+                if (list_length(result) == t_thrd.syncrep_cxt.SyncRepConfig[groupid]->num_sync) {
                     list_free(pending);
                     return result; /* Exit if got enough sync standbys */
                 }
@@ -1812,47 +1940,223 @@ static bool SyncPaxosQueueIsOrderedByLSN(void)
 #endif
 
 /*
+ * =================================================================
+ * Analyze and transform GUC param synchronous_standby_names content
+ * Create result in session MEMORY_CONTEXT_STORAGE session.
+ * =================================================================
+ */
+static TransContext* create_transform_context()
+{
+    MemoryContext old_context = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    TransContext* tcxt = (TransContext*)palloc(sizeof(TransContext));
+    (void)MemoryContextSwitchTo(old_context);
+
+    tcxt->source = t_thrd.syncrepgram_cxt.syncrep_parse_result;
+    tcxt->SyncRepConfigGroups = list_length(tcxt->source);
+    Assert(tcxt->SyncRepConfigGroups > 0);
+    tcxt->success = true;
+    tcxt->has_star = false;
+    tcxt->existers = NIL;
+    tcxt->conf = NULL;
+    tcxt->is_star = false;
+    
+    tcxt->SyncRepConfig = NIL;
+    tcxt->SyncRepAllCount = 0;
+    tcxt->SyncRepMaxPossib = MAX_INT32;
+    tcxt->SyncRepMinPossib = 0;
+
+    return tcxt;
+}
+
+static void bind_transform_context(TransContext *tcxt, SyncRepConfigData *conf)
+{
+    tcxt->conf = conf;
+    tcxt->is_star = false;
+}
+
+static void advance_transform_result(TransContext *tcxt)
+{
+    tcxt->SyncRepMinPossib += tcxt->conf->num_sync;
+    if (tcxt->has_star) {
+        tcxt->SyncRepAllCount = -1;
+        tcxt->SyncRepMaxPossib = tcxt->SyncRepMinPossib;
+    } else {
+        tcxt->SyncRepAllCount += tcxt->conf->nmembers;
+        tcxt->SyncRepMaxPossib = Min(tcxt->SyncRepMaxPossib, tcxt->conf->nmembers - tcxt->conf->num_sync);
+    }
+}
+
+static void finalize_transform_result(TransContext *tcxt)
+{
+    if (!tcxt->success) {
+        clear_transform_context(tcxt);
+        return;
+    }
+
+    MemoryContext old_context = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    SyncRepConfigData* conf = NULL;
+    ListCell* lc = NULL;
+    SyncRepConfigData* result = NULL;
+    errno_t rc;
+    foreach(lc, tcxt->source) {
+        conf = (SyncRepConfigData*)lfirst(lc);
+        result = (SyncRepConfigData*)palloc(conf->config_size);
+        rc = memcpy_s(result, conf->config_size, conf, conf->config_size);
+        securec_check(rc, "", "");
+        tcxt->SyncRepConfig = lappend(tcxt->SyncRepConfig, result);
+    }
+    (void)MemoryContextSwitchTo(old_context);
+
+    if (!tcxt->has_star) {
+        tcxt->SyncRepMaxPossib = tcxt->SyncRepAllCount - tcxt->SyncRepMaxPossib;
+    }
+
+    clear_transform_context(tcxt);
+}
+
+/*
+ * clear the transform context, except results.
+ */
+static void clear_transform_context(TransContext *tcxt)
+{
+    tcxt->source = NIL;
+    tcxt->conf = NULL;
+    list_free(tcxt->existers);
+    tcxt->existers = NIL;
+}
+
+static void destroy_transform_context(TransContext *tcxt)
+{
+    list_free(tcxt->existers);
+    list_free_deep(tcxt->SyncRepConfig);
+    pfree(tcxt);
+}
+
+static bool analyze_star_and_num(TransContext *tcxt)
+{
+    SyncRepConfigData *conf = tcxt->conf;
+
+    char *p = conf->member_names;
+    for (int i = 0; i < conf->nmembers; i++) {
+        if (strcmp(p, "*") != 0) {
+            p += strlen(p) + 1;
+            continue;
+        }
+
+        if (tcxt->SyncRepConfigGroups > 1) {
+            GUC_check_errdetail("'*' is not support when sync standby strategy is combinated.");
+            return false;
+        }
+        if (conf->nmembers > 1) {
+            GUC_check_errdetail("Please use the '*' separately, otherwise, it is semantic ambiguity.");
+            return false;
+        }
+        tcxt->is_star = true;
+        tcxt->has_star = true;
+    }
+
+    if (!tcxt->is_star && conf->num_sync > conf->nmembers) {
+        GUC_check_errdetail("The sync number must less or equals to the number of standby node names.");
+        return false;
+    }
+
+    return true;
+}
+
+static bool analyze_duplicate_names(TransContext *tcxt)
+{
+    if (tcxt->is_star)
+        return true;
+
+    SyncRepConfigData *conf = tcxt->conf;
+    char *p = conf->member_names;
+    char *exister = NULL;
+
+    ListCell *lc = NULL;
+    for (int i = 0; i < conf->nmembers; i++) {
+        foreach(lc, tcxt->existers) {
+            exister = (char*)lfirst(lc);
+            if (pg_strcasecmp(p, exister) == 0) {
+                GUC_check_errdetail("Duplicate standby node name: %s", p);
+                return false;
+            }
+        }
+        tcxt->existers = lappend(tcxt->existers, p);
+        p += strlen(p) + 1;
+    }
+    return true;
+}
+
+static void transform_synchronous_standby_names(TransContext* tcxt)
+{
+    if (tcxt->SyncRepConfigGroups > SYNC_REP_MAX_GROUPS) {
+        GUC_check_errdetail("Too much groups. Please no more than %d.", SYNC_REP_MAX_GROUPS);
+        tcxt->success = false;
+        clear_transform_context(tcxt);
+        return;
+    }
+
+    ListCell* lc = NULL;
+    foreach(lc, t_thrd.syncrepgram_cxt.syncrep_parse_result) {
+        bind_transform_context(tcxt, (SyncRepConfigData*)lfirst(lc));
+
+        if (tcxt->conf->syncrep_method == SYNC_REP_PRIORITY && tcxt->SyncRepConfigGroups > 1) {
+            GUC_check_errdetail("FIRST rule is not support when sync standby strategy is combinated.");
+            tcxt->success = false;
+            break;
+        }
+        if (!analyze_star_and_num(tcxt) ||
+            !analyze_duplicate_names(tcxt)) {
+            tcxt->success = false;
+            break;
+        }
+
+        advance_transform_result(tcxt);
+    }
+
+    finalize_transform_result(tcxt);
+}
+
+/*
  * ===========================================================
  * Synchronous Replication functions executed by any process
  * ===========================================================
  */
 bool check_synchronous_standby_names(char **newval, void **extra, GucSource source)
 {
-    errno_t rc = EOK;
-
     if (*newval != NULL && (*newval)[0] != '\0') {
         int parse_rc;
-        SyncRepConfigData *pconf = NULL;
         syncrep_scanner_yyscan_t yyscanner;
 
         /* Reset communication variables to ensure a fresh start */
-        t_thrd.syncrepgram_cxt.syncrep_parse_result = NULL;
+        t_thrd.syncrepgram_cxt.syncrep_parse_result = NIL;
 
         /* Parse the synchronous_standby_names string */
         yyscanner = syncrep_scanner_init(*newval);
         parse_rc = syncrep_yyparse(yyscanner);
         syncrep_scanner_finish(yyscanner);
 
-        if (parse_rc != 0 || t_thrd.syncrepgram_cxt.syncrep_parse_result == NULL) {
+        if (parse_rc != 0 || t_thrd.syncrepgram_cxt.syncrep_parse_result == NIL) {
             GUC_check_errcode(ERRCODE_SYNTAX_ERROR);
             GUC_check_errdetail("synchronous_standby_names parser failed");
             return false;
         }
 
-        /* GUC extra value must be malloc'd, not palloc'd */
-        pconf = (SyncRepConfigData *)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
-                                                        t_thrd.syncrepgram_cxt.syncrep_parse_result->config_size);
-        if (pconf == NULL)
+        /*
+         * analyze and transform synchronous_standby_names content,
+         * make result in session MEMORY_CONTEXT_STORAGE.
+         */
+        TransContext* tcxt = create_transform_context();
+        transform_synchronous_standby_names(tcxt);
+        if (!tcxt->success) {
+            destroy_transform_context(tcxt);
             return false;
-        rc = memcpy_s(pconf, t_thrd.syncrepgram_cxt.syncrep_parse_result->config_size,
-                      t_thrd.syncrepgram_cxt.syncrep_parse_result,
-                      t_thrd.syncrepgram_cxt.syncrep_parse_result->config_size);
-        securec_check(rc, "", "");
+        }
 
-        *extra = (void *)pconf;
+        *extra = (void *)tcxt;
         if (t_thrd.syncrepgram_cxt.syncrep_parse_result) {
-            pfree(t_thrd.syncrepgram_cxt.syncrep_parse_result);
-            t_thrd.syncrepgram_cxt.syncrep_parse_result = NULL;
+            list_free_deep(t_thrd.syncrepgram_cxt.syncrep_parse_result);
+            t_thrd.syncrepgram_cxt.syncrep_parse_result = NIL;
         }
 
         /*
@@ -1875,16 +2179,36 @@ void assign_synchronous_standby_names(const char *newval, void *extra)
      * it should be safe to know the latest rep config ASAP for all sessions.
      * If this assumption no longer holds, please move it to session level.
      */
-    pfree_ext(t_thrd.syncrep_cxt.SyncRepConfig);
-
-    if (extra != NULL) {
-        SyncRepConfigData *pconf = (SyncRepConfigData *)extra;
-        errno_t rc = EOK;
-        t_thrd.syncrep_cxt.SyncRepConfig = (SyncRepConfigData *)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), pconf->config_size);
-        rc = memcpy_s(t_thrd.syncrep_cxt.SyncRepConfig, pconf->config_size, pconf, pconf->config_size);
-        securec_check(rc, "", "");
+    for (int i = 0; i < t_thrd.syncrep_cxt.SyncRepConfigGroups; i++) {
+        pfree_ext(t_thrd.syncrep_cxt.SyncRepConfig[i]);
     }
+    pfree_ext(t_thrd.syncrep_cxt.SyncRepConfig);
+    t_thrd.syncrep_cxt.SyncRepConfigGroups = 0;
+    t_thrd.syncrep_cxt.SyncRepMaxPossib = 0;
+
+    if (extra == NULL)
+        return;
+
+    TransContext* tcxt = (TransContext*)extra;
+    ListCell* lc = NULL;
+    int i = 0;
+    errno_t rc = EOK;
+    MemoryContext old_context = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    t_thrd.syncrep_cxt.SyncRepConfigGroups = tcxt->SyncRepConfigGroups;
+    t_thrd.syncrep_cxt.SyncRepMaxPossib = tcxt->SyncRepMaxPossib;
+    t_thrd.syncrep_cxt.SyncRepConfig = (SyncRepConfigData **)palloc(
+        tcxt->SyncRepConfigGroups * sizeof(SyncRepConfigData*));
+
+    foreach(lc, tcxt->SyncRepConfig) {
+        SyncRepConfigData* pconf = (SyncRepConfigData*)lfirst(lc);
+        t_thrd.syncrep_cxt.SyncRepConfig[i] = (SyncRepConfigData*)palloc(pconf->config_size);
+        rc = memcpy_s(t_thrd.syncrep_cxt.SyncRepConfig[i], pconf->config_size, pconf, pconf->config_size);
+        securec_check(rc, "", "");
+
+        i++;
+    }
+
+    (void)MemoryContextSwitchTo(old_context);
 }
 
 void assign_synchronous_commit(int newval, void *extra)
