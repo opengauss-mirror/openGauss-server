@@ -61,7 +61,13 @@ struct JitTvmCodeGenContext {
 
     /** @var The resulting jitted function. */
     tvm::Function* m_jittedQuery;
+
+    // non-primitive constants
+    uint32_t m_constCount;
+    Const* m_constValues;
 };
+
+extern int AllocateConstId(JitTvmCodeGenContext* ctx, int type, Datum value, bool isNull);
 }  // namespace JitExec
 
 #endif /* JIT_TVM_QUERY_H */

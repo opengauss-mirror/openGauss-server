@@ -142,6 +142,7 @@ void InitCodeGenContextFuncs(JitLlvmCodeGenContext* ctx)
     DefineGetSubQueryIndex(ctx, module);
     DefineGetSubQuerySearchKey(ctx, module);
     DefineGetSubQueryEndIteratorKey(ctx, module);
+    DefineGetConstAt(ctx, module);
 }
 
 #define APPLY_UNARY_OPERATOR(funcid, name)                                                              \
@@ -258,6 +259,18 @@ static bool InitCodeGenContext(JitLlvmCodeGenContext* ctx, GsCodeGen* code_gen, 
         return false;
     }
 
+    ctx->m_constCount = 0;
+    size_t allocSize = sizeof(Const) * MOT_JIT_MAX_CONST;
+    ctx->m_constValues = (Const*)MOT::MemSessionAlloc(allocSize);
+    if (ctx->m_constValues == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "JIT Compile",
+            "Failed to allocate %u bytes for constant array in code-generation context",
+            allocSize);
+        DestroyCodeGenContext(ctx);
+        return false;
+    }
+
     InitCodeGenContextTypes(ctx);
     InitCodeGenContextFuncs(ctx);
     InitCodeGenContextBuiltins(ctx);
@@ -351,11 +364,32 @@ static void DestroyCodeGenContext(JitLlvmCodeGenContext* ctx)
         MOT::MemSessionFree(ctx->m_subQueryTableInfo);
         ctx->m_subQueryTableInfo = nullptr;
     }
+    if (ctx->m_constValues != nullptr) {
+        MOT::MemSessionFree(ctx->m_constValues);
+    }
     if (ctx->_code_gen != nullptr) {
         ctx->_code_gen->releaseResource();
         delete ctx->_code_gen;
         ctx->_code_gen = nullptr;
     }
+}
+
+extern int AllocateConstId(JitLlvmCodeGenContext* ctx, int type, Datum value, bool isNull)
+{
+    int res = -1;
+    if (ctx->m_constCount == MOT_JIT_MAX_CONST) {
+        MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
+            "JIT Compile",
+            "Cannot allocate constant identifier, reached limit of %u",
+            ctx->m_constCount);
+    } else {
+        res = ctx->m_constCount++;
+        ctx->m_constValues[res].consttype = type;
+        ctx->m_constValues[res].constvalue = value;
+        ctx->m_constValues[res].constisnull = isNull;
+        MOT_LOG_TRACE("Allocated constant id: %d", res);
+    }
+    return res;
 }
 
 /** @brief Wraps up an LLVM function (compiles it and prepares a funciton pointer). */
@@ -379,6 +413,15 @@ static JitContext* FinalizeCodegen(JitLlvmCodeGenContext* ctx, int max_arg, JitC
 #else
         ctx->m_jittedQuery->print(llvm::errs());
 #endif
+    }
+
+    // prepare global constant array
+    JitDatumArray datumArray = {};
+    if (ctx->m_constCount > 0) {
+        if (!PrepareDatumArray(ctx->m_constValues, ctx->m_constCount, &datumArray)) {
+            MOT_LOG_ERROR("Failed to generate jitted code for query: Failed to prepare constant datum array");
+            return nullptr;
+        }
     }
 
     // that's it, we are ready
@@ -412,6 +455,8 @@ static JitContext* FinalizeCodegen(JitLlvmCodeGenContext* ctx, int max_arg, JitC
         MOT_LOG_TRACE("Installed inner index id: %" PRIu64, jit_context->m_innerIndexId);
     }
     jit_context->m_commandType = command_type;
+    jit_context->m_constDatums.m_datumCount = datumArray.m_datumCount;
+    jit_context->m_constDatums.m_datums = datumArray.m_datums;
 
     return jit_context;
 }

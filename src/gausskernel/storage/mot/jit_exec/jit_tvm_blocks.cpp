@@ -424,7 +424,17 @@ static Expression* ProcessConstExpr(
 
     if (IsTypeSupported(const_value->consttype)) {
         result_type = const_value->consttype;
-        result = new (std::nothrow) ConstExpression(const_value->constvalue, arg_pos, (int)(const_value->constisnull));
+        if (IsPrimitiveType(result_type)) {
+            result =
+                new (std::nothrow) ConstExpression(const_value->constvalue, arg_pos, (int)(const_value->constisnull));
+        } else {
+            int constId = AllocateConstId(ctx, result_type, const_value->constvalue, const_value->constisnull);
+            if (constId == -1) {
+                MOT_LOG_TRACE("Failed to allocate constant identifier");
+            } else {
+                result = AddGetConstAt(ctx, constId, arg_pos);
+            }
+        }
         if (max_arg && (arg_pos > *max_arg)) {
             *max_arg = arg_pos;
         }
@@ -662,8 +672,18 @@ static Expression* ProcessExpr(
 
 static Expression* ProcessConstExpr(JitTvmCodeGenContext* ctx, const JitConstExpr* expr, int* max_arg)
 {
-    AddSetExprArgIsNull(ctx, expr->_arg_pos, (expr->_is_null ? 1 : 0));  // mark expression null status
-    Expression* result = new (std::nothrow) ConstExpression(expr->_value, expr->_arg_pos, (int)(expr->_is_null));
+    Expression* result = nullptr;
+    AddSetExprArgIsNull(ctx, expr->_arg_pos, expr->_is_null);  // mark expression null status
+    if (IsPrimitiveType(expr->_const_type)) {
+        result = new (std::nothrow) ConstExpression(expr->_value, expr->_arg_pos, (int)(expr->_is_null));
+    } else {
+        int constId = AllocateConstId(ctx, expr->_const_type, expr->_value, expr->_is_null);
+        if (constId == -1) {
+            MOT_LOG_TRACE("Failed to allocate constant identifier");
+        } else {
+            result = AddGetConstAt(ctx, constId, expr->_arg_pos);
+        }
+    }
     if (max_arg && (expr->_arg_pos > *max_arg)) {
         *max_arg = expr->_arg_pos;
     }

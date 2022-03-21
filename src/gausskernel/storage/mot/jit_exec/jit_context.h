@@ -34,6 +34,26 @@ namespace JitExec {
 struct JitContextPool;
 struct JitSource;
 
+/** @struct Array of constant datum objects used in JIT execution. */
+struct JitDatum {
+    /** @var The constant value. */
+    Datum m_datum;
+
+    /** @var The constant type. */
+    int m_type;
+
+    /** @var The constant is-null property. */
+    int m_isNull;
+};
+
+struct JitDatumArray {
+    /** @var The number of constant datum objects used by the jitted function (global copy for all contexts). */
+    uint64_t m_datumCount;
+
+    /** @var The array of constant datum objects used by the jitted function (global copy for all contexts). */
+    JitDatum* m_datums;
+};
+
 /**
  * @typedef The context for executing a jitted function.
  */
@@ -96,6 +116,9 @@ struct JitContext {
 
     /** @var The source query string. */
     const char* m_queryString;  // L1 offset 40 (constant)
+
+    /** @var The array of constant datum objects used by the jitted function (global copy for all contexts). */
+    JitDatumArray m_constDatums;
 
     /*---------------------- Range Scan execution state -------------------*/
     /** @var Begin iterator for range select (stateful execution). */

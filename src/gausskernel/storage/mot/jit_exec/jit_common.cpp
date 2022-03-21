@@ -242,6 +242,40 @@ extern bool IsTypeSupported(int resultType)
     }
 }
 
+extern bool IsStringType(int type)
+{
+    switch (type) {
+        case VARCHAROID:
+        case BPCHAROID:
+        case TEXTOID:
+        case BYTEAOID:
+            return true;
+        default:
+            return false;
+    }
+}
+
+extern bool IsPrimitiveType(int type)
+{
+    switch (type) {
+        case BOOLOID:
+        case CHAROID:
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+        case TIMEOID:
+        case TIMESTAMPOID:
+        case DATEOID:
+        case FLOAT4OID:
+        case FLOAT8OID:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
 static bool IsEqualsWhereOperator(int whereOp)
 {
     bool result = false;
@@ -622,5 +656,235 @@ extern bool PrepareSubQueryData(JitContext* jitContext, JitCompoundPlan* plan)
     }
 
     return result;
+}
+
+static bool CloneStringDatum(Datum source, Datum* target, JitContextUsage usage)
+{
+    bytea* value = DatumGetByteaP(source);
+    size_t len = VARSIZE(value);  // includes header len VARHDRSZ
+    char* src = VARDATA(value);
+
+    // special case: empty string
+    if (len == 0) {
+        len = VARHDRSZ;
+    }
+    size_t strSize = len - VARHDRSZ;
+    MOT_LOG_TRACE("CloneStringDatum(): len = %u, src = %*.*s", (unsigned)len, strSize, strSize, src);
+
+    bytea* copy = nullptr;
+    if (usage == JIT_CONTEXT_GLOBAL) {
+        copy = (bytea*)MOT::MemGlobalAlloc(len);
+    } else {
+        copy = (bytea*)MOT::MemSessionAlloc(len);
+    }
+    if (copy == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "JIT Compile", "Failed to allocate %u bytes for datum string constant", (unsigned)len);
+        return false;
+    }
+
+    if (strSize > 0) {
+        errno_t erc = memcpy_s(VARDATA(copy), strSize, (uint8_t*)src, strSize);
+        securec_check(erc, "\0", "\0");
+    }
+
+    SET_VARSIZE(copy, len);
+
+    *target = PointerGetDatum(copy);
+    return true;
+}
+
+static bool CloneTimeTzDatum(Datum source, Datum* target, JitContextUsage usage)
+{
+    MOT::TimetzSt* value = (MOT::TimetzSt*)DatumGetPointer(source);
+    size_t allocSize = sizeof(MOT::TimetzSt);
+    MOT::TimetzSt* copy = nullptr;
+    if (usage == JIT_CONTEXT_GLOBAL) {
+        copy = (MOT::TimetzSt*)MOT::MemGlobalAlloc(allocSize);
+    } else {
+        copy = (MOT::TimetzSt*)MOT::MemSessionAlloc(allocSize);
+    }
+    if (copy == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "JIT Compile", "Failed to allocate %u bytes for datum TimeTZ constant", (unsigned)allocSize);
+        return false;
+    }
+    copy->m_time = value->m_time;
+    copy->m_zone = value->m_zone;
+
+    *target = PointerGetDatum(copy);
+    return true;
+}
+
+static bool CloneIntervalDatum(Datum source, Datum* target, JitContextUsage usage)
+{
+    MOT::IntervalSt* value = (MOT::IntervalSt*)DatumGetPointer(source);
+    size_t allocSize = sizeof(MOT::IntervalSt);
+    MOT::IntervalSt* copy = nullptr;
+    if (usage == JIT_CONTEXT_GLOBAL) {
+        copy = (MOT::IntervalSt*)MOT::MemGlobalAlloc(allocSize);
+    } else {
+        copy = (MOT::IntervalSt*)MOT::MemSessionAlloc(allocSize);
+    }
+    if (copy == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "JIT Compile",
+            "Failed to allocate %u bytes for datum Interval constant",
+            (unsigned)allocSize);
+        return false;
+    }
+    copy->m_day = value->m_day;
+    copy->m_month = value->m_month;
+    copy->m_time = value->m_time;
+
+    *target = PointerGetDatum(copy);
+    return true;
+}
+
+static bool CloneTIntervalDatum(Datum source, Datum* target, JitContextUsage usage)
+{
+    MOT::TintervalSt* value = (MOT::TintervalSt*)DatumGetPointer(source);
+    size_t allocSize = sizeof(MOT::TintervalSt);
+    MOT::TintervalSt* copy = nullptr;
+    if (usage == JIT_CONTEXT_GLOBAL) {
+        copy = (MOT::TintervalSt*)MOT::MemGlobalAlloc(allocSize);
+    } else {
+        copy = (MOT::TintervalSt*)MOT::MemSessionAlloc(allocSize);
+    }
+    if (copy == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "JIT Compile",
+            "Failed to allocate %u bytes for datum TInterval constant",
+            (unsigned)allocSize);
+        return false;
+    }
+    copy->m_status = value->m_status;
+    copy->m_data[0] = value->m_data[0];
+    copy->m_data[1] = value->m_data[1];
+
+    *target = PointerGetDatum(copy);
+    return true;
+}
+
+static bool CloneNumericDatum(Datum source, Datum* target, JitContextUsage usage)
+{
+    varlena* var = (varlena*)DatumGetPointer(source);
+    Size len = VARSIZE(var);
+    struct varlena* result = nullptr;
+    if (usage == JIT_CONTEXT_GLOBAL) {
+        result = (varlena*)MOT::MemGlobalAlloc(len);
+    } else {
+        result = (varlena*)MOT::MemSessionAlloc(len);
+    }
+    if (result == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "JIT Compile", "Failed to allocate %u bytes for datum Numeric constant", (unsigned)len);
+        return false;
+    }
+
+    errno_t rc = memcpy_s(result, len, var, len);
+    securec_check(rc, "\0", "\0");
+
+    *target = NumericGetDatum((Numeric)result);
+    return true;
+}
+
+static bool CloneCStringDatum(Datum source, Datum* target, JitContextUsage usage)
+{
+    char* src = DatumGetCString(source);
+    size_t len = strlen(src) + 1;  // includes terminating null
+
+    char* copy = nullptr;
+    if (usage == JIT_CONTEXT_GLOBAL) {
+        copy = (char*)MOT::MemGlobalAlloc(len);
+    } else {
+        copy = (char*)MOT::MemSessionAlloc(len);
+    }
+    if (copy == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "JIT Compile", "Failed to allocate %u bytes for datum string constant", (unsigned)len);
+        return false;
+    }
+
+    errno_t erc = memcpy_s(copy, len, src, len);
+    securec_check(erc, "\0", "\0");
+
+    *target = PointerGetDatum(copy);
+    return true;
+}
+
+extern bool CloneDatum(Datum source, int type, Datum* target, JitContextUsage usage)
+{
+    bool result = true;
+    if (IsStringType(type)) {
+        result = CloneStringDatum(source, target, usage);
+    } else {
+        switch (type) {
+            case TIMETZOID:
+                result = CloneTimeTzDatum(source, target, usage);
+                break;
+
+            case INTERVALOID:
+                result = CloneIntervalDatum(source, target, usage);
+                break;
+
+            case TINTERVALOID:
+                result = CloneTIntervalDatum(source, target, usage);
+                break;
+
+            case NUMERICOID:
+                result = CloneNumericDatum(source, target, usage);
+                break;
+
+            case UNKNOWNOID:
+                result = CloneCStringDatum(source, target, usage);
+                break;
+
+            default:
+                MOT_LOG_TRACE("Unsupported non-primitive constant type: %d", type);
+                result = false;
+                break;
+        }
+    }
+
+    return result;
+}
+
+extern bool PrepareDatumArray(Const* constArray, uint32_t constCount, JitDatumArray* datumArray)
+{
+    size_t allocSize = sizeof(JitDatum) * constCount;
+    JitDatum* datums = (JitDatum*)MOT::MemGlobalAlloc(allocSize);
+    if (datums == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "JIT Compile", "Failed to allocate %u bytes for constant datum array", (unsigned)allocSize);
+        return false;
+    }
+
+    for (uint32_t i = 0; i < constCount; ++i) {
+        Const* constValue = &constArray[i];
+        datums[i].m_isNull = constValue->constisnull;
+        datums[i].m_type = constValue->consttype;
+        if (!datums[i].m_isNull) {
+            if (IsPrimitiveType(constValue->constvalue)) {
+                datums[i].m_datum = constValue->constvalue;
+            } else {
+                if (!CloneDatum(
+                        constValue->constvalue, constValue->consttype, &datums[i].m_datum, JIT_CONTEXT_GLOBAL)) {
+                    MOT_LOG_TRACE("Failed to prepare datum value");
+                    for (uint32_t j = 0; j < i; ++j) {
+                        if (!datums[j].m_isNull && !IsPrimitiveType(datums[j].m_type)) {
+                            MOT::MemGlobalFree(DatumGetPointer(datums[j].m_datum));
+                        }
+                    }
+                    MOT::MemGlobalFree(datums);
+                    return false;
+                }
+            }
+        }
+    }
+
+    datumArray->m_datumCount = constCount;
+    datumArray->m_datums = datums;
+    return true;
 }
 }  // namespace JitExec
