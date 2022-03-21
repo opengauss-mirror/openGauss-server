@@ -1828,10 +1828,6 @@ void install_label_hook()
  */
 void set_gsaudit_prehook(ProcessUtility_hook_type func)
 {
-    if (next_ProcessUtility_hook != NULL) {
-        ereport(WARNING, (errmsg("next_ProcessUtility_hook in security_plugin cannot be set since it's not null")));
-        return;
-    }
     next_ProcessUtility_hook = func;
 }
 

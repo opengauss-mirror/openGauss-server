@@ -110,10 +110,6 @@ void InitHypopg()
  */
 void set_hypopg_prehook(ProcessUtility_hook_type func)
 {
-    if (prev_utility_hook != NULL) {
-        ereport(WARNING, (errmsg("prev_utility_hook in hypopg cannot be set since it's not null")));
-        return;
-    }
     prev_utility_hook = func;
 }
 

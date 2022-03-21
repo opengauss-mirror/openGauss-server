@@ -130,10 +130,6 @@ static const int g_auditFuncMapNum = sizeof(g_auditFuncMap) / sizeof(AuditFuncMa
  */
 void set_pgaudit_prehook(ProcessUtility_hook_type func)
 {
-    if (prev_ProcessUtility != NULL) {
-        ereport(WARNING, (errmsg("prev_ProcessUtility in pgaudit cannot be set since it's not null")));
-        return;
-    }
     prev_ProcessUtility = func;
 }
 
