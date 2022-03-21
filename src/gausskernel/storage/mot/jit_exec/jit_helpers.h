@@ -97,6 +97,14 @@ void setExprArgIsNull(int arg_pos, int isnull);
 int getExprArgIsNull(int arg_pos);
 
 /**
+ * @brief Retrieves a pooled constant by its identifier.
+ * @param constId The identifier of the constant value.
+ * @param argPos The ordinal position of the enveloping parameter expression.
+ * @return The constant value.
+ */
+Datum GetConstAt(int constId, int argPos);
+
+/**
  * @brief Retrieves a datum parameter from parameters array.
  * @param params The parameter array.
  * @param paramid The zero-based index of the parameter to retrieve.

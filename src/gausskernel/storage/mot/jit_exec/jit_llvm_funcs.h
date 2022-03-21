@@ -632,6 +632,11 @@ inline void DefineGetSubQueryEndIteratorKey(JitLlvmCodeGenContext* ctx, llvm::Mo
         defineFunction(module, ctx->KeyType->getPointerTo(), "GetSubQueryEndIteratorKey", ctx->INT32_T, nullptr);
 }
 
+inline void DefineGetConstAt(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->GetConstAtFunc = defineFunction(module, ctx->DATUM_T, "GetConstAt", ctx->INT32_T, ctx->INT32_T, nullptr);
+}
+
 /*--------------------------- End of LLVM Helper Prototypes ---------------------------*/
 
 /*--------------------------- Helpers to generate calls to Helper function via LLVM ---------------------------*/
@@ -1324,6 +1329,13 @@ inline llvm::Value* AddGetSubQueryEndIteratorKey(JitLlvmCodeGenContext* ctx, int
 {
     llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
     return AddFunctionCall(ctx, ctx->GetSubQueryEndIteratorKeyFunc, subQueryIndexValue, nullptr);
+}
+
+inline llvm::Value* AddGetConstAt(JitLlvmCodeGenContext* ctx, int constId, int argPos)
+{
+    llvm::ConstantInt* constIdValue = llvm::ConstantInt::get(ctx->INT32_T, constId, true);
+    llvm::ConstantInt* argPosValue = llvm::ConstantInt::get(ctx->INT32_T, argPos, true);
+    return AddFunctionCall(ctx, ctx->GetConstAtFunc, constIdValue, argPosValue, nullptr);
 }
 
 /** @brief Adds a call to issueDebugLog(function, msg). */

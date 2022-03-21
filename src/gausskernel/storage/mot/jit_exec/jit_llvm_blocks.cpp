@@ -454,10 +454,21 @@ static llvm::Value* ProcessConstExpr(
     if (IsTypeSupported(const_value->consttype)) {
         result_type = const_value->consttype;
         AddSetExprArgIsNull(ctx, arg_pos, const_value->constisnull);  // mark expression null status
-        result = llvm::ConstantInt::get(ctx->INT64_T, const_value->constvalue, true);
+        if (IsPrimitiveType(result_type)) {
+            result = llvm::ConstantInt::get(ctx->INT64_T, const_value->constvalue, true);
+        } else {
+            int constId = AllocateConstId(ctx, result_type, const_value->constvalue, const_value->constisnull);
+            if (constId == -1) {
+                MOT_LOG_TRACE("Failed to allocate constant identifier");
+            } else {
+                result = AddGetConstAt(ctx, constId, arg_pos);
+            }
+        }
         if (max_arg && (arg_pos > *max_arg)) {
             *max_arg = arg_pos;
         }
+    } else {
+        MOT_LOG_TRACE("Failed to process const expression: type %d unsupported", (int)result_type);
     }
 
     MOT_LOG_DEBUG("%*s <-- Processing CONST expression result: %p", depth, "", result);
@@ -769,8 +780,18 @@ static llvm::Value* ProcessExpr(
 
 static llvm::Value* ProcessConstExpr(JitLlvmCodeGenContext* ctx, const JitConstExpr* expr, int* max_arg)
 {
+    llvm::Value* result = nullptr;
     AddSetExprArgIsNull(ctx, expr->_arg_pos, expr->_is_null);  // mark expression null status
-    llvm::Value* result = llvm::ConstantInt::get(ctx->INT64_T, expr->_value, true);
+    if (IsPrimitiveType(expr->_const_type)) {
+        result = llvm::ConstantInt::get(ctx->INT64_T, expr->_value, true);
+    } else {
+        int constId = AllocateConstId(ctx, expr->_const_type, expr->_value, expr->_is_null);
+        if (constId == -1) {
+            MOT_LOG_TRACE("Failed to allocate constant identifier");
+        } else {
+            result = AddGetConstAt(ctx, constId, expr->_arg_pos);
+        }
+    }
     if (max_arg && (expr->_arg_pos > *max_arg)) {
         *max_arg = expr->_arg_pos;
     }

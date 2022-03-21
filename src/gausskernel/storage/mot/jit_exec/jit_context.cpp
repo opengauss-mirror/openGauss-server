@@ -97,6 +97,63 @@ extern void FreeJitContext(JitContext* jitContext)
     }
 }
 
+static bool CloneDatumArray(JitDatumArray* source, JitDatumArray* target, JitContextUsage usage)
+{
+    uint32_t datumCount = source->m_datumCount;
+    if (datumCount == 0) {
+        target->m_datumCount = 0;
+        target->m_datums = nullptr;
+        return true;
+    }
+
+    size_t allocSize = sizeof(JitDatum) * datumCount;
+    JitDatum* datumArray = nullptr;
+    if (usage == JIT_CONTEXT_GLOBAL) {
+        datumArray = (JitDatum*)MOT::MemGlobalAlloc(allocSize);
+    } else {
+        datumArray = (JitDatum*)MOT::MemSessionAlloc(allocSize);
+    }
+    if (datumArray == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "JIT Compile", "Failed to allocate %u bytes for datum array", (unsigned)allocSize);
+        return false;
+    }
+
+    for (uint32_t i = 0; i < datumCount; ++i) {
+        JitDatum* datum = (JitDatum*)&source->m_datums[i];
+        datumArray[i].m_isNull = datum->m_isNull;
+        datumArray[i].m_type = datum->m_type;
+        if (!datum->m_isNull) {
+            if (IsPrimitiveType(datum->m_type)) {
+                datumArray[i].m_datum = datum->m_datum;
+            } else {
+                if (!CloneDatum(datum->m_datum, datum->m_type, &datumArray[i].m_datum, usage)) {
+                    MOT_REPORT_ERROR(MOT_ERROR_OOM, "JIT Compile", "Failed to clone datum array entry");
+                    for (uint32_t j = 0; j < i; ++j) {
+                        if (!IsPrimitiveType(datumArray[j].m_type)) {
+                            if (usage == JIT_CONTEXT_GLOBAL) {
+                                MOT::MemGlobalFree(DatumGetPointer(datumArray[j].m_datum));
+                            } else {
+                                MOT::MemGlobalFree(DatumGetPointer(datumArray[j].m_datum));
+                            }
+                        }
+                    }
+                    if (usage == JIT_CONTEXT_GLOBAL) {
+                        MOT::MemGlobalFree(datumArray);
+                    } else {
+                        MOT::MemSessionFree(datumArray);
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+
+    target->m_datums = datumArray;
+    target->m_datumCount = datumCount;
+    return true;
+}
+
 extern JitContext* CloneJitContext(JitContext* sourceJitContext)
 {
     MOT_LOG_TRACE("Cloning JIT context %p of query: %s", sourceJitContext, sourceJitContext->m_queryString);
@@ -109,6 +166,11 @@ extern JitContext* CloneJitContext(JitContext* sourceJitContext)
     result->m_llvmFunction = sourceJitContext->m_llvmFunction;
     result->m_tvmFunction = sourceJitContext->m_tvmFunction;
     result->m_commandType = sourceJitContext->m_commandType;
+    if (!CloneDatumArray(&sourceJitContext->m_constDatums, &result->m_constDatums, JIT_CONTEXT_LOCAL)) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "JIT Compile", "Failed to clone constant datum array");
+        DestroyJitContext(result);
+        return nullptr;
+    }
     result->m_table = sourceJitContext->m_table;
     result->m_index = sourceJitContext->m_index;
     result->m_indexId = sourceJitContext->m_indexId;
@@ -492,6 +554,29 @@ extern bool PrepareJitContext(JitContext* jitContext)
     return true;
 }
 
+static void DestroyDatumArray(JitDatumArray* datumArray, JitContextUsage usage)
+{
+    if (datumArray->m_datumCount > 0) {
+        MOT_ASSERT(datumArray->m_datums != nullptr);
+        for (uint32_t i = 0; i < datumArray->m_datumCount; ++i) {
+            if (!datumArray->m_datums[i].m_isNull && !IsPrimitiveType(datumArray->m_datums[i].m_type)) {
+                if (usage == JIT_CONTEXT_GLOBAL) {
+                    MOT::MemGlobalFree(DatumGetPointer(datumArray->m_datums[i].m_datum));
+                } else {
+                    MOT::MemSessionFree(DatumGetPointer(datumArray->m_datums[i].m_datum));
+                }
+            }
+        }
+        if (usage == JIT_CONTEXT_GLOBAL) {
+            MOT::MemGlobalFree(datumArray->m_datums);
+        } else {
+            MOT::MemSessionFree(datumArray->m_datums);
+        }
+        datumArray->m_datums = nullptr;
+        datumArray->m_datumCount = 0;
+    }
+}
+
 extern void DestroyJitContext(JitContext* jitContext)
 {
     if (jitContext != nullptr) {
@@ -512,6 +597,9 @@ extern void DestroyJitContext(JitContext* jitContext)
             RemoveJitSourceContext(jitContext->m_jitSource, jitContext);
             jitContext->m_jitSource = nullptr;
         }
+
+        // cleanup constant datum array
+        DestroyDatumArray(&jitContext->m_constDatums, jitContext->m_usage);
 
         // cleanup sub-query data array
         CleanupJitContextSubQueryDataArray(jitContext);

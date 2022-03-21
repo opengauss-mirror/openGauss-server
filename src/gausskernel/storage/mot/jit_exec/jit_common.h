@@ -31,6 +31,9 @@
 
 #include "mot_engine.h"
 
+/** @define The maximum number of constant objects that can be used in a query. */
+#define MOT_JIT_MAX_CONST 1024
+
 // This file contains definitions used both by LLVM and TVM jitted code
 namespace JitExec {
 // forward declaration
@@ -63,6 +66,12 @@ extern int BuildIndexColumnOffsets(MOT::Table* table, const MOT::Index* index, i
 
 /** @brief Queries whether a PG type is supported by MOT tables. */
 extern bool IsTypeSupported(int resultType);
+
+/** @brief Queries whether a PG type represents a string. */
+extern bool IsStringType(int type);
+
+/** @brief Queries whether a PG type represents a primitive type. */
+extern bool IsPrimitiveType(int type);
 
 /** @brief Queries whether a WHERE clause operator is supported. */
 extern bool IsWhereOperatorSupported(int whereOp);
@@ -125,6 +134,12 @@ extern void DestroyTableInfo(TableInfo* table_info);
  * @return True if operations succeeded, otherwise false.
  */
 extern bool PrepareSubQueryData(JitContext* jitContext, JitCompoundPlan* plan);
+
+/** @brief Prepares array of global datum objects from array of constants. */
+extern bool PrepareDatumArray(Const* constArray, uint32_t constCount, JitDatumArray* datumArray);
+
+/** @brief Clones an interval datum into global memory. */
+extern bool CloneDatum(Datum source, int type, Datum* target, JitContextUsage usage);
 }  // namespace JitExec
 
 #endif

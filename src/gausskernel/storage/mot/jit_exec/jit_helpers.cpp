@@ -392,6 +392,22 @@ int getExprArgIsNull(int arg_pos)
     return result;
 }
 
+Datum GetConstAt(int constId, int argPos)
+{
+    MOT_LOG_DEBUG("Retrieving constant datum by id %d", constId);
+    Datum result = PointerGetDatum(nullptr);
+    JitExec::JitContext* ctx = u_sess->mot_cxt.jit_context;
+    if (constId < (int)ctx->m_constDatums.m_datumCount) {
+        JitExec::JitDatum* datum = &ctx->m_constDatums.m_datums[constId];
+        result = datum->m_datum;
+        setExprArgIsNull(argPos, datum->m_isNull);
+        DBG_PRINT_DATUM("Retrieved constant datum", datum->m_type, datum->m_datum, datum->m_isNull);
+    } else {
+        MOT_LOG_ERROR("Invalid constant identifier: %d", constId);
+    }
+    return result;
+}
+
 Datum getDatumParam(ParamListInfo params, int paramid, int arg_pos)
 {
     MOT_LOG_DEBUG("Retrieving datum param at index %d", paramid);

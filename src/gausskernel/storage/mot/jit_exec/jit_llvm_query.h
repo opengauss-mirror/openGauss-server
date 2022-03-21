@@ -171,6 +171,7 @@ struct JitLlvmCodeGenContext {
     llvm::FunctionCallee GetSubQueryIndexFunc;
     llvm::FunctionCallee GetSubQuerySearchKeyFunc;
     llvm::FunctionCallee GetSubQueryEndIteratorKeyFunc;
+    llvm::FunctionCallee GetConstAtFunc;
 
     // builtins
 #define APPLY_UNARY_OPERATOR(funcid, name) llvm::FunctionCallee _builtin_##name;
@@ -224,10 +225,16 @@ struct JitLlvmCodeGenContext {
     TableInfo _inner_table_info;
     TableInfo* m_subQueryTableInfo;
 
+    // non-primitive constants
+    uint32_t m_constCount;
+    Const* m_constValues;
+
     dorado::GsCodeGen* _code_gen;
     dorado::GsCodeGen::LlvmBuilder* _builder;
     llvm::Function* m_jittedQuery;
 };
+
+extern int AllocateConstId(JitLlvmCodeGenContext* ctx, int type, Datum value, bool isNull);
 }  // namespace JitExec
 
 #endif /* JIT_LLVM_QUERY_H */

@@ -2761,6 +2761,31 @@ private:
     int m_subQueryIndex;
 };
 
+/** @class GetConstAtExpression */
+class GetConstAtExpression : public tvm::Expression {
+public:
+    explicit GetConstAtExpression(int constId, int argPos)
+        : Expression(tvm::Expression::CanFail), m_constId(constId), m_argPos(argPos)
+    {}
+
+    ~GetConstAtExpression() final
+    {}
+
+    Datum eval(tvm::ExecContext* exec_context) final
+    {
+        return (uint64_t)GetConstAt(m_constId, m_argPos);
+    }
+
+    void dump() final
+    {
+        (void)fprintf(stderr, "GetConstAt(constId=%d, argPos=%d)", m_constId, m_argPos);
+    }
+
+private:
+    int m_constId;
+    int m_argPos;
+};
+
 inline tvm::Instruction* AddIsSoftMemoryLimitReached(JitTvmCodeGenContext* ctx)
 {
     return ctx->_builder->addInstruction(new (std::nothrow) IsSoftMemoryLimitReachedInstruction());
@@ -3146,6 +3171,11 @@ inline tvm::Expression* AddSelectSubQueryResult(JitTvmCodeGenContext* ctx, int s
 inline void AddCopyAggregateToSubQueryResult(JitTvmCodeGenContext* ctx, int subQueryIndex)
 {
     ctx->_builder->addInstruction(new (std::nothrow) CopyAggregateToSubQueryResultInstruction(subQueryIndex));
+}
+
+inline tvm::Expression* AddGetConstAt(JitTvmCodeGenContext* ctx, int constId, int argPos)
+{
+    return new (std::nothrow) GetConstAtExpression(constId, argPos);
 }
 
 #ifdef MOT_JIT_DEBUG
