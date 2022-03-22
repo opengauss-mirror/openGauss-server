@@ -20836,6 +20836,7 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo, bool large)
     called = (strcmp(PQgetvalue(res, 0, 4), "t") == 0);
 
 #ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     /*
      * In Postgres-XC it is possible that the current value of a
      * sequence cached on each node is different as several sessions
@@ -20897,6 +20898,28 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo, bool large)
 
     ExecuteSqlStatement(fout, "ROLLBACK TO SAVEPOINT bfnextval");
     ExecuteSqlStatement(fout, "RELEASE bfnextval");
+#else
+    resetPQExpBuffer(query);
+    PQclear(res);
+    appendPQExpBuffer(query, "SELECT last_value, is_called FROM %s;", fmtId(tbinfo->dobj.name));
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+    if (PQntuples(res) != 1) {
+        write_msg(NULL,
+            ngettext("query to get nextval of sequence %s "
+                    "returned %d rows (expected 1)\n",
+                    "query to get nextval of sequence %s "
+                    "returned %d rows (expected 1)\n",
+                    PQntuples(res)),
+                    fmtId(tbinfo->dobj.name),
+                    PQntuples(res));
+        PQclear(res);
+        destroyPQExpBuffer(query);
+        exit_nicely(1);
+    }
+    last = PQgetvalue(res, 0, 0);
+#endif
+
 #endif
 
     resetPQExpBuffer(query);

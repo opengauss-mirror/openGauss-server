@@ -54,5 +54,6 @@ ALTER TABLE rlsrel1 FORCE ROW LEVEL SECURITY;
 ALTER TABLE rlsrel2 ENABLE ROW LEVEL SECURITY;
 \! @abs_bindir@/gs_dump --help > @abs_bindir@/gs_dump.log 2>&1
 \! @abs_bindir@/gs_dump basedb -p @portstring@ --with-encryption=AES128 --with-key=abcdefghigklmnop --include-alter-table -n dumptest -s > @abs_bindir@/dump.sql 2>&1 ; echo $?
+SELECT * FROM dumptest."seq$";
 \c regression
 drop database if exists basedb;
