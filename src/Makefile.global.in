@@ -1148,13 +1148,16 @@ submake-libpgport:
 submake-libplpgsql:
 	$(MAKE) -C $(top_builddir)/src/common/pl/plpgsql/src all
 
+submake-pagecompression:
+	$(MAKE) -C $(top_builddir)/src/lib/page_compression all
+
 submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/lib/alarm
 
 submake-libcarbondata:
 	$(MAKE) -C $(top_builddir)/../contrib/carbondata all
 
-.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-libcarbondata
+.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-libcarbondata submake-pagecompression
 
 
 ##########################################################################

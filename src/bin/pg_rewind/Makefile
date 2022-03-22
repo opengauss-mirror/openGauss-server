@@ -18,7 +18,8 @@ include $(top_builddir)/src/Makefile.global
 PG_CPPFLAGS = -I$(libpq_srcdir)
 PG_LIBS = $(libpq_pgport)
 
-override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -I$(top_builddir)/src/bin/pg_ctl
+override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -I$(top_builddir)/src/bin/pg_ctl -I${top_builddir}/src/lib/page_compression
+override LDFLAGS := -L../../src/lib/page_compression
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"
     ifneq "$(shell which g++ |grep hutaf_llt |wc -l)" "1"
@@ -26,8 +27,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = file_ops.o datapagemap.o fetch.o filemap.o logging.o parsexlog.o pg_rewind.o compressed_rewind.o
-
+OBJS = file_ops.o datapagemap.o fetch.o filemap.o logging.o parsexlog.o pg_rewind.o
 #all:gs_rewind.a
 
 pg_rewind.a: $(OBJS)

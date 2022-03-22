@@ -59,6 +59,9 @@ typedef struct
     size_t  size;
     time_t  mtime;
     bool    is_datafile;
+    bool    compressedFile;
+    uint16 compressedChunkSize;
+    uint8 compressedAlgorithm;
     bool    is_database;
     Oid     tblspcOid;
     Oid     dbOid;
@@ -513,6 +516,7 @@ FILE* fio_fopen(char const* path, char const* mode, fio_location location)
 }
 
 int fio_fprintf(FILE* f, char const* format, ...) __attribute__ ((format (printf, 2, 3)));
+static char *ProcessErrorIn(int out, fio_header &hdr, const char *fromFullpath);
 /* Format output to file stream */
 int fio_fprintf(FILE* f, char const* format, ...)
 {
@@ -621,7 +625,7 @@ int fio_truncate(int fd, off_t size)
 /*
  * Read file from specified location.
  */
-int fio_pread(FILE* f, void* buf, off_t offs)
+int fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression)
 {
     if (fio_is_remote_file(f))
     {
@@ -647,12 +651,15 @@ int fio_pread(FILE* f, void* buf, off_t offs)
     else
     {
         /* For local file, opened by fopen, we should use stdio functions */
-        int rc = fseek(f, offs, SEEK_SET);
-
-        if (rc < 0)
-        return rc;
-
-        return fread(buf, 1, BLCKSZ, f);
+        if (pageCompression) {
+            return pageCompression->ReadCompressedBuffer(offs / BLCKSZ, (char*)buf, BLCKSZ, true);
+        } else {
+            int rc = fseek(f, offs, SEEK_SET);
+            if (rc < 0) {
+                return rc;
+            }
+            return fread(buf, 1, BLCKSZ, f);
+        }
     }
 }
 
@@ -765,6 +772,15 @@ ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compres
                     ? uncompressed_size
                     : fwrite(uncompressed_buf, 1, uncompressed_size, f);
     }
+}
+
+void fio_construct_compressed(void const *buf, size_t size)
+{
+    fio_header hdr;
+    hdr.cop = FIO_COSTRUCT_COMPRESSED;
+    hdr.size = size;
+    IO_CHECK(fio_write_all(fio_stdout, &hdr, sizeof(hdr)), sizeof(hdr));
+    IO_CHECK(fio_write_all(fio_stdout, buf, size), size);
 }
 
 static ssize_t
@@ -1308,7 +1324,7 @@ static void fio_send_pages_impl(int out, char* buf)
     fio_header   hdr;
     fio_send_request *req = (fio_send_request*) buf;
     char             *from_fullpath = (char*) buf + sizeof(fio_send_request);
-    bool with_pagemap = req->bitmapsize > 0 ? true : false;
+    bool with_pagemap = req->bitmapsize > 0;
     /* error reporting */
     char *errormsg = NULL;
     /* parse buffer */
@@ -1318,39 +1334,22 @@ static void fio_send_pages_impl(int out, char* buf)
     int32       hdr_num = -1;
     int32       cur_pos_out = 0;
     BackupPageHeader2 *headers = NULL;
+    PageCompression* pageCompression = NULL;
     int nRet = 0;
 
-    /* open source file */
-    in = fopen(from_fullpath, PG_BINARY_R);
+    if (PageCompression::IsCompressedTableFile(from_fullpath, MAXPGPATH)) {
+        /* init pageCompression and return pcdFd for error check */
+        pageCompression = new PageCompression();
+        pageCompression->Init(from_fullpath, MAXPGPATH, req->segmentno / RELSEG_SIZE);
+        in = pageCompression->GetPcdFile();
+    } else {
+        /* open source file */
+        in = fopen(from_fullpath, PG_BINARY_R);
+    }
+
     if (!in)
     {
-        hdr.cop = FIO_ERROR;
-
-        /* do not send exact wording of ENOENT error message
-        * because it is a very common error in our case, so
-        * error code is enough.
-        */
-        if (errno == ENOENT)
-        {
-            hdr.arg = FILE_MISSING;
-            hdr.size = 0;
-        }
-        else
-        {
-            hdr.arg = OPEN_FAILED;
-            errormsg = (char *)pgut_malloc(ERRMSG_MAX_LEN);
-            /* Construct the error message */
-            nRet = snprintf_s(errormsg, ERRMSG_MAX_LEN,ERRMSG_MAX_LEN - 1, "Cannot open file \"%s\": %s",
-                from_fullpath, strerror(errno));
-            securec_check_ss_c(nRet, "\0", "\0");
-            hdr.size = strlen(errormsg) + 1;
-        }
-
-        /* send header and message */
-        IO_CHECK(fio_write_all(out, &hdr, sizeof(hdr)), sizeof(hdr));
-        if (errormsg)
-            IO_CHECK(fio_write_all(out, errormsg, hdr.size), hdr.size);
-
+        errormsg = ProcessErrorIn(out, hdr, from_fullpath);
         goto cleanup;
     }
 
@@ -1385,21 +1384,25 @@ static void fio_send_pages_impl(int out, char* buf)
         /* read page, check header and validate checksumms */
         for (;;)
         {
-            /*
-            * Optimize stdio buffer usage, fseek only when current position
-            * does not match the position of requested block.
-            */
-            if (current_pos != (int)(blknum*BLCKSZ))
-            {
-                current_pos = blknum*BLCKSZ;
-                if (fseek(in, current_pos, SEEK_SET) != 0)
-                    elog(ERROR, "fseek to position %u is failed on remote file '%s': %s",
-                        current_pos, from_fullpath, strerror(errno));
+            if (pageCompression) {
+                read_len = pageCompression->ReadCompressedBuffer(blknum, read_buffer, BLCKSZ, true);
+            } else {
+                /*
+                * Optimize stdio buffer usage, fseek only when current position
+                * does not match the position of requested block.
+                */
+                if (current_pos != (int)(blknum*BLCKSZ))
+                {
+                    current_pos = blknum*BLCKSZ;
+                    if (fseek(in, current_pos, SEEK_SET) != 0)
+                        elog(ERROR, "fseek to position %u is failed on remote file '%s': %s",
+                             current_pos, from_fullpath, strerror(errno));
+                }
+
+                read_len = fread(read_buffer, 1, BLCKSZ, in);
+
+                current_pos += read_len;
             }
-
-            read_len = fread(read_buffer, 1, BLCKSZ, in);
-
-            current_pos += read_len;
 
             /* report error */
             if (ferror(in))
@@ -1560,9 +1563,43 @@ eof:
     pg_free(iter);
     pg_free(errormsg);
     pg_free(headers);
-    if (in)
-        fclose(in);
+    if (pageCompression) {
+        /* in will be closed */
+        delete pageCompression;
+    } else {
+        if (in)
+            fclose(in);
+    }
     return;
+}
+
+static char *ProcessErrorIn(int out, fio_header &hdr, const char *fromFullpath)
+{
+    char *errormsg = NULL;
+    hdr.cop = FIO_ERROR;
+
+    /* do not send exact wording of ENOENT error message
+     * because it is a very common error in our case, so
+     * error code is enough.
+     */
+    if (errno == ENOENT) {
+        hdr.arg = FILE_MISSING;
+        hdr.size = 0;
+    } else {
+        hdr.arg = OPEN_FAILED;
+        errormsg = (char *)pgut_malloc(ERRMSG_MAX_LEN);
+        /* Construct the error message */
+        error_t nRet = snprintf_s(errormsg, ERRMSG_MAX_LEN, ERRMSG_MAX_LEN - 1, "Cannot open file \"%s\": %s",
+                                  fromFullpath, strerror(errno));
+        securec_check_ss_c(nRet, "\0", "\0");
+        hdr.size = strlen(errormsg) + 1;
+    }
+
+    /* send header and message */
+    IO_CHECK(fio_write_all(out, &hdr, sizeof(hdr)), sizeof(hdr));
+    if (errormsg)
+        IO_CHECK(fio_write_all(out, errormsg, hdr.size), hdr.size);
+    return errormsg;
 }
 
 /* Receive chunks of data and write them to destination file.
@@ -1817,6 +1854,9 @@ void fio_list_dir(parray *files, const char *root, bool exclude,
             file->forkName = fio_file.forkName;
             file->segno = fio_file.segno;
             file->external_dir_num = fio_file.external_dir_num;
+            file->compressedFile = fio_file.compressedFile;
+            file->compressedChunkSize = fio_file.compressedChunkSize;
+            file->compressedAlgorithm = fio_file.compressedAlgorithm;
 
             if (fio_file.linked_len > 0)
             {
@@ -1893,6 +1933,9 @@ static void fio_list_dir_impl(int out, char* buf)
         fio_file.forkName = file->forkName;
         fio_file.segno = file->segno;
         fio_file.external_dir_num = file->external_dir_num;
+        fio_file.compressedFile = file->compressedFile;
+        fio_file.compressedChunkSize = file->compressedChunkSize;
+        fio_file.compressedAlgorithm = file->compressedAlgorithm;
 
         if (file->linked)
             fio_file.linked_len = strlen(file->linked) + 1;
@@ -2211,6 +2254,12 @@ void fio_communicate(int in, int out)
             case FIO_WRITE_COMPRESSED: /* Write to the current position in file */
                 IO_CHECK(fio_write_compressed_impl(fd[hdr.handle], buf, hdr.size, hdr.arg), BLCKSZ);
                 break;
+            case FIO_COSTRUCT_COMPRESSED: {
+                CompressCommunicate *cm = (CompressCommunicate *)buf;
+                auto result = ConstructCompressedFile(cm->path, cm->segmentNo, cm->chunkSize, cm->algorithm);
+                IO_CHECK(result, SUCCESS);
+                break;
+            }
             case FIO_READ: /* Read from the current position in file */
                 if ((size_t)hdr.arg > buf_size) {
                     size_t oldSize = buf_size;
@@ -2339,4 +2388,3 @@ void fio_communicate(int in, int out)
     exit(EXIT_FAILURE);
     }
 }
-

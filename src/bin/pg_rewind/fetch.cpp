@@ -23,8 +23,8 @@
 #include "libpq/libpq-fe.h"
 #include "libpq/libpq-int.h"
 #include "common/fe_memutils.h"
-#include "compressed_rewind.h"
 #include "catalog/catalog.h"
+#include "PageCompression.h"
 #include "catalog/pg_type.h"
 
 PGconn* conn = NULL;
@@ -323,9 +323,14 @@ BuildErrorCode fetchSourceFileList()
         }
         RewindCompressInfo rewindCompressInfo;
         RewindCompressInfo *pointer = NULL;
-        if (!PQgetisnull(res, i, 4) && FetchSourcePca(PQgetvalue(res, i, 4), &rewindCompressInfo)) {
-            filesize = rewindCompressInfo.newBlockNumber * BLCKSZ;
-            pointer = &rewindCompressInfo;
+        if (!PQgetisnull(res, i, 4)) {
+            size_t length = 0;
+            auto ptr = PQunescapeBytea((const unsigned char*)PQgetvalue(res, i, 4), &length);
+            if (FetchSourcePca(ptr, length, &rewindCompressInfo)) {
+                filesize = rewindCompressInfo.newBlockNumber * BLCKSZ;
+                pointer = &rewindCompressInfo;
+            }
+            PQfreemem(ptr);
         }
         process_source_file(path, type, filesize, link_target, pointer);
         PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
@@ -467,19 +472,9 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             securec_check_c(errorno, "\0", "\0");
             chunkSize = ntohl(chunkSize);
             bool rebuild = *PQgetvalue(res, 0, 6) != 0;
-            char dst[MAXPGPATH];
-            /* open pca */
-            FormatPathToPca(filename, dst, MAXPGPATH, false);
-            OpenCompressedPcaFile(dst, chunkSize, algorithm, rebuild);
-
-            /* open pcd */
-            FormatPathToPcd(filename, dst, MAXPGPATH, false);
-            open_target_file(dst, false);
-            BlockNumber blockNumber = chunkoff;
-            size_t blockSize = chunkspace;
-
+            CompressedFileInit(filename, chunkSize, algorithm, rebuild);
             /* fetch result */
-            FetchCompressedFile(chunk, blockNumber, blockSize);
+            FetchCompressedFile(chunk, (BlockNumber)chunkoff, (size_t)chunkspace);
         }
     }
     return BUILD_SUCCESS;
@@ -591,13 +586,17 @@ static void CompressedFileCopy(const file_entry_t* entry, bool rebuild)
 
 static void CompressedFileRemove(const file_entry_t* entry)
 {
-    remove_target((file_entry_t*) entry);
-    char* path = entry->path;
-    char dst[MAXPGPATH];
-    FormatPathToPca(path, dst, MAXPGPATH);
-    remove_target_file(dst, false);
-    FormatPathToPcd(path, dst, MAXPGPATH);
-    remove_target_file(dst, false);
+    char path[MAXPGPATH];
+    error_t rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pg_data, entry->path);
+    securec_check_ss_c(rc, "\0", "\0");
+    COMPRESS_ERROR_STATE result = PageCompression::RemoveCompressedFile(path);
+    if (result == NORMAL_MISSING_ERROR || result == NORMAL_UNLINK_ERROR) {
+        pg_fatal("could not remove compress file \"%s\": %s\n", path, strerror(errno));
+    } else if (result == PCA_MISSING_ERROR || result == PCA_UNLINK_ERROR) {
+        pg_fatal("could not remove compress file \"%s_pca\": %s\n", path, strerror(errno));
+    } else if (result == PCD_MISSING_ERROR || result == PCD_UNLINK_ERROR) {
+        pg_fatal("could not remove compress file \"%s_pcd\": %s\n", path, strerror(errno));
+    }
     pg_log(PG_DEBUG, "CompressedFileRemove: %s\n", path);
 }
 
@@ -966,19 +965,14 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
         struct stat fst;
         char fullpath[MAXPGPATH];
         char path[MAXPGPATH];
-        const size_t MINPCANAMESIZE = 4;
 
         if (strcmp(xlde->d_name, ".") == 0 || strcmp(xlde->d_name, "..") == 0)
             continue;
         /* Skip compressed page files */
         size_t dirNamePath = strlen(xlde->d_name);
-        if (dirNamePath >= MINPCANAMESIZE) {
-            const char* suffix = xlde->d_name + dirNamePath - MINPCANAMESIZE;
-            if (strncmp(suffix, "_pca", MINPCANAMESIZE) == 0 || strncmp(suffix, "_pcd", MINPCANAMESIZE) == 0) {
-                continue;
-            }
+        if (PageCompression::SkipCompressedFile(xlde->d_name, dirNamePath)) {
+            continue;
         }
-
 
         ss_c = snprintf_s(fullpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", fullparentpath, xlde->d_name);
         securec_check_ss_c(ss_c, "\0", "\0");
@@ -1012,7 +1006,7 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
             uint64 fileSize = (uint64)fst.st_size;
             RewindCompressInfo rewindCompressInfo;
             RewindCompressInfo *pointer = NULL;
-            if (ProcessLocalPca(path, &rewindCompressInfo)) {
+            if (ProcessLocalPca(path, &rewindCompressInfo, pg_data)) {
                 fileSize = rewindCompressInfo.oldBlockNumber * BLCKSZ;
                 pointer = &rewindCompressInfo;
             }

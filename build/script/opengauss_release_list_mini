@@ -865,6 +865,8 @@
 ./lib/libnghttp2.so
 ./lib/libnghttp2.so.14
 ./lib/libnghttp2.so.14.20.0
+./lib/libpagecompression.so
+./lib/libpagecompression.so.1
 ./lib/libpcre.so
 ./lib/libpcre.so.1
 ./lib/libpcre.so.1.2.12

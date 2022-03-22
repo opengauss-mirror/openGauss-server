@@ -1979,6 +1979,19 @@ void flush_and_close_file(pgBackup *backup, bool sync, FILE *out, char *control_
          control_path_temp, strerror(errno));
 }
 
+inline int WriteCompressOption(pgFile *file, char *line, int remainLen, int len)
+{
+    if (file->is_datafile && file->compressedFile) {
+        auto nRet =
+            snprintf_s(line + len, remainLen - len, remainLen - len - 1,
+                       ",\"compressedFile\":\"%d\",\"compressedChunkSize\":\"%d\",\"compressedAlgorithm\":\"%d\"", 1,
+                       file->compressedChunkSize, file->compressedAlgorithm);
+        securec_check_ss_c(nRet, "\0", "\0");
+        return nRet;
+    }
+    return 0;
+}
+
 /*
  * Output the list of files to backup catalog DATABASE_FILE_LIST
  */
@@ -2072,6 +2085,8 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
             nRet = snprintf_s(line+len, remainLen - len,remainLen - len - 1,",\"segno\":\"%d\"", file->segno);
             securec_check_ss_c(nRet, "\0", "\0");
             len += nRet;
+            /* persistence compress option */
+            len += WriteCompressOption(file, line, remainLen, len);
         }
 
         if (file->linked)

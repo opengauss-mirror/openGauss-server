@@ -1104,6 +1104,27 @@ static void sync_restored_files(parray *dest_files,
     elog(INFO, "Restored backup files are synced, time elapsed: %s", pretty_time);
 }
 
+inline void RestoreCompressFile(FILE *out, char *to_fullpath, size_t pathLen, pgFile *dest_file)
+{
+    if (dest_file->is_datafile && dest_file->compressedFile && !dest_file->is_cfs) {
+        if (!fio_is_remote_file(out)) {
+            auto result = ConstructCompressedFile(to_fullpath, dest_file->segno, dest_file->compressedChunkSize,
+                                                  dest_file->compressedAlgorithm);
+            if (result != SUCCESS) {
+                elog(ERROR, "Cannot copy compressed file \"%s\": %s", to_fullpath, strerror(errno));
+            }
+        } else {
+            CompressCommunicate communicate;
+            errno_t rc = memcpy_s(communicate.path, MAXPGPATH, to_fullpath, MAXPGPATH);
+            securec_check(rc, "", "");
+            communicate.chunkSize = dest_file->compressedChunkSize;
+            communicate.segmentNo = dest_file->segno;
+            communicate.algorithm = dest_file->compressedAlgorithm;
+            fio_construct_compressed((void*)&communicate, sizeof(communicate));
+        }
+    }
+}
+
 /*
  * Restore files into $PGDATA.
  */
@@ -1260,6 +1281,7 @@ done:
             elog(ERROR, "Cannot close file \"%s\": %s", to_fullpath,
                  strerror(errno));
 
+        RestoreCompressFile(out, to_fullpath, MAXPGPATH, dest_file);
         /* free pagemap used for restore optimization */
         pg_free(dest_file->pagemap.bitmap);
 

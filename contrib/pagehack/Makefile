@@ -1,9 +1,10 @@
 # contrib/pagehack/Makefile
 MODULE_big	= pagehack
-OBJS		= openGaussCompression.o pagehack.o
+OBJS		= pagehack.o
 
 # executable program, even there is no database server/client
 PROGRAM = pagehack
+all: submake-pagecompression
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config
@@ -13,8 +14,9 @@ else
 subdir = contrib/pagehack
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
-override CFLAGS += -lzstd
-
+override CPPFLAGS += -I${top_builddir}/src/lib/page_compression
+override LDFLAGS += -L${top_builddir}/src/lib/page_compression
+override CFLAGS += -lpagecompression -lzstd
 ifeq ($(enable_debug), yes)
 	PG_CPPFLAGS += -DDEBUG
 endif

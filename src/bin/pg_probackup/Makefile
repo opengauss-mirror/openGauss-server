@@ -38,10 +38,14 @@ ifeq ($(enable_lite_mode), no)
     LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
 endif
 PG_CPPFLAGS = -I$(libpq_srcdir) ${PTHREAD_CFLAGS} -Isrc -I$(top_builddir)/$(subdir) -I$(LZ4_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH)
+# add page_compression so .h
+LDFLAGS += -L../../lib/page_compression
+PG_CPPFLAGS = -I../../lib/page_compression
+LIBS += -lpagecompression -lzstd
 override CPPFLAGS := -DFRONTEND $(CPPFLAGS) $(PG_CPPFLAGS) -DHAVE_LIBZ
 PG_LIBS_INTERNAL = $(libpq_pgport) ${PTHREAD_CFLAGS}
 
-all: $(PROGRAM)
+all: submake-pagecompression $(PROGRAM)
 
 gs_probackup: $(OBJS) | submake-libpq submake-libpgport
 	$(CC) $(CXXFLAGS) $(OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)

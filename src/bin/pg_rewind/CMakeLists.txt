@@ -5,7 +5,6 @@ set(TGT_rewind_SRC ${CMAKE_CURRENT_SOURCE_DIR}/datapagemap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/filemap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/file_ops.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/compressed_rewind.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parsexlog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_rewind.cpp
 )
@@ -18,6 +17,7 @@ set(TGT_rewind_INC
     ${PROJECT_SRC_DIR}/include/libpq 
     ${LIBOPENSSL_INCLUDE_PATH} 
     ${ZSTD_INCLUDE_PATH}
+    ${PROJECT_SRC_DIR}/lib/page_compression
 )
 
 set(rewind_DEF_OPTIONS ${MACRO_OPTIONS})
