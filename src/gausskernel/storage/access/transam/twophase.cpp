@@ -2612,6 +2612,10 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
 
         ColFileNodeCopy(&colFileNode, colFileNodeRel);
 
+        if (IS_COMPRESS_DELETE_FORK(colFileNode.forknum)) {
+            SET_OPT_BY_NEGATIVE_FORK(colFileNode.filenode, colFileNode.forknum);
+            colFileNode.forknum = MAIN_FORKNUM;
+        }
         if (!IsValidColForkNum(colFileNode.forknum)) {
             RowRelationDoDeleteFiles(colFileNode.filenode, InvalidBackendId, colFileNode.ownerid);
         } else {

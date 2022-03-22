@@ -1028,6 +1028,10 @@ void smgrDoPendingDeletes(bool isCommit)
                 u_sess->catalog_cxt.pendingDeletes = next;
             /* do deletion if called for */
             if (pending->atCommit == isCommit) {
+                if (IS_COMPRESS_DELETE_FORK(pending->forknum)) {
+                    SET_OPT_BY_NEGATIVE_FORK(pending->relnode, pending->forknum);
+                    pending->forknum = MAIN_FORKNUM;
+                }
                 if (!IsValidColForkNum(pending->forknum)) {
                     RowRelationDoDeleteFiles(
                         pending->relnode, pending->backend, pending->ownerid, pending->relOid, isCommit);
@@ -1144,7 +1148,11 @@ int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr, bool skipTemp, i
             rptrRel->filenode.spcNode = pending->relnode.spcNode;
             rptrRel->filenode.dbNode = pending->relnode.dbNode;
             rptrRel->filenode.relNode = pending->relnode.relNode;
-            rptrRel->forknum = pending->forknum;
+            if (IS_COMPRESSED_RNODE(pending->relnode, pending->forknum)) {
+                rptrRel->forknum = COMPRESS_FORKNUM;
+            } else {
+                rptrRel->forknum = pending->forknum;
+            }
             rptrRel->ownerid = pending->ownerid;
             /* Add bucketid into forknum */
             forknum_add_bucketid(rptrRel->forknum, pending->relnode.bucketNode);

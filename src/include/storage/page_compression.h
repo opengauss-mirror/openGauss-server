@@ -212,24 +212,25 @@ inline void TransCompressOptions(const RelFileNode& node, RelFileCompressOption*
     compressOption = compressOption >> g_cmpBitStruct[CMP_BYTE_CONVERT_INDEX].bitLen;
 }
 
-#define SET_COMPRESS_OPTION(node, byteConvert, diffConvert, preChunks, symbol, level, algorithm, chunkSize)    \
-    do {                                                                             \
-        (node).opt = (node).opt << g_cmpBitStruct[CMP_BYTE_CONVERT_INDEX].bitLen;    \
-        (node).opt += (byteConvert)&g_cmpBitStruct[CMP_BYTE_CONVERT_INDEX].mask;     \
-        (node).opt = (node).opt << g_cmpBitStruct[CMP_DIFF_CONVERT_INDEX].bitLen;    \
-        (node).opt += (diffConvert)&g_cmpBitStruct[CMP_DIFF_CONVERT_INDEX].mask;     \
-        (node).opt = (node).opt << g_cmpBitStruct[CMP_PRE_CHUNK_INDEX].bitLen;       \
-        (node).opt += (preChunks)&g_cmpBitStruct[CMP_PRE_CHUNK_INDEX].mask;          \
-        (node).opt = (node).opt << g_cmpBitStruct[CMP_COMPRESS_LEVEL_SYMBOL].bitLen; \
-        (node).opt += (symbol)&g_cmpBitStruct[CMP_COMPRESS_LEVEL_SYMBOL].mask;       \
-        (node).opt = (node).opt << g_cmpBitStruct[CMP_LEVEL_INDEX].bitLen;           \
-        (node).opt += (level)&g_cmpBitStruct[CMP_LEVEL_INDEX].mask;                  \
-        (node).opt = (node).opt << g_cmpBitStruct[CMP_ALGORITHM_INDEX].bitLen;       \
-        (node).opt += (algorithm)&g_cmpBitStruct[CMP_ALGORITHM_INDEX].mask;          \
-        (node).opt = (node).opt << g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].bitLen;      \
-        (node).opt += (chunkSize)&g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].mask;         \
+#define SET_COMPRESS_OPTION(node, byteConvert, diffConvert, preChunks, symbol, level, algorithm, chunkSize) \
+    do {                                                                                                    \
+        (node).opt = 0;                                                                                     \
+        (node).opt = (node).opt << g_cmpBitStruct[CMP_BYTE_CONVERT_INDEX].bitLen;                           \
+        (node).opt += (byteConvert)&g_cmpBitStruct[CMP_BYTE_CONVERT_INDEX].mask;                            \
+        (node).opt = (node).opt << g_cmpBitStruct[CMP_DIFF_CONVERT_INDEX].bitLen;                           \
+        (node).opt += (diffConvert)&g_cmpBitStruct[CMP_DIFF_CONVERT_INDEX].mask;                            \
+        (node).opt = (node).opt << g_cmpBitStruct[CMP_PRE_CHUNK_INDEX].bitLen;                              \
+        (node).opt += (preChunks)&g_cmpBitStruct[CMP_PRE_CHUNK_INDEX].mask;                                 \
+        (node).opt = (node).opt << g_cmpBitStruct[CMP_COMPRESS_LEVEL_SYMBOL].bitLen;                        \
+        (node).opt += (symbol)&g_cmpBitStruct[CMP_COMPRESS_LEVEL_SYMBOL].mask;                              \
+        (node).opt = (node).opt << g_cmpBitStruct[CMP_LEVEL_INDEX].bitLen;                                  \
+        (node).opt += (level)&g_cmpBitStruct[CMP_LEVEL_INDEX].mask;                                         \
+        (node).opt = (node).opt << g_cmpBitStruct[CMP_ALGORITHM_INDEX].bitLen;                              \
+        (node).opt += (algorithm)&g_cmpBitStruct[CMP_ALGORITHM_INDEX].mask;                                 \
+        (node).opt = (node).opt << g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].bitLen;                             \
+        (node).opt += (chunkSize)&g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].mask;                                \
     } while (0)
-    
+
 #define GET_ROW_COL_CONVERT(opt) \
             (((opt) >> g_cmpBitStruct[CMP_BYTE_CONVERT_INDEX].moveBit) & g_cmpBitStruct[CMP_BYTE_CONVERT_INDEX].mask)
 #define GET_DIFF_CONVERT(opt) \
@@ -246,8 +247,8 @@ inline void TransCompressOptions(const RelFileNode& node, RelFileCompressOption*
     (((opt) >> g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].moveBit) & g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].mask)
 
 #define IS_COMPRESSED_MAINFORK(reln, forkNum) ((reln)->smgr_rnode.node.opt != 0 && (forkNum) == MAIN_FORKNUM)
+#define IS_COMPRESS_DELETE_FORK(forkNum) ((forkNum) == COMPRESS_FORKNUM)
 #define IS_COMPRESSED_RNODE(rnode, forkNum) ((rnode).opt != 0 && (forkNum) == MAIN_FORKNUM)
-
 /* Compress function */
 template <bool heapPageData>
 extern int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption option);
@@ -260,6 +261,11 @@ int CompressPageBufferBound(const char* page, uint8 algorithm);
 int CompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption option);
 
 int DecompressPage(const char* src, char* dst, uint8 algorithm);
+
+#define SET_OPT_BY_NEGATIVE_FORK(rnode, forkNumber)                              \
+    do {                                                                         \
+        SET_COMPRESS_OPTION((rnode), 0, 0, 0, 0, 0, COMPRESS_ALGORITHM_ZSTD, 0); \
+    } while (0)
 
 /* Memory mapping function */
 extern PageCompressHeader* pc_mmap(int fd, int chunk_size, bool readonly);

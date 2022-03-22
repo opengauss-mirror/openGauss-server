@@ -1321,6 +1321,10 @@ void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
             ColFileNodeRel *colFileNodeRel = xnodes + i;
             ColFileNode colFileNode;
             ColFileNodeCopy(&colFileNode, colFileNodeRel);
+            if (IS_COMPRESS_DELETE_FORK(colFileNode.forknum)) {
+                SET_OPT_BY_NEGATIVE_FORK(colFileNode.filenode, colFileNode.forknum);
+                colFileNode.forknum = MAIN_FORKNUM;
+            }
             if (!IsValidColForkNum(colFileNode.forknum)) {
                 XlogDropRowReation(colFileNode.filenode);
             }
