@@ -248,12 +248,13 @@ char* ssl_rand_file = "server.key.rand";
 
 char pgxc_node_name[MAXPGPATH];
 
+static volatile pgpid_t postmasterPID = -1;
+
 #if defined(WIN32) || defined(__CYGWIN__)
 static DWORD pgctl_start_type = SERVICE_AUTO_START;
 static SERVICE_STATUS status;
 static SERVICE_STATUS_HANDLE hStatus = (SERVICE_STATUS_HANDLE)0;
 static HANDLE shutdownHandles[2];
-static pid_t postmasterPID = -1;
 
 #define shutdownEvent shutdownHandles[0]
 #define postmasterProcess shutdownHandles[1]
@@ -808,6 +809,19 @@ static pgpid_t start_postmaster(void)
     }
 
     /* fork succeeded, in child */
+
+    /*
+     * If possible, detach the postmaster process from the launching process
+     * group and make it a group leader, so that it doesn't get signaled along
+     * with the current group that launched it.
+     */
+#ifdef HAVE_SETSID
+    if (setsid() < 0) {
+        pg_log(PG_WARNING, _("%s: could not start server due to setsid() failure: %s\n"),
+               progname, strerror(errno));
+        exit(1);
+    }
+#endif
 
     if (pg_host != NULL && *(pg_host) != '\0') {
         ret = snprintf_s(template_file, MAXPGPATH, MAXPGPATH - 1, "%s/binary_upgrade/old_upgrade_version", pg_host);
@@ -1394,6 +1408,28 @@ static void read_post_opts(void)
     }
 }
 
+/*
+ * SIGINT signal handler used while waiting for postmaster to start up.
+ * Forwards the SIGINT to the postmaster process, asking it to shut down,
+ * before terminating pg_ctl itself. This way, if the user hits CTRL-C while
+ * waiting for the server to start up, the server launch is aborted.
+ */
+static void trap_sigint_during_startup(int sig)
+{
+    if (postmasterPID != -1) {
+       if (kill(postmasterPID, SIGINT) != 0)
+            pg_log(PG_WARNING, _("%s: could not send stop signal (PID: %ld): %s\n"),
+                   progname, postmasterPID, strerror(errno));
+    }
+
+	/*
+     * Clear the signal handler, and send the signal again, to terminate the
+     * process as normal.
+     */
+    pqsignal(SIGINT, SIG_DFL);
+    raise(SIGINT);
+}
+
 static char* find_other_exec_or_die(const char* argv0, const char* target, const char* versionstr)
 {
     int ret;
@@ -1682,6 +1718,17 @@ static void do_start(void)
     pm_pid = start_postmaster();
 
     if (do_wait) {
+        /*
+         * If the user interrupts the startup (e.g. with CTRL-C), we'd like to
+         * abort the server launch.  Install a signal handler that will
+         * forward SIGINT to the postmaster process, while we wait.
+         *
+         * (We don't bother to reset the signal handler after the launch, as
+         * we're about to exit, anyway.)
+         */
+        postmasterPID = pm_pid;
+        pqsignal(SIGINT, trap_sigint_during_startup);
+
         pg_log(PG_PROGRESS, _("waiting for server to start...\n"));
         switch (test_postmaster_connection(pm_pid, false, beforeStat)) {
             case PQPING_OK:
