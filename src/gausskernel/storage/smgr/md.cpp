@@ -562,46 +562,83 @@ void set_max_segno_delrel(int max_segno, RelFileNode rnode, ForkNumber forknum)
     return;
 }
 
-static int ResetPcMap(char *path, const RelFileNodeBackend& rnode)
+/**
+ * set all zero  to pca file
+ * @param fd pca file fd 
+ * @param chunkSize chunkSize
+ * @param path for errport
+ * @return 0 for success and other for failed
+ */
+static int ResetPcaFileInner(int fd, int chunkSize, char *path)
 {
-    int ret;
+    bool ret = 0;
+    int mapRealSize = SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize);
+    PageCompressHeader *map = pc_mmap_real_size(fd, mapRealSize, false);
+    if (map == MAP_FAILED) {
+        ereport(WARNING, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to mmap %s: %m", path)));
+        ret = -1;
+    } else {
+        pg_atomic_write_u32(&map->nblocks, 0);
+        pg_atomic_write_u32(&map->allocated_chunks, 0);
+        error_t rc =
+            memset_s((char *)map + SIZE_OF_PAGE_COMPRESS_HEADER_DATA, mapRealSize - SIZE_OF_PAGE_COMPRESS_HEADER_DATA,
+                     0, SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize) - SIZE_OF_PAGE_COMPRESS_HEADER_DATA);
+        securec_check_c(rc, "\0", "\0");
+        map->sync = false;
+        if (sync_pcmap(map, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
+            ret = -1;
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m", path)));
+        }
+        /* if mmap is called then pc_munmap must be called too */
+        if (pc_munmap(map) != 0) {
+            ret = -1;
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not munmap file \"%s\": %m", path)));
+        }
+    }
+    return ret;
+}
+
+/**
+ * 
+ * @param fd pca_file fd
+ * @param chunkSize chunkSize destination
+ * @param path for ereport
+ * @return success or not
+ */
+static bool ReadChunkSizeFromFile(int fd, uint16 *chunkSize, char *path)
+{
+    off_t chunkSizeOffset = (off_t)offsetof(PageCompressHeader, chunk_size);
+    if (lseek(fd, chunkSizeOffset, SEEK_SET) != chunkSizeOffset && errno != ENOENT) {
+        ereport(WARNING, (errcode_for_file_access(), errmsg("could not lseek file \"%s\": %m", path)));
+        return false;
+    }
+    if (read(fd, chunkSize, sizeof(*chunkSize)) != sizeof(*chunkSize) && errno != ENOENT) {
+        ereport(WARNING, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", path)));
+        return false;
+    }
+    return true;
+}
+
+static int ResetPcMap(char *path, const RelFileNodeBackend &rnode)
+{
+    int ret = 0;
     char pcfile_path[MAXPGPATH];
     int rc = snprintf_s(pcfile_path, MAXPGPATH, MAXPGPATH - 1, PCA_SUFFIX, path);
     securec_check_ss(rc, "\0", "\0");
     int fd_pca = BasicOpenFile(pcfile_path, O_RDWR | PG_BINARY, 0);
-    if (fd_pca >= 0) {
-        int save_errno;
-        int chunkSize = CHUNK_SIZE_LIST[GET_COMPRESS_CHUNK_SIZE(rnode.node.opt)];
-        int mapRealSize = SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize);
-        PageCompressHeader *map = pc_mmap_real_size(fd_pca, mapRealSize, false);
-        if (map == MAP_FAILED) {
-            ereport(WARNING, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                errmsg("Failed to mmap page compression address file %s: %m", pcfile_path)));
-        } else {
-            pg_atomic_write_u32(&map->nblocks, 0);
-            pg_atomic_write_u32(&map->allocated_chunks, 0);
-            error_t rc = memset_s((char *)map + SIZE_OF_PAGE_COMPRESS_HEADER_DATA,
-                                  mapRealSize - SIZE_OF_PAGE_COMPRESS_HEADER_DATA, 0,
-                                  SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize) - SIZE_OF_PAGE_COMPRESS_HEADER_DATA);
-            securec_check_c(rc, "\0", "\0");
-            map->sync = false;
-            if (sync_pcmap(map, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
-                ereport(WARNING, (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m", pcfile_path)));
-            }
-
-            if (pc_munmap(map) != 0) {
-                ereport(WARNING, (errcode_for_file_access(), errmsg("could not munmap file \"%s\": %m", pcfile_path)));
-            }
-        }
-        save_errno = errno;
-        (void)close(fd_pca);
-        errno = save_errno;
+    if (fd_pca < 0) {
+        return -1;
+    }
+    uint16 chunkSize;
+    if (ReadChunkSizeFromFile(fd_pca, &chunkSize, pcfile_path)) {
+        ret = ResetPcaFileInner(fd_pca, chunkSize, pcfile_path);
     } else {
         ret = -1;
     }
-    if (ret < 0 && errno != ENOENT) {
-        ereport(WARNING, (errcode_for_file_access(), errmsg("could not truncate file \"%s\": %m", pcfile_path)));
-    }
+    int save_errno = errno;
+    (void)close(fd_pca);
+    errno = save_errno;
+    
     return ret;
 }
 
