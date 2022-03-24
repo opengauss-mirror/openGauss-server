@@ -57,5 +57,11 @@ ALTER TABLE rlsrel2 ENABLE ROW LEVEL SECURITY;
 \! @abs_bindir@/gs_dump --help > @abs_bindir@/gs_dump.log 2>&1
 \! @abs_bindir@/gs_dump basedb -p @portstring@ --with-encryption=AES128 --with-key=abcdefghigklmnop --include-alter-table -n dumptest -s > @abs_bindir@/dump.sql 2>&1 ; echo $?
 0
+SELECT * FROM dumptest."seq$";
+  sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid
+ ---------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
+  seq$          |        101 |         101 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | f         |    0
+ (1 row)
+
 \c regression
 drop database if exists basedb;
