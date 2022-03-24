@@ -39,10 +39,15 @@
 #define SYNC_REP_PRIORITY 0
 #define SYNC_REP_QUORUM 1
 
+#define SYNC_REP_MAX_GROUPS 256
+
 extern volatile bool most_available_sync;
 
 #define SyncStandbysDefined() \
     (u_sess->attr.attr_storage.SyncRepStandbyNames != NULL && u_sess->attr.attr_storage.SyncRepStandbyNames[0] != '\0')
+
+#define GetWalsndSyncRepConfig(walsnder)  \
+    (t_thrd.syncrep_cxt.SyncRepConfig[(walsnder)->sync_standby_group])
 
 /*
  * Struct for the configuration of synchronous replication.

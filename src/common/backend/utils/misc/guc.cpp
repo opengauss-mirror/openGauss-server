@@ -164,7 +164,6 @@
 #include "utils/guc_memory.h"
 #include "utils/guc_network.h"
 #include "utils/guc_resource.h"
-#include "common/config/cm_config.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -517,9 +516,6 @@ static bool validate_conf_enum(struct config_generic *record, const char *name, 
                           int elevel, bool freemem, void *newvalue, void **newextra);
 
 #ifndef ENABLE_MULTIPLE_NODES
-int init_gauss_cluster_config(void);
-static bool AlterSystemSetCheckSyncStandbyNames(struct config_generic *record, const char *name, const char *value,
-                                                void *newextra);
 static void CheckAndGetAlterSystemSetParam(AlterSystemStmt* altersysstmt,
     char** outer_name, char** outer_value, struct config_generic** outer_record);
 static void FinishAlterSystemSet(GucContext context);
@@ -8253,121 +8249,6 @@ static void CheckAlterSystemSetPrivilege(const char* name)
 }
 
 /*
- * Obtain cluster information from cluster_static_config.
- */
-int init_gauss_cluster_config(void)
-{
-    char path[MAXPGPATH] = {0};
-    int err_no = 0;
-    int nRet = 0;
-    int status = 0;
-    uint32 nodeidx = 0;
-    struct stat statbuf {};
-
-    char* gausshome = gs_getenv_r("GAUSSHOME");
-    check_backend_env(gausshome);
-
-    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, STATIC_CONFIG_FILE);
-    securec_check_ss_c(nRet, "\0", "\0");
-
-    if (lstat(path, &statbuf) != 0) {
-        return 1;
-    }
-
-    status = read_config_file(path, &err_no);
-
-    if (status != 0) {
-        return 1;
-    }
-
-    if (g_nodeHeader.node <= 0) {
-        free(g_node);
-        g_node = nullptr;
-        return 1;
-    }
-
-    for (nodeidx = 0; nodeidx < g_node_num; nodeidx++) {
-        if (g_node[nodeidx].node == g_nodeHeader.node) {
-            g_currentNode = &g_node[nodeidx];
-            break;
-        }
-    }
-
-    if (g_currentNode == NULL) {
-        free(g_node);
-        g_node = nullptr;
-        return 1;
-    }
-
-    if (get_dynamic_dn_role() != 0) {
-        // failed to get dynamic dn role
-        free(g_node);
-        g_node = nullptr;
-        return 1;
-    }
-
-    return 0;
-}
-
-static bool AlterSystemSetCheckSyncStandbyNames(struct config_generic *record, const char *name, const char *value,
-                                                void *newextra)
-{
-    char* newvalue = NULL;
-    bool res = false;
-    SyncRepConfigData *pconf = NULL;
-    char* data_dir = t_thrd.proc_cxt.DataDir;
-    char* p = NULL;
-
-    if (value != NULL) {
-        newvalue = guc_strdup(DEBUG5, value);
-    }
-    if (!validate_conf_option(record, name, value, PGC_S_FILE, ERROR, false, &newvalue, &newextra)) {
-        goto ret;
-    }
-
-    pconf = (SyncRepConfigData *)newextra;
-
-    if (pconf == NULL || strcmp(value, "*") == 0) {
-        res = true;
-        goto ret;
-    }
-
-    if (pconf->num_sync > pconf->nmembers) {
-        // The sync number must less or equals to the number of standby node names.
-        goto ret;
-    }
-    /* get current cluster information from cluster_staic_config */
-    if (has_static_config()) {
-        if (init_gauss_cluster_config() != 0) {
-            res = true;
-            goto ret;
-        }
-    } else {
-        res = true;
-        goto ret;
-    }
-
-    p = pconf->member_names;
-    for (int i = 1; i <= pconf->nmembers; i++) {
-        if (!CheckDataNameValue(p, data_dir)) {
-            goto ret;
-        }
-        p += strlen(p) + 1;
-    }
-
-ret:
-    if (newvalue != NULL) {
-        pfree(newvalue);
-        newvalue = NULL;
-    }
-    if (newextra != NULL) {
-        pfree(newextra);
-        newextra = NULL;
-    }
-    return res;
-}
-
-/*
  * Persist the configuration parameter value.
  *
  * This function takes all previous configuration parameters
@@ -8424,10 +8305,7 @@ static void CheckAndGetAlterSystemSetParam(AlterSystemStmt* altersysstmt,
                     "ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,\n"
                     "and it must be allowed to set in postgresql.conf.", name)));
 
-    if ((strcmp(name, "synchronous_standby_names") == 0 &&
-        !AlterSystemSetCheckSyncStandbyNames(record, name, value, newextra)) ||
-        (strcmp(name, "synchronous_standby_names") != 0 &&
-        !validate_conf_option(record, name, value, PGC_S_FILE, ERROR, true, NULL, &newextra))) {
+    if (!validate_conf_option(record, name, value, PGC_S_FILE, ERROR, true, NULL, &newextra)) {
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("invalid value for parameter \"%s\": \"%s\"", name, value)));

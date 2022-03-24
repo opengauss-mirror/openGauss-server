@@ -4234,6 +4234,7 @@ static void InitWalSnd(void)
             securec_check(rc, "", "");
             rc = memset_s((void *)&walsnd->wal_sender_channel, sizeof(ReplConnInfo), 0, sizeof(ReplConnInfo));
             securec_check(rc, "", "");
+            walsnd->sync_standby_group = 0;
             walsnd->sync_standby_priority = 0;
             walsnd->index = i;
             walsnd->log_ctrl.sleep_time = 0;
@@ -5329,8 +5330,7 @@ bool WalSndInProgress(int type)
 bool WalSndQuorumInProgress(int type)
 {
     int i;
-    int num = 0;
-    int num_sync = t_thrd.syncrep_cxt.SyncRepConfig->num_sync;
+    int* nums = (int*)palloc0(t_thrd.syncrep_cxt.SyncRepConfigGroups * sizeof(int));
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
@@ -5338,15 +5338,19 @@ bool WalSndQuorumInProgress(int type)
         SpinLockAcquire(&walsnd->mutex);
         if (walsnd->pid != 0 && walsnd->pid != t_thrd.proc_cxt.MyProcPid &&
             ((walsnd->sendRole & type) == walsnd->sendRole)) {
-            num++;
+            nums[walsnd->sync_standby_group]++;
         }
         SpinLockRelease(&walsnd->mutex);
     }
-    if (num_sync <= num) {
-        return true;
-    } else {
-        return false;
+
+    for (i = 0; i < t_thrd.syncrep_cxt.SyncRepConfigGroups; i++) {
+        if (t_thrd.syncrep_cxt.SyncRepConfig[i]->num_sync > nums[i]) {
+            pfree(nums);
+            return false;
+        }
     }
+    pfree(nums);
+    return true;
 }
 
 bool WalSndAllInProgressForMainStandby(int type)
@@ -5810,13 +5814,14 @@ Datum gs_paxos_stat_replication(PG_FUNCTION_ARGS)
  */
 Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 {
-#define PG_STAT_GET_WAL_SENDERS_COLS 21
+#define PG_STAT_GET_WAL_SENDERS_COLS 22
 
     TupleDesc tupdesc;
     int *sync_priority = NULL;
     int i = 0;
     volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     List *sync_standbys = NIL;
+    ListCell *lc = NULL;
 
     Tuplestorestate *tupstore = BuildTupleResult(fcinfo, &tupdesc);
 
@@ -5875,6 +5880,7 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
         int j = 0;
         errno_t rc = 0;
         int ret = 0;
+        int group = 0;
         int priority = 0;
 
         SpinLockAcquire(&hashmdata->mutex);
@@ -5906,8 +5912,10 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
         syncStart = walsnd->syncPercentCountStart;
         catchup_time[0] = walsnd->catchupTime[0];
         catchup_time[1] = walsnd->catchupTime[1];
-        if (IS_DN_MULTI_STANDYS_MODE())
+        if (IS_DN_MULTI_STANDYS_MODE()) {
+            group = walsnd->sync_standby_group;
             priority = walsnd->sync_standby_priority;
+        }
         SpinLockRelease(&walsnd->mutex);
 
         set_xlog_location(local_role, &sndWrite, &sndFlush, &sndReplay);
@@ -6043,9 +6051,11 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                 /* sync_state and sync_prority */
                 if (!SyncRepRequested()) {
                     values[j++] = CStringGetTextDatum("Async");
+                    nulls[j++] = true;
                     values[j++] = Int32GetDatum(0);
                 } else {
                     values[j++] = CStringGetTextDatum("Sync");
+                    nulls[j++] = true;
                     values[j++] = Int32GetDatum(sync_priority[i]);
                 }
             } else {
@@ -6065,14 +6075,18 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                  * basically useless to report "sync" or "potential" as their sync
                  * states. We report just "quorum" for them.
                  */
-                if (priority == 0)
+                if (priority == 0) {
                     values[j++] = CStringGetTextDatum("Async");
-                else if (list_member_int(sync_standbys, i)) {
-                    values[j++] = t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY
+                    nulls[j++] = true;
+                } else if (list_member_int((List*)list_nth(sync_standbys, group), i)) {
+                    values[j++] = GetWalsndSyncRepConfig(walsnd)->syncrep_method == SYNC_REP_PRIORITY
                                         ? CStringGetTextDatum("Sync")
                                         : CStringGetTextDatum("Quorum");
-                } else
+                    values[j++] = Int32GetDatum(group);
+                } else {
                     values[j++] = CStringGetTextDatum("Potential");
+                    values[j++] = Int32GetDatum(group);
+                }
                 values[j++] = Int32GetDatum(priority);
             }
 
@@ -6093,6 +6107,10 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
         }
 
         tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+    }
+
+    foreach(lc, sync_standbys) {
+        list_free((List*)lfirst(lc));
     }
     list_free(sync_standbys);
     if (sync_priority != NULL) {

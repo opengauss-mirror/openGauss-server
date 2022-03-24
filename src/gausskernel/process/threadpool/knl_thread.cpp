@@ -792,7 +792,7 @@ static void knl_t_replscanner_init(knl_t_replscanner_context* replscanner_cxt)
 
 static void knl_t_syncgram_init(knl_t_syncrepgram_context* syncrepgram_cxt)
 {
-    syncrepgram_cxt->syncrep_parse_result = NULL;
+    syncrepgram_cxt->syncrep_parse_result = NIL;
 }
 
 static void knl_t_syncrepscanner_init(knl_t_syncrepscanner_context* syncrepscanner_cxt)
@@ -805,6 +805,8 @@ static void knl_t_syncrepscanner_init(knl_t_syncrepscanner_context* syncrepscann
 static void knl_t_syncrep_init(knl_t_syncrep_context* syncrep_cxt)
 {
     syncrep_cxt->SyncRepConfig = NULL;
+    syncrep_cxt->SyncRepConfigGroups = 0;
+    syncrep_cxt->SyncRepMaxPossib = 0;
     syncrep_cxt->announce_next_takeover = true;
 }
 

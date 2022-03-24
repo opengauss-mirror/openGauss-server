@@ -1203,6 +1203,66 @@ static void CheckKeepSyncWindow(char** opt_lines, int idx)
 
 #endif
 
+static void
+parse_next_sync_groups(char **pgroup, char *result)
+{
+    if (**pgroup == '\0') {
+        result[0] = '\0';
+        return;
+    }
+
+    char *this_group = *pgroup;
+    char *p = *pgroup;
+    while (*p != '\0' && *p != ')') p++;
+    while (*p != '\0' && *p != ',') p++;
+    if (*p == ',') {
+        *p = '\0';
+       p++;
+    }
+
+    *pgroup = p;
+    errno_t rc = snprintf_s(result, MAX_VALUE_LEN, MAX_VALUE_LEN - 1, "'%s'", this_group);
+    securec_check_ss_c(rc, "\0", "\0");
+    return;
+}
+
+static int
+transform_az_name(char *config_value, char *allAZString, int allAZStringBufLen, const char *data_dir)
+{
+    char    *azString = NULL;
+    char    *buf = allAZString;
+    int      buflen = allAZStringBufLen;
+
+    char    *allgroup = xstrdup(config_value);
+    char    *pgrp = allgroup + 1;                                  // trim first "'"
+    char    this_group[MAX_VALUE_LEN] = {0x00};
+
+    allgroup[strlen(allgroup) - 1] = '\0';                         // trim last  "'"
+    parse_next_sync_groups(&pgrp, this_group);
+    while (this_group[0] != '\0') {
+        azString = get_AZ_value(this_group, data_dir);
+        if (NULL == azString) {
+            GS_FREE(allgroup);
+            return FAILURE;
+        }
+
+        int azStringLen = strlen(azString);
+        azString[0] = ' ';
+        azString[azStringLen - 1] = ',';
+        errno_t rc = strncpy_s(buf, buflen, azString, azStringLen);
+        securec_check_c(rc, "\0", "\0");
+        buf += azStringLen;
+        buflen -= azStringLen;
+        GS_FREE(azString);
+
+        parse_next_sync_groups(&pgrp, this_group);
+    }
+    GS_FREE(allgroup);
+    allAZString[0] = allAZString[strlen(allAZString) - 1] = '\'';
+
+    return SUCCESS;
+}
+
 /*
  * @@GaussDB@@
  * Brief            :
@@ -1282,17 +1342,16 @@ do_gucset(const char *action_type, const char *data_dir)
 
             // get AZ string
             if (NULL != config_value[i]) {
-                char    *azString = NULL;
-                azString = get_AZ_value(config_value[i], data_dir);
-                if (NULL == azString) {
-                    result_status = FAILURE;
+                char allAZString[MAX_VALUE_LEN] = {0x00};
+
+                result_status = transform_az_name(config_value[i], allAZString, MAX_VALUE_LEN, data_dir);
+                if (result_status == FAILURE) {
                     continue;
                 }
                 tmpAZStr = xstrdup(config_value[i]);
 
                 GS_FREE(config_value[i]);
-                config_value[i] = xstrdup(azString);
-                GS_FREE(azString);
+                config_value[i] = xstrdup(allAZString);
             }
         }
 

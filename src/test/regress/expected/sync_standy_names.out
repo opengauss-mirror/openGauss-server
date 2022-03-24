@@ -1,0 +1,150 @@
+show synchronous_standby_names;
+ synchronous_standby_names 
+---------------------------
+ *
+(1 row)
+
+-- single gram
+alter system set synchronous_standby_names = '*';                                                          -- suc
+alter system set synchronous_standby_names = 'd1, *';                                                      -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "d1, *"
+DETAIL:  Please use the '*' separately, otherwise, it is semantic ambiguity.
+alter system set synchronous_standby_names = '*, *';                                                       -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "*, *"
+DETAIL:  Please use the '*' separately, otherwise, it is semantic ambiguity.
+alter system set synchronous_standby_names = 'd1';                                                         -- suc
+alter system set synchronous_standby_names = 'd1, d2, d3, d4';                                             -- suc
+alter system set synchronous_standby_names = 'd1, d2, d1, d4';                                             -- err, duplicate name
+ERROR:  invalid value for parameter "synchronous_standby_names": "d1, d2, d1, d4"
+DETAIL:  Duplicate standby node name: d1
+alter system set synchronous_standby_names = '2 (*)';                                                      -- suc
+alter system set synchronous_standby_names = '2 (d1, *)';                                                  -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "2 (d1, *)"
+DETAIL:  Please use the '*' separately, otherwise, it is semantic ambiguity.
+alter system set synchronous_standby_names = '2 (*, *)';                                                   -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "2 (*, *)"
+DETAIL:  Please use the '*' separately, otherwise, it is semantic ambiguity.
+alter system set synchronous_standby_names = '2 (d1, d2, d3, d4)';                                         -- suc
+alter system set synchronous_standby_names = '2 (d1, d2, d1, d4)';                                         -- err, duplicate name
+ERROR:  invalid value for parameter "synchronous_standby_names": "2 (d1, d2, d1, d4)"
+DETAIL:  Duplicate standby node name: d1
+alter system set synchronous_standby_names = '5 (d1, d2, d3, d4)';                                         -- err, requriement more than have
+ERROR:  invalid value for parameter "synchronous_standby_names": "5 (d1, d2, d3, d4)"
+DETAIL:  The sync number must less or equals to the number of standby node names.
+alter system set synchronous_standby_names = '0 (d1, d2, d3, d4)';                                         -- suc
+alter system set synchronous_standby_names = '-1 (d1, d2, d3, d4)';                                        -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "-1 (d1, d2, d3, d4)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = 'first 2 (*)';                                                -- suc
+alter system set synchronous_standby_names = 'first 2 (d1, *)';                                            -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "first 2 (d1, *)"
+DETAIL:  Please use the '*' separately, otherwise, it is semantic ambiguity.
+alter system set synchronous_standby_names = 'first 2 (*, *)';                                             -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "first 2 (*, *)"
+DETAIL:  Please use the '*' separately, otherwise, it is semantic ambiguity.
+alter system set synchronous_standby_names = 'first 2 (d1, d2, d3, d4)';                                   -- suc
+alter system set synchronous_standby_names = 'first 2 (d1, d2, d1, d4)';                                   -- err, duplicate name
+ERROR:  invalid value for parameter "synchronous_standby_names": "first 2 (d1, d2, d1, d4)"
+DETAIL:  Duplicate standby node name: d1
+alter system set synchronous_standby_names = 'first 5 (d1, d2, d3, d4)';                                   -- err, requriement more than have
+ERROR:  invalid value for parameter "synchronous_standby_names": "first 5 (d1, d2, d3, d4)"
+DETAIL:  The sync number must less or equals to the number of standby node names.
+alter system set synchronous_standby_names = 'first 0 (d1, d2, d3, d4)';                                   -- suc
+alter system set synchronous_standby_names = 'first -1 (d1, d2, d3, d4)';                                  -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "first -1 (d1, d2, d3, d4)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = 'any 2 (*)';                                                  -- suc
+alter system set synchronous_standby_names = 'any 2 (d1, *';                                               -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, *"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = 'any 2 (*, *)';                                               -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (*, *)"
+DETAIL:  Please use the '*' separately, otherwise, it is semantic ambiguity.
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4)';                                     -- suc
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d1, d4)';                                     -- err, duplicate name
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d1, d4)"
+DETAIL:  Duplicate standby node name: d1
+alter system set synchronous_standby_names = 'any 5 (d1, d2, d3, d4)';                                     -- err, requriement more than have
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 5 (d1, d2, d3, d4)"
+DETAIL:  The sync number must less or equals to the number of standby node names.
+alter system set synchronous_standby_names = 'any 0 (d1, d2, d3, d4)';                                     -- suc
+alter system set synchronous_standby_names = 'any -1 (d1, d2, d3, d4)';                                    -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "any -1 (d1, d2, d3, d4)"
+DETAIL:  synchronous_standby_names parser failed
+-- combinate gram
+alter system set synchronous_standby_names = 'd1, d2, d3, 1 (d5, d6)';                                     -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "d1, d2, d3, 1 (d5, d6)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = '1 (d1, d2, d3), 1 (d5, d6)';                                 -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "1 (d1, d2, d3), 1 (d5, d6)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = '*, 1 (d5, d6)';                                              -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "*, 1 (d5, d6)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = '1 (d1, d2, d3), 1 (*)';                                      -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "1 (d1, d2, d3), 1 (*)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = '1 (d1, d2, d3), 1 (*)';                                      -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "1 (d1, d2, d3), 1 (*)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = 'any 2 (*), any 2 (d1, d2, d3, d4), any 2 (d5, d6, d7)';      -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (*), any 2 (d1, d2, d3, d4), any 2 (d5, d6, d7)"
+DETAIL:  '*' is not support when sync standby strategy is combinated.
+alter system set synchronous_standby_names = 'any 2 (d, dd), any 2 (d1, *, d3, d4), any 2 (d5, d6, d7)';   -- err, semantic ambiguity
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d, dd), any 2 (d1, *, d3, d4), any 2 (d5, d6, d7)"
+DETAIL:  '*' is not support when sync standby strategy is combinated.
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), d5, d6, d7';                         -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d3, d4), d5, d6, d7"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), 2 (d5, d1, d7)';                     -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d3, d4), 2 (d5, d1, d7)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), *';                                  -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d3, d4), *"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = '2 (d1, d2, d3, d4), first 2 (d5, d6, d7)';                   -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "2 (d1, d2, d3, d4), first 2 (d5, d6, d7)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = '2 (d1, d2, d3, d4), any 4 (d5, d6, d7)';                     -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "2 (d1, d2, d3, d4), any 4 (d5, d6, d7)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = '*, any 0 (d5, d6, d7)';                                      -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "*, any 0 (d5, d6, d7)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = 'd1, d2, d3, d4, any 2 (d5, d6, d7)';                         -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "d1, d2, d3, d4, any 2 (d5, d6, d7)"
+DETAIL:  synchronous_standby_names parser failed
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), any 2 (d5, d6, d7)';                 -- suc
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), any 2 (d5, d1, d7)';                 -- err, duplicate name
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d3, d4), any 2 (d5, d1, d7)"
+DETAIL:  Duplicate standby node name: d1
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), any 2 (d5, d6, d6)';                 -- err, duplicate name
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d3, d4), any 2 (d5, d6, d6)"
+DETAIL:  Duplicate standby node name: d6
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), first 2 (d5, d6, d7)';               -- err, not support first
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d3, d4), first 2 (d5, d6, d7)"
+DETAIL:  FIRST rule is not support when sync standby strategy is combinated.
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), any 4 (d5, d6, d7)';                 -- err, requriement more than have
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d3, d4), any 4 (d5, d6, d7)"
+DETAIL:  The sync number must less or equals to the number of standby node names.
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), any 0 (d5, d6, d7)';                 -- suc
+alter system set synchronous_standby_names = 'first 2 (d1, d2, d3, d4), first 2 (d5, d6, d7)';             -- err, not support first
+ERROR:  invalid value for parameter "synchronous_standby_names": "first 2 (d1, d2, d3, d4), first 2 (d5, d6, d7)"
+DETAIL:  FIRST rule is not support when sync standby strategy is combinated.
+alter system set synchronous_standby_names = 'any 2 (d1, d2, d3, d4), , any 0 (d5, d6, d7)';               -- err, parser err
+ERROR:  invalid value for parameter "synchronous_standby_names": "any 2 (d1, d2, d3, d4), , any 0 (d5, d6, d7)"
+DETAIL:  synchronous_standby_names parser failed
+-- recover
+alter system set synchronous_standby_names = '*';
+select pg_sleep(3);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show synchronous_standby_names;
+ synchronous_standby_names 
+---------------------------
+ *
+(1 row)
+

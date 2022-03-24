@@ -118,10 +118,11 @@ typedef struct WalSnd {
     Latch latch;
 
     /*
-     * The priority order of the standby managed by this WALSender, as listed
-     * in synchronous_standby_names, or 0 if not-listed. Protected by
-     * SyncRepLock.
+     * The strategy group and priority order of the standby managed by this WALSender,
+     * as listed in synchronous_standby_names, or 0 if not-listed. 
+     * Protected by SyncRepLock.
      */
+    uint8 sync_standby_group;
     int sync_standby_priority;
     int index;
     LogCtrlData log_ctrl;

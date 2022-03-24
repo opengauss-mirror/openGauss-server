@@ -1270,8 +1270,9 @@ void GetMinLsnRecordsFromHadrCascadeStandby(void)
     qsort(standbyApplyList, g_instance.attr.attr_storage.max_wal_senders, sizeof(XLogRecPtr), cmp_min_lsn);
     applyLoc = GetXLogReplayRecPtr(NULL, &ReplayReadPtr);
     t_thrd.walreceiver_cxt.reply_message->applyRead = ReplayReadPtr;
-    for (i = t_thrd.syncrep_cxt.SyncRepConfig->num_sync - 1; i >= 0; i--) {
-        if (i < t_thrd.syncrep_cxt.SyncRepConfig->num_sync - 1) {
+    int min_require = Min(g_instance.attr.attr_storage.max_wal_senders, t_thrd.syncrep_cxt.SyncRepMaxPossib);
+    for (i = min_require - 1 ; i >= 0; i--) {
+        if (i < min_require - 1) {
             needReport = true;
         }
         if (standbyReceiveList[i] != InvalidXLogRecPtr) {
