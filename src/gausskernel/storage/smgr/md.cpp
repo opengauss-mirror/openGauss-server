@@ -2403,7 +2403,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
                 chunk_size = PageCompressChunkSize(reln);
                 pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, chunk_size);
 
-                for (BlockNumber blk = 0; blk < RELSEG_SIZE; ++blk) {
+                for (BlockNumber blk = last_seg_blocks; blk < RELSEG_SIZE; ++blk) {
                     pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blk);
                     pcAddr->nchunks = 0;
                     pcAddr->checksum = AddrChecksum32(blk, pcAddr, chunk_size);
