@@ -122,8 +122,8 @@ static void transformStartWithClause(StartWithTransformContext *context, SelectS
 
 static List *expandAllTargetList(List *targetRelInfoList);
 
-static List *ExtractColumnRefStartInfo(ParseState *pstate, ColumnRef *column,
-                                            char *relname, char *colname);
+static List *ExtractColumnRefStartInfo(ParseState *pstate, ColumnRef *column, char *relname, char *colname,
+                                       Node *preResult);
 static void HandleSWCBColumnRef(StartWithTransformContext* context, Node *node);
 static void StartWithWalker(StartWithTransformContext *context, Node *expr);
 static void AddWithClauseToBranch(ParseState *pstate, SelectStmt *stmt, List *relInfoList);
@@ -534,6 +534,21 @@ static bool preSkipPLSQLParams(ParseState *pstate, ColumnRef *cref)
     return false;
 }
 
+/**
+ * @param preResult Var struct
+ * @return true if is a upper query column
+ */
+static inline bool IsAUpperQueryColumn(Node *preResult)
+{
+    if (IsA(preResult, Var)) {
+        Var *varNode = (Var *)preResult;
+        if (!IS_SPECIAL_VARNO(varNode->varno) && varNode->varlevelsup >= 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /*
  * --------------------------------------------------------------------------------------
  * @Brief: to be input
@@ -543,8 +558,8 @@ static bool preSkipPLSQLParams(ParseState *pstate, ColumnRef *cref)
  * @Return: to be input
  * --------------------------------------------------------------------------------------
  */
-static List *ExtractColumnRefStartInfo(ParseState *pstate, ColumnRef *column,
-                                           char *relname, char *colname)
+static List *ExtractColumnRefStartInfo(ParseState *pstate, ColumnRef *column, char *relname, char *colname,
+                                       Node *preResult)
 {
     ListCell *lc1 = NULL;
     ListCell *lc2 = NULL;
@@ -613,7 +628,7 @@ static List *ExtractColumnRefStartInfo(ParseState *pstate, ColumnRef *column,
                 errmsg("column reference \"%s\" is ambiguous.", colname)));
     }
 
-    if (list_length(extract_infos) == 0) {
+    if (list_length(extract_infos) == 0 && !IsAUpperQueryColumn(preResult)) {
         ereport(WARNING,
                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                errmsg("Cannot match table with startwith/connectby column %s.%s, maybe it is a upper query column",
@@ -678,7 +693,7 @@ static void HandleSWCBColumnRef(StartWithTransformContext *context, Node *node)
              * which will be helpful for after SWCB rewrite. So here columnref will contain
              * two fields after ExtractColumnRefStartInfo.
              */
-            result = ExtractColumnRefStartInfo(pstate, column, NULL, colname);
+            result = ExtractColumnRefStartInfo(pstate, column, NULL, colname, preResult);
 
             if (prior) {
                 char *dummy = makeStartWithDummayColname(
@@ -700,7 +715,7 @@ static void HandleSWCBColumnRef(StartWithTransformContext *context, Node *node)
             relname = strVal(field1);
             colname = strVal(field2);
 
-            result = ExtractColumnRefStartInfo(pstate, column, relname, colname);
+            result = ExtractColumnRefStartInfo(pstate, column, relname, colname, preResult);
 
             if (prior) {
                 char *dummy = makeStartWithDummayColname(strVal(linitial(column->fields)),
