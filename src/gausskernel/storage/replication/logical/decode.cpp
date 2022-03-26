@@ -440,6 +440,11 @@ static void DecodeHeap3Op(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
     switch (info) {
         case XLOG_HEAP3_NEW_CID: {
+            xl_heap_new_cid *xlrec = NULL;
+            int bucket_id = 0;
+            xlrec = (xl_heap_new_cid *)buf->record_data;
+            bucket_id = XLogRecGetBucketId(buf->record);
+            SnapBuildProcessNewCid(builder, xid, buf->origptr, xlrec, bucket_id);
             break;
         }
         case XLOG_HEAP3_REWRITE:
