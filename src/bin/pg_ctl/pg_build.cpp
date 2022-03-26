@@ -875,6 +875,74 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
     return con_get;
 }
 
+/* check connection for standby build standby */
+PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 term)
+{
+    PGconn* con_get = NULL;
+    char repl_conninfo_str[MAXPGPATH];
+    ServerMode remote_mode = UNKNOWN_MODE;
+    int tnRet = 0;
+    int repl_arr_length;
+    int i = 0;
+    int parse_failed_num = 0;
+
+    for (i = 1; i < MAX_REPLNODE_NUM; i++) {
+        ReplConnInfo* repl_conn_info = ParseReplConnInfo(conninfo_global[i - 1], &repl_arr_length);
+        if (repl_conn_info == NULL) {
+            parse_failed_num++;
+            continue;
+        }
+
+        tnRet = memset_s(repl_conninfo_str, MAXPGPATH, 0, MAXPGPATH);
+        securec_check_ss_c(tnRet, "", "");
+
+        tnRet = snprintf_s(repl_conninfo_str,
+            sizeof(repl_conninfo_str),
+            sizeof(repl_conninfo_str) - 1,
+            "localhost=%s localport=%d host=%s port=%d "
+            "dbname=replication replication=true "
+            "fallback_application_name=gs_ctl "
+            "connect_timeout=%d rw_timeout=%d "
+            "options='-c remotetype=application'",
+            repl_conn_info->localhost,
+            repl_conn_info->localport,
+            repl_conn_info->remotehost,
+            repl_conn_info->remoteport,
+            conn_timeout,
+            recv_timeout);
+        securec_check_ss_c(tnRet, "", "");
+
+        free(repl_conn_info);
+        repl_conn_info = NULL;
+        con_get = PQconnectdb(repl_conninfo_str);
+        if (con_get != NULL && PQstatus(con_get) == CONNECTION_OK && check_remote_version(con_get, term)) {
+            remote_mode = get_remote_mode(con_get);
+            if (remote_mode == STANDBY_MODE && (g_replconn_idx == -1 || i == g_replconn_idx)) {
+                g_replconn_idx = i;
+                break;
+            }
+        } else {
+            if (conn_str != NULL) {
+                pg_log(PG_WARNING, "The given address can not been access.\n");
+                if (con_get != NULL) {
+                    PQfinish(con_get);
+                }
+                exit(1);
+            }
+        }
+    }
+
+    if (parse_failed_num == MAX_REPLNODE_NUM - 1) {
+        pg_log(PG_WARNING, "Invalid value for parameter \"replconninfo\" in postgresql.conf or no correct standby.\n");
+        if (con_get != NULL) {
+            PQfinish(con_get);
+        }
+        exit(1);
+    }
+
+    return con_get;
+}
+
 /*
  * Brief            : @@GaussDB@@
  * Description    : find the value of guc para according to name

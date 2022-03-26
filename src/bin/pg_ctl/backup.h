@@ -16,7 +16,7 @@ extern int bgpipe[2];
 extern pid_t bgchild;
 
 extern char* formatLogTime();
-void backup_main(char* dir, uint32 term);
+void backup_main(char* dir, uint32 term, bool isFromStandby);
 void backup_incremental_xlog(char* dir);
 void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
 bool CreateBuildtagFile(const char* fulltagname);

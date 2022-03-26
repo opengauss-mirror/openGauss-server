@@ -13268,6 +13268,63 @@ char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfi
     return startpoint;
 }
 
+XLogRecPtr StandbyDoStartBackup(const char* backupidstr, char** labelFile, char** tblSpcMapFile, List** tableSpaces,
+    DIR* tblSpcDir, bool infoTbsSize)
+{
+    StringInfoData labelfbuf;
+    StringInfoData tblspc_mapfbuf;
+    pg_time_t stamp_time;
+    char strfbuf[128];
+    char xlogFileName[MAXFNAMELEN];
+    XLogSegNo _logSegNo;
+    XLogRecPtr checkPointLoc;
+    XLogRecPtr startPoint;
+    errno_t errorno = EOK;
+
+    LWLockAcquire(ControlFileLock, LW_SHARED);
+    checkPointLoc = t_thrd.shemem_ptr_cxt.ControlFile->checkPoint;
+    startPoint = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
+    LWLockRelease(ControlFileLock);
+
+    XLByteToSeg(startPoint, _logSegNo);
+    errorno = snprintf_s(xlogFileName, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", t_thrd.xlog_cxt.ThisTimeLineID,
+                         (uint32)((_logSegNo) / XLogSegmentsPerXLogId),
+                         (uint32)((_logSegNo) % XLogSegmentsPerXLogId));
+    securec_check_ss(errorno, "", "");
+
+    /*
+     * Construct tablespace_map file
+     */
+    initStringInfo(&tblspc_mapfbuf);
+    CollectTableSpace(tblSpcDir, tableSpaces, &tblspc_mapfbuf, infoTbsSize);
+
+    /*
+     * Construct backup label file
+     */
+    initStringInfo(&labelfbuf);
+
+    /* Use the log timezone here, not the session timezone */
+    stamp_time = (pg_time_t)time(NULL);
+    pg_strftime(strfbuf, sizeof(strfbuf), "%Y-%m-%d %H:%M:%S %Z", pg_localtime(&stamp_time, log_timezone));
+    appendStringInfo(&labelfbuf, "START WAL LOCATION: %X/%X (file %s)\n", (uint32)(startPoint >> 32),
+                     (uint32)startPoint, xlogFileName);
+    appendStringInfo(&labelfbuf, "CHECKPOINT LOCATION: %X/%X\n", (uint32)(checkPointLoc >> 32),
+                     (uint32)checkPointLoc);
+    appendStringInfo(&labelfbuf, "BACKUP METHOD: streamed\n");
+    appendStringInfo(&labelfbuf, "BACKUP FROM: standby\n");
+    appendStringInfo(&labelfbuf, "START TIME: %s\n", strfbuf);
+    appendStringInfo(&labelfbuf, "LABEL: %s\n", backupidstr);
+
+    /*
+     * Okay, write the file, or return its contents to caller.
+     */
+    *labelFile = labelfbuf.data;
+    if (tblspc_mapfbuf.len > 0) {
+        *tblSpcMapFile = tblspc_mapfbuf.data;
+    }
+    return startPoint;
+}
+
 /* Error cleanup callback for pg_start_backup */
 static void pg_start_backup_callback(int code, Datum arg)
 {
@@ -13676,6 +13733,48 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive)
      * We're done.  As a convenience, return the ending WAL location.
      */
     return stoppoint;
+}
+
+/*
+ *
+ */
+XLogRecPtr StandbyDoStopBackup(char *labelfile)
+{
+    XLogRecPtr stopPoint;
+    XLogRecPtr startPoint;
+    uint32 hi, lo;
+    char startxlogfilename[MAXFNAMELEN];
+    char ch;
+    char *remaining = NULL;
+    /*
+     * During recovery, we don't need to check WAL level. Because, if WAL
+     * level is not sufficient, it's impossible to get here during recovery.
+     */
+    if (!XLogIsNeeded()) {
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("WAL level not sufficient for making an online backup"),
+                 errhint("wal_level must be set to \"archive\", \"hot_standby\" or \"logical\" at server start.")));
+    }
+    /*
+     * Read and parse the START WAL LOCATION line (this code is pretty crude,
+     * but we are not expecting any variability in the file format).
+     */
+    if (sscanf_s(labelfile, "START WAL LOCATION: %X/%X (file %24s)%c", &hi, &lo, startxlogfilename,
+                 sizeof(startxlogfilename), &ch, 1) != 4 ||
+        ch != '\n') {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                        errmsg("invalid data in file \"%s\"", BACKUP_LABEL_FILE)));
+    }
+    startPoint = (((uint64)hi) << 32) | lo;
+    remaining = strchr(labelfile, '\n') + 1; /* %n is not portable enough */
+    LWLockAcquire(ControlFileLock, LW_SHARED);
+    stopPoint = t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo;
+    LWLockRelease(ControlFileLock);
+    if (XLByteLE(stopPoint, startPoint)) {
+        stopPoint = GetXLogReplayRecPtr(NULL);
+    }
+    return stopPoint;
 }
 
 /*
