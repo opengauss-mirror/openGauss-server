@@ -28,7 +28,6 @@
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/syscache.h"
-#include "replication/worker_internal.h"
 
 static List *textarray_to_stringlist(ArrayType *textarray);
 
@@ -69,7 +68,7 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
 
     /* Get slotname */
     datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subslotname, &isnull);
-    if (!isnull) {
+    if (unlikely(isnull)) {
         sub->slotname = pstrdup(NameStr(*DatumGetName(datum)));
     } else {
         sub->slotname = NULL;
@@ -90,6 +89,13 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
             errmsg("null publications for subscription %u", subid)));
     }
     sub->publications = textarray_to_stringlist(DatumGetArrayTypeP(datum));
+
+    datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subbinary, &isnull);
+    if (unlikely(isnull)) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("null binary for subscription %u", subid)));
+    }
+    sub->binary = DatumGetBool(datum);
 
     ReleaseSysCache(tup);
 
@@ -183,7 +189,7 @@ char *get_subscription_name(Oid subid, bool missing_ok)
 }
 
 /* Clear the list content, only deal with DefElem and string content */
-static void ClearListContent(List *list)
+void ClearListContent(List *list)
 {
     ListCell *cell = NULL;
     foreach(cell, list) {
@@ -201,25 +207,6 @@ static void ClearListContent(List *list)
         errno_t errCode = memset_s(str, len, 0, len);
         securec_check(errCode, "\0", "\0");
     }
-}
-
-/*
- * Decrypt conninfo for subscription.
- * IMPORTANT: caller should clear and free the memory after using it immediately
- */
-char *DecryptConninfo(char *encryptConninfo)
-{
-    const char* sensitiveOptionsArray[] = {"password"};
-    const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
-    List *defList = ConninfoToDefList(encryptConninfo);
-    DecryptOptions(defList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
-    char *decryptConninfo = DefListToString(defList);
-
-    /* defList has plain content, clear it before free */
-    ClearListContent(defList);
-    list_free_ext(defList);
-    /* IMPORTANT: caller should clear and free the memory after using it immediately */
-    return decryptConninfo;
 }
 
 /*

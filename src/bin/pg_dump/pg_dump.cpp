@@ -233,6 +233,7 @@ char* all_data_nodename_list = NULL;
 const uint32 USTORE_UPGRADE_VERSION = 92368;
 const uint32 PACKAGE_ENHANCEMENT = 92444;
 const uint32 SUBSCRIPTION_VERSION = 92580;
+const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92607;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -4444,7 +4445,9 @@ void getSubscriptions(Archive *fout)
     int i_subslotname;
     int i_subsynccommit;
     int i_subpublications;
-    int i, ntups;
+    int i_subbinary;
+    int i;
+    int ntups;
 
     if (no_subscriptions || GetVersionNum(fout) < SUBSCRIPTION_VERSION) {
         return;
@@ -4469,14 +4472,20 @@ void getSubscriptions(Archive *fout)
     resetPQExpBuffer(query);
 
     /* Get the subscriptions in current database. */
-    appendPQExpBuffer(query,
-        "SELECT s.tableoid, s.oid, s.subname,"
-        "(%s s.subowner) AS rolname, "
-        " s.subconninfo, s.subslotname, s.subsynccommit, s.subpublications "
-        "FROM pg_catalog.pg_subscription s "
+    appendPQExpBuffer(query, "SELECT s.tableoid, s.oid, s.subname,"
+        "(%s s.subowner) AS rolname, s.subconninfo, s.subslotname, "
+        "s.subsynccommit, s.subpublications, \n", username_subquery);
+
+    if (GetVersionNum(fout) >= SUBSCRIPTION_BINARY_VERSION_NUM) {
+        appendPQExpBuffer(query, " s.subbinary\n");
+    } else {
+        appendPQExpBuffer(query, " false AS subbinary\n");
+    }
+
+    appendPQExpBuffer(query, "FROM pg_catalog.pg_subscription s "
         "WHERE s.subdbid = (SELECT oid FROM pg_catalog.pg_database"
-        "                   WHERE datname = current_database())",
-        username_subquery);
+        "                   WHERE datname = current_database())");
+
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
     ntups = PQntuples(res);
@@ -4494,6 +4503,7 @@ void getSubscriptions(Archive *fout)
     i_subslotname = PQfnumber(res, "subslotname");
     i_subsynccommit = PQfnumber(res, "subsynccommit");
     i_subpublications = PQfnumber(res, "subpublications");
+    i_subbinary = PQfnumber(res, "subbinary");
 
     subinfo = (SubscriptionInfo *)pg_malloc(ntups * sizeof(SubscriptionInfo));
 
@@ -4512,6 +4522,7 @@ void getSubscriptions(Archive *fout)
         }
         subinfo[i].subsynccommit = gs_strdup(PQgetvalue(res, i, i_subsynccommit));
         subinfo[i].subpublications = gs_strdup(PQgetvalue(res, i, i_subpublications));
+        subinfo[i].subbinary = gs_strdup(PQgetvalue(res, i, i_subbinary));
 
         if (strlen(subinfo[i].rolname) == 0) {
             write_msg(NULL, "WARNING: owner of subscription \"%s\" appears to be invalid\n", subinfo[i].dobj.name);
@@ -4576,6 +4587,10 @@ static void dumpSubscription(Archive *fout, const SubscriptionInfo *subinfo)
         appendStringLiteralAH(query, subinfo->subslotname, fout);
     } else {
         appendPQExpBufferStr(query, "NONE");
+    }
+
+    if (strcmp(subinfo->subbinary, "t") == 0) {
+        appendPQExpBuffer(query, ", binary = true");
     }
 
     if (strcmp(subinfo->subsynccommit, "off") != 0) {
