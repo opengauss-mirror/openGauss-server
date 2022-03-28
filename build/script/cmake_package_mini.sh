@@ -631,8 +631,7 @@ function target_file_copy()
     echo  "Begin generate ${bin_name}  bin file..."  >> "$LOG_FILE" 2>&1
     curpath=$(pwd)
     cd $2
-    tar -zcf ${bin_name} .  >> "$LOG_FILE" 2>&1
-    mv ${bin_name} ${curpath}
+    tar -zcf ${curpath}/${bin_name} .  >> "$LOG_FILE" 2>&1
     cd ${curpath}
     if [ $? -ne 0 ]; then
         echo "Please check and makesure '7z' exist. "

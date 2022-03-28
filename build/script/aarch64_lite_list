@@ -10,6 +10,7 @@
 ./bin/gs_restore
 ./bin/pg_config
 ./bin/pg_controldata
+./bin/gs_probackup
 ./bin/pg_resetxlog
 ./bin/alarmItem.conf
 ./bin/retry_errcodes.conf
