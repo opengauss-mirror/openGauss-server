@@ -43,6 +43,40 @@
 #include "utils/rel.h"
 #include "utils/syscache.h"
 
+/* check if namespace is internal schema, internal schema doesn't need publish */
+static inline bool IsInternalSchema(Oid relnamespace)
+{
+    Assert(CSTORE_NAMESPACE < PG_PKG_SERVICE_NAMESPACE);
+    Assert(PG_PKG_SERVICE_NAMESPACE < PG_DBEPERF_NAMESPACE);
+    Assert(PG_DBEPERF_NAMESPACE < PG_SNAPSHOT_NAMESPACE);
+    Assert(PG_SNAPSHOT_NAMESPACE < PG_BLOCKCHAIN_NAMESPACE);
+    Assert(PG_BLOCKCHAIN_NAMESPACE < PG_DB4AI_NAMESPACE);
+    Assert(PG_DB4AI_NAMESPACE < PG_PLDEBUG_NAMESPACE);
+#ifndef ENABLE_MULTIPLE_NODES
+    Assert(PG_PLDEBUG_NAMESPACE < DBE_PLDEVELOPER_NAMESPACE);
+    Assert(DBE_PLDEVELOPER_NAMESPACE < PG_SQLADVISOR_NAMESPACE);
+#else
+    Assert(PG_PLDEBUG_NAMESPACE < PG_SQLADVISOR_NAMESPACE);
+#endif
+
+    /* please make sure the list is ordered */
+    static Oid internalSchemaList[] = {
+        CSTORE_NAMESPACE,
+        PG_PKG_SERVICE_NAMESPACE,
+        PG_DBEPERF_NAMESPACE,
+        PG_SNAPSHOT_NAMESPACE,
+        PG_BLOCKCHAIN_NAMESPACE,
+        PG_DB4AI_NAMESPACE,
+        PG_PLDEBUG_NAMESPACE,
+#ifndef ENABLE_MULTIPLE_NODES
+        DBE_PLDEVELOPER_NAMESPACE,
+#endif
+        PG_SQLADVISOR_NAMESPACE
+    };
+    static size_t count = lengthof(internalSchemaList);
+    return bsearch(&relnamespace, &internalSchemaList, count, sizeof(Oid), oid_cmp) != NULL;
+}
+
 /*
  * Check if relation can be in given publication and throws appropriate
  * error if not.
@@ -66,6 +100,19 @@ static void check_publication_add_relation(Relation targetrel)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("table \"%s\" cannot be replicated", RelationGetRelationName(targetrel)),
             errdetail("Temporary and unlogged relations cannot be replicated.")));
+
+    if (IsInternalSchema(targetrel->rd_rel->relnamespace)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("\"%s\" is in internal schema", RelationGetRelationName(targetrel)),
+            errdetail("\"%s\" is a internal schema, table in this schema cannot be replicated.",
+            get_namespace_name(RelationGetNamespace(targetrel)))));
+    }
+
+    if (!RelationIsRowFormat(targetrel)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("\"%s\" is not a row table", RelationGetRelationName(targetrel)),
+            errdetail("Only row tables can be added to publications.")));
+    }
 }
 
 /*
@@ -102,30 +149,43 @@ static Publication *GetPublication(Oid pubid)
  * Returns if relation represented by oid and Form_pg_class entry
  * is publishable.
  *
- * Does same checks as the above, but does not need relation to be opened
+ * Does same checks as check_publication_add_relation, but does not need relation to be opened
  * and also does not throw errors.
  */
-static bool is_publishable_class(Oid relid, Form_pg_class reltuple)
+static bool is_publishable_class(Oid relid, HeapTuple tuple, Relation rel)
 {
-    /* internal namespace, doesn't need to publish */
-    if (reltuple->relnamespace == CSTORE_NAMESPACE || reltuple->relnamespace == PG_PKG_SERVICE_NAMESPACE ||
-#ifndef ENABLE_MULTIPLE_NODES
-        reltuple->relnamespace == DBE_PLDEVELOPER_NAMESPACE ||
-#endif
-        reltuple->relnamespace == PG_SNAPSHOT_NAMESPACE || reltuple->relnamespace == PG_SQLADVISOR_NAMESPACE ||
-        reltuple->relnamespace == PG_BLOCKCHAIN_NAMESPACE || reltuple->relnamespace == PG_DB4AI_NAMESPACE ||
-        reltuple->relnamespace == PG_PLDEBUG_NAMESPACE) {
-        return false;
+    Form_pg_class reltuple = NULL;
+    if (rel != NULL) {
+        reltuple = rel->rd_rel;
+    } else if (tuple != NULL) {
+        reltuple = (Form_pg_class)GETSTRUCT(tuple);
+    } else {
+        /* should not happen */
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("null input of pg_class heap tuple or relation, oid: %u", relid)));
     }
-    return reltuple->relkind == RELKIND_RELATION && !IsCatalogClass(relid, reltuple) &&
-        reltuple->relpersistence == RELPERSISTENCE_PERMANENT &&
+
+    if (IsInternalSchema(reltuple->relnamespace) || reltuple->relkind != RELKIND_RELATION ||
+        IsCatalogClass(relid, reltuple) || reltuple->relpersistence != RELPERSISTENCE_PERMANENT ||
         /*
          * Also exclude any tables created as part of initdb. This mainly
          * affects the preinstalled information_schema.
          * Note that IsCatalogClass() only checks for these inside pg_catalog
          * and toast schemas.
          */
-        relid >= FirstNormalObjectId;
+        relid < FirstNormalObjectId) {
+        return false;
+    }
+
+    /* check whether is row table */
+    bool isRowTable = true;
+    if (rel != NULL) {
+        isRowTable = RelationIsRowFormat(rel);
+    } else {
+        /* already checkd tuple before */
+        isRowTable = CheckRelOrientationByPgClassTuple(tuple, GetDefaultPgClassDesc(), ORIENTATION_ROW);
+    }
+    return isRowTable;
 }
 
 /*
@@ -314,9 +374,9 @@ static List *GetAllTablesPublicationRelations(void)
 
     while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
         Oid relid = HeapTupleGetOid(tuple);
-        Form_pg_class relForm = (Form_pg_class)GETSTRUCT(tuple);
-        if (is_publishable_class(relid, relForm))
+        if (is_publishable_class(relid, tuple, NULL)) {
             result = lappend_oid(result, relid);
+        }
     }
 
     heap_endscan(scan);
@@ -432,5 +492,5 @@ Datum pg_get_publication_tables(PG_FUNCTION_ARGS)
  */
 bool is_publishable_relation(Relation rel)
 {
-    return is_publishable_class(RelationGetRelid(rel), rel->rd_rel);
+    return is_publishable_class(RelationGetRelid(rel), NULL, rel);
 }
