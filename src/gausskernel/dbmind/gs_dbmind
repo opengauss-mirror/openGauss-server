@@ -38,6 +38,13 @@ function extract_libname() {
 ABSPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DBMIND_PATH=${ABSPATH}/dbmind
 
+if [[ ! -d $DBMIND_PATH && -d "$ABSPATH/tools" ]]; then
+    die "Not found the subdirectory 'dbmind' but found 'tools'. Maybe you are in the source code directory.\n
+If you want to debug DBMind in this directory, you should rename the name of subdirectory 'tools' to 'dbmind', as follows: \n
+> mv tools dbmind
+  "
+fi
+
 # Check whether Python has been installed onto the OS.
 PYTHON=$(which python)
 if [[ "$?" != "0" ]]; then
