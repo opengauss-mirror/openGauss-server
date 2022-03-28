@@ -2316,7 +2316,11 @@ bool gs_stop_query(gsocket* gsock, uint32 remote_pid)
 /* get the error information of communication layer */
 const char* gs_comm_strerror()
 {
-    return mc_strerror(errno);
+    bool savedVal = t_thrd.int_cxt.ImmediateInterruptOK;
+    t_thrd.int_cxt.ImmediateInterruptOK = false;
+    const char *errMsg = mc_strerror(errno);
+    t_thrd.int_cxt.ImmediateInterruptOK = savedVal;
+    return errMsg;
 }
 
 /* get communication layer stream status at receiver end as a tuple for pg_comm_stream_status */
