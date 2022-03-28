@@ -192,7 +192,7 @@ static const char *BuiltinTrancheNames[] = {
     "BarrierHashTblLock",
     "PageRepairHashTblLock",
     "FileRepairHashTblLock",
-    "ReplicationOriginLock",
+    "ReplicationOriginSlotLock",
     "AuditIndextblLock"
 };
 
