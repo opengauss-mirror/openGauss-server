@@ -14,7 +14,10 @@
 #ifndef RELFILENODEMAP_H
 #define RELFILENODEMAP_H
 
+extern Oid RelidByRelfilenodeCache(Oid reltablespace, Oid relfilenode);
 extern Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode);
+extern Oid PartitionRelidByRelfilenodeCache(Oid reltablespace, Oid relfilenode, Oid &partationReltoastrelid);
 extern Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid& partationReltoastrelid);
 
+extern Oid HeapGetRelid(Oid reltablespace, Oid relfilenode, Oid &partationReltoastrelid);
 #endif /* RELFILENODEMAP_H */

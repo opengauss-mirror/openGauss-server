@@ -1316,11 +1316,8 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                 case REORDER_BUFFER_CHANGE_DELETE:
                     Assert(snapshot_now);
 
-                    reloid = RelidByRelfilenode(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode);
-                    if (reloid == InvalidOid) {
-                        reloid = PartitionRelidByRelfilenode(change->data.tp.relnode.spcNode,
-                                                             change->data.tp.relnode.relNode, partitionReltoastrelid);
-                    }
+                    reloid = HeapGetRelid(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode,
+                        partitionReltoastrelid);
                     /*
                      * Catalog tuple without data, emitted while catalog was
                      * in the process of being rewritten.
