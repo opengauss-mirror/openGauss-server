@@ -1931,7 +1931,10 @@ Datum pg_filenode_relation(PG_FUNCTION_ARGS)
     Oid relfilenode = PG_GETARG_OID(1);
     Oid heaprel = InvalidOid;
 
-    heaprel = RelidByRelfilenode(reltablespace, relfilenode);
+    heaprel = RelidByRelfilenodeCache(reltablespace, relfilenode);
+    if (!OidIsValid(heaprel)) {
+        heaprel = RelidByRelfilenode(reltablespace, relfilenode);
+    }
 
     if (!OidIsValid(heaprel))
         PG_RETURN_NULL();

@@ -1737,8 +1737,11 @@ typedef struct knl_u_relmap_context {
     struct RelMapFile* pending_local_updates;
 
     struct ScanKeyData relfilenodeSkey[2];
+    /* used for partition */
+    struct ScanKeyData partfilenodeSkey[2];
     /* Hash table for informations about each relfilenode <-> oid pair */
     struct HTAB* RelfilenodeMapHash;
+    struct HTAB* PartfilenodeMapHash;
 } knl_u_relmap_context;
 
 typedef struct knl_u_unique_sql_context {

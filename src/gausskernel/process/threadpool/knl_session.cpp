@@ -964,6 +964,7 @@ static void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)
     relmap_cxt->pending_shared_updates = (RelMapFile*)palloc0(sizeof(RelMapFile));
     relmap_cxt->pending_local_updates = (RelMapFile*)palloc0(sizeof(RelMapFile));
     relmap_cxt->RelfilenodeMapHash = NULL;
+    relmap_cxt->PartfilenodeMapHash = NULL;
 }
 
 static void knl_u_inval_init(knl_u_inval_context* inval_cxt)

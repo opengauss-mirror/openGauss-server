@@ -34,6 +34,8 @@
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
 
+static const int PARTITION_HASH_ELEM_SIZE = 4096;
+
 typedef struct {
     Oid reltablespace;
     Oid relfilenode;
@@ -43,6 +45,17 @@ typedef struct {
     RelfilenodeMapKey key; /* lookup key - must be first */
     Oid relid;             /* pg_class.oid */
 } RelfilenodeMapEntry;
+
+typedef struct {
+    Oid reltablespace;
+    Oid relfilenode;
+} PartfilenodeMapKey;
+ 
+typedef struct {
+    PartfilenodeMapKey key; /* lookup key - must be first */
+    Oid relid;             /* pg_partition.oid */
+    Oid reltoastrelid;     /* pg_partition.reltoastrelid */
+} PartfilenodeMapEntry;
 
 /*
  * RelfilenodeMapInvalidateCallback
@@ -66,6 +79,31 @@ static void RelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
             entry->relid == InvalidOid || /* negative cache entry */
             entry->relid == relid) {      /* individual flushed relation */
             if (hash_search(u_sess->relmap_cxt.RelfilenodeMapHash, (void *) &entry->key, HASH_REMOVE, NULL) == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_RELFILENODEMAP), errmsg("hash table corrupted")));
+            }
+        }
+    }
+}
+
+static void PartfilenodeMapInvalidateCallback(Datum arg, Oid relid)
+{
+    HASH_SEQ_STATUS status;
+    PartfilenodeMapEntry* entry = NULL;
+    /* callback only gets registered after creating the hash */
+    Assert(u_sess->relmap_cxt.PartfilenodeMapHash != NULL);
+ 
+    hash_seq_init(&status, u_sess->relmap_cxt.PartfilenodeMapHash);
+    while ((entry = (PartfilenodeMapEntry*)hash_seq_search(&status)) != NULL) {
+        /*
+         * If relid is InvalidOid, signalling a complete reset, we must remove
+         * all entries, otherwise just remove the specific relation's entry.
+         * Always remove negative cache entries.
+         */
+        if (relid == InvalidOid ||        /* complete reset */
+            entry->relid == InvalidOid || /* negative cache entry */
+            entry->relid == relid) {      /* individual flushed relation */
+            if (hash_search(u_sess->relmap_cxt.PartfilenodeMapHash,
+                (void *) &entry->key, HASH_REMOVE, NULL) == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_RELFILENODEMAP), errmsg("hash table corrupted")));
             }
         }
@@ -116,6 +154,73 @@ static void InitializeRelfilenodeMap()
     CacheRegisterRelcacheCallback(RelfilenodeMapInvalidateCallback, (Datum)0);
 }
 
+static void InitializePartfilenodeMap()
+{
+    HASHCTL ctl;
+    int i;
+ 
+    /* build skey */
+    errno_t ret = memset_s(&u_sess->relmap_cxt.partfilenodeSkey,
+        sizeof(u_sess->relmap_cxt.partfilenodeSkey), 0, sizeof(u_sess->relmap_cxt.partfilenodeSkey));
+    securec_check(ret, "\0", "\0");
+ 
+    for (i = 0; i < 2; i++) {
+        fmgr_info_cxt(F_OIDEQ, &u_sess->relmap_cxt.partfilenodeSkey[i].sk_func, u_sess->cache_mem_cxt);
+        u_sess->relmap_cxt.partfilenodeSkey[i].sk_strategy = BTEqualStrategyNumber;
+        u_sess->relmap_cxt.partfilenodeSkey[i].sk_subtype = InvalidOid;
+        u_sess->relmap_cxt.partfilenodeSkey[i].sk_collation = InvalidOid;
+    }
+ 
+    u_sess->relmap_cxt.partfilenodeSkey[0].sk_attno = Anum_pg_partition_reltablespace;
+    u_sess->relmap_cxt.partfilenodeSkey[1].sk_attno = Anum_pg_partition_relfilenode;
+ 
+    /* Initialize the hash table. */
+    ret = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(ret, "\0", "\0");
+    ctl.keysize = sizeof(PartfilenodeMapKey);
+    ctl.entrysize = sizeof(PartfilenodeMapEntry);
+    ctl.hash = tag_hash;
+    ctl.hcxt = u_sess->cache_mem_cxt;
+ 
+    /*
+     * Only create the relmap_cxt->PartfilenodeMapHash now, so we don't end up partially
+     * initialized when fmgr_info_cxt() above ERRORs out with an out of memory
+     * error.
+     */
+    u_sess->relmap_cxt.PartfilenodeMapHash = hash_create("PartfilenodeMap cache",
+        PARTITION_HASH_ELEM_SIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+ 
+    /* Watch for invalidation events. */
+    CacheRegisterRelcacheCallback(PartfilenodeMapInvalidateCallback, (Datum)0);
+}
+
+Oid RelidByRelfilenodeCache(Oid reltablespace, Oid relfilenode)
+{
+    RelfilenodeMapKey key;
+    bool found = true;
+    if (u_sess->relmap_cxt.RelfilenodeMapHash == NULL) {
+        InitializeRelfilenodeMap();
+    }
+    /* pg_class will show 0 when the value is actually u_sess->proc_cxt.MyDatabaseTableSpace */
+    if (reltablespace == u_sess->proc_cxt.MyDatabaseTableSpace) {
+        reltablespace = 0;
+    }
+
+    errno_t ret = memset_s(&key, sizeof(key), 0, sizeof(key));
+    securec_check(ret, "\0", "\0");
+ 
+    key.reltablespace = reltablespace;
+    key.relfilenode = relfilenode;
+
+    RelfilenodeMapEntry* entry =
+        (RelfilenodeMapEntry*)hash_search(u_sess->relmap_cxt.RelfilenodeMapHash, (void*)&key, HASH_FIND, &found);
+ 
+    if (found) {
+        return entry->relid;
+    }
+    return InvalidOid;
+}
+
 /*
  * Map a relation's (tablespace, filenode) to a relation's oid and cache the
  * result.
@@ -146,22 +251,6 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode)
 
     key.reltablespace = reltablespace;
     key.relfilenode = relfilenode;
-
-    /*
-     * Check cache and enter entry if nothing could be found. Even if no target
-     * Check cache and return entry if one is found. Even if no target
-     * relation can be found later on we store the negative match and return a
-     * InvalidOid from cache. That's not really necessary for performance since
-     * querying invalid values isn't supposed to be a frequent thing, but the
-     * implementation is simpler this way.
-     * InvalidOid from cache. That's not really necessary for performance
-     * since querying invalid values isn't supposed to be a frequent thing,
-     * but it's basically free.
-     */
-    entry = (RelfilenodeMapEntry*)hash_search(u_sess->relmap_cxt.RelfilenodeMapHash, (void*)&key, HASH_FIND, &found);
-
-    if (found)
-        return entry->relid;
 
     /* ok, no previous cache entry, do it the hard way */
 
@@ -242,6 +331,39 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode)
 
     return relid;
 }
+
+Oid PartitionRelidByRelfilenodeCache(Oid reltablespace, Oid relfilenode, Oid &partationReltoastrelid)
+{
+    PartfilenodeMapKey key;
+    PartfilenodeMapEntry* entry = NULL;
+    bool found = false;
+    if (u_sess->relmap_cxt.PartfilenodeMapHash == NULL) {
+        InitializePartfilenodeMap();
+    }
+    /* pg_class will show 0 when the value is actually u_sess->proc_cxt.MyDatabaseTableSpace */
+    if (reltablespace == u_sess->proc_cxt.MyDatabaseTableSpace) {
+        reltablespace = 0;
+    }
+
+    key.reltablespace = reltablespace;
+    key.relfilenode = relfilenode;
+ 
+    /*
+     * Check cache and return entry if one is found. Even if no target
+     * relation can be found later on we store the negative match and return a
+     * InvalidOid from cache. That's not really necessary for performance since
+     * querying invalid values isn't supposed to be a frequent thing, but the
+     * implementation is simpler this way.
+     */
+    entry = (PartfilenodeMapEntry*)hash_search(u_sess->relmap_cxt.PartfilenodeMapHash, (void*)&key, HASH_FIND, &found);
+ 
+    if (found) {
+        partationReltoastrelid = entry->reltoastrelid;
+        return entry->relid;
+    }
+    return InvalidOid;
+}
+
 /*
  * Map a partation-relation's (tablespace, filenode) to it's parent relation's oid and
  * save partation-relation's Reltoastrelid to partationReltoastrelid.
@@ -249,46 +371,49 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode)
  */
 Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid& partationReltoastrelid)
 {
-    bool foundflag = false;
+    PartfilenodeMapKey key;
+    PartfilenodeMapEntry* entry = NULL;
+    bool found = false;
     SysScanDesc scandesc;
     Relation relation;
     HeapTuple ntp;
     ScanKeyData skey[2];
     Oid relid = InvalidOid;
     int rc = 0;
+    if (u_sess->relmap_cxt.PartfilenodeMapHash == NULL) {
+        InitializePartfilenodeMap();
+    }
 
     /* pg_class will show 0 when the value is actually u_sess->proc_cxt.MyDatabaseTableSpace */
     if (reltablespace == u_sess->proc_cxt.MyDatabaseTableSpace)
         reltablespace = 0;
+
+    key.reltablespace = reltablespace;
+    key.relfilenode = relfilenode;
+
+    /* initialize empty/negative cache entry before doing the actual lookups */
+    relid = InvalidOid;
 
     /* For partition table in MPPDB, the relfilenode is in pg_partition instead of pg_class,
      * so here we scan the pg_partition again to get the parent's oid. */
     /* check plain relations by looking in pg_class */
     relation = heap_open(PartitionRelationId, AccessShareLock);
 
-    rc = memcpy_s(skey, sizeof(skey), u_sess->relmap_cxt.relfilenodeSkey, sizeof(skey));
+    rc = memcpy_s(skey, sizeof(skey), u_sess->relmap_cxt.partfilenodeSkey, sizeof(skey));
     securec_check(rc, "", "");
-    skey[0].sk_attno = Anum_pg_partition_reltablespace;
-    skey[1].sk_attno = Anum_pg_partition_relfilenode;
+    /* set scan arguments */
     skey[0].sk_argument = ObjectIdGetDatum(reltablespace);
     skey[1].sk_argument = ObjectIdGetDatum(relfilenode);
 
-    /*
-     * Using historical snapshot in logic decoding.
-     */
-    Snapshot snapshot = NULL;
-    snapshot = SnapshotNow;
-    if (HistoricSnapshotActive()) {
-        snapshot =  GetCatalogSnapshot();
-    }
     scandesc = systable_beginscan(relation, InvalidOid, false, NULL, 2, skey);
 
+    found = false;
     while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
-        if (foundflag)
+        if (found)
             ereport(ERROR,
                 (errcode(ERRCODE_RELFILENODEMAP),
                     errmsg("unexpected duplicate for tablespace %u, relfilenode %u", reltablespace, relfilenode)));
-        foundflag = true;
+        found = true;
 
 #ifdef USE_ASSERT_CHECKING
         if (assert_enabled) {
@@ -309,5 +434,35 @@ Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid& partati
     systable_endscan(scandesc);
     heap_close(relation, AccessShareLock);
 
+    /*
+     * Only enter entry into cache now, our opening of pg_partition could have
+     * caused cache invalidations to be executed which would have deleted a
+     * new entry if we had entered it above.
+     */
+    if (relid != InvalidOid) {
+        entry =
+            (PartfilenodeMapEntry*)hash_search(u_sess->relmap_cxt.PartfilenodeMapHash, (void*)&key, HASH_ENTER, &found);
+        entry->relid = relid;
+        entry->reltoastrelid = partationReltoastrelid;
+    }
     return relid;
 }
+
+Oid HeapGetRelid(Oid reltablespace, Oid relfilenode, Oid &partationReltoastrelid)
+{
+    Oid reloid = InvalidOid;
+    reloid = RelidByRelfilenodeCache(reltablespace, relfilenode);
+    if (reloid == InvalidOid) {
+        reloid = PartitionRelidByRelfilenodeCache(reltablespace, relfilenode, partationReltoastrelid);
+    }
+ 
+    if (reloid == InvalidOid) {
+        reloid = RelidByRelfilenode(reltablespace, relfilenode);
+    }
+ 
+    if (reloid == InvalidOid) {
+        reloid = PartitionRelidByRelfilenode(reltablespace, relfilenode, partationReltoastrelid);
+    }
+    return reloid;
+}
+
