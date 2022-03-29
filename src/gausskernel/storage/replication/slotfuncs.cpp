@@ -434,6 +434,7 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
 {
     Name name = PG_GETARG_NAME(0);
     bool for_backup = false;
+    bool isLogical = false;
 
     ValidateName(NameStr(*name));
 
@@ -443,6 +444,11 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
     }
 
     check_permissions(for_backup);
+
+    isLogical = IsLogicalReplicationSlot(NameStr(*name));
+    if (isLogical && RecoveryInProgress())
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Standby mode doesn't support drop logical slot.")));
 
     CheckSlotRequirements();
 

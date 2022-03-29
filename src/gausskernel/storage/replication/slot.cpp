@@ -468,6 +468,32 @@ bool IsReplicationSlotActive(const char *name)
 }
 
 /*
+ * Find out if we have an logical replication slot by slot name
+ */
+bool IsLogicalReplicationSlot(const char *name)
+{
+    bool isLogical = false;
+
+    Assert(t_thrd.slot_cxt.MyReplicationSlot == NULL);
+
+    ReplicationSlotValidateName(name, ERROR);
+
+    /* Search for the named slot to identify whether it is a logical replication slot or not. */
+    LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        if (s->in_use && strcmp(name, NameStr(s->data.name)) == 0 &&
+            s->data.database != InvalidOid ) {
+            isLogical = true;
+            break;
+        }
+    }
+    LWLockRelease(ReplicationSlotControlLock);
+
+    return isLogical;
+}
+
+/*
  * Find out if we have a slot by slot name
  */
 bool ReplicationSlotFind(const char *name)
