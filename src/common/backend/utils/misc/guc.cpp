@@ -4031,7 +4031,7 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"local_syscache_threshold",
-             PGC_POSTMASTER,
+             PGC_SIGHUP,
              RESOURCES_MEM,
              gettext_noop("Sets the maximum threshold for cleaning cache."),
              NULL,
