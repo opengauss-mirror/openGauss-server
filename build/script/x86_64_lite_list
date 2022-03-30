@@ -11,6 +11,7 @@
 ./bin/pg_config
 ./bin/pg_controldata
 ./bin/pg_resetxlog
+./bin/gs_probackup
 ./bin/alarmItem.conf
 ./bin/retry_errcodes.conf
 ./bin/cluster_guc.conf
