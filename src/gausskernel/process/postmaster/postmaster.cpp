@@ -302,6 +302,7 @@ bool dummyStandbyMode = false;
 volatile uint64 sync_system_identifier = 0;
 bool FencedUDFMasterMode = false;
 bool PythonFencedMasterModel = false;
+static pid_t fencedMasterPID = 0;
 
 extern char* optarg;
 extern int optind, opterr;
@@ -1453,23 +1454,15 @@ int PostmasterMain(int argc, char* argv[])
      * Locate the proper configuration files and data directory, and read
      * postgresql.conf for the first time.
      */
-#if ((defined ENABLE_PYTHON2) || (defined ENABLE_PYTHON3))
-    if (!SelectConfigFiles(userDoption, progname))
-        ExitPostmaster(1);
-
-    if (strlen(GetConfigOption(const_cast<char*>("unix_socket_directory"), true, false)) != 0) {
-        PythonFencedMasterModel = true;
-        
-        /* disable bbox for fenced UDF process */
-        SetConfigOption("enable_bbox_dump", "false", PGC_POSTMASTER, PGC_S_ARGV);
-    }
-#else
     if (FencedUDFMasterMode) {
         /* disable bbox for fenced UDF process */
         SetConfigOption("enable_bbox_dump", "false", PGC_POSTMASTER, PGC_S_ARGV);
     } else if (!SelectConfigFiles(userDoption, progname)) {
         ExitPostmaster(1);
     }
+#if ((defined ENABLE_PYTHON2) || (defined ENABLE_PYTHON3))
+    if (strlen(GetConfigOption(const_cast<char*>("unix_socket_directory"), true, false)) != 0) 
+        PythonFencedMasterModel = true;
 #endif
 
     if ((g_instance.attr.attr_security.transparent_encrypted_string != NULL &&
@@ -2279,12 +2272,7 @@ int PostmasterMain(int argc, char* argv[])
     }
     /* If start with plpython fenced mode, we just startup as fenced mode */
     if (PythonFencedMasterModel) {
-        /*
-         * If enabled, start up syslogger collection subprocess
-         */
-        g_instance.attr.attr_common.Logging_collector = true;
-        g_instance.pid_cxt.SysLoggerPID = SysLogger_Start();
-        StartUDFMaster();
+        fencedMasterPID = StartUDFMaster();
     }
     if (status == STATUS_OK)
         status = ServerLoop();
@@ -4946,6 +4934,10 @@ static void pmdie(SIGNAL_ARGS)
                 signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
             }
 
+            if (fencedMasterPID != 0) {
+                if (kill(fencedMasterPID, SIGTERM) < 0)
+		            elog(DEBUG3, "kill(%ld,%d) failed: %m", (long) fencedMasterPID, SIGTERM);
+            }
             if (ENABLE_THREAD_POOL && (pmState == PM_RECOVERY || pmState == PM_STARTUP)) {
                 /*
                  * Although there is not connections from client at PM_RECOVERY and PM_STARTUP
@@ -11512,7 +11504,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     }
 
     /* We don't need read GUC variables */
-    if (!FencedUDFMasterMode && !PythonFencedMasterModel) {
+    if (!FencedUDFMasterMode) {
         /* Read in remaining GUC variables */
         read_nondefault_variables();
     }

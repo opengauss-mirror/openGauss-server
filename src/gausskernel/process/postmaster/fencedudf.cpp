@@ -161,10 +161,10 @@ void FencedUDFMasterMain(int argc, char* argv[]);
 extern void* internal_load_library(const char* libname);
 
 
-void StartUDFMaster()
+pid_t StartUDFMaster()
 {
-    pid_t fencedWorkPid = 0;
-    switch ((fencedWorkPid = fork_process())) {
+    pid_t fencedMasterPid = 0;
+    switch ((fencedMasterPid = fork_process())) {
         case -1: {
             int errsv = errno;
             ereport(WARNING,
@@ -185,6 +185,7 @@ void StartUDFMaster()
             break;
         }
     }
+    return fencedMasterPid;
 }
 /*
  * @Description: The main function of UDF RPC server.
@@ -289,7 +290,10 @@ void UDFMasterServerLoop()
          */
         gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
         (void)gs_signal_unblock_sigusr2();
-
+        sigrelse(SIGINT);
+        sigrelse(SIGQUIT);
+        sigrelse(SIGTERM);
+        
         /* must set timeout each time; some OSes change it! */
         struct timeval timeout;
 
@@ -1745,10 +1749,10 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
             } else {
                 char pathbuf[MAXPGPATH];
                 get_lib_path(my_exec_path, pathbuf);
-#ifdef ENABLE_PYTHON2
-                join_path_components(pathbuf, pathbuf, "postgresql/plpython2.so");
+#ifdef ENABLE_PYTHON3
+                join_path_components(pathbuf, pathbuf, "plpython3.so");
 #else
-                join_path_components(pathbuf, pathbuf, "postgresql/plpython3.so");
+                join_path_components(pathbuf, pathbuf, "plpython2.so");
 #endif
                 char *libpl_location = strdup(pathbuf);
                 void *libpl_handler = internal_load_library(libpl_location);
