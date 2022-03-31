@@ -3504,7 +3504,7 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
         return;
     }
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!force_vacuum && !(ap_entry->at_allowvacuum && ap_entry->at_dovacuum)) {  
+    if (!force_vacuum && !(ap_entry->at_allowvacuum && ap_entry->at_dovacuum)) { 
 #else
     if (!force_vacuum && (!ap_entry->at_allowvacuum || ap_entry->at_dovacuum)) {
 #endif
