@@ -91,10 +91,6 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
     }
     sub->publications = textarray_to_stringlist(DatumGetArrayTypeP(datum));
 
-    datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subbinary, &isnull);
-    Assert(!isnull);
-    sub->binary = DatumGetBool(datum);
-
     ReleaseSysCache(tup);
 
     return sub;

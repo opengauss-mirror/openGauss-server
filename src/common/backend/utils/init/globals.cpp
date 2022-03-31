@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92607;
+const uint32 GRAND_VERSION_NUM = 92606;
 
 const uint32 PREDPUSH_SAME_LEVEL_VERSION_NUM = 92522;
 const uint32 UPSERT_WHERE_VERSION_NUM = 92514;
@@ -101,7 +101,6 @@ const uint32 PRIVS_DIRECTORY_VERSION_NUM = 92460;
 const uint32 COMMENT_RECORD_PARAM_VERSION_NUM = 92484;
 const uint32 SCAN_BATCH_MODE_VERSION_NUM = 92568;
 const uint32 PUBLICATION_VERSION_NUM = 92580;
-const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92607;
 
 /* Version number of the guc parameter backend_version added in V500R001C20 */
 const uint32 V5R1C20_BACKEND_VERSION_NUM = 92305;

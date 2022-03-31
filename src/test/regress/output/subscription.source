@@ -76,10 +76,10 @@ CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION 'host=''1.2.3.4'' port=''123
 ALTER SUBSCRIPTION testsub CONNECTION 'host=''1.2.3.4'' port=''12345'' user=''username'' dbname=''postgres'' password=''password_1234''';
 ALTER SUBSCRIPTION testsub CONNECTION 'dbname=does_not_exist';
 reset client_min_messages;
-select subname, pg_get_userbyid(subowner) as Owner, subenabled, subconninfo, subpublications, subbinary from pg_subscription where subname='testsub';
- subname |           owner           | subenabled |     subconninfo      | subpublications | subbinary 
----------+---------------------------+------------+----------------------+-----------------+-----------
- testsub | regress_subscription_user | f          | dbname=doesnotexist  | {testpub}       | f
+select subname, pg_get_userbyid(subowner) as Owner, subenabled, subconninfo, subpublications from pg_subscription where subname='testsub';
+ subname |           owner           | subenabled |      subconninfo       | subpublications 
+---------+---------------------------+------------+------------------------+-----------------
+ testsub | regress_subscription_user | f          | dbname=does_not_exist  | {testpub}
 (1 row)
 
 --- alter subscription
@@ -122,14 +122,6 @@ ALTER SUBSCRIPTION testsub SET (slot_name='testsub');
 ERROR:  Currently enabled=false, cannot change slot_name to a non-null value.
 -- alter owner
 ALTER SUBSCRIPTION testsub owner to regress_subscription_user2;
--- alter subbinary to true
-ALTER SUBSCRIPTION testsub SET (binary=true);
-select subname, subbinary from pg_subscription where subname='testsub';
- subname | subbinary 
----------+-----------
- testsub | t
-(1 row)
-
 --rename
 ALTER SUBSCRIPTION testsub rename to testsub_rename;
 --- inside a transaction block
@@ -289,11 +281,10 @@ SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-1
  testsub_maskconninfo | ALTER SUBSCRIPTION testsub_maskconninfo SET (conninfo='*************************************************************************************************************************;
  testsub              | ALTER SUBSCRIPTION testsub SET (synchronous_commit=on);
  testsub              | ALTER SUBSCRIPTION testsub owner to regress_subscription_user2;
- testsub              | ALTER SUBSCRIPTION testsub SET (binary=true);
  testsub              | ALTER SUBSCRIPTION testsub rename to testsub_rename;
  testsub_rename       | DROP SUBSCRIPTION IF EXISTS testsub_rename;
  testsub_maskconninfo | DROP SUBSCRIPTION IF EXISTS testsub_maskconninfo;
-(15 rows)
+(14 rows)
 
 --clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');

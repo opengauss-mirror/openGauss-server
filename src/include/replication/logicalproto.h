@@ -35,20 +35,11 @@
  * Keep in mind that the columns correspond to the *remote* table.
  */
 typedef struct LogicalRepTupleData {
-    /* Array of StringInfos, one per column; some may be unused */
-    StringInfoData *colvalues;
-    /* Array of markers for null/unchanged/text/binary, one per column */
-    char       *colstatus;
+    char *values[MaxTupleAttributeNumber]; /* value in out function format or NULL if values is NULL */
+    bool changed[MaxTupleAttributeNumber]; /* marker for changed/unchanged values */
     /* Length of above arrays */
     int ncols;
 } LogicalRepTupleData;
-
-/* Possible values for LogicalRepTupleData.colstatus[colnum] */
-/* These values are also used in the on-the-wire protocol */
-#define LOGICALREP_COLUMN_NULL        'n'
-#define LOGICALREP_COLUMN_UNCHANGED    'u'
-#define LOGICALREP_COLUMN_TEXT        't'
-#define LOGICALREP_COLUMN_BINARY    'b' /* added in PG14 */
 
 typedef uint32 LogicalRepRelId;
 
@@ -90,12 +81,12 @@ extern void logicalrep_read_begin(StringInfo in, LogicalRepBeginData *begin_data
 extern void logicalrep_write_commit(StringInfo out, ReorderBufferTXN *txn, XLogRecPtr commit_lsn);
 extern void logicalrep_read_commit(StringInfo in, LogicalRepCommitData *commit_data);
 extern void logicalrep_write_origin(StringInfo out, const char *origin, XLogRecPtr origin_lsn);
-extern void logicalrep_write_insert(StringInfo out, Relation rel, HeapTuple newtuple, bool binary);
+extern void logicalrep_write_insert(StringInfo out, Relation rel, HeapTuple newtuple);
 extern LogicalRepRelId logicalrep_read_insert(StringInfo in, LogicalRepTupleData *newtup);
-extern void logicalrep_write_update(StringInfo out, Relation rel, HeapTuple oldtuple, HeapTuple newtuple, bool binary);
+extern void logicalrep_write_update(StringInfo out, Relation rel, HeapTuple oldtuple, HeapTuple newtuple);
 extern LogicalRepRelId logicalrep_read_update(StringInfo in, bool *has_oldtuple, LogicalRepTupleData *oldtup,
     LogicalRepTupleData *newtup);
-extern void logicalrep_write_delete(StringInfo out, Relation rel, HeapTuple oldtuple, bool binary);
+extern void logicalrep_write_delete(StringInfo out, Relation rel, HeapTuple oldtuple);
 extern LogicalRepRelId logicalrep_read_delete(StringInfo in, LogicalRepTupleData *oldtup);
 extern void logicalrep_write_rel(StringInfo out, Relation rel);
 extern LogicalRepRelation *logicalrep_read_rel(StringInfo in);

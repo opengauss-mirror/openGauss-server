@@ -50,15 +50,13 @@ CATALOG(pg_subscription,6126) BKI_SHARED_RELATION BKI_ROWTYPE_OID(6128) BKI_SCHE
     NameData subslotname;    /* Slot name on publisher */
     text subsynccommit;      /* Synchronous commit setting for worker */
     text subpublications[1]; /* List of publications subscribed to */
-    bool subbinary;          /* True if the subscription wants the
-                              * publisher to send data in binary */
 #endif
 }
 FormData_pg_subscription;
 
 typedef FormData_pg_subscription *Form_pg_subscription;
 
-#define Natts_pg_subscription 9
+#define Natts_pg_subscription 8
 #define Anum_pg_subscription_subdbid 1
 #define Anum_pg_subscription_subname 2
 #define Anum_pg_subscription_subowner 3
@@ -67,7 +65,6 @@ typedef FormData_pg_subscription *Form_pg_subscription;
 #define Anum_pg_subscription_subslotname 6
 #define Anum_pg_subscription_subsynccommit 7
 #define Anum_pg_subscription_subpublications 8
-#define Anum_pg_subscription_subbinary 9
 
 
 typedef struct Subscription {
@@ -80,7 +77,6 @@ typedef struct Subscription {
     char *slotname;     /* Name of the replication slot */
     char *synccommit;   /* Synchronous commit setting for worker */
     List *publications; /* List of publication names to subscribe to */
-    bool binary;        /* Indicates if the subscription wants data in binary format */
 } Subscription;
 
 

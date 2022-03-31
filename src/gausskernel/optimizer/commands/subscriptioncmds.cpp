@@ -56,7 +56,7 @@ static void ValidateReplicationSlot(char *slotname, List *publications);
  * accommodate that.
  */
 static void parse_subscription_options(const List *options, char **conninfo, List **publications, bool *enabled_given,
-    bool *enabled, bool *slot_name_given, char **slot_name, char **synchronous_commit, bool *binary_given, bool *binary)
+    bool *enabled, bool *slot_name_given, char **slot_name, char **synchronous_commit)
 {
     ListCell *lc;
 
@@ -75,10 +75,6 @@ static void parse_subscription_options(const List *options, char **conninfo, Lis
     }
     if (synchronous_commit) {
         *synchronous_commit = NULL;
-    }
-    if (binary) {
-        *binary_given = false;
-        *binary = false;
     }
 
     /* Parse options */
@@ -128,15 +124,6 @@ static void parse_subscription_options(const List *options, char **conninfo, Lis
             /* Test if the given value is valid for synchronous_commit GUC. */
             (void)set_config_option("synchronous_commit", *synchronous_commit, PGC_BACKEND, PGC_S_TEST, GUC_ACTION_SET,
                 false, 0, false);
-        } else if (strcmp(defel->defname, "binary") == 0 && binary) {
-            if (*binary_given) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                         errmsg("conflicting or redundant options")));
-            }
-
-            *binary_given = true;
-            *binary = defGetBoolean(defel);
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized subscription parameter: %s", defel->defname)));
@@ -309,8 +296,6 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     char *conninfo;
     char *slotname;
     bool slotname_given;
-    bool binary;
-    bool binary_given;
     char originname[NAMEDATALEN];
     List *publications;
     int rc;
@@ -320,7 +305,7 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
      * Connection and publication should not be specified here.
      */
     parse_subscription_options(stmt->options, NULL, NULL, &enabled_given, &enabled, &slotname_given, &slotname,
-        &synchronous_commit, &binary_given, &binary);
+        &synchronous_commit);
 
     /*
      * Since creating a replication slot is not transactional, rolling back
@@ -364,7 +349,6 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     values[Anum_pg_subscription_subname - 1] = DirectFunctionCall1(namein, CStringGetDatum(stmt->subname));
     values[Anum_pg_subscription_subowner - 1] = ObjectIdGetDatum(owner);
     values[Anum_pg_subscription_subenabled - 1] = BoolGetDatum(enabled);
-    values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(binary);
 
     /* encrypt conninfo */
     List *conninfoList = ConninfoToDefList(stmt->conninfo);
@@ -455,8 +439,6 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
     Oid subid;
     bool enabled_given = false;
     bool enabled;
-    bool binary_given;
-    bool binary;
     char *synchronous_commit;
     char *conninfo;
     char *slot_name;
@@ -491,7 +473,7 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
 
     /* Parse options. */
     parse_subscription_options(stmt->options, &conninfo, &publications, &enabled_given, &enabled, &slotname_given,
-        &slot_name, &synchronous_commit, &binary_given, &binary);
+        &slot_name, &synchronous_commit);
 
     /* Form a new tuple. */
     rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
@@ -565,10 +547,6 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
     if (synchronous_commit) {
         values[Anum_pg_subscription_subsynccommit - 1] = CStringGetTextDatum(synchronous_commit);
         replaces[Anum_pg_subscription_subsynccommit - 1] = true;
-    }
-    if (binary_given) {
-        values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(binary);
-        replaces[Anum_pg_subscription_subbinary - 1] = true;
     }
     if (publications != NIL) {
         values[Anum_pg_subscription_subpublications - 1] = publicationListToArray(publications);
