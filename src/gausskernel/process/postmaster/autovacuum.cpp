@@ -3503,8 +3503,11 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
         *dovacuum = false;
         return;
     }
-
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!force_vacuum && !(ap_entry->at_allowvacuum && ap_entry->at_dovacuum)) { 
+#else
     if (!force_vacuum && (!ap_entry->at_allowvacuum || ap_entry->at_dovacuum)) {
+#endif
         *doanalyze = false;
         *dovacuum = false;
         return;
