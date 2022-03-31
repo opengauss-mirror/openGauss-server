@@ -90,7 +90,6 @@ extern Oid get_subscription_oid(const char *subname, bool missing_ok);
 extern char *get_subscription_name(Oid subid, bool missing_ok);
 
 extern int CountDBSubscriptions(Oid dbid);
-extern void ClearListContent(List *list);
-
+extern char *DecryptConninfo(char *encryptConninfo);
 
 #endif /* PG_SUBSCRIPTION_H */

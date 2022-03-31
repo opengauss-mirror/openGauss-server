@@ -41,7 +41,6 @@
 #include "catalog/pg_partition_fn.h"
 
 #include "commands/trigger.h"
-#include "commands/subscriptioncmds.h"
 
 #include "executor/executor.h"
 #include "executor/node/nodeModifyTable.h"
@@ -112,8 +111,6 @@ static void store_flush_position(XLogRecPtr remote_lsn);
 static void reread_subscription(void);
 static void ApplyWorkerProcessMsg(char type, StringInfo s, XLogRecPtr *lastRcv);
 static void apply_dispatch(StringInfo s);
-static void apply_handle_conninfo(StringInfo s);
-static void UpdateConninfo(char* standbysInfo);
 
 /* SIGHUP: set flag to re-read config file at next convenient time */
 static void LogicalrepWorkerSighub(SIGNAL_ARGS)
@@ -885,9 +882,6 @@ static void apply_dispatch(StringInfo s)
         case 'O':
             apply_handle_origin(s);
             break;
-        case 'S':
-            apply_handle_conninfo(s);
-            break;
         default:
             ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
                 errmsg("invalid logical replication message type \"%c\"", action)));
@@ -1497,9 +1491,14 @@ void ApplyWorkerMain()
 
     CommitTransactionCommand();
 
-    if (!AttemptConnectPublisher(t_thrd.applyworker_cxt.mySubscription->conninfo,
-        t_thrd.applyworker_cxt.mySubscription->name, true)) {
-        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Failed to connect to publisher.")));
+    char *decryptConnInfo = DecryptConninfo(t_thrd.applyworker_cxt.mySubscription->conninfo);
+    bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(decryptConnInfo, NULL,
+        t_thrd.applyworker_cxt.mySubscription->name, -1);
+    rc = memset_s(decryptConnInfo, strlen(decryptConnInfo), 0, strlen(decryptConnInfo));
+    securec_check(rc, "", "");
+    pfree_ext(decryptConnInfo);
+    if (!connectSuccess) {
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("could not connect to the publisher")));
     }
 
     /*
@@ -1666,64 +1665,3 @@ char* DefListToString(const List *defList)
     return buf.data;
 }
 
-/*
- * Handle conninfo update message.
- */
-static void apply_handle_conninfo(StringInfo s)
-{
-    char* standbysInfo = NULL;
-    logicalrep_read_conninfo(s, &standbysInfo);
-    UpdateConninfo(standbysInfo);
-    pfree_ext(standbysInfo);
-}
-
-static void UpdateConninfo(char* standbysInfo)
-{
-    Relation rel;
-    bool nulls[Natts_pg_subscription];
-    bool replaces[Natts_pg_subscription];
-    Datum values[Natts_pg_subscription];
-    HeapTuple tup;
-    Subscription* sub = t_thrd.applyworker_cxt.mySubscription;
-    Oid subid = sub->oid;
-
-    StartTransactionCommand();
-    rel = heap_open(SubscriptionRelationId, RowExclusiveLock);
-    /* Fetch the existing tuple. */
-    tup = SearchSysCacheCopy2(SUBSCRIPTIONNAME, u_sess->proc_cxt.MyDatabaseId,
-        CStringGetDatum(t_thrd.applyworker_cxt.mySubscription->name));
-    if (!HeapTupleIsValid(tup)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("subscription \"%s\" does not exist",
-            t_thrd.applyworker_cxt.mySubscription->name)));
-    }
-    subid = HeapTupleGetOid(tup);
-
-    /* Form a new tuple. */
-    int rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
-    securec_check(rc, "", "");
-    rc = memset_s(values, sizeof(values), 0, sizeof(values));
-    securec_check(rc, "", "");
-    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
-    securec_check(rc, "", "");
-
-    /* get conninfoWithoutHostport */
-    StringInfoData conninfoWithoutHostport;
-    initStringInfo(&conninfoWithoutHostport);
-    ParseConninfo(sub->conninfo, &conninfoWithoutHostport, (HostPort**)NULL);
-
-    /* join conninfoWithoutHostport together with standbysinfo */
-    appendStringInfo(&conninfoWithoutHostport, " %s", standbysInfo);
-    /* Replace connection information */
-    values[Anum_pg_subscription_subconninfo - 1] = CStringGetTextDatum(conninfoWithoutHostport.data);
-    replaces[Anum_pg_subscription_subconninfo - 1] = true;
-    tup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);
-
-    /* Update the catalog. */
-    simple_heap_update(rel, &tup->t_self, tup);
-    CatalogUpdateIndexes(rel, tup);
-
-    heap_close(rel, RowExclusiveLock);
-    CommitTransactionCommand();
-
-    ereport(LOG, (errmsg("Update conninfo successfully, new conninfo %s.", standbysInfo)));
-}

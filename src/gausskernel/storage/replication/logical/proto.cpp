@@ -603,25 +603,3 @@ static const char *logicalrep_read_namespace(StringInfo in)
 
     return nspname;
 }
-
-/*
- * Write conninfo to the output stream.
- */
-void logicalrep_write_conninfo(StringInfo out, char* conninfo)
-{
-    pq_sendbyte(out, 'S'); /* action */
-
-    pq_writestring(out, conninfo); /* conninfo follows */
-}
-
-/*
- * Read conninfo from stream.
- */
-void logicalrep_read_conninfo(StringInfo in, char** conninfo)
-{
-    const char* conninfoTemp = pq_getmsgstring(in);
-    size_t conninfoLen = strlen(conninfoTemp) + 1;
-    *conninfo = (char*)palloc(conninfoLen);
-    int rc = strcpy_s(*conninfo, conninfoLen, conninfoTemp);
-    securec_check(rc, "", "");
-}

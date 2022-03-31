@@ -259,7 +259,7 @@ void StartRemoteStreaming(const LibpqrcvConnectParam *options)
 
         if (options->binary && PQserverVersion(t_thrd.libwalreceiver_cxt.streamConn) >= 90204) {
             appendStringInfoString(&cmd, ", binary 'true'");
-            ereport(DEBUG5, (errmsg("append binary true")));
+            ereport(DEBUG5, ( errmsg("append binary true")));
         }
 
         appendStringInfoChar(&cmd, ')');
@@ -426,7 +426,7 @@ void IdentifyRemoteSystem(bool checkRemote)
 }
 
 /* identify remote mode, should do this after connect success. */
-ServerMode IdentifyRemoteMode()
+static ServerMode IdentifyRemoteMode()
 {
     Assert(t_thrd.libwalreceiver_cxt.streamConn != NULL);
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
@@ -449,9 +449,7 @@ ServerMode IdentifyRemoteMode()
                                   num_fields)));
     }
     remoteMode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
-    if (walrcv->conn_target != REPCONNTARGET_PUBLICATION &&
-        !t_thrd.walreceiver_cxt.AmWalReceiverForFailover &&
-        (!IS_PRIMARY_NORMAL(remoteMode)) &&
+    if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && (!IS_PRIMARY_NORMAL(remoteMode)) &&
         /* remoteMode of cascade standby is a standby */
         !t_thrd.xlog_cxt.is_cascade_standby && !IS_SHARED_STORAGE_MODE) {
         PQclear(res);
