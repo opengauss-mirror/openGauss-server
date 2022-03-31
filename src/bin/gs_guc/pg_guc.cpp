@@ -1229,6 +1229,12 @@ parse_next_sync_groups(char **pgroup, char *result)
 static int
 transform_az_name(char *config_value, char *allAZString, int allAZStringBufLen, const char *data_dir)
 {
+    if (strcmp(config_value, "''") == 0) {
+        errno_t rc = strncpy_s(allAZString, allAZStringBufLen, config_value, strlen(config_value));
+        securec_check_c(rc, "\0", "\0");
+        return SUCCESS;
+    }
+
     char    *azString = NULL;
     char    *buf = allAZString;
     int      buflen = allAZStringBufLen;
