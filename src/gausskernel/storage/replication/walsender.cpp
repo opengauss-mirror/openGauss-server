@@ -5945,6 +5945,9 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
             rc = memset_s(&nulls[j], PG_STAT_GET_WAL_SENDERS_COLS - j, true, PG_STAT_GET_WAL_SENDERS_COLS - j);
             securec_check(rc, "", "");
         } else {
+            Datum group_values;
+            bool group_isnull = false;
+
             /* local_role */
             values[j++] = CStringGetTextDatum(wal_get_role_string(local_role));
 
@@ -6051,11 +6054,11 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                 /* sync_state and sync_prority */
                 if (!SyncRepRequested()) {
                     values[j++] = CStringGetTextDatum("Async");
-                    nulls[j++] = true;
+                    group_isnull = true;
                     values[j++] = Int32GetDatum(0);
                 } else {
                     values[j++] = CStringGetTextDatum("Sync");
-                    nulls[j++] = true;
+                    group_isnull = true;
                     values[j++] = Int32GetDatum(sync_priority[i]);
                 }
             } else {
@@ -6077,15 +6080,15 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                  */
                 if (priority == 0) {
                     values[j++] = CStringGetTextDatum("Async");
-                    nulls[j++] = true;
+                    group_isnull = true;
                 } else if (list_member_int((List*)list_nth(sync_standbys, group), i)) {
                     values[j++] = GetWalsndSyncRepConfig(walsnd)->syncrep_method == SYNC_REP_PRIORITY
                                         ? CStringGetTextDatum("Sync")
                                         : CStringGetTextDatum("Quorum");
-                    values[j++] = Int32GetDatum(group);
+                    group_values = Int32GetDatum(group);
                 } else {
                     values[j++] = CStringGetTextDatum("Potential");
-                    values[j++] = Int32GetDatum(group);
+                    group_values = Int32GetDatum(group);
                 }
                 values[j++] = Int32GetDatum(priority);
             }
@@ -6104,6 +6107,12 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                 securec_check_ss(ret, "\0", "\0");
             }
             values[j++] = CStringGetTextDatum(location);
+
+            if (!group_isnull) {
+                values[j++] = group_values;
+            } else {
+                nulls[j++] = true;
+            }
         }
 
         tuplestore_putvalues(tupstore, tupdesc, values, nulls);

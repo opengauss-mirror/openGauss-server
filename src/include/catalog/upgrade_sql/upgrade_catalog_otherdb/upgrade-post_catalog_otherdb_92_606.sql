@@ -26,10 +26,10 @@ BEGIN
             OUT receiver_replay_location text,
             OUT sync_percent text,
             OUT sync_state text,
-            OUT sync_group integer,
             OUT sync_priority integer,
             OUT sync_most_available text,
-            OUT channel text
+            OUT channel text,
+            OUT sync_group integer
         ) RETURNS SETOF record
         STABLE NOT FENCED NOT SHIPPABLE ROWS 10
         LANGUAGE internal AS 'pg_stat_get_wal_senders';
