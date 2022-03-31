@@ -35,7 +35,6 @@ typedef struct LibpqrcvConnectParam {
     bool logical;
     uint32 protoVersion;    /* Logical protocol version */
     List *publicationNames; /* String list of publications */
-    bool binary;            /* Ask publisher to use binary */
 }LibpqrcvConnectParam;
 
 extern int32 pg_atoi(char* s, int size, int c);
@@ -54,6 +53,5 @@ extern bool libpqrcv_command(const char *cmd, char **err, int *sqlstate);
 extern void IdentifyRemoteSystem(bool checkRemote);
 extern void CreateRemoteReplicationSlot(XLogRecPtr startpoint, const char* slotname, bool isLogical);
 extern void StartRemoteStreaming(const LibpqrcvConnectParam *options);
-extern ServerMode IdentifyRemoteMode();
 
 #endif
