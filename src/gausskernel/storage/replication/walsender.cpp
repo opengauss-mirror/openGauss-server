@@ -4605,7 +4605,7 @@ static void set_xlog_location(ServerMode local_role, XLogRecPtr* sndWrite, XLogR
  */
 Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 {
-#define PG_STAT_GET_WAL_SENDERS_COLS 22
+#define PG_STAT_GET_WAL_SENDERS_COLS 21
 
     TupleDesc tupdesc;
     Tuplestorestate *tupstore = NULL;
@@ -4830,11 +4830,9 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                 /* sync_state and sync_prority */
                 if (!SyncRepRequested()) {
                     values[j++] = CStringGetTextDatum("Async");
-                    nulls[j++] = true;
                     values[j++] = Int32GetDatum(0);
                 } else {
                     values[j++] = CStringGetTextDatum("Sync");
-                    nulls[j++] = true;
                     values[j++] = Int32GetDatum(sync_priority[i]);
                 }
             } else {
@@ -4856,15 +4854,12 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
                  */
                 if (priority == 0) {
                     values[j++] = CStringGetTextDatum("Async");
-                    nulls[j++] = true;
                 } else if (list_member_int((List*)list_nth(sync_standbys, group), i)) {
                     values[j++] = GetWalsndSyncRepConfig(walsnd)->syncrep_method == SYNC_REP_PRIORITY
                                         ? CStringGetTextDatum("Sync")
                                         : CStringGetTextDatum("Quorum");
-                    values[j++] = Int32GetDatum(group);
                 } else {
                     values[j++] = CStringGetTextDatum("Potential");
-                    values[j++] = Int32GetDatum(group);
                 }
                 
                 values[j++] = Int32GetDatum(priority);
