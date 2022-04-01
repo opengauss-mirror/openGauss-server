@@ -93,7 +93,7 @@
 #include "utils/relcache.h"
 
 static const int NAPTIME_PER_CYCLE = 10; /* max sleep time between cycles (10ms) */
-static const float HALF = 0.5;
+static const double HALF = 0.5;
 
 typedef struct FlushPosition {
     dlist_node node;
