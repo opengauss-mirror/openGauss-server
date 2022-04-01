@@ -1278,12 +1278,9 @@ static const char *MXStatusToString(MultiXactStatus status)
 
 static char *mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
-    static char *str = NULL;
+    char *str = NULL;
     StringInfoData buf;
     int i;
-
-    if (str != NULL)
-        pfree(str);
 
     initStringInfo(&buf);
 
@@ -1295,7 +1292,7 @@ static char *mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *me
     }
 
     appendStringInfoChar(&buf, ']');
-    str = MemoryContextStrdup(TopMemoryContext, buf.data);
+    str = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), buf.data);
     pfree(buf.data);
     return str;
 }
