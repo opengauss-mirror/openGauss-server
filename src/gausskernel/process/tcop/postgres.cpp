@@ -866,7 +866,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist)
     List* (*parser_hook)(const char*, List**) = raw_parser;
 #ifndef ENABLE_MULTIPLE_NODES
     int id = GetCustomParserId();
-    if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
+    if (id >= 0 && g_instance.raw_parser_hook[id] != NULL && u_sess->attr.attr_sql.b_sql_plugin) {
         parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
     }
 #endif
