@@ -51,7 +51,6 @@ const int SIZE_OF_TWO_UINT64 = 16;
 
 knl_instance_context g_instance;
 
-extern void InitGlobalSeq();
 extern void InitGlobalVecFuncMap();
 
 static void knl_g_cost_init(knl_g_cost_context* cost_cxt)
@@ -541,7 +540,6 @@ void knl_instance_init()
     MemoryContextSeal(g_instance.instance_context);
     MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
 
-    InitGlobalSeq();
     InitGlobalVecFuncMap();
     pthread_mutex_init(&g_instance.gpc_reset_lock, NULL);
     g_instance.signal_base = (struct GsSignalBase*)MemoryContextAllocZero(

@@ -277,6 +277,8 @@ void InitProcGlobal(void)
     PGPROC *initProcs[MAX_NUMA_NODE] = {0};
 
     int nNumaNodes = g_instance.shmem_cxt.numaNodeNum;
+    /* since myProcLocks is a various array, need palloc actrual size */
+    Size actrualPgProcSize = offsetof(PGPROC, myProcLocks) + NUM_LOCK_PARTITIONS * sizeof(SHM_QUEUE);
 #ifdef __USE_NUMA
     if (nNumaNodes > 1) {
         ereport(INFO, (errmsg("InitProcGlobal nNumaNodes: %d, inheritThreadPool: %d, groupNum: %d",
@@ -284,7 +286,7 @@ void InitProcGlobal(void)
                               (g_threadPoolControler ? g_threadPoolControler->GetGroupNum() : 0))));
 
         int groupProcCount = (TotalProcs + nNumaNodes - 1) / nNumaNodes;
-        size_t allocSize = groupProcCount * sizeof(PGPROC);
+        size_t allocSize = groupProcCount * actrualPgProcSize;
         for (int nodeNo = 0; nodeNo < nNumaNodes; nodeNo++) {
             initProcs[nodeNo] = (PGPROC *)numa_alloc_onnode(allocSize, nodeNo);
             if (!initProcs[nodeNo]) {
@@ -292,13 +294,13 @@ void InitProcGlobal(void)
                                 errmsg("InitProcGlobal NUMA memory allocation in node %d failed.", nodeNo)));
             }
             add_numa_alloc_info(initProcs[nodeNo], allocSize);
-            int ret = memset_s(initProcs[nodeNo], groupProcCount * sizeof(PGPROC), 0, groupProcCount * sizeof(PGPROC));
+            int ret = memset_s(initProcs[nodeNo], allocSize, 0, allocSize);
             securec_check_c(ret, "\0", "\0");
         }
     } else {
 #endif
         if (needPalloc) {
-            initProcs[0] = (PGPROC *)CACHELINEALIGN(palloc0(TotalProcs * sizeof(PGPROC) + PG_CACHE_LINE_SIZE));
+            initProcs[0] = (PGPROC *)CACHELINEALIGN(palloc0(TotalProcs * actrualPgProcSize + PG_CACHE_LINE_SIZE));
         } else {
             initProcs[0] = g_instance.proc_base->allProcs[0];
             errno_t rc = memset_s(initProcs[0], TotalProcs * sizeof(PGPROC), 0, TotalProcs * sizeof(PGPROC));
@@ -326,8 +328,8 @@ void InitProcGlobal(void)
     if (procs == NULL)
         ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of shared memory")));
 
-    for (i = 0; (unsigned int)(i) < TotalProcs; i++) {
-        procs[i] = &initProcs[i % nNumaNodes][i / nNumaNodes];
+    for (i = 0; (unsigned int)(i) < TotalProcs; i++) { /* set proc pointer to actural position */
+        procs[i] = (PGPROC *)((char*)(initProcs[i % nNumaNodes]) + (i / nNumaNodes) * actrualPgProcSize);
     }
 
     if (needPalloc) {

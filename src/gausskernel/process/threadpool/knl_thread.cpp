@@ -223,8 +223,8 @@ static void knl_t_shemem_ptr_init(knl_t_shemem_ptr_context* shemem_ptr_cxt)
     shemem_ptr_cxt->MultiXactState = NULL;
     shemem_ptr_cxt->OldestMemberMXactId = NULL;
     shemem_ptr_cxt->OldestVisibleMXactId = NULL;
-    shemem_ptr_cxt->ClogCtl = (SlruCtlData*)palloc0(NUM_CLOG_PARTITIONS * sizeof(SlruCtlData));
-    shemem_ptr_cxt->CsnlogCtlPtr = (SlruCtlData*)palloc0(NUM_CSNLOG_PARTITIONS * sizeof(SlruCtlData));
+    shemem_ptr_cxt->ClogCtl = (SlruCtlData*)palloc0(MAX_NUM_CLOG_PARTITIONS * sizeof(SlruCtlData));
+    shemem_ptr_cxt->CsnlogCtlPtr = (SlruCtlData*)palloc0(MAX_NUM_CSNLOG_PARTITIONS * sizeof(SlruCtlData));
     shemem_ptr_cxt->XLogCtl = NULL;
     shemem_ptr_cxt->GlobalWALInsertLocks = NULL;
     shemem_ptr_cxt->LocalGroupWALInsertLocks = NULL;

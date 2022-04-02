@@ -154,7 +154,7 @@ extern int SimpleLruReadPage_ReadOnly(SlruCtl ctl, int64 pageno, TransactionId x
 extern int SimpleLruReadPage_ReadOnly_Locked(SlruCtl ctl, int64 pageno, TransactionId xid);
 extern void SimpleLruWritePage(SlruCtl ctl, int slotno);
 extern int SimpleLruFlush(SlruCtl ctl, bool checkpoint);
-extern void SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage, bool isPart, int partitionNum);
+extern void SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage, int partitionNum);
 
 typedef bool (*SlruScanCallback)(SlruCtl ctl, const char* filename, int64 segpage, const void* data);
 extern bool SlruScanDirectory(SlruCtl ctl, SlruScanCallback callback, const void* data);

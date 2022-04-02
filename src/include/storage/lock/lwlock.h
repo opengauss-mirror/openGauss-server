@@ -15,6 +15,7 @@
 #define LWLOCK_H
 
 #include "lib/ilist.h"
+#include "nodes/pg_list.h"
 #include "storage/lock/s_lock.h"
 #include "utils/atomic.h"
 #include "gs_thread.h"
@@ -27,6 +28,22 @@ typedef volatile uint64 pg_atomic_uint64;
 #include "storage/lwlocknames.h"
 #endif
 extern const char *const MainLWLockNames[];
+
+const int MAX_LWLOCK_NAME_LENTH = 64;
+
+typedef struct LWLOCK_PARTITION_DESC {
+    char name[MAX_LWLOCK_NAME_LENTH];
+    int defaultNumPartition;
+    int minNumPartition;
+    int maxNumPartition;
+} LWLOCK_PARTITION_DESC;
+
+const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
+    {"CLOG_PART", 256, 1, 256},
+    {"CSNLOG_PART", 512, 1, 512},
+    {"LOG2_LOCKTABLE_PART", 4, 4, 16}, /* lock table partition range is 2^4 to 2^16 */
+    {"TWOPHASE_PART", 1, 1, 64},
+};
 
 /*
  * It's a bit odd to declare NUM_BUFFER_PARTITIONS and NUM_LOCK_PARTITIONS
@@ -54,13 +71,19 @@ extern const char *const MainLWLockNames[];
 #define NUM_INSTANCE_REALTIME_PARTITIONS 32
 
 /* CSN log partitions */
-#define NUM_CSNLOG_PARTITIONS 512
+#define MAX_NUM_CSNLOG_PARTITIONS (LWLockPartInfo[CSNLOG_PART].maxNumPartition)
+#define NUM_CSNLOG_PARTITIONS (g_instance.attr.attr_storage.num_internal_lock_partitions[CSNLOG_PART])
 
 /* Clog partitions */
-#define NUM_CLOG_PARTITIONS 256
+#define MAX_NUM_CLOG_PARTITIONS (LWLockPartInfo[CLOG_PART].maxNumPartition)
+#define NUM_CLOG_PARTITIONS (g_instance.attr.attr_storage.num_internal_lock_partitions[CLOG_PART])
+
+/* Twophase State partitions */
+#define NUM_TWOPHASE_PARTITIONS (g_instance.attr.attr_storage.num_internal_lock_partitions[TWOPHASE_PART])
 
 /* Number of partitions the shared lock tables are divided into */
-#define LOG2_NUM_LOCK_PARTITIONS 4
+#define LOG2_NUM_LOCK_PARTITIONS (g_instance.attr.attr_storage.num_internal_lock_partitions[LOG2_LOCKTABLE_PART])
+
 #define NUM_LOCK_PARTITIONS (1 << LOG2_NUM_LOCK_PARTITIONS)
 
 /* Number of partitions the shared predicate lock tables are divided into */
@@ -92,46 +115,43 @@ extern const char *const MainLWLockNames[];
 #define NUM_GS_PARTITIONS 1024
 
 #ifdef WIN32
-#define NUM_INDIVIDUAL_LWLOCKS           100
+#define NUM_INDIVIDUAL_LWLOCKS           103
 #endif
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
 */
 
 /* Offsets for various chunks of preallocated lwlocks in main array. */
-enum LWLockTrunkOffset {
-    FirstBufMappingLock = NUM_INDIVIDUAL_LWLOCKS,
-    FirstLockMgrLock = FirstBufMappingLock + NUM_BUFFER_PARTITIONS,
-    FirstPredicateLockMgrLock = FirstLockMgrLock + NUM_LOCK_PARTITIONS,
-    FirstOperatorRealTLock = FirstPredicateLockMgrLock+ NUM_PREDICATELOCK_PARTITIONS,
-    FirstOperatorHistLock = FirstOperatorRealTLock + NUM_OPERATOR_REALTIME_PARTITIONS,
-    FirstSessionRealTLock = FirstOperatorHistLock + NUM_OPERATOR_HISTORY_PARTITIONS,
-    FirstSessionHistLock = FirstSessionRealTLock + NUM_SESSION_REALTIME_PARTITIONS,
-    FirstInstanceRealTLock = FirstSessionHistLock + NUM_SESSION_HISTORY_PARTITIONS,
-    /* Cache Mgr lock IDs */
-    FirstCacheSlotMappingLock = FirstInstanceRealTLock + NUM_INSTANCE_REALTIME_PARTITIONS,
-    FirstCSNBufMappingLock = FirstCacheSlotMappingLock + NUM_CACHE_BUFFER_PARTITIONS,
-    FirstCBufMappingLock = FirstCSNBufMappingLock + NUM_CSNLOG_PARTITIONS,
-    /* Instrumentaion */
-    FirstUniqueSQLMappingLock = FirstCBufMappingLock + NUM_CLOG_PARTITIONS,
-    FirstInstrUserLock = FirstUniqueSQLMappingLock + NUM_UNIQUE_SQL_PARTITIONS,
-    /* global plan cache */
-    FirstGPCMappingLock = FirstInstrUserLock + NUM_INSTR_USER_PARTITIONS,
-    FirstGPCPrepareMappingLock = FirstGPCMappingLock + NUM_GPC_PARTITIONS,
-    /* ASP */
-    FirstASPMappingLock = FirstGPCPrepareMappingLock + NUM_GPC_PARTITIONS,
-    /* global sequence */
-    FirstGlobalSeqLock = FirstASPMappingLock + NUM_UNIQUE_SQL_PARTITIONS,
+#define FirstBufMappingLock (NUM_INDIVIDUAL_LWLOCKS)
+#define FirstLockMgrLock (FirstBufMappingLock + NUM_BUFFER_PARTITIONS)
+#define FirstPredicateLockMgrLock (FirstLockMgrLock + NUM_LOCK_PARTITIONS)
+#define FirstOperatorRealTLock (FirstPredicateLockMgrLock + NUM_PREDICATELOCK_PARTITIONS)
+#define FirstOperatorHistLock (FirstOperatorRealTLock + NUM_OPERATOR_REALTIME_PARTITIONS)
+#define FirstSessionRealTLock (FirstOperatorHistLock + NUM_OPERATOR_HISTORY_PARTITIONS)
+#define FirstSessionHistLock (FirstSessionRealTLock + NUM_SESSION_REALTIME_PARTITIONS)
+#define FirstInstanceRealTLock (FirstSessionHistLock + NUM_SESSION_HISTORY_PARTITIONS)
+/* Cache Mgr lock IDs */
+#define FirstCacheSlotMappingLock (FirstInstanceRealTLock + NUM_INSTANCE_REALTIME_PARTITIONS)
+#define FirstCSNBufMappingLock (FirstCacheSlotMappingLock + NUM_CACHE_BUFFER_PARTITIONS)
+#define FirstCBufMappingLock (FirstCSNBufMappingLock + NUM_CSNLOG_PARTITIONS)
+/* Instrumentaion */
+#define FirstUniqueSQLMappingLock (FirstCBufMappingLock + NUM_CLOG_PARTITIONS)
+#define FirstInstrUserLock (FirstUniqueSQLMappingLock + NUM_UNIQUE_SQL_PARTITIONS)
+/* global plan cache */
+#define FirstGPCMappingLock (FirstInstrUserLock + NUM_INSTR_USER_PARTITIONS)
+#define FirstGPCPrepareMappingLock (FirstGPCMappingLock + NUM_GPC_PARTITIONS)
+/* ASP */
+#define FirstASPMappingLock (FirstGPCPrepareMappingLock + NUM_GPC_PARTITIONS)
+/* global sequence */
+#define FirstGlobalSeqLock (FirstASPMappingLock + NUM_UNIQUE_SQL_PARTITIONS)
 
-    FirstNormalizedSqlLock = FirstGlobalSeqLock + NUM_GS_PARTITIONS,
-    FirstMPFLLock = FirstNormalizedSqlLock + NUM_NORMALIZED_SQL_PARTITIONS,
+#define FirstNormalizedSqlLock (FirstGlobalSeqLock + NUM_GS_PARTITIONS)
+#define FirstMPFLLock (FirstNormalizedSqlLock + NUM_NORMALIZED_SQL_PARTITIONS)
+#define FirstNGroupMappingLock (FirstMPFLLock + NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS)
+#define FirstIOStatLock (FirstNGroupMappingLock + NUM_NGROUP_INFO_PARTITIONS)
 
-    FirstNGroupMappingLock = FirstMPFLLock + NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS,
-    FirstIOStatLock = FirstNGroupMappingLock + NUM_NGROUP_INFO_PARTITIONS,
-
-    /* must be last: */
-    NumFixedLWLocks = FirstIOStatLock + NUM_IO_STAT_PARTITIONS
-};
+/* must be last: */
+#define NumFixedLWLocks (FirstIOStatLock + NUM_IO_STAT_PARTITIONS)
 
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
@@ -318,6 +338,9 @@ extern void CreateLWLocks(void);
 
 extern void RequestAddinLWLocks(int n);
 extern const char* GetBuiltInTrancheName(int trancheId);
+extern void SetLWLockPartDefaultNum(void);
+extern void CheckAndSetLWLockPartInfo(const List* res);
+extern void CheckLWLockPartNumRange(void);
 
 /*
  * There is another, more flexible method of obtaining lwlocks. First, call

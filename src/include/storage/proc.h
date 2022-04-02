@@ -184,13 +184,6 @@ struct PGPROC {
     syscalllock deleMemContextMutex;
     int64* usedMemory;
 
-    /*
-     * All PROCLOCK objects for locks held or awaited by this backend are
-     * linked into one of these lists, according to the partition number of
-     * their lock.
-     */
-    SHM_QUEUE myProcLocks[NUM_LOCK_PARTITIONS];
-
     /* Support for group XID clearing. */
     /* true, if member of ProcArray group waiting for XID clear */
     bool procArrayGroupMember;
@@ -265,6 +258,13 @@ struct PGPROC {
     char *dw_unaligned_buf;
     char *dw_buf;
     volatile int32 dw_pos;
+
+    /*
+     * All PROCLOCK objects for locks held or awaited by this backend are
+     * linked into one of these lists, according to the partition number of
+     * their lock.
+     */
+    SHM_QUEUE myProcLocks[1];
 };
 
 /* NOTE: "typedef struct PGPROC PGPROC" appears in storage/lock/lock.h. */

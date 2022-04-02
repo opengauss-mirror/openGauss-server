@@ -76,6 +76,7 @@
 #include "access/multixact.h"
 #include "access/subtrans.h"
 #include "commands/async.h"
+#include "commands/copy.h"
 #include "lib/ilist.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -90,6 +91,7 @@
 #include "storage/spin.h"
 #include "storage/cucache_mgr.h"
 #include "utils/atomic.h"
+#include "utils/builtins.h"
 #include "instruments/instr_event.h"
 #include "instruments/instr_statement.h"
 #include "tsan_annotation.h"
@@ -2034,4 +2036,88 @@ LWLockMode GetHeldLWLockMode(LWLock *lock)
              errmsg("lock %s is not held", T_NAME(lock))));
 
     return (LWLockMode)0; /* keep compiler silence */
+}
+
+static int FindLWLockPartIndex(const char* name)
+{
+    int i;
+    for (i = 0; i < LWLOCK_PART_KIND; i++) {
+        if (pg_strcasecmp(name, LWLockPartInfo[i].name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool CheckAndSetLWLockPartNum(const char* input)
+{
+    const int pairNum = 2;
+    /* Do str copy and remove space. */
+    char* strs = TrimStr(input);
+    if (strs == NULL || strs[0] == '\0') {
+        return false;
+    }
+    const char* delim = "=";
+    List *res = NULL;
+    char* nextToken = NULL;
+
+    /* Get name and num */
+    char* token = strtok_s(strs, delim, &nextToken);
+    while (token != NULL) {
+        res = lappend(res, TrimStr(token));
+        token = strtok_s(NULL, delim, &nextToken);
+    }
+    pfree(strs);
+    if (res->length != pairNum) {
+        list_free_deep(res);
+        return false;
+    }
+    int index = FindLWLockPartIndex((char*)linitial(res));
+    if (index != -1) {
+        if (!StrToInt32((char*)lsecond(res), &g_instance.attr.attr_storage.num_internal_lock_partitions[index])) {
+            ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
+                errmsg("num_internal_lock_partitions attr has invalid lwlock num:%s.", (char*)lsecond(res))));
+        }
+        list_free_deep(res);
+        return true;
+    } else {
+        ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
+            errmsg("num_internal_lock_partitions attr has invalid lwlock name: %s.", (char*)linitial(res))));
+        return false; /* keep compiler silence */
+    }
+}
+
+void SetLWLockPartDefaultNum(void)
+{
+    int i;
+    for (i = 0; i < LWLOCK_PART_KIND; i++) {
+        g_instance.attr.attr_storage.num_internal_lock_partitions[i] = LWLockPartInfo[i].defaultNumPartition;
+    }
+}
+
+void CheckAndSetLWLockPartInfo(const List* res)
+{
+    ListCell* cell = NULL;
+    foreach (cell, res) {
+        char* input = (char*)lfirst(cell);
+        if (!CheckAndSetLWLockPartNum(input)) {
+            ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
+                errmsg("num_internal_lock_partitions attr has invalid input syntax.")));
+        }
+    }
+}
+
+void CheckLWLockPartNumRange(void)
+{
+    int i;
+    for (i = 0; i < LWLOCK_PART_KIND; i++) {
+        if (g_instance.attr.attr_storage.num_internal_lock_partitions[i] < LWLockPartInfo[i].minNumPartition ||
+            g_instance.attr.attr_storage.num_internal_lock_partitions[i] > LWLockPartInfo[i].maxNumPartition) {
+            ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
+                errmsg("Invalid attribute for internal lock partitions."),
+                errdetail("Current %s lock partition num %d is out of range [%d, %d].",
+                    LWLockPartInfo[i].name, g_instance.attr.attr_storage.num_internal_lock_partitions[i],
+                    LWLockPartInfo[i].minNumPartition, LWLockPartInfo[i].maxNumPartition)));
+        }
+    }
 }
