@@ -177,7 +177,8 @@ test: single_node_produce_commit_rollback
 test: instr_unique_sql
 test: shutdown
 
-# interval partition 
+test: hw_partition_start_end
+# interval partition
 test: hw_partition_interval
 test: hw_partition_interval_exchange
 test: hw_partition_interval_index
