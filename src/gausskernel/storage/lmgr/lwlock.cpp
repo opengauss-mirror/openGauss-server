@@ -139,17 +139,12 @@ static const char *BuiltinTrancheNames[] = {
     "UniqueSQLMappingLock",
     "InstrUserLockId",
     "GPCMappingLock",
-    "UspagrpMappingLock",
-    "ProcXactMappingLock",
+    "GPCPrepareMappingLock",
     "ASPMappingLock",
     "GlobalSeqLock",
-    "GlobalWorkloadLock",
     "NormalizedSqlLock",
-    "StartBlockMappingLock",
     "BufferIOLock",
     "BufferContentLock",
-    "UndoPerZoneLock",
-    "UndoSpaceLock",
     "DataCacheLock",
     "MetaCacheLock",
     "PGPROCLock",
@@ -176,9 +171,7 @@ static const char *BuiltinTrancheNames[] = {
     "IOStatLock",
     "WALFlushWait",
     "WALBufferInitWait",
-    "WALInitSegment",
-    "SegmentHeadPartitionLock",
-    "TwoPhaseStatePartLock"
+    "WALInitSegment"
 };
 
 static void RegisterLWLockTranches(void);
@@ -548,16 +541,16 @@ static void InitializeLWLocks(int numLocks)
         LWLockInitialize(&lock->lock, LWTRANCHE_GPC_MAPPING);
     }
 
+    for (id = 0; id < NUM_GPC_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_GPC_PREPARE_MAPPING);
+    }
+
     for (id = 0; id < NUM_UNIQUE_SQL_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_ASP_MAPPING);
     }
 
     for (id = 0; id < NUM_GS_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_GlobalSeq);
-    }
-
-    for (id = 0; id < NUM_GWC_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_GWC_MAPPING);
     }
 
     for (id = 0; id < NUM_NORMALIZED_SQL_PARTITIONS; id++, lock++) {
@@ -574,22 +567,6 @@ static void InitializeLWLocks(int numLocks)
 
     for (id = 0; id < NUM_IO_STAT_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_IO_STAT);
-    }
-
-    for (id = 0; id < NUM_PROCXACT_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_PROC_XACT_MAPPING);
-    }
-
-    for (id = 0; id < NUM_STARTBLOCK_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_START_BLOCK_MAPPING);
-    }
-
-    for (id = 0; id < NUM_TWOPHASE_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_TWOPHASE_STATE);
-    }
-
-    for (id = 0; id < NUM_SEGMENT_HEAD_PARTITIONS; id++, lock++) {
-        LWLockInitialize(&lock->lock, LWTRANCHE_SEGHEAD_PARTITION);
     }
 
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);

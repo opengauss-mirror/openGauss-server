@@ -238,7 +238,7 @@
 #define static
 #endif
 
-
+extern void InitGlobalSeq();
 extern void auto_explain_init(void);
 extern int S3_init();
 static const int RECOVERY_PARALLELISM_DEFAULT = 1;
@@ -1996,6 +1996,8 @@ int PostmasterMain(int argc, char* argv[])
     init_capture_view();
     /* init percentile */
     InitPercentile();
+    /* init global sequence */
+    InitGlobalSeq();
 #ifdef ENABLE_MULTIPLE_NODES
     /* init compaction */
     CompactionProcess::init_instance();

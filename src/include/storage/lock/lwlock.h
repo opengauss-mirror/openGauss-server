@@ -111,22 +111,11 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of partions the io state hashtable */
 #define NUM_IO_STAT_PARTITIONS 128
 
-/* Number of partitions the xid => procid hashtable */
-#define NUM_PROCXACT_PARTITIONS  128
-
 /* Number of partions the global sequence hashtable */
 #define NUM_GS_PARTITIONS 1024
 
-/* Number of partions the global workload cache hashtable */
-#define NUM_GWC_PARTITIONS 64
-
-#define NUM_STARTBLOCK_PARTITIONS 128
-
-/* Number of partions of the segment head buffer */
-#define NUM_SEGMENT_HEAD_PARTITIONS 128
-
 #ifdef WIN32
-#define NUM_INDIVIDUAL_LWLOCKS           113
+#define NUM_INDIVIDUAL_LWLOCKS           103
 #endif
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
@@ -150,26 +139,19 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define FirstInstrUserLock (FirstUniqueSQLMappingLock + NUM_UNIQUE_SQL_PARTITIONS)
 /* global plan cache */
 #define FirstGPCMappingLock (FirstInstrUserLock + NUM_INSTR_USER_PARTITIONS)
+#define FirstGPCPrepareMappingLock (FirstGPCMappingLock + NUM_GPC_PARTITIONS)
 /* ASP */
-#define FirstASPMappingLock (FirstGPCMappingLock + NUM_GPC_PARTITIONS)
+#define FirstASPMappingLock (FirstGPCPrepareMappingLock + NUM_GPC_PARTITIONS)
 /* global sequence */
 #define FirstGlobalSeqLock (FirstASPMappingLock + NUM_UNIQUE_SQL_PARTITIONS)
-/* global workload cache */
-#define FirstGWCMappingLock (FirstGlobalSeqLock + NUM_GS_PARTITIONS)
 
-#define FirstNormalizedSqlLock (FirstGWCMappingLock + NUM_GWC_PARTITIONS)
+#define FirstNormalizedSqlLock (FirstGlobalSeqLock + NUM_GS_PARTITIONS)
 #define FirstMPFLLock (FirstNormalizedSqlLock + NUM_NORMALIZED_SQL_PARTITIONS)
 #define FirstNGroupMappingLock (FirstMPFLLock + NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS)
 #define FirstIOStatLock (FirstNGroupMappingLock + NUM_NGROUP_INFO_PARTITIONS)
-/* undo space & trans group mapping */
-#define FirstProcXactMappingLock (FirstIOStatLock + NUM_IO_STAT_PARTITIONS)
-#define FirstStartBlockMappingLock (FirstProcXactMappingLock + NUM_PROCXACT_PARTITIONS)
-/* segment head */
-#define FirstSegmentHeadLock (FirstStartBlockMappingLock + NUM_STARTBLOCK_PARTITIONS)
-#define FirstTwoPhaseStateLock (FirstSegmentHeadLock + NUM_SEGMENT_HEAD_PARTITIONS)
 
 /* must be last: */
-#define NumFixedLWLocks (FirstTwoPhaseStateLock + NUM_TWOPHASE_PARTITIONS)
+#define NumFixedLWLocks (FirstIOStatLock + NUM_IO_STAT_PARTITIONS)
 
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
@@ -195,17 +177,12 @@ enum BuiltinTrancheIds
     LWTRANCHE_UNIQUE_SQLMAPPING,
     LWTRANCHE_INSTR_USER,
     LWTRANCHE_GPC_MAPPING,
-    LWTRANCHE_USPACE_TRANSGRP_MAPPING,
-    LWTRANCHE_PROC_XACT_MAPPING,
+    LWTRANCHE_GPC_PREPARE_MAPPING,
     LWTRANCHE_ASP_MAPPING,
     LWTRANCHE_GlobalSeq, 
-    LWTRANCHE_GWC_MAPPING,
     LWTRANCHE_NORMALIZED_SQL,
-    LWTRANCHE_START_BLOCK_MAPPING,
     LWTRANCHE_BUFFER_IO_IN_PROGRESS,
     LWTRANCHE_BUFFER_CONTENT,
-    LWTRANCHE_UNDO_ZONE,
-    LWTRANCHE_UNDO_SPACE,
     LWTRANCHE_DATA_CACHE,
     LWTRANCHE_META_CACHE,
     LWTRANCHE_PROC,
@@ -233,8 +210,6 @@ enum BuiltinTrancheIds
     LWTRANCHE_WAL_FLUSH_WAIT,
     LWTRANCHE_WAL_BUFFER_INIT_WAIT,
     LWTRANCHE_WAL_INIT_SEGMENT,
-    LWTRANCHE_SEGHEAD_PARTITION,
-    LWTRANCHE_TWOPHASE_STATE,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */
