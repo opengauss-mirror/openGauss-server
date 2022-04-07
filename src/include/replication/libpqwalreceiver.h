@@ -35,6 +35,7 @@ typedef struct LibpqrcvConnectParam {
     bool logical;
     uint32 protoVersion;    /* Logical protocol version */
     List *publicationNames; /* String list of publications */
+    bool binary;            /* Ask publisher to use binary */
 }LibpqrcvConnectParam;
 
 extern int32 pg_atoi(char* s, int size, int c);

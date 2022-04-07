@@ -38,7 +38,7 @@ CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION 'host=''1.2.3.4'' port=''123
 ALTER SUBSCRIPTION testsub CONNECTION 'host=''1.2.3.4'' port=''12345'' user=''username'' dbname=''postgres'' password=''password_1234''';
 ALTER SUBSCRIPTION testsub CONNECTION 'dbname=does_not_exist';
 reset client_min_messages;
-select subname, pg_get_userbyid(subowner) as Owner, subenabled, subconninfo, subpublications from pg_subscription where subname='testsub';
+select subname, pg_get_userbyid(subowner) as Owner, subenabled, subconninfo, subpublications, subbinary from pg_subscription where subname='testsub';
 --- alter subscription
 ------ set publication
 ALTER SUBSCRIPTION testsub SET PUBLICATION testpub2, testpub3;
@@ -58,6 +58,9 @@ select subname, subenabled, subsynccommit from pg_subscription  where subname='t
 ALTER SUBSCRIPTION testsub SET (slot_name='testsub');
 -- alter owner
 ALTER SUBSCRIPTION testsub owner to regress_subscription_user2;
+-- alter subbinary to true
+ALTER SUBSCRIPTION testsub SET (binary=true);
+select subname, subbinary from pg_subscription where subname='testsub';
 --rename
 ALTER SUBSCRIPTION testsub rename to testsub_rename;
 --- inside a transaction block

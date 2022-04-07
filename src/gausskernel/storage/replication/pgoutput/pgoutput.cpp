@@ -15,6 +15,8 @@
 
 #include "catalog/pg_publication.h"
 
+#include "commands/defrem.h"
+
 #include "replication/logical.h"
 #include "replication/logicalproto.h"
 #include "replication/origin.h"
@@ -74,11 +76,14 @@ void _PG_output_plugin_init(OutputPluginCallbacks *cb)
     cb->shutdown_cb = pgoutput_shutdown;
 }
 
-static void parse_output_parameters(List *options, PGOutputData *data)
+static void parse_output_parameters(List* options, PGOutputData* data)
 {
     ListCell *lc;
     bool protocol_version_given = false;
     bool publication_names_given = false;
+    bool binary_option_given = false;
+
+    data->binary = false;
 
     foreach (lc, options) {
         DefElem *defel = (DefElem *)lfirst(lc);
@@ -108,6 +113,12 @@ static void parse_output_parameters(List *options, PGOutputData *data)
 
             if (!SplitIdentifierString(strVal(defel->arg), ',', &(data->publication_names)))
                 ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid publication_names syntax")));
+        } else if (strcmp(defel->defname, "binary") == 0) {
+            if (binary_option_given)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            binary_option_given = true;
+
+            data->binary = defGetBoolean(defel);
         } else
             elog(ERROR, "unrecognized pgoutput option: %s", defel->defname);
     }
@@ -300,19 +311,19 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     switch (change->action) {
         case REORDER_BUFFER_CHANGE_INSERT:
             OutputPluginPrepareWrite(ctx, true);
-            logicalrep_write_insert(ctx->out, relation, &change->data.tp.newtuple->tuple);
+            logicalrep_write_insert(ctx->out, relation, &change->data.tp.newtuple->tuple, data->binary);
             OutputPluginWrite(ctx, true);
             break;
         case REORDER_BUFFER_CHANGE_UINSERT:
             OutputPluginPrepareWrite(ctx, true);
-            logicalrep_write_insert(ctx->out, relation, (HeapTuple)(&change->data.utp.newtuple->tuple));
+            logicalrep_write_insert(ctx->out, relation, (HeapTuple)(&change->data.utp.newtuple->tuple), data->binary);
             OutputPluginWrite(ctx, true);
             break;
         case REORDER_BUFFER_CHANGE_UPDATE: {
             HeapTuple oldtuple = change->data.tp.oldtuple ? &change->data.tp.oldtuple->tuple : NULL;
 
             OutputPluginPrepareWrite(ctx, true);
-            logicalrep_write_update(ctx->out, relation, oldtuple, &change->data.tp.newtuple->tuple);
+            logicalrep_write_update(ctx->out, relation, oldtuple, &change->data.tp.newtuple->tuple, data->binary);
             OutputPluginWrite(ctx, true);
             break;
         }
@@ -320,14 +331,14 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
             HeapTuple oldtuple = change->data.utp.oldtuple ? ((HeapTuple)(&change->data.utp.oldtuple->tuple)) : NULL;
 
             OutputPluginPrepareWrite(ctx, true);
-            logicalrep_write_update(ctx->out, relation, oldtuple, (HeapTuple)(&change->data.utp.newtuple->tuple));
+            logicalrep_write_update(ctx->out, relation, oldtuple, (HeapTuple)(&change->data.utp.newtuple->tuple), data->binary);
             OutputPluginWrite(ctx, true);
             break;
         }
         case REORDER_BUFFER_CHANGE_DELETE:
             if (change->data.tp.oldtuple) {
                 OutputPluginPrepareWrite(ctx, true);
-                logicalrep_write_delete(ctx->out, relation, &change->data.tp.oldtuple->tuple);
+                logicalrep_write_delete(ctx->out, relation, &change->data.tp.oldtuple->tuple, data->binary);
                 OutputPluginWrite(ctx, true);
             } else
                 elog(DEBUG1, "didn't send DELETE change because of missing oldtuple");
@@ -335,7 +346,7 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
         case REORDER_BUFFER_CHANGE_UDELETE:
             if (change->data.utp.oldtuple) {
                 OutputPluginPrepareWrite(ctx, true);
-                logicalrep_write_delete(ctx->out, relation, (HeapTuple)(&change->data.utp.oldtuple->tuple));
+                logicalrep_write_delete(ctx->out, relation, (HeapTuple)(&change->data.utp.oldtuple->tuple), data->binary);
                 OutputPluginWrite(ctx, true);
             } else
                 elog(DEBUG1, "didn't send DELETE change because of missing oldtuple");
