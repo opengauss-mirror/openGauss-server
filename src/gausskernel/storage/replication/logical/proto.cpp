@@ -406,7 +406,7 @@ static void logicalrep_write_tuple(StringInfo out, Relation rel, HeapTuple tuple
                 pfree(outputbytes);
             }
         } else {
-            char *outputstr;
+            char* outputstr = NULL;
             pq_sendbyte(out, LOGICALREP_COLUMN_TEXT);
             if (!typclass->typbyval && typclass->typlen == -1) {
                 /* definitely detoasted Datum */
@@ -464,10 +464,8 @@ static void logicalrep_read_tuple(StringInfo in, LogicalRepTupleData *tuple)
                 len = pq_getmsgint(in, sizeof(uint32));    /* read length */
 
                 /* and data */
-                value->data = (char *) palloc((len + 1) * sizeof(char));
+                value->data = (char *)palloc0((len + 1) * sizeof(char));
                 pq_copymsgbytes(in, value->data, len);
-                /* not strictly necessary but per StringInfo practice */
-                value->data[len] = '\0';
                 /* make StringInfo fully valid */
                 value->len = len;
                 value->cursor = 0;
@@ -602,4 +600,26 @@ static const char *logicalrep_read_namespace(StringInfo in)
     }
 
     return nspname;
+}
+
+/*
+ * Write conninfo to the output stream.
+ */
+void logicalrep_write_conninfo(StringInfo out, char* conninfo)
+{
+    pq_sendbyte(out, 'S'); /* action */
+
+    pq_writestring(out, conninfo); /* conninfo follows */
+}
+
+/*
+ * Read conninfo from stream.
+ */
+void logicalrep_read_conninfo(StringInfo in, char** conninfo)
+{
+    const char* conninfoTemp = pq_getmsgstring(in);
+    size_t conninfoLen = strlen(conninfoTemp) + 1;
+    *conninfo = (char*)palloc(conninfoLen);
+    int rc = strcpy_s(*conninfo, conninfoLen, conninfoTemp);
+    securec_check(rc, "", "");
 }

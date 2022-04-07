@@ -54,5 +54,6 @@ extern bool libpqrcv_command(const char *cmd, char **err, int *sqlstate);
 extern void IdentifyRemoteSystem(bool checkRemote);
 extern void CreateRemoteReplicationSlot(XLogRecPtr startpoint, const char* slotname, bool isLogical);
 extern void StartRemoteStreaming(const LibpqrcvConnectParam *options);
+extern ServerMode IdentifyRemoteMode();
 
 #endif
