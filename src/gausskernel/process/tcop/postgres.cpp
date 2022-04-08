@@ -827,9 +827,6 @@ void InitBSqlPluginHookIfNeeded()
 {
     const char* b_sql_plugin = "b_sql_plugin";
     CFunInfo tmpCF;
-    if (!CheckIfExtensionExists(b_sql_plugin)) {
-        return;
-    }
 
     tmpCF = load_external_function(b_sql_plugin, INIT_PLUGIN_OBJECT, false, false);
     if (tmpCF.user_fn != NULL) {
@@ -7572,7 +7569,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         init_set_params_htab();
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.b_sql_plugin) {
         InitBSqlPluginHookIfNeeded();
     }
 #endif
