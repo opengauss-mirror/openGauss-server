@@ -5923,7 +5923,7 @@ int main(int argc, char** argv)
             &option_index)) != -1)
 #endif
 #else
-        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:dqL:T:Q:", long_options,
+        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:T:Q:", long_options,
             &option_index)) != -1)
 #endif
 #endif
