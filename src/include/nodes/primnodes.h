@@ -1025,6 +1025,12 @@ typedef struct XmlExpr {
     int location; /* token location, or -1 if unknown */
 } XmlExpr;
 
+typedef struct PrefixKey {
+    Expr xpr;
+    Expr* arg; /* should be a ColumnRef or Var */
+    int length; /* prefix length */
+} PrefixKey;
+
 /* ----------------
  * NullTest
  *

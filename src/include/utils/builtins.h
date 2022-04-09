@@ -912,6 +912,7 @@ extern Datum instr_3args(PG_FUNCTION_ARGS);
 extern Datum instr_4args(PG_FUNCTION_ARGS);
 extern Datum byteain(PG_FUNCTION_ARGS);
 extern void text_to_bktmap(text* gbucket, uint2* bktmap, int *bktlen);
+extern bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified);
 
 #define CStringGetTextDatum(s) PointerGetDatum(cstring_to_text(s))
 #define TextDatumGetCString(d) text_to_cstring((text*)DatumGetPointer(d))

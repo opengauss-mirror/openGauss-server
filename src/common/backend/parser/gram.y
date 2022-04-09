@@ -630,7 +630,7 @@ static int errstate;
 %type <node>	var_value zone_value
 
 %type <keyword> unreserved_keyword type_func_name_keyword
-%type <keyword> col_name_keyword reserved_keyword
+%type <keyword> col_name_keyword reserved_keyword col_name_keyword_nonambiguous
 
 %type <node>	TableConstraint TableLikeClause ForeignTableLikeClause
 %type <ival>	excluding_option_list TableLikeOptionList TableLikeIncludingOption TableLikeExcludingOption
@@ -656,7 +656,7 @@ static int errstate;
 %type <ival>	document_or_content
 %type <boolean> xml_whitespace_option
 
-%type <node>	func_application func_with_separator func_expr_common_subexpr
+%type <node>	func_application func_with_separator func_expr_common_subexpr index_functional_expr_key func_application_special
 %type <node>	func_expr func_expr_windowless
 %type <node>	common_table_expr
 %type <with>	with_clause opt_with_clause
@@ -12187,7 +12187,7 @@ index_elem:	ColId opt_collate opt_class opt_asc_desc opt_nulls_order
 					$$->ordering = (SortByDir)$4;
 					$$->nulls_ordering = (SortByNulls)$5;
 				}
-			| func_expr_windowless opt_collate opt_class opt_asc_desc opt_nulls_order
+			| index_functional_expr_key opt_collate opt_class opt_asc_desc opt_nulls_order
 				{
 					$$ = makeNode(IndexElem);
 					$$->name = NULL;
@@ -12209,6 +12209,54 @@ index_elem:	ColId opt_collate opt_class opt_asc_desc opt_nulls_order
 					$$->ordering = (SortByDir)$6;
 					$$->nulls_ordering = (SortByNulls)$7;
 				}
+		;
+
+index_functional_expr_key:	col_name_keyword_nonambiguous '(' Iconst ')'
+			{
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+							ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("prefix key is supported only in B-format database")));
+						}
+						PrefixKey* pk = makeNode(PrefixKey);
+						pk->arg = (Expr*)makeColumnRef(pstrdup($1), NIL, @1, yyscanner);
+						pk->length = $3;
+						$$ = (Node*)pk;
+					}
+				| func_name '(' func_arg_list opt_sort_clause ')'
+					{
+						List* elist = (List*)$3;
+						List* nlist = (List*)$1;
+						
+						/*
+						 * This syntax branch can be parsed either as a column prefix or as a function.
+						 * In B-compatible mode, it is preferentially treated as a column prefix.
+						 */
+						if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT &&
+							$4 == NIL && list_length(elist) == 1 && list_length(nlist) == 1) {
+							Node* arg = (Node*)linitial(elist);
+							if (IsA(arg, A_Const) && ((A_Const*)arg)->val.type == T_Integer) {
+								PrefixKey* pk = makeNode(PrefixKey);
+								pk->arg = (Expr*)makeColumnRef(strVal(linitial(nlist)), NIL, @1, yyscanner);
+								pk->length = intVal(&((A_Const*)arg)->val);
+								$$ = (Node*)pk;
+								break;
+							}
+						}
+						
+						FuncCall *n = makeNode(FuncCall);
+						n->funcname = $1;
+						n->args = $3;
+						n->agg_order = $4;
+						n->agg_star = FALSE;
+						n->agg_distinct = FALSE;
+						n->func_variadic = FALSE;
+						n->over = NULL;
+						n->location = @1;
+						n->call_func = false;
+						$$ = (Node *)n;
+					}
+				| func_application_special  { $$ = $1; }
+				| func_expr_common_subexpr  { $$ = $1; }
 		;
 
 opt_include:		INCLUDE '(' index_including_params ')'			{ $$ = $3; }
@@ -22481,12 +22529,12 @@ func_expr:	func_application within_group_clause over_clause
 				{ $$ = $1; }
 		;
 
-func_application:	func_name '(' ')'
+func_application:	func_name '(' func_arg_list opt_sort_clause ')'
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = $1;
-					n->args = NIL;
-					n->agg_order = NIL;
+					n->args = $3;
+					n->agg_order = $4;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
 					n->func_variadic = FALSE;
@@ -22495,12 +22543,15 @@ func_application:	func_name '(' ')'
 					n->call_func = false;
 					$$ = (Node *)n;
 				}
-			| func_name '(' func_arg_list opt_sort_clause ')'
+			| func_application_special { $$ = $1; }
+		;
+
+func_application_special:	func_name '(' ')'
 				{
 					FuncCall *n = makeNode(FuncCall);
 					n->funcname = $1;
-					n->args = $3;
-					n->agg_order = $4;
+					n->args = NIL;
+					n->agg_order = NIL;
 					n->agg_star = FALSE;
 					n->agg_distinct = FALSE;
 					n->func_variadic = FALSE;
@@ -24899,6 +24950,9 @@ unreserved_keyword:
  * The type names appearing here are not usable as function names
  * because they can be followed by '(' in typename productions, which
  * looks too much like a function call for an LR(1) parser.
+ *
+ * If the new col_name_keyword is not used in func_expr_common_subexpr,
+ * add it to col_name_keyword_nonambiguous too!
  */
 col_name_keyword:
 			  BETWEEN
@@ -24964,6 +25018,56 @@ col_name_keyword:
 			| XMLPI
 			| XMLROOT
 			| XMLSERIALIZE
+		;
+
+/* Column identifier --- keywords that can be column, table, etc names.
+ *
+ * These keywords will not be recognized as function names. These keywords
+ * are used to distinguish index prefix keys from function keys.
+ */
+col_name_keyword_nonambiguous:
+			  BETWEEN
+			| BIGINT
+			| BINARY_DOUBLE
+			| BINARY_INTEGER
+			| BIT
+			| BOOLEAN_P
+			| BUCKETCNT
+			| BYTEAWITHOUTORDER
+			| BYTEAWITHOUTORDERWITHEQUAL
+			| CHAR_P
+			| CHARACTER
+			| DATE_P
+			| DEC
+			| DECIMAL_P
+			| DECODE
+			| EXISTS
+			| FLOAT_P
+			| GROUPING_P
+			| INOUT
+			| INT_P
+			| INTEGER
+			| INTERVAL
+			| NATIONAL
+			| NCHAR
+			| NONE
+			| NUMBER_P
+			| NUMERIC
+			| NVARCHAR2
+			| OUT_P
+			| PRECISION
+			| REAL
+			| ROW
+			| SETOF
+			| SMALLDATETIME
+			| SMALLINT
+			| TIME
+			| TIMESTAMP
+			| TINYINT
+			| VALUES
+			| VARCHAR
+			| VARCHAR2
+			| XMLATTRIBUTES
 		;
 
 /* Type/function identifier --- keywords that can be type or function names.

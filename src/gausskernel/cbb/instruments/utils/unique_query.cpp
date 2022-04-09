@@ -754,6 +754,12 @@ void UniqueSql::JumbleExpr(pgssJumbleState* jstate, Node* node)
 
             break;
         }
+        case T_PrefixKey: {
+            PrefixKey* pkey = (PrefixKey*)node;
+            UniqueSql::JumbleExpr(jstate, (Node*)pkey->arg);
+            APP_JUMB(pkey->length);
+            break;
+        }
         default:
             /* Only a warning, since we can stumble along anyway */
             elog(DEBUG1, "unrecognized node type: %d", (int)nodeTag(node));

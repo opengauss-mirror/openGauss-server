@@ -24,6 +24,7 @@
 
 #include "access/skey.h"
 #include "access/transam.h"
+#include "access/sysattr.h"
 #include "bulkload/foreignroutine.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_constraint.h"
@@ -120,9 +121,9 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
 static Node* replace_nestloop_params(PlannerInfo* root, Node* expr);
 static Node* replace_nestloop_params_mutator(Node* node, PlannerInfo* root);
 static void process_subquery_nestloop_params(PlannerInfo *root, List *subplan_params);
-static List* fix_indexqual_references(PlannerInfo* root, IndexPath* index_path);
+static List* fix_indexqual_references(PlannerInfo* root, IndexPath* index_path, Bitmapset** prefixkeys);
 static List* fix_indexorderby_references(PlannerInfo* root, IndexPath* index_path);
-static Node* fix_indexqual_operand(Node* node, IndexOptInfo* index, int indexcol);
+static Node* fix_indexqual_operand(Node* node, IndexOptInfo* index, int indexcol, Bitmapset** prefixkeys);
 static List* get_switched_clauses(List* clauses, Relids outerrelids);
 static List* order_qual_clauses(PlannerInfo* root, List* clauses);
 static void copy_path_costsize(Plan* dest, Path* src);
@@ -2515,6 +2516,18 @@ static TsStoreScan* create_tsstorescan_plan(PlannerInfo* root, Path* best_path, 
  }
 #endif   /* ENABLE_MULTIPLE_NODES */
 
+static bool clause_relate_to_prefixkey(RestrictInfo* rinfo, IndexOptInfo* index, Bitmapset* prefixkeys)
+{
+    Index relid = index->rel->relid;
+    Bitmapset* columns = NULL;
+
+    if (prefixkeys == NULL || bms_is_empty(prefixkeys) || !bms_is_member(relid, rinfo->clause_relids)) {
+        return false;
+    }
+    pull_varattnos((Node*)rinfo->clause, relid, &columns);
+    return bms_overlap(columns, prefixkeys);
+}
+
 /*
  * create_indexscan_plan
  *	  Returns an indexscan plan for the base relation scanned by 'best_path'
@@ -2539,6 +2552,7 @@ static Scan* create_indexscan_plan(
     List* fixed_indexorderbys = NIL;
     List* opquals = NIL;
     ListCell* l = NULL;
+    Bitmapset *prefixkeys = NULL;
 
     /* it should be a base rel... */
     Assert(baserelid > 0);
@@ -2554,7 +2568,7 @@ static Scan* create_indexscan_plan(
      * The executor needs a copy with the indexkey on the left of each clause
      * and with index Vars substituted for table ones.
      */
-    fixed_indexquals = fix_indexqual_references(root, best_path);
+    fixed_indexquals = fix_indexqual_references(root, best_path, &prefixkeys);
 
     /*
      * Likewise fix up index attr references in the ORDER BY expressions.
@@ -2602,6 +2616,10 @@ static Scan* create_indexscan_plan(
 
         if (list_member_ptr(indexquals, rinfo))
             continue; /* simple duplicate */
+        if (clause_relate_to_prefixkey(rinfo, best_path->indexinfo, prefixkeys)) {
+            qpqual = lappend(qpqual, rinfo);
+            continue;
+        }
         if (is_redundant_derived_clause(rinfo, indexquals))
             continue; /* derived from same EquivalenceClass */
         if (!contain_mutable_functions((Node*)rinfo->clause)) {
@@ -5151,7 +5169,7 @@ process_subquery_nestloop_params(PlannerInfo *root, List *subplan_params)
  * with the original; this is needed in case there is a subplan in it (we need
  * two separate copies of the subplan tree, or things will go awry).
  */
-static List* fix_indexqual_references(PlannerInfo* root, IndexPath* index_path)
+static List* fix_indexqual_references(PlannerInfo* root, IndexPath* index_path, Bitmapset** prefixkeys)
 {
     IndexOptInfo* index = index_path->indexinfo;
     List* fixed_indexquals = NIL;
@@ -5192,11 +5210,10 @@ static List* fix_indexqual_references(PlannerInfo* root, IndexPath* index_path)
              */
             if (!bms_equal(rinfo->left_relids, index->rel->relids))
                 CommuteOpExpr(op);
-
             /*
              * Now replace the indexkey expression with an index Var.
              */
-            linitial(op->args) = fix_indexqual_operand((Node*)linitial(op->args), index, indexcol);
+            linitial(op->args) = fix_indexqual_operand((Node*)linitial(op->args), index, indexcol, prefixkeys);
         } else if (IsA(clause, RowCompareExpr)) {
             RowCompareExpr* rc = (RowCompareExpr*)clause;
             Expr* newrc = NULL;
@@ -5234,19 +5251,19 @@ static List* fix_indexqual_references(PlannerInfo* root, IndexPath* index_path)
             Assert(list_length(rc->largs) == list_length(indexcolnos));
             forboth(lca, rc->largs, lcai, indexcolnos)
             {
-                lfirst(lca) = fix_indexqual_operand((Node*)lfirst(lca), index, lfirst_int(lcai));
+                lfirst(lca) = fix_indexqual_operand((Node*)lfirst(lca), index, lfirst_int(lcai), prefixkeys);
             }
         } else if (IsA(clause, ScalarArrayOpExpr)) {
             ScalarArrayOpExpr* saop = (ScalarArrayOpExpr*)clause;
 
             /* Never need to commute... */
             /* Replace the indexkey expression with an index Var. */
-            linitial(saop->args) = fix_indexqual_operand((Node*)linitial(saop->args), index, indexcol);
+            linitial(saop->args) = fix_indexqual_operand((Node*)linitial(saop->args), index, indexcol, prefixkeys);
         } else if (IsA(clause, NullTest)) {
             NullTest* nt = (NullTest*)clause;
 
             /* Replace the indexkey expression with an index Var. */
-            nt->arg = (Expr*)fix_indexqual_operand((Node*)nt->arg, index, indexcol);
+            nt->arg = (Expr*)fix_indexqual_operand((Node*)nt->arg, index, indexcol, prefixkeys);
         } else
             ereport(ERROR,
                 (errmodule(MOD_OPT),
@@ -5258,6 +5275,7 @@ static List* fix_indexqual_references(PlannerInfo* root, IndexPath* index_path)
 
     return fixed_indexquals;
 }
+
 
 /*
  * fix_indexorderby_references
@@ -5304,7 +5322,7 @@ static List* fix_indexorderby_references(PlannerInfo* root, IndexPath* index_pat
             /*
              * Now replace the indexkey expression with an index Var.
              */
-            linitial(op->args) = fix_indexqual_operand((Node*)linitial(op->args), index, indexcol);
+            linitial(op->args) = fix_indexqual_operand((Node*)linitial(op->args), index, indexcol, NULL);
         } else
             ereport(ERROR,
                 (errmodule(MOD_OPT),
@@ -5327,7 +5345,7 @@ static List* fix_indexorderby_references(PlannerInfo* root, IndexPath* index_pat
  * Most of the code here is just for sanity cross-checking that the given
  * expression actually matches the index column it's claimed to.
  */
-static Node* fix_indexqual_operand(Node* node, IndexOptInfo* index, int indexcol)
+static Node* fix_indexqual_operand(Node* node, IndexOptInfo* index, int indexcol, Bitmapset** prefixkeys)
 {
     Var* result = NULL;
     int pos;
@@ -5374,6 +5392,13 @@ static Node* fix_indexqual_operand(Node* node, IndexOptInfo* index, int indexcol
                 indexkey = (Node*)lfirst(indexpr_item);
                 if (indexkey && IsA(indexkey, RelabelType))
                     indexkey = (Node*)((RelabelType*)indexkey)->arg;
+                if (indexkey && IsA(indexkey, PrefixKey)) {
+                    indexkey = (Node*)((PrefixKey*)indexkey)->arg;
+                    if (prefixkeys != NULL) {
+                        *prefixkeys = bms_add_member(*prefixkeys,
+                            ((Var*)indexkey)->varattno - FirstLowInvalidHeapAttributeNumber);
+                    }
+                }
                 if (equal(node, indexkey)) {
                     result = makeVar(INDEX_VAR,
                         indexcol + 1,

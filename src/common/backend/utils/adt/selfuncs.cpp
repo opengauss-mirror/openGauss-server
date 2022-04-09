@@ -5398,7 +5398,7 @@ static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* varda
          * The first index column must match the desired variable and sort
          * operator --- but we can use a descending-order index.
          */
-        if (!match_index_to_operand(vardata->var, 0, index))
+        if (!match_index_to_operand(vardata->var, 0, index, true))
             continue;
         switch (get_op_opfamily_strategy(sortop, index->sortopfamily[0])) {
             case BTLessStrategyNumber:
@@ -6697,10 +6697,10 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
             continue; /* keep compiler quiet */
         }
 
-        if (match_index_to_operand(leftop, indexcol, index)) {
+        if (match_index_to_operand(leftop, indexcol, index, true)) {
             /* clause_op is correct */
         } else {
-            Assert(match_index_to_operand(rightop, indexcol, index));
+            Assert(match_index_to_operand(rightop, indexcol, index, true));
             /* Must flip operator to get the opfamily member */
             clause_op = get_commutator(clause_op);
         }

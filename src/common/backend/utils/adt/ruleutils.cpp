@@ -3313,7 +3313,9 @@ static char *pg_get_indexdef_worker(Oid indexrelid, int colno, const Oid *exclud
             str = deparse_expression_pretty(indexkey, context, false, false, prettyFlags, 0);
             if (!colno || colno == keyno + 1) {
                 /* Need parens if it's not a bare function call */
-                if (indexkey && IsA(indexkey, FuncExpr) && ((FuncExpr*)indexkey)->funcformat == COERCE_EXPLICIT_CALL)
+                if (indexkey &&
+                    ((IsA(indexkey, FuncExpr) && ((FuncExpr*)indexkey)->funcformat == COERCE_EXPLICIT_CALL) ||
+                     IsA(indexkey, PrefixKey)))
                     appendStringInfoString(&buf, str);
                 else
                     appendStringInfo(&buf, "(%s)", str);
@@ -9955,6 +9957,12 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
                 get_rule_expr((Node*)lfirst(l), context, showimplicit, no_alias);
                 sep = ", ";
             }
+        } break;
+
+        case T_PrefixKey: {
+            PrefixKey* pkey = (PrefixKey*)node;
+            get_rule_expr((Node*)pkey->arg, context, showimplicit, no_alias);
+            appendStringInfo(buf, "(%d)", pkey->length);
         } break;
 
         default:

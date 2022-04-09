@@ -6784,6 +6784,16 @@ static SubPartitionPruningResult *_copySubPartitionPruningResult(const SubPartit
     return newnode;
 }
 
+static PrefixKey* _copyPrefixKey(const PrefixKey* from)
+{
+    PrefixKey* newnode = makeNode(PrefixKey);
+
+    COPY_NODE_FIELD(arg);
+    COPY_SCALAR_FIELD(length);
+
+    return newnode;
+}
+
 /*
  * copyObject
  *
@@ -7256,6 +7266,9 @@ void* copyObject(const void* from)
             break;
         case T_MergeAction:
             retval = _copyMergeAction((MergeAction*)from);
+            break;
+        case T_PrefixKey:
+            retval = _copyPrefixKey((PrefixKey*)from);
             break;
             /*
              * RELATION NODES

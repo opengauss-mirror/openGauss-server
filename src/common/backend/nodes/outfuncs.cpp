@@ -5660,6 +5660,13 @@ static void _outTrainModel(StringInfo str, TrainModel* node)
     }
 }
 
+static void _outPrefixKey(StringInfo str, PrefixKey* node)
+{
+    WRITE_NODE_TYPE("PREFIXKEY");
+    WRITE_NODE_FIELD(arg);
+    WRITE_INT_FIELD(length);
+}
+
 /*
  * _outNode -
  *	  converts a Node into ascii string and append it to 'str'
@@ -6342,6 +6349,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_DfsPrivateItem:
                 _outDfsPrivateItem(str, (DfsPrivateItem*)obj);
+                break;
+            case T_PrefixKey:
+                _outPrefixKey(str, (PrefixKey*)obj);
                 break;
             /*
              * Vector Nodes

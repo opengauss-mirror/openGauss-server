@@ -118,7 +118,6 @@ static text* text_catenate(text* t1, text* t2);
 static text* text_overlay(text* t1, text* t2, int sp, int sl);
 static void appendStringInfoText(StringInfo str, const text* t);
 static bytea* bytea_catenate(bytea* t1, bytea* t2);
-static bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified);
 static bytea* bytea_substring_orclcompat(Datum str, int S, int L, bool length_not_specified);
 static bytea* bytea_overlay(bytea* t1, bytea* t2, int sp, int sl);
 static StringInfo makeStringAggState(FunctionCallInfo fcinfo);
@@ -3042,7 +3041,7 @@ Datum bytea_substr_no_len(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(bytea_substring(PG_GETARG_DATUM(0), PG_GETARG_INT32(1), -1, true));
 }
 
-static bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified)
+bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified)
 {
     int S1; /* adjusted start position */
     int L1; /* adjusted substring length */

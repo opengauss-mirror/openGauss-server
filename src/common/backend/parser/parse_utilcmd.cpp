@@ -3813,6 +3813,12 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
 #endif
             if (expression_returns_set(ielem->expr))
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("index expression cannot return a set")));
+            if (IsA(ielem->expr, PrefixKey) &&
+                (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE)) &&
+                (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_USTORE_INDEX_TYPE))) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("access method \"%s\" does not support prefix key", stmt->accessMethod)));
+            }
         }
 
         if (IsElementExisted(indexElements, ielem)) {
