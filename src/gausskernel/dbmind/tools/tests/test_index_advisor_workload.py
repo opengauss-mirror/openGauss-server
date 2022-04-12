@@ -27,6 +27,7 @@ from collections.abc import Iterable
 from collections import defaultdict
 
 import index_advisor_workload as iaw
+import mcts
 
 
 def hash_any(obj):
@@ -226,6 +227,32 @@ select * from student_range_part1 where credit=1;
 
 
 class IndexAdvisorTester(unittest.TestCase):
+
+    def test_mcts(self):
+        storage_threshold = 12
+        index1 = iaw.IndexItem('public.a', 'col1', index_type='global')
+        index2 = iaw.IndexItem('public.b', 'col1', index_type='global')
+        index3 = iaw.IndexItem('public.c', 'col1', index_type='global')
+        index4 = iaw.IndexItem('public.d', 'col1', index_type='global')
+
+        atomic_index1 = iaw.IndexItem('public.a', 'col1', index_type='global')
+        atomic_index2 = iaw.IndexItem('public.b', 'col1', index_type='global')
+        atomic_index3 = iaw.IndexItem('public.c', 'col1', index_type='global')
+        atomic_index4 = iaw.IndexItem('public.d', 'col1', index_type='global')
+
+        atomic_index1.storage = 10
+        atomic_index2.storage = 4
+        atomic_index3.storage = 7
+        available_choices = [index1, index2, index3, index4]
+        atomic_choices = [[], [atomic_index2], [atomic_index1], [atomic_index3],
+                          [atomic_index2, atomic_index3], [atomic_index4]]
+        query = iaw.QueryItem('select * from gia_01', 1)
+        query.cost_list = [10, 7, 5, 9, 4, 11]
+        workload_info = [query]
+
+        results = mcts.MCTS(workload_info, atomic_choices, available_choices, storage_threshold, 2)
+        self.assertLessEqual([index1.atomic_pos, index2.atomic_pos, index3.atomic_pos], [2, 1, 3])
+        self.assertSetEqual({results[0].table, results[1].table}, {'public.b', 'public.c'})
 
     def test_get_indexable_columns(self):
         tables = 'table1 table2 table2 table3 table3 table3'.split()
