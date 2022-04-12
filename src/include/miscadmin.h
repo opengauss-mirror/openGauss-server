@@ -90,6 +90,7 @@ extern const uint32 SUPPORT_DATA_REPAIR;
 extern const uint32 SCAN_BATCH_MODE_VERSION_NUM;
 extern const uint32 RELMAP_4K_VERSION_NUM;
 extern const uint32 PUBLICATION_VERSION_NUM;
+extern const uint32 SUBSCRIPTION_BINARY_VERSION_NUM;
 extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 extern const uint32 SUPPORT_HASH_XLOG_VERSION_NUM;
 extern const uint32 PITR_INIT_VERSION_NUM;
