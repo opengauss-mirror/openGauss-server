@@ -26,9 +26,11 @@ import logging
 try:
     from .dao.gsql_execute import GSqlExecute
     from .dao.execute_factory import ExecuteFactory
+    from .mcts import MCTS
 except ImportError:
     from dao.gsql_execute import GSqlExecute
     from dao.execute_factory import ExecuteFactory
+    from mcts import MCTS
 
 ENABLE_MULTI_NODE = False
 SAMPLE_NUM = 5
@@ -192,9 +194,12 @@ class IndexAdvisor:
                                                     self.workload_used_index))
         if DRIVER:
             self.db.close_conn()
-
-        opt_config = greedy_determine_opt_config(self.workload_info[0], atomic_config_total,
-                                                 candidate_indexes, self.index_cost_total[0])
+        if MAX_INDEX_STORAGE:
+            opt_config = MCTS(self.workload_info[0], atomic_config_total, candidate_indexes,
+                              MAX_INDEX_STORAGE, MAX_INDEX_NUM)
+        else:
+            opt_config = greedy_determine_opt_config(self.workload_info[0], atomic_config_total,
+                                                     candidate_indexes, self.index_cost_total[0])
         self.retain_lower_cost_index(candidate_indexes)
         if len(opt_config) == 0:
             print("No optimal indexes generated!")
@@ -943,7 +948,7 @@ def check_parameter(args):
         raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
                                          args.max_index_num)
     if args.max_index_storage is not None and args.max_index_storage <= 0:
-        raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
+        raise argparse.ArgumentTypeError("%s is an invalid positive float value" %
                                          args.max_index_storage)
     JSON_TYPE = args.json
     MAX_INDEX_NUM = args.max_index_num
@@ -971,7 +976,7 @@ def main(argv):
     arg_parser.add_argument(
         "--max_index_num", help="Maximum number of suggested indexes", type=int)
     arg_parser.add_argument("--max_index_storage",
-                            help="Maximum storage of suggested indexes/MB", type=int)
+                            help="Maximum storage of suggested indexes/MB", type=float)
     arg_parser.add_argument("--multi_iter_mode", action='store_true',
                             help="Whether to use multi-iteration algorithm", default=False)
     arg_parser.add_argument("--multi_node", action='store_true',
