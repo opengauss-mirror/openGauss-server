@@ -94,7 +94,7 @@ hint_gram.o: hint_gram.hpp
 # gram.cpp, gram.hpp, and scan.inc are in the distribution tarball, so they
 # are not cleaned here.
 clean distclean maintainer-clean:
-	rm -f lex.backup
+	rm -f lex.backup hint_gram.cpp
 
 
 maintainer-check:
