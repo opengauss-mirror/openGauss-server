@@ -13,5 +13,6 @@
 #define LOGICALWORKER_H
 
 extern void ApplyWorkerMain();
+extern bool IsLogicalWorker(void);
 
 #endif /* LOGICALWORKER_H */
