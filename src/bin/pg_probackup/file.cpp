@@ -51,6 +51,7 @@ typedef struct
     bool exclusive_backup;
     bool skip_hidden;
     int  external_dir_num;
+    bool backup_replslots;
 } fio_list_dir_request;
 
 typedef struct
@@ -1794,7 +1795,7 @@ cleanup:
 /* Compile the array of files located on remote machine in directory root */
 void fio_list_dir(parray *files, const char *root, bool exclude,
                             bool follow_symlink, bool add_root, bool backup_logs,
-                            bool skip_hidden, int external_dir_num)
+                            bool skip_hidden, int external_dir_num, bool backup_replslots)
 {
     fio_header hdr;
     fio_list_dir_request req;
@@ -1811,6 +1812,7 @@ void fio_list_dir(parray *files, const char *root, bool exclude,
     req.exclusive_backup = exclusive_backup;
     req.skip_hidden = skip_hidden;
     req.external_dir_num = external_dir_num;
+    req.backup_replslots = backup_replslots;
 
     hdr.cop = FIO_LIST_DIR;
     hdr.size = sizeof(req);
@@ -1870,7 +1872,14 @@ void fio_list_dir(parray *files, const char *root, bool exclude,
                 securec_check_ss_c(nRet, "\0", "\0");
             }
 
-           
+            /* 
+             * Check file that under pg_replslot and judge whether it
+             * belonged to logical replication slots for subscriptions.
+             */
+            if (backup_replslots && strcmp(buf, PG_REPLSLOT_DIR) != 0 &&
+                path_is_prefix_of_path(PG_REPLSLOT_DIR, buf) && check_logical_replslot_dir(file->rel_path) != 1) {
+                continue;
+            }
 
             parray_append(files, file);
         }
@@ -1914,7 +1923,7 @@ static void fio_list_dir_impl(int out, char* buf)
 
     dir_list_file(file_files, req->path, req->exclude, req->follow_symlink,
                         req->add_root, req->backup_logs, req->skip_hidden,
-                        req->external_dir_num, FIO_LOCAL_HOST);
+                        req->external_dir_num, FIO_LOCAL_HOST, req->backup_replslots);
 
     /* send information about files to the main process */
     for (i = 0; i < (int)parray_num(file_files); i++)

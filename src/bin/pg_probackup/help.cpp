@@ -154,6 +154,7 @@ void help_pg_probackup(void)
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--ttl=interval] [--expire-time=time]\n"));
+    printf(_("                 [--backup-pg-replslot]\n"));
     printf(_("                 [--help]\n"));
 
     printf(_("\n  %s restore -B backup-path --instance=instance_name\n"), PROGRAM_NAME);
@@ -420,6 +421,7 @@ static void help_backup(void)
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
     printf(_("                 [--remote-libpath=libpath]\n"));
     printf(_("                 [--ttl=interval] [--expire-time=time]\n\n"));
+    printf(_("                 [--backup-pg-replslot]\n"));
 
     printf(_("  -B, --backup-path=backup-path    location of the backup storage area\n"));
     printf(_("      --instance=instance_name     name of the instance\n"));
@@ -441,6 +443,7 @@ static void help_backup(void)
     printf(_("      --note=text                  add note to backup\n"));
     printf(_("                                   (example: --note='backup before app update to v13.1')\n"));
     printf(_("      --archive-timeout=timeout    wait timeout for WAL segment archiving (default: 5min)\n"));
+    printf(_("      --backup-pg-replslot]        backup of '%s' directory\n"), PG_REPLSLOT_DIR);
 
     printf(_("\n  Logging options:\n"));
     printf(_("      --log-level-console=log-level-console\n"));

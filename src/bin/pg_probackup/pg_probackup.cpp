@@ -77,6 +77,7 @@ int        rw_timeout = 0;
 
 /* backup options */
 bool         backup_logs = false;
+bool         backup_replslots = false;
 bool         smooth_checkpoint;
 char        *remote_agent;
 static char *backup_note = NULL;
@@ -186,6 +187,7 @@ static ConfigOption cmd_options[] =
     { 'b', 145, "wal",                &delete_wal,        SOURCE_CMD_STRICT },
     { 'b', 146, "expired",            &delete_expired,    SOURCE_CMD_STRICT },
     { 's', 172, "status",            &delete_status,        SOURCE_CMD_STRICT },
+    { 'b', 186, "backup-pg-replslot",   &backup_replslots,    SOURCE_CMD_STRICT},
 
     { 'b', 147, "force",            &force,                SOURCE_CMD_STRICT },
     { 'b', 148, "compress",            &compress_shortcut,    SOURCE_CMD_STRICT },
@@ -550,7 +552,7 @@ static int do_actual_operate()
                     elog(ERROR, "required parameter not specified: BACKUP_MODE "
                          "(-b, --backup-mode)");
 
-                return do_backup(start_time, set_backup_params, no_validate, no_sync, backup_logs);
+                return do_backup(start_time, set_backup_params, no_validate, no_sync, backup_logs, backup_replslots);
             }
         case RESTORE_CMD:
             return do_restore_or_validate(current.backup_id,
