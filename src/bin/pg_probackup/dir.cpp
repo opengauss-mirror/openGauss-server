@@ -42,13 +42,6 @@ const char *pgdata_exclude_dir[] =
     (const char *)"pg_stat_tmp",
     (const char *)"pgsql_tmp",
 
-    /*
-    * It is generally not useful to backup the contents of this directory even
-    * if the intention is to restore to another master. See backup.sgml for a
-    * more detailed description.
-    */
-    (const char *)"pg_replslot",
-
     /* Contents removed on startup, see dsm_cleanup_for_mmap(). */
     (const char *)"pg_dynshmem",
 
@@ -68,7 +61,7 @@ const char *pgdata_exclude_dir[] =
     (const char *)"pg_subtrans",
 
     /* end of list */
-    NULL,   /* pg_log will be set later */
+    NULL,   /* pg_log and pg_replslot will be set later */
     NULL
 };
 
@@ -128,16 +121,19 @@ may be removed int the future */
 
 static int pgCompareString(const void *str1, const void *str2);
 
-static char dir_check_file(pgFile *file, bool backup_logs);
+static char dir_check_file(pgFile *file, bool backup_logs, bool backup_replslots);
 static char check_in_tablespace(pgFile *file, bool in_tablespace);
 static char check_db_dir(pgFile *file);
 static char check_digit_file(pgFile *file);
 static char check_nobackup_dir(pgFile *file);
 static void dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
                                                     bool exclude, bool follow_symlink, bool backup_logs,
-                                                    bool skip_hidden, int external_dir_num, fio_location location);
+                                                    bool skip_hidden, int external_dir_num, fio_location location,
+                                                    bool backup_replslots);
 static void opt_path_map(ConfigOption *opt, const char *arg,
                                              TablespaceList *list, const char *type);
+
+char check_logical_replslot_dir(const char *rel_path);
 
 /* Tablespace mapping */
 static TablespaceList tablespace_dirs = {NULL, NULL};
@@ -538,7 +534,7 @@ db_map_entry_free(void *entry)
 void
 dir_list_file(parray *files, const char *root, bool exclude, bool follow_symlink,
                         bool add_root, bool backup_logs, bool skip_hidden, int external_dir_num,
-                        fio_location location)
+                        fio_location location, bool backup_replslots)
 {
     pgFile  *file;
 
@@ -565,7 +561,7 @@ dir_list_file(parray *files, const char *root, bool exclude, bool follow_symlink
         parray_append(files, file);
 
     dir_list_file_internal(files, file, root, exclude, follow_symlink,
-                                        backup_logs, skip_hidden, external_dir_num, location);
+                                        backup_logs, skip_hidden, external_dir_num, location, backup_replslots);
 
     if (!add_root)
         pgFileFree(file);
@@ -589,7 +585,7 @@ dir_list_file(parray *files, const char *root, bool exclude, bool follow_symlink
  * - datafiles
  */
 static char
-dir_check_file(pgFile *file, bool backup_logs)
+dir_check_file(pgFile *file, bool backup_logs, bool backup_replslots)
 {
     int     i;
     int     sscanf_res;
@@ -649,6 +645,29 @@ dir_check_file(pgFile *file, bool backup_logs)
                 /* Skip */
                 elog(VERBOSE, "Excluding directory content: %s", file->rel_path);
                 return CHECK_EXCLUDE_FALSE;
+            }
+        }
+
+        /*
+         * Backup pg_replslot if it is specified.
+         * It is generally not useful to backup the contents of this directory even
+         * if the intention is to restore to another master. See backup.sgml for a
+         * more detailed description.
+         */
+        if (!backup_replslots) {
+            if (strcmp(file->rel_path, PG_REPLSLOT_DIR) == 0) {
+                /* Skip */
+                elog(VERBOSE, "Excluding directory content: %s", file->rel_path);
+                return CHECK_EXCLUDE_FALSE;
+            }
+        } else {
+            /* 
+             * Check file that under pg_replslot and judge whether it
+             * belonged to logical replication slots for subscriptions.
+             */
+            if (strcmp(file->rel_path, PG_REPLSLOT_DIR) != 0 &&
+                path_is_prefix_of_path(PG_REPLSLOT_DIR, file->rel_path)) {
+                return check_logical_replslot_dir(file->rel_path);
             }
         }
 
@@ -746,6 +765,35 @@ static char check_nobackup_dir(pgFile *file)
             }
         }
     }
+    return ret;
+}
+
+char check_logical_replslot_dir(const char *rel_path)
+{
+    char ret = CHECK_FALSE;
+    int i = 0;
+    char *tmp = pg_strdup(rel_path);
+    char *p;
+#define DIRECTORY_DELIMITER "/"
+
+    if (logical_replslot) {
+        /* extract slot name from rel_path, such as sub1 from pg_replslot/sub1/snap */
+        p = strtok(tmp, DIRECTORY_DELIMITER);
+        if (p != NULL) {
+            p = strtok(NULL, DIRECTORY_DELIMITER);
+        }
+
+        for (i = 0; p != NULL && i < (int)parray_num(logical_replslot); i++) {
+            char *slotName = (char *)parray_get(logical_replslot, i);
+            if (strcmp(p, slotName) == 0) {
+                pfree(tmp);
+                return CHECK_TRUE;
+            }
+        }
+    } else {
+        ret = CHECK_TRUE;
+    }
+    pfree(tmp);
     return ret;
 }
 
@@ -889,7 +937,8 @@ bool SkipSomeDirFile(pgFile *file, struct dirent *dent, bool skipHidden)
 static void
 dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
                                         bool exclude, bool follow_symlink, bool backup_logs,
-                                        bool skip_hidden, int external_dir_num, fio_location location)
+                                        bool skip_hidden, int external_dir_num, fio_location location,
+                                        bool backup_replslots)
 {
     DIR     *dir;
     struct dirent *dent;
@@ -937,7 +986,7 @@ dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
 
         if (exclude)
         {
-            check_res = dir_check_file(file, backup_logs);
+            check_res = dir_check_file(file, backup_logs, backup_replslots);
             if (check_res == CHECK_FALSE)
             {
                 /* Skip */
@@ -963,7 +1012,7 @@ dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
         */
         if (S_ISDIR(file->mode))
             dir_list_file_internal(files, file, child, exclude, follow_symlink,
-                backup_logs, skip_hidden, external_dir_num, location);
+                backup_logs, skip_hidden, external_dir_num, location, backup_replslots);
     }
 
     if (errno && errno != ENOENT)

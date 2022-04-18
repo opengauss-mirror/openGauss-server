@@ -31,6 +31,9 @@
    it will be backuped up in external dirs  */
 parray *pgdata_nobackup_dir = NULL;
 
+/* list of logical replication slots */
+parray *logical_replslot = NULL;
+
 static int standby_message_timeout_local = 10 ;	/* 10 sec = default */
 static XLogRecPtr stop_backup_lsn = InvalidXLogRecPtr;
 static XLogRecPtr stop_stream_lsn = InvalidXLogRecPtr;
@@ -89,10 +92,11 @@ static void backup_cleanup(bool fatal, void *userdata);
 
 static void *backup_files(void *arg);
 
-static void do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool backup_logs);
+static void do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool backup_logs,
+    bool backup_replslots);
 
 static void pg_start_backup(const char *label, bool smooth, pgBackup *backup,
-                                PGNodeInfo *nodeInfo, PGconn *conn);
+                                PGNodeInfo *nodeInfo, PGconn *conn, bool backup_replslots);
 static void pg_stop_backup(pgBackup *backup, PGconn *pg_startbackup_conn, PGNodeInfo *nodeInfo);
 static int checkpoint_timeout(PGconn *backup_conn);
 
@@ -558,7 +562,7 @@ static void sync_files(parray *database_map, const char *database_path, parray *
  * Move files from 'pgdata' to a subdirectory in 'backup_path'.
  */
 static void
-do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool backup_logs)
+do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool backup_logs, bool backup_replslots)
 {
     int i;
     char    database_path[MAXPGPATH];
@@ -591,7 +595,7 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     securec_check_c(rc, "\0", "\0");
 
     /* Call pg_start_backup function in openGauss connect */
-    pg_start_backup(label, smooth_checkpoint, &current, nodeInfo, backup_conn);
+    pg_start_backup(label, smooth_checkpoint, &current, nodeInfo, backup_conn, backup_replslots);
 
     /* Obtain current timeline */
 #if PG_VERSION_NUM >= 90600
@@ -624,10 +628,10 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     /* list files with the logical path. omit $PGDATA */
     if (fio_is_remote(FIO_DB_HOST))
         fio_list_dir(backup_files_list, instance_config.pgdata,
-                            true, true, false, backup_logs, true, 0);
+                            true, true, false, backup_logs, true, 0, backup_replslots);
     else
         dir_list_file(backup_files_list, instance_config.pgdata,
-                             true, true, false, backup_logs, true, 0, FIO_LOCAL_HOST);
+                             true, true, false, backup_logs, true, 0, FIO_LOCAL_HOST, backup_replslots);
 
     /*
      * Get database_map (name to oid) for use in partial restore feature.
@@ -749,6 +753,11 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
     }
     pgdata_nobackup_dir = NULL;
 
+    if (logical_replslot) {
+        free_dir_list(logical_replslot);
+    }
+    logical_replslot = NULL;
+
     /* Cleanup */
     if (backup_list)
     {
@@ -849,7 +858,7 @@ static void do_after_backup()
  */
 int
 do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
-        bool no_validate, bool no_sync, bool backup_logs)
+        bool no_validate, bool no_sync, bool backup_logs, bool backup_replslots)
 {
     PGconn  *backup_conn = NULL;
     PGNodeInfo  nodeInfo;
@@ -925,7 +934,7 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
         add_note(&current, set_backup_params->note);
 
     /* backup data */
-    do_backup_instance(backup_conn, &nodeInfo, no_sync, backup_logs);
+    do_backup_instance(backup_conn, &nodeInfo, no_sync, backup_logs, backup_replslots);
     pgut_atexit_pop(backup_cleanup, NULL);
 
     /* compute size of wal files of this backup stored in the archive */
@@ -1034,13 +1043,15 @@ confirm_block_size(PGconn *conn, const char *name, int blcksz)
  */
 static void
 pg_start_backup(const char *label, bool smooth, pgBackup *backup,
-                PGNodeInfo *nodeInfo, PGconn *conn)
+                PGNodeInfo *nodeInfo, PGconn *conn, bool backup_replslots)
 {
     PGresult   *res;
     const char *params[2];
     uint32  lsn_hi;
     uint32  lsn_lo;
     int     ret;
+    int i;
+    XLogRecPtr startLsn;
 
     params[0] = label;
 
@@ -1068,7 +1079,33 @@ pg_start_backup(const char *label, bool smooth, pgBackup *backup,
     XLogDataFromLSN(ret, PQgetvalue(res, 0, 0), &lsn_hi, &lsn_lo);
     securec_check_for_sscanf_s(ret, 2, "\0", "\0");
     /* Calculate LSN */
-    backup->start_lsn = ((uint64) lsn_hi )<< 32 | lsn_lo;
+    startLsn = ((uint64) lsn_hi )<< 32 | lsn_lo;
+
+    if (backup_replslots) {
+        logical_replslot = parray_new();
+        /* query for logical replication slots of subscriptions */
+        res = pgut_execute(conn,
+                           "SELECT slot_name, restart_lsn FROM pg_catalog.pg_get_replication_slots()"
+                           "WHERE slot_type = 'logical' AND plugin = 'pgoutput'", 0, NULL);
+        if (PQntuples(res) == 0) {
+            elog(LOG, "logical replication slots for subscriptions not found");
+        } else {
+            XLogRecPtr repslotLsn;
+
+            for (i = 0; i < PQntuples(res); i++) {
+                XLogDataFromLSN(ret, PQgetvalue(res, i, 1), &lsn_hi, &lsn_lo);
+                securec_check_for_sscanf_s(ret, 2, "\0", "\0");
+                repslotLsn = ((uint64) lsn_hi )<< 32 | lsn_lo;
+                startLsn = Min(startLsn, repslotLsn);
+
+                char* slotname = pg_strdup(PQgetvalue(res, i, 0));
+                parray_append(logical_replslot, slotname);
+            }
+            elog(WARNING, "logical replication slots for subscriptions will be backed up. "
+                 "If don't use them after restoring, please drop them to avoid affecting xlog recycling.");
+        }
+    }
+    backup->start_lsn = startLsn;
 
     PQclear(res);
 }
