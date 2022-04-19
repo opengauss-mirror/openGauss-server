@@ -81,7 +81,7 @@ bool wal_catchup = false;
 
 #define NAPTIME_PER_CYCLE 1 /* max sleep time between cycles (1ms) */
 
-#define CONFIG_BAK_FILENAME "postgresql.conf.bak"
+#define CONFIG_BAK_FILENAME_WAL "postgresql.conf.wal"
 
 #define WAL_DATA_LEN ((sizeof(uint32) + 1 + sizeof(XLogRecPtr)))
 
@@ -2550,7 +2550,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
     int ret = 0;
     char **reserve_item = NULL;
 
-    ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME);
+    ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME_WAL);
     securec_check_ss(ret, "\0", "\0");
 
     if (lstat(t_thrd.walreceiver_cxt.gucconf_file, &statbuf) != 0) {

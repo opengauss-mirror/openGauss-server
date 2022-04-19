@@ -51,6 +51,7 @@ typedef struct knl_session_attr_memory {
     char* uncontrolled_memory_context;
     int memory_tracking_mode;
     int min_dynamic_memory;
+    int local_syscache_threshold;
 } knl_session_attr_memory;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_MEMORY_H_ */
