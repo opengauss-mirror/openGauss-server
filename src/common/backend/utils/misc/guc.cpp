@@ -4037,7 +4037,7 @@ static void InitConfigureNamesInt()
              gettext_noop("Sets the maximum threshold for cleaning cache."),
              NULL,
              GUC_UNIT_KB},
-            &g_instance.attr.attr_memory.local_syscache_threshold,
+            &u_sess->attr.attr_memory.local_syscache_threshold,
             256 * 1024,
             1 * 1024,
             512 * 1024,
@@ -16158,11 +16158,11 @@ static bool check_gpc_syscache_threshold(bool* newval, void** extra, GucSource s
     if (*newval) {
         /* in case local_syscache_threshold is too low cause gpc does not take effect, we set local_syscache_threshold
            at least 16MB if gpc is on. */
-        if (g_instance.attr.attr_memory.local_syscache_threshold < 16 * 1024) {
+        if (u_sess->attr.attr_memory.local_syscache_threshold < 16 * 1024) {
             ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                           errmsg("set local_syscache_threshold from %dMB to 16MB in case gpc is on but not valid.",
-                                 g_instance.attr.attr_memory.local_syscache_threshold / 1024)));
-            g_instance.attr.attr_memory.local_syscache_threshold = 16 * 1024;
+                                 u_sess->attr.attr_memory.local_syscache_threshold / 1024)));
+            u_sess->attr.attr_memory.local_syscache_threshold = 16 * 1024;
         }
     }
     return true;
@@ -16176,7 +16176,7 @@ static bool check_syscache_threshold_gpc(int* newval, void** extra, GucSource so
         ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                       errmsg("cannot set local_syscache_threshold to %dMB in case gpc is on but not valid."
                              "Set local_syscache_threshold to 16MB default.", *newval / 1024)));
-        g_instance.attr.attr_memory.local_syscache_threshold = 16 * 1024;
+        u_sess->attr.attr_memory.local_syscache_threshold = 16 * 1024;
     }
 
     return true;

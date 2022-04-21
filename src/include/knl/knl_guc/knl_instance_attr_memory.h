@@ -45,7 +45,6 @@ typedef struct knl_instance_attr_memory {
     bool enable_memory_limit;
     int memorypool_size;
     int max_process_memory;
-    int local_syscache_threshold;
 } knl_instance_attr_memory;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_MEMORY_H_ */
