@@ -1977,6 +1977,7 @@ static void HandleWalReplicationCommand(const char *cmd_string, ReplicationCxt* 
 
     cmd_context = AllocSetContextCreate(CurrentMemoryContext, "Replication command context", ALLOCSET_DEFAULT_MINSIZE,
                                         ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    old_context = MemoryContextSwitchTo(cmd_context);
 
     yyscanner = replication_scanner_init(cmd_string);
     parse_rc = replication_yyparse(yyscanner);
@@ -1986,8 +1987,6 @@ static void HandleWalReplicationCommand(const char *cmd_string, ReplicationCxt* 
         ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR), (errmsg_internal("replication command parser returned %d", parse_rc))));
     }
-
-    old_context = MemoryContextSwitchTo(cmd_context);
 
     cmd_node = t_thrd.replgram_cxt.replication_parse_result;
 
