@@ -163,5 +163,7 @@ extern z_off_t fio_gzseek(gzFile f, z_off_t offset, int whence);
 extern const char* fio_gzerror(gzFile file, int *errnum);
 #endif
 
+extern char check_logical_replslot_dir(const char *rel_path);
+
 #endif
 
