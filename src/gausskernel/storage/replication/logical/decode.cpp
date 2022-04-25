@@ -223,6 +223,7 @@ void LogicalDecodingProcessRecord(LogicalDecodingContext *ctx, XLogReaderState *
         return;
     }
 
+    ResourceOwner tmpOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     /* cast so we get a warning when new rmgrs are added */
     switch ((RmgrIds)XLogRecGetRmid(record)) {
         /*
@@ -257,6 +258,7 @@ void LogicalDecodingProcessRecord(LogicalDecodingContext *ctx, XLogReaderState *
         default:
             break;
     }
+    t_thrd.utils_cxt.CurrentResourceOwner = tmpOwner;
 }
 
 /*
