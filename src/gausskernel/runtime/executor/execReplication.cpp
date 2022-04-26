@@ -322,7 +322,6 @@ static bool RelationFindReplTupleByIndex(EState *estate, Relation rel, Relation 
         }
         if (found) {
             /* Found tuple, try to lock it in the lockmode. */
-            outslot->tts_tuple = ExecMaterializeSlot(outslot);
             xwait = TransactionIdIsValid(snap.xmin) ? snap.xmin : snap.xmax;
             /*
              * If the tuple is locked, wait for locking transaction to finish
@@ -346,12 +345,16 @@ static bool RelationFindReplTupleByIndex(EState *estate, Relation rel, Relation 
             ItemPointer tid = tableam_tops_get_t_self(targetRel, outslot->tts_tuple);
 
             if (RelationIsUstoreFormat(targetRel)) {
+                /* materialize the slot, so we can visit it after the scan is end */
+                outslot->tts_tuple = UHeapMaterialize(outslot);
                 ItemPointerCopy(tid, &UHeaplocktup.ctid);
                 rc = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
                 securec_check(rc, "\0", "\0");
                 UHeaplocktup.disk_tuple = &tbuf.hdr;
                 locktup = &UHeaplocktup;
             } else {
+                /* materialize the slot, so we can visit it after the scan is end */
+                outslot->tts_tuple = ExecMaterializeSlot(outslot);
                 ItemPointerCopy(tid, &heaplocktup.t_self);
                 locktup = &heaplocktup;
             }
@@ -401,6 +404,10 @@ static bool tuple_equals_slot(TupleDesc desc, const Tuple tup, TupleTableSlot *s
     /* Check equality of the attributes. */
     for (attrnum = 0; attrnum < desc->natts; attrnum++) {
         TypeCacheEntry *typentry;
+        /* skip generate column */
+        if (GetGeneratedCol(desc, attrnum)) {
+            continue;
+        }
         /*
          * If one value is NULL and other is not, then they are certainly not
          * equal
@@ -478,7 +485,6 @@ static bool RelationFindReplTupleSeq(Relation rel, LockTupleMode lockmode, Tuple
 
             found = true;
             ExecStoreTuple(scantuple, outslot, InvalidBuffer, false);
-            outslot->tts_tuple = ExecMaterializeSlot(outslot);
 
             xwait = TransactionIdIsValid(snap.xmin) ? snap.xmin : snap.xmax;
             /*
@@ -511,12 +517,16 @@ static bool RelationFindReplTupleSeq(Relation rel, LockTupleMode lockmode, Tuple
             ItemPointer tid = tableam_tops_get_t_self(rel, outslot->tts_tuple);
 
             if (RelationIsUstoreFormat(targetRel)) {
+                /* materialize the slot, so we can visit it after the scan is end */
+                outslot->tts_tuple = UHeapMaterialize(outslot);
                 ItemPointerCopy(tid, &UHeaplocktup.ctid);
                 rc = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
                 securec_check(rc, "\0", "\0");
                 UHeaplocktup.disk_tuple = &tbuf.hdr;
                 locktup = &UHeaplocktup;
             } else {
+                /* materialize the slot, so we can visit it after the scan is end */
+                outslot->tts_tuple = ExecMaterializeSlot(outslot);
                 ItemPointerCopy(tid, &heaplocktup.t_self);
                 locktup = &heaplocktup;
             }
@@ -653,7 +663,6 @@ void ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate, TupleTableSlot
     /* Compute stored generated columns */
     if (rel->rd_att->constr && rel->rd_att->constr->has_generated_stored) {
         ExecComputeStoredGenerated(resultRelInfo, estate, slot, tuple, CMD_UPDATE);
-        tuple = slot->tts_tuple;
     }
 
     /* Check the constraints of the tuple */
@@ -672,10 +681,11 @@ void ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate, TupleTableSlot
         rowMovement = true;
     }
 
+    tuple = slot->tts_tuple;
     CommandId cid = GetCurrentCommandId(true);
     /* OK, update the tuple and index entries for it */
     if (!rowMovement) {
-        res = tableam_tuple_update(targetRelation, parentRelation, searchSlotTid, slot->tts_tuple, cid,
+        res = tableam_tuple_update(targetRelation, parentRelation, searchSlotTid, tuple, cid,
             InvalidSnapshot, estate->es_snapshot, true, &oldslot, &tmfd, &updateIndexes, &modifiedIdxAttrs,
             false, allowInplaceUpdate);
         CheckTupleModifyRes(res);

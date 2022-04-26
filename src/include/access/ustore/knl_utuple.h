@@ -314,4 +314,5 @@ template<bool hasnull>
 void UHeapFillDiskTuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, UHeapDiskTupleData *diskTuple,
     uint32 dataSize, bool enableReverseBitmap, bool enableReserve);
 void CheckTupleValidity(Relation rel, UHeapTuple utuple);
+Tuple UHeapMaterialize(TupleTableSlot *slot);
 #endif
