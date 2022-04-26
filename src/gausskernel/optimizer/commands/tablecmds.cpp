@@ -24797,7 +24797,8 @@ static Oid AddTemporaryPartitionForAlterPartitions(const AlterTableCmd* cmd, Rel
             destPartOid = AddTemporaryHashPartitionForAlterPartitions(cmd, partTableRel, partSeq, renameTargetPart);
             break;
         }
-        case PART_TYPE_RANGE: {
+        case PART_TYPE_RANGE:
+        case PART_TYPE_INTERVAL: {
             destPartOid = AddTemporaryRangePartitionForAlterPartitions(cmd, partTableRel, partSeq, renameTargetPart);
             break;
         }
