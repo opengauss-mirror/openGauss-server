@@ -192,6 +192,46 @@ explain(costs off) select /*+ indexscan(tg_hash i_tg_hash_local_a) */ * from tg_
 select /*+ indexscan(tg_hash i_tg_hash_local_a) */ * from tg_hash where a < 9;
 
 drop table tg_hash;
+
+drop table if exists test_ugi_045;
+create table test_ugi_045
+(
+ c_id integer not null,
+ c_date DATE,
+ c_info varchar(20) not null
+)
+partition by range(c_date)
+interval('2 day')
+(
+ partition p1 values less than ('2021-06-01 00:00:00'),
+ partition p2 values less than ('2021-06-03 00:00:00'),
+ partition p3 values less than ('2021-06-05 00:00:00'),
+ partition p4 values less than ('2021-06-07 00:00:00'),
+ partition p5 values less than ('2021-06-09 00:00:00')
+);
+
+insert into test_ugi_045(c_id, c_date, c_info) values(1, '2021-05-30 00:00:00', '1-1');
+insert into test_ugi_045(c_id, c_date, c_info) values(2, '2021-05-31 00:00:00', '1-1');
+insert into test_ugi_045(c_id, c_date, c_info) values(3, '2021-06-01 00:00:00', '1-1');
+insert into test_ugi_045(c_id, c_date, c_info) values(4, '2021-06-02 00:00:00', '1-2');
+insert into test_ugi_045(c_id, c_date, c_info) values(5, '2021-06-03 00:00:00', '1-2');
+insert into test_ugi_045(c_id, c_date, c_info) values(6, '2021-06-04 00:00:00', '1-3');
+insert into test_ugi_045(c_id, c_date, c_info) values(7, '2021-06-05 00:00:00', '1-3');
+insert into test_ugi_045(c_id, c_date, c_info) values(8, '2021-06-06 00:00:00', '1-4');
+insert into test_ugi_045(c_id, c_date, c_info) values(9, '2021-06-07 00:00:00', '1-4');
+insert into test_ugi_045(c_id, c_date, c_info) values(10, '2021-06-08 00:00:00', '1-5');
+
+create index global_index_id_045 on test_ugi_045(c_date) global;
+create index global_index_info_045 on test_ugi_045(c_info) global;
+select *from test_ugi_045;
+
+alter table test_ugi_045 truncate partition p3 update global index;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+select *from test_ugi_045;
+select *from test_ugi_045 where c_info = '1-2';
+drop table if exists test_ugi_045;
+
 -- 清理过程
 drop view check_truncate_results;
 drop materialized view pg_partition_before_truncate;
