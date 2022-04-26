@@ -10340,7 +10340,16 @@ check_sql_expr(const char *stmt, int location, int leaderlen)
 
     oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
-    (void) raw_parser(stmt);
+    RawParserHook parser_hook= raw_parser;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_sql.b_sql_plugin) {
+        int id = GetCustomParserId();
+        if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
+            parser_hook = (RawParserHook)g_instance.raw_parser_hook[id];
+        }
+    }
+#endif
+    (void)parser_hook(stmt, NULL);
     MemoryContextSwitchTo(oldCxt);
 
     /* Restore former ereport callback */
