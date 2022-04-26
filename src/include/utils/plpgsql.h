@@ -1385,6 +1385,8 @@ typedef struct PlDebugEntry {
     PLpgSQL_function* func;
 } PlDebugEntry;
 
+typedef List* (*RawParserHook)(const char*, List**);
+
 const int MAXINT8LEN = 25;
 const int DEFAULT_DEBUG_BUF_SIZE = 1024;
 const long NANOSECOND_PER_SECOND = 1000000000L; /* 1s */
