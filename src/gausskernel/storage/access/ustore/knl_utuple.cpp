@@ -1818,3 +1818,47 @@ void UHeapSlotStoreUHeapTuple(UHeapTuple utuple, TupleTableSlot *slot, bool shou
     /* Mark extracted state invalid */
     slot->tts_nvalid = 0;
 }
+
+/*
+ * Make the contents of the uheap table's slot contents solely depend on the slot(make them a local copy),
+ * and not on underlying external resources like another memory context, buffers etc.
+ *
+ * @pram slot: slot to be materialized.
+ */
+Tuple UHeapMaterialize(TupleTableSlot *slot)
+{
+    Assert(!slot->tts_isempty);
+    Assert(slot->tts_tupslotTableAm == TAM_USTORE);
+    Assert(slot->tts_tupleDescriptor != NULL);
+    /*
+     * If we have a regular physical tuple, and it's locally palloc'd, we have
+     * nothing to do.
+     */
+    if (slot->tts_tuple && slot->tts_shouldFree) {
+        return slot->tts_tuple;
+    }
+
+    /*
+     * Otherwise, copy or build a physical tuple, and store it into the slot.
+     *
+     * We may be called in a context that is shorter-lived than the tuple
+     * slot, but we have to ensure that the materialized tuple will survive
+     * anyway.
+     */
+    MemoryContext old_context = MemoryContextSwitchTo(slot->tts_mcxt);
+    if (slot->tts_tuple != NULL) {
+        slot->tts_tuple = UHeapCopyTuple((UHeapTuple)slot->tts_tuple);
+    } else {
+        slot->tts_tuple = UHeapFormTuple(slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull);
+    }
+    slot->tts_shouldFree = true;
+    MemoryContextSwitchTo(old_context);
+
+    /*
+     * Have to deform from scratch, otherwise tts_values[] entries could point
+     * into the non-materialized tuple (which might be gone when accessed).
+     */
+    slot->tts_nvalid = 0;
+    return slot->tts_tuple;
+}
+
