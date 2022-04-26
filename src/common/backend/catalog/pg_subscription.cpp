@@ -92,10 +92,10 @@ Subscription *GetSubscription(Oid subid, bool missing_ok)
 
     datum = SysCacheGetAttr(SUBSCRIPTIONOID, tup, Anum_pg_subscription_subbinary, &isnull);
     if (unlikely(isnull)) {
-        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-            errmsg("null binary for subscription %u", subid)));
+        sub->binary = false;
+    } else {
+        sub->binary = DatumGetBool(datum);
     }
-    sub->binary = DatumGetBool(datum);
 
     ReleaseSysCache(tup);
 
