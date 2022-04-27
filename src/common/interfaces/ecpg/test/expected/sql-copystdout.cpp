@@ -4,10 +4,11 @@
 #include <ecpgerrno.h>
 #include <sqlca.h>
 /* End of automatic include section */
-#define ECPGdebug(X, Y) ECPGdebug((X) + 100, (Y))
+#define ECPGdebug(X,Y) ECPGdebug((X)+100,(Y))
 
 #line 1 "copystdout.pgc"
 #include <stdio.h>
+
 
 #line 1 "sqlca.h"
 #ifndef POSTGRES_SQLCA_H
@@ -59,7 +60,7 @@ struct sqlca_t {
     /* 6: empty						*/
     /* 7: empty						*/
 
-    char sqlstate[5];
+    char sqlstate[6];
 };
 
 struct sqlca_t* ECPGget_sqlca(void);
@@ -76,82 +77,76 @@ struct sqlca_t* ECPGget_sqlca(void);
 
 #line 3 "copystdout.pgc"
 
+
 #line 1 "regression.h"
+#ifndef REGRESSION_H
+#define REGRESSION_H
+
+
+
+
+
+
+
+#endif /* REGRESSION_H */
 
 #line 4 "copystdout.pgc"
+
 
 /* exec sql whenever sqlerror  sqlprint ; */
 #line 6 "copystdout.pgc"
 
-int main()
+
+int
+main ()
 {
-    ECPGdebug(1, stderr);
+  ECPGdebug (1, stderr);
 
-    {
-        ECPGconnect(__LINE__, 0, "regress1", NULL, NULL, NULL, 0);
+  { ECPGconnect(__LINE__, 0, "regress1" , NULL, NULL , NULL, 0); 
 #line 13 "copystdout.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 13 "copystdout.pgc"
 
-    {
-        ECPGdo(
-            __LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table foo ( a int , b varchar )", ECPGt_EOIT, ECPGt_EORT);
+  { ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table foo ( a int , b varchar )", ECPGt_EOIT, ECPGt_EORT);
 #line 14 "copystdout.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 14 "copystdout.pgc"
 
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into foo values ( 5 , 'abc' )", ECPGt_EOIT, ECPGt_EORT);
+  { ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into foo values ( 5 , 'abc' )", ECPGt_EOIT, ECPGt_EORT);
 #line 15 "copystdout.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 15 "copystdout.pgc"
 
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into foo values ( 6 , 'def' )", ECPGt_EOIT, ECPGt_EORT);
+  { ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into foo values ( 6 , 'def' )", ECPGt_EOIT, ECPGt_EORT);
 #line 16 "copystdout.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 16 "copystdout.pgc"
 
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into foo values ( 7 , 'ghi' )", ECPGt_EOIT, ECPGt_EORT);
+  { ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into foo values ( 7 , 'ghi' )", ECPGt_EOIT, ECPGt_EORT);
 #line 17 "copystdout.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 17 "copystdout.pgc"
 
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "copy foo to stdout with delimiter ','", ECPGt_EOIT, ECPGt_EORT);
+
+  { ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "copy foo to stdout with delimiter ','", ECPGt_EOIT, ECPGt_EORT);
 #line 19 "copystdout.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 19 "copystdout.pgc"
 
-    printf("copy to STDOUT : sqlca.sqlcode = %ld\n", sqlca.sqlcode);
+  printf ("copy to STDOUT : sqlca.sqlcode = %ld\n", sqlca.sqlcode);
 
-    {
-        ECPGdisconnect(__LINE__, "CURRENT");
+  { ECPGdisconnect(__LINE__, "CURRENT");
 #line 22 "copystdout.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 22 "copystdout.pgc"
 
-    return 0;
+
+  return 0;
 }

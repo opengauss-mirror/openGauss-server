@@ -534,7 +534,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 				if (strcmp(yytext, dolqstart) == 0)
 				{
 					addlit(yytext, yyleng);
-					free(dolqstart);
+					free_current_memory(dolqstart);
 					BEGIN(SQL);
 					yylval.str = mm_strdup(literalbuf);
 					return DOLCONST;
@@ -627,7 +627,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 						 * Note that slash-star or dash-dash at the first
 						 * character will match a prior rule, not this one.
 						 */
-						int		nchars = yyleng;
+						unsigned int		nchars = yyleng;
 						char   *slashstar = strstr(yytext, "/*");
 						char   *dashdash = strstr(yytext, "--");
 
@@ -714,7 +714,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 					}
 <SQL>{ip}			{
 						yylval.str = mm_strdup(yytext);
-						return IP;
+						return SQL_IP;
 				}
 <C,SQL>{decimal}	{
 						yylval.str = mm_strdup(yytext);
@@ -829,7 +829,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 						if (braces_open == 0 && parenths_open == 0)
 						{
 							if (current_function)
-								free(current_function);
+								free_current_memory(current_function);
 							current_function = mm_strdup(yytext);
 						}
 						/* Informix uses SQL defines only in SQL space */
@@ -928,9 +928,9 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 								defines = ptr->next;
 							else
 								ptr2->next = ptr->next;
-							free(ptr->newm);
-							free(ptr->old);
-							free(ptr);
+							free_current_memory(ptr->newm);
+							free_current_memory(ptr->old);
+							free_current_memory(ptr);
 							break;
 						}
 					}
@@ -1143,7 +1143,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 						{
 							 if (strcmp(old, ptr->old) == 0)
 							 {
-								free(ptr->newm);
+								free_current_memory(ptr->newm);
 								ptr->newm = mm_strdup(literalbuf);
 							 }
 						}
@@ -1204,11 +1204,11 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 						/* We have to output the filename only if we change files here */
 						i = strcmp(input_filename, yy_buffer->filename);
 
-						free(input_filename);
+						free_current_memory(input_filename);
 						input_filename = yy_buffer->filename;
 
 						yy_buffer = yy_buffer->next;
-						free(yb);
+						free_current_memory(yb);
 
 						if (i != 0)
 							output_line_number();
@@ -1482,5 +1482,5 @@ void
 scanner_finish(void)
 {
 	yy_delete_buffer(scanbufhandle);
-	free(scanbuf);
+	free_current_memory(scanbuf);
 }

@@ -38,6 +38,10 @@ OBJS=	preproc.o type.o ecpg.o output.o parser.o \
 	keywords.o c_keywords.o ecpg_keywords.o kwlookup.o ../ecpglib/typename.o descriptor.o variable.o \
 	$(WIN32RES)
 
+ifeq ($(GCC),yes)
+preproc.o: CXXFLAGS += -Wno-error
+endif
+
 all: ecpg
 
 ecpg: $(OBJS) | submake-libpgport
@@ -53,7 +57,7 @@ preproc.hpp: preproc.cpp ;
 
 preproc.cpp: preproc.y
 ifdef BISON
-	$(BISON) -d $(BISONFLAGS) -o $@ $<
+	$(BISON) -d $(BISONFLAGS) -t -v -o $@ $<
 else
 	@$(missing) bison $< $@
 endif

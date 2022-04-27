@@ -24,10 +24,10 @@
 #include "extern.h"
 #include "preproc.hpp"
 
-static bool have_lookahead;      /* is lookahead info valid? */
-static int lookahead_token;      /* one-token lookahead */
-static YYSTYPE lookahead_yylval; /* yylval for lookahead token */
-static YYLTYPE lookahead_yylloc; /* yylloc for lookahead token */
+static THR_LOCAL bool have_lookahead;      /* is lookahead info valid? */
+static THR_LOCAL int lookahead_token;      /* one-token lookahead */
+static THR_LOCAL YYSTYPE lookahead_yylval; /* yylval for lookahead token */
+static THR_LOCAL YYLTYPE lookahead_yylloc; /* yylloc for lookahead token */
 
 /*
  * Intermediate filter between parser and base lexer (base_yylex in scan.l).

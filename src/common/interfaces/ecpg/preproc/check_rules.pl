@@ -53,6 +53,7 @@ my $comment     = 0;
 my $non_term_id = '';
 my $cc          = 0;
 
+#读取gram.y文件，把该文件中的规则部分(即%%分割的第二部分)，以模式为key存放到哈希变量%found中
 open GRAM, $parser or die $!;
 while (<GRAM>)
 {
@@ -154,6 +155,7 @@ if ($verbose)
 my $ret = 0;
 $cc = 0;
 
+#读取ecpg.addons文件，匹配ECPG:格式，匹配到的以空格分成三段，用第二段在哈希变量%found中查找，如果存在则检查通过，如果不存在则检查不通过
 open ECPG, $filename or die $!;
 while (<ECPG>)
 {

@@ -2,7 +2,7 @@ override CPPFLAGS := -I../../include -I$(top_srcdir)/src/interfaces/ecpg/include
 	-I$(libpq_srcdir) $(CPPFLAGS)
 override CFLAGS += $(PTHREAD_CFLAGS)
 
-override LDFLAGS := -L../../ecpglib -L../../pgtypeslib $(filter-out -l%, $(libpq)) $(LDFLAGS)
+override LDFLAGS := -lasan -L../../ecpglib -lecpg -L../../pgtypeslib -lpgtypes  -L../../compatlib -lecpg_compat -ldl -lrt $(filter-out -l%, $(libpq)) $(LDFLAGS)
 override LIBS := -lecpg -lpgtypes $(filter -l%, $(libpq)) $(LIBS) $(PTHREAD_LIBS)
 
 ECPG = ../../preproc/ecpg --regression -I$(srcdir)/../../include

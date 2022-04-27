@@ -18,7 +18,7 @@ SO_MAJOR_VERSION= 6
 SO_MINOR_VERSION= 4
 
 override CPPFLAGS := -I../include -I$(top_srcdir)/src/common/interfaces/ecpg/include \
-	-I$(libpq_srcdir) -I$(top_builddir)/src/common/port $(CPPFLAGS)
+	-I$(libpq_srcdir) -I$(top_builddir)/src/common/port -DFRONTEND $(CPPFLAGS)
 override CFLAGS += $(PTHREAD_CFLAGS)
 
 override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC

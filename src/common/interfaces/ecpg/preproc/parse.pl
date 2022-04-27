@@ -31,6 +31,7 @@ my ($stmt_mode, @fields);
 my ($line,      $non_term_id);
 
 
+# 哈希变量 key => values
 # some token have to be replaced by other symbols
 # either in the rule
 my %replace_token = (
@@ -51,10 +52,10 @@ my %replace_string = (
 	'SUBPARTITION_FOR'   => 'subpartition for',
 	'ADD_PARTITION'   => 'add partition',
 	'DROP_PARTITION'   => 'drop partition',
+	'DROP_SUBPARTITION'   => 'drop subpartition',
 	'REBUILD_PARTITION'   => 'rebuild partition',
 	'MODIFY_PARTITION'   => 'modify partition',
-	'ADD_SUBPARTITION'   => 'add subpartition',
-	'DROP_SUBPARTITION'   => 'drop subpartition',
+	'MODIFY_SUBPARTITION'   => 'modify subpartition',
 	'TYPECAST'     => '::',
 	'DOT_DOT'      => '..',
 	'COLON_EQUALS' => ':=',);
@@ -72,6 +73,7 @@ my %replace_types = (
 	'DeallocateStmt'     => 'ignore',
 	'ColId'              => 'ignore',
 	'type_function_name' => 'ignore',
+	'AnonyBlockStmt'     => 'ignore',
 	'ColLabel'           => 'ignore',
 	'Sconst'             => 'ignore',);
 
@@ -87,16 +89,21 @@ my %replace_line = (
 	'unreserved_keywordMONTH_P'    => 'ignore',
 	'unreserved_keywordSECOND_P'   => 'ignore',
 	'unreserved_keywordYEAR_P'     => 'ignore',
-	'col_name_keywordCHAR_P'       => 'ignore',
+    'col_name_keywordCHAR_P'       => 'ignore',
 	'col_name_keywordINT_P'        => 'ignore',
 	'col_name_keywordVALUES'       => 'ignore',
 	'reserved_keywordTO'           => 'ignore',
 	'reserved_keywordUNION'        => 'ignore',
+	'reserved_keywordUNION'        => 'ignore',
+	'type_func_name_keywordTIMECAPSULE'       => 'ignore',
 
 	# some other production rules have to be ignored or replaced
+	'stmtAnonyBlockStmt'      => 'ignore',
 	'fetch_argsFORWARDopt_from_incursor_name'      => 'ignore',
 	'fetch_argsBACKWARDopt_from_incursor_name'     => 'ignore',
 	"opt_array_boundsopt_array_bounds'['Iconst']'" => 'ignore',
+	'DeclareCursorStmtDECLARE_CURSORcursor_namecursor_optionsCURSORopt_holdFORSelectStmt' => 'ignore',
+	'TransactionStmtBEGIN_NON_ANOYBLOCKopt_transactiontransaction_mode_list_or_empty' => 'ignore',
 	'VariableShowStmtSHOWvar_name' => 'SHOW var_name ecpg_into',
 	'VariableShowStmtSHOWTIMEZONE' => 'SHOW TIME ZONE ecpg_into',
 	'VariableShowStmtSHOWTRANSACTIONISOLATIONLEVEL' =>
@@ -107,11 +114,13 @@ my %replace_line = (
 	  'RETURNING target_list ecpg_into',
 	'ExecuteStmtEXECUTEnameexecute_param_clause' =>
 	  'EXECUTE prepared_name execute_param_clause execute_rest',
-'ExecuteStmtCREATEOptTempTABLEcreate_as_targetASEXECUTEnameexecute_param_clause'
+	'ExecuteStmtCREATEOptTempTABLEcreate_as_targetASEXECUTEnameexecute_param_clause'
 	  => 'CREATE OptTemp TABLE create_as_target AS EXECUTE prepared_name execute_param_clause',
 	'PrepareStmtPREPAREnameprep_type_clauseASPreparableStmt' =>
 	  'PREPARE prepared_name prep_type_clause AS PreparableStmt',
-	'var_nameColId' => 'ECPGColId',);
+	'var_nameColId' => 'ECPGColId',
+	'func_name_opt_argunreserved_keywordBOGUS' =>
+	  'all_unreserved_keyword BOGUS',);
 
 preload_addons();
 
@@ -128,6 +137,9 @@ dump_buffer('rules');
 include_file('trailer', 'ecpg.trailer');
 dump_buffer('trailer');
 
+# 以参数为文件读取即gram.y文件，读取gram.y文件中的types和tokens，分别以types、orig_tokens为key，
+# 添加到哈希变量%buff中，并结合哈希变量%addons以rules为key把规则添加到哈希变量%buff中；
+# 加载ecpg.tokens、ecpg.header、ecpg.type文件，分别以tokens、header、ecpgtype为key，添加到哈希变量%buff中
 sub main
 {
   line: while (<>)
@@ -423,7 +435,7 @@ sub main
 	}
 }
 
-
+# 读取第二个参数文件，以第一个参数为key，添加到哈希变量%buff中
 # append a file onto a buffer.
 # Arguments:  buffer_name, filename (without path)
 sub include_file
@@ -462,6 +474,7 @@ sub include_addon
 
 	if ($rec->{type} eq 'addon')
 	{
+	    # add_to_buffer('rules', $str)函数以'rules'为key，添加到哈希变量%buff中
 		dump_fields($stmt_mode, $fields, '');
 	}
 
@@ -472,6 +485,7 @@ sub include_addon
 }
 
 
+# 以第一个参数为key，第二个参数为values，写入哈希变量buff中
 # include_addon does this same thing, but does not call this
 # sub... so if you change this, you need to fix include_addon too
 #   Pass:  buffer_name, string_to_append
@@ -480,6 +494,7 @@ sub add_to_buffer
 	push(@{ $buff{ $_[0] } }, "$_[1]\n");
 }
 
+#这个函数以参数为key打印出哈希变量%buff中参数的values，输出到preproc.y文件中
 sub dump_buffer
 {
 	my ($buffer) = @_;
@@ -487,6 +502,7 @@ sub dump_buffer
 	my $ref = $buff{$buffer};
 	print @$ref;
 }
+
 
 sub dump_fields
 {
@@ -633,6 +649,7 @@ sub dump_line
 
 =cut
 
+#读取文件ecpg.addons，并把ecpg.addons文件信息加入到哈希变量addons中
 sub preload_addons
 {
 	my $filename = $path . "/ecpg.addons";

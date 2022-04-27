@@ -36,7 +36,7 @@ struct ECPGgeneric_varchar {
 struct ECPGtype_information_cache {
     struct ECPGtype_information_cache* next;
     int oid;
-    bool isarray;
+    enum ARRAY_TYPE isarray;
 };
 
 /* structure to store one statement */

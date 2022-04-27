@@ -13,6 +13,12 @@ struct ECPGstruct_member {
     struct ECPGstruct_member* next;
 };
 
+struct Current_memory
+{
+    void *p;
+    struct Current_memory *next;
+};
+
 struct ECPGtype {
     enum ECPGttype type;
     char* type_name;     /* For struct and union types it is the struct
@@ -40,6 +46,9 @@ struct ECPGstruct_member* ECPGstruct_member_dup(struct ECPGstruct_member*);
 /* Frees a type. */
 void ECPGfree_struct_member(struct ECPGstruct_member*);
 void ECPGfree_type(struct ECPGtype*);
+
+void free_current_memory(void *ptr);
+void free_current_memory_all();
 
 /* Dump a type.
    The type is dumped as:

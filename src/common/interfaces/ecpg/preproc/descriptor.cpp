@@ -15,7 +15,7 @@
  * assignment handling function (descriptor)
  */
 
-static struct assignment* assignments;
+static THR_LOCAL struct assignment* assignments;
 
 void push_assignment(char* var, enum ECPGdtype value)
 {
@@ -34,8 +34,8 @@ static void drop_assignments(void)
         struct assignment* old_head = assignments;
 
         assignments = old_head->next;
-        free(old_head->variable);
-        free(old_head);
+        free_current_memory(old_head->variable);
+        free_current_memory(old_head);
     }
 }
 
@@ -101,9 +101,9 @@ void drop_descriptor(char* name, char* connection)
                 (connection && i->connection && strcmp(connection, i->connection) == 0)) {
                 *lastptr = i->next;
                 if (i->connection)
-                    free(i->connection);
-                free(i->name);
-                free(i);
+                    free_current_memory(i->connection);
+                free_current_memory(i->name);
+                free_current_memory(i);
                 return;
             }
         }

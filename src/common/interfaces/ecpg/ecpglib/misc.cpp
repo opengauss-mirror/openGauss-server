@@ -39,8 +39,8 @@ static struct sqlca_t sqlca_init = {{'S', 'Q', 'L', 'C', 'A', ' ', ' ', ' '},
     {'0', '0', '0', '0', '0'}};
 
 #ifdef ENABLE_THREAD_SAFETY
-static pthread_key_t sqlca_key;
-static pthread_once_t sqlca_key_once = PTHREAD_ONCE_INIT;
+static THR_LOCAL pthread_key_t sqlca_key;
+static THR_LOCAL pthread_once_t sqlca_key_once = PTHREAD_ONCE_INIT;
 #else
 static struct sqlca_t sqlca = {{'S', 'Q', 'L', 'C', 'A', ' ', ' ', ' '},
     sizeof(struct sqlca_t),
@@ -53,11 +53,11 @@ static struct sqlca_t sqlca = {{'S', 'Q', 'L', 'C', 'A', ' ', ' ', ' '},
 #endif
 
 #ifdef ENABLE_THREAD_SAFETY
-static pthread_mutex_t debug_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t debug_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+static THR_LOCAL pthread_mutex_t debug_mutex = PTHREAD_MUTEX_INITIALIZER;
+static THR_LOCAL pthread_mutex_t debug_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
-static int simple_debug = 0;
-static FILE* debugstream = NULL;
+static THR_LOCAL int simple_debug = 0;
+static THR_LOCAL FILE* debugstream = NULL;
 
 void ecpg_init_sqlca(struct sqlca_t* sqlca)
 {
@@ -162,7 +162,10 @@ bool ECPGtrans(int lineno, const char* connection_name, const char* transaction)
          * a begin statement, we just execute it once.
          */
         if (PQtransactionStatus(con->connection) == PQTRANS_IDLE && !con->autocommit &&
-            strncmp(transaction, "start", 5) != 0) {
+            strncmp(transaction, "begin", 5) != 0 &&
+	    strncmp(transaction, "start", 5) != 0 &&
+	    strncmp(transaction, "commit prepared", 15) != 0 &&
+	    strncmp(transaction, "rollback prepared", 17) != 0) {
             res = PQexec(con->connection, "start transaction");
             if (!ecpg_check_PQresult(res, lineno, con->connection, ECPG_COMPAT_PGSQL))
                 return FALSE;

@@ -339,7 +339,7 @@ int DecodeInterval(char** field, const int* ftype, int nf, /* int range, */
         switch (ftype[i]) {
             case DTK_TIME:
                 dterr = DecodeTime(field[i], /* range, */
-                    &tmask,
+                    (unsigned int*)(&tmask),
                     tm,
                     fsec);
                 if (dterr)
@@ -354,7 +354,7 @@ int DecodeInterval(char** field, const int* ftype, int nf, /* int range, */
                  * signed year-month values.
                  */
                 if (strchr(field[i] + 1, ':') != NULL && DecodeTime(field[i] + 1, /* INTERVAL_FULL_RANGE, */
-                                                             &tmask,
+                                                             (unsigned int*)(&tmask),
                                                              tm,
                                                              fsec) == 0) {
                     if (*field[i] == '-') {

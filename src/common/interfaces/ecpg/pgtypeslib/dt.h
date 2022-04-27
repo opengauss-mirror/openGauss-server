@@ -343,7 +343,7 @@ typedef struct {
 #define TIMESTAMP_NOT_FINITE(j) (TIMESTAMP_IS_NOBEGIN(j) || TIMESTAMP_IS_NOEND(j))
 
 int DecodeInterval(char**, const int*, int, int*, struct tm*, fsec_t*);
-int DecodeTime(const char*, int*, struct tm*, fsec_t*);
+int DecodeTime(const char*, unsigned int*, struct tm*, fsec_t*);
 int EncodeDateTime(
     struct tm* tm, fsec_t fsec, bool print_tz, int tz, const char* tzn, int style, char* str, bool EuroDates);
 int EncodeInterval(struct tm* tm, fsec_t fsec, int style, char* str);

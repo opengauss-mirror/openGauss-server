@@ -51,11 +51,6 @@ static void help(const char* progname)
     printf(_("  -?, --help     show this help, then exit\n"));
     printf(_("\nIf no output file is specified, the name is formed by adding .c to the\n"
              "input file name, after stripping off .pgc if present.\n"));
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-    printf(_("\nReport bugs to GaussDB support.\n"));
-#else
-    printf(_("\nReport bugs to openGauss community by raising an issue.\n"));
-#endif
 }
 
 static void add_include_path(char* path)
@@ -102,6 +97,63 @@ static void add_preprocessor_define(char* define)
     defines->next = pd;
 }
 
+#ifdef WIN32
+
+static char* skip_drive(const char* path)
+{
+    if (IS_DIR_SEP(path[0]) && IS_DIR_SEP(path[1])) {
+        path += 2;
+        while (*path && !IS_DIR_SEP(*path)) {
+            path++;
+        }
+    } else if (isalpha((unsigned char)path[0]) && path[1] == ':') {
+        path += 2;
+    }
+    return (char*)path;
+}
+#else
+
+#define skip_drive(path) (path)
+#endif
+
+/*
+ *  * Extracts the actual name of the program as called -
+ *   * stripped of .exe suffix if any
+ *    */
+static char* get_ecpgname(const char* argv0)
+{
+    const char* nodir_name = NULL;
+    char* progname = NULL;
+
+    nodir_name = last_dir_separator(argv0);
+    if (nodir_name != NULL) {
+        nodir_name++;
+    } else {
+        nodir_name = skip_drive(argv0);
+    }
+        /*
+ *          * Make a copy in case argv[0] is modified by ps_status. Leaks memory, but
+ *                   * called only once.
+ *                            */
+#ifdef FRONTEND
+    progname = mm_strdup(nodir_name);
+#else
+    progname = selfpstrdup(nodir_name);
+#endif
+    if (progname == NULL) {
+        fprintf(stderr, "%s: out of memory\n", nodir_name);
+        abort(); /* This could exit the postmaster */
+    }
+
+#if defined(__CYGWIN__) || defined(WIN32)
+    /* strip ".exe" suffix, regardless of case */
+    if (strlen(progname) > sizeof(EXE) - 1 && pg_strcasecmp(progname + strlen(progname) - (sizeof(EXE) - 1), EXE) == 0)
+        progname[strlen(progname) - (sizeof(EXE) - 1)] = '\0';
+#endif
+
+    return progname;
+}
+
 #define ECPG_GETOPT_LONG_HELP 1
 #define ECPG_GETOPT_LONG_VERSION 2
 #define ECPG_GETOPT_LONG_REGRESSION 3
@@ -120,8 +172,7 @@ int main(int argc, char* const argv[])
     char include_path[MAXPGPATH];
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("ecpg"));
-
-    progname = get_progname(argv[0]);
+    progname = get_ecpgname(argv[0]);
 
     find_my_exec(argv[0], my_exec_path);
 
@@ -195,7 +246,7 @@ int main(int argc, char* const argv[])
                     compat = (strcmp(optarg, "INFORMIX") == 0) ? ECPG_COMPAT_INFORMIX : ECPG_COMPAT_INFORMIX_SE;
                     get_pkginclude_path(my_exec_path, pkginclude_path);
                     snprintf(informix_path, MAXPGPATH, "%s/informix/esql", pkginclude_path);
-                    add_include_path(informix_path);
+                    add_include_path(mm_strdup(informix_path));
                 } else {
                     fprintf(stderr, _("Try \"%s --help\" for more information.\n"), argv[0]);
                     return ILLEGAL_OPTION;
@@ -292,7 +343,7 @@ int main(int argc, char* const argv[])
                 if (strcmp(input_filename, "stdin") == 0)
                     yyout = stdout;
                 else {
-                    output_filename = strdup(input_filename);
+                    output_filename = mm_strdup(input_filename);
 
                     ptr2ext = strrchr(output_filename, '.');
                     /* make extension = .c resp. .h */
@@ -306,8 +357,8 @@ int main(int argc, char* const argv[])
                             progname,
                             output_filename,
                             gs_strerror(errno));
-                        free(output_filename);
-                        free(input_filename);
+                        free_current_memory(output_filename);
+                        free_current_memory(input_filename);
                         continue;
                     }
                 }
@@ -325,19 +376,19 @@ int main(int argc, char* const argv[])
                     struct cursor* thisPtr = ptr;
                     struct arguments *l1, *l2;
 
-                    free(ptr->command);
-                    free(ptr->connection);
-                    free(ptr->name);
+                    free_current_memory(ptr->command);
+                    free_current_memory(ptr->connection);
+                    free_current_memory(ptr->name);
                     for (l1 = ptr->argsinsert; l1; l1 = l2) {
                         l2 = l1->next;
-                        free(l1);
+                        free_current_memory(l1);
                     }
                     for (l1 = ptr->argsresult; l1; l1 = l2) {
                         l2 = l1->next;
-                        free(l1);
+                        free_current_memory(l1);
                     }
                     ptr = ptr->next;
-                    free(thisPtr);
+                    free_current_memory(thisPtr);
                 }
                 cur = NULL;
 
@@ -346,9 +397,9 @@ int main(int argc, char* const argv[])
                     defptr = defines;
                     defines = defines->next;
 
-                    free(defptr->newm);
-                    free(defptr->old);
-                    free(defptr);
+                    free_current_memory(defptr->newm);
+                    free_current_memory(defptr->old);
+                    free_current_memory(defptr);
                 }
 
                 for (defptr = defines; defptr != NULL; defptr = defptr->next) {
@@ -357,9 +408,9 @@ int main(int argc, char* const argv[])
                     if (thisPtr && !thisPtr->pertinent) {
                         defptr->next = thisPtr->next;
 
-                        free(thisPtr->newm);
-                        free(thisPtr->old);
-                        free(thisPtr);
+                        free_current_memory(thisPtr->newm);
+                        free_current_memory(thisPtr->old);
+                        free_current_memory(thisPtr);
                     }
                 }
 
@@ -367,11 +418,11 @@ int main(int argc, char* const argv[])
                 for (typeptr = types; typeptr != NULL;) {
                     struct typedefs* thisPtr = typeptr;
 
-                    free(typeptr->name);
+                    free_current_memory(typeptr->name);
                     ECPGfree_struct_member(typeptr->struct_member_list);
-                    free(typeptr->type);
+                    free_current_memory(typeptr->type);
                     typeptr = typeptr->next;
-                    free(thisPtr);
+                    free_current_memory(thisPtr);
                 }
                 types = NULL;
 
@@ -443,12 +494,8 @@ int main(int argc, char* const argv[])
                         fprintf(stderr, _("could not remove output file \"%s\"\n"), output_filename);
                 }
             }
-
-            if (output_filename && out_option == 0)
-                free(output_filename);
-
-            free(input_filename);
         }
     }
+    free_current_memory_all();
     return ret_value;
 }

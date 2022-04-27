@@ -4,7 +4,7 @@
 #include <ecpgerrno.h>
 #include <sqlca.h>
 /* End of automatic include section */
-#define ECPGdebug(X, Y) ECPGdebug((X) + 100, (Y))
+#define ECPGdebug(X,Y) ECPGdebug((X)+100,(Y))
 
 #line 1 "outofscope.pgc"
 #include <stdio.h>
@@ -12,9 +12,22 @@
 #include <string.h>
 #include <limits.h>
 
+
 #line 1 "regression.h"
+#ifndef REGRESSION_H
+#define REGRESSION_H
+
+
+
+
+
+
+
+#endif /* REGRESSION_H */
 
 #line 6 "outofscope.pgc"
+
+
 
 #line 1 "pgtypes_numeric.h"
 #ifndef PGTYPES_NUMERIC
@@ -84,413 +97,282 @@ int PGTYPESnumeric_from_decimal(decimal*, numeric*);
 
 #line 8 "outofscope.pgc"
 
+
 /* exec sql begin declare section */
 
 #line 1 "struct.h"
+  
+     
+     
+      /* dec_t */
+     
+     
 
-/* dec_t */
+   typedef struct mytype  MYTYPE ;
 
-typedef struct mytype MYTYPE;
+#line 8 "struct.h"
 
-#line 9 "struct.h"
 
-typedef struct mynulltype MYNULLTYPE;
+  
+     
+     
+     
+     
+     
 
-#line 19 "struct.h"
+   typedef struct mynulltype  MYNULLTYPE ;
+
+#line 17 "struct.h"
+
 
 #line 11 "outofscope.pgc"
 
-struct mytype {
+struct mytype { 
+#line 2 "struct.h"
+ int id ;
+ 
 #line 3 "struct.h"
-    int id;
-
+ char t [ 64 ] ;
+ 
 #line 4 "struct.h"
-    char t[64];
-
+ double d1 ;
+ 
 #line 5 "struct.h"
-    double d1;
-
+ double d2 ;
+ 
 #line 6 "struct.h"
-    double d2;
-
-#line 7 "struct.h"
-    char c[30];
-};
-struct mynulltype {
+ char c [ 30 ] ;
+ } ; struct mynulltype { 
+#line 11 "struct.h"
+ int id ;
+ 
+#line 12 "struct.h"
+ int t ;
+ 
 #line 13 "struct.h"
-    int id;
-
+ int d1 ;
+ 
 #line 14 "struct.h"
-    int t;
-
+ int d2 ;
+ 
 #line 15 "struct.h"
-    int d1;
-
-#line 16 "struct.h"
-    int d2;
-
-#line 17 "struct.h"
-    int c;
-}; /* exec sql end declare section */
+ int c ;
+ } ;/* exec sql end declare section */
 #line 12 "outofscope.pgc"
+
 
 /* exec sql whenever sqlerror  stop ; */
 #line 14 "outofscope.pgc"
 
+
 /* Functions for test 1 */
 
-static void get_var1(MYTYPE** myvar0, MYNULLTYPE** mynullvar0)
+static void
+get_var1(MYTYPE **myvar0, MYNULLTYPE **mynullvar0)
 {
-    /* exec sql begin declare section */
-
+	/* exec sql begin declare section */
+			   
+		   
+	
 #line 22 "outofscope.pgc"
-    MYTYPE* myvar = malloc(sizeof(MYTYPE));
-
+ MYTYPE * myvar = ( MYTYPE * ) malloc ( sizeof ( MYTYPE ) ) ;
+ 
 #line 23 "outofscope.pgc"
-    MYNULLTYPE* mynullvar = malloc(sizeof(MYNULLTYPE));
+ MYNULLTYPE * mynullvar = ( MYNULLTYPE * ) malloc ( sizeof ( MYNULLTYPE ) ) ;
 /* exec sql end declare section */
 #line 24 "outofscope.pgc"
 
-    /* Test DECLARE ... SELECT ... INTO with pointers */
 
-    ECPGset_var(0, (myvar), __LINE__);
-    ECPGset_var(1, (mynullvar), __LINE__); /* declare mycur cursor for select * from a1 */
+	/* Test DECLARE ... SELECT ... INTO with pointers */
+
+	ECPGset_var( 0, ( myvar ), __LINE__);\
+ ECPGset_var( 1, ( mynullvar ), __LINE__);\
+ /* declare mycur cursor for select * from a1 */
 #line 28 "outofscope.pgc"
 
-    if (sqlca.sqlcode != 0)
-        exit(1);
 
-    *myvar0 = myvar;
-    *mynullvar0 = mynullvar;
+	if (sqlca.sqlcode != 0)
+		exit(1);
+
+	*myvar0 = myvar;
+	*mynullvar0 = mynullvar;
 }
 
-static void open_cur1(void)
+static void
+open_cur1(void)
 {
-    {
-        ECPGdo(__LINE__,
-            0,
-            1,
-            NULL,
-            0,
-            ECPGst_normal,
-            "declare mycur cursor for select * from a1",
-            ECPGt_EOIT,
-            ECPGt_int,
-            &((*(MYTYPE*)(ECPGget_var(0))).id),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).id),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_char,
-            &((*(MYTYPE*)(ECPGget_var(0))).t),
-            (long)64,
-            (long)1,
-            (64) * sizeof(char),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).t),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_double,
-            &((*(MYTYPE*)(ECPGget_var(0))).d1),
-            (long)1,
-            (long)1,
-            sizeof(double),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).d1),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_double,
-            &((*(MYTYPE*)(ECPGget_var(0))).d2),
-            (long)1,
-            (long)1,
-            sizeof(double),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).d2),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_char,
-            &((*(MYTYPE*)(ECPGget_var(0))).c),
-            (long)30,
-            (long)1,
-            (30) * sizeof(char),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).c),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_EORT);
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "declare mycur cursor for select * from a1", ECPGt_EOIT, 
+	ECPGt_int,&((*( MYTYPE  *)(ECPGget_var( 0)) ).id),(long)1,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).id),(long)1,(long)1,sizeof( struct mynulltype ), 
+	ECPGt_char,&((*( MYTYPE  *)(ECPGget_var( 0)) ).t),(long)64,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).t),(long)1,(long)1,sizeof( struct mynulltype ), 
+	ECPGt_double,&((*( MYTYPE  *)(ECPGget_var( 0)) ).d1),(long)1,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).d1),(long)1,(long)1,sizeof( struct mynulltype ), 
+	ECPGt_double,&((*( MYTYPE  *)(ECPGget_var( 0)) ).d2),(long)1,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).d2),(long)1,(long)1,sizeof( struct mynulltype ), 
+	ECPGt_char,&((*( MYTYPE  *)(ECPGget_var( 0)) ).c),(long)30,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).c),(long)1,(long)1,sizeof( struct mynulltype ), ECPGt_EORT);
 #line 40 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 40 "outofscope.pgc"
 
-    if (sqlca.sqlcode != 0)
-        exit(1);
+
+	if (sqlca.sqlcode != 0)
+		exit(1);
 }
 
-static void get_record1(void)
+static void
+get_record1(void)
 {
-    {
-        ECPGdo(__LINE__,
-            0,
-            1,
-            NULL,
-            0,
-            ECPGst_normal,
-            "fetch mycur",
-            ECPGt_EOIT,
-            ECPGt_int,
-            &((*(MYTYPE*)(ECPGget_var(0))).id),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).id),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_char,
-            &((*(MYTYPE*)(ECPGget_var(0))).t),
-            (long)64,
-            (long)1,
-            (64) * sizeof(char),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).t),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_double,
-            &((*(MYTYPE*)(ECPGget_var(0))).d1),
-            (long)1,
-            (long)1,
-            sizeof(double),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).d1),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_double,
-            &((*(MYTYPE*)(ECPGget_var(0))).d2),
-            (long)1,
-            (long)1,
-            sizeof(double),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).d2),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_char,
-            &((*(MYTYPE*)(ECPGget_var(0))).c),
-            (long)30,
-            (long)1,
-            (30) * sizeof(char),
-            ECPGt_int,
-            &((*(MYNULLTYPE*)(ECPGget_var(1))).c),
-            (long)1,
-            (long)1,
-            sizeof(int),
-            ECPGt_EORT);
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "fetch mycur", ECPGt_EOIT, 
+	ECPGt_int,&((*( MYTYPE  *)(ECPGget_var( 0)) ).id),(long)1,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).id),(long)1,(long)1,sizeof( struct mynulltype ), 
+	ECPGt_char,&((*( MYTYPE  *)(ECPGget_var( 0)) ).t),(long)64,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).t),(long)1,(long)1,sizeof( struct mynulltype ), 
+	ECPGt_double,&((*( MYTYPE  *)(ECPGget_var( 0)) ).d1),(long)1,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).d1),(long)1,(long)1,sizeof( struct mynulltype ), 
+	ECPGt_double,&((*( MYTYPE  *)(ECPGget_var( 0)) ).d2),(long)1,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).d2),(long)1,(long)1,sizeof( struct mynulltype ), 
+	ECPGt_char,&((*( MYTYPE  *)(ECPGget_var( 0)) ).c),(long)30,(long)1,sizeof( struct mytype ), 
+	ECPGt_int,&((*( MYNULLTYPE  *)(ECPGget_var( 1)) ).c),(long)1,(long)1,sizeof( struct mynulltype ), ECPGt_EORT);
 #line 49 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 49 "outofscope.pgc"
 
-    if (sqlca.sqlcode != 0 && sqlca.sqlcode != ECPG_NOT_FOUND)
-        exit(1);
+
+	if (sqlca.sqlcode != 0 && sqlca.sqlcode != ECPG_NOT_FOUND)
+		exit(1);
 }
 
-static void close_cur1(void)
+static void
+close_cur1(void)
 {
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close mycur", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "close mycur", ECPGt_EOIT, ECPGt_EORT);
 #line 58 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 58 "outofscope.pgc"
 
-    if (sqlca.sqlcode != 0)
-        exit(1);
+
+	if (sqlca.sqlcode != 0)
+		exit(1);
 }
 
-int main(void)
+int
+main (void)
 {
-    MYTYPE* myvar = NULL;
-    MYNULLTYPE* mynullvar = NULL;
+	MYTYPE		*myvar;
+	MYNULLTYPE	*mynullvar;
 
-    char msg[128];
+	char msg[128];
 
-    ECPGdebug(1, stderr);
+	ECPGdebug(1, stderr);
 
-    strcpy(msg, "connect");
-    {
-        ECPGconnect(__LINE__, 0, "regress1", NULL, NULL, NULL, 0);
+	strcpy(msg, "connect");
+	{ ECPGconnect(__LINE__, 0, "regress1" , NULL, NULL , NULL, 0); 
 #line 75 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 75 "outofscope.pgc"
 
-    strcpy(msg, "set");
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "set datestyle to iso", ECPGt_EOIT, ECPGt_EORT);
+
+	strcpy(msg, "set");
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "set datestyle to iso", ECPGt_EOIT, ECPGt_EORT);
 #line 78 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 78 "outofscope.pgc"
 
-    strcpy(msg, "create");
-    {
-        ECPGdo(__LINE__,
-            0,
-            1,
-            NULL,
-            0,
-            ECPGst_normal,
-            "create table a1 ( id serial primary key , t text , d1 numeric , d2 float8 , c character ( 10 ) )",
-            ECPGt_EOIT,
-            ECPGt_EORT);
+
+	strcpy(msg, "create");
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table a1 ( id serial primary key , t text , d1 numeric , d2 float8 , c character ( 10 ) )", ECPGt_EOIT, ECPGt_EORT);
 #line 81 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 81 "outofscope.pgc"
 
-    strcpy(msg, "insert");
-    {
-        ECPGdo(__LINE__,
-            0,
-            1,
-            NULL,
-            0,
-            ECPGst_normal,
-            "insert into a1 ( id , t , d1 , d2 , c ) values ( default , 'a' , 1.0 , 2 , 'a' )",
-            ECPGt_EOIT,
-            ECPGt_EORT);
+
+	strcpy(msg, "insert");
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into a1 ( id , t , d1 , d2 , c ) values ( default , 'a' , 1.0 , 2 , 'a' )", ECPGt_EOIT, ECPGt_EORT);
 #line 84 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 84 "outofscope.pgc"
 
-    {
-        ECPGdo(__LINE__,
-            0,
-            1,
-            NULL,
-            0,
-            ECPGst_normal,
-            "insert into a1 ( id , t , d1 , d2 , c ) values ( default , null , null , null , null )",
-            ECPGt_EOIT,
-            ECPGt_EORT);
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into a1 ( id , t , d1 , d2 , c ) values ( default , null , null , null , null )", ECPGt_EOIT, ECPGt_EORT);
 #line 85 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 85 "outofscope.pgc"
 
-    {
-        ECPGdo(__LINE__,
-            0,
-            1,
-            NULL,
-            0,
-            ECPGst_normal,
-            "insert into a1 ( id , t , d1 , d2 , c ) values ( default , 'b' , 2.0 , 3 , 'b' )",
-            ECPGt_EOIT,
-            ECPGt_EORT);
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "insert into a1 ( id , t , d1 , d2 , c ) values ( default , 'b' , 2.0 , 3 , 'b' )", ECPGt_EOIT, ECPGt_EORT);
 #line 86 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 86 "outofscope.pgc"
 
-    strcpy(msg, "commit");
-    {
-        ECPGtrans(__LINE__, NULL, "commit");
+
+	strcpy(msg, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit");
 #line 89 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 89 "outofscope.pgc"
 
-    /* Test out-of-scope DECLARE/OPEN/FETCH/CLOSE */
 
-    get_var1(&myvar, &mynullvar);
-    open_cur1();
+	/* Test out-of-scope DECLARE/OPEN/FETCH/CLOSE */
 
-    /* exec sql whenever not found  break ; */
+	get_var1(&myvar, &mynullvar);
+	open_cur1();
+
+	/* exec sql whenever not found  break ; */
 #line 96 "outofscope.pgc"
 
-    while (1) {
-        memset(myvar, 0, sizeof(MYTYPE));
-        get_record1();
-        if (sqlca.sqlcode == ECPG_NOT_FOUND)
-            break;
-        printf("id=%d%s t='%s'%s d1=%lf%s d2=%lf%s c = '%s'%s\n",
-            myvar->id,
-            mynullvar->id ? " (NULL)" : "",
-            myvar->t,
-            mynullvar->t ? " (NULL)" : "",
-            myvar->d1,
-            mynullvar->d1 ? " (NULL)" : "",
-            myvar->d2,
-            mynullvar->d2 ? " (NULL)" : "",
-            myvar->c,
-            mynullvar->c ? " (NULL)" : "");
-    }
 
-    close_cur1();
+	while (1)
+	{
+		memset(myvar, 0, sizeof(MYTYPE));
+		get_record1();
+		if (sqlca.sqlcode == ECPG_NOT_FOUND)
+			break;
+		printf("id=%d%s t='%s'%s d1=%lf%s d2=%lf%s c = '%s'%s\n",
+			myvar->id, mynullvar->id ? " (NULL)" : "",
+			myvar->t, mynullvar->t ? " (NULL)" : "",
+			myvar->d1, mynullvar->d1 ? " (NULL)" : "",
+			myvar->d2, mynullvar->d2 ? " (NULL)" : "",
+			myvar->c, mynullvar->c ? " (NULL)" : "");
+	}
 
-    strcpy(msg, "drop");
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "drop table a1", ECPGt_EOIT, ECPGt_EORT);
+	close_cur1();
+
+	strcpy(msg, "drop");
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "drop table a1", ECPGt_EOIT, ECPGt_EORT);
 #line 115 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 115 "outofscope.pgc"
 
-    strcpy(msg, "commit");
-    {
-        ECPGtrans(__LINE__, NULL, "commit");
+
+	strcpy(msg, "commit");
+	{ ECPGtrans(__LINE__, NULL, "commit");
 #line 118 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 118 "outofscope.pgc"
 
-    strcpy(msg, "disconnect");
-    {
-        ECPGdisconnect(__LINE__, "CURRENT");
+
+	strcpy(msg, "disconnect");
+	{ ECPGdisconnect(__LINE__, "CURRENT");
 #line 121 "outofscope.pgc"
 
-        if (sqlca.sqlcode < 0)
-            exit(1);
-    }
+if (sqlca.sqlcode < 0) exit (1);}
 #line 121 "outofscope.pgc"
 
-    return (0);
+
+	free(myvar);
+	free(mynullvar);
+
+	return (0);
 }
