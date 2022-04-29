@@ -1570,7 +1570,7 @@ static void XLogWalRcvSendHSFeedback(void)
      * If the user doesn't want status to be reported to the master, be sure
      * to exit before doing anything at all.
      */
-    if (u_sess->attr.attr_storage.wal_receiver_status_interval <= 0 || !u_sess->attr.attr_storage.hot_standby_feedback)
+    if (u_sess->attr.attr_storage.wal_receiver_status_interval <= 0)
         return;
 
     /* Get current timestamp. */
