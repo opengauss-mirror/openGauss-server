@@ -1598,7 +1598,10 @@ static void XLogWalRcvSendHSFeedback(void)
     /* Get updated RecentGlobalXmin */
     GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, true, true);
 #endif
-    xmin = GetOldestXmin(NULL);
+    if (u_sess->attr.attr_storage.hot_standby_feedback)
+        xmin = GetOldestXmin(NULL);
+    else
+        xmin = InvalidTransactionId;
 
     /*
      * Always send feedback message.
