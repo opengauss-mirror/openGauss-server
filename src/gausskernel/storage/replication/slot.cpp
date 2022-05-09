@@ -1934,14 +1934,18 @@ ArchiveConfig* formArchiveConfigFromStr(char *content, bool encrypted)
     ArchiveConnConfig* conn_config = NULL;
     char* media_type = NULL;
     errno_t rc = EOK;
-    /* SplitIdentifierString will change origin string */
-    char *content_copy = pstrdup(content);
+    char *content_copy = NULL;
     char *tmp = NULL;
     List* elemlist = NIL;
     int param_num = 0;
     size_t elem_index = 0;
     archive_config = (ArchiveConfig *)palloc0(sizeof(ArchiveConfig));
     char decryptSecretAccessKeyStr[DEST_CIPHER_LENGTH] = {'\0'};
+    if (content == NULL || strlen(content) == 0) {
+        goto FAILURE;
+    }
+    /* SplitIdentifierString will change origin string */
+    content_copy = pstrdup(content);
     /* Parse string into list of identifiers */
     if (!SplitIdentifierString(content_copy, ';', &elemlist, false, false)) {
         goto FAILURE;
