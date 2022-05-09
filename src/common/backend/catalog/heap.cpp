@@ -6230,7 +6230,7 @@ Datum GetPartBoundaryByTuple(Relation rel, HeapTuple tuple)
     return Timestamp2Boundarys(rel, Align2UpBoundary(value, partMap->intervalValue, boundaryTs));
 }
 
-Oid AddNewIntervalPartition(Relation rel, void* insertTuple)
+Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL)
 {
     Relation pgPartRel = NULL;
     Oid newPartOid = InvalidOid;
@@ -6327,7 +6327,13 @@ Oid AddNewIntervalPartition(Relation rel, void* insertTuple)
      */
     CommandCounterIncrement();
 
-    UpdatePgObjectChangecsn(RelationGetRelid(rel), rel->rd_rel->relkind);
+    /*
+     * If add interval partition in the DDL, do not need to change the csn
+     * because the scn has been changed in the DDL.
+     */
+    if (!isDDL) {
+        UpdatePgObjectChangecsn(RelationGetRelid(rel), rel->rd_rel->relkind);
+    }
 
     return newPartOid;
 }
@@ -7113,7 +7119,7 @@ int lookupHBucketid(oidvector *buckets, int low, int2 bktId)
  * Description	:
  * Notes		:
  */
-Oid heapTupleGetPartitionId(Relation rel, void *tuple)
+Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL)
 {
     Oid partitionid = InvalidOid;
 
@@ -7140,7 +7146,7 @@ Oid heapTupleGetPartitionId(Relation rel, void *tuple)
                 (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
         } break;
         case PART_AREA_INTERVAL: {
-            return AddNewIntervalPartition(rel, tuple);
+            return AddNewIntervalPartition(rel, tuple, isDDL);
         } break;
         case PART_AREA_LIST: {
             ereport(ERROR,
