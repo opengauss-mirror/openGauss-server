@@ -146,6 +146,29 @@ then
 fi
 
 ##################################################################################
+# the modification here will also lead to the synchronous modification of the 3rd-party compilation library path
+# PR link : https://gitee.com/opengauss/openGauss-third_party/pulls/130
+# redflag platform  
+# the result form like this: asianux_x86_64
+##################################################################################
+if [ "$kernel"x = "redflag"x ]
+then
+    plat_form_str=asianux7.6_"$cpu_bit"
+fi
+
+
+##################################################################################
+# the modification here will also lead to the synchronous modification of the 3rd-party compilation library path
+# PR link : https://gitee.com/opengauss/openGauss-third_party/pulls/130
+# asianux platform
+# the result form like this: asianux_aarch64
+##################################################################################
+if [ "$kernel"x = "asianux"x ]
+then
+    plat_form_str=asianux7.5_"$cpu_bit"
+fi
+
+##################################################################################
 #
 # other platform 
 #
