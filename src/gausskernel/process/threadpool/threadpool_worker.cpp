@@ -848,7 +848,7 @@ static bool InitSession(knl_session_context* session)
     t_thrd.proc_cxt.PostInit->InitSession();
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.b_sql_plugin) {
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.dolphin) {
         InitBSqlPluginHookIfNeeded();
     }
 #endif

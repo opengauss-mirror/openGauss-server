@@ -2712,8 +2712,8 @@ void PostgresInitializer::InitExtensionVariable()
     }
     
     /* check whether the extension has been created */
-    const char* b_sql_plugin = "b_sql_plugin";
-    u_sess->attr.attr_sql.b_sql_plugin = CheckIfExtensionExists(b_sql_plugin);
+    const char* dolphin = "dolphin";
+    u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists(dolphin);
 }
 
 void PostgresInitializer::FinishInit()
