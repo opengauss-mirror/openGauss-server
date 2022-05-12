@@ -825,10 +825,10 @@ void client_read_ended(void)
 #define INIT_PLUGIN_OBJECT "init_plugin_object"
 void InitBSqlPluginHookIfNeeded()
 {
-    const char* b_sql_plugin = "b_sql_plugin";
+    const char* dolphin = "dolphin";
     CFunInfo tmpCF;
 
-    tmpCF = load_external_function(b_sql_plugin, INIT_PLUGIN_OBJECT, false, false);
+    tmpCF = load_external_function(dolphin, INIT_PLUGIN_OBJECT, false, false);
     if (tmpCF.user_fn != NULL) {
         ((void* (*)(void))(tmpCF.user_fn))();
     }
@@ -862,7 +862,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist)
 
     List* (*parser_hook)(const char*, List**) = raw_parser;
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_sql.b_sql_plugin) {
+    if (u_sess->attr.attr_sql.dolphin) {
         int id = GetCustomParserId();
         if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
             parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
@@ -7574,7 +7574,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         init_set_params_htab();
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.b_sql_plugin) {
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.dolphin) {
         InitBSqlPluginHookIfNeeded();
     }
 #endif

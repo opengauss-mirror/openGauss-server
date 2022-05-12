@@ -238,7 +238,7 @@ typedef struct knl_session_attr_sql {
 #ifndef ENABLE_MULTIPLE_NODES
     bool enable_custom_parser;
 #endif
-    bool b_sql_plugin;
+    bool dolphin;
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */

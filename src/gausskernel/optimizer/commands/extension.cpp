@@ -1175,7 +1175,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
         FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
     }
 
-    if (pg_strcasecmp(stmt->extname, "b_sql_plugin") == 0 && !DB_IS_CMPT(B_FORMAT)) {
+    if (pg_strcasecmp(stmt->extname, "dolphin") == 0 && !DB_IS_CMPT(B_FORMAT)) {
         ereport(ERROR,
             (errmsg("please create extension \"%s\" with B type DBCOMPATIBILITY", stmt->extname)));
     }
@@ -1418,8 +1418,8 @@ void CreateExtension(CreateExtensionStmt* stmt)
 
     u_sess->exec_cxt.extension_is_valid = true;
 
-    if (pg_strcasecmp(stmt->extname, "b_sql_plugin") == 0) {
-         u_sess->attr.attr_sql.b_sql_plugin = true;
+    if (pg_strcasecmp(stmt->extname, "dolphin") == 0) {
+         u_sess->attr.attr_sql.dolphin = true;
     }
 
     /*

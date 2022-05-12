@@ -52,7 +52,7 @@ static_assert(sizeof(false) == sizeof(char), "illegal bool size");
 static struct HTAB* nameHash = NULL;
 static struct HTAB* oidHash = NULL;
 
-/* for b_sql_plugin */
+/* for dolphin */
 struct HTAB* b_nameHash = NULL;
 struct HTAB* b_oidHash = NULL;
 
@@ -118,7 +118,7 @@ static const FuncGroup* NameHashTableAccess(HASHACTION action, const char* name,
 
     Assert(name != NULL);
 
-    if (DB_IS_CMPT(B_FORMAT) && b_nameHash != NULL && u_sess->attr.attr_sql.b_sql_plugin) {
+    if (DB_IS_CMPT(B_FORMAT) && b_nameHash != NULL && u_sess->attr.attr_sql.dolphin) {
         result = (HashEntryNameToFuncGroup *)hash_search(b_nameHash, &temp_name, action, &found);
     } else {
         result = (HashEntryNameToFuncGroup *)hash_search(nameHash, &temp_name, action, &found);
@@ -144,7 +144,7 @@ static const Builtin_func* OidHashTableAccess(HASHACTION action, Oid oid, const 
     bool found = false;
     Assert(oid > 0);
 
-    if (DB_IS_CMPT(B_FORMAT) && b_oidHash != NULL && u_sess->attr.attr_sql.b_sql_plugin) {
+    if (DB_IS_CMPT(B_FORMAT) && b_oidHash != NULL && u_sess->attr.attr_sql.dolphin) {
         result = (HashEntryOidToBuiltinFunc *)hash_search(b_oidHash, &oid, action, &found);
     } else {
         result = (HashEntryOidToBuiltinFunc *)hash_search(oidHash, &oid, action, &found);
