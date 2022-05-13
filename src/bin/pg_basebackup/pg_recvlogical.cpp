@@ -636,7 +636,7 @@ static int getOptions(const int argc, char* const* argv)
     int c;
     int option_index;
     uint32 hi, lo;
-    while ((c = getopt_long(argc, argv, "f:F:nvd:h:o:p:U:wWP:s:S:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:F:nvd:h:o:p:U:wWP:s:S:I:", long_options, &option_index)) != -1) {
         switch (c) {
             /* general options */
             case 'f':
