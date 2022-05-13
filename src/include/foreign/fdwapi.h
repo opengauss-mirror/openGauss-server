@@ -199,7 +199,7 @@ typedef struct FdwRoutine {
 
 /* Functions in foreign/foreign.c */
 extern FdwRoutine* GetFdwRoutine(Oid fdwhandler);
-extern FdwRoutine* GetFdwRoutineByRelId(Oid relid);
+extern FdwRoutine* GetFdwRoutineByRelId(Oid relid, bool missHandlerOk = false);
 extern FdwRoutine* GetFdwRoutineByServerId(Oid serverid);
 extern FdwRoutine* GetFdwRoutineForRelation(Relation relation, bool makecopy);
 
