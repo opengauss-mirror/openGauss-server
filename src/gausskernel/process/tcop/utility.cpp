@@ -2260,8 +2260,11 @@ static void set_item_arg_according_to_def_name(DefElem* item)
     if (strcmp(item->defname, "transaction_isolation") == 0) {
         SetPGVariable("transaction_isolation", list_make1(item->arg), true);
     } else if (strcmp(item->defname, "transaction_read_only") == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
         /* Set read only state from CN when this DN is not read only. */
-        if (u_sess->attr.attr_storage.DefaultXactReadOnly == false) {
+        if (u_sess->attr.attr_storage.DefaultXactReadOnly == false)
+#endif
+        {
             SetPGVariable("transaction_read_only", list_make1(item->arg), true);
         }
     } else if (strcmp(item->defname, "transaction_deferrable") == 0) {

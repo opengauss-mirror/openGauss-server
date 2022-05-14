@@ -154,7 +154,7 @@ test: single_node_select_implicit single_node_select_having
 test: single_node_union
 #test: single_node_case single_node_join single_node_aggregates 
 #test: single_node_transactions 
-test: single_node_random 
+test: single_node_random transactions_test
 #test: single_node_portals
 #test: single_node_arrays 
 #test: single_node_btree_index single_node_hash_index single_node_update 
