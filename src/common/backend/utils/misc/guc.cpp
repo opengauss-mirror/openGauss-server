@@ -8486,6 +8486,7 @@ static void WriteAlterSystemSetGucFile(char* ConfFileName, char** opt_lines, Con
     opt_lines = NULL;
     if (ret != CODE_OK) {
         release_file_lock(filelock);
+        LWLockRelease(ConfigFileLock);
         ereport(ERROR,
                 (errcode(ERRCODE_FILE_WRITE_FAILED),
                  errmsg("write %s failed: %s.", ConfFileName, gs_strerror(ret))));
@@ -8505,7 +8506,12 @@ static char** LockAndReadConfFile(char* ConfFileName, char* ConfTmpFileName, cha
         file = ConfTmpFileName;
     }
 
-    if (file != NULL && S_ISREG(st.st_mode) && get_file_lock(file, filelock) == CODE_OK) {
+    /* 
+     * Get the process lock (filelock) first, if success, acquire thread
+     * lock (ConfigFileLock) for config file, sleep until get the lock
+     */
+    if (file != NULL && S_ISREG(st.st_mode) && get_file_lock(ConfLockFileName, filelock) == CODE_OK) {
+        LWLockAcquire(ConfigFileLock, LW_EXCLUSIVE);
         opt_lines = read_guc_file(file);
     } else {
         ereport(ERROR,
@@ -8514,6 +8520,8 @@ static char** LockAndReadConfFile(char* ConfFileName, char* ConfTmpFileName, cha
 
     if (opt_lines == NULL) {
         release_file_lock(filelock);
+        /* release thread lock for config file */
+        LWLockRelease(ConfigFileLock);
         ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED), errmsg("Read configure file falied.")));
     }
 
@@ -8535,6 +8543,22 @@ static char** LockAndReadConfFile(char* ConfFileName, char* ConfTmpFileName, cha
  *
  * In case of an error, we leave the original automatic
  * configuration file (postgresql.conf.bak) intact.
+ * 
+ * There are two locks used to ensure changing of config file
+ * is multi-thread safe and multi-process safe:
+ *   filelock: for multi-process safe
+ *   ConfigFileLock: for multi-thread safe
+ * Both locks must be acquired before any changes of config file.
+ * 
+ * filelock:
+ *   is a ConfFileLock, creates a file "postgresql.conf.lock"
+ * as a lock for the config file "postgresql.conf", and uses 
+ * flock() to ensure modification of config file is 
+ * multi-process safe for mogdb and gs_guc processes.
+ * 
+ * ConfigFileLock:
+ *   is a LWLock, defined in lwlocknames.txt. is a global lock
+ * in mogdb and guarantees multi-thread safe access of config file.
  */
 void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
 {
@@ -8580,14 +8604,17 @@ void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
      */
     if (rename(ConfTmpBakFileName, ConfFileName) < 0) {
         release_file_lock(&filelock);
+        /* release thread lock for config file */
+        LWLockRelease(ConfigFileLock);
         ereport(ERROR,
                 (errcode_for_file_access(),
                  errmsg("could not rename file \"%s\" to \"%s\"", ConfTmpFileName, ConfFileName)));
     }
 
-    release_file_lock(&filelock);
-
     FinishAlterSystemSet(record->context);
+    release_file_lock(&filelock);
+    /* release thread lock for config file */
+    LWLockRelease(ConfigFileLock);
 }
 #endif
 
