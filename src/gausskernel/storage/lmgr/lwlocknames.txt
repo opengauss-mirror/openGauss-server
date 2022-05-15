@@ -132,3 +132,4 @@ ReplicationOriginLock 122
 LogicalRepWorkerLock 123
 XGBoostLibLock 124
 NgroupDestoryLock 125
+ConfigFileLock 126
