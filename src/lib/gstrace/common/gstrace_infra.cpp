@@ -1158,7 +1158,7 @@ FILE* trace_fopen(const char* open_file, const char* mode)
     canonicalize_path(file_name);
 
     fp = fopen(file_name, mode);
-    if (chmod(file_name, S_IWUSR | S_IRUSR) != 0) {
+    if (fp != NULL && chmod(file_name, S_IWUSR | S_IRUSR) != 0) {
         fclose(fp);
         return NULL;
     }
