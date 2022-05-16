@@ -361,7 +361,7 @@ param			\${integer}
 
 newParam		:({identifier}|{integer})
 
-newArray		:({integer}{space}*\])
+newArray		:({identifier}|{integer}){space}*\]
 
 other			.
 
@@ -957,6 +957,7 @@ other			.
 				}
 {newArray}		{
 					yyless(1);
+					SET_YYLLOC();
 					yyextra->is_hint_str = false;
 					return yytext[0];
 				}
