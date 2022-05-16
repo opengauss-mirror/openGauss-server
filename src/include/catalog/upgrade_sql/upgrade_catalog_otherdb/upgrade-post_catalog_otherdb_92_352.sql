@@ -10,4 +10,3 @@ OUT "pg_control_last_modified" timestamp
 )
 RETURNS setof record LANGUAGE INTERNAL VOLATILE NOT FENCED as 'pg_control_system';
 
-CREATE VIEW pg_catalog.pg_control_system AS SELECT * FROM pg_control_system();
