@@ -916,3 +916,4 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail
 test: gs_dump_encrypt
+test: join_test_alias
