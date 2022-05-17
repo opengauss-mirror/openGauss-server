@@ -1,7 +1,7 @@
 create schema "compress_2PC";
 create table "compress_2PC".file_count(id int, count int);
 checkpoint;
-\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into \"compress_2PC\".file_count values(1, `find @abs_srcdir@ | wc -l`)"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into \"compress_2PC\".file_count values(1, `find @abs_srcdir@/tmp_check/datanode1/base | wc -l`)"
 INSERT 0 1
 -- create rollback
 start transaction;
@@ -45,7 +45,7 @@ prepare transaction 'the first prepare transaction';
 commit prepared 'the first prepare transaction';
 -- checkpoint
 checkpoint;
-\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into \"compress_2PC\".file_count values(2, `find @abs_srcdir@ | wc -l`)"
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into \"compress_2PC\".file_count values(2, `find @abs_srcdir@/tmp_check/datanode1/base | wc -l`)"
 INSERT 0 1
 select count(distinct(count)) from "compress_2PC".file_count;
  count 
