@@ -11,7 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 DROP TABLE [ IF EXISTS ] 
-{[schema.]table_name} [, ...] [ CASCADE | RESTRICT ] [ PURGE ]};
+{[schema.]table_name} [, ...] [ CASCADE | RESTRICT ] [ PURGE ];
 </synopsis>
 </refsynopsisdiv>
 </refentry>
