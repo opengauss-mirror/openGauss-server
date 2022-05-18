@@ -1272,6 +1272,7 @@ static void knl_t_walsender_init(knl_t_walsender_context* walsender_cxt)
     walsender_cxt->WalSndCtl = NULL;
     walsender_cxt->MyWalSnd = NULL;
     walsender_cxt->logical_xlog_advanced_timeout = 10 * 1000;
+    walsender_cxt->logical_slot_advanced_timeout = 10 * 1000;
     walsender_cxt->Demotion = NoDemote;
     walsender_cxt->wake_wal_senders = false;
     walsender_cxt->wal_send_completed = false;

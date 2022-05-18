@@ -2259,6 +2259,24 @@ static void AdvanceReplicationSlot(XLogRecPtr flush)
         if (t_thrd.slot_cxt.MyReplicationSlot->data.database != InvalidOid) {
             LogicalConfirmReceivedLocation(flush);
             if (RecoveryInProgress() && OidIsValid(t_thrd.slot_cxt.MyReplicationSlot->data.database)) {
+                TimestampTz timegap;
+                TimestampTz now;
+
+                /*
+                 * Check if time since last notify primary logical slot advancing has reached the limit.
+                 * If reached, notify primary advance logical slot.
+                 */
+                if (t_thrd.walsender_cxt.last_logical_slot_advanced_timestamp <= 0) {
+                    return;
+                }
+                now = GetCurrentTimestamp();
+                timegap = TimestampTzPlusMilliseconds(t_thrd.walsender_cxt.last_logical_slot_advanced_timestamp,
+                                                      t_thrd.walsender_cxt.logical_slot_advanced_timeout);
+                if (now < timegap) {
+                    return;
+                }
+                t_thrd.walsender_cxt.last_logical_slot_advanced_timestamp = now;
+
                 /* Notify the primary to advance logical slot location */
                 NotifyPrimaryAdvance(t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn, flush);
             }
@@ -3039,6 +3057,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
     t_thrd.walsender_cxt.last_reply_timestamp = GetCurrentTimestamp();
     last_syncconf_timestamp = GetCurrentTimestamp();
     t_thrd.walsender_cxt.last_logical_xlog_advanced_timestamp = GetCurrentTimestamp();
+    t_thrd.walsender_cxt.last_logical_slot_advanced_timestamp = GetCurrentTimestamp();
     t_thrd.walsender_cxt.waiting_for_ping_response = false;
 #define MINUTE_30 (30 * 60 * 1000) /* 30 minutes */
     t_thrd.walsender_cxt.timeoutCheckInternal = u_sess->attr.attr_storage.wal_sender_timeout;
