@@ -89,5 +89,8 @@ ERROR:  Can not use compress option in ustore index.
 -- segment
 CREATE TABLE unspported_feature.segment_table(id int, c1 text) WITH(compresstype=2, segment=on);  --failed
 ERROR:  only row orientation table support compresstype.
-CREATE INDEX on unspported_feature.index_test(c1) WITH(compresstype=2, segment=on); --faled
+CREATE INDEX on unspported_feature.index_test(c1) WITH(compresstype=2, segment=on); --failed
 ERROR:  Can not use compress option in segment storage.
+-- set compress_diff_convert
+create table unspported_feature.compress_byte_test(id int) with (compresstype=2, compress_byte_convert=false, compress_diff_convert = true); -- failed
+ERROR:  compress_diff_convert should be used with compress_byte_convert.
