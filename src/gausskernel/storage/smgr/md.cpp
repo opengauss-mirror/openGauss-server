@@ -394,8 +394,6 @@ void mdcreate(SMgrRelation reln, ForkNumber forkNum, bool isRedo)
     }
 
     if (fd < 0) {
-        int save_errno = errno;
-
         /*
          * During bootstrap, there are cases where a system relation will be
          * accessed (by internal backend processes) before the bootstrap
@@ -407,26 +405,7 @@ void mdcreate(SMgrRelation reln, ForkNumber forkNum, bool isRedo)
          * new catalogs can by no means be used by other relations, we simply
          * truncate them.
          */
-        if (isRedo || IsBootstrapProcessingMode() ||
-            (u_sess->attr.attr_common.IsInplaceUpgrade && filenode.rnode.node.relNode < FirstNormalObjectId)) {
-            ADIO_RUN()
-            {
-                flags = O_RDWR | PG_BINARY | O_DIRECT | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
-            }
-            ADIO_ELSE()
-            {
-                flags = O_RDWR | PG_BINARY | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
-            }
-            ADIO_END();
-
-            fd = DataFileIdOpenFile(path, filenode, flags, 0600);
-        }
-
-        if (fd < 0) {
-            /* be sure to report the error reported by create, not open */
-            errno = save_errno;
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", path)));
-        }
+        fd = RetryDataFileIdOpenFile(isRedo, path, filenode, flags);
     }
 
     File fd_pca = -1;
