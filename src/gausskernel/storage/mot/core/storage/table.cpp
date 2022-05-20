@@ -582,6 +582,7 @@ Row* Table::RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcMan
 #endif
         currSentinel = ix->IndexRemove(&key, tid);
         MOT_ASSERT(currSentinel == sentinel);
+        MOT_ASSERT(currSentinel->GetCounter() == 0);
         if (likely(gc != nullptr)) {
             if (ix->GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
                 OutputRow = currSentinel->GetData();

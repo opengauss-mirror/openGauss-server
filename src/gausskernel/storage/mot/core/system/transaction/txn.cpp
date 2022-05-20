@@ -413,6 +413,8 @@ RC TxnManager::RollbackInsert(Access* ac)
 #endif
         outputSen = index_->IndexRemove(&m_key, GetThdId());
         MOT_ASSERT(outputSen != nullptr);
+        MOT_ASSERT(outputSen->GetCounter() == 0);
+
         GcSessionRecordRcu(index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE(index_));
         // If we are the owner of the key and insert on top of a deleted row,
         // lets check if we can reclaim the deleted row
@@ -820,6 +822,8 @@ void TxnInsertAction::CleanupOptimisticInsert(
                 MOT_ASSERT(pIndexInsertResult->GetCounter() == 0);
                 Sentinel* outputSen = index_->IndexRemove(currentItem->m_key, m_manager->GetThdId());
                 MOT_ASSERT(outputSen != nullptr);
+                MOT_ASSERT(outputSen->GetCounter() == 0);
+
                 m_manager->GcSessionRecordRcu(
                     index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE(index_));
                 m_manager->m_accessMgr->IncreaseTableStat(table);
