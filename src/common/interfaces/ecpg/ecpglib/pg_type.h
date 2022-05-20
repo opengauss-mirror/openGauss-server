@@ -46,7 +46,7 @@
 #define CIRCLEOID 718
 #define CASHOID 790
 #define INETOID 869
-#define INT16OID 873
+#define INT16OID 34
 #define CIDROID 650
 #define BPCHAROID 1042
 #define VARCHAROID 1043
