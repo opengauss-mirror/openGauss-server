@@ -720,7 +720,6 @@ static Datum ExecEvalWholeRowVar(
 {
     Var* variable = (Var*)wrvstate->xprstate.expr;
     TupleTableSlot* slot = NULL;
-    TupleDesc slot_tupdesc;
     bool needslow = false;
 
     if (isDone != NULL)
@@ -802,21 +801,13 @@ static Datum ExecEvalWholeRowVar(
     if (wrvstate->wrv_junkFilter != NULL)
         slot = ExecFilterJunk(wrvstate->wrv_junkFilter, slot);
 
-    slot_tupdesc = slot->tts_tupleDescriptor;
-
     /*
-     * If it's a RECORD Var, we'll use the slot's type ID info.  It's likely
-     * that the slot's type is also RECORD; if so, make sure it's been
-     * "blessed", so that the Datum can be interpreted later.
-     *
      * If the Var identifies a named composite type, we must check that the
      * actual tuple type is compatible with it.
      */
-    if (variable->vartype == RECORDOID) {
-        if (slot_tupdesc->tdtypeid == RECORDOID && slot_tupdesc->tdtypmod < 0)
-            assign_record_type_typmod(slot_tupdesc);
-    } else {
+    if (variable->vartype != RECORDOID) {
         TupleDesc var_tupdesc;
+        TupleDesc slot_tupdesc;
         int i;
 
         /*
@@ -832,6 +823,8 @@ static Datum ExecEvalWholeRowVar(
          * ExecEvalWholeRowSlow to check (2) for each row.
          */
         var_tupdesc = lookup_rowtype_tupdesc(variable->vartype, -1);
+
+        slot_tupdesc = slot->tts_tupleDescriptor;
 
         if (var_tupdesc->natts != slot_tupdesc->natts)
             ereport(ERROR,
@@ -886,6 +879,7 @@ static Datum ExecEvalWholeRowFast(
 {
     Var* variable = (Var*)wrvstate->xprstate.expr;
     TupleTableSlot* slot = NULL;
+    TupleDesc slot_tupdesc;
     HeapTuple tuple;
     TupleDesc tupleDesc;
     HeapTupleHeader dtuple;
@@ -914,6 +908,17 @@ static Datum ExecEvalWholeRowFast(
     /* Apply the junkfilter if any */
     if (wrvstate->wrv_junkFilter != NULL)
         slot = ExecFilterJunk(wrvstate->wrv_junkFilter, slot);
+
+    /*
+     * If it's a RECORD Var, we'll use the slot's type ID info.  It's likely
+     * that the slot's type is also RECORD; if so, make sure it's been
+     * "blessed", so that the Datum can be interpreted later.
+     */        
+    slot_tupdesc = slot->tts_tupleDescriptor;
+    if (variable->vartype == RECORDOID) {
+        if (slot_tupdesc->tdtypeid == RECORDOID && slot_tupdesc->tdtypmod < 0)
+            assign_record_type_typmod(slot_tupdesc);
+    }
 
     tuple = ExecFetchSlotTuple(slot);
     tupleDesc = slot->tts_tupleDescriptor;
