@@ -56,12 +56,22 @@ void* basic_table<P>::insert(MOT::Key const* const& key, void* const& entry, boo
           5. Update the the key slice, keylen, key suffix and key's value in the
        leaf
           6. Add the key's location in permutation's back (key is not visible for
-       readers yet) As key's location is not part of the permutation yet, the key
+       readers yet) as key's location is not part of the permutation yet, the key
        is not reachable (aka not present). In addition, the leaf is still locked.
         Unlocking the node and enter the key into the permutation will be done
-       later in finish_insert (called from lp.finish). */
+       later in finish_insert (done in lp.finish function). */
 
-    bool found = lp.find_insert(*mtSessionThreadInfo);
+    bool found = false;
+    if (!lp.find_insert(*mtSessionThreadInfo, found)) {
+        // Failed to insert key due to memory allocation failure.
+        MOT_ASSERT(!mtSessionThreadInfo->non_disruptive_error());
+        MOT_ASSERT(found == false);
+        lp.finish(0, *mtSessionThreadInfo);
+        result = false;
+        return nullptr;
+    }
+
+    MOT_ASSERT(mtSessionThreadInfo->non_disruptive_error());
 
     // If the key is new (not previously existing) then we record the entry under
     // that key

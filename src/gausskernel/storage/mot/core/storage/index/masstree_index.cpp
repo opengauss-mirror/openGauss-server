@@ -69,14 +69,17 @@ Sentinel* MasstreePrimaryIndex::IndexInsertImpl(const Key* key, Sentinel* sentin
     mtSessionThreadInfo->set_gc_session(
         MOTEngine::GetInstance()->GetCurrentGcSession());  // set current GC session in thread-pooled envelope
 
+    mtSessionThreadInfo->set_last_error(MT_MERR_OK);
+
     existingItem = m_index.insert(key, sentinel, inserted, pid);
 
     mtSessionThreadInfo->set_gc_session(NULL);
     mtSessionThreadInfo->set_working_index(NULL);
 
-    if (!inserted) {  // key mapping already exists in unique index
+    if (!inserted && existingItem) {  // key mapping already exists in unique index
         result = reinterpret_cast<Sentinel*>(existingItem);
-    }  // otherwise return null pointer
+    }  // otherwise return null pointer (if !inserted && !existingItem, Key does not exist and insertation failed due to
+       // memory issue)
 
     return result;
 }
@@ -107,6 +110,8 @@ Sentinel* MasstreePrimaryIndex::IndexRemoveImpl(const Key* key, uint32_t pid)
     mtSessionThreadInfo->set_working_index((MasstreePrimaryIndex*)this);
     mtSessionThreadInfo->set_gc_session(
         MOTEngine::GetInstance()->GetCurrentGcSession());  // set current GC session in thread-pooled envelope
+
+    mtSessionThreadInfo->set_last_error(MT_MERR_OK);
 
     output = m_index.remove(key->GetKeyBuf(), key->GetKeyLength(), result, pid);
 
