@@ -160,9 +160,9 @@ static void FreeWorkerInfo(int code, Datum arg);
 /* add parameter toast_table_map by data partition. */
 static autovac_table* table_recheck_autovac(
     vacuum_object* vacObj, HTAB* table_toast_map, HTAB* toast_table_map, TupleDesc pg_class_desc);
-static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_class classForm, HeapTuple tuple,
-    PgStat_StatTabEntry* tabentry, bool allowAnalyze, bool allowVacuum, bool is_recheck, bool* dovacuum,
-    bool* doanalyze, bool* need_freeze);
+static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, bytea* rawRelopts, Form_pg_class classForm,
+    HeapTuple tuple, PgStat_StatTabEntry* tabentry, bool allowAnalyze, bool allowVacuum, bool is_recheck,
+    bool* dovacuum, bool* doanalyze, bool* need_freeze);
 
 static void autovacuum_do_vac_analyze(autovac_table* tab, BufferAccessStrategy bstrategy);
 static void autovacuum_local_vac_analyze(autovac_table* tab, BufferAccessStrategy bstrategy);
@@ -2097,7 +2097,7 @@ static void do_autovacuum(void)
         relation_support_autoavac(tuple, &enable_analyze, &enable_vacuum, &is_internal_relation);
 
         /* Check if it needs vacuum or analyze */
-        relation_needs_vacanalyze(relid, relopts, classForm, tuple, tabentry, enable_analyze, enable_vacuum,
+        relation_needs_vacanalyze(relid, relopts, rawRelopts, classForm, tuple, tabentry, enable_analyze, enable_vacuum,
             false, &dovacuum, &doanalyze, &need_freeze);
 
         if (freeze_autovacuum) {
@@ -2308,6 +2308,7 @@ static void do_autovacuum(void)
         Oid relid = HeapTupleGetOid(tuple);
         PgStat_StatTabEntry* tabentry = NULL;
         AutoVacOpts* relopts = NULL;
+        bytea *rawRelopts = NULL;
         bool isReloptsReferenceOther = false;
         bool dovacuum = false;
         bool doanalyze = false;
@@ -2337,6 +2338,7 @@ static void do_autovacuum(void)
          * main rel
          */
         relopts = extract_autovac_opts(tuple, pg_class_desc);
+        rawRelopts = extractRelOptions(tuple, pg_class_desc, InvalidOid);
         /*
          * we must get main table id first, and then get the
          * reloptions according to the main table id
@@ -2355,8 +2357,8 @@ static void do_autovacuum(void)
         /* Fetch the pgstat entry for this table */
         tabentry = get_pgstat_tabentry_relid(relid, classForm->relisshared, InvalidOid, shared, dbentry);
         relation_support_autoavac(tuple, &enable_analyze, &enable_vacuum, &is_internal_relation);
-        relation_needs_vacanalyze(relid, relopts, classForm, tuple, tabentry, enable_analyze, enable_vacuum, true,
-            &dovacuum, &doanalyze, &need_freeze);
+        relation_needs_vacanalyze(relid, relopts, rawRelopts, classForm, tuple, tabentry, enable_analyze, enable_vacuum,
+            true, &dovacuum, &doanalyze, &need_freeze);
 
         if (freeze_autovacuum) {
             if (ISMATMAP(classForm->relname.data) || ISMLOG(classForm->relname.data)) {
@@ -2906,8 +2908,8 @@ static autovac_table* table_recheck_autovac(
     /* fetch the pgstat table entry */
     tabentry = get_pgstat_tabentry_relid(relid, classForm->relisshared, InvalidOid, shared, dbentry);
     relation_support_autoavac(classTup, &enable_analyze, &enable_vacuum, &is_internal_relation);
-    relation_needs_vacanalyze(relid, avopts, classForm, classTup, tabentry, enable_analyze, enable_vacuum, true,
-        &dovacuum, &doanalyze, &need_freeze);
+    relation_needs_vacanalyze(relid, avopts, rawRelopts, classForm, classTup, tabentry, enable_analyze, enable_vacuum,
+        true, &dovacuum, &doanalyze, &need_freeze);
 
     /* ignore ANALYZE for toast tables */
     if (classForm->relkind == RELKIND_TOASTVALUE)
@@ -3019,8 +3021,8 @@ static void determine_vacuum_params(float4& vac_scale_factor, int& vac_base_thre
  * value < 0 is substituted with the value of
  * autovacuum_vacuum_scale_factor GUC variable.  Ditto for analyze.
  */
-static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_class classForm, HeapTuple tuple,
-    PgStat_StatTabEntry* tabentry, bool allowAnalyze, bool allowVacuum, bool is_recheck,
+static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, bytea* rawRelopts, Form_pg_class classForm,
+    HeapTuple tuple, PgStat_StatTabEntry* tabentry, bool allowAnalyze, bool allowVacuum, bool is_recheck,
     /* output params below */
     bool* dovacuum, bool* doanalyze, bool* need_freeze)
 {
@@ -3028,6 +3030,7 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_c
     avw_info* avwentry = NULL;
     bool found = false;
     bool force_vacuum = false;
+    bool delta_vacuum = false;
     bool av_enabled = false;
     bool userEnabled = true;
     /* pg_class.reltuples */
@@ -3086,6 +3089,19 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_c
     *need_freeze = force_vacuum;
     AUTOVAC_LOG(DEBUG2, "vac \"%s\": need freeze is %s", NameStr(classForm->relname), force_vacuum ? "true" : "false");
 
+    /* Is time to move rows from delta to main cstore table by vacuum? */
+    if (rawRelopts != NULL && StdRelOptIsColStore(rawRelopts) && g_instance.attr.attr_storage.enable_delta_store) {
+        PgStat_StatDBEntry *dbentry = pgstat_fetch_stat_dbentry(u_sess->proc_cxt.MyDatabaseId);;
+        PgStat_StatDBEntry *shared = pgstat_fetch_stat_dbentry(InvalidOid);
+
+        /* delta table's relisshared is same to main cstore table */
+        PgStat_StatTabEntry *deltaTabentry = get_pgstat_tabentry_relid(classForm->reldeltarelid,
+            classForm->relisshared, InvalidOid, shared, dbentry);
+        if (deltaTabentry != NULL) {
+            delta_vacuum = (deltaTabentry->n_live_tuples >= ((StdRdOptions*)rawRelopts)->delta_rows_threshold);
+        }
+    }
+
     /* User disabled it in pg_class.reloptions?  (But ignore if at risk) */
     if (!force_vacuum && (!av_enabled || !u_sess->attr.attr_storage.autovacuum_start_daemon)) {
         userEnabled = false;
@@ -3121,7 +3137,7 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_c
         }
 
         /* Determine if this table needs vacuum. */
-        *dovacuum = force_vacuum;
+        *dovacuum = force_vacuum || delta_vacuum;
         *doanalyze = false;
 
         if (false == *dovacuum && allowVacuum)
