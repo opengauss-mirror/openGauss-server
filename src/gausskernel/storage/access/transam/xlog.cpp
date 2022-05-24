@@ -8965,6 +8965,8 @@ void StartupXLOG(void)
     g_instance.comm_cxt.predo_cxt.redoPf.redo_done_time = 0;
     pg_atomic_write_u32(&(g_instance.comm_cxt.localinfo_cxt.is_finish_redo), 0);
 
+    NotifyGscRecoveryStarted();
+
     /*
      * Initialize WAL insert status array and the flush index - lastWalStatusEntryFlushed.
      */
