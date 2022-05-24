@@ -1272,6 +1272,15 @@ int ResizeHashBucket(int origin_nbucket, DynamicHashBucketStrategy strategy)
     return cc_nbuckets;
 }
 
+void NotifyGscRecoveryStarted()
+{
+    if (!EnableGlobalSysCache()) {
+	    return;
+    }
+    g_instance.global_sysdbcache.recovery_finished = false;
+
+}
+
 void NotifyGscRecoveryFinished()
 {
     if (EnableGlobalSysCache()) {
