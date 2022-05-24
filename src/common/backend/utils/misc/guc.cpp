@@ -2104,7 +2104,7 @@ static void InitConfigureNamesInt()
             PGC_SIGHUP,
             NODE_ALL,
             INSTRUMENTS_OPTIONS,
-            gettext_noop("Sets the active session profile max sample nums in buff"),
+            gettext_noop("Sets the active session profile interval sample time in buff"),
             NULL,
             GUC_UNIT_S},
             &u_sess->attr.attr_common.asp_sample_interval,
