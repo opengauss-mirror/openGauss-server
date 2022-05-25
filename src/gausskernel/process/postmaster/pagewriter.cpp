@@ -1263,7 +1263,7 @@ static void ckpt_pagewriter_main_thread_loop(void)
         HandlePageWriterMainInterrupts();
 
         candidate_num = get_curr_candidate_nums(false) + get_curr_candidate_nums(true);
-        if (candidate_num == 0) {
+        if (candidate_num == 0 && !t_thrd.pagewriter_cxt.shutdown_requested) {
             /* wakeup sub thread scan the buffer pool, init the candidate list */
             wakeup_sub_thread();
         }
