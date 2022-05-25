@@ -222,6 +222,7 @@ NON_EXEC_STATIC void PercentileMain()
         g_instance.stat_cxt.force_process = false;
         sleep(SLEEP_INTERVAL);
     }
+    elog(LOG, "instrumention percentile ended");
     gs_thread_exit(0);
 }
 
