@@ -183,7 +183,7 @@ void GlobalSysTabCache::InvalidTuples(int cache_id, uint32 hash_value, bool rese
 
     /* maybe upgrade from version before v5r2c00, the cacheid is out of order
      * whatever, we cache nothing except relmap, so just ignore the catcache invalmsg */
-    if (unlikely(!g_instance.global_sysdbcache.recovery_finished) && m_global_systupcaches[cache_id] == NULL) {
+    if (unlikely(!g_instance.global_sysdbcache.recovery_finished && m_global_systupcaches[cache_id] == NULL)) {
         return;
     }
 
