@@ -145,9 +145,13 @@ DROP TEXT SEARCH CONFIGURATION test_tsconfig_exists;
 -- doesn't exists
 DROP EXTENSION test_extension_exists;
 DROP EXTENSION IF EXISTS test_extension_exists;
--- exists but doesn't support drop
-DROP EXTENSION plpgsql;
-DROP EXTENSION IF EXISTS plpgsql;
+-- only extension in white list support drop, but the guc support_extended_features is true in pg_regress mode, so hdfs_fdw can be droped
+CREATE DATABASE ext_test_db;
+\c ext_test_db
+DROP EXTENSION hdfs_fdw;
+DROP EXTENSION IF EXISTS hdfs_fdw;
+\c regression
+DROP DATABASE ext_test_db;
 
 -- functions
 DROP FUNCTION test_function_exists();
