@@ -481,6 +481,8 @@ void InstrStartNode(Instrumentation* instr)
         instr->first_time = true;
     }
 
+    CPUUsageGetCurrent(&instr->cpuusage_start);
+
     if (instr->need_timer) {
         if (INSTR_TIME_IS_ZERO(instr->starttime)) {
             INSTR_TIME_SET_CURRENT(instr->starttime);
@@ -492,8 +494,6 @@ void InstrStartNode(Instrumentation* instr)
     /* save buffer usage totals at node entry, if needed */
     if (instr->need_bufusage)
         instr->bufusage_start = *u_sess->instr_cxt.pg_buffer_usage;
-
-    CPUUsageGetCurrent(&instr->cpuusage_start);
 }
 
 /*
@@ -530,8 +530,6 @@ void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
     instr_time end_time;
     CPUUsage cpu_usage;
 
-    CPUUsageGetCurrent(&cpu_usage);
-
     /* count the returned tuples */
     instr->ntuples += n_tuples;
 
@@ -547,6 +545,8 @@ void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
 
         INSTR_TIME_SET_ZERO(instr->starttime);
     }
+    
+    CPUUsageGetCurrent(&cpu_usage);    
 
     /* Add delta of buffer usage since entry to node's totals */
     if (instr->need_bufusage) {
