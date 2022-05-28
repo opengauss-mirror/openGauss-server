@@ -4454,16 +4454,7 @@ void getSubscriptions(Archive *fout)
     }
 
     if (!isExecUserSuperRole(fout)) {
-        res = ExecuteSqlQuery(fout,
-            "SELECT count(*) FROM pg_subscription "
-            "WHERE subdbid = (SELECT oid FROM pg_catalog.pg_database"
-            "                 WHERE datname = current_database())",
-            PGRES_TUPLES_OK);
-        uint64 n = (res != NULL) ? strtoul(PQgetvalue(res, 0, 0), NULL, 10) : 0;
-        if (n > 0) {
-            write_msg(NULL, "WARNING: subscriptions not dumped because current user is not a superuser\n");
-        }
-        PQclear(res);
+        write_msg(NULL, "WARNING: subscriptions not dumped because current user is not a superuser\n");
         return;
     }
 
@@ -10794,6 +10785,11 @@ static void dumpDirectory(Archive* fout)
     char* rolname = NULL;
     char* dirpath = NULL;
     char* diracl = NULL;
+
+    if (!isExecUserSuperRole(fout)) {
+        write_msg(NULL, "WARNING: directory not dumped because current user is not a superuser\n");
+        return;
+    }
 
     /* Make sure we are in proper schema */
     selectSourceSchema(fout, "pg_catalog");
@@ -21403,6 +21399,11 @@ static void dumpSynonym(Archive* fout)
     PQExpBuffer query;
     PQExpBuffer q;
     PQExpBuffer delq;
+
+    if (!isExecUserSuperRole(fout)) {
+        write_msg(NULL, "WARNING: synonym not dumped because current user is not a superuser\n");
+        return;
+    }
 
     selectSourceSchema(fout, "pg_catalog");
     query = createPQExpBuffer();
