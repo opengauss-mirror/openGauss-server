@@ -93,6 +93,7 @@ install:
 	$(MAKE) install_pldebugger
 	$(MAKE) -C contrib/postgres_fdw $@
 	$(MAKE) -C contrib/hstore $@
+	@if test -d contrib/dolphin; then $(MAKE) -C contrib/dolphin $@; fi
 	+@echo "openGauss installation complete."
 endif
 endif
