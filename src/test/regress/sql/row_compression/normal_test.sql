@@ -68,4 +68,12 @@ CREATE TABLE normal_test.pre_handle(id int) WITH(compresstype=2, compress_chunk_
 insert into normal_test.pre_handle select generate_series(1,1000);
 checkpoint;
 select count(*) from normal_test.pre_handle;
+
+-- create table like test
+create table normal_test.including_all(id int) with (compresstype=2);
+create table normal_test.including_all_new(like normal_test.including_all including all); --success
+create table normal_test.including_all_new2(like normal_test.including_all including reloptions); --success
+\d+ normal_test.including_all_new
+\d+ normal_test.including_all_new2
+create table normal_test.segment_off(id int) with (compresstype=2,segment=off); --success
 drop schema normal_test cascade;
