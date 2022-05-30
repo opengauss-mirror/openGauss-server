@@ -771,6 +771,7 @@ static void init_session_share_memory()
 
 #ifndef ENABLE_MULTIPLE_NODES
 extern void InitBSqlPluginHookIfNeeded();
+extern void LoadDolphinIfNeeded();
 #endif
 
 static bool InitSession(knl_session_context* session)
@@ -847,15 +848,19 @@ static bool InitSession(knl_session_context* session)
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitSession();
 
-#ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.dolphin) {
-        InitBSqlPluginHookIfNeeded();
-    }
-#endif
-
     Assert(CheckMyDatabaseMatch());
 
     SetProcessingMode(NormalProcessing);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
+        if (!u_sess->attr.attr_sql.dolphin) {
+            LoadDolphinIfNeeded();
+        } else {
+            InitBSqlPluginHookIfNeeded();
+        }
+    }
+#endif
 
     init_session_share_memory();
 
