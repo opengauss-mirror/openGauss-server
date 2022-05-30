@@ -1286,6 +1286,7 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
              *wal_segment_dir,
               wal_segment[MAXFNAMELEN];
     bool    file_exists = false;
+    bool    read_partial_file = false;
     uint32  try_count = 0,
                 timeout;
     int     rc = 0;
@@ -1346,8 +1347,10 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
         if (!file_exists)
         {
             file_exists = fileExists(wal_segment_path, FIO_BACKUP_HOST);
-            if(!file_exists)
-            {
+            read_partial_file = (!file_exists)
+                                && XRecOffIsNull(target_lsn)
+                                && try_count > timeout / archive_timeout_deno;
+            if(read_partial_file) {
                 file_exists = fileExists(partial_file, FIO_BACKUP_HOST);
             }
             tryToFindCompressedWALFile(&file_exists, gz_wal_segment_path, wal_segment_path);
