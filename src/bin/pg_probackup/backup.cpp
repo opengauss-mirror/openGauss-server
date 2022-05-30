@@ -1353,9 +1353,7 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
             if(read_partial_file) {
                 file_exists = fileExists(partial_file, FIO_BACKUP_HOST);
             }
-#ifdef HAVE_LIBZ
             tryToFindCompressedWALFile(&file_exists, gz_wal_segment_path, wal_segment_path);
-#endif
         }
         
             if (file_exists)
