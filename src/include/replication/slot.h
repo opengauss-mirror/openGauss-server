@@ -215,6 +215,7 @@ extern void ReplicationSlotPersist(void);
 extern void ReplicationSlotDrop(const char* name, bool for_backup = false);
 extern void ReplicationSlotAcquire(const char* name, bool isDummyStandby, bool allowDrop = false);
 extern bool IsReplicationSlotActive(const char *name);
+extern bool IsLogicalReplicationSlot(const char *name);
 bool ReplicationSlotFind(const char* name);
 extern void ReplicationSlotRelease(void);
 extern void ReplicationSlotSave(void);
