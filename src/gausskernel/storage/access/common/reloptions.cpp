@@ -2939,7 +2939,8 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
 {
     auto defname = defElem->defname;
     if (pg_strcasecmp(defname, "compresstype") == 0) {
-        tableCreateSupport->compressType = defGetInt64(defElem);
+        /* compresstype must be a valid number type */
+        tableCreateSupport->compressType = strtol(defGetString(defElem), NULL, 10);
     } else if (pg_strcasecmp(defname, "compress_chunk_size") == 0) {
         tableCreateSupport->compressChunkSize = true;
     } else if (pg_strcasecmp(defname, "compress_prealloc_chunks") == 0) {
