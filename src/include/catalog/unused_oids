@@ -56,5 +56,9 @@ BEGIN {
 	last = $1;
 }
 END {
-	print last + 1, "-", ENVIRON["FIRSTOBJECTID"]-1;
+	if (last + 1 < ENVIRON["FIRSTOBJECTID"]-1) {
+		print last + 1, "-", ENVIRON["FIRSTOBJECTID"]-1;
+	} else {
+		print last + 1;
+	}
 }'
