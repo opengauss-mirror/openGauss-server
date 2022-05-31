@@ -423,10 +423,10 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
             bool success;
             if (real_ByteConvert) {
                 success = pglz_compress(src_copy + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, (PGLZ_Header *)data,
-                    PGLZ_strategy_default);
+                                        heapPageData ? PGLZ_strategy_default : PGLZ_strategy_always);
             } else {
                 success = pglz_compress(src + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, (PGLZ_Header *)data,
-                    PGLZ_strategy_default);
+                                        heapPageData ? PGLZ_strategy_default : PGLZ_strategy_always);
             }
             compressed_size = success ? VARSIZE(data) : BLCKSZ;
             compressed_size = compressed_size < BLCKSZ ? compressed_size : BLCKSZ;
