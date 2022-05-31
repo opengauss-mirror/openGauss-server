@@ -2100,6 +2100,7 @@ typedef struct knl_t_walsender_context {
     /* My slot in the shared memory array */
     struct WalSnd* MyWalSnd;
     int logical_xlog_advanced_timeout; /* maximum time to write xlog * of logical slot advance */
+    int logical_slot_advanced_timeout; /* maximum time to notify primary advance logical slot */
     typedef int ServerMode;
     typedef int DemoteMode;
     DemoteMode Demotion;
@@ -2170,6 +2171,10 @@ typedef struct knl_t_walsender_context {
      * Timestamp of the last logical xlog advanced is written.
      */
     TimestampTz last_logical_xlog_advanced_timestamp;
+    /*
+     * Timestamp of the last primary logical slot advanced is written.
+     */
+    TimestampTz last_logical_slot_advanced_timestamp;
     /* Have we sent a heartbeat message asking for reply, since last reply? */
     bool waiting_for_ping_response;
     /* Flags set by signal handlers for later service in main loop */
