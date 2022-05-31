@@ -179,9 +179,34 @@ select count(*) from normal_test.pre_handle;
   1000
 (1 row)
 
+-- create table like test
+create table normal_test.including_all(id int) with (compresstype=2);
+create table normal_test.including_all_new(like normal_test.including_all including all); --success
+create table normal_test.including_all_new2(like normal_test.including_all including reloptions); --success
+\d+ normal_test.including_all_new
+                Table "normal_test.including_all_new"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ id     | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compresstype=2
+
+\d+ normal_test.including_all_new2
+               Table "normal_test.including_all_new2"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ id     | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compresstype=2
+
+create table normal_test.segment_off(id int) with (compresstype=2,segment=off); --success
 drop schema normal_test cascade;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table normal_test.tbl_pc
 drop cascades to table normal_test.tbl_partition
 drop cascades to table normal_test.exchange_table
 drop cascades to table normal_test.pre_handle
+drop cascades to table normal_test.including_all
+drop cascades to table normal_test.including_all_new
+drop cascades to table normal_test.including_all_new2
+drop cascades to table normal_test.segment_off
