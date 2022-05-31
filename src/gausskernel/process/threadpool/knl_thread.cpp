@@ -1405,6 +1405,10 @@ static void knl_t_statement_init(knl_t_statement_context* statement_cxt)
     statement_cxt->got_SIGHUP = false;
     statement_cxt->full_sql_retention_time = 0;
     statement_cxt->slow_sql_retention_time = 0;
+    statement_cxt->slow_max_mblock = 0;
+    statement_cxt->slow_max_block = 0;
+    statement_cxt->fast_max_mblock = 0;
+    statement_cxt->fast_max_block = 0;
 }
 
 

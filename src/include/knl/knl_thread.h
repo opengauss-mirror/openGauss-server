@@ -2718,8 +2718,13 @@ typedef struct knl_t_statement_context {
     volatile bool got_SIGHUP;
     int slow_sql_retention_time;
     int full_sql_retention_time;
-} knl_t_statement_context;
 
+    /* using for standby, memory and disk size for slow and fast sql mem-file chain */
+    int slow_max_mblock;
+    int slow_max_block;
+    int fast_max_mblock;
+    int fast_max_block;
+} knl_t_statement_context;
 
 /* Default send interval is 1s */
 const int DEFAULT_SEND_INTERVAL = 1000;
