@@ -722,7 +722,7 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
 
         XLogBeginInsert();
         XLogRegisterData((char*)&xlrec, size);
-        lsn = XLogInsert(RM_SMGR_ID, XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE, rel->rd_node.bucketNode);
+        lsn = XLogInsert(RM_SMGR_ID, info, rel->rd_node.bucketNode);
 
         /*
          * Flush, because otherwise the truncation of the main relation might
