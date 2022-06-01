@@ -770,6 +770,7 @@ static void init_session_share_memory()
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
+extern void InitASqlPluginHookIfNeeded();
 extern void InitBSqlPluginHookIfNeeded();
 extern void LoadDolphinIfNeeded();
 #endif
@@ -859,6 +860,8 @@ static bool InitSession(knl_session_context* session)
         } else {
             InitBSqlPluginHookIfNeeded();
         }
+    } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
+            InitASqlPluginHookIfNeeded();
     }
 #endif
 

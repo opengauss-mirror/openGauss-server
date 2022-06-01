@@ -2711,9 +2711,13 @@ void PostgresInitializer::InitExtensionVariable()
             (*init_session_vars)();
     }
     
-    /* check whether the extension has been created */
+    /* check whether the extension has been created 
+    *  at most one will be true.
+    */
+    const char* whale = "whale";
     const char* dolphin = "dolphin";
     u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists(dolphin);
+    u_sess->attr.attr_sql.whale = CheckIfExtensionExists(whale);
 }
 
 void PostgresInitializer::FinishInit()

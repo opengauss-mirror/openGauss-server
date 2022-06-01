@@ -1178,6 +1178,9 @@ void CreateExtension(CreateExtensionStmt* stmt)
     if (pg_strcasecmp(stmt->extname, "dolphin") == 0 && !DB_IS_CMPT(B_FORMAT)) {
         ereport(ERROR,
             (errmsg("please create extension \"%s\" with B type DBCOMPATIBILITY", stmt->extname)));
+    } else if (pg_strcasecmp(stmt->extname, "whale") == 0 && !DB_IS_CMPT(A_FORMAT)) {
+        ereport(ERROR,
+            (errmsg("please create extension \"%s\" with A type DBCOMPATIBILITY", stmt->extname)));
     }
     /* Check extension name validity before any filesystem access */
     check_valid_extension_name(stmt->extname);
@@ -1420,6 +1423,8 @@ void CreateExtension(CreateExtensionStmt* stmt)
 
     if (pg_strcasecmp(stmt->extname, "dolphin") == 0) {
          u_sess->attr.attr_sql.dolphin = true;
+    } else if (pg_strcasecmp(stmt->extname, "whale") == 0) {
+         u_sess->attr.attr_sql.whale = true;
     }
 
     /*
