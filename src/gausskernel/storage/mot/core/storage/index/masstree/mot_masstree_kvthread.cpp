@@ -54,13 +54,27 @@ inline threadinfo::threadinfo(int purpose, int index, int rcu_max_free_count)
     ts_ = 2;
 }
 
+// if rcu_max_free_count == -1, destroy threadinfo structure
 threadinfo* threadinfo::make(void* obj_mem, int purpose, int index, int rcu_max_free_count)
 {
-    threadinfo* ti = new (obj_mem) threadinfo(purpose, index, rcu_max_free_count);
+    if (rcu_max_free_count == -1) {
+        // act as destructor
+        MOT_ASSERT(obj_mem);
+        threadinfo* ti = (threadinfo*)obj_mem;
+        masstree_invariant(ti->dealloc_rcu.size() == 0);
+        delete ti;
+        return nullptr;
+    }
+
+    threadinfo* ti = new (std::nothrow) threadinfo(purpose, index, rcu_max_free_count);
+    if (ti == nullptr) {
+        return nullptr;
+    }
 
     if (use_pool()) {
         void* limbo_space = ti->allocate(MAX_MEMTAG_MASSTREE_LIMBO_GROUP_ALLOCATION_SIZE, memtag_limbo);
         if (!limbo_space) {
+            delete ti;
             return nullptr;
         }
 
