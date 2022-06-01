@@ -545,13 +545,11 @@ static void hash_xlog_delete(XLogReaderState *record)
     if (xldata->is_primary_bucket_page) {
         action = XLogReadBufferForRedoExtended(record, 1, RBM_NORMAL, true, &deletebuf);
     } else {
-        /*
-         * we don't care for return value as the purpose of reading bucketbuf
-         * is to ensure a cleanup lock on primary bucket page.
-         */
-        (void) XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf);
-
-        PageSetLSN(bucketbuf.pageinfo.page, lsn);
+        /* read bucketbuf for a cleanup lock on primary bucket page */
+        if (XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &bucketbuf) == BLK_NEEDS_REDO) {
+            PageSetLSN(bucketbuf.pageinfo.page, lsn);
+            MarkBufferDirty(bucketbuf.buf);
+        }
 
         action = XLogReadBufferForRedo(record, 1, &deletebuf);
     }

@@ -827,6 +827,9 @@ void hashbucketcleanup(Relation rel, Bucket cur_bucket, Buffer bucket_buf,
                 clear_dead_marking = true;
             }
 
+            if (buf != bucket_buf) {
+                MarkBufferDirty(bucket_buf);
+            }
             MarkBufferDirty(buf);
 
             /* XLOG stuff */
@@ -871,24 +874,21 @@ void hashbucketcleanup(Relation rel, Bucket cur_bucket, Buffer bucket_buf,
 
         /*
          * release the lock on previous page after acquiring the lock on next
-         * page
+         * page, except the primary bucket page
          */
-        if (retain_pin)
-            LockBuffer(buf, BUFFER_LOCK_UNLOCK);
-        else
+        if (!retain_pin)
             _hash_relbuf(rel, buf);
 
         buf = next_buf;
     }
 
     /*
-     * lock the bucket page to clear the garbage flag and squeeze the bucket.
-     * if the current buffer is same as bucket buffer, then we already have
-     * lock on bucket page.
+     * Lock the bucket page to clear the garbage flag and squeeze the bucket.
+     * We already have lock on bucket page in the previous step, so release 
+     * the overflow pages is enough.
      */
     if (buf != bucket_buf) {
         _hash_relbuf(rel, buf);
-        LockBuffer(bucket_buf, BUFFER_LOCK_EXCLUSIVE);
     }
 
     /*
