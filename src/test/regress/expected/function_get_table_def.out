@@ -576,5 +576,18 @@ select * from pg_get_tabledef('list_hash_2');
 (1 row)
 
 drop table list_hash_2;
+create table generated_test(a int, b int generated always as (length((a)::text)) stored);
+select * from pg_get_tabledef('generated_test');
+                       pg_get_tabledef                        
+--------------------------------------------------------------
+ SET search_path = test_get_table_def;                       +
+ CREATE TABLE generated_test (                               +
+     a integer,                                              +
+     b integer GENERATED ALWAYS AS (length((a)::text)) STORED+
+ )                                                           +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+drop table generated_test;
 reset current_schema;
 drop schema test_get_table_def cascade;

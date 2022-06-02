@@ -1582,6 +1582,7 @@ static int get_table_attribute(
                 SysScanDesc adscan;
                 HeapTuple tup = NULL;
                 bool isnull = false;
+                char generatedCol = '\0';
 
                 attrdefDesc = heap_open(AttrDefaultRelationId, AccessShareLock);
 
@@ -1596,8 +1597,18 @@ static int get_table_attribute(
 
                     Datum txt = DirectFunctionCall2(pg_get_expr, val, ObjectIdGetDatum(tableoid));
 
-                    if (attrdef->adnum == att_tup->attnum)
-                        appendStringInfo(buf, " DEFAULT %s", TextDatumGetCString(txt));
+                    if (attrdef->adnum == att_tup->attnum) {
+                        val = fastgetattr(tup, Anum_pg_attrdef_adgencol, attrdefDesc->rd_att, &isnull);
+                        if (!isnull) {
+                            generatedCol = DatumGetChar(val);
+                        }
+                        if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
+                            appendStringInfo(buf, " GENERATED ALWAYS AS (%s) STORED", TextDatumGetCString(txt));
+                        } else {
+                            appendStringInfo(buf, " DEFAULT %s", TextDatumGetCString(txt));
+                        }
+                        break;
+                    }
                 }
 
                 systable_endscan(adscan);
