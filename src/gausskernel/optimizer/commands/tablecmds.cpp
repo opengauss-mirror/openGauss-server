@@ -14729,9 +14729,13 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
                     errmsg("\"%s\" is not a table, view, materialized view, index, or TOAST table", RelationGetRelationName(rel))));
             break;
     }
-    
+
+    if (rel->rd_options && REL_SUPPORT_COMPRESSED(rel)) {
+        SetupPageCompressForRelation(&rel->rd_node, &((StdRdOptions *)(rel->rd_options))->compress,
+                                     RelationGetRelationName(rel));
+    }
     CheckSupportModifyCompression(rel, relOpt, defList);
-    
+
     /*
      * All we need do here is update the pg_class row; the new options will be
      * propagated into relcaches during post-commit cache inval.
