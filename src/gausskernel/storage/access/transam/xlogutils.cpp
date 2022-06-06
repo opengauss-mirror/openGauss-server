@@ -776,7 +776,7 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
             bool notSkip = DoLsnCheck(bufferinfo, willinit, lastLsn, 
                 (blockinfo.pblk.relNode != InvalidOid) ? &blockinfo.pblk : NULL, &needRepair);
  
-            if (needRepair) {
+            if (needRepair && g_instance.pid_cxt.PageRepairPID != 0) {
                 XLogRecPtr pageCurLsn = PageGetLSN(bufferinfo->pageinfo.page);
                 RepairBlockKey key;
 
@@ -1374,9 +1374,11 @@ void XLogDropRelation(const RelFileNode &rnode, ForkNumber forknum)
     }
 
     /* clear relfilenode match entry of page repair thread hashtbl */
-    ClearPageRepairHashTbl(rnode, forknum, 0, false);
-    if (!IsSegmentFileNode(rnode)) {
-        ClearBadFileHashTbl(rnode, forknum, 0);
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        ClearPageRepairHashTbl(rnode, forknum, 0, false);
+        if (!IsSegmentFileNode(rnode)) {
+            ClearBadFileHashTbl(rnode, forknum, 0);
+        }
     }
 }
 
@@ -1445,8 +1447,10 @@ void XLogDropDatabase(Oid dbid)
     } else {
         parallel_recovery::BatchClearRecoveryThreadHashTbl(InvalidOid, dbid);
     }
-    BatchClearPageRepairHashTbl(InvalidOid, dbid);
-    BatchClearBadFileHashTbl(InvalidOid, dbid);
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        BatchClearPageRepairHashTbl(InvalidOid, dbid);
+        BatchClearBadFileHashTbl(InvalidOid, dbid);
+    }
 }
 
 /*
@@ -1463,8 +1467,10 @@ void XLogDropSegmentSpace(Oid spcNode, Oid dbNode)
         parallel_recovery::BatchClearRecoveryThreadHashTbl(spcNode, dbNode);
     }
     /* clear spcNode and dbNode match entry of page repair thread hashtbl */
-    BatchClearPageRepairHashTbl(spcNode, dbNode);
-    BatchClearBadFileHashTbl(spcNode, dbNode);
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        BatchClearPageRepairHashTbl(spcNode, dbNode);
+        BatchClearBadFileHashTbl(spcNode, dbNode);
+    }
 }
 
 /*
@@ -1476,28 +1482,32 @@ void XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum, BlockNumber nbl
 {
     forget_invalid_pages(rnode, forkNum, nblocks, false);
     /* clear relfilenode match entry of recovery thread hashtbl */
-    if (IsExtremeRedo()) {
-        extreme_rto::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
-    } else {
-        parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        if (IsExtremeRedo()) {
+            extreme_rto::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
+        } else {
+            parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, false);
+        }
+        ClearPageRepairHashTbl(rnode, forkNum, nblocks, false);
+        int truncate_segno = (nblocks % RELSEG_SIZE) == 0 ? (nblocks / RELSEG_SIZE) : (nblocks / RELSEG_SIZE + 1);
+        ClearBadFileHashTbl(rnode, forkNum, truncate_segno);
     }
-    ClearPageRepairHashTbl(rnode, forkNum, nblocks, false);
-    int truncate_segno = (nblocks % RELSEG_SIZE) == 0 ? (nblocks / RELSEG_SIZE) : (nblocks / RELSEG_SIZE + 1);
-    ClearBadFileHashTbl(rnode, forkNum, truncate_segno);
 }
 
 void XLogTruncateSegmentSpace(RelFileNode rnode, ForkNumber forkNum, BlockNumber nblocks)
 {
     forget_invalid_pages(rnode, forkNum, nblocks, true);
     /* clear relfilenode match entry of recovery thread hashtbl */
-    if (IsExtremeRedo()) {
-        extreme_rto::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
-    } else {
-        parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        if (IsExtremeRedo()) {
+            extreme_rto::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
+        } else {
+            parallel_recovery::ClearRecoveryThreadHashTbl(rnode, forkNum, nblocks, true);
+        }
+        ClearPageRepairHashTbl(rnode, forkNum, nblocks, true);
+        int truncate_segno = (nblocks % RELSEG_SIZE) == 0 ? (nblocks / RELSEG_SIZE) : (nblocks / RELSEG_SIZE + 1);
+        ClearBadFileHashTbl(rnode, forkNum, truncate_segno);
     }
-    ClearPageRepairHashTbl(rnode, forkNum, nblocks, true);
-    int truncate_segno = (nblocks % RELSEG_SIZE) == 0 ? (nblocks / RELSEG_SIZE) : (nblocks / RELSEG_SIZE + 1);
-    ClearBadFileHashTbl(rnode, forkNum, truncate_segno);
 }
 
 /*

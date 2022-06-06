@@ -3045,12 +3045,6 @@ static int ServerLoop(void)
         }
 #endif
         /*
-         * If the startup thread is running, need check the page repair thread.
-         */
-        if (g_instance.pid_cxt.PageRepairPID == 0 && (pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY)) {
-            g_instance.pid_cxt.PageRepairPID = initialize_util_thread(PAGEREPAIR_THREAD);
-        }
-        /*
          * If no background writer process is running, and we are not in a
          * state that prevents it, start one.  It doesn't matter if this
          * fails, we'll just try again later.  Likewise for the checkpointer.
@@ -8135,9 +8129,6 @@ static void handle_recovery_started()
         }
         Assert(g_instance.pid_cxt.SpBgWriterPID == 0);
         g_instance.pid_cxt.SpBgWriterPID = initialize_util_thread(SPBGWRITER);
-
-        Assert(g_instance.pid_cxt.PageRepairPID == 0);
-        g_instance.pid_cxt.PageRepairPID = initialize_util_thread(PAGEREPAIR_THREAD);
 
         if (ENABLE_INCRE_CKPT) {
             for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
