@@ -41,10 +41,10 @@
 constexpr uint32 COMPRESS_ADDRESS_FLUSH_CHUNKS = 5000;
 
 #define SUPPORT_COMPRESSED(relKind, relam) \
-    ((relKind) == RELKIND_RELATION || ((relKind) == RELKIND_INDEX && (relam) == BTREE_AM_OID))
-#define REL_SUPPORT_COMPRESSED(relation)                  \
-    (((relation)->rd_rel->relkind) == RELKIND_RELATION || \
-     (((relation)->rd_rel->relkind) == RELKIND_INDEX && ((relation)->rd_rel->relam) == BTREE_AM_OID))
+    ((relKind) == RELKIND_RELATION ||      \
+     (((relKind) == RELKIND_INDEX || (relKind == RELKIND_GLOBAL_INDEX)) && (relam) == BTREE_AM_OID))
+
+#define REL_SUPPORT_COMPRESSED(relation) SUPPORT_COMPRESSED((relation)->rd_rel->relkind, (relation)->rd_rel->relam)
 
 typedef uint32 pc_chunk_number_t;
 const uint32 PAGE_COMPRESSION_VERSION = 92603;

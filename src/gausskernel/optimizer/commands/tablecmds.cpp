@@ -1167,7 +1167,8 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
                           stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
                           stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP;
     if (noSupportTable && tableCreateSupport.compressType) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), errmsg("only row orientation table support compresstype.")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), errmsg("compresstype can not be used in ustore table, segment table, "
+                                                                "column table, view, unlogged table or temp table.")));
     }
     CheckCompressOption(&tableCreateSupport);
 

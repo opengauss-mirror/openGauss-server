@@ -64,3 +64,18 @@ create table unsupported_feature.compress_byte_test(id int) with (compresstype=2
 create table unsupported_feature.test(id int) with (compresstype=2); -- success
 alter table unsupported_feature.test set(Compresstype=1); -- failed
 alter table unsupported_feature.test set(Compress_level=3); -- success
+
+create table lm_rcp_4 (c1 int,c2 varchar2,c3 number,c4 money,c5 CHAR(20),c6 CLOB,c7 blob,c8 DATE,c9 BOOLEAN,c10 TIMESTAMP,c11 point,columns12 cidr) with(Compresstype=2,Compress_chunk_size=512)
+    partition by list(c1) subpartition by range(c3)(
+    partition ts1 values(1,2,3,4,5)(subpartition ts11 values less than(500),subpartition ts12 values less than(5000),subpartition ts13 values less than(MAXVALUE)),
+    partition ts2 values(6,7,8,9,10),
+    partition ts3 values(11,12,13,14,15)(subpartition ts31 values less than(5000),subpartition ts32 values less than(10000),subpartition ts33 values less than(MAXVALUE)),
+    partition ts4 values(default));
+create unique index indexg_lm_rcp_4 on lm_rcp_4(c1 NULLS first,c2,c3) global
+with(FILLFACTOR=80,Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert=1);
+--s3.
+alter index indexg_lm_rcp_4 rename to indexg_lm_rcp_4_newname;
+--s4.修改压缩类型
+alter index indexg_lm_rcp_4_newname set(Compresstype=1);
+--s5.修改Compress_level
+alter index indexg_lm_rcp_4_newname set(Compress_level=3);
