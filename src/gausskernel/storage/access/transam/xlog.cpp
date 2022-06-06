@@ -9116,7 +9116,7 @@ void StartupXLOG(void)
 
     // Check for recovery control file, and if so set up state for offline recovery
     readRecoveryCommandFile();
-    if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_UNSET) {
+    if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_UNSET && g_instance.pid_cxt.PageRepairPID != 0) {
         g_instance.repair_cxt.support_repair = true;
     } else {
         g_instance.repair_cxt.support_repair = false;

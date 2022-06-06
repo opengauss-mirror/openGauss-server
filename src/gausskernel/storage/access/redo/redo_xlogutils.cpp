@@ -269,7 +269,7 @@ XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse *datadecode, Redo
                     bool notSkip = DoLsnCheck(bufferinfo, willinit, XLogBlockDataGetLastBlockLSN(datadecode), 
                         (bufferinfo->blockinfo.pblk.relNode != InvalidOid) ? &bufferinfo->blockinfo.pblk : NULL,
                         &needRepair);
-                    if (needRepair) {
+                    if (needRepair && g_instance.pid_cxt.PageRepairPID != 0) {
                         XLogRecPtr pageCurLsn = PageGetLSN(bufferinfo->pageinfo.page);
                         UnlockReleaseBuffer(bufferinfo->buf);
                         extreme_rto::RecordBadBlockAndPushToRemote(datadecode, LSN_CHECK_FAIL, pageCurLsn,

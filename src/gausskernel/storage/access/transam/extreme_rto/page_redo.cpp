@@ -349,7 +349,7 @@ void HandlePageRedoInterrupts()
         ProcessConfigFile(PGC_SIGHUP);
     }
 
-    if (t_thrd.page_redo_cxt.check_repair) {
+    if (t_thrd.page_redo_cxt.check_repair && g_instance.pid_cxt.PageRepairPID != 0) {
         SeqCheckRemoteReadAndRepairPage();
         t_thrd.page_redo_cxt.check_repair = false;
     }
@@ -2378,7 +2378,9 @@ int RedoMainLoop()
     instr_time startTime;
     instr_time endTime;
 
-    (void)RegisterRedoPageRepairCallBack(HandlePageRedoPageRepair);
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        (void)RegisterRedoPageRepairCallBack(HandlePageRedoPageRepair);
+    }
 
     INSTR_TIME_SET_CURRENT(startTime);
     switch (g_redoWorker->role) {
