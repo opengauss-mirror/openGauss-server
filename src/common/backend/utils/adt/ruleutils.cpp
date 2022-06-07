@@ -2971,7 +2971,7 @@ Datum pg_get_indexdef_for_dump(PG_FUNCTION_ARGS)
     bool dumpSchemaOnly = PG_GETARG_BOOL(1);
 
     PG_RETURN_TEXT_P(string_to_text(pg_get_indexdef_worker(indexrelid, 0, NULL, false, true, 0, dumpSchemaOnly,
-                                                           true, false)));
+                                                           true, true)));
 }
 
 Datum pg_get_indexdef_ext(PG_FUNCTION_ARGS)
@@ -3026,10 +3026,12 @@ static void AppendOnePartitionIndex(Oid indexRelId, Oid partOid, bool showTblSpc
     }
 
     if (isSub) {
-        appendStringInfo(buf, "\n    ");
+        appendStringInfo(buf, "\n        ");
+        appendStringInfo(buf, "SUBPARTITION %s", quote_identifier(partIdxTuple->relname.data));
+    } else {
+        appendStringInfo(buf, "PARTITION %s", quote_identifier(partIdxTuple->relname.data));
     }
 
-    appendStringInfo(buf, "PARTITION %s", quote_identifier(partIdxTuple->relname.data));
     if (showTblSpc && OidIsValid(partIdxTuple->reltablespace)) {
         char *tblspacName = get_tablespace_name(partIdxTuple->reltablespace);
         if (tblspacName != NULL)
@@ -3089,31 +3091,47 @@ static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, boo
     }
 
     List *partList = NIL;
-    ListCell *lc = NULL;
+    ListCell *lc1 = NULL;
+    ListCell *lc2 = NULL;
     bool isFirst = true;
-    if (isSub) {
-        /* reserve this code, oneday we will support it */
-        partList = RelationGetSubPartitionOidList(rel);
-    } else {
-        partList = relationGetPartitionOidList(rel);
-    }
 
-    if (isSub) {
-        appendStringInfo(buf, "\n");
-    }
     appendStringInfoChar(buf, '(');
 
-    foreach (lc, partList) {
-        Oid partOid = DatumGetObjectId(lfirst(lc));
-        AppendOnePartitionIndex(indexrelid, partOid, showTblSpc, &isFirst, buf, isSub);
-    }
     if (isSub) {
+        int i = 0;
+        partList = RelationGetSubPartitionOidListList(rel);
+        int partListLen = list_length(partList);
         appendStringInfo(buf, "\n");
+        foreach (lc1, partList) {
+            appendStringInfo(buf, "    PARTITION partition_name(");
+            foreach (lc2, (List*)lfirst(lc1)) {
+                Oid partOid = DatumGetObjectId(lfirst(lc2));
+                AppendOnePartitionIndex(indexrelid, partOid, showTblSpc, &isFirst, buf, isSub);
+            }
+            appendStringInfo(buf, "\n    )");
+            if (i != partListLen - 1) {
+                appendStringInfo(buf, ",\n");
+            }
+            isFirst = true;
+            i++;
+        }
+        appendStringInfo(buf, "\n");
+    } else {
+        partList = relationGetPartitionOidList(rel);
+        foreach (lc1, partList) {
+            Oid partOid = DatumGetObjectId(lfirst(lc1));
+            AppendOnePartitionIndex(indexrelid, partOid, showTblSpc, &isFirst, buf, isSub);
+        }
     }
+    
     appendStringInfo(buf, ") ");
 
     heap_close(rel, NoLock);
-    releasePartitionOidList(&partList);
+    if (isSub) {
+        ReleaseSubPartitionOidList(&partList);
+    } else {
+        releasePartitionOidList(&partList);
+    }
 }
 
 /*
