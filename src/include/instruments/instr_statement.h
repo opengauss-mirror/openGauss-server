@@ -140,12 +140,14 @@ struct StatementDetail {
 };
 
 /* increment this version if more detail is supported. */
-#define STATEMENT_DETAIL_VERSION 1
+#define STATEMENT_DETAIL_VERSION_v1  1
+#define STATEMENT_DETAIL_VERSION 2
 
 /* flag for detail content's integrity, CAUTION: modify is_valid_detail_record() if add new flag */
-#define STATEMENT_DETAIL_NOT_TRUNCATED 0
-#define STATEMENT_DETAIL_TRUNCATED 1
-#define STATEMENT_DETAIL_MISSING_OOM 2
+#define STATEMENT_DETAIL_LOCK_STATUS_LEN 1
+#define STATEMENT_DETAIL_LOCK_NOT_TRUNCATED 0
+#define STATEMENT_DETAIL_LOCK_TRUNCATED 1
+#define STATEMENT_DETAIL_LOCK_MISSING_OOM 2
 
 #define STATEMENT_DETAIL_FORMAT_STRING "plaintext"
 #define STATEMENT_DETAIL_FORMAT_JSON "json"
@@ -184,6 +186,10 @@ typedef struct StatementStatContext {
     uint64 plan_size;
     LockSummaryStat lock_summary;
     StatementDetail details;
+
+    /* wait events */
+    WaitEventEntry *wait_events;
+    Bitmapset      *wait_events_bitmap;
 } StatementStatContext;
 extern void StatementFlushMain();
 extern void CleanStatementMain();
@@ -211,6 +217,10 @@ extern bool instr_stmt_need_track_plan();
 extern void instr_stmt_report_returned_rows(uint64 returned_rows);
 extern void instr_stmt_report_soft_parse(uint64 soft_parse);
 extern void instr_stmt_report_hard_parse(uint64 hard_parse);
+extern void instr_stmt_set_wait_events_bitmap(uint32 class_id, uint32 event_id);
+extern void instr_stmt_copy_wait_events();
+extern void instr_stmt_diff_wait_events();
+extern void init_full_sql_wait_events();
 
 #endif
 

@@ -953,6 +953,12 @@ static void knl_u_statement_init(knl_u_statement_context* statement_cxt)
 
     (void)syscalllockInit(&statement_cxt->list_protect);
     statement_cxt->stmt_stat_cxt = NULL;
+    statement_cxt->wait_events = NULL;
+
+    /* pre-allocate memory for wait events bitmap */
+    statement_cxt->wait_events_bms = NULL;
+    statement_cxt->enable_wait_events_bitmap = false;
+    statement_cxt->is_session_bms_active = false;
 }
 
 static void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)
