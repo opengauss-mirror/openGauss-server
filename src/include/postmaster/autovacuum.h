@@ -27,7 +27,7 @@
 extern inline bool is_errmodule_enable(int elevel, ModuleId mod_id);
 #define AUTOVAC_LOG(level, format, ...)                                                                      \
     do {                                                                                                     \
-        if (is_errmodule_enable(level, MOD_AUTOVAC)) {                                                       \
+        if (module_logging_is_on(MOD_AUTOVAC))  {                                                       \
             ereport(level, (errmodule(MOD_AUTOVAC), errmsg(format, ##__VA_ARGS__), ignore_interrupt(true))); \
         }                                                                                                    \
     } while (0)
