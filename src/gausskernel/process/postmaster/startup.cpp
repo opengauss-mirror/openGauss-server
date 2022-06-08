@@ -217,7 +217,7 @@ void HandleStartupProcInterrupts(void)
         ProcessConfigFile(PGC_SIGHUP);
     }
 
-    if (t_thrd.startup_cxt.check_repair) {
+    if (t_thrd.startup_cxt.check_repair && g_instance.pid_cxt.PageRepairPID != 0) {
         if (!IsExtremeRedo() && !IsParallelRedo()) {
             parallel_recovery::SeqCheckRemoteReadAndRepairPage();
         }
@@ -327,7 +327,9 @@ void StartupProcessMain(void)
     (void)gspqsignal(SIGWINCH, SIG_DFL);
 
     (void)RegisterRedoInterruptCallBack(HandleStartupProcInterrupts);
-    (void)RegisterRedoPageRepairCallBack(HandleStartupPageRepair);
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        (void)RegisterRedoPageRepairCallBack(HandleStartupPageRepair);
+    }
     /*
      * Unblock signals (they were blocked when the postmaster forked us)
      */
