@@ -1070,8 +1070,8 @@ void dw_upgrade_batch()
     knl_g_dw_context* dw_batch_cxt = &g_instance.dw_batch_cxt;
     dw_batch_file_context* dw_file_cxt = &dw_batch_cxt->batch_file_cxts[0];
 
-    (void)LWLockConditionalAcquire(dw_batch_cxt->flush_lock, LW_EXCLUSIVE);
-    (void)LWLockConditionalAcquire(dw_file_cxt->flush_lock, LW_EXCLUSIVE);
+    (void)LWLockAcquire(dw_batch_cxt->flush_lock, LW_EXCLUSIVE);
+    (void)LWLockAcquire(dw_file_cxt->flush_lock, LW_EXCLUSIVE);
 
     wait_all_dw_page_finish_flush();
 
@@ -1665,6 +1665,9 @@ void ckpt_pagewriter_main(void)
     pgstat_report_activity(STATE_IDLE, NULL);
 
     if (t_thrd.pagewriter_cxt.pagewriter_id == 0) {
+        g_instance.ckpt_cxt_ctl->page_writer_sub_can_exit = false;
+        pg_write_barrier();
+
         g_instance.proc_base->pgwrMainThreadLatch = &t_thrd.proc->procLatch;
         g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem->pagewritermain_pid = t_thrd.proc_cxt.MyProcPid;
         InitSync();
