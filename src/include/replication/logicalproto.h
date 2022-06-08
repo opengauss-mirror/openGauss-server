@@ -77,6 +77,7 @@ typedef struct LogicalRepBeginData {
     XLogRecPtr final_lsn;
     TimestampTz committime;
     TransactionId xid;
+    CommitSeqNo csn;
 } LogicalRepBeginData;
 
 typedef struct LogicalRepCommitData {

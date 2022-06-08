@@ -46,6 +46,9 @@ void logicalrep_write_begin(StringInfo out, ReorderBufferTXN *txn)
     pq_sendint64(out, txn->final_lsn);
     pq_sendint64(out, txn->commit_time);
     pq_sendint64(out, txn->xid);
+    if (t_thrd.walsender_cxt.isUseSnapshot) {
+        pq_sendint64(out, txn->csn);
+    }
 }
 
 /*
@@ -59,6 +62,9 @@ void logicalrep_read_begin(StringInfo in, LogicalRepBeginData *begin_data)
         elog(ERROR, "final_lsn not set in begin message");
     begin_data->committime = pq_getmsgint64(in);
     begin_data->xid = pq_getmsgint64(in);
+    if (t_thrd.applyworker_cxt.curWorker != NULL && AM_TABLESYNC_WORKER) {
+        begin_data->csn = pq_getmsgint64(in);
+    }
 }
 
 

@@ -39,6 +39,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_subscription.h"
 #include "catalog/pg_partition_fn.h"
+#include "catalog/pg_subscription_rel.h"
 
 #include "commands/trigger.h"
 #include "commands/subscriptioncmds.h"
@@ -114,6 +115,30 @@ static void ApplyWorkerProcessMsg(char type, StringInfo s, XLogRecPtr *lastRcv);
 static void apply_dispatch(StringInfo s);
 static void apply_handle_conninfo(StringInfo s);
 static void UpdateConninfo(char* standbysInfo);
+
+/*
+ * Should this worker apply changes for given relation.
+ *
+ * This is mainly needed for initial relation data sync as that runs in
+ * separate worker process running in parallel and we need some way to skip
+ * changes coming to the main apply worker during the sync of a table.
+ *
+ * Note we need to do smaller or equals comparison for SYNCDONE state because
+ * it might hold position of end of intitial slot consistent point WAL
+ * record + 1 (ie start of next record) and next record can be COMMIT of
+ * transaction we are now processing (which is what we set remote_final_lsn
+ * to in apply_handle_begin).
+ */
+static bool should_apply_changes_for_rel(LogicalRepRelMapEntry *rel)
+{
+    if (AM_TABLESYNC_WORKER)
+        return (t_thrd.applyworker_cxt.curWorker->relid == rel->localreloid &&
+            (COMMITSEQNO_IS_FROZEN(t_thrd.applyworker_cxt.curWorker->relcsn) ||
+            t_thrd.applyworker_cxt.curRemoteCsn > t_thrd.applyworker_cxt.curWorker->relcsn));
+    else
+        return (rel->state == SUBREL_STATE_READY ||
+            (rel->state == SUBREL_STATE_SYNCDONE && rel->statelsn <= t_thrd.applyworker_cxt.remoteFinalLsn));
+}
 
 /* SIGHUP: set flag to re-read config file at next convenient time */
 static void LogicalrepWorkerSighub(SIGNAL_ARGS)
@@ -450,6 +475,8 @@ static void apply_handle_begin(StringInfo s)
     logicalrep_read_begin(s, &begin_data);
 
     t_thrd.applyworker_cxt.inRemoteTransaction = true;
+    t_thrd.applyworker_cxt.remoteFinalLsn = begin_data.final_lsn;
+    t_thrd.applyworker_cxt.curRemoteCsn = begin_data.csn;
 
     pgstat_report_activity(STATE_RUNNING, NULL);
 }
@@ -462,6 +489,8 @@ static void apply_handle_commit(StringInfo s)
     LogicalRepCommitData commit_data;
 
     logicalrep_read_commit(s, &commit_data);
+
+    Assert(commit_data.commit_lsn == t_thrd.applyworker_cxt.remoteFinalLsn);
 
     if (IsTransactionState()) {
         /*
@@ -478,6 +507,9 @@ static void apply_handle_commit(StringInfo s)
 
     t_thrd.applyworker_cxt.inRemoteTransaction = false;
 
+    /* Process any tables that are being synchronized in parallel. */
+    process_syncing_tables(commit_data.end_lsn);
+
     pgstat_report_activity(STATE_IDLE, NULL);
 }
 
@@ -490,7 +522,7 @@ static void apply_handle_origin(StringInfo s)
      * ORIGIN message can only come inside remote transaction and before
      * any actual writes.
      */
-    if (!t_thrd.applyworker_cxt.inRemoteTransaction || IsTransactionState())
+    if (!t_thrd.applyworker_cxt.inRemoteTransaction || (IsTransactionState() && !AM_TABLESYNC_WORKER))
         ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("ORIGIN message sent out of order")));
 }
 
@@ -555,6 +587,14 @@ static void apply_handle_insert(StringInfo s)
 
     relid = logicalrep_read_insert(s, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
+    if (!should_apply_changes_for_rel(rel)) {
+        /*
+         * The relation can't become interesting in the middle of the
+         * transaction so it's safe to unlock it.
+         */
+        logicalrep_rel_close(rel, RowExclusiveLock);
+        return;
+    }
 
     /* Initialize the executor state. */
     estate = create_estate_for_relation(rel);
@@ -670,6 +710,14 @@ static void apply_handle_update(StringInfo s)
 
     relid = logicalrep_read_update(s, &has_oldtup, &oldtup, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
+    if (!should_apply_changes_for_rel(rel)) {
+        /*
+         * The relation can't become interesting in the middle of the
+         * transaction so it's safe to unlock it.
+         */
+        logicalrep_rel_close(rel, RowExclusiveLock);
+        return;
+    }
 
     /* Check if we can do the update. */
     check_relation_updatable(rel);
@@ -780,6 +828,14 @@ static void apply_handle_delete(StringInfo s)
 
     relid = logicalrep_read_delete(s, &oldtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
+    if (!should_apply_changes_for_rel(rel)) {
+        /*
+         * The relation can't become interesting in the middle of the
+         * transaction so it's safe to unlock it.
+         */
+        logicalrep_rel_close(rel, RowExclusiveLock);
+        return;
+    }
 
     /* Check if we can do the delete. */
     check_relation_updatable(rel);
@@ -982,7 +1038,11 @@ static void ApplyWorkerProcessMsg(char type, StringInfo s, XLogRecPtr *lastRcv)
         PrimaryKeepaliveMessage keepalive;
         pq_copymsgbytes(s, (char*)&keepalive, sizeof(PrimaryKeepaliveMessage));
 
-        send_feedback(keepalive.walEnd, keepalive.replyRequested, false);
+        if (*lastRcv < keepalive.walEnd) {
+            *lastRcv = keepalive.walEnd;
+        }
+
+        send_feedback(*lastRcv, keepalive.replyRequested, false);
         UpdateWorkerStats(*lastRcv, keepalive.sendTime, true);
     }
 }
@@ -1040,9 +1100,8 @@ static inline void ProcessApplyWorkerInterrupts(void)
 /*
  * Apply main loop.
  */
-static void ApplyLoop(void)
+static void LogicalRepApplyLoop(XLogRecPtr last_received)
 {
-    XLogRecPtr last_received = InvalidXLogRecPtr;
     bool ping_sent = false;
     TimestampTz last_recv_timestamp = GetCurrentTimestamp();
 
@@ -1109,11 +1168,13 @@ static void ApplyLoop(void)
              * If we didn't get any transactions for a while there might be
              * unconsumed invalidation messages in the queue, consume them now.
              */
-            StartTransactionCommand();
+            AcceptInvalidationMessages();
             /* Check for subscription change */
             if (!t_thrd.applyworker_cxt.mySubscriptionValid)
                 reread_subscription();
-            CommitTransactionCommand();
+
+            /* Process any table synchronization changes. */
+            process_syncing_tables(last_received);
         }
 
         if (t_thrd.applyworker_cxt.got_SIGHUP) {
@@ -1210,6 +1271,13 @@ static void reread_subscription(void)
 {
     MemoryContext oldctx;
     Subscription *newsub;
+    bool started_tx = false;
+
+    /* This function might be called inside or outside of transaction. */
+    if (!IsTransactionState()) {
+        StartTransactionCommand();
+        started_tx = true;
+    }
 
     /* Ensure allocations in permanent context. */
     oldctx = MemoryContextSwitchTo(t_thrd.applyworker_cxt.applyContext);
@@ -1307,6 +1375,9 @@ static void reread_subscription(void)
     SetConfigOption("synchronous_commit", t_thrd.applyworker_cxt.mySubscription->synccommit, PGC_BACKEND,
         PGC_S_OVERRIDE);
 
+    if (started_tx)
+        CommitTransactionCommand();
+
     t_thrd.applyworker_cxt.mySubscriptionValid = true;
 }
 
@@ -1324,8 +1395,8 @@ void ApplyWorkerMain()
 {
     MemoryContext oldctx;
     char originname[NAMEDATALEN];
-    RepOriginId originid;
     XLogRecPtr origin_startpos;
+    char *myslotname;
     int rc = 0;
     LibpqrcvConnectParam options;
 
@@ -1472,48 +1543,75 @@ void ApplyWorkerMain()
     /* Keep us informed about subscription changes. */
     CacheRegisterThreadSyscacheCallback(SUBSCRIPTIONOID, subscription_change_cb, (Datum)0);
 
-    ereport(LOG, (errmsg("logical replication apply for worker subscription \"%s\" has started",
-        t_thrd.applyworker_cxt.mySubscription->name)));
-
-    /* Setup replication origin tracking. */
-    rc = sprintf_s(originname, sizeof(originname), "pg_%u", t_thrd.applyworker_cxt.mySubscription->oid);
-    securec_check_ss(rc, "", "");
-    originid = replorigin_by_name(originname, true);
-    if (!OidIsValid(originid))
-        originid = replorigin_create(originname);
-    replorigin_session_setup(originid);
-    u_sess->reporigin_cxt.originId = originid;
-    origin_startpos = replorigin_session_get_progress(false);
+    if (AM_TABLESYNC_WORKER)
+        ereport(LOG, (errmsg("logical replication table synchronization for subscription %s, table %s has started",
+            t_thrd.applyworker_cxt.mySubscription->name, get_rel_name(t_thrd.applyworker_cxt.curWorker->relid))));
+    else
+        ereport(LOG, (errmsg("logical replication apply worker for subscription \"%s\" has started",
+            t_thrd.applyworker_cxt.mySubscription->name)));
 
     CommitTransactionCommand();
 
-    if (!AttemptConnectPublisher(t_thrd.applyworker_cxt.mySubscription->conninfo,
-        t_thrd.applyworker_cxt.mySubscription->name, true)) {
-        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Failed to connect to publisher.")));
+    if (AM_TABLESYNC_WORKER) {
+        char *syncslotname;
+
+        /* This is table synchroniation worker, call initial sync. */
+        syncslotname = LogicalRepSyncTableStart(&origin_startpos);
+
+        /* allocate slot name in long-lived context */
+        myslotname = MemoryContextStrdup(t_thrd.applyworker_cxt.applyContext, syncslotname);
+
+        pfree(syncslotname);
+    } else {
+        RepOriginId originid;
+
+        myslotname = t_thrd.applyworker_cxt.mySubscription->slotname;
+
+        /* Setup replication origin tracking. */
+        StartTransactionCommand();
+        rc = sprintf_s(originname, sizeof(originname), "pg_%u", t_thrd.applyworker_cxt.mySubscription->oid);
+        securec_check_ss(rc, "", "");
+        originid = replorigin_by_name(originname, true);
+        if (!OidIsValid(originid))
+            originid = replorigin_create(originname);
+        replorigin_session_setup(originid);
+        u_sess->reporigin_cxt.originId = originid;
+        origin_startpos = replorigin_session_get_progress(false);
+        CommitTransactionCommand();
+
+        if (!AttemptConnectPublisher(t_thrd.applyworker_cxt.mySubscription->conninfo, myslotname, true)) {
+            ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Failed to connect to publisher.")));
+        }
+
+        /*
+         * We don't really use the output identify_system for anything
+         * but it does some initializations on the upstream so let's still
+         * call it.
+         */
+        (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_identify_system();
     }
 
     /*
-     * We don't really use the output identify_system for anything
-     * but it does some initializations on the upstream so let's still
-     * call it.
+     * Setup callback for syscache so that we know when something
+     * changes in the subscription relation state.
      */
-    (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_identify_system();
+    CacheRegisterThreadSyscacheCallback(SUBSCRIPTIONRELMAP, invalidate_syncing_table_states, (Datum)0);
 
     /* Build logical replication streaming options. */
     rc = memset_s(&options, sizeof(LibpqrcvConnectParam), 0, sizeof(LibpqrcvConnectParam));
     securec_check(rc, "", "");
     options.logical = true;
     options.startpoint = origin_startpos;
-    options.slotname = t_thrd.applyworker_cxt.mySubscription->slotname;
+    options.slotname = myslotname;
     options.protoVersion = LOGICALREP_PROTO_VERSION_NUM;
     options.publicationNames = t_thrd.applyworker_cxt.mySubscription->publications;
     options.binary = t_thrd.applyworker_cxt.mySubscription->binary;
 
-    /* Start streaming from the slot. */
+    /* Start normal logical streaming replication. */
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_startstreaming(&options);
 
     /* Run the main loop. */
-    ApplyLoop();
+    LogicalRepApplyLoop(origin_startpos);
 
     ereport(LOG, (errmsg("ApplyWorker: shutting down")));
     proc_exit(0);

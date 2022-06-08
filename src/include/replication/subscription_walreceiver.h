@@ -32,5 +32,5 @@
 extern bool sub_connect(char *conninfo, XLogRecPtr *startpoint, char *appname, int channel_identifier);
 extern void sub_identify_system();
 extern void sub_startstreaming(const LibpqrcvConnectParam *options);
-extern void sub_create_slot(const LibpqrcvConnectParam *options);
+extern void sub_create_slot(const LibpqrcvConnectParam *options, XLogRecPtr *lsn, CommitSeqNo *csn);
 #endif

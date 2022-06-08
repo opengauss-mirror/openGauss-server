@@ -79,6 +79,9 @@ select subname, subenabled from pg_subscription  where subname='testsub_rename';
 ALTER SUBSCRIPTION testsub_rename SET (ENABLED=false);
 select subname, subenabled from pg_subscription  where subname='testsub_rename';
 COMMIT;
+BEGIN;
+ALTER SUBSCRIPTION testsub_rename REFRESH PUBLICATION;
+COMMIT;
 --- drop subscription
 DROP SUBSCRIPTION IF EXISTS testsub_rename;
 DROP SUBSCRIPTION IF EXISTS testsub_maskconninfo;

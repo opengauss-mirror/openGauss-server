@@ -127,6 +127,7 @@
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/xlog_internal.h"
+#include "access/csnlog.h"
 
 #include "replication/logical.h"
 #include "replication/reorderbuffer.h"
@@ -257,7 +258,7 @@ struct SnapBuild {
 static void SnapBuildPurgeCommittedTxn(SnapBuild *builder);
 
 /* snapshot building/manipulation/distribution functions */
-static Snapshot SnapBuildBuildSnapshot(SnapBuild *builder, TransactionId xid);
+static Snapshot SnapBuildBuildSnapshot(SnapBuild *builder);
 
 static void SnapBuildFreeSnapshot(Snapshot snap);
 
@@ -442,7 +443,7 @@ void SnapBuildSnapDecRefcount(Snapshot snap)
  * these snapshots; they have to copy them and fill in appropriate ->curcid
  * and ->subxip/subxcnt values.
  */
-static Snapshot SnapBuildBuildSnapshot(SnapBuild *builder, TransactionId xid)
+static Snapshot SnapBuildBuildSnapshot(SnapBuild *builder)
 {
     Snapshot snapshot;
     Size ssize;
@@ -513,36 +514,95 @@ static Snapshot SnapBuildBuildSnapshot(SnapBuild *builder, TransactionId xid)
 }
 
 /*
+ * Build the initial slot snapshot and convert it to normal snapshot that
+ * is understood by HeapTupleSatisfiesMVCC.
+ *
+ * The snapshot will be usable directly in current transaction or exported
+ * for loading in different transaction.
+ */
+Snapshot SnapBuildInitialSnapshot(SnapBuild *builder)
+{
+    Snapshot snap = NULL;
+    TransactionId *newxip = NULL;
+    const int newxcnt = 0;
+    int maxcnt = GetMaxSnapshotXidCount();
+    uint32 idx;
+    CommitSeqNo snapshotcsn = InvalidCommitSeqNo;
+    TransactionId tempXid;
+
+    Assert(!u_sess->utils_cxt.FirstSnapshotSet);
+    Assert(u_sess->utils_cxt.XactIsoLevel = XACT_REPEATABLE_READ);
+
+    if (builder->state != SNAPBUILD_CONSISTENT)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot build an initial slot snapshot before reaching a consistent state")));
+
+    if (!builder->committed.includes_all_transactions)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot build an initial slot snapshot, not all transactions are monitored anymore")));
+
+    /* so we don't overwrite the existing value */
+    if (TransactionIdIsValid(t_thrd.pgxact->xmin))
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot build an initial slot snapshot when MyPgXact->xmin already is valid")));
+
+    snap = SnapBuildBuildSnapshot(builder);
+
+    /*
+     * We know that snap->xmin is alive, enforced by the logical xmin
+     * mechanism. Due to that we can do this without locks, we're only
+     * changing our own value.
+     */
+    t_thrd.pgxact->xmin = snap->xmin;
+
+    if (snap->xcnt > (uint32)maxcnt)
+        maxcnt = snap->xcnt;
+
+    tempXid = snap->xmin;
+    while (tempXid > FirstNormalTransactionId) {
+        TransactionIdRetreat(tempXid);
+        snapshotcsn = CSNLogGetCommitSeqNo(tempXid);
+
+        if (COMMITSEQNO_IS_COMMITTED(snapshotcsn) && !COMMITSEQNO_IS_FROZEN(snapshotcsn)) {
+            break;
+        }
+    }
+    /* allocate in transaction context */
+    newxip = (TransactionId *)palloc(sizeof(TransactionId) * maxcnt);
+
+    /*
+     * snapbuild.c builds transactions in an "inverted" manner, which means it
+     * stores committed transactions in ->xip, not ones in progress. Build a
+     * classical snapshot by marking all non-committed transactions as
+     * in-progress. This can be expensive.
+     */
+    for (idx = 0; idx < snap->xcnt; idx++) {
+        CommitSeqNo csn = CSNLogGetCommitSeqNo(snap->xip[idx]);
+        if (snapshotcsn == InvalidCommitSeqNo || snapshotcsn < csn) {
+            snapshotcsn = csn;
+        }
+    }
+
+    snap->xcnt = newxcnt;
+    snap->xip = newxip;
+    snap->snapshotcsn = snapshotcsn;
+
+    return snap;
+}
+
+/*
  * Export a snapshot so it can be set in another session with SET TRANSACTION
  * SNAPSHOT.
  *
  * For that we need to start a transaction in the current backend as the
  * importing side checks whether the source transaction is still open to make
  * sure the xmin horizon hasn't advanced since then.
- *
- * After that we convert a locally built snapshot into the normal variant
- * understood by HeapTupleSatisfiesMVCC et al.
  */
 const char *SnapBuildExportSnapshot(SnapBuild *builder)
 {
-    Snapshot snap = NULL;
-    char *snapname = NULL;
-    TransactionId *newxip = NULL;
-    const int newxcnt = 0;
-    int maxcnt = GetMaxSnapshotXidCount();
+    Snapshot snap;
+    char *snapname;
 
-    if (builder->state != SNAPBUILD_CONSISTENT)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("cannot export a snapshot before reaching a consistent state")));
-
-    if (!builder->committed.includes_all_transactions)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("cannot export a snapshot, not all transactions are monitored anymore")));
-
-    /* so we don't overwrite the existing value */
-    if (TransactionIdIsValid(t_thrd.pgxact->xmin))
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("cannot export a snapshot when MyPgXact->xmin already is valid")));
     if (IsTransactionOrTransactionBlock())
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot export a snapshot from within a transaction")));
@@ -561,33 +621,11 @@ const char *SnapBuildExportSnapshot(SnapBuild *builder)
     u_sess->utils_cxt.XactIsoLevel = XACT_REPEATABLE_READ;
     u_sess->attr.attr_common.XactReadOnly = true;
 
-    snap = SnapBuildBuildSnapshot(builder, GetTopTransactionId());
+    snap = SnapBuildInitialSnapshot(builder);
 
     /*
-     * We know that snap->xmin is alive, enforced by the logical xmin
-     * mechanism. Due to that we can do this without locks, we're only
-     * changing our own value.
-     */
-    t_thrd.pgxact->xmin = snap->xmin;
-
-    if (snap->xcnt > (uint32)maxcnt)
-        maxcnt = snap->xcnt;
-
-    /* allocate in transaction context */
-    newxip = (TransactionId *)palloc(sizeof(TransactionId) * maxcnt);
-
-    /*
-     * snapbuild.c builds transactions in an "inverted" manner, which means it
-     * stores committed transactions in ->xip, not ones in progress. Build a
-     * classical snapshot by marking all non-committed transactions as
-     * in-progress. This can be expensive.
-     */
-    snap->xcnt = newxcnt;
-    snap->xip = newxip;
-
-    /*
-     * now that we've built a plain snapshot, use the normal mechanisms for
-     * exporting it
+     * now that we've built a plain snapshot, make it active and use the
+     * normal mechanisms for exporting it.
      */
     snapname = ExportSnapshot(snap, NULL);
     if (!RecoveryInProgress())
@@ -647,7 +685,7 @@ bool SnapBuildProcessChange(SnapBuild *builder, TransactionId xid, XLogRecPtr ls
     if (!ReorderBufferXidHasBaseSnapshot(builder->reorder, xid)) {
         /* only build a new snapshot if we don't have a prebuilt one */
         if (builder->snapshot == NULL) {
-            builder->snapshot = SnapBuildBuildSnapshot(builder, xid);
+            builder->snapshot = SnapBuildBuildSnapshot(builder);
             /* inrease refcount for the snapshot builder */
             SnapBuildSnapIncRefcount(builder->snapshot);
         }
@@ -934,7 +972,7 @@ void SnapBuildCommitTxn(SnapBuild *builder, XLogRecPtr lsn, TransactionId xid, i
         if (builder->snapshot != NULL) {
             SnapBuildSnapDecRefcount(builder->snapshot);
         }
-        builder->snapshot = SnapBuildBuildSnapshot(builder, xid);
+        builder->snapshot = SnapBuildBuildSnapshot(builder);
 
         /* we might need to execute invalidations, add snapshot */
         if (!ReorderBufferXidHasBaseSnapshot(builder->reorder, xid)) {
@@ -1646,7 +1684,7 @@ static bool SnapBuildRestore(SnapBuild *builder, XLogRecPtr lsn)
     if (builder->snapshot != NULL) {
         SnapBuildSnapDecRefcount(builder->snapshot);
     }
-    builder->snapshot = SnapBuildBuildSnapshot(builder, InvalidTransactionId);
+    builder->snapshot = SnapBuildBuildSnapshot(builder);
     SnapBuildSnapIncRefcount(builder->snapshot);
 
     ReorderBufferSetRestartPoint(builder->reorder, lsn);

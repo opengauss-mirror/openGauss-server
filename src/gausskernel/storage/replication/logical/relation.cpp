@@ -24,6 +24,7 @@
 #include "replication/logicalrelation.h"
 #include "replication/worker_internal.h"
 #include "utils/inval.h"
+#include "catalog/pg_subscription_rel.h"
 
 static const int DEFAULT_LOGICAL_RELMAP_HASH_ELEM = 128;
 /*
@@ -330,6 +331,11 @@ LogicalRepRelMapEntry *logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lo
 
         entry->localrelvalid = true;
     }
+
+    if (entry->state != SUBREL_STATE_READY)
+        entry->state = GetSubscriptionRelState(t_thrd.applyworker_cxt.mySubscription->oid,
+                                               entry->localreloid,
+                                               &entry->statelsn);
 
     return entry;
 }

@@ -623,7 +623,7 @@ typedef struct knl_u_utils_context {
      */
     struct SnapshotData* FirstXactSnapshot;
 
-    /* Current xact's exported snapshots (a list of Snapshot structs) */
+    /* Current xact's exported snapshots (a list of ExportedSnapshot structs) */
     List* exportedSnapshots;
 
     uint8_t g_output_version; /* Set the default output schema. */

@@ -73,6 +73,7 @@
 %token <str> SCONST IDENT
 %token <recptr> RECPTR
 %token <ival>	ICONST
+%token T_WORD
 
 /* Keyword tokens. */
 %token K_BASE_BACKUP
@@ -102,15 +103,17 @@
 %token K_PHYSICAL
 %token K_LOGICAL
 %token K_SLOT
+%token K_USE_SNAPSHOT
 
 %type <node>	command
-%type <node>	base_backup start_replication start_data_replication fetch_mot_checkpoint start_logical_replication advance_logical_replication identify_system identify_version identify_mode identify_consistence create_replication_slot drop_replication_slot identify_maxlsn identify_channel identify_az
+%type <node>	base_backup start_replication start_data_replication fetch_mot_checkpoint start_logical_replication advance_logical_replication identify_system identify_version identify_mode identify_consistence create_replication_slot drop_replication_slot identify_maxlsn identify_channel identify_az sql_cmd
 %type <list>	base_backup_opt_list
 %type <defelt>	base_backup_opt
 %type <list>    plugin_options plugin_opt_list
 %type <defelt>  plugin_opt_elem
 %type <node>    plugin_opt_arg
 %type <str>		opt_slot
+%type <boolval> uses_napshot_opt
 %%
 
 firstcmd: command opt_semicolon
@@ -139,6 +142,7 @@ command:
 			| identify_maxlsn
 			| identify_channel
 			| identify_az
+			| sql_cmd
 			;
 
 /*
@@ -366,16 +370,18 @@ advance_logical_replication:
  					cmd->kind = REPLICATION_KIND_PHYSICAL;
  					cmd->slotname = $2;
  					cmd->init_slot_lsn = $4;
+ 					cmd->useSnapshot = false;
  					$$ = (Node *) cmd;
  				}
 			/* CREATE_REPLICATION_SLOT slot LOGICAL plugin */
-			| K_CREATE_REPLICATION_SLOT IDENT K_LOGICAL IDENT
+			| K_CREATE_REPLICATION_SLOT IDENT K_LOGICAL IDENT uses_napshot_opt
  				{
 					CreateReplicationSlotCmd *cmd;
 					cmd = makeNode(CreateReplicationSlotCmd);
 					cmd->kind = REPLICATION_KIND_LOGICAL;
 					cmd->slotname = $2;
 					cmd->plugin = $4;
+					cmd->useSnapshot = $5;
 					$$ = (Node *) cmd;
  				}
  			;
@@ -427,6 +433,26 @@ plugin_opt_elem:
 plugin_opt_arg:
 			SCONST                          { $$ = (Node *) makeString($1); }
 			| /* EMPTY */                   { $$ = NULL; }
+			;
+
+uses_napshot_opt:
+			K_USE_SNAPSHOT                  { $$ = true; }
+			| /* EMPTY */                   { $$ = false; }
+
+sql_cmd:
+			IDENT
+				{
+					SQLCmd *cmd = makeNode(SQLCmd);
+					int tok;
+
+					/* Just move lexer to the end of command. */
+					for (;;) {
+						tok = yylex(&yylval, &yylloc, yyscanner);
+						if (tok == ';' || tok == 0)
+							break;
+					}
+					$$ = (Node *)cmd;
+				}
 			;
 %%
 

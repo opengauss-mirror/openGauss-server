@@ -23,6 +23,7 @@ PostgreSQL documentation
 <synopsis>
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> CONNECTION '<replaceable>conninfo</replaceable>'
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> SET PUBLICATION <replaceable class="parameter">publication_name</replaceable> [, ...]
+ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> REFRESH PUBLICATION [ WITH ( <replaceable class="parameter">refresh_option</replaceable> [= <replaceable class="parameter">value</replaceable>] [, ... ] ) ]
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> ENABLE
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> SET ( <replaceable class="parameter">subscription_parameter</replaceable> [= <replaceable class="parameter">value</replaceable>] [, ... ] )
 ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> OWNER TO <replaceable>new_owner</replaceable>
@@ -45,6 +46,23 @@ ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> RENAME TO <
    new owning role. The new owner has to be a superuser.
    (Currently, all subscription owners must be superusers, so the owner checks
    will be bypassed in practice.  But this might change in the future.)
+  </para>
+
+  <para>
+   When refreshing a publication we remove the relations that are no longer
+   part of the publication and we also remove the table synchronization slots
+   if there are any. It is necessary to remove these slots so that the resources
+   allocated for the subscription on the remote host are released. If due to
+   network breakdown or some other error, <productname>openGauss</productname>
+   is unable to remove the slots, an ERROR will be reported. To proceed in this
+   situation, the user either needs to retry the operation or disassociate the
+   slot from the subscription and drop the subscription as explained in
+   <xref linkend="sql-dropsubscription"/>.
+  </para>
+
+  <para>
+   Commands <command>ALTER SUBSCRIPTION ... REFRESH PUBLICATION</command>
+   cannot be executed inside a transaction block.
   </para>
  </refsect1>
 
@@ -74,6 +92,36 @@ ALTER SUBSCRIPTION <replaceable class="parameter">name</replaceable> RENAME TO <
 
    <varlistentry>
     <term><literal>SET PUBLICATION <replaceable class="parameter">publication_name</replaceable></literal></term>
+   </varlistentry>
+
+   <varlistentry>
+    <term><literal>REFRESH PUBLICATION</literal></term>
+    <listitem>
+     <para>
+      Fetch missing table information from publisher.  This will start
+      replication of tables that were added to the subscribed-to publications
+      since the last invocation of <command>REFRESH PUBLICATION</command> or
+      since <command>CREATE SUBSCRIPTION</command>.
+     </para>
+
+     <para>
+      <replaceable>refresh_option</replaceable> specifies additional options for the
+      refresh operation.  The supported options are:
+
+      <variablelist>
+       <varlistentry>
+        <term><literal>copy_data</literal> (<type>boolean</type>)</term>
+        <listitem>
+         <para>
+          Specifies whether the existing data in the publications that are
+          being subscribed to should be copied once the replication starts.
+          The default is <literal>true</literal>.  (Previously subscribed
+          tables are not copied.)
+         </para>
+        </listitem>
+       </varlistentry>
+      </variablelist></para>
+    </listitem>
    </varlistentry>
 
    <varlistentry>

@@ -70,7 +70,8 @@ void sub_startstreaming(const LibpqrcvConnectParam *options)
 {
     return StartRemoteStreaming(options);
 }
-void sub_create_slot(const LibpqrcvConnectParam *options)
+void sub_create_slot(const LibpqrcvConnectParam *options, XLogRecPtr *lsn, CommitSeqNo *csn)
 {
-    return CreateRemoteReplicationSlot(options->startpoint, options->slotname, options->logical);
+    return CreateRemoteReplicationSlot(options->startpoint, options->slotname, options->logical, lsn,
+                                       options->useSnapshot, csn);
 }

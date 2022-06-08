@@ -29,7 +29,6 @@
 #include "utils/snapmgr.h"
 
 static void RenumberEnumType(Relation pg_enum, HeapTuple* existing, int nelems);
-static int oid_cmp(const void* p1, const void* p2);
 static int sort_order_cmp(const void* p1, const void* p2);
 
 #define checkEnumLableValue(val)                                                             \
@@ -554,19 +553,6 @@ static void RenumberEnumType(Relation pg_enum, HeapTuple* existing, int nelems)
 
     /* Make the updates visible */
     CommandCounterIncrement();
-}
-
-/* qsort comparison function for oids */
-static int oid_cmp(const void* p1, const void* p2)
-{
-    Oid v1 = *((const Oid*)p1);
-    Oid v2 = *((const Oid*)p2);
-
-    if (v1 < v2)
-        return -1;
-    if (v1 > v2)
-        return 1;
-    return 0;
 }
 
 /* qsort comparison function for tuples by sort order */

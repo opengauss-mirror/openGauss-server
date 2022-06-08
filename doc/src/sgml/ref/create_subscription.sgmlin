@@ -97,6 +97,16 @@ CREATE SUBSCRIPTION <replaceable class="parameter">subscription_name</replaceabl
 
       <variablelist>
        <varlistentry>
+        <term><literal>copy_data</literal> (<type>boolean</type>)</term>
+        <listitem>
+         <para>
+          Specifies whether the existing data in the publications that are
+          being subscribed to should be copied once the replication starts.
+          The default is <literal>true</literal>.
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
         <term><literal>enabled</literal> (<type>boolean</type>)</term>
         <listitem>
          <para>

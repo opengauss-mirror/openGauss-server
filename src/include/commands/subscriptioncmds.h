@@ -23,7 +23,7 @@ typedef struct HostPort {
 } HostPort;
 
 extern ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel);
-extern ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt);
+extern ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel);
 extern void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel);
 
 extern ObjectAddress AlterSubscriptionOwner(const char *name, Oid newOwnerId);

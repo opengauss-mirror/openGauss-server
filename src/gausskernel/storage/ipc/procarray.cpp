@@ -1988,7 +1988,7 @@ RETRY_GET:
  *
  * Returns TRUE if successful, FALSE if source xact is no longer running.
  */
-bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid)
+bool ProcArrayInstallImportedXmin(TransactionId xmin, VirtualTransactionId *sourcevxid)
 {
     bool result = false;
     ProcArrayStruct* arrayP = g_instance.proc_array_idx;
@@ -1996,7 +1996,7 @@ bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid)
 
     Assert(TransactionIdIsNormal(xmin));
 
-    if (!TransactionIdIsNormal(sourcexid))
+    if (!sourcevxid)
         return false;
 
     /* Get lock so source xact can't end while we're doing this */
@@ -2008,9 +2008,10 @@ bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid)
         volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
         TransactionId xid;
 
-        xid = pgxact->xid; /* fetch just once */
-
-        if (xid != sourcexid)
+        /* We are only interested in the specific virtual transaction. */
+        if (proc->backendId != sourcevxid->backendId)
+            continue;
+        if (proc->lxid != sourcevxid->localTransactionId)
             continue;
 
         /*

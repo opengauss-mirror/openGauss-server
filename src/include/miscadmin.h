@@ -32,6 +32,8 @@
 #include "pgtime.h" /* for pg_time_t */
 #include "libpq/libpq-be.h"
 
+#define InvalidPid (-1)
+
 #define PG_BACKEND_VERSIONSTR "gaussdb " DEF_GS_VERSION "\n"
 
 /*****************************************************************************
@@ -94,6 +96,7 @@ extern const uint32 SUBSCRIPTION_BINARY_VERSION_NUM;
 extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 extern const uint32 SUPPORT_HASH_XLOG_VERSION_NUM;
 extern const uint32 PITR_INIT_VERSION_NUM;
+extern const uint32 PUBLICATION_INITIAL_DATA_VERSION_NAME;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

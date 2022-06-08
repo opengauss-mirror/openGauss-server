@@ -52,6 +52,12 @@ typedef struct ReplicationState {
      */
     ThreadId acquired_by;
 
+    pthread_mutex_t originMutex;
+
+    pthread_cond_t orginCV;
+
+    pthread_condattr_t originAttr;
+
     /*
      * Lock protecting remote_lsn and local_lsn.
      */
@@ -72,7 +78,7 @@ typedef struct ReplicationStateShmStruct {
 /* API for querying & manipulating replication origins */
 extern RepOriginId replorigin_by_name(const char *name, bool missing_ok);
 extern RepOriginId replorigin_create(const char *name);
-extern void replorigin_drop_by_name(const char *name, bool missing_ok);
+extern void replorigin_drop_by_name(const char *name, bool missing_ok, bool nowait);
 extern bool replorigin_by_oid(RepOriginId roident, bool missing_ok, char **roname);
 
 /* API for querying & manipulating replication progress tracking */

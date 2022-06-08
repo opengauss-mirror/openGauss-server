@@ -362,6 +362,17 @@ int WalSenderMain(void)
      */
     walsnd_context = AllocSetContextCreate(t_thrd.top_mem_cxt, "Wal Sender", ALLOCSET_DEFAULT_MINSIZE,
                                            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    t_thrd.mem_cxt.msg_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
+                                                       "MessageContext",
+                                                       ALLOCSET_DEFAULT_MINSIZE,
+                                                       ALLOCSET_DEFAULT_INITSIZE,
+                                                       ALLOCSET_DEFAULT_MAXSIZE);
+
+    t_thrd.mem_cxt.mask_password_mem_cxt = AllocSetContextCreate(t_thrd.top_mem_cxt,
+                                                                 "MaskPasswordCtx",
+                                                                 ALLOCSET_DEFAULT_MINSIZE,
+                                                                 ALLOCSET_DEFAULT_INITSIZE,
+                                                                 ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(walsnd_context);
 
     /* Set up resource owner */
@@ -1231,11 +1242,14 @@ int logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int
  */
 static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 {
+#define MAX_ULONG_LENGTH 22
     const char *slot_name = NULL;
     StringInfoData buf;
     bool isDummyStandby = false;
     const char *snapshot_name = NULL;
+    Snapshot snap;
     char xpos[MAXFNAMELEN];
+    char strCSN[MAX_ULONG_LENGTH];
     int rc = 0;
 
     Assert(!t_thrd.slot_cxt.MyReplicationSlot);
@@ -1266,6 +1280,27 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
         ValidateName(cmd->slotname);
         ValidateName(cmd->plugin);
         char *fullname = NULL;
+
+        /*
+         * Do options check early so that we can bail before calling the
+         * DecodingContextFindStartpoint which can take long time.
+         */
+        if (cmd->useSnapshot) {
+            if (!IsTransactionBlock()) {
+                ereport(ERROR, (errmsg("CREATE_REPLICATION_SLOT ... USE_SNAPSHOT "
+                                       "must be called inside a transaction")));
+            }
+            if (u_sess->utils_cxt.XactIsoLevel != XACT_REPEATABLE_READ) {
+                ereport(ERROR, (errmsg("CREATE_REPLICATION_SLOT ... USE_SNAPSHOT "
+                                       "must be called in REPEATABLE READ isolation mode transaction")));
+            }
+            if (u_sess->utils_cxt.FirstSnapshotSet) {
+                ereport(ERROR, (errmsg("CREATE_REPLICATION_SLOT ... USE_SNAPSHOT must be called before any query")));
+            }
+            if (IsSubTransaction())
+                ereport(ERROR, (errmsg("CREATE_REPLICATION_SLOT ... USE_SNAPSHOT "
+                                       "must not be called in a subtransaction")));
+        }
         fullname = expand_dynamic_library_name(cmd->plugin);
 
         /* Load the shared library, unless we already did */
@@ -1279,11 +1314,20 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
         /* build initial snapshot, might take a while */
         DecodingContextFindStartpoint(ctx);
 
-        /*
-         * Export a plain (not of the snapbuild.c type) snapshot to the user
-         * that can be imported into another session.
-         */
-        snapshot_name = SnapBuildExportSnapshot(ctx->snapshot_builder);
+        if (!cmd->useSnapshot) {
+            /*
+             * Export a plain (not of the snapbuild.c type) snapshot to the user
+             * that can be imported into another session.
+             */
+            snapshot_name = SnapBuildExportSnapshot(ctx->snapshot_builder);
+        } else {
+            t_thrd.walsender_cxt.isUseSnapshot = true;
+
+            snap = SnapBuildInitialSnapshot(ctx->snapshot_builder);
+            SetTransactionSnapshot(snap, NULL, InvalidPid);
+            rc = snprintf_s(strCSN, MAX_ULONG_LENGTH, MAX_ULONG_LENGTH - 1, "%lu", snap->snapshotcsn);
+            securec_check_ss(rc, "\0", "\0");
+        }
 
         /* don't need the decoding context anymore */
         FreeDecodingContext(ctx);
@@ -1307,7 +1351,11 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
      * that.)
      */
     pq_beginmessage(&buf, 'T');
-    pq_sendint16(&buf, 4); /* 4 field */
+    if (cmd->useSnapshot) {
+        pq_sendint16(&buf, 5); /* 5 field */
+    } else {
+        pq_sendint16(&buf, 4); /* 4 field */
+    }
 
     /* first field: slot name */
     pq_sendstring(&buf, "slot_name"); /* col name */
@@ -1344,11 +1392,26 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
     pq_sendint16(&buf, UINT16_MAX);       /* typlen */
     pq_sendint32(&buf, 0);                /* typmod */
     pq_sendint16(&buf, 0);                /* format code */
+
+    if (cmd->useSnapshot) {
+        /* fifth field: use snapshot's csn */
+        pq_sendstring(&buf, "snapshot_csn"); /* col name */
+        pq_sendint32(&buf, 0);                /* table oid */
+        pq_sendint16(&buf, 0);                /* attnum */
+        pq_sendint32(&buf, TEXTOID);          /* type oid */
+        pq_sendint16(&buf, UINT16_MAX);       /* typlen */
+        pq_sendint32(&buf, 0);                /* typmod */
+        pq_sendint16(&buf, 0);                /* format code */
+    }
     pq_endmessage_noblock(&buf);
 
     /* Send a DataRow message */
     pq_beginmessage(&buf, 'D');
-    pq_sendint16(&buf, 4); /* # of columns */
+    if (cmd->useSnapshot) {
+        pq_sendint16(&buf, 5); /* # of columns */
+    } else {
+        pq_sendint16(&buf, 4); /* # of columns */
+    }
 
     /* slot_name */
     pq_sendint32(&buf, strlen(slot_name)); /* col1 len */
@@ -1372,6 +1435,12 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
         pq_sendbytes(&buf, cmd->plugin, strlen(cmd->plugin));
     } else
         pq_sendint32(&buf, UINT32_MAX); /* col4 len, NULL */
+
+    /* snapshot csn */
+    if (cmd->useSnapshot) {
+        pq_sendint32(&buf, strlen(strCSN)); /* col5 len */
+        pq_sendbytes(&buf, strCSN, strlen(strCSN));
+    }
     pq_endmessage_noblock(&buf);
 
     /* Send CommandComplete and ReadyForQuery messages */
@@ -2140,6 +2209,14 @@ static void IdentifyCommand(Node* cmd_node, ReplicationCxt* repCxt, const char *
             break;
 #endif
 
+        case T_SQLCmd:
+            if (u_sess->proc_cxt.MyDatabaseId == InvalidOid)
+                ereport(ERROR, (errmsg("not connected to database")));
+            execute_simple_query(cmd_string);
+            /* Send CommandComplete and ReadyForQuery messages */
+            ReadyForQuery((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
+            break;
+
         default:
             ereport(FATAL,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid standby query string: %s", cmd_string)));
@@ -2190,6 +2267,23 @@ static void HandleWalReplicationCommand(const char *cmd_string, ReplicationCxt* 
     old_context = MemoryContextSwitchTo(cmd_context);
 
     cmd_node = t_thrd.replgram_cxt.replication_parse_result;
+
+    /*
+     * CREATE_REPLICATION_SLOT ... LOGICAL exports a snapshot. If it was
+     * called outside of transaction the snapshot should be cleared here.
+     */
+    if (!IsTransactionBlock())
+        SnapBuildClearExportedSnapshot();
+
+    /*
+     * For aborted transactions, don't allow anything except pure SQL,
+     * the exec_simple_query() will handle it correctly.
+     */
+    if (IsAbortedTransactionBlockState() && !IsA(cmd_node, SQLCmd))
+        ereport(ERROR, (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION), errmsg("current transaction is aborted, "
+            "commands ignored until end of transaction block")));
+
+    CHECK_FOR_INTERRUPTS();
 
     IdentifyCommand(cmd_node, repCxt, cmd_string);
 

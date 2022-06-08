@@ -219,4 +219,13 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
  
 (1 row)
 
+create table replica_test (a int primary key, b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "replica_test_pkey" for table "replica_test"
+select pg_get_replica_identity_index('replica_test');
+ pg_get_replica_identity_index 
+-------------------------------
+ replica_test_pkey
+(1 row)
+
+drop table replica_test;
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1

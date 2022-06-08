@@ -17,6 +17,7 @@ Description: change the definition of a subscription
 Syntax:
 ALTER SUBSCRIPTION name CONNECTION 'conninfo'
 ALTER SUBSCRIPTION name SET PUBLICATION publication_name [, ...]
+ALTER SUBSCRIPTION name REFRESH PUBLICATION [ WITH ( refresh_option [= value] [, ... ] ) ]
 ALTER SUBSCRIPTION name ENABLE
 ALTER SUBSCRIPTION name SET ( subscription_parameter [= value] [, ... ] )
 ALTER SUBSCRIPTION name OWNER TO new_owner
@@ -157,6 +158,10 @@ ALTER SUBSCRIPTION testsub_rename SET (ENABLED=false);
 ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 select subname, subenabled from pg_subscription  where subname='testsub_rename';
 ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+COMMIT;
+BEGIN;
+ALTER SUBSCRIPTION testsub_rename REFRESH PUBLICATION;
+ERROR:  ALTER SUBSCRIPTION ... REFRESH cannot run inside a transaction block
 COMMIT;
 --- drop subscription
 DROP SUBSCRIPTION IF EXISTS testsub_rename;

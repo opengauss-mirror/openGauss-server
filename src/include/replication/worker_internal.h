@@ -23,9 +23,6 @@ typedef struct LogicalRepWorker
     /* Database id to connect to. */
     Oid dbid;
 
-    /* User to use for connection (will be same as owner of subscription). */
-    NameData username;
-
     Oid userid;
 
     /* Subscription id for the worker. */
@@ -33,6 +30,10 @@ typedef struct LogicalRepWorker
 
     /* Used for initial table synchronization. */
     Oid relid;
+    char relstate;
+    XLogRecPtr relstate_lsn;
+    CommitSeqNo relcsn;
+    slock_t relmutex;
 
     TimestampTz workerLaunchTime;
 
@@ -53,10 +54,22 @@ typedef struct ApplyLauncherShmStruct {
 } ApplyLauncherShmStruct;
 
 extern void logicalrep_worker_attach();
+extern LogicalRepWorker *logicalrep_worker_find(Oid subid, Oid relid, bool only_running);
 extern List *logicalrep_workers_find(Oid subid, bool only_running);
-extern void logicalrep_worker_stop(Oid subid);
+extern void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, Oid userid, Oid relid);
+extern void logicalrep_worker_stop(Oid subid, Oid relid);
+extern void logicalrep_worker_wakeup(Oid subid, Oid relid);
+extern void logicalrep_worker_wakeup_ptr(LogicalRepWorker *worker);
 
+extern int logicalrep_sync_worker_count(Oid subid);
+
+extern void ReplicationOriginNameForTablesync(Oid suboid, Oid relid, char *originname, int szorgname);
 extern char* DefListToString(const List *defList);
 extern List* ConninfoToDefList(const char *conn);
+extern char *LogicalRepSyncTableStart(XLogRecPtr *origin_startpos);
+void process_syncing_tables(XLogRecPtr current_lsn);
+void invalidate_syncing_table_states(Datum arg, int cacheid, uint32 hashvalue);
+
+#define AM_TABLESYNC_WORKER (OidIsValid(t_thrd.applyworker_cxt.curWorker->relid))
 
 #endif /* WORKER_INTERNAL_H */

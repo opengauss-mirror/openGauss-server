@@ -14771,6 +14771,7 @@ AlterSubscriptionStmt:
 					AlterSubscriptionStmt *n =
 						makeNode(AlterSubscriptionStmt);
 					n->subname = $3;
+					n->refresh = false;
 					n->options = $5;
 					$$ = (Node *)n;
 				}
@@ -14779,6 +14780,7 @@ AlterSubscriptionStmt:
 					AlterSubscriptionStmt *n =
 						makeNode(AlterSubscriptionStmt);
 					n->subname = $3;
+					n->refresh = false;
 					n->options = list_make1(makeDefElem("conninfo",
 											(Node *)makeString($5)));
 					$$ = (Node *)n;
@@ -14788,14 +14790,25 @@ AlterSubscriptionStmt:
 					AlterSubscriptionStmt *n =
 						makeNode(AlterSubscriptionStmt);
 					n->subname = $3;
+					n->refresh = false;
 					n->options = list_make1(makeDefElem("publication",
 											(Node *)$6));
+					$$ = (Node *)n;
+				}
+			| ALTER SUBSCRIPTION name REFRESH PUBLICATION opt_definition
+				{
+					AlterSubscriptionStmt *n =
+						makeNode(AlterSubscriptionStmt);
+					n->subname = $3;
+					n->refresh = true;
+					n->options = $6;
 					$$ = (Node *)n;
 				}
 			| ALTER SUBSCRIPTION name ENABLE_P
 				{
 					AlterSubscriptionStmt *n =
 						makeNode(AlterSubscriptionStmt);
+					n->refresh = false;
 					n->subname = $3;
 					n->options = list_make1(makeDefElem("enabled",
 											(Node *)makeInteger(TRUE)));

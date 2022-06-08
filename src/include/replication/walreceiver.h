@@ -238,10 +238,10 @@ typedef struct WalReceiverFunc {
     bool (*walrcv_receive)(int timeout, unsigned char* type, char** buffer, int* len);
     void (*walrcv_send)(const char *buffer, int nbytes);
     void (*walrcv_disconnect)();
-    bool (*walrcv_command)(const char *cmd, char **err, int *sqlstate);
+    WalRcvExecResult* (*walrcv_exec)(const char *cmd, const int nRetTypes, const Oid *retTypes);
     void (*walrcv_identify_system)();
     void (*walrcv_startstreaming)(const LibpqrcvConnectParam *options);
-    void (*walrcv_create_slot)(const LibpqrcvConnectParam *options);
+    void (*walrcv_create_slot)(const LibpqrcvConnectParam *options, XLogRecPtr *lsn, CommitSeqNo *csn);
 } WalReceiverFunc;
 
 #define WalRcvIsOnline()                                                              \
@@ -339,5 +339,22 @@ static inline void WalRcvCtlReleaseExitLock(void)
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockRelease(&walrcv->exitLock);
+}
+
+static inline void walrcv_clear_result(WalRcvExecResult *walres)
+{
+    if (!walres)
+        return;
+
+    if (walres->err)
+        pfree(walres->err);
+
+    if (walres->tuplestore)
+        tuplestore_end(walres->tuplestore);
+
+    if (walres->tupledesc)
+        FreeTupleDesc(walres->tupledesc);
+
+    pfree(walres);
 }
 #endif /* _WALRECEIVER_H */

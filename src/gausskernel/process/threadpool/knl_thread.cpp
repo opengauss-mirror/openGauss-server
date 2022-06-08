@@ -1471,6 +1471,7 @@ static void knl_t_walsender_init(knl_t_walsender_context* walsender_cxt)
     walsender_cxt->is_obsmode = false;
     walsender_cxt->standbyConnection = false;
     walsender_cxt->restoreLogicalLogHead = NULL;
+    walsender_cxt->isUseSnapshot = false;
 }
 
 static void knl_t_tsearch_init(knl_t_tsearch_context* tsearch_cxt)

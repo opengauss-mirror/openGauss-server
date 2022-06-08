@@ -588,6 +588,7 @@ typedef enum NodeTag {
     T_AdvanceReplicationCmd,
     T_StartDataReplicationCmd,
     T_FetchMotCheckpointCmd,
+    T_SQLCmd,
 
     /*
      * TAGS FOR RANDOM OTHER STUFF

@@ -2402,6 +2402,7 @@ typedef struct knl_t_walsender_context {
     bool is_obsmode;
     bool standbyConnection;
     bool cancelLogCtl;
+    bool isUseSnapshot;
 } knl_t_walsender_context;
 
 typedef struct knl_t_walreceiverfuncs_context {
@@ -3234,6 +3235,11 @@ typedef struct knl_t_apply_worker_context {
     MemoryContext messageContext;
     MemoryContext logicalRepRelMapContext;
     MemoryContext applyContext;
+    StringInfo copybuf;
+    bool tableStatesValid;
+    List *tableStates;
+    XLogRecPtr remoteFinalLsn;
+    CommitSeqNo curRemoteCsn;
 } knl_t_apply_worker_context;
 
 typedef struct knl_t_publication_context {

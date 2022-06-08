@@ -2199,6 +2199,7 @@ typedef struct AlterSubscriptionStmt {
     NodeTag type;
     char *subname; /* Name of of the subscription */
     List *options; /* List of DefElem nodes */
+    bool refresh;
 } AlterSubscriptionStmt;
 
 typedef struct DropSubscriptionStmt {

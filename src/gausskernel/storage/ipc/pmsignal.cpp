@@ -324,8 +324,13 @@ void MarkPostmasterChildNormal(void)
 
     Assert(slot > 0 && slot <= t_thrd.shemem_ptr_cxt.PMSignalState->num_child_flags);
     slot--;
+    /*
+     * Walsender for subscription would create slot and start replication
+     * during one connect. So it can be PM_CHILD_ACTIVE here.
+     */
     Assert(t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] == PM_CHILD_WALSENDER ||
-           t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] == PM_CHILD_DATASENDER);
+           t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] == PM_CHILD_DATASENDER ||
+           t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] == PM_CHILD_ACTIVE);
     t_thrd.shemem_ptr_cxt.PMSignalState->PMChildFlags[slot] = PM_CHILD_ACTIVE;
 }
 

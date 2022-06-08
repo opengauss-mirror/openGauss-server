@@ -333,6 +333,7 @@ extern ArchiveTaskStatus* find_archive_task_status(int *idx);
 extern ArchiveTaskStatus* walreceiver_find_archive_task_status(unsigned int expected_pitr_task_status);
 extern void get_hadr_cn_info(char* keyCn, bool* isExitKey, char* deleteCn, bool* isExitDelete, 
     ArchiveSlotConfig *archive_conf);
-
+extern void ReplicationSlotNameForTablesync(Oid suboid, Oid relid, char *syncslotname, int szslot);
+extern void ReplicationSlotDropAtPubNode(char *slotname, bool missing_ok);
 
 #endif /* SLOT_H */

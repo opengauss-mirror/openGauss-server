@@ -473,13 +473,13 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool allowDro
     /* If we did not find the slot or it was already active, error out. */
     if (slot == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("replication slot \"%s\" does not exist", name)));
-    /* We allow dropping active logical replication slots on standby in opengauss. */
+    /* We allow dropping active logical replication slots on standby or for subscription in opengauss. */
     if (active) {
-        if ((slot->data.database != InvalidOid
+        if (((slot->data.database != InvalidOid
 #ifndef ENABLE_MULTIPLE_NODES
             && !allowDrop
 #endif
-            ) || isDummyStandby != slot->data.isDummyStandby)
+            ) || isDummyStandby != slot->data.isDummyStandby) && strcmp(slot->data.plugin.data, "pgoutput") != 0)
             ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE), errmsg("replication slot \"%s\" is already active", name)));
         else {
             ereport(WARNING,

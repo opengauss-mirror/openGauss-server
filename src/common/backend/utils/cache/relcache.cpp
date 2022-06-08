@@ -92,6 +92,7 @@
 #include "catalog/gs_package.h"
 #include "catalog/pg_publication.h"
 #include "catalog/pg_publication_rel.h"
+#include "catalog/pg_subscription_rel.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_recyclebin.h"
 #include "catalog/pg_replication_origin.h"
@@ -335,6 +336,7 @@ static const FormData_pg_attribute Desc_pg_publication_rel[Natts_pg_publication_
 static const FormData_pg_attribute Desc_pg_replication_origin[Natts_pg_replication_origin] = {
     Schema_pg_replication_origin
 };
+static const FormData_pg_attribute Desc_pg_subscription_rel[Natts_pg_subscription_rel] = {Schema_pg_subscription_rel};
 
 /* Please add to the array in ascending order of oid value */
 static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{DefaultAclRelationId,
@@ -899,6 +901,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         false,
         Natts_pg_replication_origin,
         Desc_pg_replication_origin,
+        false,
+        true},
+    {SubscriptionRelRelationId,
+        "pg_subscription_rel",
+        SubscriptionRelRelation_Rowtype_Id,
+        false,
+        false,
+        Natts_pg_subscription_rel,
+        Desc_pg_subscription_rel,
         false,
         true},
     {PackageRelationId,
