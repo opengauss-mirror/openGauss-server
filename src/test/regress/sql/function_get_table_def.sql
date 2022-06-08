@@ -210,5 +210,9 @@ create index list_hash_2_idx3 on list_hash_2(col_4) global;
 select * from pg_get_tabledef('list_hash_2');
 drop table list_hash_2;
 
+create table generated_test(a int, b int generated always as (length((a)::text)) stored);
+select * from pg_get_tabledef('generated_test');
+drop table generated_test;
+
 reset current_schema;
 drop schema test_get_table_def cascade;
