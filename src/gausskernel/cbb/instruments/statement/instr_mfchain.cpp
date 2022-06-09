@@ -167,34 +167,43 @@ static void ReportBlockException(uint32 blockId, BlockActionState state, int lev
 {
     if (state == BLOCK_ACTION_SUCCESS) {
         return;
+    }
 
-    } else if (state == BLOCK_FILL_READONLY_ERR) {
-        ereport(level, (errmsg("MemFileBlock %u fill exception: block is readonly.", blockId)));
-    } else if (state == BLOCK_FILL_FULL_ERR) {
-        ereport(level, (errmsg("MemFileBlock %u fill exception: block is full.", blockId)));
-    } else if (state == BLOCK_FILL_BIGITEM_ERR) {
-        ereport(level, 
-            (errmsg("MemFileBlock fill exception: item too big so that even cannot store it using a whole block.")));
-    
-    } else if (state == BLOCK_FLUSH_DISK_ERR) {
-        ereport(level,
-            (errmsg("MemFileBlock flush exception: Disk is inaccessible or insufficient space, errno(%d)", errno)));
-    } else if (state == BLOCK_ADV_MEMORY_ERR) {
-        ereport(level, (errmsg("MemFileBlock flush exception: The memory is inaccessible or insufficient.")));
-
-    } else if (state == BLOCK_RELOAD_NO_FILE_ERR) {
-        ereport(level, (errmsg("MemFileBlock %u reload exception: file not exists.", blockId)));
-    } else if (state == BLOCK_RELOAD_FILE_DAMAGE_ERR) {
-        ereport(level, (errmsg("MemFileBlock %u reload exception: file is damaged.", blockId)));
-    } else if (state == BLOCK_VERIFY_VERSION_ERR) {
-        ereport(level, (errmsg("MemFileBlock %u verify exception: version is different from now.", blockId)));
-    } else if (state == BLOCK_VERIFY_CHECKSUM_ERR) {
-        ereport(level, (errmsg("MemFileBlock %u verify exception: checksum not match.", blockId)));
-    } else if (state == BLOCK_VERIFY_SDESC_ERR) {
-        ereport(level, (errmsg("MemFileBlock %u verify exception: SimpleTupleDesc not match to now.", blockId)));
-
-    } else {
-        ereport(ERROR, (errmsg("Unknow Mem-File-Block action state.")));
+    switch(state) {
+        case BLOCK_FILL_READONLY_ERR:
+            ereport(level, (errmsg("MemFileBlock %u fill exception: block is readonly.", blockId)));
+            break;
+        case BLOCK_FILL_FULL_ERR:
+            ereport(level, (errmsg("MemFileBlock %u fill exception: block is full.", blockId)));
+            break;
+        case BLOCK_FILL_BIGITEM_ERR:
+            ereport(level, (errmsg("MemFileBlock fill exception: "
+                "item too big so that even cannot store it using a whole block.")));
+            break;
+        case BLOCK_FLUSH_DISK_ERR:
+            ereport(level, (errmsg("MemFileBlock flush exception: "
+                "Disk is inaccessible or insufficient space, errno(%d)", errno)));
+            break;
+        case BLOCK_ADV_MEMORY_ERR:
+            ereport(level, (errmsg("MemFileBlock flush exception: The memory is inaccessible or insufficient.")));
+            break;
+        case BLOCK_RELOAD_NO_FILE_ERR:
+            ereport(level, (errmsg("MemFileBlock %u reload exception: file not exists.", blockId)));
+            break;
+        case BLOCK_RELOAD_FILE_DAMAGE_ERR:
+            ereport(level, (errmsg("MemFileBlock %u reload exception: file is damaged.", blockId)));
+            break;
+        case BLOCK_VERIFY_VERSION_ERR:
+            ereport(level, (errmsg("MemFileBlock %u verify exception: version is different from now.", blockId)));
+            break;
+        case BLOCK_VERIFY_CHECKSUM_ERR:
+            ereport(level, (errmsg("MemFileBlock %u verify exception: checksum not match.", blockId)));
+            break;
+        case BLOCK_VERIFY_SDESC_ERR:
+            ereport(level, (errmsg("MemFileBlock %u verify exception: SimpleTupleDesc not match to now.", blockId)));
+            break;
+        default:
+            ereport(ERROR, (errmsg("Unknow Mem-File-Block action state.")));
     }
 }
 
@@ -282,27 +291,40 @@ static BlockActionState FlushBlockBuff(MemFileBlock* block)
     Assert(block->buff != NULL);
 
     block->flushTime = GetCurrentTimestamp();
-
     BlockActionState state = CompleteBlockBuffHeader(block);
     if (state != BLOCK_ACTION_SUCCESS) {
         return state;
     }
 
     char* path = GetBlockPath(block);
-    int writeSize = -1;
     int fd = open(path, O_RDWR | O_CREAT, S_IREAD | S_IWRITE);
     if (fd == -1) {
         pfree(path);
         return BLOCK_FLUSH_DISK_ERR;
     }
-    writeSize = write(fd, block->buff, MFBLOCK_SIZE);
-    if (writeSize != MFBLOCK_SIZE || fsync(fd) != 0) {
+    char* ptr = (char*)block->buff;
+    bool success = true;
+    int writeSize = -1;
+    int leftSize = MFBLOCK_SIZE;
+    while (leftSize > 0) {
+        writeSize = write(fd, ptr, leftSize);
+        if (writeSize <= 0) {
+            success = false;
+            break;
+        }
+        leftSize -= writeSize;
+        ptr += writeSize;
+    }
+    if (success) {
+        fsync(fd);
+    } else {
         unlink(path);
     }
+
     close(fd);
     pfree(path);
 
-    return writeSize == MFBLOCK_SIZE ? BLOCK_ACTION_SUCCESS : BLOCK_FLUSH_DISK_ERR;
+    return success ? BLOCK_ACTION_SUCCESS : BLOCK_FLUSH_DISK_ERR;
 }
 
 static BlockActionState ReloadBlockFile(char* filename, char* buffer, bool justHead)
@@ -504,30 +526,38 @@ static void ReportChainException(MemFileChain* mfchain, ChainActionState state, 
 {
     if (state == CHAIN_ACTION_SUCCESS) {
         return;
+    }
 
-    } else if (state == CHAIN_CREATE_LONGNAME_ERR) {
-        ereport(level, (errmsg("Mem-File-Chain create exception: name '%s' too long.", mfchain->name)));
-    } else if (state == CHAIN_CREATE_DIR_ERR) {
-        ereport(level, (errmsg("Mem-File-Chain create exception: cannot create dir '%s'.", mfchain->path)));
-    } else if (state == CHAIN_CREATE_SIZEPARAM_ERR) {
-        ereport(level, (errmsg("Mem-File-Chain create exception: invalid size param.")));
-    } else if (state == CHAIN_CREATE_TYPEMOD_ERR) {
-        ereport(level, (errmsg("Mem-File-Chain create exception: table column has typemod.")));
-    } else if (state == CHAIN_CREATE_LOCK_ERR) {
-        ereport(level, (errmsg("Mem-File-Chain create exception: invalid lock.")));
-
-    } else if (state == CHAIN_ADV_DISK_ERR) {
-        ereport(level, (errmsg("Mem-File-Chain advance exception: The disk is inaccessible or insufficient space..")));
-    } else if (state == CHAIN_SDESC_RECREATE) {
-        ereport(level, (errmsg("Mem-File-Chain insert exception: sDesc is changed and recreate.")));
-
-    } else if (state == CHAIN_TURN_ON) {
-        ereport(level, (errmsg("Mem-File-Chain state:  mem file chain turn on success.")));
-    } else if (state == CHAIN_TURN_OFF) {
-        ereport(level, (errmsg("Mem-File-Chain exception: Something bad happened, mem file chain turn off.")));
-
-    } else {
-        ereport(ERROR, (errmsg("Unknow Mem-File-Chain action state.")));
+    switch (state) {
+        case CHAIN_CREATE_LONGNAME_ERR:
+            ereport(level, (errmsg("Mem-File-Chain create exception: name '%s' too long.", mfchain->name)));
+            break;
+        case CHAIN_CREATE_DIR_ERR:
+            ereport(level, (errmsg("Mem-File-Chain create exception: cannot create dir '%s'.", mfchain->path)));
+            break;
+        case CHAIN_CREATE_SIZEPARAM_ERR:
+            ereport(level, (errmsg("Mem-File-Chain create exception: invalid size param.")));
+            break;
+        case CHAIN_CREATE_TYPEMOD_ERR:
+            ereport(level, (errmsg("Mem-File-Chain create exception: table column has typemod.")));
+            break;
+        case CHAIN_CREATE_LOCK_ERR:
+            ereport(level, (errmsg("Mem-File-Chain create exception: invalid lock.")));
+            break;
+        case CHAIN_ADV_DISK_ERR:
+            ereport(level, (errmsg("Mem-File-Chain advance exception: Disk is inaccessible or insufficient space.")));
+            break;
+        case CHAIN_SDESC_RECREATE:
+            ereport(level, (errmsg("Mem-File-Chain insert exception: sDesc is changed and recreate.")));
+            break;
+        case CHAIN_TURN_ON:
+            ereport(level, (errmsg("Mem-File-Chain state:  mem file chain turn on success.")));
+            break;
+        case CHAIN_TURN_OFF:
+            ereport(level, (errmsg("Mem-File-Chain exception: Something bad happened, mem file chain turn off.")));
+            break;
+        default:
+            ereport(ERROR, (errmsg("Unknow Mem-File-Chain action state.")));
     }
 }
 
