@@ -62,6 +62,7 @@
 #include "storage/lock/lwlock.h"
 #include "utils/memgroup.h"
 #include "replication/walprotocol.h"
+#include "instruments/instr_mfchain.h"
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_def.h"
 #endif
@@ -195,6 +196,10 @@ typedef struct knl_g_stat_context {
     /* unique sql */
     MemoryContext UniqueSqlContext;
     HTAB* volatile UniqueSQLHashtbl;
+
+    /* standby statement history */
+    MemFileChain* stbyStmtHistSlow;
+    MemFileChain* stbyStmtHistFast;
 
     /* user logon/logout stat */
     MemoryContext InstrUserContext;

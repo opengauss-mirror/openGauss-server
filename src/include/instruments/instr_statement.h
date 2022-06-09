@@ -153,6 +153,8 @@ struct StatementDetail {
 #define STATEMENT_DETAIL_FORMAT_JSON "json"
 #define STATEMENT_DETAIL_TYPE_PRETTY "pretty"
 
+#define Anum_statement_history_finish_time 12
+
 /* entry for full/slow sql stat */
 typedef struct StatementStatContext {
     void *next;             /* next item if in free or suspend list */
@@ -199,7 +201,8 @@ extern bool check_statement_stat_level(char** newval, void** extra, GucSource so
 extern void assign_statement_stat_level(const char* newval, void* extra);
 extern bool check_statement_retention_time(char** newval, void** extra, GucSource source);
 extern void assign_statement_retention_time(const char* newval, void* extra);
-
+extern bool check_standby_statement_chain_size(char** newval, void** extra, GucSource source);
+extern void assign_standby_statement_chain_size(const char* newval, void* extra);
 extern void instr_stmt_report_lock(
     StmtDetailType type, int lockmode = -1, const LOCKTAG *locktag = NULL, uint16 lwlockId = 0);
 
