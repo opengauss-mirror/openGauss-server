@@ -51,6 +51,14 @@ void initStringInfo(StringInfo str)
     resetStringInfo(str);
 }
 
+/* free a 'StringInfoData', use this function when call initStringInfo */
+void FreeStringInfo(StringInfo str)
+{
+    if (str != NULL) {
+        pfree_ext(str->data);
+    }
+}
+
 /*
  * resetStringInfo
  *

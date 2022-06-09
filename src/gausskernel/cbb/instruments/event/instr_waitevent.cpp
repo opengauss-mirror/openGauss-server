@@ -32,6 +32,7 @@
 #include "funcapi.h"
 #include "storage/lmgr.h"
 #include "workload/statctl.h"
+#include "instruments/instr_statement.h"
 #include "instruments/instr_waitevent.h"
 
 const int MASK_CLASS_ID = 0xFF000000;
@@ -173,6 +174,7 @@ void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitstatus, i
      * When the duration is 0, we set the duration to 1
      */
     duration = (duration == 0) ? 1 : duration;
+    instr_stmt_set_wait_events_bitmap(PG_WAIT_STATE, waitstatus);
     updateMinValueForAtomicType(duration,
         &(InstrWaitInfo->status_info.statistics_info[waitstatus].min_duration));
     InstrWaitInfo->status_info.statistics_info[waitstatus].counter++;
@@ -193,6 +195,7 @@ void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_inf
      * When the duration is 0, we set the duration to 1
      */
     duration = (duration == 0) ? 1 : duration;
+    instr_stmt_set_wait_events_bitmap(classId, eventId);
     switch (classId) {
         case PG_WAIT_LWLOCK:
             updateMinValueForAtomicType(duration,

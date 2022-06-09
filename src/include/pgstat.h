@@ -902,6 +902,7 @@ typedef enum WaitStatePhase {
 #define PG_WAIT_LOCK 0x03000000U
 #define PG_WAIT_IO 0x0A000000U
 #define PG_WAIT_SQL 0x0B000000U
+#define PG_WAIT_STATE 0x0C000000U
 
 /* ----------
  * Wait Events - IO

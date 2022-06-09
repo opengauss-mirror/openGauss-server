@@ -76,6 +76,9 @@ extern StringInfo makeStringInfo(void);
  */
 extern void initStringInfo(StringInfo str);
 
+/* free a 'StringInfoData', use this function when call initStringInfo */
+extern void FreeStringInfo(StringInfo str);
+
 /* ------------------------
  * resetStringInfo
  * Clears the current content of the StringInfo, if any. The

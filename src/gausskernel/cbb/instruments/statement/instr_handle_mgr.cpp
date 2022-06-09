@@ -27,14 +27,29 @@
 #include "knl/knl_variable.h"
 #include "utils/memutils.h"
 
-#define CHECK_STMT_TRACK_ENABLED()      \
-{                                       \
-    if (!ENABLE_STATEMENT_TRACK) {      \
-        return;                         \
+#define CHECK_STMT_TRACK_ENABLED()                                              \
+{                                                                               \
+    if (!ENABLE_STATEMENT_TRACK) {                                              \
+        return;                                                                 \
     } else if (u_sess->statement_cxt.statement_level[0] == STMT_TRACK_OFF &&    \
-        u_sess->statement_cxt.statement_level[1] == STMT_TRACK_OFF) {   \
-        return;                         \
-    }   \
+        u_sess->statement_cxt.statement_level[1] == STMT_TRACK_OFF) {           \
+        return;                                                                 \
+    }                                                                           \
+}
+
+/* statement track wait events level control >= L1 */
+static bool is_stmt_wait_events_enabled()
+{
+    if (!ENABLE_STATEMENT_TRACK) {
+        return false;
+    }
+    if (CURRENT_STMT_METRIC_HANDLE->level < STMT_TRACK_L0) {
+        return false;
+    }
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL) {
+        return false;
+    }
+    return true;
 }
 
 /* reset the reused handle from freelist */
@@ -47,6 +62,7 @@ static void reset_statement_handle()
     pfree_ext(CURRENT_STMT_METRIC_HANDLE->application_name);
     pfree_ext(CURRENT_STMT_METRIC_HANDLE->query);
     pfree_ext(CURRENT_STMT_METRIC_HANDLE->query_plan);
+    pfree_ext(CURRENT_STMT_METRIC_HANDLE->wait_events);
 
     /* release detail list from the entry */
     StatementDetailItem *cur_pos = CURRENT_STMT_METRIC_HANDLE->details.head;
@@ -58,9 +74,22 @@ static void reset_statement_handle()
     }
 
     /* reset counter and stat */
+    Bitmapset *tmpBitmap = CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap;
     errno_t rc = memset_s(CURRENT_STMT_METRIC_HANDLE,
         sizeof(StatementStatContext), 0, sizeof(StatementStatContext));
     securec_check(rc, "\0", "\0");
+    CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap = tmpBitmap;
+}
+
+static void instr_stmt_reset_wait_events_bitmap()
+{
+    CHECK_STMT_HANDLE();
+    if (CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap != NULL) {
+        errno_t rc = memset_s((void*)CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->words,
+            sizeof(bitmapword) * CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->nwords,
+            0, sizeof(bitmapword) * CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap->nwords);
+        securec_check(rc, "\0", "\0");
+    }
 }
 
 /* alloc handle for current session */
@@ -81,6 +110,7 @@ void statement_init_metric_context()
         ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("init - stmt cxt: %p, parent cxt: %p",
             u_sess->statement_cxt.stmt_stat_cxt, u_sess->top_mem_cxt)));
     }
+    init_full_sql_wait_events();
 
     /* commit for previous allocated handle */
     if (u_sess->statement_cxt.curStatementMetrics != NULL) {
@@ -138,6 +168,11 @@ void statement_init_metric_context()
         }
 
         instr_stmt_report_stat_at_handle_init();
+        instr_stmt_reset_wait_events_bitmap();
+        if (is_stmt_wait_events_enabled()) {
+            u_sess->statement_cxt.enable_wait_events_bitmap = true;
+            instr_stmt_copy_wait_events();
+        }
     }
 }
 
@@ -314,6 +349,13 @@ static void print_stmt_detail_lock_debug_log(int log_level)
     }
 }
 
+static void print_stmt_wait_event_log(int log_level)
+{
+    ereport(log_level, (errmodule(MOD_INSTR), errmsg("8, ----Events Information Area----")));
+    ereport(log_level, (errmodule(MOD_INSTR),
+        errmsg("\t wait events count: %d", bms_num_members(CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap))));
+}
+
 static void print_stmt_debug_log()
 {
     int log_level = DEBUG2;
@@ -327,6 +369,7 @@ static void print_stmt_debug_log()
     print_stmt_net_debug_log(log_level);
     print_stmt_summary_lock_debug_log(log_level);
     print_stmt_detail_lock_debug_log(log_level);
+    print_stmt_wait_event_log(log_level);
 }
 
 /* put current handle to suspend list */
@@ -335,6 +378,9 @@ void statement_commit_metirc_context()
     CHECK_STMT_HANDLE();
 
     instr_stmt_report_stat_at_handle_commit();
+
+    instr_stmt_diff_wait_events();
+    u_sess->statement_cxt.enable_wait_events_bitmap = false;
     print_stmt_debug_log();
 
     (void)syscalllockAcquire(&u_sess->statement_cxt.list_protect);
