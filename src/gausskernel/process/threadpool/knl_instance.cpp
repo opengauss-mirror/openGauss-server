@@ -341,6 +341,14 @@ static void InitHotkeyResources(knl_g_stat_context* stat_cxt)
     stat_cxt->lru->Init();
     stat_cxt->fifo = NIL;
 }
+static void InitStbyStmtHist(knl_g_stat_context* stat_cxt)
+{
+    MemFileChainCreateParam param = {0};
+    param.notInit = true;
+    param.parent = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX);
+    stat_cxt->stbyStmtHistFast = MemFileChainCreate(&param);
+    stat_cxt->stbyStmtHistSlow = MemFileChainCreate(&param);
+}
 
 static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
 {
@@ -351,6 +359,8 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
 
     stat_cxt->UniqueSqlContext = NULL;
     stat_cxt->UniqueSQLHashtbl = NULL;
+    stat_cxt->stbyStmtHistFast = NULL;
+    stat_cxt->stbyStmtHistSlow = NULL;
     stat_cxt->InstrUserHTAB = NULL;
     stat_cxt->calculate_on_other_cn = false;
     stat_cxt->force_process = false;
@@ -385,6 +395,7 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
     (void)pthread_rwlock_init(&(stat_cxt->track_memory_lock), &attr);
     
     InitHotkeyResources(stat_cxt);
+    InitStbyStmtHist(stat_cxt);
 }
 
 static void knl_g_pid_init(knl_g_pid_context* pid_cxt)

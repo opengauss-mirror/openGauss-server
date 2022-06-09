@@ -2811,7 +2811,7 @@ static int ServerLoop(void)
             g_instance.pid_cxt.AshPID = initialize_util_thread(ASH_WORKER);
 
         /* If we have lost the full sql flush thread, try to start a new one */
-        if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0 && pmState == PM_RUN)
+        if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY))
             g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
         if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && g_instance.pid_cxt.PercentilePID == 0 &&

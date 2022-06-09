@@ -114,6 +114,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of partions the global sequence hashtable */
 #define NUM_GS_PARTITIONS 1024
 
+/* Number of standby statement hsitory needed */
+#define NUM_STANDBY_STMTHIST_PARTITIONS 2
+
 #ifdef WIN32
 #define NUM_INDIVIDUAL_LWLOCKS           103
 #endif
@@ -149,9 +152,10 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define FirstMPFLLock (FirstNormalizedSqlLock + NUM_NORMALIZED_SQL_PARTITIONS)
 #define FirstNGroupMappingLock (FirstMPFLLock + NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS)
 #define FirstIOStatLock (FirstNGroupMappingLock + NUM_NGROUP_INFO_PARTITIONS)
+#define FirstStandbyStmtHistLock (FirstIOStatLock + NUM_IO_STAT_PARTITIONS)
 
 /* must be last: */
-#define NumFixedLWLocks (FirstIOStatLock + NUM_IO_STAT_PARTITIONS)
+#define NumFixedLWLocks (FirstStandbyStmtHistLock + NUM_STANDBY_STMTHIST_PARTITIONS)
 
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
@@ -207,6 +211,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_NGROUP_MAPPING,    
     LWTRANCHE_MATVIEW_SEQNO,
     LWTRANCHE_IO_STAT,
+    LWTRANCHE_STANDBY_STMTHIST,
     LWTRANCHE_WAL_FLUSH_WAIT,
     LWTRANCHE_WAL_BUFFER_INIT_WAIT,
     LWTRANCHE_WAL_INIT_SEGMENT,

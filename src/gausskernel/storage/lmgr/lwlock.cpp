@@ -169,6 +169,7 @@ static const char *BuiltinTrancheNames[] = {
     "NGroupMappingLock",
     "MatviewSeqnoLock",
     "IOStatLock",
+    "StandbyStmtHistLock",
     "WALFlushWait",
     "WALBufferInitWait",
     "WALInitSegment"
@@ -567,6 +568,10 @@ static void InitializeLWLocks(int numLocks)
 
     for (id = 0; id < NUM_IO_STAT_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_IO_STAT);
+    }
+
+    for (id = 0; id < NUM_STANDBY_STMTHIST_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_STANDBY_STMTHIST);
     }
 
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);

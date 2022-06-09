@@ -1873,6 +1873,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3114 | nth_value
  3116 | fdw_handler_in
  3117 | fdw_handler_out
+ 3118 | standby_statement_history
+ 3119 | standby_statement_history
  3120 | void_recv
  3121 | void_send
  3122 | oidvectorrecv_extend
