@@ -2273,22 +2273,16 @@ void instr_stmt_set_wait_events_bitmap(uint32 class_id, uint32 event_id)
         return;
 
     int32 bms_event_idx = -1;
+    bms_event_idx = get_wait_events_idx_in_bms(class_id, event_id);
+    if (bms_event_idx == -1) {
+        return;
+    }
     /* 1, after session BMS inited, we always mark events in BMS */
     if (u_sess->statement_cxt.is_session_bms_active) {
-        bms_event_idx = get_wait_events_idx_in_bms(class_id, event_id);
-        if (bms_event_idx == -1) {
-            return;
-        }
         instr_stmt_set_wait_events_in_session_bms(bms_event_idx);
     }
 
     /* 2, for statement in handle, mark delta events in handle BMS */
-    if (bms_event_idx == -1) {
-        bms_event_idx = get_wait_events_idx_in_bms(class_id, event_id);
-        if (bms_event_idx == -1) {
-            return;
-        }
-    }
     instr_stmt_set_wait_events_in_handle_bms(bms_event_idx);
 }
 
