@@ -328,6 +328,8 @@ Datum array_in(PG_FUNCTION_ARGS)
 
     /* This checks for overflow of the array dimensions */
     nitems = ArrayGetNItems(ndim, dim);
+    ArrayCheckBounds(ndim, dim, lBound);
+
     /* Empty array? */
     if (nitems == 0)
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(element_type));
@@ -1224,21 +1226,11 @@ Datum array_recv(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                     errmsg("array size cannot be negative.")));
         }
-
-        /*
-         * Check overflow of upper bound. (ArrayNItems() below checks that
-         * dim[i] >= 0)
-         */
-        if (dim[i] != 0) {
-            int ub = lBound[i] + dim[i] - 1;
-
-            if (lBound[i] > ub)
-                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
-        }
     }
 
     /* This checks for overflow of array dimensions */
     nitems = ArrayGetNItems(ndim, dim);
+    ArrayCheckBounds(ndim, dim, lBound);
 
     /*
      * We arrange to look up info about element type, including its receive
@@ -2944,7 +2936,7 @@ ArrayType* array_set(ArrayType* array, int nSubscripts, const int* indx, Datum d
         if (nSubscripts != 1)
             ereport(ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("wrong number of array subscripts")));
 
-        if (indx[0] < 0 || indx[0] * elmlen >= arraytyplen)
+        if (indx[0] < 0 || elmlen == 0 || indx[0] >= arraytyplen / elmlen)
             ereport(ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("array subscript out of range")));
 
         if (isNull)
@@ -3034,6 +3026,8 @@ ArrayType* array_set(ArrayType* array, int nSubscripts, const int* indx, Datum d
      * Compute sizes of items and areas to copy
      */
     newnitems = ArrayGetNItems(ndim, dim);
+    ArrayCheckBounds(ndim, dim, lb);
+
     if (newhasnulls)
         overheadlen = ARR_OVERHEAD_WITHNULLS(ndim, newnitems);
     else
@@ -3284,6 +3278,7 @@ ArrayType* array_set_slice(ArrayType* array, int nSubscripts, int* upperIndx, in
 
     /* Do this mainly to check for overflow */
     nitems = ArrayGetNItems(ndim, dim);
+    ArrayCheckBounds(ndim, dim, lb);
 
     /*
      * Make sure source array has enough entries.  Note we ignore the shape of
@@ -3694,7 +3689,8 @@ ArrayType* construct_md_array(Datum* elems, bool* nulls, int ndims, int* dims, c
         return construct_empty_array(elmtype);
 
     nelems = ArrayGetNItems(ndims, dims);
-
+    ArrayCheckBounds(ndims, dims, lbs);
+    
     /* compute required space */
     nbytes = 0;
     hasnulls = false;
@@ -5455,6 +5451,7 @@ static ArrayType* array_fill_internal(
         return construct_empty_array(elmtype);
 
     nitems = ArrayGetNItems(ndims, dimv);
+    ArrayCheckBounds(ndims, dimv, lbsv);
 
     /*
      * We arrange to look up info about element type only once per series of
