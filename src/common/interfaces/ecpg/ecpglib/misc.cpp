@@ -39,8 +39,8 @@ static struct sqlca_t sqlca_init = {{'S', 'Q', 'L', 'C', 'A', ' ', ' ', ' '},
     {'0', '0', '0', '0', '0'}};
 
 #ifdef ENABLE_THREAD_SAFETY
-static THR_LOCAL pthread_key_t sqlca_key;
-static THR_LOCAL pthread_once_t sqlca_key_once = PTHREAD_ONCE_INIT;
+static pthread_key_t sqlca_key;
+static pthread_once_t sqlca_key_once = PTHREAD_ONCE_INIT;
 #else
 static struct sqlca_t sqlca = {{'S', 'Q', 'L', 'C', 'A', ' ', ' ', ' '},
     sizeof(struct sqlca_t),
@@ -53,11 +53,11 @@ static struct sqlca_t sqlca = {{'S', 'Q', 'L', 'C', 'A', ' ', ' ', ' '},
 #endif
 
 #ifdef ENABLE_THREAD_SAFETY
-static THR_LOCAL pthread_mutex_t debug_mutex = PTHREAD_MUTEX_INITIALIZER;
-static THR_LOCAL pthread_mutex_t debug_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t debug_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t debug_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
-static THR_LOCAL int simple_debug = 0;
-static THR_LOCAL FILE* debugstream = NULL;
+static int simple_debug = 0;
+static FILE* debugstream = NULL;
 
 void ecpg_init_sqlca(struct sqlca_t* sqlca)
 {

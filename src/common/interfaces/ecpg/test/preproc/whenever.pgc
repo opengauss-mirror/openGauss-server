@@ -43,7 +43,7 @@ int main(void)
 	exec sql select * into :i from nonexistant;
 	exec sql rollback;
 
-	exec sql whenever sqlerror ecpgcall print2();
+	exec sql whenever sqlerror call print2();
 	exec sql select * into :i from nonexistant;
 	exec sql rollback;
 

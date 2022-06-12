@@ -31,7 +31,6 @@ my ($stmt_mode, @fields);
 my ($line,      $non_term_id);
 
 
-# 哈希变量 key => values
 # some token have to be replaced by other symbols
 # either in the rule
 my %replace_token = (
@@ -52,10 +51,10 @@ my %replace_string = (
 	'SUBPARTITION_FOR'   => 'subpartition for',
 	'ADD_PARTITION'   => 'add partition',
 	'DROP_PARTITION'   => 'drop partition',
-	'DROP_SUBPARTITION'   => 'drop subpartition',
 	'REBUILD_PARTITION'   => 'rebuild partition',
 	'MODIFY_PARTITION'   => 'modify partition',
-	'MODIFY_SUBPARTITION'   => 'modify subpartition',
+	'ADD_SUBPARTITION'   => 'add subpartition',
+	'DROP_SUBPARTITION'   => 'drop subpartition',
 	'TYPECAST'     => '::',
 	'DOT_DOT'      => '..',
 	'COLON_EQUALS' => ':=',);
@@ -137,9 +136,6 @@ dump_buffer('rules');
 include_file('trailer', 'ecpg.trailer');
 dump_buffer('trailer');
 
-# 以参数为文件读取即gram.y文件，读取gram.y文件中的types和tokens，分别以types、orig_tokens为key，
-# 添加到哈希变量%buff中，并结合哈希变量%addons以rules为key把规则添加到哈希变量%buff中；
-# 加载ecpg.tokens、ecpg.header、ecpg.type文件，分别以tokens、header、ecpgtype为key，添加到哈希变量%buff中
 sub main
 {
   line: while (<>)
@@ -435,7 +431,6 @@ sub main
 	}
 }
 
-# 读取第二个参数文件，以第一个参数为key，添加到哈希变量%buff中
 # append a file onto a buffer.
 # Arguments:  buffer_name, filename (without path)
 sub include_file
@@ -474,7 +469,6 @@ sub include_addon
 
 	if ($rec->{type} eq 'addon')
 	{
-	    # add_to_buffer('rules', $str)函数以'rules'为key，添加到哈希变量%buff中
 		dump_fields($stmt_mode, $fields, '');
 	}
 
@@ -485,7 +479,6 @@ sub include_addon
 }
 
 
-# 以第一个参数为key，第二个参数为values，写入哈希变量buff中
 # include_addon does this same thing, but does not call this
 # sub... so if you change this, you need to fix include_addon too
 #   Pass:  buffer_name, string_to_append
@@ -494,7 +487,6 @@ sub add_to_buffer
 	push(@{ $buff{ $_[0] } }, "$_[1]\n");
 }
 
-#这个函数以参数为key打印出哈希变量%buff中参数的values，输出到preproc.y文件中
 sub dump_buffer
 {
 	my ($buffer) = @_;
@@ -502,7 +494,6 @@ sub dump_buffer
 	my $ref = $buff{$buffer};
 	print @$ref;
 }
-
 
 sub dump_fields
 {
@@ -649,7 +640,6 @@ sub dump_line
 
 =cut
 
-#读取文件ecpg.addons，并把ecpg.addons文件信息加入到哈希变量addons中
 sub preload_addons
 {
 	my $filename = $path . "/ecpg.addons";

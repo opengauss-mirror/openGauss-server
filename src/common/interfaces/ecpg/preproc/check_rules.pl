@@ -53,7 +53,8 @@ my $comment     = 0;
 my $non_term_id = '';
 my $cc          = 0;
 
-#读取gram.y文件，把该文件中的规则部分(即%%分割的第二部分)，以模式为key存放到哈希变量%found中
+# Read the gram. Y file and store the rule part of the file (the second 
+# part of the %% split) in the hash variable %found
 open GRAM, $parser or die $!;
 while (<GRAM>)
 {
@@ -155,7 +156,9 @@ if ($verbose)
 my $ret = 0;
 $cc = 0;
 
-#读取ecpg.addons文件，匹配ECPG:格式，匹配到的以空格分成三段，用第二段在哈希变量%found中查找，如果存在则检查通过，如果不存在则检查不通过
+# Read the ecpg. Addons file and match the ecpg: format, split the matching into three segments
+# with Spaces, use the second segment to search the hash variable %found, if it exists, the check
+# passes, if it does not exist, the check fails
 open ECPG, $filename or die $!;
 while (<ECPG>)
 {

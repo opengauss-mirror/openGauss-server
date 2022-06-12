@@ -89,11 +89,5 @@ check: all
 	$(MKDIR_P) ./log
 	test -d $(HOME)/memchk/asan || mkdir -p $(HOME)/memchk/asan
 	test -e $(HOME)/memchk/memleak_ignore || touch $(HOME)/memchk/memleak_ignore
-	${pg_mem_check} && ./pg_regress $(REGRESS_OPTS) --top-builddir=$(top_builddir) --single_node -d 1 -c 0 -r 1 -p 57436 -b ./tmp_check -n  $(pg_regress_locale_flags) $(THREAD)  -w --keep_last_data=false  --temp-config=$(srcdir)/make_connect.conf --schedule=$(srcdir)/ecpg_schedule --regconf=regress.conf 
+	${pg_mem_check} && ./pg_regress $(REGRESS_OPTS) --top-builddir=$(top_builddir) --single_node -d 1 -c 0 -r 1 -p 57436 -b ./tmp_check -n  $(pg_regress_locale_flags) $(THREAD)  -w --keep_last_data=false  --temp-config=$(srcdir)/make_connect.conf --schedule=$(srcdir)/ecpg_schedule --regconf=regress.conf --ecpg
 
-# the same options, but with --listen-on-tcp
-checktcp: all
-	./pg_regress $(REGRESS_OPTS) --top-builddir=$(top_builddir) --temp-install=./tmp_check $(pg_regress_locale_flags) $(THREAD) --schedule=$(srcdir)/ecpg_schedule_tcp --host=localhost
-
-installcheck: all
-	./pg_regress $(REGRESS_OPTS) --psqldir='$(PSQLDIR)' --top-builddir=$(top_builddir) $(pg_regress_locale_flags) $(THREAD) --schedule=$(srcdir)/ecpg_schedule

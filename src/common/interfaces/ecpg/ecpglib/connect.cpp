@@ -11,12 +11,12 @@
 #include "sqlca.h"
 
 #ifdef ENABLE_THREAD_SAFETY
-static THR_LOCAL pthread_mutex_t connections_mutex = PTHREAD_MUTEX_INITIALIZER;
-static THR_LOCAL pthread_key_t actual_connection_key;
-static THR_LOCAL pthread_once_t actual_connection_key_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t connections_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_key_t actual_connection_key;
+static pthread_once_t actual_connection_key_once = PTHREAD_ONCE_INIT;
 #endif
-static THR_LOCAL struct connection* actual_connection = NULL;
-static THR_LOCAL struct connection* all_connections = NULL;
+static struct connection* actual_connection = NULL;
+static struct connection* all_connections = NULL;
 
 #ifdef ENABLE_THREAD_SAFETY
 static void ecpg_actual_connection_init(void)

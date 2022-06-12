@@ -627,7 +627,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 						 * Note that slash-star or dash-dash at the first
 						 * character will match a prior rule, not this one.
 						 */
-						unsigned int		nchars = yyleng;
+						size_t		nchars = yyleng;
 						char   *slashstar = strstr(yytext, "/*");
 						char   *dashdash = strstr(yytext, "--");
 
@@ -666,7 +666,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 							nchars--; /* else remove the +/-, and check again */
 						}
 
-						if (nchars < yyleng)
+						if (nchars < (size_t)yyleng)
 						{
 							/* Strip the unwanted chars from the token */
 							yyless(nchars);
@@ -907,7 +907,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 					}
 <undef>{identifier}{space}*";" {
 					struct _defines *ptr, *ptr2 = NULL;
-					int i;
+					size_t i;
 
 					/*
 					 *	Skip the ";" and trailing whitespace. Note that yytext
@@ -1095,7 +1095,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 					else
 					{
 						struct _defines *defptr;
-						unsigned int i;
+						size_t i;
 
 						/*
 						 *	Skip the ";" and trailing whitespace. Note that yytext
@@ -1183,7 +1183,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 					else
 					{
 						struct _yy_buffer *yb = yy_buffer;
-						int i;
+						size_t i;
 						struct _defines *ptr;
 
 						for (ptr = defines; ptr; ptr = ptr->next)

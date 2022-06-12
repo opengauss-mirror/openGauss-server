@@ -20,8 +20,8 @@ static void descriptor_free(struct descriptor* desc);
 
 /* We manage descriptors separately for each thread. */
 #ifdef ENABLE_THREAD_SAFETY
-static THR_LOCAL pthread_key_t descriptor_key;
-static THR_LOCAL pthread_once_t descriptor_once = PTHREAD_ONCE_INIT;
+static pthread_key_t descriptor_key;
+static pthread_once_t descriptor_once = PTHREAD_ONCE_INIT;
 
 static void descriptor_deallocate_all(struct descriptor* list);
 

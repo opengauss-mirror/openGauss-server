@@ -21,10 +21,10 @@ typedef struct {
     const char* connection; /* connection for the statement		*/
 } stmtCacheEntry;
 
-static THR_LOCAL int nextStmtID = 1;
+static int nextStmtID = 1;
 static const int stmtCacheNBuckets = 2039;  /* # buckets - a prime # */
 static const int stmtCacheEntPerBucket = 8; /* # entries/bucket		*/
-static THR_LOCAL stmtCacheEntry stmtCacheEntries[16384] = {{0, {0}, 0, 0, 0}};
+static stmtCacheEntry stmtCacheEntries[16384] = {{0, {0}, 0, 0, 0}};
 
 static bool deallocate_one(int lineno, enum COMPAT_MODE c, struct connection* con, struct prepared_statement* prev,
     struct prepared_statement* thisPtr);

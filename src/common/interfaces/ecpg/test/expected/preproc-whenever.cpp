@@ -153,7 +153,7 @@ if (sqlca.sqlcode < 0) print ( "select" );}
 #line 44 "whenever.pgc"
 
 
-	/* exec sql whenever sqlerror  ecpgcall print2 ( ) ; */
+	/* exec sql whenever sqlerror  call print2 ( ) ; */
 #line 46 "whenever.pgc"
 
 	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "select * from nonexistant", ECPGt_EOIT, 

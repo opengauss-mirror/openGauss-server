@@ -459,6 +459,7 @@ static char* platform = "euleros2.0_sp2_x86_64";
 
 /* client logic jdbc run regression tests */
 static bool use_jdbc_client = false;
+static bool use_ecpg = false;
 static bool to_create_jdbc_user = false;
 static bool is_skip_environment_cleanup = false;
 static char* client_logic_hook = "encryption";
@@ -5382,10 +5383,19 @@ static void create_database(const char* dbname)
     }
 }
 
-static void create_role(const char* rolename, const _stringlist* granted_dbs)
+static void create_role_ecpg(const char* rolename, const _stringlist* granted_dbs)
 {
     header(_("creating role \"%s\""), rolename);
     psql_command("postgres", "CREATE ROLE \"%s\" WITH LOGIN PASSWORD 'connectpw@123'", rolename);
+    for (; granted_dbs != NULL; granted_dbs = granted_dbs->next) {
+        psql_command("postgres", "GRANT ALL ON DATABASE \"%s\" TO \"%s\"", granted_dbs->str, rolename);
+    }
+}
+
+static void create_role(const char* rolename, const _stringlist* granted_dbs)
+{
+    header(_("creating role \"%s\""), rolename);
+    psql_command("postgres", "CREATE ROLE \"%s\" WITH LOGIN", rolename);
     for (; granted_dbs != NULL; granted_dbs = granted_dbs->next) {
         psql_command("postgres", "GRANT ALL ON DATABASE \"%s\" TO \"%s\"", granted_dbs->str, rolename);
     }
@@ -5466,6 +5476,7 @@ static void help(void)
     printf(_("  --psqldir=DIR             use gsql in DIR (default: find in PATH)\n"));
     printf(_("  --enable-segment          create table default with segment=on"));
     printf(_("  --jdbc          enable jdbc regression test"));
+    printf(_("  --ecpg          enable ecpg regression test"));
     printf(_("\n"));
     printf(_("The exit status is 0 if all tests passed, 1 if some tests failed, and 2\n"));
     printf(_("if the tests could not be run for some reason.\n"));
@@ -6361,6 +6372,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         {"client_logic_hook", required_argument, NULL, 59},
         {"jdbc", no_argument, NULL, 60},
         {"skip_environment_cleanup", no_argument, NULL, 61},
+        {"ecpg", no_argument, NULL, 62},
         {NULL, 0, NULL, 0}
     };
 
@@ -6641,6 +6653,10 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 61:
                 is_skip_environment_cleanup = true;
+                break;
+            case 62:
+                printf("\n starting with ecpg\n");
+                use_ecpg = true;
                 break;
             default:
                 /* getopt_long already emitted a complaint */
@@ -7189,7 +7205,10 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 create_jdbc_user(dblist);
             }
             for (ssl = extraroles; ssl; ssl = ssl->next) {
-                create_role(ssl->str, dblist);
+                if (use_ecpg)
+                    create_role_ecpg(ssl->str, dblist);
+                else
+                    create_role(ssl->str, dblist);
             }
         }
 

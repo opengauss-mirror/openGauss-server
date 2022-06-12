@@ -1453,13 +1453,13 @@ action : CONTINUE_P
 		{
 			$<action>$.code = W_DO;
 			$<action>$.command = cat_str(4, $2, mm_strdup("("), $4, mm_strdup(")"));
-			$<action>$.str = cat2_str(mm_strdup("ecpgcall"), mm_strdup($<action>$.command));
+			$<action>$.str = cat2_str(mm_strdup("call"), mm_strdup($<action>$.command));
 		}
 		| SQL_CALL name
 		{
 			$<action>$.code = W_DO;
 			$<action>$.command = cat2_str($2, mm_strdup("()"));
-			$<action>$.str = cat2_str(mm_strdup("ecpgcall"), mm_strdup($<action>$.command));
+			$<action>$.str = cat2_str(mm_strdup("call"), mm_strdup($<action>$.command));
 		}
 		;
 
@@ -1471,7 +1471,7 @@ ECPGKeywords: ECPGKeywords_vanames	{ $$ = $1; }
 		;
 
 ECPGKeywords_vanames:  SQL_BREAK		{ $$ = mm_strdup("break"); }
-		| SQL_CALL						{ $$ = mm_strdup("ecpgcall"); }
+		| SQL_CALL						{ $$ = mm_strdup("call"); }
 		| SQL_CARDINALITY				{ $$ = mm_strdup("cardinality"); }
 		| SQL_COUNT						{ $$ = mm_strdup("count"); }
 		| SQL_DATETIME_INTERVAL_CODE	{ $$ = mm_strdup("datetime_interval_code"); }
@@ -1479,7 +1479,7 @@ ECPGKeywords_vanames:  SQL_BREAK		{ $$ = mm_strdup("break"); }
 		| SQL_FOUND						{ $$ = mm_strdup("found"); }
 		| SQL_GO						{ $$ = mm_strdup("go"); }
 		| SQL_GOTO						{ $$ = mm_strdup("goto"); }
-		| SQL_IDENTIFIED				{ $$ = mm_strdup("ecpgidentified"); }
+		| SQL_IDENTIFIED				{ $$ = mm_strdup("identified"); }
 		| SQL_INDICATOR				{ $$ = mm_strdup("indicator"); }
 		| SQL_KEY_MEMBER			{ $$ = mm_strdup("key_member"); }
 		| SQL_LENGTH				{ $$ = mm_strdup("length"); }

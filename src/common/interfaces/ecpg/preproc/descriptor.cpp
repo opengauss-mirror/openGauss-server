@@ -15,7 +15,7 @@
  * assignment handling function (descriptor)
  */
 
-static THR_LOCAL struct assignment* assignments;
+static struct assignment* assignments;
 
 void push_assignment(char* var, enum ECPGdtype value)
 {
