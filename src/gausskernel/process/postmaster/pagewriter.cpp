@@ -1214,12 +1214,14 @@ static void HandlePageWriterExit() {
     /* Let the pagewriter sub thread exit, then main pagewriter thread exits */
     if (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
         g_instance.ckpt_cxt_ctl->page_writer_sub_can_exit = true;
-	pg_write_barrier();
+        pg_write_barrier();
 
-	/* Wake up the sub thread to exit*/
-	wakeup_sub_thread();
-	/*Wait until all the sub pagewriter thread exit then */
-	while (true) {
+        ereport(LOG,
+            (errmodule(MOD_INCRE_CKPT),
+                errmsg("waiting all the pagewriter sub threads to exit")));
+
+        /* Wait until all the sub pagewriter thread exit then */
+        while (true) {
             if (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) == 1) {
                 ereport(LOG,
                     (errmodule(MOD_INCRE_CKPT),
@@ -1233,8 +1235,10 @@ static void HandlePageWriterExit() {
                 /* Normal exit from the pagewriter is here */
                 proc_exit(0); /* done */
             }
-	    pg_usleep(MILLISECOND_TO_MICROSECOND);
-	}
+            pg_usleep(MILLISECOND_TO_MICROSECOND);
+        }
+
+        ereport(LOG, (errmodule(MOD_INCRE_CKPT), errmsg("all the pagewriter threads exit")));
     }
 }
 
