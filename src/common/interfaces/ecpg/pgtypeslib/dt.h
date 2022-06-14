@@ -362,7 +362,6 @@ void dt2time(double, int*, int*, int*, fsec_t*);
 int PGTYPEStimestamp_defmt_scan(
     char** str, char* fmt, timestamp* d, int* year, int* month, int* day, int* hour, int* minute, int* second, int* tz);
 
-
 extern char* pgtypes_date_weekdays_short[];
 extern char* pgtypes_date_months[];
 extern char* months[];
