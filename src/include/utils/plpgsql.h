@@ -1748,6 +1748,11 @@ typedef struct PackageRuntimeState {
     int size;
 } PackageRuntimeState;
 
+typedef struct VarName{
+    char *name;
+    int  lineno;
+} VarName;
+
 typedef struct AutoSessionFuncValInfo {
     bool found;
     int sql_cursor_found;
