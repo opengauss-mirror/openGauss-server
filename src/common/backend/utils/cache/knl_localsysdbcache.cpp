@@ -34,7 +34,7 @@
 #include "utils/relfilenodemap.h"
 #include "postmaster/bgworker.h"
 #include "storage/lmgr.h"
-#ifdef USE_ASSERT_CHECKING
+#if defined(USE_ASSERT_CHECKING) && !defined(ENABLE_MEMORY_CHECK)
 class LSCCloseCheck {
 public:
     LSCCloseCheck()
@@ -225,11 +225,9 @@ void CreateLocalSysDBCache()
     if (!t_thrd.lsc_cxt.enable_lsc) {
         t_thrd.lsc_cxt.FetchTupleFromCatCList = GetTupleFromSessCatList;
         t_thrd.lsc_cxt.lsc->is_closed = true;
-#ifdef USE_ASSERT_CHECKING
+#if defined(USE_ASSERT_CHECKING) && !defined(ENABLE_MEMORY_CHECK)
         lsc_close_check.setCloseFlag(true);
-#endif
     } else {
-#ifdef USE_ASSERT_CHECKING
         lsc_close_check.setCloseFlag(false);
 #endif
     }
@@ -722,7 +720,7 @@ void LocalSysDBCache::CloseLocalSysDBCache()
     LocalSysDBCacheReleaseCritialReSource(true);
     is_inited = false;
     is_closed = true;
-#ifdef USE_ASSERT_CHECKING
+#if defined(USE_ASSERT_CHECKING) && !defined(ENABLE_MEMORY_CHECK)
     lsc_close_check.setCloseFlag(true);
 #endif
 }
@@ -973,7 +971,7 @@ LocalSysDBCache::LocalSysDBCache()
     is_lsc_catbucket_created = false;
     is_closed = false;
     is_inited = false;
-#ifdef USE_ASSERT_CHECKING
+#if defined(USE_ASSERT_CHECKING) && !defined(ENABLE_MEMORY_CHECK)
     lsc_close_check.setCloseFlag(false);
 #endif
 }
