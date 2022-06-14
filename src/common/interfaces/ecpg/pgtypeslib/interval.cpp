@@ -317,8 +317,8 @@ static int DecodeISO8601Interval(char* str, int* dtype, struct /* pg_ */ tm* tm,
  *
  *	* Assert wasn't available so removed it.
  */
-int DecodeInterval(char** field, const int* ftype, int nf, /* int range, */
-    int* dtype, struct /* pg_ */ tm* tm, fsec_t* fsec)
+int DecodeInterval2(char** field, const int* ftype, int nf,
+    int* dtype, struct tm* tm, fsec_t* fsec)
 {
     int IntervalStyle = INTSTYLE_POSTGRES_VERBOSE;
     int range = INTERVAL_FULL_RANGE;
@@ -1006,7 +1006,7 @@ interval* PGTYPESinterval_from_asc(char* str, char** endptr)
     }
 
     if (ParseDateTime(str, lowstr, field, ftype, &nf, ptr) != 0 ||
-        (DecodeInterval(field, ftype, nf, &dtype, tm, &fsec) != 0 &&
+        (DecodeInterval2(field, ftype, nf, &dtype, tm, &fsec) != 0 &&
             DecodeISO8601Interval(str, &dtype, tm, &fsec) != 0)) {
         errno = PGTYPES_INTVL_BAD_INTERVAL;
         return NULL;

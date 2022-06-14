@@ -100,8 +100,9 @@ void drop_descriptor(char* name, char* connection)
             if ((!connection && !i->connection) ||
                 (connection && i->connection && strcmp(connection, i->connection) == 0)) {
                 *lastptr = i->next;
-                if (i->connection)
+                if (i->connection) {
                     free_current_memory(i->connection);
+                }
                 free_current_memory(i->name);
                 free_current_memory(i);
                 return;

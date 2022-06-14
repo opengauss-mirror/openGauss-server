@@ -437,8 +437,9 @@ void dump_variables(struct arguments* list, int mode)
         NULL);
 
     /* Then release the list element. */
-    if (mode != 0)
+    if (mode != 0) {
         free_current_memory(list);
+    }
 }
 
 void check_indicator(struct ECPGtype* var)

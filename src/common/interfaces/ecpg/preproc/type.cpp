@@ -1,7 +1,7 @@
 /* src/interfaces/ecpg/preproc/type.c */
 
 #include "postgres_fe.h"
-
+#include "type.h"
 #include "extern.h"
 
 #define indicator_set ind_type != NULL && ind_type->type != ECPGt_NO_INDICATOR
@@ -15,7 +15,6 @@ void insert_current_memory(void *ptr)
 {
     if (ptr == NULL)
         return;
-    //printf("insert ptr =%p\n", ptr);
     struct Current_memory *pcm = (struct Current_memory *)malloc(sizeof(struct Current_memory));
 
     pcm->p = ptr;
@@ -28,22 +27,18 @@ void insert_current_memory(void *ptr)
 
 void free_current_memory(void *ptr)
 {
-    if(ptr == NULL)
+    if (ptr == NULL)
         return;
-
-    //printf("free ptr =%p\n", ptr);
     struct Current_memory *pcm = Currentmemoryused;
     struct Current_memory *pfront = NULL;
-    while(pcm)
-    {
-        if(pcm->p == ptr)
-        {
-            if(pfront)
+    while (pcm) {
+        if (pcm->p == ptr) {
+            if (pfront)
                 pfront->next = pcm->next;
             else
                Currentmemoryused = pcm->next;
 
-            if(pcm->p)
+            if (pcm->p)
                 free(pcm->p);
             free(pcm);
 
@@ -55,8 +50,7 @@ void free_current_memory(void *ptr)
     }
 
     pcm = Currentmemoryused;
-    while(pcm)
-    {
+    while (pcm) {
         printf("Currentmemoryused ptr =%p\n", pcm);
         pcm = pcm->next;
     }
@@ -66,10 +60,7 @@ void free_current_memory(void *ptr)
 void free_current_memory_all()
 {
     struct Current_memory *pcm = Currentmemoryused;
-    while(pcm)
-    {
-        //printf("free_current_memory_all ss num %d, %p\n",Currentmemoryused_num, pcm->p);
-        //fflush(stdout);
+    while (pcm) {
 
         struct Current_memory *pfree = pcm;
         pcm = pcm->next;
@@ -80,8 +71,6 @@ void free_current_memory_all()
         --Currentmemoryused_num;
     }
     Currentmemoryused = NULL;
-    //printf("free_current_memory_all num %d\n",Currentmemoryused_num);
-    //fflush(stdout);
 }
 
 /* malloc + error check */
@@ -584,7 +573,7 @@ static void ECPGdump_a_simple(FILE* o, const char* name, enum ECPGttype type, ch
         if (atoi(arrsize) < 0)
             strcpy(arrsize, "1");
 
-        if (siz == NULL || strlen(siz) == 0 )
+        if (siz == NULL || strlen(siz) == 0)
             fprintf(o, "\n\t%s,%s,(long)%s,(long)%s,%s, ", get_type(type), variable, varcharsize, arrsize, offset);
         else
             fprintf(o, "\n\t%s,%s,(long)%s,(long)%s,%s, ", get_type(type), variable, varcharsize, arrsize, siz);
