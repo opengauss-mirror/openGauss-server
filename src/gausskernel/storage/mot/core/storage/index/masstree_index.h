@@ -37,6 +37,7 @@
 #include "masstree/mot_masstree_struct.hpp"
 #include "masstree/mot_masstree_iterator.hpp"
 #include <cmath>
+#include "mot_engine.h"
 
 namespace MOT {
 /**
@@ -302,11 +303,38 @@ public:
     /**
      * @brief Print Masstree pools memory consumption details to log.
      */
-    virtual void PrintPoolsStats()
+    virtual void PrintPoolsStats(LogLevel level = LogLevel::LL_DEBUG)
     {
-        m_leafsPool->Print("Leafs pool: ");
-        m_internodesPool->Print("Internode pool: ");
-        m_ksuffixSlab->Print("Ksuffix slab: ");
+        m_leafsPool->Print("Leafs pool", level);
+        m_internodesPool->Print("Internode pool", level);
+        m_ksuffixSlab->Print("Ksuffix slab", level);
+    }
+
+    virtual void GetLeafsPoolStats(uint64_t& objSize, uint64_t& numUsedObj, uint64_t& totalSize, uint64_t& netto)
+    {
+        PoolStatsSt stats = {};
+        m_leafsPool->GetStats(stats);
+
+        objSize = stats.m_objSize;
+        numUsedObj = stats.m_totalObjCount - stats.m_freeObjCount;
+        totalSize = stats.m_poolCount * stats.m_poolGrossSize;
+        netto = numUsedObj * objSize;
+    }
+
+    virtual void GetInternodesPoolStats(uint64_t& objSize, uint64_t& numUsedObj, uint64_t& totalSize, uint64_t& netto)
+    {
+        PoolStatsSt stats = {};
+        m_internodesPool->GetStats(stats);
+
+        objSize = stats.m_objSize;
+        numUsedObj = stats.m_totalObjCount - stats.m_freeObjCount;
+        totalSize = stats.m_poolCount * stats.m_poolGrossSize;
+        netto = numUsedObj * objSize;
+    }
+
+    virtual PoolStatsSt* GetKsuffixSlabStats()
+    {
+        return m_ksuffixSlab->GetStats();
     }
 
     /**
@@ -316,6 +344,8 @@ public:
     {
         m_initialized = false;
         DestroyPools();
+        // remove masstree's root pointer (not valid anymore)
+        *(m_index.root_ref()) = nullptr;
 
         return IndexInitImpl(NULL);
     }
@@ -332,7 +362,7 @@ public:
      * @param tag Hint to determine which pool to use.
      * @return Pointer to allocated memory.
      */
-    void* AllocateMem(int& size, enum memtag tag)
+    virtual void* AllocateMem(int& size, enum memtag tag)
     {
         switch (tag) {
             case memtag_masstree_leaf:
@@ -360,7 +390,7 @@ public:
      * @param Pointer to allocated memory.
      * @return True if deallocation succeeded.
      */
-    bool DeallocateMem(void* ptr, int size, enum memtag tag)
+    virtual bool DeallocateMem(void* ptr, int size, enum memtag tag)
     {
         switch (tag) {
             case memtag_masstree_leaf:
@@ -431,10 +461,16 @@ public:
     {
         // If dropIndex == true, all index's pools are going to be cleaned, so we skip the release here
         mtSessionThreadInfo->set_gc_session(GetCurrentGcSession());
+        GcEpochType local_epoch =
+            GetSessionManager()->GetCurrentSessionContext()->GetTxnManager()->GetGcSession()->GcStartInnerTxn();
+
         size_t allocationSize = (*static_cast<mrcu_callback*>(gcRemoveLayerFuncObjPtr))(dropIndex);
+
         if (dropIndex == false) {
             ((SlabAllocator*)slab)->Release(gcRemoveLayerFuncObjPtr, allocationSize);
         }
+
+        GetSessionManager()->GetCurrentSessionContext()->GetTxnManager()->GetGcSession()->GcEndInnerTxn(false);
         mtSessionThreadInfo->set_gc_session(NULL);
         return allocationSize;
     }

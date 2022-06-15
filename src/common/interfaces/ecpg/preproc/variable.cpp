@@ -273,10 +273,10 @@ void remove_typedefs(int brace_level)
                 prev->next = p->next;
 
             if (p->type->type_enum == ECPGt_struct || p->type->type_enum == ECPGt_union)
-                free(p->struct_member_list);
-            free(p->type);
-            free(p->name);
-            free(p);
+                free_current_memory(p->struct_member_list);
+            free_current_memory(p->type);
+            free_current_memory(p->name);
+            free_current_memory(p);
             if (prev == types)
                 p = types;
             else
@@ -327,8 +327,8 @@ void remove_variables(int brace_level)
                 prev->next = p->next;
 
             ECPGfree_type(p->type);
-            free(p->name);
-            free(p);
+            free_current_memory(p->name);
+            free_current_memory(p);
             if (prev == allvariables)
                 p = allvariables;
             else
@@ -437,8 +437,9 @@ void dump_variables(struct arguments* list, int mode)
         NULL);
 
     /* Then release the list element. */
-    if (mode != 0)
-        free(list);
+    if (mode != 0) {
+        free_current_memory(list);
+    }
 }
 
 void check_indicator(struct ECPGtype* var)

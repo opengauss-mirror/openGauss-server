@@ -1,0 +1,37 @@
+<refentry id="sql-alterprocedure">
+ <indexterm zone="sql-alterprocedure">
+  <primary>ALTER PROCEDURE</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle>ALTER PROCEDURE</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>ALTER PROCEDURE</refname>
+  <refpurpose>change the definition of a procedure</refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+<synopsis>
+ALTER PROCEDURE <replaceable>name</replaceable> [ ( [ [ <replaceable class="parameter">argmode</replaceable> ] [ <replaceable class="parameter">argname</replaceable> ] <replaceable class="parameter">argtype</replaceable> [, ...] ] ) ]
+    <replaceable class="parameter">action</replaceable> [ ... ] [ RESTRICT ]
+ALTER PROCEDURE <replaceable>name</replaceable> [ ( [ [ <replaceable class="parameter">argmode</replaceable> ] [ <replaceable class="parameter">argname</replaceable> ] <replaceable class="parameter">argtype</replaceable> [, ...] ] ) ]
+    RENAME TO <replaceable>new_name</replaceable>
+ALTER PROCEDURE <replaceable>name</replaceable> [ ( [ [ <replaceable class="parameter">argmode</replaceable> ] [ <replaceable class="parameter">argname</replaceable> ] <replaceable class="parameter">argtype</replaceable> [, ...] ] ) ]
+    OWNER TO { <replaceable>new_owner</replaceable> | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+ALTER PROCEDURE <replaceable>name</replaceable> [ ( [ [ <replaceable class="parameter">argmode</replaceable> ] [ <replaceable class="parameter">argname</replaceable> ] <replaceable class="parameter">argtype</replaceable> [, ...] ] ) ]
+    SET SCHEMA <replaceable>new_schema</replaceable>
+    
+<phrase>where <replaceable class="parameter">action</replaceable> is one of:</phrase>
+
+    [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER
+    SET <replaceable class="parameter">configuration_parameter</replaceable> { TO | = } { <replaceable class="parameter">value</replaceable> | DEFAULT }
+    SET <replaceable class="parameter">configuration_parameter</replaceable> FROM CURRENT
+    RESET <replaceable class="parameter">configuration_parameter</replaceable>
+    RESET ALL
+</synopsis>
+ </refsynopsisdiv>
+ </refentry>

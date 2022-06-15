@@ -18,7 +18,7 @@ static void sql_check(char *fn, char *caller, int ignore)
     if (SQLCODE != 0)
     {
 
-      sprintf(errorstring, "**SQL error %ld doing '%s' in function '%s'. [%s]",
+      snprintf(errorstring, sizeof(errorstring),  "**SQL error %ld doing '%s' in function '%s'. [%s]",
              SQLCODE, caller, fn, sqlca.sqlerrm.sqlerrmc);
       fprintf(stderr, "%s", errorstring);
       printf("%s\n", errorstring);
@@ -28,9 +28,9 @@ static void sql_check(char *fn, char *caller, int ignore)
 
       if (SQLCODE == 0)
       {
-        sprintf(errorstring, "Rollback successful.\n");
+        snprintf(errorstring, sizeof(errorstring), "Rollback successful.\n");
       } else {
-        sprintf(errorstring, "Rollback failed with code %ld.\n", SQLCODE);
+        snprintf(errorstring, sizeof(errorstring), "Rollback failed with code %ld.\n", SQLCODE);
       }
 
       fprintf(stderr, "%s", errorstring);

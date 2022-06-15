@@ -132,11 +132,14 @@ DROP EXTENSION test_extension_exists;
 ERROR:  extension "test_extension_exists" does not exist
 DROP EXTENSION IF EXISTS test_extension_exists;
 NOTICE:  extension "test_extension_exists" does not exist, skipping
--- exists but doesn't support drop
-DROP EXTENSION plpgsql;
-ERROR:  EXTENSION is not yet supported.
-DROP EXTENSION IF EXISTS plpgsql;
-ERROR:  EXTENSION is not yet supported.
+-- only extension in white list support drop, but the guc support_extended_features is true in pg_regress mode, so hdfs_fdw can be droped
+CREATE DATABASE ext_test_db;
+\c ext_test_db
+DROP EXTENSION hdfs_fdw;
+DROP EXTENSION IF EXISTS hdfs_fdw;
+NOTICE:  extension "hdfs_fdw" does not exist, skipping
+\c regression
+DROP DATABASE ext_test_db;
 -- functions
 DROP FUNCTION test_function_exists();
 ERROR:  function test_function_exists does not exist

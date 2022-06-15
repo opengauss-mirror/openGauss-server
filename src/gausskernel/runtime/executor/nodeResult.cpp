@@ -89,6 +89,13 @@ TupleTableSlot* ExecResult(ResultState* node)
     }
 
     /*
+     * Reset per-tuple memory context to free any expression evaluation
+     * storage allocated in the previous tuple cycle.  Note this can't happen
+     * until we're done projecting out tuples from a scan tuple.
+     */
+    ResetExprContext(econtext);
+
+    /*
      * Check to see if we're still projecting out tuples from a previous scan
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
@@ -101,13 +108,6 @@ TupleTableSlot* ExecResult(ResultState* node)
         /* Done with that source tuple... */
         node->ps.ps_TupFromTlist = false;
     }
-
-    /*
-     * Reset per-tuple memory context to free any expression evaluation
-     * storage allocated in the previous tuple cycle.  Note this can't happen
-     * until we're done projecting out tuples from a scan tuple.
-     */
-    ResetExprContext(econtext);
 
     /*
      * if rs_done is true then it means that we were asked to return a

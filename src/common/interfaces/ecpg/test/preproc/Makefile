@@ -3,18 +3,17 @@ top_builddir = ../../../../../..
 include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/$(subdir)/../Makefile.regress
 
-
-TESTS = array_of_struct array_of_struct.cpp \
-	autoprep autoprep.cpp \
-	comment comment.cpp \
-	cursor cursor.cpp \
+TESTS = comment comment.cpp \
 	define define.cpp \
 	init init.cpp \
 	strings strings.cpp \
-	outofscope outofscope.cpp \
 	type type.cpp \
+	whenever whenever.cpp \
+	array_of_struct array_of_struct.cpp \
+	cursor cursor.cpp \
 	variable variable.cpp \
-	whenever whenever.cpp
+	outofscope outofscope.cpp \
+	autoprep autoprep.cpp
 
 all: $(TESTS)
 

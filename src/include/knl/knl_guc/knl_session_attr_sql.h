@@ -237,8 +237,9 @@ typedef struct knl_session_attr_sql {
     int vectorEngineStrategy;
 #ifndef ENABLE_MULTIPLE_NODES
     bool enable_custom_parser;
-#endif
     bool dolphin;
+    bool whale;
+#endif
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */

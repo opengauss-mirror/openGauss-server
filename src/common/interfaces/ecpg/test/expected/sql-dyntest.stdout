@@ -17,9 +17,9 @@ Found 7 columns
  6	comment (type: 1 length: -5 precision: -1 scale: 65531 = text)
 	octet_length: -1 returned_octet_length: 47)
 	= "The world's most advanced open source database."
- 7	day (type: 9 length: -5 precision: -1 scale: 65531 = date)
-	octet_length: 4 returned_octet_length: 10)
-	= 1 "14.07.1987"
+ 7	day (type: 9 length: -4 precision: 0 scale: 65532 = timestamp)
+	octet_length: 8 returned_octet_length: 19)
+	= 3 "14.07.1987 00:00:00"
  1	name (type: 1 length: 14 precision: 0 scale: 14 = char(14))
 	octet_length: -1 returned_octet_length: 14)
 	= "second entry  "
@@ -38,6 +38,6 @@ Found 7 columns
  6	comment (type: 1 length: -5 precision: -1 scale: 65531 = text)
 	octet_length: -1 returned_octet_length: 27)
 	= "The elephant never forgets."
- 7	day (type: 9 length: -5 precision: -1 scale: 65531 = date)
-	octet_length: 4 returned_octet_length: 10)
-	= 1 "05.11.1999"
+ 7	day (type: 9 length: -4 precision: 0 scale: 65532 = timestamp)
+	octet_length: 8 returned_octet_length: 19)
+	= 3 "05.11.1999 00:00:00"

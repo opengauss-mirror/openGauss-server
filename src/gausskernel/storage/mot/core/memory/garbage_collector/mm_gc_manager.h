@@ -238,15 +238,19 @@ public:
         return m_purpose;
     }
 
-    void GcStartTxnMTtests()
+    GcEpochType GcStartInnerTxn()
     {
-        if (m_gcEpoch != GetGlobalEpoch())
-            m_gcEpoch = GetGlobalEpoch();
+        m_gcEpoch = GetGlobalEpoch();
+
+        return m_gcEpoch;
     }
 
-    void GcEndTxnMTtests()
+    void GcEndInnerTxn(bool clean_gc)
     {
-        RunQuicese();
+        if (clean_gc) {
+            RunQuicese();
+        }
+        m_gcEpoch = 0;
     }
 
     void GcStartTxn()
@@ -272,6 +276,7 @@ public:
             RunQuicese();
             m_managerLock.unlock();
         }
+        m_gcEpoch = 0;
         m_isTxnStarted = false;
     }
 
@@ -313,7 +318,6 @@ public:
     {
         if (m_performGcEpoch != g_gcActiveEpoch)
             HardQuiesce(m_rcuFreeCount);
-        m_gcEpoch = 0;
     }
 
     /** @brief Clean all object at the end of the session */

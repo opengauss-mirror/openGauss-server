@@ -10,7 +10,7 @@ ECPG: stmtClosePortalStmt block
 
 				fprintf(yyout, "{ ECPGdisconnect(__LINE__, \"CURRENT\");");
 				whenever_action(2);
-				free($1);
+				free_current_memory($1);
 				break;
 			}
 		}
@@ -44,14 +44,14 @@ ECPG: stmtTransactionStmt block
 	{
 		fprintf(yyout, "{ ECPGtrans(__LINE__, %s, \"%s\");", connection ? connection : "NULL", $1);
 		whenever_action(2);
-		free($1);
+		free_current_memory($1);
 	}
 ECPG: stmtViewStmt rule
 	| ECPGAllocateDescr
 	{
 		fprintf(yyout,"ECPGallocate_desc(__LINE__, %s);",$1);
 		whenever_action(0);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGConnect
 	{
@@ -61,7 +61,7 @@ ECPG: stmtViewStmt rule
 		fprintf(yyout, "{ ECPGconnect(__LINE__, %d, %s, %d); ", compat, $1, autocommit);
 		reset_variables();
 		whenever_action(2);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGCursorStmt
 	{
@@ -71,7 +71,7 @@ ECPG: stmtViewStmt rule
 	{
 		fprintf(yyout,"ECPGdeallocate_desc(__LINE__, %s);",$1);
 		whenever_action(0);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGDeclare
 	{
@@ -85,7 +85,7 @@ ECPG: stmtViewStmt rule
 		fprintf(yyout, "}");
 		output_line_number();
 
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGDisconnect
 	{
@@ -95,7 +95,7 @@ ECPG: stmtViewStmt rule
 		fprintf(yyout, "{ ECPGdisconnect(__LINE__, %s);",
 				$1 ? $1 : "\"CURRENT\"");
 		whenever_action(2);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGExecuteImmediateStmt	{ output_statement($1, 0, ECPGst_exec_immediate); }
 	| ECPGFree
@@ -110,20 +110,20 @@ ECPG: stmtViewStmt rule
 			fprintf(yyout, "{ ECPGdeallocate(__LINE__, %d, %s, \"%s\");", compat, con, $1);
 
 		whenever_action(2);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGGetDescriptor
 	{
 		lookup_descriptor($1.name, connection);
 		output_get_descr($1.name, $1.str);
-		free($1.name);
-		free($1.str);
+		free_current_memory($1.name);
+		free_current_memory($1.str);
 	}
 	| ECPGGetDescriptorHeader
 	{
 		lookup_descriptor($1, connection);
 		output_get_descr_header($1);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGOpen
 	{
@@ -140,7 +140,7 @@ ECPG: stmtViewStmt rule
 	{
 		fprintf(yyout, "{ ECPGsetcommit(__LINE__, \"%s\", %s);", $1, connection ? connection : "NULL");
 		whenever_action(2);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGSetConnection
 	{
@@ -149,20 +149,20 @@ ECPG: stmtViewStmt rule
 
 		fprintf(yyout, "{ ECPGsetconn(__LINE__, %s);", $1);
 		whenever_action(2);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGSetDescriptor
 	{
 		lookup_descriptor($1.name, connection);
 		output_set_descr($1.name, $1.str);
-		free($1.name);
-		free($1.str);
+		free_current_memory($1.name);
+		free_current_memory($1.str);
 	}
 	| ECPGSetDescriptorHeader
 	{
 		lookup_descriptor($1, connection);
 		output_set_descr_header($1);
-		free($1);
+		free_current_memory($1);
 	}
 	| ECPGTypedef
 	{
@@ -170,7 +170,7 @@ ECPG: stmtViewStmt rule
 			mmerror(PARSE_ERROR, ET_ERROR, "AT option not allowed in TYPE statement");
 
 		fprintf(yyout, "%s", $1);
-		free($1);
+		free_current_memory($1);
 		output_line_number();
 	}
 	| ECPGVar
@@ -192,34 +192,34 @@ ECPG: where_or_current_clauseWHERECURRENT_POFcursor_name block
 		char *cursor_marker = $4[0] == ':' ? mm_strdup("$0") : $4;
 		$$ = cat_str(2,mm_strdup("where current of"), cursor_marker);
 	}
-ECPG: CopyStmtCOPYopt_binaryqualified_nameopt_column_listopt_oidscopy_fromcopy_file_namecopy_delimiteropt_withcopy_options addon
+ECPG: CopyStmtCOPYopt_binaryqualified_nameopt_column_listopt_oidscopy_fromcopy_file_nameopt_loadopt_useeofcopy_delimiteropt_noescapingOptCopyLogErrorOptCopyRejectLimitopt_withcopy_optionsopt_processed addon
 			if (strcmp($6, "to") == 0 && strcmp($7, "stdin") == 0)
 				mmerror(PARSE_ERROR, ET_ERROR, "COPY TO STDIN is not possible");
 			else if (strcmp($6, "from") == 0 && strcmp($7, "stdout") == 0)
 				mmerror(PARSE_ERROR, ET_ERROR, "COPY FROM STDOUT is not possible");
 			else if (strcmp($6, "from") == 0 && strcmp($7, "stdin") == 0)
 				mmerror(PARSE_ERROR, ET_WARNING, "COPY FROM STDIN is not implemented");
-ECPG: CopyStmtCOPYselect_with_parensTOcopy_file_nameopt_withcopy_options addon
+ECPG: CopyStmtCOPYselect_with_parensTOcopy_file_nameopt_noescapingopt_withcopy_optionsopt_processed addon
 			if (strcmp($4, "stdin") == 0)
 				mmerror(PARSE_ERROR, ET_ERROR, "COPY TO STDIN is not possible");
 ECPG: var_valueNumericOnly addon
 		if ($1[0] == '$')
 		{
-			free($1);
+			free_current_memory($1);
 			$1 = mm_strdup("$0");
 		}
 ECPG: fetch_argscursor_name addon
 		add_additional_variables($1, false);
 		if ($1[0] == ':')
 		{
-			free($1);
+			free_current_memory($1);
 			$1 = mm_strdup("$0");
 		}
 ECPG: fetch_argsfrom_incursor_name addon
 		add_additional_variables($2, false);
 		if ($2[0] == ':')
 		{
-			free($2);
+			free_current_memory($2);
 			$2 = mm_strdup("$0");
 		}
 ECPG: fetch_argsNEXTopt_from_incursor_name addon
@@ -230,19 +230,19 @@ ECPG: fetch_argsALLopt_from_incursor_name addon
 		add_additional_variables($3, false);
 		if ($3[0] == ':')
 		{
-			free($3);
+			free_current_memory($3);
 			$3 = mm_strdup("$0");
 		}
 ECPG: fetch_argsSignedIconstopt_from_incursor_name addon
 		add_additional_variables($3, false);
 		if ($3[0] == ':')
 		{
-			free($3);
+			free_current_memory($3);
 			$3 = mm_strdup("$0");
 		}
 		if ($1[0] == '$')
 		{
-			free($1);
+			free_current_memory($1);
 			$1 = mm_strdup("$0");
 		}
 ECPG: fetch_argsFORWARDALLopt_from_incursor_name addon
@@ -250,7 +250,7 @@ ECPG: fetch_argsBACKWARDALLopt_from_incursor_name addon
 		add_additional_variables($4, false);
 		if ($4[0] == ':')
 		{
-			free($4);
+			free_current_memory($4);
 			$4 = mm_strdup("$0");
 		}
 ECPG: fetch_argsABSOLUTE_PSignedIconstopt_from_incursor_name addon
@@ -260,12 +260,12 @@ ECPG: fetch_argsBACKWARDSignedIconstopt_from_incursor_name addon
 		add_additional_variables($4, false);
 		if ($4[0] == ':')
 		{
-			free($4);
+			free_current_memory($4);
 			$4 = mm_strdup("$0");
 		}
 		if ($2[0] == '$')
 		{
-			free($2);
+			free_current_memory($2);
 			$2 = mm_strdup("$0");
 		}
 ECPG: cursor_namename rule
@@ -273,7 +273,7 @@ ECPG: cursor_namename rule
 		{
 			char *curname = (char *)mm_alloc(strlen($1) + 2);
 			sprintf(curname, ":%s", $1);
-			free($1);
+			free_current_memory($1);
 			$1 = curname;
 			$$ = $1;
 		}
@@ -327,7 +327,56 @@ ECPG: DeclareCursorStmtCURSORcursor_namecursor_optionsopt_holdFORSelectStmt bloc
 		c1 = mm_strdup(thisPtr->command);
 		if ((c2 = strstr(c1, "*/")) != NULL)
 		{
-			/* We put thisPtr text into a comment, so we better remove [*][/]. */
+			/* We put this text into a comment, so we better remove [*][/]. */
+			c2[0] = '.';
+			c2[1] = '.';
+		}
+		comment = cat_str(3, mm_strdup("/*"), c1, mm_strdup("*/"));
+
+		if ((braces_open > 0) && INFORMIX_MODE) /* we're in a function */
+			$$ = cat_str(3, adjust_outofscope_cursor_vars(thisPtr),
+				mm_strdup("ECPG_informix_reset_sqlca();"),
+				comment);
+		else
+			$$ = cat2_str(adjust_outofscope_cursor_vars(thisPtr), comment);
+	}
+	| DECLARE cursor_name cursor_options CURSOR opt_hold FOR SelectStmt
+	{
+		struct cursor *ptr, *thisPtr;
+		char *cursor_marker = $2[0] == ':' ? mm_strdup("$0") : mm_strdup($2);
+		char *comment, *c1, *c2;
+		int (* strcmp_fn)(const char *, const char *) = (($2[0] == ':' || $2[0] == '"') ? strcmp : pg_strcasecmp);
+
+		for (ptr = cur; ptr != NULL; ptr = ptr->next)
+		{
+			if (strcmp_fn($2, ptr->name) == 0)
+			{
+				if ($2[0] == ':')
+					mmerror(PARSE_ERROR, ET_ERROR, "using variable \"%s\" in different declare statements is not supported", $2+1);
+				else
+					mmerror(PARSE_ERROR, ET_ERROR, "cursor \"%s\" is already defined", $2);
+			}
+		}
+
+		thisPtr = (struct cursor *) mm_alloc(sizeof(struct cursor));
+
+		thisPtr->next = cur;
+		thisPtr->name = $2;
+		thisPtr->function = (current_function ? mm_strdup(current_function) : NULL);
+		thisPtr->connection = connection;
+		thisPtr->opened = false;
+		thisPtr->command =  cat_str(7, mm_strdup("declare"), cursor_marker, $3, mm_strdup("cursor"), $5, mm_strdup("for"), $7);
+		thisPtr->argsinsert = argsinsert;
+		thisPtr->argsinsert_oos = NULL;
+		thisPtr->argsresult = argsresult;
+		thisPtr->argsresult_oos = NULL;
+		argsinsert = argsresult = NULL;
+		cur = thisPtr;
+
+		c1 = mm_strdup(thisPtr->command);
+		if ((c2 = strstr(c1, "*/")) != NULL)
+		{
+			/* We put this text into a comment, so we better remove [*][/]. */
 			c2[0] = '.';
 			c2[1] = '.';
 		}
@@ -352,11 +401,16 @@ ECPG: opt_hold block
 		else
 			$$ = EMPTY;
 	}
+ECPG: TransactionStmtSTARTTRANSACTIONtransaction_mode_list_or_empty rule
+	| BEGIN_P opt_transaction transaction_mode_list_or_empty
+	{ 
+	 $$ = cat_str(3,mm_strdup("begin"),$2,$3);
+	}
 ECPG: into_clauseINTOOptTempTableName block
-					{
-						FoundInto = 1;
-						$$= cat2_str(mm_strdup("into"), $2);
-					}
+	{
+		FoundInto = 1;
+		$$= cat2_str(mm_strdup("into"), $2);
+	}
 	| ecpg_into { $$ = EMPTY; }
 ECPG: table_refselect_with_parens addon
             mmerror(PARSE_ERROR, ET_ERROR, "subquery in FROM must have an alias");
@@ -379,9 +433,9 @@ ECPG: opt_array_boundsopt_array_bounds'['']' block
 		$$.index1 = $1.index1;
 		$$.index2 = $1.index2;
 		if (strcmp($1.index1, "-1") == 0)
-			$$.index1 = strdup($3);
+			$$.index1 = mm_strdup($3);
 		else if (strcmp($1.index2, "-1") == 0)
-			$$.index2 = strdup($3);
+			$$.index2 = mm_strdup($3);
 		$$.str = cat_str(4, $1.str, mm_strdup("["), $3, mm_strdup("]"));
 	}
 ECPG: opt_array_bounds
@@ -395,6 +449,15 @@ ECPG: IconstICONST block
 ECPG: AexprConstNULL_P rule
 	| civar			{ $$ = $1; }
 	| civarind		{ $$ = $1; }
+ECPG: func_name_opt_argfunc_name rule
+	| ECPGKeywords BOGUS
+	{ 
+	 $$ = cat_str(2,$1,mm_strdup("bogus"));
+	}
+	| ECPGCKeywords BOGUS
+	{ 
+	 $$ = cat_str(2,$1,mm_strdup("bogus"));
+	}
 ECPG: ColIdcol_name_keyword rule
 	| ECPGKeywords                  { $$ = $1; }
 	| ECPGCKeywords                 { $$ = $1; }
@@ -461,11 +524,6 @@ ECPG: FetchStmtMOVEfetch_args rule
 		char *cursor_marker = $4[0] == ':' ? mm_strdup("$0") : $4;
 		add_additional_variables($4, false);
 		$$ = cat_str(2, mm_strdup("move backward from"), cursor_marker);
-	}
-ECPG: limit_clauseLIMITselect_limit_value','select_offset_value block
-	{
-		mmerror(PARSE_ERROR, ET_WARNING, "no longer supported LIMIT #,# syntax passed to server");
-		$$ = cat_str(4, mm_strdup("limit"), $2, mm_strdup(","), $4);
 	}
 ECPG: SignedIconstIconst rule
 	| civar	{ $$ = $1; }

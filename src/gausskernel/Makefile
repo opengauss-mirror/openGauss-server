@@ -950,6 +950,7 @@ maintainer-clean: distclean
 	      ../common/backend/parser/gram.cpp \
 	      ../common/backend/parser/gram.hpp \
 	      ../common/backend/parser/hint_gram.hpp \
+	      ../common/backend/parser/hint_gram.cpp \
 	      ../common/backend/parser/scan.cpp \
 	      ../common/backend/catalog/schemapg.h \
 	      ../common/backend/catalog/postgres.bki \

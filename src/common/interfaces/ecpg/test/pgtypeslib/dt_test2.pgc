@@ -96,7 +96,7 @@ main(void)
 						+ 1
 						+ strlen(times[j])
 						+ 1;
-				char* t = malloc(length);
+				char* t = (char *)malloc(length);
 				sprintf(t, "%s %s", dates[i], times[j]);
 				ts1 = PGTYPEStimestamp_from_asc(t, NULL);
 				text = PGTYPEStimestamp_to_asc(ts1);

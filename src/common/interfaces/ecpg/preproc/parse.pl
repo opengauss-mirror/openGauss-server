@@ -72,6 +72,7 @@ my %replace_types = (
 	'DeallocateStmt'     => 'ignore',
 	'ColId'              => 'ignore',
 	'type_function_name' => 'ignore',
+	'AnonyBlockStmt'     => 'ignore',
 	'ColLabel'           => 'ignore',
 	'Sconst'             => 'ignore',);
 
@@ -87,16 +88,21 @@ my %replace_line = (
 	'unreserved_keywordMONTH_P'    => 'ignore',
 	'unreserved_keywordSECOND_P'   => 'ignore',
 	'unreserved_keywordYEAR_P'     => 'ignore',
-	'col_name_keywordCHAR_P'       => 'ignore',
+    'col_name_keywordCHAR_P'       => 'ignore',
 	'col_name_keywordINT_P'        => 'ignore',
 	'col_name_keywordVALUES'       => 'ignore',
 	'reserved_keywordTO'           => 'ignore',
 	'reserved_keywordUNION'        => 'ignore',
+	'reserved_keywordUNION'        => 'ignore',
+	'type_func_name_keywordTIMECAPSULE'       => 'ignore',
 
 	# some other production rules have to be ignored or replaced
+	'stmtAnonyBlockStmt'      => 'ignore',
 	'fetch_argsFORWARDopt_from_incursor_name'      => 'ignore',
 	'fetch_argsBACKWARDopt_from_incursor_name'     => 'ignore',
 	"opt_array_boundsopt_array_bounds'['Iconst']'" => 'ignore',
+	'DeclareCursorStmtDECLARE_CURSORcursor_namecursor_optionsCURSORopt_holdFORSelectStmt' => 'ignore',
+	'TransactionStmtBEGIN_NON_ANOYBLOCKopt_transactiontransaction_mode_list_or_empty' => 'ignore',
 	'VariableShowStmtSHOWvar_name' => 'SHOW var_name ecpg_into',
 	'VariableShowStmtSHOWTIMEZONE' => 'SHOW TIME ZONE ecpg_into',
 	'VariableShowStmtSHOWTRANSACTIONISOLATIONLEVEL' =>
@@ -107,11 +113,13 @@ my %replace_line = (
 	  'RETURNING target_list ecpg_into',
 	'ExecuteStmtEXECUTEnameexecute_param_clause' =>
 	  'EXECUTE prepared_name execute_param_clause execute_rest',
-'ExecuteStmtCREATEOptTempTABLEcreate_as_targetASEXECUTEnameexecute_param_clause'
+	'ExecuteStmtCREATEOptTempTABLEcreate_as_targetASEXECUTEnameexecute_param_clause'
 	  => 'CREATE OptTemp TABLE create_as_target AS EXECUTE prepared_name execute_param_clause',
 	'PrepareStmtPREPAREnameprep_type_clauseASPreparableStmt' =>
 	  'PREPARE prepared_name prep_type_clause AS PreparableStmt',
-	'var_nameColId' => 'ECPGColId',);
+	'var_nameColId' => 'ECPGColId',
+	'func_name_opt_argunreserved_keywordBOGUS' =>
+	  'all_unreserved_keyword BOGUS',);
 
 preload_addons();
 
@@ -422,7 +430,6 @@ sub main
 		}
 	}
 }
-
 
 # append a file onto a buffer.
 # Arguments:  buffer_name, filename (without path)

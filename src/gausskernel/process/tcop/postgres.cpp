@@ -822,15 +822,40 @@ void client_read_ended(void)
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
-#define INIT_PLUGIN_OBJECT "init_plugin_object"
-void InitBSqlPluginHookIfNeeded()
-{
-    const char* dolphin = "dolphin";
-    CFunInfo tmpCF;
 
-    tmpCF = load_external_function(dolphin, INIT_PLUGIN_OBJECT, false, false);
+void ExecuteFunctionIfExisted(const char *filename, char *funcname)
+{
+    CFunInfo tmpCF;
+    tmpCF = load_external_function(filename, funcname, false, false);
     if (tmpCF.user_fn != NULL) {
         ((void* (*)(void))(tmpCF.user_fn))();
+    }
+}
+
+bool IsFileExisted(const char *filename)
+{
+    char* fullname = expand_dynamic_library_name(filename);
+    return file_exists(fullname);
+}
+
+#define INIT_PLUGIN_OBJECT "init_plugin_object"
+#define WHALE "whale"
+#define DOLPHIN "dolphin"
+void InitASqlPluginHookIfNeeded()
+{
+    ExecuteFunctionIfExisted(WHALE, INIT_PLUGIN_OBJECT);
+}
+
+void InitBSqlPluginHookIfNeeded()
+{
+    ExecuteFunctionIfExisted(DOLPHIN, INIT_PLUGIN_OBJECT);
+}
+
+#define LOAD_DOLPHIN "create_dolphin_extension"
+void LoadDolphinIfNeeded()
+{
+    if (IsFileExisted(DOLPHIN)) {
+        ExecuteFunctionIfExisted(DOLPHIN, LOAD_DOLPHIN);
     }
 }
 #endif
@@ -862,7 +887,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist)
 
     List* (*parser_hook)(const char*, List**) = raw_parser;
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_sql.dolphin) {
+    if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
         int id = GetCustomParserId();
         if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
             parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
@@ -7574,8 +7599,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         init_set_params_htab();
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.dolphin) {
-        InitBSqlPluginHookIfNeeded();
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
+        if (!u_sess->attr.attr_sql.dolphin) {
+            LoadDolphinIfNeeded();
+        } else {
+            InitBSqlPluginHookIfNeeded();
+        }
+    } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
+            InitASqlPluginHookIfNeeded();
     }
 #endif
 

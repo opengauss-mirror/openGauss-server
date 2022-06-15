@@ -70,6 +70,7 @@
 
 THR_LOCAL bool skip_read_extern_fields = false;
 
+#define IS_DATANODE_BUT_NOT_SINGLENODE (IS_PGXC_DATANODE && !IS_SINGLE_NODE)
 /*
  * Macros to simplify reading of different kinds of fields.  Use these
  * wherever possible to reduce the chance for silly typos.	Note that these
@@ -401,24 +402,27 @@ THR_LOCAL bool skip_read_extern_fields = false;
     token = pg_strtok(&length); /* skip :fldname */ \
     local_node->fldname = _readBitmapset()
 
-#define READ_TYPEINFO_FIELD(fldname)                                                                          \
-    do {                                                                                                      \
-        if (local_node->fldname >= FirstBootstrapObjectId) {                                                  \
-            IF_EXIST(exprtypename)                                                                            \
-            {                                                                                                 \
-                char* exprtypename = NULL;                                                                    \
-                char* exprtypenamespace = NULL;                                                               \
-                token = pg_strtok(&length);                                                                   \
-                token = pg_strtok(&length);                                                                   \
-                exprtypename = nullable_string(token, length);                                                \
-                token = pg_strtok(&length);                                                                   \
-                token = pg_strtok(&length);                                                                   \
-                exprtypenamespace = nullable_string(token, length);                                           \
-                local_node->fldname = get_typeoid(get_namespace_oid(exprtypenamespace, false), exprtypename); \
-                pfree_ext(exprtypename);                                                                      \
-                pfree_ext(exprtypenamespace);                                                                 \
-            }                                                                                                 \
-        }                                                                                                     \
+#define READ_TYPEINFO_FIELD(fldname)                                                                              \
+    do {                                                                                                          \
+        if (local_node->fldname >= FirstBootstrapObjectId) {                                                      \
+            IF_EXIST(exprtypename)                                                                                \
+            {                                                                                                     \
+                char* exprtypename = NULL;                                                                        \
+                char* exprtypenamespace = NULL;                                                                   \
+                token = pg_strtok(&length);                                                                       \
+                token = pg_strtok(&length);                                                                       \
+                exprtypename = nullable_string(token, length);                                                    \
+                token = pg_strtok(&length);                                                                       \
+                token = pg_strtok(&length);                                                                       \
+                exprtypenamespace = nullable_string(token, length);                                               \
+                /* No need to reset field on CN or singlenode, keep pg_strtok() for forward compatibility */      \
+                if (IS_DATANODE_BUT_NOT_SINGLENODE) {                                                             \
+                    local_node->fldname = get_typeoid(get_namespace_oid(exprtypenamespace, false), exprtypename); \
+                }                                                                                                 \
+                pfree_ext(exprtypename);                                                                          \
+                pfree_ext(exprtypenamespace);                                                                     \
+            }                                                                                                     \
+        }                                                                                                         \
     } while (0)
 
 #define READ_TYPEINFO(typePtr)                                                                \
@@ -493,9 +497,30 @@ THR_LOCAL bool skip_read_extern_fields = false;
                 token = pg_strtok(&length);                                                                 \
                 token = pg_strtok(&length);                                                                 \
                 funcnamespace = nullable_string(token, length);                                             \
-                if (IS_PGXC_DATANODE && !skip_read_extern_fields) {                                         \
-                    local_node->fldname =                                                                   \
-                        get_func_oid(funcname, get_namespace_oid(funcnamespace, false), (Expr*)local_node); \
+                bool notfound = false;                                                                      \
+                if (IS_DATANODE_BUT_NOT_SINGLENODE && !skip_read_extern_fields) {                           \
+                    Oid funcoid = InvalidOid;                                                               \
+                    do {                                                                                    \
+                        Oid nspid = get_namespace_oid(funcnamespace, true);                                 \
+                        if (!OidIsValid(nspid)) {                                                           \
+                            notfound = true;                                                                \
+                            break;                                                                          \
+                        }                                                                                   \
+                        funcoid = get_func_oid(funcname, nspid, (Expr*)local_node);                         \
+                    } while (0);                                                                            \
+                    if (notfound || !OidIsValid(funcoid)) {                                                 \
+                        ereport(ERROR,                                                                      \
+                            (errmodule(MOD_OPT), errcode(ERRCODE_UNDEFINED_OBJECT),                         \
+                                errmsg("Cannot identify function %s.%s while deserializing field.",         \
+                                    funcname, funcnamespace),                                               \
+                                errdetail("Function with oid %u or its namespace may be renamed",           \
+                                    local_node->fldname),                                                   \
+                                errhint("Please rebuild column defalt expression, views etc. that are"      \
+                                    " related to this renamed object."),                                    \
+                                errcause("Object renamed after recorded as nodetree."),                     \
+                                erraction("Rebuild relevant object.")));                                    \
+                    }                                                                                       \
+                    local_node->fldname = funcoid;                                                          \
                 }                                                                                           \
                 pfree_ext(funcname);                                                                        \
                 pfree_ext(funcnamespace);                                                                   \
@@ -525,7 +550,7 @@ THR_LOCAL bool skip_read_extern_fields = false;
             token = pg_strtok(&length);                                                         \
             token = pg_strtok(&length);                                                         \
             oprrightname = nullable_string(token, length);                                      \
-            if (IS_PGXC_DATANODE) {                                                             \
+            if (IS_DATANODE_BUT_NOT_SINGLENODE) {                                               \
                 namespaceId = get_namespace_oid(opnamespace, false);                            \
                 oprleft = get_typeoid(namespaceId, oprleftname);                                \
                 oprright = oprleft;                                                             \
@@ -568,7 +593,7 @@ THR_LOCAL bool skip_read_extern_fields = false;
                 token = pg_strtok(&length);                                                            \
                 token = pg_strtok(&length);                                                            \
                 oprrightname = nullable_string(token, length);                                         \
-                if (IS_PGXC_DATANODE) {                                                                \
+                if (IS_DATANODE_BUT_NOT_SINGLENODE) {                                                  \
                     namespaceId = get_namespace_oid(opnamespace, false);                               \
                     oprleft = get_typeoid(namespaceId, oprleftname);                                   \
                     oprright = oprleft;                                                                \
@@ -2126,14 +2151,21 @@ static FuncExpr* _readFuncExpr(void)
             ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("NULL seqNamespace for nextval()")));
         }
 
-        if (!IS_PGXC_COORDINATOR && !skip_read_extern_fields) {
-            Oid seqid = get_valid_relname_relid(seqNamespace, seqName);
+        if (IS_DATANODE_BUT_NOT_SINGLENODE && !skip_read_extern_fields) {
 
+            Oid seqid = get_valid_relname_relid(seqNamespace, seqName, true);
+            Const* firstArg = (Const*)linitial(local_node->args);
             if (OidIsValid(seqid)) {
-                Const* firstArg = (Const*)linitial(local_node->args);
                 if (firstArg != NULL) {
                     firstArg->constvalue = ObjectIdGetDatum(seqid);
                 }
+            } else {
+                ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("Cannot identify sequence %s.%s while deserializing field.", seqNamespace, seqName),
+                    errdetail("Sequence with oid %u or its namespace may be renamed",
+                        DatumGetObjectId(firstArg->constvalue)),
+                    errhint("Please rebuild column defalt expression, views etc. that are related to this sequence"),
+                    errcause("Object renamed after recorded as nodetree."), erraction("Rebuild relevant object.")));
             }
         }
         pfree_ext(seqName);

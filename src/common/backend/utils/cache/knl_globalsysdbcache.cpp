@@ -659,7 +659,27 @@ void GlobalSysDBCache::InitSysCacheRelIds()
  */
 void GlobalSysDBCache::RefreshHotStandby()
 {
+    if (!EnableGlobalSysCache()) {
+	    return;
+    }
     hot_standby = (t_thrd.postmaster_cxt.HaShmData->current_mode != STANDBY_MODE || XLogStandbyInfoActive());
+    if (hot_standby || !m_is_inited) {
+	    return;
+    }
+    /* clean all */
+    for (int hash_index = 0; hash_index < m_nbuckets; hash_index ++) {
+        PthreadRWlockRdlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
+	for (Dlelem * elt = DLGetTail(m_bucket_list.GetBucket(hash_index)); elt != NULL;) {
+            GlobalSysDBCacheEntry *entry = (GlobalSysDBCacheEntry *)DLE_VAL(elt);
+	    elt = DLGetPred(elt);
+	    entry->ResetDBCache<true>();
+	}
+        PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
+    }
+    if (m_global_shared_db_entry != NULL) {
+        m_global_shared_db_entry->ResetDBCache<true>();
+    }
+
 }
 
 void GlobalSysDBCache::Init(MemoryContext parent)
@@ -1270,6 +1290,15 @@ int ResizeHashBucket(int origin_nbucket, DynamicHashBucketStrategy strategy)
         return MinHashBucketSize;
     }
     return cc_nbuckets;
+}
+
+void NotifyGscRecoveryStarted()
+{
+    if (!EnableGlobalSysCache()) {
+	    return;
+    }
+    g_instance.global_sysdbcache.recovery_finished = false;
+
 }
 
 void NotifyGscRecoveryFinished()

@@ -52,6 +52,10 @@ static_assert(sizeof(false) == sizeof(char), "illegal bool size");
 static struct HTAB* nameHash = NULL;
 static struct HTAB* oidHash = NULL;
 
+/* for whale */
+struct HTAB* a_nameHash = NULL;
+struct HTAB* a_oidHash = NULL;
+
 /* for dolphin */
 struct HTAB* b_nameHash = NULL;
 struct HTAB* b_oidHash = NULL;
@@ -108,6 +112,26 @@ static void InitHashTable(int size)
                                 HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
+static HTAB* get_name_hash_table_type() 
+{
+    if (a_nameHash != NULL && u_sess->attr.attr_sql.whale) {
+        return a_nameHash;
+    } else if (b_nameHash != NULL && u_sess->attr.attr_sql.dolphin) {
+        return b_nameHash;
+    }
+    return nameHash;
+}
+
+static HTAB* get_oid_hash_table_type()
+{
+    if (a_oidHash != NULL && u_sess->attr.attr_sql.whale) {
+        return a_oidHash;
+    } else if (b_oidHash != NULL && u_sess->attr.attr_sql.dolphin) {
+        return b_oidHash;
+    }
+    return oidHash;
+}
+
 static const FuncGroup* NameHashTableAccess(HASHACTION action, const char* name, const FuncGroup* group)
 {
     char temp_name[MAX_PROC_NAME_LEN] = {0};
@@ -117,12 +141,7 @@ static const FuncGroup* NameHashTableAccess(HASHACTION action, const char* name,
     bool found = false;
 
     Assert(name != NULL);
-
-    if (DB_IS_CMPT(B_FORMAT) && b_nameHash != NULL && u_sess->attr.attr_sql.dolphin) {
-        result = (HashEntryNameToFuncGroup *)hash_search(b_nameHash, &temp_name, action, &found);
-    } else {
-        result = (HashEntryNameToFuncGroup *)hash_search(nameHash, &temp_name, action, &found);
-    }
+    result = (HashEntryNameToFuncGroup *)hash_search(get_name_hash_table_type(), &temp_name, action, &found);
     if (action == HASH_ENTER) {
         Assert(!found);
         result->group = group;
@@ -143,12 +162,7 @@ static const Builtin_func* OidHashTableAccess(HASHACTION action, Oid oid, const 
     HashEntryOidToBuiltinFunc *result = NULL;
     bool found = false;
     Assert(oid > 0);
-
-    if (DB_IS_CMPT(B_FORMAT) && b_oidHash != NULL && u_sess->attr.attr_sql.dolphin) {
-        result = (HashEntryOidToBuiltinFunc *)hash_search(b_oidHash, &oid, action, &found);
-    } else {
-        result = (HashEntryOidToBuiltinFunc *)hash_search(oidHash, &oid, action, &found);
-    }
+    result = (HashEntryOidToBuiltinFunc *)hash_search(get_oid_hash_table_type(), &oid, action, &found);
     if (action == HASH_ENTER) {
         Assert(!found);
         result->func = func;

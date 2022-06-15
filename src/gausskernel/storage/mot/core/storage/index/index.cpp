@@ -258,6 +258,15 @@ bool Index::IndexInsert(Sentinel*& outputSentinel, const Key* key, uint32_t pid,
         outputSentinel = IndexInsertImpl(key, sentinel, inserted, pid);
         // sync between rollback/delete and insert
         if (inserted == false) {
+            if (unlikely(outputSentinel == nullptr)) {
+                MOT_REPORT_ERROR(
+                    MOT_ERROR_OOM, "Index Insert", "Failed to insert sentinel to index %s", m_name.c_str());
+                rc = RC_MEMORY_ALLOCATION_ERROR;
+                m_sentinelPool->Release<Sentinel>(sentinel);
+                sentinel = nullptr;
+                return false;
+            }
+
             // Spin if the counter is 0 - aborting in parallel or sentinel is marks for commit
             if (outputSentinel->RefCountUpdate(INC, pid) == RC_OK)
                 retryInsert = false;
@@ -300,8 +309,16 @@ Sentinel* Index::IndexInsert(const Key* key, Row* row, uint32_t pid)
         // no need to report to full error stack
         SetLastError(MOT_ERROR_UNIQUE_VIOLATION, MOT_SEVERITY_NORMAL);
         m_sentinelPool->Release<Sentinel>(sentinel);
+        sentinel = nullptr;
         return nullptr;
     } else {
+        if (inserted == false) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Index Insert", "Failed to insert sentinel to index %s", m_name.c_str());
+            m_sentinelPool->Release<Sentinel>(sentinel);
+            sentinel = nullptr;
+            return nullptr;
+        }
+
         if (GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
             sentinel->SetPrimaryIndex();
             sentinel->SetNextPtr(row);
@@ -343,9 +360,6 @@ Sentinel* Index::IndexReadHeader(const Key* key, uint32_t pid) const
 Sentinel* Index::IndexRemove(const Key* key, uint32_t pid)
 {
     Sentinel* sentinel = IndexRemoveImpl(key, pid);
-
-    MOT_ASSERT(sentinel != nullptr);
-    MOT_ASSERT(sentinel->GetCounter() == 0);
     return sentinel;
 }
 

@@ -298,6 +298,7 @@ void incre_ckpt_pagewriter_cxt_init()
     g_instance.ckpt_cxt_ctl->CkptBufferIdsTail = 0;
     g_instance.ckpt_cxt_ctl->CkptBufferIdsFlushPages = 0;
     g_instance.ckpt_cxt_ctl->CkptBufferIdsCompletedPages = 0;
+    g_instance.ckpt_cxt_ctl->page_writer_sub_can_exit = false;
 
     uint32 dirty_list_size = MAX_DIRTY_LIST_FLUSH_NUM / thread_num;
 
@@ -1069,8 +1070,8 @@ void dw_upgrade_batch()
     knl_g_dw_context* dw_batch_cxt = &g_instance.dw_batch_cxt;
     dw_batch_file_context* dw_file_cxt = &dw_batch_cxt->batch_file_cxts[0];
 
-    (void)LWLockConditionalAcquire(dw_batch_cxt->flush_lock, LW_EXCLUSIVE);
-    (void)LWLockConditionalAcquire(dw_file_cxt->flush_lock, LW_EXCLUSIVE);
+    (void)LWLockAcquire(dw_batch_cxt->flush_lock, LW_EXCLUSIVE);
+    (void)LWLockAcquire(dw_file_cxt->flush_lock, LW_EXCLUSIVE);
 
     wait_all_dw_page_finish_flush();
 
@@ -1209,6 +1210,34 @@ void dw_upgrade_single()
     return;
 }
 
+static void HandlePageWriterExit() {
+    /* Let the pagewriter sub thread exit, then main pagewriter thread exits */
+    if (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
+        g_instance.ckpt_cxt_ctl->page_writer_sub_can_exit = true;
+	pg_write_barrier();
+
+	/* Wake up the sub thread to exit*/
+	wakeup_sub_thread();
+	/*Wait until all the sub pagewriter thread exit then */
+	while (true) {
+            if (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) == 1) {
+                ereport(LOG,
+                    (errmodule(MOD_INCRE_CKPT),
+                        errmsg("pagewriter thread shut down, id is %d", t_thrd.pagewriter_cxt.pagewriter_id)));
+
+                /*
+                 * From here on, elog(ERROR) should end with exit(1), not send
+                 * control back to the sigsetjmp block above.
+                 */
+                u_sess->attr.attr_common.ExitOnAnyError = true;
+                /* Normal exit from the pagewriter is here */
+                proc_exit(0); /* done */
+            }
+	    pg_usleep(MILLISECOND_TO_MICROSECOND);
+	}
+    }
+}
+
 static void HandlePageWriterMainInterrupts()
 {
     if (t_thrd.pagewriter_cxt.got_SIGHUP) {
@@ -1223,24 +1252,6 @@ static void HandlePageWriterMainInterrupts()
         PageWriterSyncWithAbsorption();
         t_thrd.pagewriter_cxt.sync_retry = false;
     }
-
-    /* main thread should finally exit. */
-    while (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
-        if (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) == 1) {
-            ereport(LOG,
-                (errmodule(MOD_INCRE_CKPT),
-                    errmsg("pagewriter thread shut down, id is %d", t_thrd.pagewriter_cxt.pagewriter_id)));
-
-            /*
-             * From here on, elog(ERROR) should end with exit(1), not send
-             * control back to the sigsetjmp block above.
-             */
-            u_sess->attr.attr_common.ExitOnAnyError = true;
-            /* Normal exit from the pagewriter is here */
-            proc_exit(0); /* done */
-        }
-    }
-    return;
 }
 
 static void ckpt_pagewriter_main_thread_loop(void)
@@ -1291,8 +1302,10 @@ static void ckpt_pagewriter_main_thread_loop(void)
         /* pagewriter thread flush dirty page */
         calculate_max_flush_num();
         ckpt_pagewriter_main_thread_flush_dirty_page();
-        return;
     }
+
+    /* Control all the pagewriter threads to exit*/
+    HandlePageWriterExit();
     return;
 }
 
@@ -1341,7 +1354,8 @@ static void ckpt_pagewriter_sub_thread_loop()
     int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
     WritebackContextInit(&wb_context, &t_thrd.pagewriter_cxt.page_writer_after);
 
-    if (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
+    pg_read_barrier();
+    if (g_instance.ckpt_cxt_ctl->page_writer_sub_can_exit) {
         ereport(LOG,
             (errmodule(MOD_INCRE_CKPT),
                 errmsg("pagewriter thread shut down, id is %d", t_thrd.pagewriter_cxt.pagewriter_id)));
@@ -1651,6 +1665,9 @@ void ckpt_pagewriter_main(void)
     pgstat_report_activity(STATE_IDLE, NULL);
 
     if (t_thrd.pagewriter_cxt.pagewriter_id == 0) {
+        g_instance.ckpt_cxt_ctl->page_writer_sub_can_exit = false;
+        pg_write_barrier();
+
         g_instance.proc_base->pgwrMainThreadLatch = &t_thrd.proc->procLatch;
         g_instance.ckpt_cxt_ctl->incre_ckpt_sync_shmem->pagewritermain_pid = t_thrd.proc_cxt.MyProcPid;
         InitSync();

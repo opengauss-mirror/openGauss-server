@@ -165,7 +165,7 @@ exec sql end declare section;
 	inp_sqlda = (sqlda_t *)malloc(sizeof(sqlda_t));
 	memset(inp_sqlda, 0, sizeof(sqlda_t));
 	inp_sqlda->sqld = 1;
-	inp_sqlda->sqlvar = malloc(sizeof(sqlvar_t));
+	inp_sqlda->sqlvar = (sqlvar_compat*)malloc(sizeof(sqlvar_t));
 	memset(inp_sqlda->sqlvar, 0, sizeof(sqlvar_t));
 
 	inp_sqlda->sqlvar[0].sqltype = SQLINT;
@@ -202,7 +202,7 @@ exec sql end declare section;
 	inp_sqlda = (sqlda_t *)malloc(sizeof(sqlda_t));
 	memset(inp_sqlda, 0, sizeof(sqlda_t));
 	inp_sqlda->sqld = 1;
-	inp_sqlda->sqlvar = malloc(sizeof(sqlvar_t));
+	inp_sqlda->sqlvar = (sqlvar_compat*)malloc(sizeof(sqlvar_t));
 	memset(inp_sqlda->sqlvar, 0, sizeof(sqlvar_t));
 
 	inp_sqlda->sqlvar[0].sqltype = SQLINT;

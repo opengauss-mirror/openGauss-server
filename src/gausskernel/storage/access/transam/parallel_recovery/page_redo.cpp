@@ -265,7 +265,7 @@ void HandlePageRedoInterrupts()
         t_thrd.page_redo_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
     }
-    if (t_thrd.page_redo_cxt.check_repair) {
+    if (t_thrd.page_redo_cxt.check_repair && g_instance.pid_cxt.PageRepairPID != 0) {
         SeqCheckRemoteReadAndRepairPage();
         t_thrd.page_redo_cxt.check_repair = false;
     }
@@ -314,7 +314,9 @@ void PageRedoWorkerMain()
 
     SetupSignalHandlers();
     (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
-    (void)RegisterRedoPageRepairCallBack(HandleRedoPageRepair);
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        (void)RegisterRedoPageRepairCallBack(HandleRedoPageRepair);
+    }
 
     InitGlobals();
     ResourceManagerStartup();

@@ -4,35 +4,44 @@
 #include <ecpgerrno.h>
 #include <sqlca.h>
 /* End of automatic include section */
-#define ECPGdebug(X, Y) ECPGdebug((X) + 100, (Y))
+#define ECPGdebug(X,Y) ECPGdebug((X)+100,(Y))
 
 #line 1 "comment.pgc"
 #include <stdlib.h>
 
+
 #line 1 "regression.h"
+#ifndef REGRESSION_H
+#define REGRESSION_H
+
+
+
+
+
+
+
+#endif /* REGRESSION_H */
 
 #line 3 "comment.pgc"
+
 
 /* just a test comment */ int i;
 /* just a test comment int j*/;
 
 /****************************************************************************/
 /* Test comment                                                             */
-/* -------------------------------------------------------------------------- */
+/*--------------------------------------------------------------------------*/
 
 int main(void)
 {
-    ECPGdebug(1, stderr);
+  ECPGdebug(1, stderr);
 
-    {
-        ECPGconnect(__LINE__, 0, "regress1", NULL, NULL, NULL, 0);
-    }
+  { ECPGconnect(__LINE__, 0, "regress1" , NULL, NULL , NULL, 0); }
 #line 17 "comment.pgc"
 
-    {
-        ECPGdisconnect(__LINE__, "CURRENT");
-    }
+
+  { ECPGdisconnect(__LINE__, "CURRENT");}
 #line 19 "comment.pgc"
 
-    exit(0);
+  exit (0);
 }

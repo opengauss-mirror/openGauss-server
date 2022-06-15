@@ -25,7 +25,7 @@ test: pldeveloper_gs_source
 test: index_advisor
 test: pl_debugger_server pl_debugger_client
 test: update_for_wait_s1 update_for_wait_s2
-test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt
+test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt deserialize_func
 test: large_sequence int16 gs_dump_sequence
 test: gs_dump_tableof
 test: analyze_commands
@@ -916,3 +916,5 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail
 test: gs_dump_encrypt
+test: composite_datum_record
+test: join_test_alias

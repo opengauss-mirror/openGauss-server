@@ -2635,7 +2635,7 @@ void ForbidUserToSetCompressedOptions(List *options)
     if (FindInvalidOption(options, unSupportOptions, lengthof(unSupportOptions), &firstInvalidOpt)) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 (errmsg("Un-support feature"), errdetail("Option \"%s\" doesn't allow ALTER on uncompressed table",
+                 (errmsg("Un-support feature"), errdetail("Option \"%s\" doesn't allow ALTER",
                                                           unSupportOptions[firstInvalidOpt]))));
     }
 }
@@ -2939,7 +2939,8 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
 {
     auto defname = defElem->defname;
     if (pg_strcasecmp(defname, "compresstype") == 0) {
-        tableCreateSupport->compressType = defGetInt64(defElem);
+        /* compresstype must be a valid number type */
+        tableCreateSupport->compressType = strtol(defGetString(defElem), NULL, 10);
     } else if (pg_strcasecmp(defname, "compress_chunk_size") == 0) {
         tableCreateSupport->compressChunkSize = true;
     } else if (pg_strcasecmp(defname, "compress_prealloc_chunks") == 0) {
@@ -2947,9 +2948,9 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
     } else if (pg_strcasecmp(defname, "compress_level") == 0) {
         tableCreateSupport->compressLevel = true;
     } else if (pg_strcasecmp(defname, "compress_byte_convert") == 0) {
-        tableCreateSupport->compressByteConvert = true;
+        tableCreateSupport->compressByteConvert = defGetBoolean(defElem);
     } else if (pg_strcasecmp(defname, "compress_diff_convert") == 0) {
-        tableCreateSupport->compressDiffConvert = true;
+        tableCreateSupport->compressDiffConvert = defGetBoolean(defElem);
     }
 }
 

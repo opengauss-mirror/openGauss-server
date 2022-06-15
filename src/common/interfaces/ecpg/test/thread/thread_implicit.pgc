@@ -56,7 +56,7 @@ int main()
   EXEC SQL DISCONNECT;
 
   /* create, and start, threads */
-  threads = calloc(nthreads, sizeof(threads[0]));
+  threads = (pthread_t *)calloc(nthreads, sizeof(threads[0]));
   if( threads == NULL )
     {
       fprintf(stderr, "Cannot alloc memory\n");

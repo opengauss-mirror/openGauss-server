@@ -162,7 +162,10 @@ bool ECPGtrans(int lineno, const char* connection_name, const char* transaction)
          * a begin statement, we just execute it once.
          */
         if (PQtransactionStatus(con->connection) == PQTRANS_IDLE && !con->autocommit &&
-            strncmp(transaction, "start", 5) != 0) {
+            strncmp(transaction, "begin", strlen("begin")) != 0 &&
+	    strncmp(transaction, "start", strlen("start")) != 0 &&
+	    strncmp(transaction, "commit prepared", strlen("commit prepared")) != 0 &&
+	    strncmp(transaction, "rollback prepared", strlen("rollback prepared")) != 0) {
             res = PQexec(con->connection, "start transaction");
             if (!ecpg_check_PQresult(res, lineno, con->connection, ECPG_COMPAT_PGSQL))
                 return FALSE;

@@ -18,7 +18,6 @@ main(void)
 {
 exec sql begin declare section;
 exec sql ifdef NAMELEN;
-	typedef char string[NAMELEN];
 	intarray amount;
 	char name[AMOUNT][NAMELEN];
 	char letter[AMOUNT][1];

@@ -11,7 +11,7 @@ override LDFLAGS := -L../../compatlib $(LDFLAGS)
 override LIBS := -lecpg_compat $(LIBS)
 
 TESTS = test_informix test_informix.cpp \
-        test_informix2 test_informix2.cpp \
+	test_informix2 test_informix2.cpp \
         dec_test dec_test.cpp \
         rfmtdate rfmtdate.cpp \
         rfmtlong rfmtlong.cpp \

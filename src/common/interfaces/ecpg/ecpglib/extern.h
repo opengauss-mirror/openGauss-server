@@ -36,7 +36,7 @@ struct ECPGgeneric_varchar {
 struct ECPGtype_information_cache {
     struct ECPGtype_information_cache* next;
     int oid;
-    bool isarray;
+    enum ARRAY_TYPE isarray;
 };
 
 /* structure to store one statement */
@@ -130,7 +130,7 @@ struct connection* ecpg_get_connection(const char*);
 char* ecpg_alloc(long, int);
 char* ecpg_realloc(void*, long, int);
 void ecpg_free(void*);
-bool ecpg_init(const struct connection*, const char*, const int);
+bool ecpg_init(const struct connection* con, const char* connection_name, const int lineno);
 char* ecpg_strdup(const char*, int);
 const char* ecpg_type_name(enum ECPGttype);
 int ecpg_dynamic_type(Oid);
@@ -145,7 +145,7 @@ struct descriptor* ecpg_find_desc(int line, const char* name);
 struct prepared_statement* ecpg_find_prepared_statement(const char*, struct connection*, struct prepared_statement**);
 
 bool ecpg_store_result(const PGresult* results, int act_field, const struct statement* stmt, struct variable* var);
-bool ecpg_store_input(const int, const bool, const struct variable*, char**, bool);
+bool ecpg_store_input(const int lineno, const bool force_indicator, const struct variable* var, char** tobeinserted_p, bool quote);
 
 bool ecpg_check_PQresult(PGresult*, int, PGconn*, enum COMPAT_MODE);
 void ecpg_raise(int line, int code, const char* sqlstate, const char* str);

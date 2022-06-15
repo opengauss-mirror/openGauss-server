@@ -61,7 +61,7 @@ void GlobalBaseDefCache::RemoveElemFromBucket(GlobalBaseEntry *base)
     if (is_relation) {
         GlobalRelationEntry *entry = (GlobalRelationEntry *)base;
         uint64 rel_size = GetRelEstimateSize(entry);
-        pg_atomic_fetch_sub_u64(&m_base_space, rel_size);
+        pg_atomic_fetch_sub_u64(&m_base_space, AllocSetContextUsedSpace(((AllocSet)entry->rel_mem_manager)));
         m_db_entry->MemoryEstimateSub(rel_size);
     } else {
         GlobalPartitionEntry *entry = (GlobalPartitionEntry *)base;
@@ -77,7 +77,7 @@ void GlobalBaseDefCache::AddHeadToBucket(Index hash_index, GlobalBaseEntry *base
     if (is_relation) {
         GlobalRelationEntry *entry = (GlobalRelationEntry *)base;
         uint64 rel_size = GetRelEstimateSize(entry);
-        pg_atomic_fetch_add_u64(&m_base_space, rel_size);
+        pg_atomic_fetch_add_u64(&m_base_space, AllocSetContextUsedSpace(((AllocSet)entry->rel_mem_manager)));
         m_db_entry->MemoryEstimateAdd(rel_size);
     } else {
         GlobalPartitionEntry *entry = (GlobalPartitionEntry *)base;

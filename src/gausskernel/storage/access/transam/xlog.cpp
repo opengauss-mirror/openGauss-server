@@ -8965,6 +8965,8 @@ void StartupXLOG(void)
     g_instance.comm_cxt.predo_cxt.redoPf.redo_done_time = 0;
     pg_atomic_write_u32(&(g_instance.comm_cxt.localinfo_cxt.is_finish_redo), 0);
 
+    NotifyGscRecoveryStarted();
+
     /*
      * Initialize WAL insert status array and the flush index - lastWalStatusEntryFlushed.
      */
@@ -9114,7 +9116,7 @@ void StartupXLOG(void)
 
     // Check for recovery control file, and if so set up state for offline recovery
     readRecoveryCommandFile();
-    if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_UNSET) {
+    if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_UNSET && g_instance.pid_cxt.PageRepairPID != 0) {
         g_instance.repair_cxt.support_repair = true;
     } else {
         g_instance.repair_cxt.support_repair = false;

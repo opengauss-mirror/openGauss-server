@@ -342,8 +342,8 @@ typedef struct {
 #define TIMESTAMP_IS_NOEND(j) ((j) == DT_NOEND)
 #define TIMESTAMP_NOT_FINITE(j) (TIMESTAMP_IS_NOBEGIN(j) || TIMESTAMP_IS_NOEND(j))
 
-int DecodeInterval(char**, const int*, int, int*, struct tm*, fsec_t*);
-int DecodeTime(const char*, int*, struct tm*, fsec_t*);
+int DecodeInterval2(char** field, const int* ftype, int nf, int* dtype, struct tm* tm, fsec_t* fsec);
+int DecodeTime(const char* str, unsigned int* tmask, struct tm* tm, fsec_t* fsec);
 int EncodeDateTime(
     struct tm* tm, fsec_t fsec, bool print_tz, int tz, const char* tzn, int style, char* str, bool EuroDates);
 int EncodeInterval(struct tm* tm, fsec_t fsec, int style, char* str);
@@ -359,6 +359,8 @@ void GetCurrentDateTime(struct tm*);
 int date2j(int, int, int);
 void TrimTrailingZeros(char*);
 void dt2time(double, int*, int*, int*, fsec_t*);
+int PGTYPEStimestamp_defmt_scan(
+    char** str, char* fmt, timestamp* d, int* year, int* month, int* day, int* hour, int* minute, int* second, int* tz);
 
 extern char* pgtypes_date_weekdays_short[];
 extern char* pgtypes_date_months[];

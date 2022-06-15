@@ -213,7 +213,7 @@ extern bool check_rel_is_partitioned(Oid relid);
 extern Oid partid_get_parentid(Oid partid);
 extern bool is_not_strict_agg(Oid funcOid);
 extern bool is_pgxc_class_table(Oid tableoid);
-extern Oid get_valid_relname_relid(const char* relnamespace, const char* relname);
+extern Oid get_valid_relname_relid(const char* relnamespace, const char* relname, bool nsp_missing_ok = false);
 extern bool get_func_iswindow(Oid funcid);
 extern char get_func_prokind(Oid funcid);
 extern char get_typecategory(Oid typid);

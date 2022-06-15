@@ -1455,18 +1455,27 @@ select pg_get_tabledef('range_range_03');
  ENABLE ROW MOVEMENT;                                                                                                          +
  CREATE INDEX range_range_03_idx4 ON range_range_03 USING ubtree (c_varchar4) WITH (storage_type=USTORE) TABLESPACE pg_default;+
  CREATE INDEX range_range_03_idx3 ON range_range_03 USING ubtree (c_varchar3) WITH (storage_type=USTORE) TABLESPACE pg_default;+
- CREATE INDEX range_range_03_idx1 ON range_range_03 USING ubtree (c_varchar1) LOCAL                                            +
- (                                                                                                                             +
-     PARTITION p1_1_c_varchar1_idx,                                                                                            +
-     PARTITION p1_2_c_varchar1_idx,                                                                                            +
-     PARTITION p2_1_c_varchar1_idx,                                                                                            +
-     PARTITION p2_2_c_varchar1_idx,                                                                                            +
-     PARTITION p3_1_c_varchar1_idx,                                                                                            +
-     PARTITION p3_2_c_varchar1_idx,                                                                                            +
-     PARTITION p4_1_c_varchar1_idx,                                                                                            +
-     PARTITION p4_2_c_varchar1_idx,                                                                                            +
-     PARTITION p5_1_c_varchar1_idx,                                                                                            +
-     PARTITION p5_2_c_varchar1_idx                                                                                             +
+ CREATE INDEX range_range_03_idx1 ON range_range_03 USING ubtree (c_varchar1) LOCAL(                                           +
+     PARTITION partition_name(                                                                                                 +
+         SUBPARTITION p1_1_c_varchar1_idx,                                                                                     +
+         SUBPARTITION p1_2_c_varchar1_idx                                                                                      +
+     ),                                                                                                                        +
+     PARTITION partition_name(                                                                                                 +
+         SUBPARTITION p2_1_c_varchar1_idx,                                                                                     +
+         SUBPARTITION p2_2_c_varchar1_idx                                                                                      +
+     ),                                                                                                                        +
+     PARTITION partition_name(                                                                                                 +
+         SUBPARTITION p3_1_c_varchar1_idx,                                                                                     +
+         SUBPARTITION p3_2_c_varchar1_idx                                                                                      +
+     ),                                                                                                                        +
+     PARTITION partition_name(                                                                                                 +
+         SUBPARTITION p4_1_c_varchar1_idx,                                                                                     +
+         SUBPARTITION p4_2_c_varchar1_idx                                                                                      +
+     ),                                                                                                                        +
+     PARTITION partition_name(                                                                                                 +
+         SUBPARTITION p5_1_c_varchar1_idx,                                                                                     +
+         SUBPARTITION p5_2_c_varchar1_idx                                                                                      +
+     )                                                                                                                         +
  )  WITH (storage_type=USTORE) TABLESPACE pg_default;                                                                          +
  ALTER TABLE range_range_03 ADD CONSTRAINT range_range_03_pkey PRIMARY KEY (c, c_int) WITH (storage_type=USTORE);
 (1 row)

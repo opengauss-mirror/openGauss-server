@@ -376,6 +376,28 @@ uint1 ConvertChunkSize(uint32 compressedChunkSize, bool *success)
 constexpr int MAX_RETRY_LIMIT = 60;
 constexpr long RETRY_SLEEP_TIME = 1000000L;
 
+bool CompressedPageChecksum(char *dst)
+{
+    char *data = NULL;
+    size_t dataLen;
+    uint32 crc32;
+    if (PageIs8BXidHeapVersion(dst)) {
+        HeapPageCompressData *heapPageData = (HeapPageCompressData *)dst;
+        data = heapPageData->data;
+        dataLen = heapPageData->size;
+        crc32 = heapPageData->crc32;
+    } else {
+        PageCompressData *heapPageData = (PageCompressData *)dst;
+        data = heapPageData->data;
+        dataLen = heapPageData->size;
+        crc32 = heapPageData->crc32;
+    }
+    if (DataBlockChecksum(data, dataLen, true) == crc32) {
+        return true;
+    }
+    return false;
+}
+
 size_t ReadAllChunkOfBlock(char *dst, size_t destLen, BlockNumber blockNumber, ReadBlockChunksStruct& rbStruct)
 {
     PageCompressHeader* header = rbStruct.header;
@@ -393,6 +415,7 @@ size_t ReadAllChunkOfBlock(char *dst, size_t destLen, BlockNumber blockNumber, R
     /* for empty chunks write */
     uint8 allocatedChunks;
     uint8 nchunks;
+    int maxChunkNum = BLCKSZ / chunkSize;
     do {
         allocatedChunks = currentAddr->allocated_chunks;
         nchunks = currentAddr->nchunks;
@@ -412,25 +435,20 @@ size_t ReadAllChunkOfBlock(char *dst, size_t destLen, BlockNumber blockNumber, R
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", fileName)));
             }
         }
+        /* zero page */
         if (nchunks == 0) {
             break;
         }
-        char *data = NULL;
-        size_t dataLen;
-        uint32 crc32;
-        if (PageIs8BXidHeapVersion(dst)) {
-            HeapPageCompressData *heapPageData = (HeapPageCompressData *)dst;
-            data = heapPageData->data;
-            dataLen = heapPageData->size;
-            crc32 = heapPageData->crc32;
+        /* full uncompressed page */
+        if (maxChunkNum == nchunks) {
+            if (pg_checksum_page((char*)dst, blockNumber) == ((PageHeader)(dst))->pd_checksum) {
+                break;
+            }
         } else {
-            PageCompressData *heapPageData = (PageCompressData *)dst;
-            data = heapPageData->data;
-            dataLen = heapPageData->size;
-            crc32 = heapPageData->crc32;
-        }
-        if (DataBlockChecksum(data, dataLen, true) == crc32) {
-            break;
+            /* compressed page */
+            if (CompressedPageChecksum((char*)dst)) {
+                break;
+            }
         }
 
         if (tryCount < MAX_RETRY_LIMIT) {
