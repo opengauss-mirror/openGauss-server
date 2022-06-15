@@ -39,19 +39,17 @@ static const ScanKeyword ECPGScanKeywords[] = {
     {"break", SQL_BREAK, 0},
     {"call", SQL_CALL, 0},
     {"cardinality", SQL_CARDINALITY, 0},
-    {"connect", SQL_CONNECT, 0},
     {"count", SQL_COUNT, 0},
     {"datetime_interval_code", SQL_DATETIME_INTERVAL_CODE, 0},
     {"datetime_interval_precision", SQL_DATETIME_INTERVAL_PRECISION, 0},
     {"describe", SQL_DESCRIBE, 0},
     {"descriptor", SQL_DESCRIPTOR, 0},
-    {"disconnect", SQL_DISCONNECT, 0},
     {"found", SQL_FOUND, 0},
     {"free", SQL_FREE, 0},
     {"get", SQL_GET, 0},
     {"go", SQL_GO, 0},
     {"goto", SQL_GOTO, 0},
-    {"identified", SQL_IDENTIFIED, 0},
+    {"identified", SQL_IDENTIFIED, 0},	
     {"indicator", SQL_INDICATOR, 0},
     {"key_member", SQL_KEY_MEMBER, 0},
     {"length", SQL_LENGTH, 0},
@@ -79,6 +77,22 @@ static const ScanKeyword ECPGScanKeywords[] = {
     {"whenever", SQL_WHENEVER, 0},
 };
 
+static const ScanKeyword ECPGSQLKeywords[] = {
+    {"call", SQL_CALL, 0},
+    {"identified", SQL_IDENTIFIED, 0},	
+};
+
+static bool ISECPGSQLKeyword(const char* text)
+{
+    const ScanKeyword* res = NULL;
+    bool is_ecpg_keyword = false;
+	
+    res = ScanKeywordLookup(text, ECPGSQLKeywords, lengthof(ECPGSQLKeywords));
+    if (res)
+        is_ecpg_keyword = true;
+    return is_ecpg_keyword;
+}
+
 /*
  * ScanECPGKeywordLookup - see if a given word is a keyword
  *
@@ -88,10 +102,10 @@ static const ScanKeyword ECPGScanKeywords[] = {
 const ScanKeyword* ScanECPGKeywordLookup(const char* text)
 {
     const ScanKeyword* res = NULL;
-
+	
     /* First check SQL symbols defined by the backend. */
     res = ScanKeywordLookup(text, SQLScanKeywords, NumSQLScanKeywords);
-    if (res)
+    if (res && !ISECPGSQLKeyword(text))
         return res;
 
     /* Try ECPG-specific keywords. */

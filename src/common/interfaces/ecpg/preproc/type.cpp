@@ -1,12 +1,77 @@
 /* src/interfaces/ecpg/preproc/type.c */
 
 #include "postgres_fe.h"
-
+#include "type.h"
 #include "extern.h"
 
 #define indicator_set ind_type != NULL && ind_type->type != ECPGt_NO_INDICATOR
 
 static struct ECPGstruct_member struct_no_indicator = {"no_indicator", &ecpg_no_indicator, NULL};
+
+static int Currentmemoryused_num = 0;
+static struct Current_memory *Currentmemoryused = NULL;
+
+void insert_current_memory(void *ptr)
+{
+    if (ptr == NULL)
+        return;
+    struct Current_memory *pcm = (struct Current_memory *)malloc(sizeof(struct Current_memory));
+
+    pcm->p = ptr;
+    pcm->next = Currentmemoryused;
+
+    ++Currentmemoryused_num;
+    Currentmemoryused = pcm;
+    return;
+}
+
+void free_current_memory(void *ptr)
+{
+    if (ptr == NULL)
+        return;
+    struct Current_memory *pcm = Currentmemoryused;
+    struct Current_memory *pfront = NULL;
+    while (pcm) {
+        if (pcm->p == ptr) {
+            if (pfront)
+                pfront->next = pcm->next;
+            else
+               Currentmemoryused = pcm->next;
+
+            if (pcm->p)
+                free(pcm->p);
+            free(pcm);
+
+            --Currentmemoryused_num;
+            return;
+        }
+        pfront = pcm;
+        pcm = pcm->next;
+    }
+
+    pcm = Currentmemoryused;
+    while (pcm) {
+        printf("Currentmemoryused ptr =%p\n", pcm);
+        pcm = pcm->next;
+    }
+    mmerror(OUT_OF_MEMORY, ET_FATAL, "not find %p", ptr);
+}
+
+void free_current_memory_all()
+{
+    struct Current_memory *pcm = Currentmemoryused;
+    while (pcm) {
+
+        struct Current_memory *pfree = pcm;
+        pcm = pcm->next;
+
+        free(pfree->p);
+        free(pfree);
+
+        --Currentmemoryused_num;
+    }
+    Currentmemoryused = NULL;
+}
 
 /* malloc + error check */
 void* mm_alloc(size_t size)
@@ -15,6 +80,8 @@ void* mm_alloc(size_t size)
 
     if (ptr == NULL)
         mmerror(OUT_OF_MEMORY, ET_FATAL, "out of memory");
+
+    insert_current_memory(ptr);
 
     return ptr;
 }
@@ -26,6 +93,8 @@ char* mm_strdup(const char* string)
 
     if (newm == NULL)
         mmerror(OUT_OF_MEMORY, ET_FATAL, "out of memory");
+
+    insert_current_memory(newm);
 
     return newm;
 }
@@ -242,7 +311,7 @@ void ECPGdump_a_type(FILE* o, const char* name, struct ECPGtype* type, const int
 
         str = mm_strdup(name);
         var = find_variable(str);
-        free(str);
+        free_current_memory(str);
 
         if ((var->type->type != type->type) || (var->type->type_name && !type->type_name) ||
             (!var->type->type_name && type->type_name) ||
@@ -254,7 +323,7 @@ void ECPGdump_a_type(FILE* o, const char* name, struct ECPGtype* type, const int
         if (ind_name && ind_type && ind_type->type != ECPGt_NO_INDICATOR && ind_brace_level >= 0) {
             str = mm_strdup(ind_name);
             var = find_variable(str);
-            free(str);
+            free_current_memory(str);
 
             if ((var->type->type != ind_type->type) || (var->type->type_name && !ind_type->type_name) ||
                 (!var->type->type_name && ind_type->type_name) ||
@@ -504,13 +573,13 @@ static void ECPGdump_a_simple(FILE* o, const char* name, enum ECPGttype type, ch
         if (atoi(arrsize) < 0)
             strcpy(arrsize, "1");
 
-        if (siz == NULL || strlen(siz) == 0 || strcmp(arrsize, "0") == 0 || strcmp(arrsize, "1") == 0)
+        if (siz == NULL || strlen(siz) == 0)
             fprintf(o, "\n\t%s,%s,(long)%s,(long)%s,%s, ", get_type(type), variable, varcharsize, arrsize, offset);
         else
             fprintf(o, "\n\t%s,%s,(long)%s,(long)%s,%s, ", get_type(type), variable, varcharsize, arrsize, siz);
 
-        free(variable);
-        free(offset);
+        free_current_memory(variable);
+        free_current_memory(offset);
     }
 }
 
@@ -568,9 +637,9 @@ void ECPGfree_struct_member(struct ECPGstruct_member* rm)
         struct ECPGstruct_member* p = rm;
 
         rm = rm->next;
-        free(p->name);
-        free(p->type);
-        free(p);
+        free_current_memory(p->name);
+        free_current_memory(p->type);
+        free_current_memory(p);
     }
 }
 
@@ -587,14 +656,14 @@ void ECPGfree_type(struct ECPGtype* type)
                     case ECPGt_union:
                         /* Array of structs. */
                         ECPGfree_struct_member(type->u.element->u.members);
-                        free(type->u.element);
+                        free_current_memory(type->u.element);
                         break;
                     default:
                         if (!IS_SIMPLE_TYPE(type->u.element->type))
                             base_yyerror(
                                 "internal error: unknown datatype, please report this to <pgsql-bugs@postgresql.org>");
 
-                        free(type->u.element);
+                        free_current_memory(type->u.element);
                 }
                 break;
             case ECPGt_struct:
@@ -606,7 +675,7 @@ void ECPGfree_type(struct ECPGtype* type)
                 break;
         }
     }
-    free(type);
+    free_current_memory(type);
 }
 
 const char* get_dtype(enum ECPGdtype type)

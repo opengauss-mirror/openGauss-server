@@ -38,6 +38,10 @@ OBJS=	preproc.o type.o ecpg.o output.o parser.o \
 	keywords.o c_keywords.o ecpg_keywords.o kwlookup.o ../ecpglib/typename.o descriptor.o variable.o \
 	$(WIN32RES)
 
+ifeq ($(GCC),yes)
+preproc.o: CXXFLAGS += -Wno-error
+endif
+
 all: ecpg
 
 ecpg: $(OBJS) | submake-libpgport
@@ -53,16 +57,22 @@ preproc.hpp: preproc.cpp ;
 
 preproc.cpp: preproc.y
 ifdef BISON
-	$(BISON) -d $(BISONFLAGS) -o $@ $<
+	$(BISON) -d $(BISONFLAGS) -t -v -o $@ $<
 else
 	@$(missing) bison $< $@
 endif
 
 pgc.cpp: pgc.l
 ifdef FLEX
-	$(FLEX) $(FLEXFLAGS) -o'$@' $<
+	$(FLEX) $(FLEXFLAGS) -o'$@' $< 
+	@grep -rn "size_t yy_size_t" $@;if [ $$? == 0 ]; then sed -i 's/int yyl;/size_t yyl;/g' $@;\
+	sed -i "s/i < _yybytes_len/(size_t)i < (size_t)_yybytes_len/g" $@;\
+	sed -i "s/n < max_size/(size_t)n < (size_t)max_size/g" $@;fi;
 else
 	@$(missing) flex $< $@
+	@grep -rn "size_t yy_size_t" $@;if [ $$? == 0 ]; then sed -i 's/int yyl;/size_t yyl;/g' $@;\
+	sed -i "s/i < _yybytes_len/(size_t)i < (size_t)_yybytes_len/g" $@;\
+	sed -i "s/n < max_size/(size_t)n < (size_t)max_size/g" $@;fi;
 endif
 
 preproc.y: ../../../../common/backend/parser/gram.y parse.pl ecpg.addons ecpg.header ecpg.tokens ecpg.trailer ecpg.type

@@ -54,7 +54,7 @@ main(void)
 		}
 		if (!num) continue;
 
-		numarr = realloc(numarr, sizeof(numeric *) * (count + 1));
+		numarr = (numeric **)realloc(numarr, sizeof(numeric *) * (count + 1));
 		numarr[count++] = num;
 
 		text = PGTYPESnumeric_to_asc(num, -1);

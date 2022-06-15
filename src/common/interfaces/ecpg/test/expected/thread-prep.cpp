@@ -4,17 +4,18 @@
 #include <ecpgerrno.h>
 #include <sqlca.h>
 /* End of automatic include section */
-#define ECPGdebug(X, Y) ECPGdebug((X) + 100, (Y))
+#define ECPGdebug(X,Y) ECPGdebug((X)+100,(Y))
 
 #line 1 "prep.pgc"
 #include <stdlib.h>
 #include "ecpg_config.h"
 
 #ifndef ENABLE_THREAD_SAFETY
-int main(void)
+int
+main(void)
 {
-    printf("No threading enabled.\n");
-    return 0;
+	printf("No threading enabled.\n");
+	return 0;
 }
 #else
 #ifdef WIN32
@@ -26,8 +27,9 @@ int main(void)
 #endif
 #include <stdio.h>
 
-#define THREADS 16
-#define REPEATS 50
+#define THREADS		16
+#define REPEATS		50
+
 
 #line 1 "sqlca.h"
 #ifndef POSTGRES_SQLCA_H
@@ -79,7 +81,7 @@ struct sqlca_t {
     /* 6: empty						*/
     /* 7: empty						*/
 
-    char sqlstate[5];
+    char sqlstate[6];
 };
 
 struct sqlca_t* ECPGget_sqlca(void);
@@ -96,9 +98,21 @@ struct sqlca_t* ECPGget_sqlca(void);
 
 #line 24 "prep.pgc"
 
+
 #line 1 "regression.h"
+#ifndef REGRESSION_H
+#define REGRESSION_H
+
+
+
+
+
+
+
+#endif /* REGRESSION_H */
 
 #line 25 "prep.pgc"
+
 
 /* exec sql whenever sqlerror  sqlprint ; */
 #line 27 "prep.pgc"
@@ -106,180 +120,140 @@ struct sqlca_t* ECPGget_sqlca(void);
 /* exec sql whenever not found  sqlprint ; */
 #line 28 "prep.pgc"
 
+
 #ifdef WIN32
 static unsigned __stdcall fn(void* arg)
 #else
 static void* fn(void* arg)
 #endif
 {
-    int i;
+	int i;
 
-    /* exec sql begin declare section */
-
+	/* exec sql begin declare section */
+	  
+	 
+	   
+	
 #line 39 "prep.pgc"
-    int value;
-
+ int value ;
+ 
 #line 40 "prep.pgc"
-    char name[100];
-
+ char name [ 100 ] ;
+ 
 #line 41 "prep.pgc"
-    char query[256] = "INSERT INTO T VALUES ( ? )";
+ char query [ 256 ] = "INSERT INTO T VALUES ( ? )" ;
 /* exec sql end declare section */
 #line 42 "prep.pgc"
 
-    value = (long)arg;
-    sprintf(name, "Connection: %d", value);
 
-    {
-        ECPGconnect(__LINE__, 0, "regress1", NULL, NULL, name, 0);
+	value = (long)arg;
+	sprintf(name, "Connection: %d", value);
+
+	{ ECPGconnect(__LINE__, 0, "regress1" , NULL, NULL , name, 0); 
 #line 47 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 47 "prep.pgc"
 
-    {
-        ECPGsetcommit(__LINE__, "on", NULL);
+	{ ECPGsetcommit(__LINE__, "on", NULL);
 #line 48 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 48 "prep.pgc"
 
-    for (i = 1; i <= REPEATS; ++i) {
-        {
-            ECPGprepare(__LINE__, NULL, 0, "i", query);
+	for (i = 1; i <= REPEATS; ++i)
+	{
+		{ ECPGprepare(__LINE__, NULL, 0, "i", query);
 #line 51 "prep.pgc"
 
-            if (sqlca.sqlcode < 0)
-                sqlprint();
-        }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 51 "prep.pgc"
 
-        {
-            ECPGdo(__LINE__,
-                0,
-                1,
-                NULL,
-                0,
-                ECPGst_execute,
-                "i",
-                ECPGt_int,
-                &(value),
-                (long)1,
-                (long)1,
-                sizeof(int),
-                ECPGt_NO_INDICATOR,
-                NULL,
-                0L,
-                0L,
-                0L,
-                ECPGt_EOIT,
-                ECPGt_EORT);
+		{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_execute, "i", 
+	ECPGt_int,&(value),(long)1,(long)1,sizeof(int), 
+	ECPGt_NO_INDICATOR, NULL , 0L, 0L, 0L, ECPGt_EOIT, ECPGt_EORT);
 #line 52 "prep.pgc"
 
-            if (sqlca.sqlcode == ECPG_NOT_FOUND)
-                sqlprint();
+if (sqlca.sqlcode == ECPG_NOT_FOUND) sqlprint();
 #line 52 "prep.pgc"
 
-            if (sqlca.sqlcode < 0)
-                sqlprint();
-        }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 52 "prep.pgc"
-    }
-    {
-        ECPGdeallocate(__LINE__, 0, NULL, "i");
+
+	}
+	{ ECPGdeallocate(__LINE__, 0, NULL, "i");
 #line 54 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 54 "prep.pgc"
 
-    {
-        ECPGdisconnect(__LINE__, name);
+	{ ECPGdisconnect(__LINE__, name);
 #line 55 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 55 "prep.pgc"
 
-    return 0;
+
+	return 0;
 }
 
-int main()
+int main ()
 {
-    int i;
+	int i;
 #ifdef WIN32
-    HANDLE threads[THREADS];
+	HANDLE threads[THREADS];
 #else
-    pthread_t threads[THREADS];
+	pthread_t threads[THREADS];
 #endif
 
-    {
-        ECPGconnect(__LINE__, 0, "regress1", NULL, NULL, NULL, 0);
+	{ ECPGconnect(__LINE__, 0, "regress1" , NULL, NULL , NULL, 0); 
 #line 69 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 69 "prep.pgc"
 
-    {
-        ECPGsetcommit(__LINE__, "on", NULL);
+	{ ECPGsetcommit(__LINE__, "on", NULL);
 #line 70 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 70 "prep.pgc"
 
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "drop table if exists T", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "drop table if exists T", ECPGt_EOIT, ECPGt_EORT);
 #line 71 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 71 "prep.pgc"
 
-    {
-        ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table T ( i int )", ECPGt_EOIT, ECPGt_EORT);
+	{ ECPGdo(__LINE__, 0, 1, NULL, 0, ECPGst_normal, "create table T ( i int )", ECPGt_EOIT, ECPGt_EORT);
 #line 72 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 72 "prep.pgc"
 
-    {
-        ECPGdisconnect(__LINE__, "CURRENT");
+	{ ECPGdisconnect(__LINE__, "CURRENT");
 #line 73 "prep.pgc"
 
-        if (sqlca.sqlcode < 0)
-            sqlprint();
-    }
+if (sqlca.sqlcode < 0) sqlprint();}
 #line 73 "prep.pgc"
+
 
 #ifdef WIN32
-    for (i = 0; i < THREADS; ++i) {
-        unsigned id;
-        threads[i] = (HANDLE)_beginthreadex(NULL, 0, fn, (void*)i, 0, &id);
-    }
+	for (i = 0; i < THREADS; ++i)
+	{
+		unsigned id;
+		threads[i] = (HANDLE)_beginthreadex(NULL, 0, fn, (void*)i, 0, &id);
+	}
 
-    WaitForMultipleObjects(THREADS, threads, TRUE, INFINITE);
-    for (i = 0; i < THREADS; ++i)
-        CloseHandle(threads[i]);
+	WaitForMultipleObjects(THREADS, threads, TRUE, INFINITE);
+	for (i = 0; i < THREADS; ++i)
+		CloseHandle(threads[i]);
 #else
-    for (i = 0; i < THREADS; ++i)
-        pthread_create(&threads[i], NULL, fn, (void*)(long)i);
-    for (i = 0; i < THREADS; ++i)
-        pthread_join(threads[i], NULL);
+	for (i = 0; i < THREADS; ++i)
+		pthread_create(&threads[i], NULL, fn, (void *) (long) i);
+	for (i = 0; i < THREADS; ++i)
+		pthread_join(threads[i], NULL);
 #endif
 
-    return 0;
+	return 0;
 }
 #endif

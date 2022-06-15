@@ -53,6 +53,8 @@ my $comment     = 0;
 my $non_term_id = '';
 my $cc          = 0;
 
+# Read the gram. Y file and store the rule part of the file (the second 
+# part of the %% split) in the hash variable %found
 open GRAM, $parser or die $!;
 while (<GRAM>)
 {
@@ -154,6 +156,9 @@ if ($verbose)
 my $ret = 0;
 $cc = 0;
 
+# Read the ecpg. Addons file and match the ecpg: format, split the matching into three segments
+# with Spaces, use the second segment to search the hash variable %found, if it exists, the check
+# passes, if it does not exist, the check fails
 open ECPG, $filename or die $!;
 while (<ECPG>)
 {

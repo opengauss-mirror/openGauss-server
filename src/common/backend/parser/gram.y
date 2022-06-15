@@ -350,14 +350,14 @@ static int errstate;
 		BarrierStmt AlterNodeStmt CreateNodeStmt DropNodeStmt AlterCoordinatorStmt
 		CreateNodeGroupStmt AlterNodeGroupStmt DropNodeGroupStmt 
 		CreatePolicyLabelStmt AlterPolicyLabelStmt DropPolicyLabelStmt 
-        CreateAuditPolicyStmt AlterAuditPolicyStmt DropAuditPolicyStmt 
+		CreateAuditPolicyStmt AlterAuditPolicyStmt DropAuditPolicyStmt 
 		CreateMaskingPolicyStmt AlterMaskingPolicyStmt DropMaskingPolicyStmt
 		CreateResourcePoolStmt AlterResourcePoolStmt DropResourcePoolStmt
 		CreateWorkloadGroupStmt AlterWorkloadGroupStmt DropWorkloadGroupStmt
 		CreateAppWorkloadGroupMappingStmt AlterAppWorkloadGroupMappingStmt DropAppWorkloadGroupMappingStmt
 		MergeStmt PurgeStmt CreateMatViewStmt RefreshMatViewStmt
 		CreateWeakPasswordDictionaryStmt DropWeakPasswordDictionaryStmt
-                AlterGlobalConfigStmt DropGlobalConfigStmt
+		AlterGlobalConfigStmt DropGlobalConfigStmt
 		CreatePublicationStmt AlterPublicationStmt
 		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
 
@@ -4317,6 +4317,7 @@ CopyStmt:	COPY opt_binary qualified_name opt_column_list opt_oids
 opt_processed:
                 ENCRYPTED {$$=TRUE;}
 				|  /*EMPTY*/						{ $$ = FALSE; }
+		;
 
 opt_load:
                 LOAD								
@@ -4330,6 +4331,7 @@ opt_load:
 					$$ = makeDefElem("loader", (Node *)makeInteger(TRUE)); 
 				}
 				|  /*EMPTY*/						{ $$ = NULL; }
+		;
 
 opt_useeof:
                 USEEOF
@@ -4337,7 +4339,7 @@ opt_useeof:
                                         $$ = makeDefElem("useeof", (Node *)makeInteger(TRUE));
                                 }
                                 |  /*EMPTY*/                                            { $$ = NULL; }
-
+		;
 
 copy_from:
 			FROM 									{ $$ = TRUE; }
@@ -4375,7 +4377,7 @@ copy_opt_item:
 				{
 					$$ = makeDefElem("oids", (Node *)makeInteger(TRUE));
 				}
-			|FREEZE
+			| FREEZE
 				{
 					$$ = makeDefElem("freeze", (Node *)makeInteger(TRUE));
 				}
@@ -5031,15 +5033,15 @@ opt_table_partitioning_clause:
 			{
 				$$ = $1;
 			}
-		|hash_partitioning_clause
+		| hash_partitioning_clause
 			{
 				$$ = $1;
 			}
-		|list_partitioning_clause
+		| list_partitioning_clause
 			{
 				$$ = $1;
 			}
-		|value_partitioning_clause
+		| value_partitioning_clause
 			{
 				$$ = $1;
 			}
@@ -5177,11 +5179,11 @@ subpartitioning_clause:
 			{
 				$$ = $1;
 			}
-		|hash_subpartitioning_clause
+		| hash_subpartitioning_clause
 			{
 				$$ = $1;
 			}
-		|list_subpartitioning_clause
+		| list_subpartitioning_clause
 			{
 				$$ = $1;
 			}
@@ -5620,7 +5622,8 @@ opt_range_every_list:
 				$$ = $3;
 			}
 		| /* empty */ { $$ = NIL; }
-		
+		;
+
 partition_name:
 		ColId
 			{
@@ -8014,7 +8017,7 @@ size_clause:
 OptRelative:
 			RELATIVE_P									{ $$ = true; }
 			| /*EMPTY */	 							{ $$ = false; }
-
+		;
 
 OptTableSpaceOwner: OWNER name			{ $$ = $2; }
 			| /*EMPTY */				{ $$ = NULL; }
@@ -8879,8 +8882,8 @@ ForeignTableElementList:
 
 ForeignTableElement:
 			ForeignColDef				    { $$ = $1; }
-			|ForeignTableLikeClause			{ $$ = $1; }
-			|TableConstraint			    { $$ = $1; } /* @hdfs Add informational constraint syntax on the HDFS foreign table. */
+			| ForeignTableLikeClause			{ $$ = $1; }
+			| TableConstraint			    { $$ = $1; } /* @hdfs Add informational constraint syntax on the HDFS foreign table. */
 		;
 ForeignColDef: ColId Typename ForeignPosition create_generic_options  ColQualList
 				{
@@ -8939,7 +8942,7 @@ OptForeignTableLogRemote:
 				{
 					$$ = (Node*)makeDefElem("log_remote", (Node *)makeString($3));
 				}
-			|REMOTE_P LOG_P
+			| REMOTE_P LOG_P
 				{
 					$$ = (Node*)makeDefElem("log_remote", (Node*)makeString(""));
 				}
@@ -9159,6 +9162,7 @@ features_clause:
 		List* result = NULL;
 		$$ = result;
 	}
+	;
 
 target_clause:
 	TARGET target_list{
@@ -9181,7 +9185,7 @@ target_clause:
 		List* result = NULL;
 		$$ = result;
 	}
-
+	;
 
 with_hyperparameters_clause:
 	WITH hyperparameter_name_value_list { $$ = $2; }
@@ -9326,6 +9330,7 @@ DropRlsPolicyStmt:
 RowLevelSecurityPolicyName:
 			ROW LEVEL SECURITY POLICY name	{ $$ = $5; }
 			| POLICY name						{ $$ = $2; }
+		;
 
 RLSOptionalUsingExpr:
 			USING '(' a_expr ')'	{ $$ = $3; }
@@ -13152,6 +13157,7 @@ table_func_column_list:
 					n->isProcedure = false;
 					$$ = (Node *)n;
 				}
+		;
 
 AlterFunctionStmt:
 			ALTER FUNCTION function_with_argtypes alterfunc_opt_list opt_restrict
@@ -15491,6 +15497,7 @@ load_when_option:
 		{
 			$$ = MakeDefElemWithLoc("when_expr", (Node *)$2, @1, @2);
 		}
+	;
 
 load_when_option_list:
 		load_when_option_item
@@ -16370,7 +16377,7 @@ analyze_keyword:
 
 opt_verify_options:
         	FAST                                    { $$ = VACOPT_FAST;}
-            |COMPLETE                               { $$ = VACOPT_COMPLETE;}
+            | COMPLETE                               { $$ = VACOPT_COMPLETE;}
 	    ;
 
 opt_verbose:
@@ -16412,7 +16419,7 @@ opt_analyze_column_define:
 				{
 					$$ = $2;
 				}
-			|'(' name_list ')'						{ $$ = $2; }
+			| '(' name_list ')'						{ $$ = $2; }
 			| /*EMPTY*/								{ $$ = NIL; }
 		;
 
@@ -16973,7 +16980,7 @@ policy_status_opt:
         ENABLE_P        {$$ = TRUE;}
         | DISABLE_P     {$$ = FALSE;}
         | /* EMPTY */   {$$ = TRUE;}
-
+        ;
 
 /*****************************************************************************
  *
@@ -17125,6 +17132,7 @@ alter_policy_filter_list:
         {
             $$ = list_make1((Node *)$3);
         }
+        ;
 
 alter_policy_action_clause:
         ADD_P   { $$ = "add";  }
@@ -17270,7 +17278,8 @@ alter_policy_condition:
                 n->arg = $5;
                 $$ = (Node *) n;
             }
-            
+        ;
+
 policy_condition_opt:
 	
 		    CONDITION '(' policy_label_item masking_policy_condition_operator masking_policy_condition_value ')'
@@ -17694,7 +17703,7 @@ AlterResourcePoolStmt: ALTER RESOURCE POOL resource_pool_name OptWith
 				}
 		;
 
-AlterGlobalConfigStmt:ALTER GLOBAL CONFIGURATION OptWith
+AlterGlobalConfigStmt: ALTER GLOBAL CONFIGURATION OptWith
 				{
 					AlterGlobalConfigStmt *n = makeNode(AlterGlobalConfigStmt);
 					n->options = $4;
@@ -17728,7 +17737,7 @@ DropResourcePoolStmt: DROP RESOURCE POOL resource_pool_name
 resource_pool_name:
 			ColId							{ $$ = $1; };
 
-DropGlobalConfigStmt:DROP GLOBAL CONFIGURATION name_list
+DropGlobalConfigStmt: DROP GLOBAL CONFIGURATION name_list
 				{
 					DropGlobalConfigStmt *n = makeNode(DropGlobalConfigStmt);
 					n->options = $4;
@@ -19360,7 +19369,7 @@ opt_select_limit:
 opt_delete_limit:
 			LIMIT a_expr						{ $$ = list_make2(NULL, $2); }
 			| /* EMPTY */						{ $$ = list_make2(NULL, NULL); }
-
+		;
 
 limit_clause:
 			LIMIT select_limit_value
@@ -20196,6 +20205,7 @@ tablesample_clause:
  */
 timecapsule_clause:
 			TIMECAPSULE opt_timecapsule_clause { $$ = $2; }
+		;
 
 opt_timecapsule_clause:
 			 CSN {u_sess->parser_cxt.isTimeCapsule = true;} a_expr
@@ -20906,7 +20916,7 @@ client_logic_type:
 					$$ = SystemTypeName("byteawithoutorderwithequalcol");
 					$$->location = @1;
 			}
-;
+		;
 
 /*****************************************************************************
  *

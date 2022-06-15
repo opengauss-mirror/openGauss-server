@@ -1683,7 +1683,9 @@ bool ECPGdo(const int lineno, const int compat, const int force_indicator, const
             var->arrsize = va_arg(args, long);
             var->offset = va_arg(args, long);
 
-            if (var->arrsize == 0 || var->varcharsize == 0)
+            if (var->arrsize == 0 && var->varcharsize == 0)
+                var->value = NULL;
+            else if (var->arrsize == 0 || var->varcharsize == 0)
                 var->value = *((char**)(var->pointer));
             else
                 var->value = var->pointer;

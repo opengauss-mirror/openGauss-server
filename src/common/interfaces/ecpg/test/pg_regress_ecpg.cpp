@@ -55,6 +55,8 @@ static void ecpg_filter(const char* sourcefile, const char* outfile)
                 strncpy(n, p + 1, plen - 1);
                 n[plen - 1] = '\0';
                 replace_string(linebuf, n, "");
+                free(n);
+                n = NULL;
             }
         }
         fputs(linebuf, t);
@@ -69,7 +71,8 @@ static void ecpg_filter(const char* sourcefile, const char* outfile)
  */
 
 static PID_TYPE ecpg_start_test(
-    const char* testname, _stringlist** resultfiles, _stringlist** expectfiles, _stringlist** tags)
+    const char* testname, _stringlist** resultfiles, _stringlist** expectfiles, _stringlist** tags,
+    bool use_jdbc_client)
 {
     PID_TYPE pid;
     char inprg[MAXPGPATH];
@@ -86,7 +89,9 @@ static PID_TYPE ecpg_start_test(
     replace_string(testname_dash, "/", "-");
     snprintf(expectfile_stdout, sizeof(expectfile_stdout), "%s/expected/%s.stdout", outputdir, testname_dash);
     snprintf(expectfile_stderr, sizeof(expectfile_stderr), "%s/expected/%s.stderr", outputdir, testname_dash);
-    snprintf(expectfile_source, sizeof(expectfile_source), "%s/expected/%s.c", outputdir, testname_dash);
+    snprintf(expectfile_source, sizeof(expectfile_source), "%s/expected/%s.cpp", outputdir, testname_dash);
+    free(testname_dash);
+    testname_dash = NULL;
 
     /*
      * We can use replace_string() here because the replacement string does
@@ -109,9 +114,9 @@ static PID_TYPE ecpg_start_test(
 
     add_stringlist_item(resultfiles, outfile_source);
     add_stringlist_item(expectfiles, expectfile_source);
-    add_stringlist_item(tags, "source");
+    add_stringlist_item(tags, "cpp");
 
-    snprintf(insource, sizeof(insource), "%s.c", testname);
+    snprintf(insource, sizeof(insource), "%s.cpp", testname);
     ecpg_filter(insource, outfile_source);
 
     snprintf(inprg, sizeof(inprg), "%s/%s", inputdir, testname);
@@ -140,5 +145,5 @@ static void ecpg_init(void)
 
 int main(int argc, char* argv[])
 {
-    return regression_main(argc, argv, ecpg_init, ecpg_start_test);
+    return regression_main(argc, argv, ecpg_init, ecpg_start_test, NULL);
 }

@@ -66,7 +66,7 @@
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_store_result on line 72: allocating memory for 1 tuples
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_get_data on line 72: RESULT: 1987-07-14 offset: -1; array: no
+[NO_PID]: ecpg_get_data on line 72: RESULT: 1987-07-14 00:00:00 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 72: RESULT: 3 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
@@ -84,7 +84,7 @@
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_store_result on line 72: allocating memory for 1 tuples
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_get_data on line 72: RESULT: 1987-07-14 offset: -1; array: no
+[NO_PID]: ecpg_get_data on line 72: RESULT: 1987-07-14 00:00:00 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_get_data on line 72: RESULT: 3 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000

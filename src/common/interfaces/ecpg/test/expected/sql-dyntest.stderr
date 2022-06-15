@@ -180,15 +180,15 @@
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGget_desc: NAME = day
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: SCALE = 65531
+[NO_PID]: ECPGget_desc: SCALE = 65532
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: PRECISION = -1
+[NO_PID]: ECPGget_desc: PRECISION = 0
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: RETURNED[0] = 10
+[NO_PID]: ECPGget_desc: RETURNED[0] = 19
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: OCTET_LENGTH = 4
+[NO_PID]: ECPGget_desc: OCTET_LENGTH = 8
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: LENGTH = -5
+[NO_PID]: ECPGget_desc: LENGTH = -4
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGget_desc: TYPE = 9
 [NO_PID]: sqlca: code: 0, state: 00000
@@ -196,13 +196,13 @@
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGget_desc: reading items for tuple 7
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: TYPE = 1
+[NO_PID]: ECPGget_desc: TYPE = 3
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGget_desc: reading items for tuple 7
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: TYPE = 1
+[NO_PID]: ECPGget_desc: TYPE = 3
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_get_data on line 176: RESULT: 14.07.1987 offset: -1; array: no
+[NO_PID]: ecpg_get_data on line 176: RESULT: 14.07.1987 00:00:00 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 64: query: fetch in MYCURS; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000
@@ -350,15 +350,15 @@
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGget_desc: NAME = day
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: SCALE = 65531
+[NO_PID]: ECPGget_desc: SCALE = 65532
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: PRECISION = -1
+[NO_PID]: ECPGget_desc: PRECISION = 0
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: RETURNED[0] = 10
+[NO_PID]: ECPGget_desc: RETURNED[0] = 19
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: OCTET_LENGTH = 4
+[NO_PID]: ECPGget_desc: OCTET_LENGTH = 8
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: LENGTH = -5
+[NO_PID]: ECPGget_desc: LENGTH = -4
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGget_desc: TYPE = 9
 [NO_PID]: sqlca: code: 0, state: 00000
@@ -366,13 +366,13 @@
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGget_desc: reading items for tuple 7
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: TYPE = 1
+[NO_PID]: ECPGget_desc: TYPE = 3
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ECPGget_desc: reading items for tuple 7
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ECPGget_desc: TYPE = 1
+[NO_PID]: ECPGget_desc: TYPE = 3
 [NO_PID]: sqlca: code: 0, state: 00000
-[NO_PID]: ecpg_get_data on line 176: RESULT: 05.11.1999 offset: -1; array: no
+[NO_PID]: ecpg_get_data on line 176: RESULT: 05.11.1999 00:00:00 offset: -1; array: no
 [NO_PID]: sqlca: code: 0, state: 00000
 [NO_PID]: ecpg_execute on line 64: query: fetch in MYCURS; with 0 parameter(s) on connection regress1
 [NO_PID]: sqlca: code: 0, state: 00000

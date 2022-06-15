@@ -7,6 +7,7 @@ test: compat_informix/sqlda
 test: compat_informix/describe
 test: compat_informix/test_informix
 test: compat_informix/test_informix2
+test: connect/test1
 test: connect/test2
 test: connect/test3
 test: connect/test4
@@ -52,3 +53,4 @@ test: thread/thread_implicit
 test: thread/prep
 test: thread/alloc
 test: thread/descriptor
+

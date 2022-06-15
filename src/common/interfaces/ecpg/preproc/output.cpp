@@ -4,21 +4,22 @@
 
 #include "extern.h"
 
-static void output_escaped_str(char* cmd, bool quoted);
+static void output_escaped_str(char* str, bool quoted);
+
 
 void output_line_number(void)
 {
     char* line = hashline_number();
 
     fprintf(yyout, "%s", line);
-    free(line);
+    free_current_memory(line);
 }
 
 void output_simple_statement(char* stmt)
 {
     output_escaped_str(stmt, false);
     output_line_number();
-    free(stmt);
+    free_current_memory(stmt);
 }
 
 /*
@@ -124,9 +125,9 @@ void output_statement(char* stmt, int whenever_mode, enum ECPG_statement_type st
     reset_variables();
 
     whenever_action(whenever_mode | 2);
-    free(stmt);
+    free_current_memory(stmt);
     if (connection != NULL)
-        free(connection);
+        free_current_memory(connection);
 }
 
 void output_prepare_statement(char* name, char* stmt)
@@ -137,9 +138,9 @@ void output_prepare_statement(char* name, char* stmt)
     output_escaped_str(stmt, true);
     fputs(");", yyout);
     whenever_action(2);
-    free(name);
+    free_current_memory(name);
     if (connection != NULL)
-        free(connection);
+        free_current_memory(connection);
 }
 
 void output_deallocate_prepare_statement(char* name)
@@ -154,9 +155,9 @@ void output_deallocate_prepare_statement(char* name)
         fprintf(yyout, "{ ECPGdeallocate_all(__LINE__, %d, %s);", compat, con);
 
     whenever_action(2);
-    free(name);
+    free_current_memory(name);
     if (connection != NULL)
-        free(connection);
+        free_current_memory(connection);
 }
 
 static void output_escaped_str(char* str, bool quoted)

@@ -19,8 +19,8 @@ static void
 get_var1(MYTYPE **myvar0, MYNULLTYPE **mynullvar0)
 {
 	exec sql begin declare section;
-	MYTYPE		*myvar = malloc(sizeof(MYTYPE));
-	MYNULLTYPE	*mynullvar = malloc(sizeof(MYNULLTYPE));
+	MYTYPE		*myvar = (MYTYPE *)malloc(sizeof(MYTYPE));
+	MYNULLTYPE	*mynullvar = (MYNULLTYPE *)malloc(sizeof(MYNULLTYPE));
 	exec sql end declare section;
 
 	/* Test DECLARE ... SELECT ... INTO with pointers */
@@ -119,6 +119,9 @@ main (void)
 
 	strcpy(msg, "disconnect");
 	exec sql disconnect;
+
+	free(myvar);
+	free(mynullvar);
 
 	return (0);
 }

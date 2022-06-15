@@ -25,6 +25,8 @@ else
 abs_builddir := $(shell sh -c "pwd -W")
 endif
 
+pg_mem_check = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && export LSAN_OPTIONS='exitcode=0:suppressions=$(HOME)/memchk/memleak_ignore'
+
 all install installdirs uninstall distprep:
 	$(MAKE) -C connect $@
 	$(MAKE) -C sql $@
@@ -44,7 +46,6 @@ clean distclean maintainer-clean:
 	rm -f pg_regress regression.diffs regression.out pg_regress_ecpg.o
 
 # Build regression test driver
-
 all: pg_regress$(X)
 
 ifeq ($(enable_memory_check_core), yes)
@@ -55,7 +56,7 @@ pg_regress$(X): pg_regress_ecpg.o $(top_builddir)/src/test/regress/pg_regress.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $^ $(LIBS) -o $@
 endif
 
-$(top_builddir)/src/test/regress/pg_regress.o:
+$(top_builddir)/src/test/regress/pg_regress.o: $(top_builddir)/src/test/regress/pg_regress.cpp
 	$(MAKE) -C $(dir $@) $(notdir $@)
 
 # dependencies ensure that path changes propagate
@@ -81,14 +82,12 @@ $(remaining_files_build): $(abs_builddir)/%: $(srcdir)/%
 endif
 
 # Common options for tests. Also pick up anything passed in EXTRA_REGRESS_OPTS
-REGRESS_OPTS = --dbname=regress1,connectdb --create-role=connectuser,connectdb $(EXTRA_REGRESS_OPTS)
+REGRESS_OPTS = --dbname=regress1,connectdb --create-role=connectuser,connectdb $(EXTRA_REGRESS_OPTS) $(filter-out $(EXTRA_REGRESS_OPTS), $(VB_REGRESS_OPTS))
 
 check: all
-	./pg_regress $(REGRESS_OPTS) --top-builddir=$(top_builddir) --temp-install=./tmp_check $(pg_regress_locale_flags) $(THREAD) --schedule=$(srcdir)/ecpg_schedule 
+	rm -rf ./log
+	$(MKDIR_P) ./log
+	test -d $(HOME)/memchk/asan || mkdir -p $(HOME)/memchk/asan
+	test -e $(HOME)/memchk/memleak_ignore || touch $(HOME)/memchk/memleak_ignore
+	${pg_mem_check} && ./pg_regress $(REGRESS_OPTS) --top-builddir=$(top_builddir) --single_node -d 1 -c 0 -r 1 -p 57436 -b ./tmp_check -n  $(pg_regress_locale_flags) $(THREAD)  -w --keep_last_data=false  --temp-config=$(srcdir)/make_connect.conf --schedule=$(srcdir)/ecpg_schedule --regconf=regress.conf --ecpg
 
-# the same options, but with --listen-on-tcp
-checktcp: all
-	./pg_regress $(REGRESS_OPTS) --top-builddir=$(top_builddir) --temp-install=./tmp_check $(pg_regress_locale_flags) $(THREAD) --schedule=$(srcdir)/ecpg_schedule_tcp --host=localhost
-
-installcheck: all
-	./pg_regress $(REGRESS_OPTS) --psqldir='$(PSQLDIR)' --top-builddir=$(top_builddir) $(pg_regress_locale_flags) $(THREAD) --schedule=$(srcdir)/ecpg_schedule

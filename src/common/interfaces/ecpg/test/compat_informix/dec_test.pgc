@@ -63,7 +63,7 @@ main(void)
 			PGTYPESdecimal_free(dec);
 			continue;
 		}
-		decarr = realloc(decarr, sizeof(decimal *) * (count + 1));
+		decarr = (decimal **)realloc(decarr, sizeof(decimal *) * (count + 1));
 		decarr[count++] = dec;
 
 		r = dectoasc(dec, buf, BUFSIZE-1, -1);
@@ -124,7 +124,7 @@ main(void)
 
 	/* add a NULL value */
 	dec = PGTYPESdecimal_new();
-	decarr = realloc(decarr, sizeof(decimal *) * (count + 1));
+	decarr = (decimal **)realloc(decarr, sizeof(decimal *) * (count + 1));
 	decarr[count++] = dec;
 
 	rsetnull(CDECIMALTYPE, (char *) decarr[count-1]);

@@ -9,12 +9,12 @@ statement: ecpgstart at stmt ';' { connection = NULL; }
 				| ecpgstart ECPGVarDeclaration
 				{
 					fprintf(yyout, "%s", $2);
-					free($2);
+					free_current_memory($2);
 					output_line_number();
 				}
 				| ECPGDeclaration
-				| c_thing               { fprintf(yyout, "%s", $1); free($1); }
-				| CPP_LINE              { fprintf(yyout, "%s", $1); free($1); }
+				| c_thing               { fprintf(yyout, "%s", $1); free_current_memory($1); }
+				| CPP_LINE              { fprintf(yyout, "%s", $1); free_current_memory($1); }
 				| '{'                   { braces_open++; fputs("{", yyout); }
 				| '}'
 		{
@@ -22,7 +22,7 @@ statement: ecpgstart at stmt ';' { connection = NULL; }
 			remove_variables(braces_open--);
 			if (braces_open == 0)
 			{
-				free(current_function);
+				free_current_memory(current_function);
 				current_function = NULL;
 			}
 			fputs("}", yyout);
@@ -53,12 +53,12 @@ at: AT connection_object
 /*
  * the exec sql connect statement: connect to the given database
  */
-ECPGConnect: SQL_CONNECT TO connection_target opt_connection_name opt_user
+ECPGConnect: CONNECT TO connection_target opt_connection_name opt_user
 			{ $$ = cat_str(5, $3, mm_strdup(","), $5, mm_strdup(","), $4); }
-		| SQL_CONNECT TO DEFAULT
+		| CONNECT TO DEFAULT
 			{ $$ = mm_strdup("NULL, NULL, NULL, \"DEFAULT\""); }
 		  /* also allow ORACLE syntax */
-		| SQL_CONNECT ora_user
+		| CONNECT ora_user
 			{ $$ = cat_str(3, mm_strdup("NULL,"), $2, mm_strdup(", NULL")); }
 		| DATABASE connection_target
 			{ $$ = cat2_str($2, mm_strdup(", NULL, NULL, NULL")); }
@@ -138,7 +138,7 @@ opt_server: server			{ $$ = $1; }
 
 server_name: ColId					{ $$ = $1; }
 		| ColId '.' server_name		{ $$ = make3_str($1, mm_strdup("."), $3); }
-		| IP						{ $$ = make_name(); }
+		| SQL_IP						{ $$ = make_name(); }
 		;
 
 opt_port: ':' Iconst		{ $$ = make2_str(mm_strdup(":"), $2); }
@@ -384,7 +384,7 @@ ECPGDeclaration: sql_startdeclare
 		var_type_declarations sql_enddeclare
 		{
 			fprintf(yyout, "%s/* exec sql end declare section */", $3);
-			free($3);
+			free_current_memory($3);
 			output_line_number();
 		}
 		;
@@ -659,7 +659,7 @@ var_type:	simple_type
 				$$.type_index = thisPtr->type->type_index;
 				$$.type_sizeof = thisPtr->type->type_sizeof;
 				struct_member_list[struct_level] = ECPGstruct_member_dup(thisPtr->struct_member_list);
-				free(name);
+				free_current_memory(name);
 			}
 			else
 			{
@@ -704,7 +704,7 @@ struct_union_type_with_symbol: s_struct_union_symbol
 			else
 				su_type.type_enum = ECPGt_union;
 			su_type.type_str = cat2_str($1.su, $1.symbol);
-			free(forward_name);
+			free_current_memory(forward_name);
 			forward_name = NULL;
 
 			/* This is essantially a typedef but needs the keyword struct/union as well.
@@ -896,7 +896,7 @@ variable: opt_pointer ECPGColLabel opt_array_bounds opt_bit_field opt_initialize
 						if (atoi(length) == -1 && i > 0) /* char <var>[] = "string" */
 						{
 							/* if we have an initializer but no string size set, let's use the initializer's length */
-							free(length);
+							free_current_memory(length);
 							length = (char *)mm_alloc(i+sizeof("sizeof()"));
 							sprintf(length, "sizeof(%s)", $5+2);
 						}
@@ -923,7 +923,7 @@ variable: opt_pointer ECPGColLabel opt_array_bounds opt_bit_field opt_initialize
 			else
 				ECPGmake_struct_member($2, type, &(struct_member_list[struct_level - 1]));
 
-			free($2);
+			free_current_memory($2);
 		}
 		;
 
@@ -953,7 +953,7 @@ ECPGDeclare: DECLARE STATEMENT ecpg_ident
 /*
  * the exec sql disconnect statement: disconnect from the given database
  */
-ECPGDisconnect: SQL_DISCONNECT dis_name { $$ = $2; }
+ECPGDisconnect: DISCONNECT dis_name { $$ = $2; }
 		;
 
 dis_name: connection_object			{ $$ = $1; }
@@ -1428,13 +1428,13 @@ action : CONTINUE_P
 		| SQL_GOTO name
 		{
 			$<action>$.code = W_GOTO;
-			$<action>$.command = strdup($2);
+			$<action>$.command = mm_strdup($2);
 			$<action>$.str = cat2_str(mm_strdup("goto "), $2);
 		}
 		| SQL_GO TO name
 		{
 			$<action>$.code = W_GOTO;
-			$<action>$.command = strdup($3);
+			$<action>$.command = mm_strdup($3);
 			$<action>$.str = cat2_str(mm_strdup("goto "), $3);
 		}
 		| DO name '(' c_args ')'
@@ -1496,9 +1496,8 @@ ECPGKeywords_vanames:  SQL_BREAK		{ $$ = mm_strdup("break"); }
 		| SQL_STOP					{ $$ = mm_strdup("stop"); }
 		;
 
-ECPGKeywords_rest:  SQL_CONNECT		{ $$ = mm_strdup("connect"); }
-		| SQL_DESCRIBE				{ $$ = mm_strdup("describe"); }
-		| SQL_DISCONNECT			{ $$ = mm_strdup("disconnect"); }
+ECPGKeywords_rest:  
+		  SQL_DESCRIBE				{ $$ = mm_strdup("describe"); }
 		| SQL_OPEN					{ $$ = mm_strdup("open"); }
 		| SQL_VAR					{ $$ = mm_strdup("var"); }
 		| SQL_WHENEVER				{ $$ = mm_strdup("whenever"); }
@@ -1622,7 +1621,7 @@ ECPGunreserved_interval: DAY_P				{ $$ = mm_strdup("day"); }
 		;
 
 
-into_list : coutputvariable | into_list ',' coutputvariable
+into_list: coutputvariable | into_list ',' coutputvariable 
 		;
 
 ecpgstart: SQL_START	{
@@ -1723,7 +1722,7 @@ ecpg_sconst:
 			strcpy($$+1, $1);
 			$$[strlen($1)+1]='\'';
 			$$[strlen($1)+2]='\0';
-			free($1);
+			free_current_memory($1);
 		}
 		| ECONST
 		{
@@ -1733,7 +1732,7 @@ ecpg_sconst:
 			strcpy($$+2, $1);
 			$$[strlen($1)+2]='\'';
 			$$[strlen($1)+3]='\0';
-			free($1);
+			free_current_memory($1);
 		}
 		| NCONST
 		{
@@ -1743,7 +1742,7 @@ ecpg_sconst:
 			strcpy($$+2, $1);
 			$$[strlen($1)+2]='\'';
 			$$[strlen($1)+3]='\0';
-			free($1);
+			free_current_memory($1);
 		}
 		| UCONST	{ $$ = $1; }
 		| DOLCONST	{ $$ = $1; }

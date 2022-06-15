@@ -459,6 +459,7 @@ static char* platform = "euleros2.0_sp2_x86_64";
 
 /* client logic jdbc run regression tests */
 static bool use_jdbc_client = false;
+static bool use_ecpg = false;
 static bool to_create_jdbc_user = false;
 static bool is_skip_environment_cleanup = false;
 static char* client_logic_hook = "encryption";
@@ -1783,8 +1784,9 @@ static void CopyFile()
     char dstDatadir[MAXPGPATH];
     char cmdBuf[MAXPGPATH * 2];
 
+    char* data_folder = get_node_info_name(0, DATANODE, false);
     errno_t rc = snprintf_s(dstDatadir, sizeof(dstDatadir), sizeof(dstDatadir) - 1, "%s/%s/pg_copydir",
-        temp_install, get_node_info_name(0, DATANODE, false));
+        temp_install, data_folder);
     securec_check_ss_c(rc, "", "");
     rc = snprintf_s(cmdBuf, sizeof(cmdBuf), sizeof(cmdBuf) - 1,
         SYSTEMQUOTE "mkdir -p %s ; cp ./data/* %s -r" SYSTEMQUOTE, dstDatadir, dstDatadir);
@@ -1799,7 +1801,7 @@ static void CopyFile()
 
     /* mkdir results dir */
     rc = snprintf_s(dstDatadir, sizeof(dstDatadir), sizeof(dstDatadir) - 1, "%s/%s/pg_copydir/results",
-        temp_install, get_node_info_name(0, DATANODE, false));
+        temp_install, data_folder);
     securec_check_ss_c(rc, "", "");
     rc = snprintf_s(cmdBuf, sizeof(cmdBuf), sizeof(cmdBuf) - 1, SYSTEMQUOTE "mkdir -p %s" SYSTEMQUOTE, dstDatadir);
     securec_check_ss_c(rc, "", "");
@@ -1810,6 +1812,7 @@ static void CopyFile()
             cmdBuf);
         exit_nicely(2);
     }
+    free(data_folder);
 }
 
 /*
@@ -1860,12 +1863,13 @@ static void initdb_node_info(bool standby)
 
         printf("bindir: %s\n", bindir);
         char* data_folder = get_node_info_name(i, COORD, false);
+        char* data_folder2 = get_node_info_name(i, COORD, true);
         (void)snprintf(buf,
             sizeof(buf),
             SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s\" -L \"%s\" --noclean%s%s > "
                         "\"%s/log/initdb.log\" 2>&1" SYSTEMQUOTE,
             bindir,
-            (char*)get_node_info_name(i, COORD, true),
+            data_folder2,
             init_database ? "-U upcheck" : "",
             temp_install,
             data_folder,
@@ -1874,6 +1878,7 @@ static void initdb_node_info(bool standby)
             nolocale ? " --no-locale" : "",
             outputdir);
         free(data_folder);
+        free(data_folder2);
         if (regr_system(buf)) {
             fprintf(stderr,
                 _("\n%s: gs_initdb failed\nExamine %s/log/initdb.log for the reason.\nCommand was: %s\n"),
@@ -1888,12 +1893,13 @@ static void initdb_node_info(bool standby)
         char buf[MAXPGPATH * 4];
 
         char* data_folder = get_node_info_name(i, DATANODE, false);
+        char* data_folder2 = get_node_info_name(i, DATANODE, true);
         (void)snprintf(buf,
             sizeof(buf),
             SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s\" -L \"%s\" --noclean%s%s > "
                         "\"%s/log/initdb.log\" 2>&1" SYSTEMQUOTE,
             bindir,
-            (char*)get_node_info_name(i, DATANODE, true),
+            data_folder2,
             init_database ? "-U upcheck" : "",
             temp_install,
             data_folder,
@@ -1901,6 +1907,8 @@ static void initdb_node_info(bool standby)
             debug ? " --debug" : "",
             nolocale ? " --no-locale" : "",
             outputdir);
+        free(data_folder);
+        free(data_folder2);
         if (regr_system(buf)) {
             fprintf(stderr,
                 _("\n%s: gs_initdb failed\nExamine %s/log/initdb.log for the reason.\nCommand was: %s\n"),
@@ -1909,7 +1917,6 @@ static void initdb_node_info(bool standby)
                 buf);
             exit_nicely(2);
         }
-        free(data_folder);
     }
 
     CopyFile();
@@ -5203,9 +5210,10 @@ static void check_global_variables()
         xargs grep \"THR_LOCAL\" | grep -v \"extern THR_LOCAL\" | wc -l", code_base_src);
     char* cmd = cmd_buf;
 #else
-    char* cmd =
-        "find ../../common/backend/ -name \"*.cpp\" | xargs grep \"THR_LOCAL\" | \
-        grep -v \"extern THR_LOCAL\" | wc -l";
+    char cmd_buf[CMAKE_CMD_BUF_LEN+1];
+    snprintf(cmd_buf, CMAKE_CMD_BUF_LEN,"find %s/src/common/backend/ -name \"*.cpp\" | \
+        xargs grep \"THR_LOCAL\" | grep -v \"extern THR_LOCAL\" | wc -l", top_builddir);
+    char* cmd = cmd_buf;
 #endif
     FILE* fstream = NULL;
     char buf[50];
@@ -5222,8 +5230,9 @@ static void check_global_variables()
     xargs grep \"THR_LOCAL\" | grep -v \"extern THR_LOCAL\" | wc -l", code_base_src);
     cmd = cmd_buf;
 #else
-    cmd = "find ../../gausskernel/ -name \"*.cpp\" | xargs grep \"THR_LOCAL\" | \
-    grep -v \"extern THR_LOCAL\" | wc -l";
+    snprintf(cmd_buf, CMAKE_CMD_BUF_LEN,"find  %s/src/gausskernel/ -name \"*.cpp\" | \
+    xargs grep \"THR_LOCAL\" | grep -v \"extern THR_LOCAL\" | wc -l", top_builddir);
+    cmd = cmd_buf;
 #endif
     memset(buf, 0, sizeof(buf));
     fstream = popen(cmd, "r");
@@ -5250,9 +5259,11 @@ static void check_pgxc_like_macros()
     printf("cmd_buf:%s\n", cmd_buf);
     char* cmd = cmd_buf;
 #else
-    char* cmd =
-        "find ../../common/backend/ ../../gausskernel/ -name \"*.cpp\" |"
-        "xargs grep -e \"#ifdef STREAMPLAN\" -e \"#ifdef PGXC\"  -e \"IS_SINGLE_NODE\" |wc -l";
+    char cmd_buf[1001];
+    snprintf(cmd_buf, 1000,"find %s/src/common/backend/ %s/src/gausskernel/ -name \"*.cpp\" | \
+    xargs grep -e \"#ifdef STREAMPLAN\" -e \"#ifdef PGXC\"  -e \"IS_SINGLE_NODE\" | \
+    wc -l", top_builddir, top_builddir);
+    char* cmd = cmd_buf;
 #endif
     FILE* fstream = NULL;
     char buf[50];
@@ -5372,6 +5383,15 @@ static void create_database(const char* dbname)
     }
 }
 
+static void create_role_ecpg(const char* rolename, const _stringlist* granted_dbs)
+{
+    header(_("creating role \"%s\""), rolename);
+    psql_command("postgres", "CREATE ROLE \"%s\" WITH LOGIN PASSWORD 'connectpw@123'", rolename);
+    for (; granted_dbs != NULL; granted_dbs = granted_dbs->next) {
+        psql_command("postgres", "GRANT ALL ON DATABASE \"%s\" TO \"%s\"", granted_dbs->str, rolename);
+    }
+}
+
 static void create_role(const char* rolename, const _stringlist* granted_dbs)
 {
     header(_("creating role \"%s\""), rolename);
@@ -5456,6 +5476,7 @@ static void help(void)
     printf(_("  --psqldir=DIR             use gsql in DIR (default: find in PATH)\n"));
     printf(_("  --enable-segment          create table default with segment=on"));
     printf(_("  --jdbc          enable jdbc regression test"));
+    printf(_("  --ecpg          enable ecpg regression test"));
     printf(_("\n"));
     printf(_("The exit status is 0 if all tests passed, 1 if some tests failed, and 2\n"));
     printf(_("if the tests could not be run for some reason.\n"));
@@ -6351,6 +6372,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         {"client_logic_hook", required_argument, NULL, 59},
         {"jdbc", no_argument, NULL, 60},
         {"skip_environment_cleanup", no_argument, NULL, 61},
+        {"ecpg", no_argument, NULL, 62},
         {NULL, 0, NULL, 0}
     };
 
@@ -6422,7 +6444,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                  * before we add the specified one.
                  */
                 free_stringlist(&dblist);
-                split_to_stringlist(strdup(optarg), ", ", &dblist);
+                split_to_stringlist(optarg, ", ", &dblist);
                 break;
             case 2:
                 debug = true;
@@ -6475,7 +6497,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 dlpath = strdup(optarg);
                 break;
             case 18:
-                split_to_stringlist(strdup(optarg), ", ", &extraroles);
+                split_to_stringlist(optarg, ", ", &extraroles);
                 break;
             case 19:
                 temp_config = strdup(optarg);
@@ -6631,6 +6653,10 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 break;
             case 61:
                 is_skip_environment_cleanup = true;
+                break;
+            case 62:
+                printf("\n starting with ecpg\n");
+                use_ecpg = true;
                 break;
             default:
                 /* getopt_long already emitted a complaint */
@@ -7179,7 +7205,10 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                 create_jdbc_user(dblist);
             }
             for (ssl = extraroles; ssl; ssl = ssl->next) {
-                create_role(ssl->str, dblist);
+                if (use_ecpg)
+                    create_role_ecpg(ssl->str, dblist);
+                else
+                    create_role(ssl->str, dblist);
             }
         }
 
