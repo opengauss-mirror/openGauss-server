@@ -1,0 +1,35 @@
+-- These cases used to give too-many-states failures
+select 'x' ~ 'abcd(\m)+xyz';
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'a' ~ '^abcd*(((((^(a c(e?d)a+|)+|)+|)+|)+|a)+|)';
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'x' ~ 'a^(^)bcd*xy(((((($a+|)+|)+|)+$|)+|)+|)^$';
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'x' ~ 'xyz(\Y\Y)+';
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'x' ~ 'x|(?:\M)+';
+ ?column? 
+----------
+ t
+(1 row)
+
+-- This generates O(N) states but O(N^2) arcs, so it causes problems
+-- if arc count is not constrained
+select 'x' ~ repeat('x*y*z*', 1000);
+ERROR:  invalid regular expression: regular expression is too complex

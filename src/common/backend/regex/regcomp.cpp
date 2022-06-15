@@ -135,10 +135,10 @@ static int sortins_cmp(const void*, const void*);
 static void sortouts(struct nfa*, struct state*);
 static int sortouts_cmp(const void*, const void*);
 static void moveins(struct nfa*, struct state*, struct state*);
-static void copyins(struct nfa*, struct state*, struct state*, int);
+static void copyins(struct nfa*, struct state*, struct state*);
 static void mergeins(struct nfa*, struct state*, struct arc**, int);
 static void moveouts(struct nfa*, struct state*, struct state*);
-static void copyouts(struct nfa*, struct state*, struct state*, int);
+static void copyouts(struct nfa*, struct state*, struct state*);
 static void cloneouts(struct nfa*, struct state*, struct state*, struct state*, int);
 static void delsub(struct nfa*, struct state*, struct state*);
 static void deltraverse(struct nfa*, struct state*, struct state*);
@@ -149,9 +149,9 @@ static struct state* single_color_transition(struct state*, struct state*);
 static void specialcolors(struct nfa*);
 static long optimize(struct nfa*, FILE*);
 static void pullback(struct nfa*, FILE*);
-static int pull(struct nfa*, struct arc*);
+static int pull(struct nfa *, struct arc *, struct state **);
 static void pushfwd(struct nfa*, FILE*);
-static int push(struct nfa*, struct arc*);
+static int push(struct nfa *, struct arc *, struct state **);
 
 #define INCOMPATIBLE 1 /* destroys arc */
 #define SATISFIED 2    /* constraint satisfied */
@@ -179,7 +179,6 @@ static void dumpnfa(struct nfa*, FILE*);
 #ifdef REG_DEBUG
 static void dumpstate(struct state*, FILE*);
 static void dumparcs(struct state*, FILE*);
-static int dumprarcs(struct arc*, struct state*, FILE*, int);
 static void dumparc(struct arc*, struct state*, FILE*);
 static void dumpcnfa(struct cnfa*, FILE*);
 static void dumpcstate(int, struct cnfa*, FILE*);
@@ -597,7 +596,9 @@ static void makesearch(struct vars* v, struct nfa* nfa)
     /* do the splits */
     for (s = slist; s != NULL; s = s2) {
         s2 = newstate(nfa);
-        copyouts(nfa, s, s2, 1);
+        NOERR();
+        copyouts(nfa, s, s2);
+        NOERR();
         for (a = s->ins; a != NULL; a = b) {
             b = a->inchain;
             if (a->from != pre) {
@@ -1730,7 +1731,7 @@ static void cleanst(struct vars* v)
 
 /*
  * nfatree - turn a subRE subtree into a tree of compacted NFAs
- * f£ºfor debug output
+ * for debug output
  * return optimize results from top node
  */
 static long nfatree(struct vars* v, struct subre* t, FILE* f)
@@ -1895,7 +1896,7 @@ static void dump(regex_t* re, FILE* f)
 
     dumpcolors(&g->cmap, f);
     if (!NULLCNFA(g->search)) {
-        printf("\nsearch:\n");
+        fprintf(f, "\nsearch:\n");
         dumpcnfa(&g->search, f);
     }
     for (i = 1; i < g->nlacons; i++) {
