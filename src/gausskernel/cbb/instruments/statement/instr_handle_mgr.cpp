@@ -431,6 +431,7 @@ void release_statement_context(PgBackendStatus* beentry, const char* func, int l
     if (stmtCxt != NULL) {
         MemoryContextDelete(stmtCxt);
     }
+    u_sess->statement_cxt.stmt_stat_cxt = NULL;
 
     ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] release_statement_context end - entry:%p", beentry)));
 }
