@@ -1829,12 +1829,12 @@ bool TrIsRefRbObjectEx(Oid classid, Oid objid, const char *objname)
         return false;
     }
 
-    /* Note: we preserve rule origin name when RbDrop. */
-    if (TrRbIsEmptyDb(u_sess->proc_cxt.MyDatabaseId)) {
+    if (classid != RewriteRelationId && objname && strncmp(objname, "BIN$", 4) != 0) {
         return false;
     }
 
-    if (classid != RewriteRelationId && objname && strncmp(objname, "BIN$", 4) != 0) {
+    /* Note: we preserve rule origin name when RbDrop. */
+    if (TrRbIsEmptyDb(u_sess->proc_cxt.MyDatabaseId)) {
         return false;
     }
 
@@ -1873,7 +1873,7 @@ void TrForbidAccessRbObject(Oid classid, Oid objid, const char *objname)
         return;
     }
 
-    if (TrRbIsEmptyDb(u_sess->proc_cxt.MyDatabaseId) || !TrMaybeRbObject(classid, objid, objname)) {
+    if (!TrMaybeRbObject(classid, objid, objname) || TrRbIsEmptyDb(u_sess->proc_cxt.MyDatabaseId)) {
         return;
     }
 
