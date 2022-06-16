@@ -302,7 +302,7 @@ Numeric makeNumeric(NumericVar* var);
 extern Numeric make_result(NumericVar *var);
 extern void init_var_from_num(Numeric num, NumericVar* dest);
 extern void free_var(NumericVar *var);
-extern bool numericvar_to_int64(const NumericVar* var, int64* result);
+extern bool numericvar_to_int64(const NumericVar* var, int64* result, bool can_ignore = false);
 extern void int64_to_numericvar(int64 val, NumericVar *var);
 extern void add_var(NumericVar *var1, NumericVar *var2, NumericVar *result);
 extern char *numeric_normalize(Numeric num);

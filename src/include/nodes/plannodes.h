@@ -72,6 +72,8 @@ typedef struct PlannedStmt {
 
     bool hasModifyingCTE; /* has insert|update|delete in WITH? */
 
+    bool hasIgnore; /* is the executed query string has keyword ignore */
+
     bool canSetTag; /* do I set the command result tag? */
 
     bool transientPlan; /* redo plan when TransactionXmin changes? */

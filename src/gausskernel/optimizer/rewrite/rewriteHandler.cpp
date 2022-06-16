@@ -3156,6 +3156,10 @@ List *QueryRewriteRefresh(Query *parse_tree)
     if (hintState != NULL && hintState->multi_node_hint) {
         appendStringInfo(cquery, " /*+ multinode */ ");
     }
+    
+    if (hintState != NULL && hintState->sql_ignore_hint) {
+        appendStringInfo(cquery, " /*+ ignore_error */ ");
+    }
 
     if (relation->schemaname) {
         appendStringInfo(cquery, " INTO %s.%s", quote_identifier(relation->schemaname),

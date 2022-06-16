@@ -903,10 +903,16 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 #ifdef ENABLE_MOT
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
-                if (state->mt_insert_constr_slot == NULL) {
-                    ExecConstraints(result_rel_info, slot, estate);
-                } else {
-                    ExecConstraints(result_rel_info, state->mt_insert_constr_slot, estate);
+                TupleTableSlot *tmp_slot = state->mt_insert_constr_slot == NULL ? slot : state->mt_insert_constr_slot;
+                if (!ExecConstraints(result_rel_info, tmp_slot, estate)) {
+                    if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
+                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
+                        /* Double check constraints in case that new val in column with not null constraints
+                         * violated check constraints */
+                        ExecConstraints(result_rel_info, tmp_slot, estate);
+                    } else {
+                        return NULL;
+                    }
                 }
             }
         }
@@ -941,10 +947,17 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
             bucket_id = computeTupleBucketId(result_relation_desc, (HeapTuple)tuple);
         }
         if (result_relation_desc->rd_att->constr) {
-            if (state->mt_insert_constr_slot == NULL)
-                ExecConstraints(result_rel_info, slot, estate);
-            else
-                ExecConstraints(result_rel_info, state->mt_insert_constr_slot, estate);
+            TupleTableSlot *tmp_slot = state->mt_insert_constr_slot == NULL ? slot : state->mt_insert_constr_slot;
+            if (!ExecConstraints(result_rel_info, tmp_slot, estate)) {
+                if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
+                    tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
+                    /* Double check constraints in case that new val in column with not null constraints
+                     * violated check constraints */
+                    ExecConstraints(result_rel_info, tmp_slot, estate);
+                } else {
+                    return NULL;
+                }
+            }
         }
 
 #ifdef PGXC
@@ -1058,6 +1071,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                  */
                 new_id = InvalidOid;
                 RangeTblEntry *rte = exec_rt_fetch(result_rel_info->ri_RangeTableIndex, estate);
+                bool isgpi = false;
+                ConflictInfoData conflictInfo;
+                Oid conflictPartOid = InvalidOid;
+                int2 conflictBucketid = InvalidBktId;
+
                 switch (result_relation_desc->rd_rel->parttype) {
                     case PARTTYPE_NON_PARTITIONED_RELATION:
                     case PARTTYPE_VALUE_PARTITIONED_RELATION: {
@@ -1079,6 +1097,16 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                 searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt,
                                     result_relation_desc, bucket_id, target_rel);
                             }
+                            // check unique constraints first if SQL has keyword IGNORE
+                            if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                                !ExecCheckIndexConstraints(slot, estate, target_rel, partition, &isgpi,
+                                                           bucket_id, &conflictInfo, &conflictPartOid,
+                                                           &conflictBucketid)) {
+                                ereport(WARNING,
+                                        (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                                RelationGetRelationName(target_rel))));
+                                return NULL;
+                            }
                             new_id = tableam_tuple_insert(target_rel, tuple, estate->es_output_cid, 0, NULL);
 
                             if (rel_isblockchain) {
@@ -1091,7 +1119,12 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
                     case PARTTYPE_PARTITIONED_RELATION: {
                         /* get partititon oid for insert the record */
-                        partition_id = heapTupleGetPartitionId(result_relation_desc, tuple);
+                        partition_id =
+                            heapTupleGetPartitionId(result_relation_desc, tuple, false, estate->es_plannedstmt->hasIgnore);
+                        /* if cannot find valid partition oid and sql has keyword ignore, return and don't insert */
+                        if (estate->es_plannedstmt->hasIgnore && partition_id == InvalidOid) {
+                            return NULL;
+                        }
                         CheckPartitionOidForSpecifiedPartition(rte, partition_id);
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
@@ -1106,6 +1139,15 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 #endif   /* ENABLE_MULTIPLE_NODES */
                         } else {
                             target_rel = heap_rel;
+                            /* check unique constraints first if SQL has keyword IGNORE */
+                            if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                                !ExecCheckIndexConstraints(slot, estate, target_rel, partition, &isgpi, bucket_id,
+                                                           &conflictInfo, &conflictPartOid, &conflictBucketid)) {
+                                ereport(WARNING,
+                                        (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                                RelationGetRelationName(target_rel))));
+                                return NULL;
+                            }
                             tableam_tops_update_tuple_with_oid(heap_rel, tuple, slot);
                                 if (bucket_id != InvalidBktId) {
                                     searchHBucketFakeRelation(
@@ -1128,7 +1170,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         Partition subPart = NULL;
 
                         /* get partititon oid for insert the record */
-                        partitionId = heapTupleGetPartitionId(result_relation_desc, tuple);
+                        partitionId = heapTupleGetPartitionId(result_relation_desc, tuple, false,
+                                                              estate->es_plannedstmt->hasIgnore);
+                        if (estate->es_plannedstmt->hasIgnore && partitionId == InvalidOid) {
+                            return NULL;
+                        }
                         CheckPartitionOidForSpecifiedPartition(rte, partitionId);
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
@@ -1136,7 +1182,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                                          RowExclusiveLock);
 
                         /* get subpartititon oid for insert the record */
-                        subPartitionId = heapTupleGetPartitionId(partRel, tuple);
+                        subPartitionId = heapTupleGetPartitionId(partRel, tuple, false, estate->es_plannedstmt->hasIgnore);
+                        if (estate->es_plannedstmt->hasIgnore && subPartitionId == InvalidOid) {
+                            return NULL;
+                        }
                         CheckSubpartitionOidForSpecifiedSubpartition(rte, partitionId, subPartitionId);
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, partRel,
@@ -1147,6 +1196,15 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         partition = subPart;
 
                         target_rel = heap_rel;
+                        // check unique constraints first if SQL has keyword IGNORE
+                        if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                            !ExecCheckIndexConstraints(slot, estate, target_rel, partition, &isgpi, bucket_id,
+                                                       &conflictInfo, &conflictPartOid, &conflictBucketid)) {
+                            ereport(WARNING,
+                                    (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                            RelationGetRelationName(result_relation_desc))));
+                            return NULL;
+                        }
                         tableam_tops_update_tuple_with_oid(heap_rel, tuple, slot);
                         if (bucket_id != InvalidBktId) {
                             searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt, heap_rel, bucket_id,
@@ -1669,6 +1727,13 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     uint64 res_hash;
     uint64 hash_del = 0;
     bool is_record = false;
+    /*
+     * flag to tell whether violate unique constraint for update indices
+     */
+    bool isgpi = false;
+    ConflictInfoData conflictInfo;
+    Oid conflictPartOid = InvalidOid;
+    int2 conflictBucketid = InvalidBktId;
 #ifdef PGXC
     RemoteQueryState* result_remote_rel = NULL;
 #endif
@@ -1729,7 +1794,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
 #endif
         result_rel_info->ri_TrigDesc && result_rel_info->ri_TrigDesc->trig_update_before_row) {
 #ifdef PGXC
-        slot = ExecBRUpdateTriggers(estate, epqstate, result_rel_info, oldPartitionOid, 
+        slot = ExecBRUpdateTriggers(estate, epqstate, result_rel_info, oldPartitionOid,
             bucketid, oldtuple, tupleid, slot);
 #else
         slot = ExecBRUpdateTriggers(estate, epqstate, result_rel_info, tupleid, slot);
@@ -1786,10 +1851,16 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
 #ifdef ENABLE_MOT
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
-                if (node->mt_insert_constr_slot == NULL) {
-                    ExecConstraints(result_rel_info, slot, estate);
-                } else {
-                    ExecConstraints(result_rel_info, node->mt_insert_constr_slot, estate);
+                TupleTableSlot *tmp_slot = node->mt_insert_constr_slot == NULL ? slot : node->mt_insert_constr_slot;
+                if (!ExecConstraints(result_rel_info, slot, estate)) {
+                    if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
+                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), slot);
+                        /* Double check constraints in case that new val in column with not null constraints
+                         * violated check constraints */
+                        ExecConstraints(result_rel_info, slot, estate);
+                    } else {
+                        return NULL;
+                    }
                 }
             }
         }
@@ -1827,10 +1898,17 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         Assert(RELATION_HAS_BUCKET(result_relation_desc) == (bucketid != InvalidBktId));
 lreplace:
         if (result_relation_desc->rd_att->constr) {
-            if (node->mt_update_constr_slot == NULL)
-                ExecConstraints(result_rel_info, slot, estate);
-            else
-                ExecConstraints(result_rel_info, node->mt_update_constr_slot, estate);
+            TupleTableSlot *tmp_slot = node->mt_update_constr_slot == NULL ? slot : node->mt_update_constr_slot;
+            if (!ExecConstraints(result_rel_info, tmp_slot, estate)) {
+                if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
+                    tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
+                    /* Double check constraints in case that new val in column with not null constraints
+                     * violated check constraints */
+                    ExecConstraints(result_rel_info, tmp_slot, estate);
+                } else {
+                    return NULL;
+                }
+            }
         }
 
 #ifdef PGXC
@@ -1857,6 +1935,21 @@ lreplace:
                         searchHBucketFakeRelation(
                             estate->esfRelations, estate->es_query_cxt, result_relation_desc, bucketid, fake_relation);
                         parent_relation = result_relation_desc;
+                    }
+
+                    /*
+                     * check constraints first if SQL has keyword IGNORE
+                     * 
+                     * Note: we need to exclude the case of UPSERT_UPDATE, so that upsert could be successfully finished.
+                     */
+                    if (node->mt_upsert->us_action != UPSERT_UPDATE && estate->es_plannedstmt &&
+                        estate->es_plannedstmt->hasIgnore &&
+                        !ExecCheckIndexConstraints(slot, estate, result_relation_desc, partition, &isgpi, bucketid,
+                                                   &conflictInfo, &conflictPartOid, &conflictBucketid)) {
+                        ereport(WARNING,
+                                (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                        RelationGetRelationName(result_relation_desc))));
+                        return NULL;
                     }
 
                     /*
@@ -2017,8 +2110,9 @@ lreplace:
                         exec_index_tuples_state.targetPartRel = NULL;
                         exec_index_tuples_state.p = NULL;
                         exec_index_tuples_state.conflict = NULL;
-                        recheck_indexes = tableam_tops_exec_update_index_tuples(slot, oldslot, fake_relation,
-                            node, tuple, tupleid, exec_index_tuples_state, bucketid, modifiedIdxAttrs);
+                        recheck_indexes = tableam_tops_exec_update_index_tuples(
+                            slot, oldslot, fake_relation, node, tuple, tupleid, exec_index_tuples_state, bucketid,
+                            modifiedIdxAttrs);
                     }
 
                     if (oldslot) {
@@ -2046,7 +2140,8 @@ lreplace:
                             if (u_sess->exec_cxt.route->fileExist) {
                                 new_partId = u_sess->exec_cxt.route->partitionId;
                             } else {
-                                ereport(ERROR, (errmodule(MOD_EXECUTOR),
+                                int level = estate->es_plannedstmt->hasIgnore ? WARNING : ERROR;
+                                ereport(level, (errmodule(MOD_EXECUTOR),
                                                 (errcode(ERRCODE_PARTITION_ERROR),
                                                  errmsg("fail to update partitioned table \"%s\"",
                                                         RelationGetRelationName(result_relation_desc)),
@@ -2055,6 +2150,9 @@ lreplace:
 
                             releaseDummyRelation(&partRel);
                             partitionClose(result_relation_desc, part, NoLock);
+                            if (!u_sess->exec_cxt.route->fileExist && estate->es_plannedstmt->hasIgnore) {
+                                return NULL;
+                            }
                         }
 
                         if (oldPartitionOid == new_partId) {
@@ -2076,6 +2174,12 @@ lreplace:
                          * it can not be a range area 
                          */
                         if (u_sess->exec_cxt.route->partArea != PART_AREA_INTERVAL) {
+                            if (epqstate->parentestate->es_plannedstmt->hasIgnore) {
+                                ereport(WARNING, (errmsg("fail to update partitioned table \"%s\".new tuple does not "
+                                                         "map to any table partition.",
+                                                         RelationGetRelationName(result_relation_desc))));
+                                return NULL;
+                            }
                             ereport(ERROR,
                                 (errmodule(MOD_EXECUTOR),
                                     (errcode(ERRCODE_PARTITION_ERROR),
@@ -2126,6 +2230,17 @@ lreplace:
                         if (bucketid != InvalidBktId) {
                             searchHBucketFakeRelation(
                                 estate->esfRelations, estate->es_query_cxt, fake_relation, bucketid, fake_relation);
+                        }
+
+                        /*
+                         * check constraints first if SQL has keyword IGNORE
+                         */
+                        if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                            !ExecCheckIndexConstraints(slot, estate, fake_relation, partition, &isgpi, bucketid,
+                                                       &conflictInfo, &conflictPartOid, &conflictBucketid)) {
+                            ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                                     RelationGetRelationName(result_relation_desc))));
+                            return NULL;
                         }
 
                         if (result_relation_desc->rd_isblockchain) {
@@ -2275,8 +2390,9 @@ lreplace:
                             exec_index_tuples_state.targetPartRel = fake_part_rel;
                             exec_index_tuples_state.p = partition;
                             exec_index_tuples_state.conflict = NULL;
-                            recheck_indexes = tableam_tops_exec_update_index_tuples(slot, oldslot, fake_relation,
-                                node, tuple, tupleid, exec_index_tuples_state, bucketid, modifiedIdxAttrs);
+                            recheck_indexes = tableam_tops_exec_update_index_tuples(
+                                slot, oldslot, fake_relation, node, tuple, tupleid, exec_index_tuples_state, bucketid,
+                                modifiedIdxAttrs);
                         }
 
                         if (oldslot) {
@@ -2286,26 +2402,61 @@ lreplace:
                     /* partition table, row movement */
                         /* partition table, row movement, heap */
 
+                        /* init old_partition vars and new inserted partition vars first */
+                        Partition old_partition = NULL;
+                        Relation old_fake_relation = NULL;
+                        TupleTableSlot* oldslot = NULL;
+                        uint64 hash_del = 0;
+
+                        searchFakeReationForPartitionOid(estate->esfRelations,
+                                                         estate->es_query_cxt,
+                                                         result_relation_desc,
+                                                         oldPartitionOid,
+                                                         old_fake_relation,
+                                                         old_partition,
+                                                         RowExclusiveLock);
+
+                        if (bucketid != InvalidBktId) {
+                            searchHBucketFakeRelation(
+                                estate->esfRelations, estate->es_query_cxt, old_fake_relation, bucketid, old_fake_relation);
+                        }
+
+                        Partition insert_partition = NULL;
+                        Relation fake_insert_relation = NULL;
+
+                        if (need_create_file) {
+                            new_partId = AddNewIntervalPartition(result_relation_desc, tuple);
+                        }
+
+                        searchFakeReationForPartitionOid(estate->esfRelations,
+                                                         estate->es_query_cxt,
+                                                         result_relation_desc,
+                                                         new_partId,
+                                                         fake_part_rel,
+                                                         insert_partition,
+                                                         RowExclusiveLock);
+                        fake_insert_relation = fake_part_rel;
+                        if (bucketid != InvalidBktId) {
+                            searchHBucketFakeRelation(estate->esfRelations,
+                                                      estate->es_query_cxt,
+                                                      fake_insert_relation,
+                                                      bucketid,
+                                                      fake_insert_relation);
+                        }
+
+                        /*
+                         * check constraints first if SQL has keyword IGNORE
+                         */
+                        if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                            !ExecCheckIndexConstraints(slot, estate, fake_insert_relation, insert_partition, &isgpi,
+                                                       bucketid, &conflictInfo, &conflictPartOid, &conflictBucketid)) {
+                            ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                                     RelationGetRelationName(result_relation_desc))));
+                            return NULL;
+                        }
+
                         /* delete the old tuple */
                         {
-                            Partition old_partition = NULL;
-                            Relation old_fake_relation = NULL;
-                            TupleTableSlot* oldslot = NULL;
-                            uint64 hash_del = 0;
-
-                            searchFakeReationForPartitionOid(estate->esfRelations,
-                                estate->es_query_cxt,
-                                result_relation_desc,
-                                oldPartitionOid,
-                                old_fake_relation,
-                                old_partition,
-                                RowExclusiveLock);
-
-                            if (bucketid != InvalidBktId) {
-                                searchHBucketFakeRelation(
-                                    estate->esfRelations, estate->es_query_cxt, old_fake_relation, bucketid, old_fake_relation);
-                            }
-
 ldelete:
                             /* Record updating behevior into user chain table */
                             if (result_relation_desc->rd_isblockchain) {
@@ -2483,28 +2634,7 @@ ldelete:
 
                         /* insert the new tuple */
                         {
-                            Partition insert_partition = NULL;
-                            Relation fake_insert_relation = NULL;
 
-                            if (need_create_file) {
-                                new_partId = AddNewIntervalPartition(result_relation_desc, tuple);
-                            }
-
-                            searchFakeReationForPartitionOid(estate->esfRelations,
-                                estate->es_query_cxt,
-                                result_relation_desc,
-                                new_partId,
-                                fake_part_rel,
-                                insert_partition,
-                                RowExclusiveLock);
-                            fake_insert_relation = fake_part_rel;
-                            if (bucketid != InvalidBktId) {
-                                searchHBucketFakeRelation(estate->esfRelations,
-                                    estate->es_query_cxt,
-                                    fake_insert_relation,
-                                    bucketid,
-                                    fake_insert_relation);
-                            }
                             if (result_relation_desc->rd_isblockchain) {
                                 MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
                                 tuple = set_user_tuple_hash((HeapTuple)tuple, fake_insert_relation);
@@ -3245,7 +3375,8 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
             if (result_rel_info->ri_FdwRoutine == NULL || result_rel_info->ri_FdwRoutine->GetFdwType == NULL ||
                 result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
 #endif
-                ExecOpenIndices(result_rel_info, node->upsertAction != UPSERT_NONE);
+                ExecOpenIndices(result_rel_info, (node->upsertAction != UPSERT_NONE ||
+                                                  (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore)));
 #ifdef ENABLE_MOT
             }
 #endif

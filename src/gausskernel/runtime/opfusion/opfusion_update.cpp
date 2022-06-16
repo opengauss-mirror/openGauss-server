@@ -204,6 +204,7 @@ void UpdateFusion::InitLocals(ParamListInfo params)
     m_local.m_tmpvals = NULL;
     m_c_local.m_estate = CreateExecutorState();
     m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+    m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
 
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
     if (m_global->m_table_type == TAM_USTORE) {
@@ -351,8 +352,30 @@ lreplace:
             }
         }
 
-        if (rel->rd_att->constr)
-            ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
+        if (rel->rd_att->constr) {
+            if (!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate)) {
+                if (u_sess->utils_cxt.sql_ignore_strategy_val != SQL_OVERWRITE_NULL) {
+                    return 0;
+                }
+                tup = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot);
+                /* Double check constraints in case that new val in column with not null constraints
+                 * violated check constraints */
+                ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
+            }
+        }
+
+        /* Check unique constraints first if SQL has keyword IGNORE */
+        bool isgpi = false;
+        ConflictInfoData conflictInfo;
+        Oid conflictPartOid = InvalidOid;
+        int2 conflictBucketid = InvalidBktId;
+        if (m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore &&
+            !ExecCheckIndexConstraints(m_local.m_reslot, m_c_local.m_estate, ledger_dest_rel, part, &isgpi, bucketid,
+                                       &conflictInfo, &conflictPartOid, &conflictBucketid)) {
+            ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                     RelationGetRelationName(ledger_dest_rel))));
+            break;
+        }
 
         bool update_indexes = false;
         TupleTableSlot* oldslot = NULL;
@@ -535,7 +558,7 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
     m_c_local.m_estate->es_output_cid = GetCurrentCommandId(true);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        ExecOpenIndices(result_rel_info, false);
+        ExecOpenIndices(result_rel_info, true);
     }
 
     /* ********************************

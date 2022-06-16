@@ -185,8 +185,8 @@ static void append_value(StringInfo buf, Value* value, Node* node)
     }
 }
 
-#define HINT_NUM 16
-#define HINT_KEYWORD_NUM 21
+#define HINT_NUM 17
+#define HINT_KEYWORD_NUM 22
 
 typedef struct {
     HintKeyword keyword;
@@ -214,6 +214,7 @@ const char* G_HINT_KEYWORD[HINT_KEYWORD_NUM] = {
     (char*) HINT_SET,
     (char*) HINT_CPLAN,
     (char*) HINT_GPLAN,
+    (char*) HINT_SQL_IGNORE,
     (char*) HINT_NO_GPC,
 };
 
@@ -1211,6 +1212,7 @@ HintState* HintStateCreate()
     hstate->set_hint = NIL;
     hstate->cache_plan_hint = NIL;
     hstate->no_expand_hint = NIL;
+    hstate->sql_ignore_hint = false;
 
     return hstate;
 }
@@ -1386,6 +1388,11 @@ static void AddNoGPCHint(HintState* hstate, Hint* hint)
     }
 }
 
+static void AddSqlIgnoreHint(HintState* hstate, Hint* hint)
+{
+    hstate->sql_ignore_hint = true;
+}
+
 typedef void (*AddHintFunc)(HintState*, Hint*);
 
 const AddHintFunc G_HINT_CREATOR[HINT_NUM] = {
@@ -1404,6 +1411,7 @@ const AddHintFunc G_HINT_CREATOR[HINT_NUM] = {
     AddSetHint,
     AddPlanCacheHint,
     AddNoExpandHint,
+    AddSqlIgnoreHint,
     AddNoGPCHint,
 };
 

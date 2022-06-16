@@ -1421,6 +1421,9 @@ static Query* _readQuery(void)
     IF_EXIST(hasSynonyms) {
         READ_BOOL_FIELD(hasSynonyms);
     }
+    IF_EXIST(hasIgnore) {
+        READ_BOOL_FIELD(hasIgnore);
+    }
     READ_NODE_FIELD(cteList);
     READ_NODE_FIELD(rtable);
     READ_NODE_FIELD(jointree);
@@ -4254,6 +4257,9 @@ static PlannedStmt* _readPlannedStmt(void)
     READ_UINT64_FIELD(queryId);
     READ_BOOL_FIELD(hasReturning);
     READ_BOOL_FIELD(hasModifyingCTE);
+    IF_EXIST(hasIgnore) {
+        READ_BOOL_FIELD(hasIgnore);
+    }
     READ_BOOL_FIELD(canSetTag);
     READ_BOOL_FIELD(transientPlan);
     IF_EXIST(dependsOnRole) {

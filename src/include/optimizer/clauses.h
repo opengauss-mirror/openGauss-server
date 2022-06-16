@@ -100,7 +100,8 @@ extern Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* es
 extern Query* inline_set_returning_function(PlannerInfo* root, RangeTblEntry* rte);
 extern bool filter_cstore_clause(PlannerInfo* root, Expr* clause);
 /* evaluate_expr used to be a  static function */
-extern Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result_collation);
+extern Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result_collation,
+                           bool can_ignore = false);
 extern bool contain_var_unsubstitutable_functions(Node* clause);
 extern void distribute_qual_to_rels(PlannerInfo* root, Node* clause, bool is_deduced, bool below_outer_join,
     JoinType jointype, Index security_level, Relids qualscope, Relids ojscope, Relids outerjoin_nonnullable,

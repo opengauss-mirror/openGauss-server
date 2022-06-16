@@ -890,6 +890,7 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     result->invalItems = glob->invalItems;
     result->nParamExec = glob->nParamExec;
     result->noanalyze_rellist = (List*)copyObject(t_thrd.postgres_cxt.g_NoAnalyzeRelNameList);
+    result->hasIgnore = parse->hasIgnore;
 
     if (IS_PGXC_COORDINATOR &&
         (t_thrd.proc->workingVersionNum < 92097 || total_num_streams > 0)) {

@@ -125,6 +125,7 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(queryId);
     COPY_SCALAR_FIELD(hasReturning);
     COPY_SCALAR_FIELD(hasModifyingCTE);
+    COPY_SCALAR_FIELD(hasIgnore);
     COPY_SCALAR_FIELD(canSetTag);
     COPY_SCALAR_FIELD(transientPlan);
     COPY_SCALAR_FIELD(dependsOnRole);
@@ -4543,6 +4544,7 @@ static Query* _copyQuery(const Query* from)
     COPY_SCALAR_FIELD(hasForUpdate);
     COPY_SCALAR_FIELD(hasRowSecurity);
     COPY_SCALAR_FIELD(hasSynonyms);
+    COPY_SCALAR_FIELD(hasIgnore);
     COPY_NODE_FIELD(cteList);
     COPY_NODE_FIELD(rtable);
     COPY_NODE_FIELD(jointree);
@@ -4601,6 +4603,7 @@ static InsertStmt* _copyInsertStmt(const InsertStmt* from)
     COPY_NODE_FIELD(upsertClause);
     COPY_NODE_FIELD(hintState);
     COPY_SCALAR_FIELD(isRewritten);
+    COPY_SCALAR_FIELD(hasIgnore);
     return newnode;
 }
 
@@ -4630,6 +4633,7 @@ static UpdateStmt* _copyUpdateStmt(const UpdateStmt* from)
     COPY_NODE_FIELD(returningList);
     COPY_NODE_FIELD(withClause);
     COPY_NODE_FIELD(hintState);
+    COPY_SCALAR_FIELD(hasIgnore);
 
     return newnode;
 }

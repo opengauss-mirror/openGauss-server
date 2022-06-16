@@ -155,6 +155,7 @@ typedef struct FunctionCallInfoData {
     fmNodePtr resultinfo;                        /* pass or return extra info about result */
     Oid fncollation;                             /* collation for function to use */
     bool isnull;                                 /* function must set true if result is NULL */
+    bool can_ignore;                             /* function can ignore overflow or underflow conditions for type transform function */
     short nargs;                                 /* # arguments actually passed */
     Datum* arg;                                  /* Arguments passed to function */
     bool* argnull;                               /* T if arg[i] is actually NULL */
@@ -179,6 +180,7 @@ typedef struct FunctionCallInfoData {
         resultinfo = NULL;
         nargs = 0;
         isnull = false;
+        can_ignore = false;
     }
 } FunctionCallInfoData;
 
@@ -449,7 +451,7 @@ typedef const Pg_magic_struct* (*PGModuleMagicFunction)(void);
  * directly-computed parameter list.  Note that neither arguments nor result
  * are allowed to be NULL.
  */
-extern Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1);
+extern Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1, bool can_ignore = false);
 extern Datum DirectFunctionCall2Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2);
 extern Datum DirectFunctionCall3Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3);
 extern Datum DirectFunctionCall4Coll(PGFunction func, Oid collation, Datum arg1, Datum arg2, Datum arg3, Datum arg4);

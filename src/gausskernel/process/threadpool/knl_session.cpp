@@ -465,6 +465,7 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
 
     utils_cxt->memory_context_limited_white_list = NULL;
     utils_cxt->enable_memory_context_control = false;
+    utils_cxt->sql_ignore_strategy_val = 0;
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
 }
 

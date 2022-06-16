@@ -7125,7 +7125,7 @@ int lookupHBucketid(oidvector *buckets, int low, int2 bktId)
  * Description	:
  * Notes		:
  */
-Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL)
+Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL, bool canIgnore)
 {
     Oid partitionid = InvalidOid;
 
@@ -7143,31 +7143,35 @@ Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL)
      * feedback for non-existing table partition.
      *   If the routing result indicates a range partition, give error report
      */
+    int level = canIgnore ? WARNING : ERROR;
     switch (u_sess->catalog_cxt.route->partArea) {
         /*
          * If it is a range partition, give error report
          */
         case PART_AREA_RANGE: {
-            ereport(ERROR,
+            ereport(
+                level,
                 (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
         } break;
         case PART_AREA_INTERVAL: {
             return AddNewIntervalPartition(rel, tuple, isDDL);
         } break;
         case PART_AREA_LIST: {
-            ereport(ERROR,
+            ereport(
+                level,
                 (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
         } break;
         case PART_AREA_HASH: {
-            ereport(ERROR,
+            ereport(
+                level,
                 (errcode(ERRCODE_NO_DATA_FOUND), errmsg("inserted partition key does not map to any table partition")));
         } break;
         /* never happen; just to be self-contained */
         default: {
-            ereport(ERROR,
-                (errcode(ERRCODE_NO_DATA_FOUND),
-                    errmsg("Inserted partition key does not map to any table partition"),
-                    errdetail("Unrecognized PartitionArea %d", u_sess->catalog_cxt.route->partArea)));
+            ereport(
+                level,
+                (errcode(ERRCODE_NO_DATA_FOUND), errmsg("Inserted partition key does not map to any table partition"),
+                 errdetail("Unrecognized PartitionArea %d", u_sess->catalog_cxt.route->partArea)));
         } break;
     }
 

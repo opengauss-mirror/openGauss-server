@@ -845,6 +845,7 @@ static bool _equalQuery(const Query* a, const Query* b)
     COMPARE_SCALAR_FIELD(hasForUpdate);
     COMPARE_SCALAR_FIELD(hasRowSecurity);
     COMPARE_SCALAR_FIELD(hasSynonyms);
+    COMPARE_SCALAR_FIELD(hasIgnore);
     COMPARE_NODE_FIELD(cteList);
     COMPARE_NODE_FIELD(rtable);
     COMPARE_NODE_FIELD(jointree);
@@ -892,6 +893,7 @@ static bool _equalInsertStmt(const InsertStmt* a, const InsertStmt* b)
     COMPARE_NODE_FIELD(returningList);
     COMPARE_NODE_FIELD(withClause);
     COMPARE_NODE_FIELD(upsertClause);
+    COMPARE_SCALAR_FIELD(hasIgnore);
 
     return true;
 }
@@ -916,6 +918,7 @@ static bool _equalUpdateStmt(const UpdateStmt* a, const UpdateStmt* b)
     COMPARE_NODE_FIELD(fromClause);
     COMPARE_NODE_FIELD(returningList);
     COMPARE_NODE_FIELD(withClause);
+    COMPARE_SCALAR_FIELD(hasIgnore);
 
     return true;
 }

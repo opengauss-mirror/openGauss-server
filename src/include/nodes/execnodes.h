@@ -212,6 +212,7 @@ typedef struct ExprContext {
     bool have_vec_set_fun;
     bool* vec_fun_sel;  // selection for vector set-result function.
     int current_row;
+    bool can_ignore;    // indicates whether ERROR can be ignored when type casting
 } ExprContext;
 
 /*

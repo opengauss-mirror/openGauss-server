@@ -1220,7 +1220,7 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
  * are allowed to be NULL.	Also, the function cannot be one that needs to
  * look at FmgrInfo, since there won't be any.
  */
-Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1)
+Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1, bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -1229,6 +1229,7 @@ Datum DirectFunctionCall1Coll(PGFunction func, Oid collation, Datum arg1)
 
     fcinfo.arg[0] = arg1;
     fcinfo.argnull[0] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = (*func)(&fcinfo);
 

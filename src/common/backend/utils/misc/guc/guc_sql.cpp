@@ -165,6 +165,8 @@ static void assign_convert_string_to_digit(bool newval, void* extra);
 static void AssignUStoreAttr(const char* newval, void* extra);
 static bool check_snapshot_delimiter(char** newval, void** extra, GucSource source);
 static bool check_snapshot_separator(char** newval, void** extra, GucSource source);
+static bool check_sql_ignore_strategy(char** newval, void** extra, GucSource source);
+static void assign_sql_ignore_strategy(const char* newval, void* extra);
 
 
 static void InitSqlConfigureNamesBool();
@@ -330,6 +332,13 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"rownum_type_compat", OPT_ROWNUM_TYPE_COMPAT},
     {"compat_cursor", OPT_COMPAT_CURSOR},
     {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT}
+};
+
+// increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
+#define SQL_IGNORE_STRATEGY_NUM 2
+static const struct config_enum_entry sql_ignore_strategy[] = {
+    {"ignore_null", SQL_IGNORE_NULL, false},
+    {"overwrite_null", SQL_OVERWRITE_NULL, false},
 };
 
 /*
@@ -2686,6 +2695,18 @@ static void InitSqlConfigureNamesString()
             check_snapshot_delimiter,
             NULL,
             NULL},
+        {{"sql_ignore_strategy",
+            PGC_USERSET,
+            NODE_ALL,
+            COMPAT_OPTIONS,
+            gettext_noop("Handling strategy when SQL has keyword IGNORE and gets ERROR."),
+            NULL,
+            },
+            &u_sess->attr.attr_sql.sql_ignore_strategy_string,
+            "ignore_null",
+            check_sql_ignore_strategy,
+            assign_sql_ignore_strategy,
+            NULL},
         {{NULL,
             (GucContext)0,
             (GucNodeType)0,
@@ -3360,4 +3381,28 @@ static bool check_snapshot_separator(char** newval, void** extra, GucSource sour
 {
     return (strlen(*newval) == 1 && (!u_sess->attr.attr_sql.db4ai_snapshot_version_delimiter
                                      || **newval != *u_sess->attr.attr_sql.db4ai_snapshot_version_delimiter));
+}
+
+static bool check_sql_ignore_strategy(char** newval, void** extra, GucSource source)
+{
+    if (NULL == newval) {
+        return false;
+    }
+    for (int start = 0; start < SQL_IGNORE_STRATEGY_NUM; start++) {
+        if (strcmp((const char*)*newval, sql_ignore_strategy[start].name) == 0) {
+            return true;
+        }
+    }
+    GUC_check_errdetail("invalid value for sql ignore strategy.");
+    return false;
+}
+
+static void assign_sql_ignore_strategy(const char* newval, void* extra) {
+    for (int start = 0; start < SQL_IGNORE_STRATEGY_NUM; start++) {
+        if (strcmp((const char*)newval, sql_ignore_strategy[start].name) == 0) {
+            u_sess->utils_cxt.sql_ignore_strategy_val = sql_ignore_strategy[start].val;
+            return;
+        }
+    }
+    u_sess->utils_cxt.sql_ignore_strategy_val = sql_ignore_strategy[0].val;
 }

@@ -60,7 +60,7 @@ static double convert_to_numeric(Node *value);
 
 %token <keyword> NestLoop_P MergeJoin_P HashJoin_P No_P Leading_P Rows_P Broadcast_P Redistribute_P BlockName_P
 	TableScan_P IndexScan_P IndexOnlyScan_P Skew_P HINT_MULTI_NODE_P NULL_P TRUE_P FALSE_P Predpush_P
-	PredpushSameLevel_P Rewrite_P Gather_P Set_P USE_CPLAN_P USE_GPLAN_P ON_P OFF_P No_expand_P NO_GPC_P
+	PredpushSameLevel_P Rewrite_P Gather_P Set_P USE_CPLAN_P USE_GPLAN_P ON_P OFF_P No_expand_P SQL_IGNORE_P NO_GPC_P
 
 %nonassoc	IDENT NULL_P
 
@@ -162,6 +162,12 @@ join_hint_item:
 	| no_gpc_hint
 	{
 		$$ = $1;
+	}
+	| SQL_IGNORE_P
+	{
+		SqlIgnoreHint *sql_ignore_hint = (SqlIgnoreHint *)makeNode(SqlIgnoreHint);
+		sql_ignore_hint->sql_ignore_hint = true;
+		$$ = (Node *) sql_ignore_hint;
 	}
 
 gather_hint:
