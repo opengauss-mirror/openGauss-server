@@ -6308,6 +6308,9 @@ static AlterSubscriptionStmt *_copyAlterSubscriptionStmt(const AlterSubscription
 
     COPY_STRING_FIELD(subname);
     COPY_NODE_FIELD(options);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_INITIAL_DATA_VERSION_NAME) {
+        COPY_SCALAR_FIELD(refresh);
+    }
 
     return newnode;
 }

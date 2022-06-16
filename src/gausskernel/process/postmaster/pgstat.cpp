@@ -783,10 +783,10 @@ static void pgstat_free_tablist(void)
 /* ----------
  * pgstat_report_stat() -
  *
- *	Called from tcop/postgres.c to send the so far collected per-table
- *	and function usage statistics to the collector.  Note that this is
- *	called only when not within a transaction, so it is fair to use
- *	transaction stop time as an approximation of current time.
+ *	Must be called by processes that performs DML: tcop/postgres.c, logical
+ *	receiver processes, SPI worker, etc. to send the so far collected
+ *	per-table and function usage statistics to the collector.  Note that this
+ *	is called only when not within a transaction, so it is fair to use
  * ----------
  */
 void pgstat_report_stat(bool force)
@@ -4570,6 +4570,15 @@ const char* pgstat_get_wait_io(WaitEventIO w)
             break;
         case WAIT_EVENT_UNDO_META_SYNC:
             event_name = "UndoMetaSync";
+            break;
+        case WAIT_EVENT_LOGICAL_SYNC_DATA:
+            event_name = "LogicalSyncData";
+            break;
+        case WAIT_EVENT_LOGICAL_SYNC_STATE_CHANGE:
+            event_name = "LogicalSyncStateChange";
+            break;
+        case WAIT_EVENT_REPLICATION_ORIGIN_DROP:
+            event_name = "ReplicationOriginDrop";
             break;
         default:
             event_name = "unknown wait event";

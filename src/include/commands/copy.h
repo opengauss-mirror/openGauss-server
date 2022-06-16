@@ -391,12 +391,14 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
 extern void ProcessCopyOptions(CopyState cstate, bool is_from, List* options);
 extern bool IsTypeAcceptEmptyStr(Oid typeOid);
 extern CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, 
-    List* options, void* mem_info, const char* queryString);
+    List* options, void* mem_info, const char* queryString, CopyGetDataFunc func = NULL);
 extern void EndCopyFrom(CopyState cstate);
 extern bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* nulls, Oid* tupleOid);
 extern bool NextCopyFromRawFields(CopyState cstate, char*** fields, int* nfields);
 extern void CopyFromErrorCallback(void* arg);
 extern void BulkloadErrorCallback(void* arg);
+
+extern uint64 CopyFrom(CopyState cstate);
 
 extern DestReceiver* CreateCopyDestReceiver(void);
 

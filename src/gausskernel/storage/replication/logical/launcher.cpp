@@ -27,6 +27,7 @@
 #include "access/xact.h"
 
 #include "catalog/pg_subscription.h"
+#include "catalog/pg_subscription_rel.h"
 #include "catalog/pg_database.h"
 #include "commands/user.h"
 
@@ -58,7 +59,7 @@
 static const int DEFAULT_NAPTIME_PER_CYCLE = 180000L;
 
 static const int wal_retrieve_retry_interval = 5000;
-static const int PG_STAT_GET_SUBSCRIPTION_COLS = 7;
+static const int PG_STAT_GET_SUBSCRIPTION_COLS = 8;
 static const int WAIT_SUB_WORKER_ATTACH_CYCLE = 50000L; /* 50ms */
 static const int WAIT_SUB_WORKER_ATTACH_TIMEOUT = 1000000L; /* 1s */
 
@@ -157,9 +158,9 @@ List *logicalrep_workers_find(Oid subid, bool only_running)
 
 /*
  * Walks the workers array and searches for one that matches given
- * subscription id.
+ * subscription id and relid.
  */
-static LogicalRepWorker *logicalrep_worker_find(Oid subid)
+LogicalRepWorker *logicalrep_worker_find(Oid subid, Oid relid, bool only_running)
 {
     int i;
     LogicalRepWorker *res = NULL;
@@ -168,7 +169,7 @@ static LogicalRepWorker *logicalrep_worker_find(Oid subid)
     /* Search for attached worker for a given subscription id. */
     for (i = 0; i < g_instance.attr.attr_storage.max_logical_replication_workers; i++) {
         LogicalRepWorker *w = &t_thrd.applylauncher_cxt.applyLauncherShm->workers[i];
-        if (w->subid == subid && w->proc) {
+        if (w->subid == subid && w->relid == relid && (!only_running || w->proc)) {
             res = w;
             break;
         }
@@ -228,10 +229,9 @@ static void WaitForReplicationWorkerAttach()
 /*
  * Start new apply background worker.
  */
-static void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, Oid userid)
+void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, Oid userid, Oid relid)
 {
     int slot;
-    int rc;
     LogicalRepWorker *worker = NULL;
 
     ereport(DEBUG1, (errmsg("starting logical replication worker for subscription \"%s\"", subname)));
@@ -265,11 +265,19 @@ static void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, O
     }
 
     /* Prepare the worker info. */
-    rc = memset_s(worker, sizeof(LogicalRepWorker), 0, sizeof(LogicalRepWorker));
-    securec_check(rc, "", "");
+    worker->proc = NULL;
     worker->dbid = dbid;
     worker->userid = userid;
     worker->subid = subid;
+    worker->relid = relid;
+    worker->relstate = SUBREL_STATE_UNKNOWN;
+    worker->relstate_lsn = InvalidXLogRecPtr;
+    worker->relcsn = InvalidCommitSeqNo;
+    worker->last_lsn = InvalidXLogRecPtr;
+    TIMESTAMP_NOBEGIN(worker->last_send_time);
+    TIMESTAMP_NOBEGIN(worker->last_recv_time);
+    worker->reply_lsn = InvalidXLogRecPtr;
+    TIMESTAMP_NOBEGIN(worker->reply_time);
     worker->workerLaunchTime = GetCurrentTimestamp();
 
     t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker = worker;
@@ -283,13 +291,13 @@ static void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, O
  * Stop the logical replication worker for subid/relid, if any, and wait until
  * it detaches from the slot.
  */
-void logicalrep_worker_stop(Oid subid)
+void logicalrep_worker_stop(Oid subid, Oid relid)
 {
     LogicalRepWorker *worker;
 
     LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
 
-    worker = logicalrep_worker_find(subid);
+    worker = logicalrep_worker_find(subid, relid, false);
     /* No worker, nothing to do. */
     if (!worker) {
         LWLockRelease(LogicalRepWorkerLock);
@@ -357,6 +365,34 @@ void logicalrep_worker_stop(Oid subid)
         LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
     }
     LWLockRelease(LogicalRepWorkerLock);
+}
+
+/*
+ * Wake up (using latch) any logical replication worker for specified sub/rel.
+ */
+void logicalrep_worker_wakeup(Oid subid, Oid relid)
+{
+    LogicalRepWorker *worker;
+
+    LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+
+    worker = logicalrep_worker_find(subid, relid, true);
+
+    if (worker)
+        logicalrep_worker_wakeup_ptr(worker);
+
+    LWLockRelease(LogicalRepWorkerLock);
+}
+
+/*
+ * Wake up (using latch) the specified logical replication worker.
+ *
+ * Caller must hold lock, else worker->proc could change under us.
+ */
+void logicalrep_worker_wakeup_ptr(LogicalRepWorker *worker)
+{
+    Assert(LWLockHeldByMe(LogicalRepWorkerLock));
+    SetLatch(&worker->proc->procLatch);
 }
 
 /*
@@ -479,6 +515,27 @@ static void LogicalrepLauncherSigusr1(SIGNAL_ARGS)
 }
 
 /*
+ * Count the number of registered (not necessarily running) sync workers
+ * for a subscription.
+ */
+int logicalrep_sync_worker_count(Oid subid)
+{
+    int i;
+    int res = 0;
+
+    Assert(LWLockHeldByMe(LogicalRepWorkerLock));
+
+    /* Search for attached worker for a given subscription id. */
+    for (i = 0; i < g_instance.attr.attr_storage.max_logical_replication_workers; i++) {
+        LogicalRepWorker *w = &t_thrd.applylauncher_cxt.applyLauncherShm->workers[i];
+        if (w->subid == subid && OidIsValid(w->relid))
+            res++;
+    }
+
+    return res;
+}
+
+/*
  * ApplyLauncherShmemSize
  * 		Compute space needed for replication launcher shared memory
  */
@@ -510,8 +567,19 @@ void ApplyLauncherShmemInit(void)
         (ApplyLauncherShmStruct *)ShmemInitStruct("Logical Replication Launcher Data", memSize, &found);
 
     if (!found) {
+        int slot;
+
         rc = memset_s(t_thrd.applylauncher_cxt.applyLauncherShm, memSize, 0, memSize);
         securec_check(rc, "", "");
+
+        /* Initialize memory and spin locks for each worker slot. */
+        for (slot = 0; slot < g_instance.attr.attr_storage.max_logical_replication_workers; slot++) {
+            LogicalRepWorker *worker = &t_thrd.applylauncher_cxt.applyLauncherShm->workers[slot];
+
+            rc = memset_s(worker, sizeof(LogicalRepWorker), 0, sizeof(LogicalRepWorker));
+            securec_check(rc, "", "");
+            SpinLockInit(&worker->relmutex);
+        }
     }
 }
 
@@ -689,7 +757,7 @@ void ApplyLauncherMain()
                 }
 
                 LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
-                w = logicalrep_worker_find(sub->oid);
+                w = logicalrep_worker_find(sub->oid, InvalidOid, false);
                 LWLockRelease(LogicalRepWorkerLock);
 
                 /* Add to pending list if the subscription has no work attached */
@@ -706,7 +774,7 @@ void ApplyLauncherMain()
             foreach(lc, pendingSubList) {
                 Subscription *readyToLaunchSub = (Subscription*)lfirst(lc);
                 logicalrep_worker_launch(readyToLaunchSub->dbid, readyToLaunchSub->oid,
-                    readyToLaunchSub->name, readyToLaunchSub->owner);
+                    readyToLaunchSub->name, readyToLaunchSub->owner, InvalidOid);
                 last_start_time = now;
                 wait_time = wal_retrieve_retry_interval;
             }
@@ -817,6 +885,10 @@ Datum pg_stat_get_subscription(PG_FUNCTION_ARGS)
         securec_check(rc, "", "");
 
         values[idx++] = ObjectIdGetDatum(worker.subid);
+        if (OidIsValid(worker.relid))
+            values[idx++] = ObjectIdGetDatum(worker.relid);
+        else
+            nulls[idx++] = true;
         values[idx++] = Int32GetDatum(worker_pid);
         if (XLogRecPtrIsInvalid(worker.last_lsn))
             nulls[idx++] = true;

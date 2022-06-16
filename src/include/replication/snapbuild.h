@@ -65,6 +65,7 @@ extern void FreeSnapshotBuilder(SnapBuild* cache);
 
 extern void SnapBuildSnapDecRefcount(Snapshot snap);
 
+extern Snapshot SnapBuildInitialSnapshot(SnapBuild *builder);
 extern const char* SnapBuildExportSnapshot(SnapBuild* snapstate);
 extern void SnapBuildClearExportedSnapshot(void);
 

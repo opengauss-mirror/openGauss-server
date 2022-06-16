@@ -108,6 +108,7 @@
 #include "catalog/pg_publication.h"
 #include "catalog/pg_publication_rel.h"
 #include "catalog/pg_replication_origin.h"
+#include "catalog/pg_subscription_rel.h"
 
 /* ---------------------------------------------------------------------------
 
@@ -305,11 +306,11 @@ const cachedesc cacheinfo[] = {
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         32},
-    {ModelRelationId, /* DB4AI_MODELOID */
-        GsModelOidIndexId,
-        1,
-        {ObjectIdAttributeNumber, 0, 0, 0},
-        256},
+    {SubscriptionRelRelationId, /* SUBSCRIPTIONRELMAP */
+        SubscriptionRelSrrelidSrsubidIndexId,
+        2,
+        {Anum_pg_subscription_rel_srrelid, Anum_pg_subscription_rel_srsubid, 0, 0},
+        64},
     {ModelRelationId, /* DB4AI_MODEL */
         GsModelNameIndexId,
         1,

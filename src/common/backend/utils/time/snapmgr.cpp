@@ -62,6 +62,7 @@
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
+#include "storage/sinvaladt.h"
 SnapshotData CatalogSnapshotData = {SNAPSHOT_MVCC};
 
 /*
@@ -82,18 +83,13 @@ static THR_LOCAL bool RegisterStreamSnapshot = false;
 
 /* Define pathname of exported-snapshot files */
 #define SNAPSHOT_EXPORT_DIR "pg_snapshots"
-#define XactExportFilePath(path, xid, num, suffix) \
-    {                                              \
-        int rc = snprintf_s(path,                  \
-            sizeof(path),                          \
-            sizeof(path) - 1,                      \
-            SNAPSHOT_EXPORT_DIR "/%08X%08X-%d%s",  \
-            (uint32)((xid) >> 32),                 \
-            (uint32)(xid),                         \
-            (num),                                 \
-            (suffix));                             \
-        securec_check_ss(rc, "", "");              \
-    }
+
+/* Structure holding info about exported snapshot. */
+typedef struct ExportedSnapshot {
+    char *snapfile;
+    Snapshot snapshot;
+} ExportedSnapshot;
+
 #define MAX_ULONG_LENGTH 22
 
 /* Static variables representing various special snapshot semantics */
@@ -617,7 +613,7 @@ void SnapshotSetCommandId(CommandId curcid)
  * must take care of all the same considerations as the first-snapshot case
  * in GetTransactionSnapshot.
  */
-static void SetTransactionSnapshot(Snapshot sourcesnap, TransactionId sourcexid)
+void SetTransactionSnapshot(Snapshot sourcesnap, VirtualTransactionId *sourcevxid, int sourcepid)
 {
     /* Caller should have checked this already */
     Assert(!u_sess->utils_cxt.FirstSnapshotSet);
@@ -664,7 +660,7 @@ static void SetTransactionSnapshot(Snapshot sourcesnap, TransactionId sourcexid)
      */
     if (IsolationUsesXactSnapshot()) {
         if (IsolationIsSerializable())
-            SetSerializableTransactionSnapshot(u_sess->utils_cxt.CurrentSnapshot, sourcexid);
+            SetSerializableTransactionSnapshot(u_sess->utils_cxt.CurrentSnapshot, sourcevxid, sourcepid);
         /* Make a saved copy */
         Assert(!(u_sess->utils_cxt.CurrentSnapshot != NULL && u_sess->utils_cxt.CurrentSnapshot->user_data != NULL));
         u_sess->utils_cxt.CurrentSnapshot = CopySnapshot(u_sess->utils_cxt.CurrentSnapshot);
@@ -1114,26 +1110,26 @@ void AtEOXact_Snapshot(bool isCommit)
      * If we exported any snapshots, clean them up.
      */
     if (u_sess->utils_cxt.exportedSnapshots != NIL) {
-        TransactionId myxid = GetTopTransactionId();
-        int i;
-        char buf[MAXPGPATH];
-
+        ListCell   *lc;
         /*
          * Get rid of the files.  Unlink failure is only a WARNING because (1)
          * it's too late to abort the transaction, and (2) leaving a leaked
          * file around has little real consequence anyway.
+         *
+         * We also also need to remove the snapshots from RegisteredSnapshots
+         * to prevent a warning below.
+         *
+         * As with the FirstXactSnapshot, we don't need to free resources of
+         * the snapshot iself as it will go away with the memory context.
          */
-        for (i = 1; i <= list_length(u_sess->utils_cxt.exportedSnapshots); i++) {
-            XactExportFilePath(buf, myxid, i, "");
-            if (unlink(buf))
-                ereport(WARNING, (errmsg("could not unlink file \"%s\": %m", buf)));
+        foreach(lc, u_sess->utils_cxt.exportedSnapshots) {
+            ExportedSnapshot *esnap = (ExportedSnapshot *)lfirst(lc);
+
+            if (unlink(esnap->snapfile))
+                ereport(WARNING, (errmsg("could not unlink file \"%s\": %m", esnap->snapfile)));
         }
 
         /*
-         * As with the FirstXactSnapshot, we needn't spend any effort on
-         * cleaning up the per-snapshot data structures, but we do need to
-         * adjust the RegisteredSnapshots count to prevent a warning below.
-         *
          * Note: you might be thinking "why do we have the exportedSnapshots
          * list at all?  All we need is a counter!".  You're right, but we do
          * it this way in case we ever feel like improving xmin management.
@@ -1189,6 +1185,7 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
 {
     TransactionId topXid;
     TransactionId* children = NULL;
+    ExportedSnapshot *esnap;
     int nchildren;
     int addTopXid;
     StringInfoData buf;
@@ -1197,6 +1194,7 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
     MemoryContext oldcxt;
     char path[MAXPGPATH];
     char pathtmp[MAXPGPATH];
+    int rc;
 
     /*
      * It's tempting to call RequireTransactionChain here, since it's not very
@@ -1213,9 +1211,9 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
      */
 
     /*
-     * This will assign a transaction ID if we do not yet have one.
+     * Get our transaction ID if there is one, to include in the snapshot.
      */
-    topXid = GetTopTransactionId();
+    topXid = GetTopTransactionIdIfAny();
 
     /*
      * We cannot export a snapshot from a subtransaction because there's no
@@ -1234,6 +1232,14 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
     nchildren = xactGetCommittedChildren(&children);
 
     /*
+     * Generate file path for the snapshot.  We start numbering of snapshots
+     * inside the transaction from 1.
+     */
+    rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, SNAPSHOT_EXPORT_DIR "/%08X-%08X-%d",
+        t_thrd.proc->backendId, t_thrd.proc->lxid, list_length(u_sess->utils_cxt.exportedSnapshots) + 1);
+    securec_check_ss(rc, "", "");
+
+    /*
      * Copy the snapshot into u_sess->top_transaction_mem_cxt, add it to the
      * exportedSnapshots list, and mark it pseudo-registered.  We do this to
      * ensure that the snapshot's xmin is honored for the rest of the
@@ -1243,7 +1249,10 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
     snapshot = CopySnapshot(snapshot);
 
     oldcxt = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
-    u_sess->utils_cxt.exportedSnapshots = lappend(u_sess->utils_cxt.exportedSnapshots, snapshot);
+    esnap = (ExportedSnapshot *) palloc(sizeof(ExportedSnapshot));
+    esnap->snapfile = pstrdup(path);
+    esnap->snapshot = snapshot;
+    u_sess->utils_cxt.exportedSnapshots = lappend(u_sess->utils_cxt.exportedSnapshots, esnap);
     (void)MemoryContextSwitchTo(oldcxt);
 
     snapshot->regd_count++;
@@ -1256,7 +1265,8 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
      */
     initStringInfo(&buf);
 
-    appendStringInfo(&buf, "xid:" XID_FMT "\n", topXid);
+    appendStringInfo(&buf, "vxid: %d/" XID_FMT "\n", t_thrd.proc->backendId, t_thrd.proc->lxid);
+    appendStringInfo(&buf, "pid:%lu\n", t_thrd.proc_cxt.MyProcPid);
     appendStringInfo(&buf, "dbid:%u\n", u_sess->proc_cxt.MyDatabaseId);
     appendStringInfo(&buf, "iso:%d\n", u_sess->utils_cxt.XactIsoLevel);
     appendStringInfo(&buf, "ro:%d\n", u_sess->attr.attr_common.XactReadOnly);
@@ -1277,7 +1287,7 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
      * xmax.  (We need not make the same check for subxip[] members, see
      * snapshot.h.)
      */
-    addTopXid = TransactionIdPrecedes(topXid, snapshot->xmax) ? 1 : 0;
+    addTopXid = (TransactionIdIsValid(topXid) && TransactionIdPrecedes(topXid, snapshot->xmax)) ? 1 : 0;
     if (addTopXid)
         appendStringInfo(&buf, "xip:" XID_FMT "\n", topXid);
 
@@ -1306,7 +1316,8 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
      * ensures that no other backend can read an incomplete file
      * (ImportSnapshot won't allow it because of its valid-characters check).
      */
-    XactExportFilePath(pathtmp, topXid, list_length(u_sess->utils_cxt.exportedSnapshots), ".tmp");
+    rc = snprintf_s(pathtmp, sizeof(pathtmp), sizeof(pathtmp) - 1, "%s.tmp", path);
+    securec_check_ss(rc, "", "");
     if (!(f = AllocateFile(pathtmp, PG_BINARY_W)))
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", pathtmp)));
 
@@ -1322,8 +1333,6 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
      * Now that we have written everything into a .tmp file, rename the file
      * to remove the .tmp suffix.
      */
-    XactExportFilePath(path, topXid, list_length(u_sess->utils_cxt.exportedSnapshots), "");
-
     if (rename(pathtmp, path) < 0)
         ereport(
             ERROR, (errcode_for_file_access(), errmsg("could not rename file \"%s\" to \"%s\": %m", pathtmp, path)));
@@ -1457,6 +1466,25 @@ static GTM_Timeline parseTimelineFromText(const char* prefix, char** s, const ch
     return val;
 }
 
+static void parseVxidFromText(const char *prefix, char **s, const char *filename, VirtualTransactionId *vxid)
+{
+    char *ptr = *s;
+    int prefixlen = strlen(prefix);
+
+    if (strncmp(ptr, prefix, prefixlen) != 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    ptr += prefixlen;
+    if (sscanf_s(ptr, "%d/%u", &vxid->backendId, &vxid->localTransactionId) != 2)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    ptr = strchr(ptr, '\n');
+    if (!ptr)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", filename)));
+    *s = ptr + 1;
+}
+
 /*
  * ImportSnapshot
  *		Import a previously exported snapshot.	The argument should be a
@@ -1469,7 +1497,8 @@ void ImportSnapshot(const char* idstr)
     FILE* f = NULL;
     struct stat stat_buf;
     char* filebuf = NULL;
-    TransactionId src_xid;
+    VirtualTransactionId src_vxid;
+    int src_pid;
     Oid src_dbid;
     int src_isolevel;
     bool src_readonly = false;
@@ -1531,7 +1560,8 @@ void ImportSnapshot(const char* idstr)
     rc = memset_s(&snapshot, sizeof(SnapshotData), 0, sizeof(snapshot));
     securec_check(rc, "", "");
 
-    src_xid = parseXidFromText("xid:", &filebuf, path);
+    parseVxidFromText("vxid:", &filebuf, path, &src_vxid);
+    src_pid = parseIntFromText("pid:", &filebuf, path);
     /* we abuse parseXidFromText a bit here ... */
     src_dbid = parseXidFromText("dbid:", &filebuf, path);
     src_isolevel = parseIntFromText("iso:", &filebuf, path);
@@ -1550,7 +1580,7 @@ void ImportSnapshot(const char* idstr)
      * don't trouble to check the array elements, just the most critical
      * fields.
      */
-    if (!TransactionIdIsNormal(src_xid) || !OidIsValid(src_dbid) || !TransactionIdIsNormal(snapshot.xmin) ||
+    if (!VirtualTransactionIdIsValid(src_vxid) || !OidIsValid(src_dbid) || !TransactionIdIsNormal(snapshot.xmin) ||
         !TransactionIdIsNormal(snapshot.xmax))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid snapshot data in file \"%s\"", path)));
@@ -1587,7 +1617,7 @@ void ImportSnapshot(const char* idstr)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot import a snapshot from a different database")));
 
     /* OK, install the snapshot */
-    SetTransactionSnapshot(&snapshot, src_xid);
+    SetTransactionSnapshot(&snapshot, &src_vxid, src_pid);
 }
 
 /*

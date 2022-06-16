@@ -72,6 +72,7 @@
 
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 
 #include "access/genam.h"
 #include "access/heapam.h"
@@ -269,11 +270,16 @@ RepOriginId replorigin_create(const char *roname)
 /*
  * Helper function to drop a replication origin.
  */
-static void replorigin_drop_guts(Relation rel, RepOriginId roident)
+static void replorigin_drop_guts(Relation rel, RepOriginId roident, bool nowait)
 {
     HeapTuple tuple = NULL;
     ScanKeyData key;
     int i;
+
+restart:
+    tuple = NULL;
+
+    CHECK_FOR_INTERRUPTS();
 
     /* cleanup the slot state info */
     LWLockAcquire(ReplicationOriginLock, LW_EXCLUSIVE);
@@ -284,9 +290,23 @@ static void replorigin_drop_guts(Relation rel, RepOriginId roident)
         /* found our slot */
         if (state->roident == roident) {
             if (state->acquired_by != 0) {
-                ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE),
-                    errmsg("could not drop replication origin with OID %d, in use by PID %lu", state->roident,
-                    state->acquired_by)));
+                if (nowait) {
+                    ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE),
+                        errmsg("could not drop replication origin with OID %d, in use by PID %lu", state->roident,
+                        state->acquired_by)));
+                }
+
+                LWLockRelease(ReplicationOriginLock);
+                pthread_mutex_lock(&state->originMutex);
+                struct timespec ts;
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_sec += SECS_PER_MINUTE / 2;
+                pgstat_report_waitevent(WAIT_EVENT_REPLICATION_ORIGIN_DROP);
+                (void)pthread_cond_timedwait(&state->orginCV, &state->originMutex, &ts);
+                pgstat_report_waitevent(WAIT_EVENT_END);
+                pthread_mutex_unlock(&state->originMutex);
+
+                goto restart;
             }
 
             /* first WAL log */
@@ -329,7 +349,7 @@ static void replorigin_drop_guts(Relation rel, RepOriginId roident)
  *
  * Needs to be called in a transaction.
  */
-void replorigin_drop_by_name(const char *name, bool missing_ok)
+void replorigin_drop_by_name(const char *name, bool missing_ok, bool nowait)
 {
     RepOriginId roident;
     Relation rel;
@@ -349,7 +369,7 @@ void replorigin_drop_by_name(const char *name, bool missing_ok)
 
     roident = replorigin_by_name(name, missing_ok);
     if (OidIsValid(roident)) {
-        replorigin_drop_guts(rel, roident);
+        replorigin_drop_guts(rel, roident, nowait);
     }
 
     /* We keep the lock on pg_replication_origin until commit */
@@ -447,8 +467,23 @@ void ReplicationOriginShmemInit(void)
         u_sess->reporigin_cxt.repStatesShm->tranche_id = LWTRANCHE_REPLICATION_ORIGIN;
 
         for (i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
-            LWLockInitialize(&u_sess->reporigin_cxt.repStatesShm->states[i].lock,
-                u_sess->reporigin_cxt.repStatesShm->tranche_id);
+            ReplicationState* state = &u_sess->reporigin_cxt.repStatesShm->states[i];
+
+            rc = pthread_condattr_init(&state->originAttr);
+            if (rc != 0) {
+                elog(FATAL, "Fail to init conattr for replication origin");
+            }
+            rc = pthread_condattr_setclock(&state->originAttr, CLOCK_MONOTONIC);
+            if (rc != 0) {
+                elog(FATAL, "Fail to setclock replication origin");
+            }
+            rc = pthread_cond_init(&state->orginCV, &state->originAttr);
+            if (rc != 0) {
+                elog(FATAL, "Fail to init cond for replication origin");
+            }
+            state->originMutex = PTHREAD_MUTEX_INITIALIZER;
+
+            LWLockInitialize(&state->lock, u_sess->reporigin_cxt.repStatesShm->tranche_id);
         }
     }
 }
@@ -917,15 +952,25 @@ static XLogRecPtr replorigin_get_progress(RepOriginId node, bool flush)
  */
 static void ReplicationOriginExitCleanup(int code, Datum arg)
 {
+    pthread_cond_t* cv = NULL;
+    pthread_mutex_t* mutex = NULL;
+
     LWLockAcquire(ReplicationOriginLock, LW_EXCLUSIVE);
 
     if (u_sess->reporigin_cxt.curRepState != NULL &&
         u_sess->reporigin_cxt.curRepState->acquired_by == t_thrd.proc_cxt.MyProcPid) {
+        cv = &u_sess->reporigin_cxt.curRepState->orginCV;
+        mutex = &u_sess->reporigin_cxt.curRepState->originMutex;
         u_sess->reporigin_cxt.curRepState->acquired_by = 0;
         u_sess->reporigin_cxt.curRepState = NULL;
     }
 
     LWLockRelease(ReplicationOriginLock);
+    if (cv) {
+        pthread_mutex_lock(mutex);
+        pthread_cond_signal(cv);
+        pthread_mutex_unlock(mutex);
+    }
 }
 
 /*
@@ -1000,6 +1045,11 @@ void replorigin_session_setup(RepOriginId node)
     u_sess->reporigin_cxt.curRepState->acquired_by = t_thrd.proc_cxt.MyProcPid;
 
     LWLockRelease(ReplicationOriginLock);
+
+    /* probably this one is pointless */
+    pthread_mutex_lock(&u_sess->reporigin_cxt.curRepState->originMutex);
+    pthread_cond_signal(&u_sess->reporigin_cxt.curRepState->orginCV);
+    pthread_mutex_unlock(&u_sess->reporigin_cxt.curRepState->originMutex);
 }
 
 /*
@@ -1010,6 +1060,8 @@ void replorigin_session_setup(RepOriginId node)
  */
 static void replorigin_session_reset(void)
 {
+    pthread_cond_t* cv = NULL;
+    pthread_mutex_t* mutex = NULL;
     Assert(g_instance.attr.attr_storage.max_replication_slots != 0);
 
     if (u_sess->reporigin_cxt.curRepState == NULL)
@@ -1019,9 +1071,16 @@ static void replorigin_session_reset(void)
     LWLockAcquire(ReplicationOriginLock, LW_EXCLUSIVE);
 
     u_sess->reporigin_cxt.curRepState->acquired_by = 0;
+    cv = &u_sess->reporigin_cxt.curRepState->orginCV;
+    mutex = &u_sess->reporigin_cxt.curRepState->originMutex;
     u_sess->reporigin_cxt.curRepState = NULL;
 
     LWLockRelease(ReplicationOriginLock);
+    if (cv && mutex) {
+        pthread_mutex_lock(mutex);
+        pthread_cond_signal(cv);
+        pthread_mutex_unlock(mutex);
+    }
 }
 
 /*
@@ -1108,7 +1167,7 @@ Datum pg_replication_origin_drop(PG_FUNCTION_ARGS)
 
     name = text_to_cstring((text *)DatumGetPointer(PG_GETARG_DATUM(0)));
 
-    replorigin_drop_by_name(name, false);
+    replorigin_drop_by_name(name, false, true);
 
     pfree(name);
 

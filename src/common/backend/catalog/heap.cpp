@@ -69,6 +69,7 @@
 #include "catalog/storage.h"
 #include "catalog/storage_xlog.h"
 #include "catalog/storage_gtt.h"
+#include "catalog/pg_subscription_rel.h"
 #include "commands/matview.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
@@ -3573,6 +3574,11 @@ void heap_drop_with_catalog(Oid relid)
         }
     }
     relation_close(rel, NoLock);
+
+    /*
+     * Remove any associated relation synchronization states.
+     */
+    RemoveSubscriptionRel(InvalidOid, relid);
 
     /*
      * Forget any ON COMMIT action for the rel

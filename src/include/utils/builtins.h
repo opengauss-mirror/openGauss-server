@@ -642,6 +642,7 @@ extern Datum oidvectorge(PG_FUNCTION_ARGS);
 extern Datum oidvectorgt(PG_FUNCTION_ARGS);
 extern oidvector* buildoidvector(const Oid* oids, int n);
 extern Oid oidparse(Node* node);
+extern int oid_cmp(const void *p1, const void *p2);
 
 /* pseudotypes.c */
 extern Datum cstring_in(PG_FUNCTION_ARGS);

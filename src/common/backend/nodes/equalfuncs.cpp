@@ -2933,6 +2933,9 @@ static bool _equalAlterSubscriptionStmt(const AlterSubscriptionStmt *a, const Al
 {
     COMPARE_STRING_FIELD(subname);
     COMPARE_NODE_FIELD(options);
+    if (t_thrd.proc->workingVersionNum >= PUBLICATION_INITIAL_DATA_VERSION_NAME) {
+        COMPARE_SCALAR_FIELD(refresh);
+    }
 
     return true;
 }

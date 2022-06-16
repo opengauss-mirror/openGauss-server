@@ -70,7 +70,7 @@ extern Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot);
 
 extern Snapshot GetLocalSnapshotData(Snapshot snapshot);
 
-extern bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid);
+extern bool ProcArrayInstallImportedXmin(TransactionId xmin, VirtualTransactionId *sourcevxid);
 extern RunningTransactions GetRunningTransactionData(void);
 
 extern bool TransactionIdIsActive(TransactionId xid);

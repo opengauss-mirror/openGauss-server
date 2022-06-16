@@ -244,7 +244,6 @@ uint64 DoCopyTo(CopyState cstate);
 static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast);
 static uint64 CopyToCompatiblePartions(CopyState cstate);
 void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nulls);
-static uint64 CopyFrom(CopyState cstate);
 static void EstCopyMemInfo(Relation rel, UtilityDesc* desc);
 
 static int CopyFromCompressAndInsertBatch(PageCompress* pcState, EState* estate, CommandId mycid, int hi_options,
@@ -3878,7 +3877,7 @@ void HeapAddToBulk(CopyFromBulk bulk, Tuple tup, bool needCopy)
 /*
  * Copy FROM file to relation.
  */
-static uint64 CopyFrom(CopyState cstate)
+uint64 CopyFrom(CopyState cstate)
 {
     Tuple tuple;
     TupleDesc tupDesc;
@@ -5567,7 +5566,8 @@ static void CopyInitCstateVar(CopyState cstate)
  * Returns a CopyState, to be passed to NextCopyFrom and related functions.
  */
 CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, 
-                             List* options, void* mem_info, const char* queryString)
+                        List* options, void* mem_info, const char* queryString,
+                        CopyGetDataFunc func)
 {
     CopyState cstate;
     bool pipe = (filename == NULL);
@@ -5709,7 +5709,9 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
     cstate->volatile_defexprs = volatile_defexprs;
     cstate->num_defaults = num_defaults;
 
-    if (pipe) {
+    if (func) {
+        cstate->copyGetDataFunc = func;
+    } else if (pipe) {
         if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
             ReceiveCopyBegin(cstate);
         else

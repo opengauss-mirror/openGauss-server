@@ -651,6 +651,8 @@ DECLARE_UNIQUE_INDEX(pg_replication_origin_roident_index, 6136, on pg_replicatio
 DECLARE_UNIQUE_INDEX(pg_replication_origin_roname_index, 6137, on pg_replication_origin using btree(roname text_pattern_ops));
 #define ReplicationOriginNameIndex 6137
 
+DECLARE_UNIQUE_INDEX(pg_subscription_rel_srrelid_srsubid_index, 6138, on pg_subscription_rel using btree(srrelid oid_ops, srsubid oid_ops));
+#define SubscriptionRelSrrelidSrsubidIndexId 6138
 
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES

@@ -118,6 +118,7 @@ DROP_REPLICATION_SLOT		{ return K_DROP_REPLICATION_SLOT; }
 PHYSICAL			{ return K_PHYSICAL; }
 LOGICAL 			{ return K_LOGICAL; }
 SLOT				{ return K_SLOT; }
+USE_SNAPSHOT		{ return K_USE_SNAPSHOT; }
 
 ","				{ return ','; }
 ";"				{ return ';'; }
@@ -199,9 +200,7 @@ SLOT				{ return K_SLOT; }
 				}
 
 .				{
-					ereport(ERROR,
-							(errcode(ERRCODE_SYNTAX_ERROR),
-							 errmsg("syntax error: unexpected character \"%s\"", yytext)));
+					return T_WORD;
 				}
 %%
 

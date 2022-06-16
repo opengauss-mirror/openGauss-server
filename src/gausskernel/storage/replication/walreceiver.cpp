@@ -161,7 +161,7 @@ const WalReceiverFunc WalReceiverFuncTable[] = {
     { archive_connect, archive_receive, archive_send, archive_disconnect, NULL, NULL, NULL, NULL },
     { shared_storage_connect, shared_storage_receive, shared_storage_send, shared_storage_disconnect,
         NULL, NULL, NULL, NULL},
-    { sub_connect, libpqrcv_receive, libpqrcv_send, libpqrcv_disconnect, libpqrcv_command, sub_identify_system,
+    { sub_connect, libpqrcv_receive, libpqrcv_send, libpqrcv_disconnect, libpqrcv_exec, sub_identify_system,
         sub_startstreaming, sub_create_slot}
 };
 

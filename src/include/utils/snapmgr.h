@@ -115,4 +115,6 @@ extern struct HTAB* HistoricSnapshotGetTupleCids(void);
 extern void SetupHistoricSnapshot(Snapshot snapshot_now, struct HTAB* tuplecids);
 extern void TeardownHistoricSnapshot(bool is_error);
 extern bool HistoricSnapshotActive(void);
+
+extern void SetTransactionSnapshot(Snapshot sourcesnap, VirtualTransactionId *sourcevxid, int sourcepid);
 #endif /* SNAPMGR_H */
