@@ -513,7 +513,7 @@ static void process_syncing_tables_for_apply(XLogRecPtr current_lsn)
                  * If there are free sync worker slot(s), start a new sync
                  * worker for the table.
                  */
-                if (nsyncworkers < g_instance.attr.attr_storage.max_sync_workers_per_subscription) {
+                if (nsyncworkers < u_sess->attr.attr_storage.max_sync_workers_per_subscription) {
                     logicalrep_worker_launch(t_thrd.applyworker_cxt.curWorker->dbid,
                                              t_thrd.applyworker_cxt.mySubscription->oid,
                                              t_thrd.applyworker_cxt.mySubscription->name,

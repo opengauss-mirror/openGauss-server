@@ -2238,7 +2238,7 @@ static void InitStorageConfigureNamesInt()
             REPLICATION,
             gettext_noop("Maximum number of table synchronization workers per subscription."),
             NULL},
-            &g_instance.attr.attr_storage.max_sync_workers_per_subscription,
+            &u_sess->attr.attr_storage.max_sync_workers_per_subscription,
             2,
             0,
             MAX_BACKENDS,

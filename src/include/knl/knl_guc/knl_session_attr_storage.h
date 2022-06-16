@@ -248,6 +248,7 @@ typedef struct knl_session_attr_storage {
     bool reserve_space_for_nullable_atts;
     knl_session_attr_dcf dcf_attr;
     int catchup2normal_wait_time;
+    int max_sync_workers_per_subscription;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */
