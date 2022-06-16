@@ -1127,6 +1127,40 @@ select * from t1 order by a limit 10 offset 20;
  30 | 10 | 2 | 30
 (10 rows)
 
+-- test limit and offset
+explain (costs off) select * from t1 limit 1;
+                  QUERY PLAN                  
+----------------------------------------------
+ Limit
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         ->  Limit
+               ->  Seq Scan on t1
+(4 rows)
+
+explain (costs off) select * from t1 limit 1 offset 10;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Limit
+   ->  Limit
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Limit
+                     ->  Seq Scan on t1
+(5 rows)
+
+explain (costs off) select * from t1 order by 1 limit 1 offset 10;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Limit
+   ->  Limit
+         ->  Sort
+               Sort Key: a
+               ->  Streaming(type: LOCAL GATHER dop: 1/2)
+                     ->  Limit
+                           ->  Sort
+                                 Sort Key: a
+                                 ->  Seq Scan on t1
+(9 rows)
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;
