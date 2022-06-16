@@ -61,6 +61,13 @@ select * from t1 order by a limit 10;
 explain (costs off) select * from t1 order by a limit 10 offset 20;
 select * from t1 order by a limit 10 offset 20;
 
+-- test limit and offset
+explain (costs off) select * from t1 limit 1;
+
+explain (costs off) select * from t1 limit 1 offset 10;
+
+explain (costs off) select * from t1 order by 1 limit 1 offset 10;
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;
