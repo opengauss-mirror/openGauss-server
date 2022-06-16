@@ -154,7 +154,6 @@ typedef struct knl_instance_attr_storage {
     int wal_flush_timeout;
     int wal_flush_delay;
     int max_logical_replication_workers;
-    int max_sync_workers_per_subscription;
     char *redo_bind_cpu_attr;
 } knl_instance_attr_storage;
 
