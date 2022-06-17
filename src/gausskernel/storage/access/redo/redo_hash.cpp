@@ -1244,7 +1244,10 @@ static void HashXlogDeleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
             MakeRedoBufferDirty(bufferinfo);
         }
     } else {
-        PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
+        if (action == BLK_NEEDS_REDO) {
+            PageSetLSN(bufferinfo->pageinfo.page, bufferinfo->lsn);
+            MakeRedoBufferDirty(bufferinfo);
+        }
     }
 }
 
