@@ -613,7 +613,7 @@ void SnapshotSetCommandId(CommandId curcid)
  * must take care of all the same considerations as the first-snapshot case
  * in GetTransactionSnapshot.
  */
-void SetTransactionSnapshot(Snapshot sourcesnap, VirtualTransactionId *sourcevxid, int sourcepid)
+void SetTransactionSnapshot(Snapshot sourcesnap, VirtualTransactionId *sourcevxid, ThreadId sourcepid)
 {
     /* Caller should have checked this already */
     Assert(!u_sess->utils_cxt.FirstSnapshotSet);
@@ -1498,7 +1498,7 @@ void ImportSnapshot(const char* idstr)
     struct stat stat_buf;
     char* filebuf = NULL;
     VirtualTransactionId src_vxid;
-    int src_pid;
+    ThreadId src_pid;
     Oid src_dbid;
     int src_isolevel;
     bool src_readonly = false;

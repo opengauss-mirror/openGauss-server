@@ -32,7 +32,7 @@
 #include "pgtime.h" /* for pg_time_t */
 #include "libpq/libpq-be.h"
 
-#define InvalidPid (-1)
+#define InvalidPid ((ThreadId)(-1))
 
 #define PG_BACKEND_VERSIONSTR "gaussdb " DEF_GS_VERSION "\n"
 
