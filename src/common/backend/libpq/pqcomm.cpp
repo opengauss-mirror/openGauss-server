@@ -1367,6 +1367,17 @@ static int pq_discardbytes(size_t len)
 }
 
 /* --------------------------------
+ * pq_buffer_has_data - is any buffered data available to read?
+ *
+ * This will *not* attempt to read more data.
+ * --------------------------------
+ */
+bool pq_buffer_has_data(void)
+{
+    return (t_thrd.libpq_cxt.PqRecvPointer < t_thrd.libpq_cxt.PqRecvLength);
+}
+
+/* --------------------------------
  *		pq_getstring	- get a null terminated string from connection
  *
  *		The return value is placed in an expansible StringInfo, which has
