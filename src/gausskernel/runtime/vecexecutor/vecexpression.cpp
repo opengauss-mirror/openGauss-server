@@ -1990,7 +1990,15 @@ void InitVectorFunction(FunctionCallInfo finfo, MemoryContext fcacheCxt)
 
     Oid foid = finfo->flinfo->fn_oid;
 
-    entry = (VecFuncCacheEntry*)hash_search(g_instance.vec_func_hash, &foid, HASH_FIND, &found);
+    struct HTAB* vec_func_hash = NULL;
+    if (u_sess->attr.attr_sql.dolphin &&
+        g_instance.plugin_vec_func_cxt.vec_func_plugin[DOLPHIN_VEC] != NULL) {
+        vec_func_hash = g_instance.plugin_vec_func_cxt.vec_func_plugin[DOLPHIN_VEC];
+    } else {
+        vec_func_hash = g_instance.vec_func_hash;
+    }
+
+    entry = (VecFuncCacheEntry*)hash_search(vec_func_hash, &foid, HASH_FIND, &found);
 
     if (found && entry->vec_fn_cache[0] != NULL) {
         finfo->flinfo->vec_fn_cache = &entry->vec_fn_cache[0];
