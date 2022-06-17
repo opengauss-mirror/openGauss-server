@@ -764,3 +764,4 @@ test: smp
 test: mulcolpk
 test: pbe_partition
 test: unique_index_first
+test: join_test_alias
