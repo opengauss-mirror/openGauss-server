@@ -2304,6 +2304,7 @@ static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have
     int32          tupTypmod;
     HeapTupleHeader rec;
     TupleDesc      tupdesc;
+    bool           needforget = false;
     RecordIOData  *my_extra = NULL;
     int            ncolumns;
     PopulateRecordsetState *state = NULL;
@@ -2351,7 +2352,10 @@ static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have
         if (PG_ARGISNULL(0)) {
             rec = NULL;
         } else {
+            /* using the arg tupdesc, becouse it may not be the same as the result tupdesc. */
             rec = PG_GETARG_HEAPTUPLEHEADER(0);
+            tupdesc = lookup_rowtype_tupdesc(HeapTupleHeaderGetTypeId(rec), HeapTupleHeaderGetTypMod(rec));
+            needforget = true;
         }
     } else {
         if (PG_ARGISNULL(1)) {
@@ -2359,6 +2363,7 @@ static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have
         }
         rec = NULL;
     }
+
     tupType = tupdesc->tdtypeid;
     tupTypmod = tupdesc->tdtypmod;
     ncolumns = tupdesc->natts;
@@ -2388,6 +2393,9 @@ static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have
     /* make these in a sufficiently long-lived memory context */
     old_cxt = MemoryContextSwitchTo(rsi->econtext->ecxt_per_query_memory);
     state->ret_tdesc = CreateTupleDescCopy(tupdesc);
+    if (needforget) {
+        DecrTupleDescRefCount(tupdesc);
+    }
     BlessTupleDesc(state->ret_tdesc);
     state->tuple_store = tuplestore_begin_heap((uint32)rsi->allowedModes & SFRM_Materialize_Random,
                                                false, u_sess->attr.attr_memory.work_mem);
