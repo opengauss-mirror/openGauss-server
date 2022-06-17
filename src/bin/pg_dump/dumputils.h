@@ -40,6 +40,11 @@
 #define FILE_PERMISSION 0600
 #define MAX_PASSWDLEN 100
 
+#define  A_FORMAT  "A"
+#define  B_FORMAT  "B"
+#define  C_FORMAT  "C"
+#define  PG_FORMAT  "PG"
+
 /* Data structures for simple lists of OIDs and strings.  The support for
  * these is very primitive compared to the backend's List facilities, but
  * it's all we need in pg_dump.
@@ -87,6 +92,7 @@ extern int quote_all_identifiers;
 extern const char* progname;
 extern const char* dbname;
 extern const char* instport;
+extern const char *gdatcompatibility;
 extern char* binary_upgrade_oldowner;
 extern char* binary_upgrade_newowner;
 

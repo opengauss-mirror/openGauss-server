@@ -610,7 +610,7 @@ static int errstate;
 
 %type <ival>	Iconst SignedIconst
 %type <str>		Sconst comment_text notify_payload
-%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst
+%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user
 %type <list>	var_list
 %type <str>		ColId ColLabel var_name type_function_name param_name
 %type <node>	var_value zone_value
@@ -11967,53 +11967,65 @@ range_subpartition_index_item:
  *****************************************************************************/
 
 CreateFunctionStmt:
-			CREATE opt_or_replace FUNCTION func_name_opt_arg proc_args
+			CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
 			RETURNS func_return createfunc_opt_list opt_definition
 				{
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
 					n->isOraStyle = false;
 					n->isPrivate = false;
 					n->replace = $2;
-					n->funcname = $4;
-					n->parameters = $5;
-					n->returnType = $7;
-					n->options = $8;
-					n->withClause = $9;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}			
+					n->funcname = $5;
+					n->parameters = $6;
+					n->returnType = $8;
+					n->options = $9;
+					n->withClause = $10;
 					n->isProcedure = false;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace FUNCTION func_name_opt_arg proc_args
+			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
 			  RETURNS TABLE '(' table_func_column_list ')' createfunc_opt_list opt_definition
 				{
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
 					n->isOraStyle = false;
 					n->isPrivate = false;
 					n->replace = $2;
-					n->funcname = $4;
-					n->parameters = mergeTableFuncParameters($5, $9);
-					n->returnType = TableFuncTypeName($9);
-					n->returnType->location = @7;
-					n->options = $11;
-					n->withClause = $12;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}
+					n->funcname = $5;
+					n->parameters = mergeTableFuncParameters($6, $10);
+					n->returnType = TableFuncTypeName($10);
+					n->returnType->location = @8;
+					n->options = $12;
+					n->withClause = $13;
 					n->isProcedure = false;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace FUNCTION func_name_opt_arg proc_args
+			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
 			  createfunc_opt_list opt_definition
 				{
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
 					n->isOraStyle = false;
 					n->isPrivate = false;
 					n->replace = $2;
-					n->funcname = $4;
-					n->parameters = $5;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}
+					n->funcname = $5;
+					n->parameters = $6;
 					n->returnType = NULL;
-					n->options = $6;
-					n->withClause = $7;
+					n->options = $7;
+					n->withClause = $8;
 					n->isProcedure = false;
 					$$ = (Node *)n;
 				}
-			| CREATE opt_or_replace FUNCTION func_name_opt_arg proc_args
+			| CREATE opt_or_replace definer_user FUNCTION func_name_opt_arg proc_args
 			  RETURN func_return opt_createproc_opt_list as_is {
 				  u_sess->parser_cxt.eaten_declare = false;
 				  u_sess->parser_cxt.eaten_begin = false;
@@ -12024,18 +12036,22 @@ CreateFunctionStmt:
 					int rc = 0;
 					rc = CompileWhich();
                                         if (rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) {
-                                            u_sess->plsql_cxt.procedure_first_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @9);
+                                            u_sess->plsql_cxt.procedure_first_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @10);
                                         }
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
-					FunctionSources *funSource = (FunctionSources *)$11;
+					FunctionSources *funSource = (FunctionSources *)$12;
 					n->isOraStyle = true;
 					n->isPrivate = false;
 					n->replace = $2;
-					n->funcname = $4;
-					n->parameters = $5;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}
+					n->funcname = $5;
+					n->parameters = $6;
 					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funSource->headerSrc, n->parameters);
-					n->returnType = $7;
-					n->options = $8;
+					n->returnType = $8;
+					n->options = $9;
 					n->options = lappend(n->options, makeDefElem("as",
 										(Node *)list_make1(makeString(funSource->bodySrc))));
 					n->options = lappend(n->options, makeDefElem("language",
@@ -12075,7 +12091,7 @@ callfunc_args:   func_arg_expr
 				}
 			;
 CreateProcedureStmt:
-			CREATE opt_or_replace PROCEDURE func_name_opt_arg proc_args
+			CREATE opt_or_replace definer_user PROCEDURE func_name_opt_arg proc_args
 			opt_createproc_opt_list as_is {
 				u_sess->parser_cxt.eaten_declare = false;
 				u_sess->parser_cxt.eaten_begin = false;
@@ -12086,18 +12102,22 @@ CreateProcedureStmt:
                                         int rc = 0;
                                         rc = CompileWhich();
                                         if ((rc == PLPGSQL_COMPILE_PROC || rc == PLPGSQL_COMPILE_NULL) && u_sess->cmd_cxt.CurrentExtensionObject == InvalidOid) {
-                                            u_sess->plsql_cxt.procedure_first_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @7);
+                                            u_sess->plsql_cxt.procedure_first_line = GetLineNumber(t_thrd.postgres_cxt.debug_query_string, @8);
                                         }
 					rc = CompileWhich();
 					CreateFunctionStmt *n = makeNode(CreateFunctionStmt);
-					FunctionSources *funSource = (FunctionSources *)$9;
-					int count = get_outarg_num($5);
+					FunctionSources *funSource = (FunctionSources *)$10;
+					int count = get_outarg_num($6);
 
 					n->isOraStyle = true;
 					n->isPrivate = false;
 					n->replace = $2;
-					n->funcname = $4;
-					n->parameters = $5;
+					n->definer = $3;
+					if (n->replace && NULL != n->definer) {
+						parser_yyerror("not support DEFINER function");
+					}
+					n->funcname = $5;
+					n->parameters = $6;
 					n->inputHeaderSrc = FormatFuncArgType(yyscanner, funSource->headerSrc, n->parameters);
 					n->returnType = NULL;
 					n->isProcedure = true;
@@ -12107,7 +12127,7 @@ CreateProcedureStmt:
 						n->returnType->typmods = NULL;
 						n->returnType->arrayBounds = NULL;
 					}
-					n->options = $6;
+					n->options = $7;
 					n->options = lappend(n->options, makeDefElem("as",
 										(Node *)list_make1(makeString(funSource->bodySrc))));
 					n->options = lappend(n->options, makeDefElem("language",
@@ -12298,7 +12318,19 @@ invoker_rights:	 AUTHID DEFINER
 				}
 			;
 
-
+definer_user: DEFINER '=' RoleId
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
+						$$ = $3;
+					} else {
+						parser_yyerror("not support DEFINER function");
+					}
+				}
+			| /* EMPTY */
+				{
+					$$ = NULL;
+				}
+			;
 pkg_body_subprogram: {
                 int proc_b  = 0;
                 int proc_e  = 0;

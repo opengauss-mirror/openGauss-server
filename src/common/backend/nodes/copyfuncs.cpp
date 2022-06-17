@@ -5134,6 +5134,9 @@ static CreateFunctionStmt* _copyCreateFunctionStmt(const CreateFunctionStmt* fro
     COPY_NODE_FIELD(options);
     COPY_NODE_FIELD(withClause);
     COPY_STRING_FIELD(inputHeaderSrc);
+    if (t_thrd.proc->workingVersionNum >= CREATE_FUNCTION_DEFINER_VERSION) {
+        COPY_STRING_FIELD(definer);
+    }
 
     return newnode;
 }

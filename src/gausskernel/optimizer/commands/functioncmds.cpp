@@ -999,6 +999,21 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
     } else {
         proowner = GetUserId();
     }
+
+    if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
+        if (stmt->definer) {
+            HeapTuple roletuple = SearchSysCache1(AUTHNAME, PointerGetDatum(stmt->definer));
+
+            if (!HeapTupleIsValid(roletuple))
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", stmt->definer)));
+
+            proowner = HeapTupleGetOid(roletuple);
+            ReleaseSysCache(roletuple);
+        }
+        else {
+            proowner = GetUserId();
+        }
+    }
     /* default attributes */
     volatility = PROVOLATILE_VOLATILE;
     procost = -1; /* indicates not set */
