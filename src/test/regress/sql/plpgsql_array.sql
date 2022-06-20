@@ -451,11 +451,41 @@ declare
 end;
 
 drop table testtbl;
+select array_cat(
+    array_cat(
+        array_extendnull(
+            array_cat('[2147483645:2147483647]={1,2,3}'::int[], array[4]),
+            1
+        ),
+        array_extendnull(
+            array_cat('[2147483645:2147483647]={10,20,30}'::int[], array[40]),
+            1
+        )
+    ),
+    array[0,0,0,0,0,0,0,0,0]
+) as result;
+
+DECLARE
+id_arr int[];
+BEGIN
+id_arr[2047483630] = 1;
+id_arr[2147483647] = 1;
+id_arr[2047483641] = 1;
+raise notice '%,%',id_arr[2147483644],id_arr[2147483645];
+END;
+/
+
+drop table if exists cve_2021_32027_tb;
+create table cve_2021_32027_tb (i int, p point);
+insert into cve_2021_32027_tb(p) values('(1,1)');
+update cve_2021_32027_tb set p[2147483647] = 0 returning *;
+update cve_2021_32027_tb set p[268435456] = 0 returning *;
+update cve_2021_32027_tb set p[536870912] = 0 returning *;
 
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------
-
+drop table if exists cve_2021_32027_tb;
 drop package if exists pckg_test;
 drop procedure if exists pro1;
 drop function if exists functype;
