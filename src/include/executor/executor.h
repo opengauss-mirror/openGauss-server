@@ -152,6 +152,7 @@ extern THR_LOCAL PGDLLIMPORT ExecutorEnd_hook_type ExecutorEnd_hook;
 typedef bool (*ExecutorCheckPerms_hook_type)(List*, bool);
 extern THR_LOCAL PGDLLIMPORT ExecutorCheckPerms_hook_type ExecutorCheckPerms_hook;
 
+typedef ExprState* (*execInitExprFunc)(Expr* node, PlanState* parent);
 /*
  * prototypes from functions in execAmi.c
  */
