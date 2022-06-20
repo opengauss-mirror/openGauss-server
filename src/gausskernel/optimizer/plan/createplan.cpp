@@ -8220,7 +8220,12 @@ static Plan* parallel_limit_sort(
         plan = create_local_gather(plan);
         plan = (Plan*)make_sort_from_pathkeys(root, plan, root->sort_pathkeys, -1.0);
     } else {
+#ifdef ENABLE_MULTIPLE_NODES
         plan = create_local_gather(lefttree);
+#else
+        plan = (Plan*)make_limit(root, lefttree, limitOffset, limitCount, offset_est, count_est, false);
+        plan = create_local_gather(plan);
+#endif
     }
 
     return plan;
