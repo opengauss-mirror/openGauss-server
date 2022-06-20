@@ -740,6 +740,12 @@ static void knl_g_audit_init(knl_g_audit_context *audit_cxt)
     }
 }
 
+void knl_plugin_vec_func_init(knl_g_plugin_vec_func_context* func_cxt) {
+    for (int i = 0; i < PLUGIN_VEC_FUNC_HATB_COUNT; i++) {
+        func_cxt->vec_func_plugin[i] = NULL;
+    }
+}
+
 void knl_instance_init()
 {
     g_instance.binaryupgrade = false;
@@ -831,6 +837,7 @@ void knl_instance_init()
     knl_g_streaming_dr_init(&g_instance.streaming_dr_cxt);
     knl_g_csn_barrier_init(&g_instance.csn_barrier_cxt);
     knl_g_audit_init(&g_instance.audit_cxt);
+    knl_plugin_vec_func_init(&g_instance.plugin_vec_func_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

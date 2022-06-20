@@ -146,6 +146,20 @@ typedef struct knl_g_cost_context {
 
 } knl_g_cost_context;
 
+enum plugin_vecfunc_type {
+    DOLPHIN_VEC = 0,
+
+    /* 
+     * This is the number of vecfunc hash tables.
+     * If you are adding a new plugin hash table, do not place an enumeration after it.
+     */
+    PLUGIN_VEC_FUNC_HATB_COUNT,
+};
+
+typedef struct knl_g_plugin_vec_func_context {
+    struct HTAB* vec_func_plugin[PLUGIN_VEC_FUNC_HATB_COUNT];
+} knl_g_plugin_vec_func_context;
+
 typedef struct knl_g_pid_context {
     ThreadId StartupPID;
     ThreadId TwoPhaseCleanerPID;
@@ -1148,6 +1162,7 @@ typedef struct knl_instance_context {
     uint64 global_session_seq;
 
     struct HTAB* vec_func_hash;
+    knl_g_plugin_vec_func_context plugin_vec_func_cxt;
 
     MemoryContext instance_context;
     MemoryContext error_context;
