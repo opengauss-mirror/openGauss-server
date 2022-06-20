@@ -354,7 +354,7 @@ static uint32 predicatelock_hash(const void *key, Size keysize);
 static void SummarizeOldestCommittedSxact(void);
 static Snapshot GetSafeSnapshot(Snapshot snapshot);
 static Snapshot GetSerializableTransactionSnapshotInt(Snapshot snapshot, VirtualTransactionId *sourcevxid,
-                                                      int sourcepid);
+                                                      ThreadId sourcepid);
 static bool PredicateLockExists(const PREDICATELOCKTARGETTAG *targettag);
 static bool GetParentPredicateLockTag(const PREDICATELOCKTARGETTAG* tag, PREDICATELOCKTARGETTAG* parent);
 static bool CoarserLockCovers(const PREDICATELOCKTARGETTAG* newtargettag);
@@ -1404,7 +1404,7 @@ Snapshot GetSerializableTransactionSnapshot(Snapshot snapshot)
  * transaction; and if we're read-write, the source transaction must not be
  * read-only.
  */
-void SetSerializableTransactionSnapshot(Snapshot snapshot, VirtualTransactionId *sourcevxid, int sourcepid)
+void SetSerializableTransactionSnapshot(Snapshot snapshot, VirtualTransactionId *sourcevxid, ThreadId sourcepid)
 {
     Assert(IsolationIsSerializable());
 
@@ -1431,7 +1431,7 @@ void SetSerializableTransactionSnapshot(Snapshot snapshot, VirtualTransactionId 
  * We do that by calling ProcArrayInstallImportedXmin.
  */
 static Snapshot GetSerializableTransactionSnapshotInt(Snapshot snapshot, VirtualTransactionId *sourcevxid,
-                                                      int sourcepid)
+                                                      ThreadId sourcepid)
 {
     PGPROC *proc = NULL;
     VirtualTransactionId vxid;
@@ -1482,7 +1482,7 @@ static Snapshot GetSerializableTransactionSnapshotInt(Snapshot snapshot, Virtual
         LWLockRelease(SerializableXactHashLock);
         ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("could not import the requested snapshot"),
-                 errdetail("The source process with pid %d is not running anymore.", sourcepid)));
+                 errdetail("The source process with pid %lu is not running anymore.", sourcepid)));
     }
 
     /*
