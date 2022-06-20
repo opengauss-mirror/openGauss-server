@@ -1411,6 +1411,9 @@ static bool _equalCreateFunctionStmt(const CreateFunctionStmt* a, const CreateFu
     COMPARE_NODE_FIELD(returnType);
     COMPARE_NODE_FIELD(options);
     COMPARE_NODE_FIELD(withClause);
+    if (t_thrd.proc->workingVersionNum >= CREATE_FUNCTION_DEFINER_VERSION) {
+        COMPARE_STRING_FIELD(definer);
+    }
 
     return true;
 }

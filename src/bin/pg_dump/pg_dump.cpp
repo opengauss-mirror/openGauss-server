@@ -73,7 +73,7 @@
 #include "knl/knl_variable.h"
 
 #include "openssl/rand.h"
-
+#include "miscadmin.h"
 #include "bin/elog.h"
 #ifdef HAVE_CE
 #include "client_logic_cache/types_to_oid.h"
@@ -3168,6 +3168,7 @@ static void dumpDatabase(Archive* fout)
     if (isHasDatcompatibility) {
         i_datcompatibility = PQfnumber(res, "datcompatibility");
         datcompatibility = PQgetvalue(res, 0, i_datcompatibility);
+        gdatcompatibility = datcompatibility;
     }
 
     appendPQExpBuffer(creaQry, "CREATE DATABASE %s WITH TEMPLATE = template0", fmtId(datname));
@@ -12707,11 +12708,13 @@ static char* format_function_signature(Archive* fout, FuncInfo* finfo, bool hono
 static void dumpFunc(Archive* fout, FuncInfo* finfo)
 {
     PQExpBuffer query;
+    PQExpBuffer definerquery;
     PQExpBuffer q;
     PQExpBuffer delqry;
     PQExpBuffer labelq;
     PQExpBuffer asPart;
     PGresult* res = NULL;
+    PGresult* defres = NULL;
     char* funcsig = NULL;     /* identity signature */
     char* funcfullsig = NULL; /* full signature */
     char* funcsig_tag = NULL;
@@ -12740,6 +12743,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     char* propackage = NULL;
     char* rettypename = NULL;
     char* propackageid = NULL;
+    char* definer = NULL;
     int nallargs = 0;
     char** allargtypes = NULL;
     char** argmodes = NULL;
@@ -12769,6 +12773,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     delqry = createPQExpBuffer();
     labelq = createPQExpBuffer();
     asPart = createPQExpBuffer();
+    definerquery = createPQExpBuffer();
 
     /* Set proper schema search path so type references list correctly */
     selectSourceSchema(fout, finfo->dobj.nmspace->dobj.name);
@@ -12788,7 +12793,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
         "pg_catalog.pg_get_function_identity_arguments(oid) AS funciargs, "
         "pg_catalog.pg_get_function_result(oid) AS funcresult, "
         "proiswindow, provolatile, proisstrict, prosecdef, "
-        "proleakproof, proconfig, procost, prorows, propackageid, "
+        "proleakproof, proconfig, procost, prorows, propackageid, proowner,"
         "%s, "
         "%s, "
         "%s, "
@@ -12826,6 +12831,13 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     proshippable = PQgetvalue(res, 0, PQfnumber(res, "proshippable"));
     propackage = PQgetvalue(res, 0, PQfnumber(res, "propackage"));
     propackageid = PQgetvalue(res, 0, PQfnumber(res, "propackageid"));
+
+    if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
+        /* get definer user name */
+        appendPQExpBuffer(definerquery, "SELECT  rolname from  pg_authid where oid=%s", PQgetvalue(res, 0, PQfnumber(res, "proowner")));
+        defres = ExecuteSqlQueryForSingleRow(fout, definerquery->data);
+        definer =  PQgetvalue(defres, 0, PQfnumber(defres, "rolname"));
+    }
 
     if (propackageid != NULL) {
         if (strcmp(propackageid, "0") != 0) {
@@ -12951,7 +12963,15 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     appendPQExpBuffer(delqry, "DROP %s IF EXISTS %s.%s%s;\n", funcKind,
                       fmtId(finfo->dobj.nmspace->dobj.name), funcsig, if_cascade);
 
-    appendPQExpBuffer(q, "CREATE %s %s ", funcKind, funcfullsig);
+    if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
+        appendPQExpBuffer(q, "CREATE DEFINER = %s %s %s ", definer, funcKind, funcfullsig);
+        PQclear(defres);
+        destroyPQExpBuffer(definerquery);
+        
+    } else {
+         appendPQExpBuffer(q, "CREATE %s %s ", funcKind, funcfullsig);
+    }
+    
     
     if (isProcedure) {
         /* For procedure, no return type, do nothing */

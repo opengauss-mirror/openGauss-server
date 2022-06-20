@@ -75,6 +75,7 @@ typedef enum
     IDEN_CREATE,
     IDEN_OR,
     IDEN_REPLACE,
+    IDEN_DEFINER,
     IDEN_PROCEDURE,
     IDEN_RETURN,
     IDEN_RETURNS,
@@ -2146,6 +2147,8 @@ keywordRead(const char* text)
 		return IDEN_OR;
 	else if (!upperstrcmp(text, "replace"))
 		return IDEN_REPLACE;
+	else if (!upperstrcmp(text, "definer"))
+		return IDEN_DEFINER;
 	else if (!upperstrcmp(text, "procedure"))
 		return IDEN_PROCEDURE;
     else if (!upperstrcmp(text, "package"))
@@ -2216,6 +2219,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
 	{
 		case IDEN_CREATE:
 			state->gram_state[IDEN_OR] = true;
+			state->gram_state[IDEN_DEFINER] = true;
 			state->gram_state[IDEN_PROCEDURE] = true;
 			state->gram_state[IDEN_FUNCTION] = true;
 			state->gram_state[IDEN_TRIGGER] = true;
@@ -2224,14 +2228,24 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			break;
 		case IDEN_OR:
 			state->gram_state[IDEN_REPLACE] = true;
+			state->gram_state[IDEN_DEFINER] = true;
 			state->count_to_read++;
 			break;
 		case IDEN_REPLACE:
+			state->gram_state[IDEN_DEFINER] = true;
 			state->gram_state[IDEN_PROCEDURE] = true;
 			state->gram_state[IDEN_FUNCTION] = true;
 			state->gram_state[IDEN_PACKAGE] = true;
 			state->gram_state[IDEN_TRIGGER] = true;
 			state->count_to_read++;
+			break;
+		case IDEN_DEFINER:
+			state->gram_state[IDEN_PROCEDURE] = true;
+			state->gram_state[IDEN_FUNCTION] = true;
+			state->gram_state[IDEN_PACKAGE] = true;
+			state->gram_state[IDEN_TRIGGER] = true;
+			state->count_to_read++;
+			state->count_to_read = -1;
 			break;
 		case IDEN_PROCEDURE:
 			state->gram_state[IDEN_AS] = true;

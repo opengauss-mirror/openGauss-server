@@ -4220,16 +4220,23 @@ char* pg_get_functiondef_worker(Oid funcid, int* headerlines)
         if (pkgname != NULL) {
             appendStringInfo(&buf, "CREATE OR REPLACE PROCEDURE %s(",
                                 quote_qualified_identifier(nsp, pkgname->data, name));
+        } else   if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
+            appendStringInfo(&buf, "CREATE DEFINER = %s PROCEDURE %s(", 
+                                GetUserNameFromId(proc->proowner), quote_qualified_identifier(nsp, name));
         } else {
-            appendStringInfo(&buf, "CREATE OR REPLACE PROCEDURE %s(", 
-                                quote_qualified_identifier(nsp, name));
+            appendStringInfo(&buf, "CREATE OR REPLACE PROCEDURE %s(",
+                               quote_qualified_identifier(nsp, name));
         }
+        
     } else {
         if (pkgname != NULL) {
             appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(", 
                                 quote_qualified_identifier(nsp, pkgname->data, name));
+        }  else   if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)   {
+            appendStringInfo(&buf, "CREATE DEFINER = %s FUNCTION %s(", 
+                                GetUserNameFromId(proc->proowner), quote_qualified_identifier(nsp, name));
         } else {
-            appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(", 
+            appendStringInfo(&buf, "CREATE OR REPLACE FUNCTION %s(",
                                 quote_qualified_identifier(nsp, name));
         }
     }

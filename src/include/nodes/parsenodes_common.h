@@ -2076,6 +2076,7 @@ typedef struct CreateFunctionStmt {
     char* queryStr;
     int startLineNumber;
     int firstLineNumber;
+    char *definer;
 } CreateFunctionStmt;
 
 typedef struct FunctionSources {

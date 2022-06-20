@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-CREATE [ OR REPLACE ] PROCEDURE procedure_name
+CREATE [ OR REPLACE ]  [DEFINER = user] PROCEDURE procedure_name
     [ ( {[ argmode ] [ argname ] argtype [ { DEFAULT | := | = } expression ]}[,...]) ]
    { IS | AS } plsql_body
 /

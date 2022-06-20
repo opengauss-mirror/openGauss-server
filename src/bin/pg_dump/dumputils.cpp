@@ -41,6 +41,7 @@ int quote_all_identifiers = 0;
 const char* progname = NULL;
 const char* dbname = NULL;
 const char* instport = NULL;
+const char *gdatcompatibility = NULL;
 
 char* binary_upgrade_oldowner = NULL;
 char* binary_upgrade_newowner = NULL;

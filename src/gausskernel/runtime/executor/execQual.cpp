@@ -1432,9 +1432,26 @@ static void init_fcache(
 {
     AclResult aclresult;
     MemoryContext oldcontext;
+    Form_pg_proc procStruct;
+    HeapTuple procTup;
+    Oid definer = GetUserId();
+    
+    if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT)
+    {
+        /* Get the function's pg_proc entry */
+        procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(foid));
+        if (!HeapTupleIsValid(procTup)) {
+            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for function %u", foid)));
+        }
+        procStruct = (Form_pg_proc)GETSTRUCT(procTup);
+        if (procStruct->prosecdef)
+            definer = procStruct->proowner;
+        ReleaseSysCache(procTup);
+    }
 
     /* Check permission to call function */
-    aclresult = pg_proc_aclcheck(foid, GetUserId(), ACL_EXECUTE);
+    aclresult = pg_proc_aclcheck(foid, definer, ACL_EXECUTE);
     if (aclresult != ACLCHECK_OK)
         aclcheck_error(aclresult, ACL_KIND_PROC, get_func_name(foid));
 
