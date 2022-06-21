@@ -1134,7 +1134,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("It is not allowed to assign version option for non-dfs table.")));
         } else if (pg_strcasecmp(def->defname, "segment") == 0){
-            segment = true;
+            segment = defGetBoolean(def);
         } else {
             SetOneOfCompressOption(def, &tableCreateSupport);
         }
