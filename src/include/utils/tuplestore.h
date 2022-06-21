@@ -79,5 +79,6 @@ extern void tuplestore_end(Tuplestorestate* state);
 extern int64 tuplestore_get_avgwidth(Tuplestorestate* state);
 extern bool tuplestore_get_busy_status(Tuplestorestate* state);
 extern int tuplestore_get_spread_num(Tuplestorestate* state);
+extern int tuplestore_get_memtupcount(Tuplestorestate* state);
 
 #endif /* TUPLESTORE_H */

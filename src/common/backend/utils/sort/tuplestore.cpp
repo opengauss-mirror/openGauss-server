@@ -1509,3 +1509,8 @@ int tuplestore_get_spread_num(Tuplestorestate* state)
 {
     return state->spreadNum;
 }
+
+int tuplestore_get_memtupcount(Tuplestorestate* state)
+{
+    return state->memtupcount;
+}
