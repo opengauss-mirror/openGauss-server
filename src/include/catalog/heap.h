@@ -165,7 +165,7 @@ extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc,
     Datum interval, Datum maxValues,  Datum transitionPoint, Datum reloptions);
 
 extern void heap_truncate_one_part(Relation rel , Oid partOid);
-extern Oid heapTupleGetPartitionId(Relation rel, void *tuple);
+extern Oid heapTupleGetPartitionId(Relation rel, void *tuple, bool isDDL = false);
 extern Oid heapTupleGetSubPartitionId(Relation rel, void *tuple);
 extern void heap_truncate(List *relids);
 extern void heap_truncate_one_rel(Relation rel);
@@ -240,7 +240,7 @@ extern char* make_column_map(TupleDesc tuple_desc);
  */
 extern bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubPartition = false);
 
-extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple);
+extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL = false);
 
 extern int GetIndexKeyAttsByTuple(Relation relation, HeapTuple indexTuple);
 
