@@ -6822,9 +6822,9 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
          * Each type foreign table has own mchanism, we use function pointor to realize. For example,
          * wheather support alter owner, support alter colomn type, etc.
          */
-        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(relid);
+        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(relid, true);
 
-        if (NULL != fdwroutine->ValidateTableDef) {
+        if (fdwroutine != NULL && NULL != fdwroutine->ValidateTableDef) {
             fdwroutine->ValidateTableDef((Node*)stmt);
         }
 

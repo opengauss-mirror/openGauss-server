@@ -3493,15 +3493,17 @@ void heap_drop_with_catalog(Oid relid)
          * When we drop a foreign partition table, we need to delete the corresponding
          * tuple in pg_partition.
          */
-        FdwRoutine* fdwRoutine = GetFdwRoutineByRelId(relid);
-        if (NULL != fdwRoutine->PartitionTblProcess) {
-            fdwRoutine->PartitionTblProcess(NULL, relid, HDFS_DROP_PARTITIONED_FOREIGNTBL);
-        }
+        FdwRoutine* fdwRoutine = GetFdwRoutineByRelId(relid, true);
+        if (fdwRoutine != NULL) {
+            if (NULL != fdwRoutine->PartitionTblProcess) {
+                fdwRoutine->PartitionTblProcess(NULL, relid, HDFS_DROP_PARTITIONED_FOREIGNTBL);
+            }
 
 #ifdef ENABLE_MOT
-        /* Forward drop stmt to MOT FDW. */
-        MotFdwDropForeignRelation(rel, fdwRoutine);
+            /* Forward drop stmt to MOT FDW. */
+            MotFdwDropForeignRelation(rel, fdwRoutine);
 #endif
+        }
     }
 
     /* drop enty for pg_partition */

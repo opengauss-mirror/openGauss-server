@@ -498,8 +498,9 @@ FdwRoutine* GetFdwRoutine(Oid fdwhandler)
 /*
  * GetFdwRoutineByRelId - look up the handler of the foreign-data wrapper
  * for the given foreign table, and retrieve its FdwRoutine struct.
+ * If missHandlerOk is true, will return NULL if the fdwhandler is invalid.
  */
-FdwRoutine* GetFdwRoutineByRelId(Oid relid)
+FdwRoutine* GetFdwRoutineByRelId(Oid relid, bool missHandlerOk)
 {
     HeapTuple tp;
     Form_pg_foreign_data_wrapper fdwform;
@@ -539,6 +540,9 @@ FdwRoutine* GetFdwRoutineByRelId(Oid relid)
 
     /* Complain if FDW has been set to NO HANDLER. */
     if (!OidIsValid(fdwhandler)) {
+        if (missHandlerOk) {
+            return NULL;
+        }
         ereport(ERROR,
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("foreign-data wrapper \"%s\" has no handler", NameStr(fdwform->fdwname))));

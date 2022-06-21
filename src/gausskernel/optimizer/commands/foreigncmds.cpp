@@ -1694,12 +1694,15 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
     /* @hdfs
      * Check column data type and distribute by clause.
      */
-    FdwRoutine* fdwroutine = GetFdwRoutine(fdw->fdwhandler);
-    if (NULL != fdwroutine->ValidateTableDef) {
+    FdwRoutine* fdwroutine = NULL;
+    if (OidIsValid(fdw->fdwhandler)) {
+        fdwroutine = GetFdwRoutine(fdw->fdwhandler);
+        if (NULL != fdwroutine->ValidateTableDef) {
 #ifdef ENABLE_MOT
-        stmt->base.relation->foreignOid = relid;
+            stmt->base.relation->foreignOid = relid;
 #endif
-        fdwroutine->ValidateTableDef((Node*)stmt);
+            fdwroutine->ValidateTableDef((Node*)stmt);
+        }
     }
 
 #ifdef ENABLE_MOT
@@ -1936,7 +1939,7 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
     /* @hdfs
      * When we create a hdfs partition foreign table, we need to do some more processes.
      */
-    if (NULL != fdwroutine->PartitionTblProcess) {
+    if (fdwroutine != NULL && NULL != fdwroutine->PartitionTblProcess) {
         fdwroutine->PartitionTblProcess((Node*)stmt, relid, HDFS_CREATE_PARTITIONED_FOREIGNTBL);
         CommandCounterIncrement();
     }
