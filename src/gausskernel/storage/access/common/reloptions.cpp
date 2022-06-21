@@ -2947,9 +2947,9 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
     } else if (pg_strcasecmp(defname, "compress_level") == 0) {
         tableCreateSupport->compressLevel = true;
     } else if (pg_strcasecmp(defname, "compress_byte_convert") == 0) {
-        tableCreateSupport->compressByteConvert = true;
+        tableCreateSupport->compressByteConvert = defGetBoolean(defElem);
     } else if (pg_strcasecmp(defname, "compress_diff_convert") == 0) {
-        tableCreateSupport->compressDiffConvert = true;
+        tableCreateSupport->compressDiffConvert = defGetBoolean(defElem);
     }
 }
 
