@@ -505,6 +505,7 @@ typedef struct knl_g_ckpt_context {
 
     /* Pagewriter thread need wait shutdown checkpoint finish */
     volatile bool page_writer_can_exit;
+    volatile bool page_writer_sub_can_exit;
 
     /* pagewriter thread view information */
     uint64 page_writer_actual_flush;

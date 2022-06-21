@@ -229,10 +229,15 @@ private:
     bool m_syscache_relids[FirstNormalObjectId];
 
 };
+void NotifyGscRecoveryStarted();
 void NotifyGscRecoveryFinished();
 extern Datum gs_gsc_dbstat_info(PG_FUNCTION_ARGS);
 extern Datum gs_gsc_clean(PG_FUNCTION_ARGS);
 extern Datum gs_gsc_catalog_detail(PG_FUNCTION_ARGS);
 extern Datum gs_gsc_table_detail(PG_FUNCTION_ARGS);
 extern int ResizeHashBucket(int origin_nbucket, DynamicHashBucketStrategy strategy);
+
+/* only primary node check recovery, recovery from upgrade may have misorder cacheids */
+#define IsPrimaryRecoveryFinished() \
+    (g_instance.global_sysdbcache.recovery_finished || t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE)
 #endif

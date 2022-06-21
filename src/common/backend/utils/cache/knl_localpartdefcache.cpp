@@ -74,7 +74,7 @@ Partition LocalPartDefCache::SearchPartitionFromGlobalCopy(Oid part_oid)
     if (!g_instance.global_sysdbcache.hot_standby) {
         return NULL;
     }
-    if (unlikely(!g_instance.global_sysdbcache.recovery_finished)) {
+    if (unlikely(!IsPrimaryRecoveryFinished())) {
         return NULL;
     }
     uint32 hash_value = oid_hash((void *)&(part_oid), sizeof(Oid));
@@ -165,7 +165,7 @@ static bool IsPartOidStoreInGlobal(Oid part_oid)
     if (!g_instance.global_sysdbcache.hot_standby) {
         return false;
     }
-    if (unlikely(!g_instance.global_sysdbcache.recovery_finished)) {
+    if (unlikely(!IsPrimaryRecoveryFinished())) {
         return false;
     }
     if (g_instance.global_sysdbcache.StopInsertGSC()) {
