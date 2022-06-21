@@ -329,7 +329,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"aformat_regexp_match", OPT_AFORMAT_REGEX_MATCH},
     {"rownum_type_compat", OPT_ROWNUM_TYPE_COMPAT},
     {"compat_cursor", OPT_COMPAT_CURSOR},
-    {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT}
+    {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT},
+    {"pgformat_substr", OPT_PGFORMAT_SUBSTR}
 };
 
 /*

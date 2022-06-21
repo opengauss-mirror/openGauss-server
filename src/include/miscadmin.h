@@ -127,7 +127,8 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_ROWNUM_TYPE_COMPAT 1048576
 #define OPT_COMPAT_CURSOR 2097152
 #define OPT_CHAR_COERCE_COMPAT 4194304
-#define OPT_MAX 23
+#define OPT_PGFORMAT_SUBSTR 8388608
+#define OPT_MAX 24
 
 
 #define DISPLAY_LEADING_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_DISPLAY_LEADING_ZERO)
@@ -156,6 +157,7 @@ extern bool contain_backend_version(uint32 version_number);
 #define ROWNUM_TYPE_COMPAT (u_sess->utils_cxt.behavior_compat_flags & OPT_ROWNUM_TYPE_COMPAT)
 #define COMPAT_CURSOR (u_sess->utils_cxt.behavior_compat_flags & OPT_COMPAT_CURSOR)
 #define CHAR_COERCE_COMPAT (u_sess->utils_cxt.behavior_compat_flags & OPT_CHAR_COERCE_COMPAT)
+#define PGFORMAT_SUBSTR (u_sess->utils_cxt.behavior_compat_flags & OPT_PGFORMAT_SUBSTR)
 
 /* define database compatibility Attribute */
 typedef struct {

@@ -42,6 +42,8 @@
 #include "executor/node/nodeSort.h"
 #include "pgxc/groupmgr.h"
 
+#define SUBSTR_WITH_LEN_OFFSET 2
+#define SUBSTR_A_CMPT_OFFSET 4
 #define JUDGE_INPUT_VALID(X, Y) ((NULL == (X)) || (NULL == (Y)))
 #define GET_POSITIVE(X) ((X) > 0 ? (X) : ((-1) * (X)))
 static int getResultPostionReverse(text* textStr, text* textStrToSearch, int32 beginIndex, int occurTimes);
@@ -1278,8 +1280,12 @@ Datum text_substr_orclcompat(PG_FUNCTION_ARGS)
     FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), DatumGetPointer(str), "text_substr()");
 
     is_compress = (VARATT_IS_COMPRESSED(DatumGetPointer(str)) || VARATT_IS_EXTERNAL(DatumGetPointer(str)));
-    // orclcompat is true, withlen is true
-    baseIdx = 6 + (int)is_compress + (eml - 1) * 8;
+    /* withlen is true */
+    baseIdx = SUBSTR_WITH_LEN_OFFSET + (int)is_compress + (eml - 1) * 8;
+    if (!PGFORMAT_SUBSTR || !DB_IS_CMPT(PG_FORMAT)) {
+        /* if pgformat_substr is not on or current database is not pg format, use A cmpt */
+        baseIdx += SUBSTR_A_CMPT_OFFSET;
+    }
 
     result = (*substr_Array[baseIdx])(str, start, length, &is_null, fun_mblen);
 
