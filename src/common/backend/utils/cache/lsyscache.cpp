@@ -1723,7 +1723,7 @@ char* get_relname_relid_extend(
 extern bool StreamTopConsumerAmI();
 
 /* same as get_relname_relid except we check for cache invalidation here */
-Oid get_valid_relname_relid(const char* relnamespace, const char* relname)
+Oid get_valid_relname_relid(const char* relnamespace, const char* relname, bool nsp_missing_ok)
 {
     Oid nspid = InvalidOid;
     Oid oldnspid = InvalidOid;
@@ -1747,7 +1747,10 @@ Oid get_valid_relname_relid(const char* relnamespace, const char* relname)
         if (EnableLocalSysCache()) {
             thrd_inval_count = t_thrd.lsc_cxt.lsc->inval_cxt.SIMCounter;
         }
-        nspid = get_namespace_oid(relnamespace, false);
+        nspid = get_namespace_oid(relnamespace, nsp_missing_ok);
+        if (!OidIsValid(nspid)) {
+            return InvalidOid;
+        }
         relid = get_relname_relid(relname, nspid);
         /*
          * In bootstrap processing mode, we don't bother with locking
