@@ -31,6 +31,7 @@
 #include "access/extreme_rto/spsc_blocking_queue.h"
 #include "access/parallel_recovery/redo_item.h"
 
+#include "nodes/parsenodes_common.h"
 #include "nodes/replnodes.h"
 #include "access/ustore/knl_utuple.h"
 #include "replication/logical_queue.h"

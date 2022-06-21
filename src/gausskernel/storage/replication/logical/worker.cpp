@@ -118,18 +118,6 @@ static void LogicalrepWorkerSighub(SIGNAL_ARGS)
     t_thrd.applyworker_cxt.got_SIGHUP = true;
 }
 
-/* SIGTERM: time to die */
-static void LogicalrepWorkerSigterm(SIGNAL_ARGS)
-{
-    int saveErrno = errno;
-
-    t_thrd.applyworker_cxt.got_SIGTERM = true;
-    if (t_thrd.proc)
-        SetLatch(&t_thrd.proc->procLatch);
-
-    errno = saveErrno;
-}
-
 /*
  * Make sure that we started local transaction.
  *
@@ -1004,12 +992,14 @@ static void ApplyLoop(void)
     /* mark as idle, before starting to loop */
     pgstat_report_activity(STATE_IDLE, NULL);
 
-    while (!t_thrd.applyworker_cxt.got_SIGTERM) {
+    for (;;) {
         MemoryContextSwitchTo(t_thrd.applyworker_cxt.messageContext);
 
         int len;
         char *buf = NULL;
         unsigned char type;
+
+        CHECK_FOR_INTERRUPTS();
 
         /* Wait a while for data to arrive */
         if ((WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_receive(NAPTIME_PER_CYCLE, &type, &buf, &len)) {
@@ -1296,7 +1286,7 @@ void ApplyWorkerMain()
      */
     gspqsignal(SIGHUP, LogicalrepWorkerSighub);
     gspqsignal(SIGINT, StatementCancelHandler);
-    gspqsignal(SIGTERM, LogicalrepWorkerSigterm);
+    gspqsignal(SIGTERM, die);
 
     gspqsignal(SIGQUIT, quickdie);
     gspqsignal(SIGALRM, handle_sig_alarm);
@@ -1595,3 +1585,10 @@ char* DefListToString(const List *defList)
     return buf.data;
 }
 
+/*
+ * Is current process a logical replication worker?
+ */
+bool IsLogicalWorker(void)
+{
+    return t_thrd.applyworker_cxt.curWorker != NULL;
+}

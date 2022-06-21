@@ -6112,6 +6112,9 @@ void ProcessInterrupts(void)
 
             /* The logical replication launcher can be stopped at any time. */
             proc_exit(0);
+        } else if (IsLogicalWorker()) {
+            ereport(FATAL, (errcode(ERRCODE_ADMIN_SHUTDOWN),
+                errmsg("terminating logical replication worker due to administrator command")));
 #endif
         } else if (IsTxnSnapCapturerProcess()) {
             ereport(FATAL,
