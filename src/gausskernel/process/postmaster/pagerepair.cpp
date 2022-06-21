@@ -214,6 +214,9 @@ bool CheckPrimaryPageLSN(XLogRecPtr page_old_lsn, XLogRecPtr page_new_lsn, Repai
 void PageRepairHashTblInit(void)
 {
     HASHCTL ctl;
+    if (g_instance.pid_cxt.PageRepairPID == 0) {
+        return;
+    }
 
     if (g_instance.repair_cxt.page_repair_hashtbl_lock == NULL) {
         g_instance.repair_cxt.page_repair_hashtbl_lock = LWLockAssign(LWTRANCHE_PAGE_REPAIR);
@@ -852,6 +855,10 @@ void FileRepairHashTblInit(void)
 {
     HASHCTL ctl;
 
+    if (g_instance.pid_cxt.PageRepairPID == 0) {
+        return;
+    }
+
     if (g_instance.repair_cxt.file_repair_hashtbl_lock == NULL) {
         g_instance.repair_cxt.file_repair_hashtbl_lock = LWLockAssign(LWTRANCHE_FILE_REPAIR);
     }
@@ -885,7 +892,7 @@ bool CheckFileRepairHashTbl(RelFileNode rnode, ForkNumber forknum, uint32 segno)
     key.forknum = forknum;
     key.segno = segno;
 
-    if (file_hashtbl == NULL) {
+    if (file_hashtbl == NULL || g_instance.pid_cxt.PageRepairPID == 0) {
         return found;
     }
     LWLockAcquire(FILE_REPAIR_LOCK, LW_SHARED);
@@ -904,6 +911,9 @@ bool CheckFileRepairHashTbl(RelFileNode rnode, ForkNumber forknum, uint32 segno)
 
 void CheckNeedRecordBadFile(RepairFileKey key, uint32 nblock, uint32 blocknum, const XLogPhyBlock *pblk)
 {
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        return;
+    }
     if (CheckVerionSupportRepair() && (nblock == 0 || blocknum / RELSEG_SIZE > nblock / RELSEG_SIZE) &&
         IsPrimaryClusterStandbyDN() && g_instance.repair_cxt.support_repair) {
         if (pblk != NULL) {
@@ -1092,6 +1102,10 @@ void CheckNeedRenameFile()
     RepairFileKey *rename_key = NULL;
     errno_t rc = 0;
     uint32 i = 0;
+
+    if (g_instance.pid_cxt.PageRepairPID != 0) {
+        return;
+    }
 
     LWLockAcquire(FILE_REPAIR_LOCK, LW_EXCLUSIVE);
     hash_seq_init(&status, file_hash);
