@@ -76,4 +76,52 @@ create table normal_test.including_all_new2(like normal_test.including_all inclu
 \d+ normal_test.including_all_new
 \d+ normal_test.including_all_new2
 create table normal_test.segment_off(id int) with (compresstype=2,segment=off); --success
+
+
+--compress_diff_convert布尔值：
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert=t);
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert='t');
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert='f');
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert=yes);
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert='no');
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=1,compress_diff_convert='1');
+drop table if exists normal_test.tb1;
+
+--compress_byte_convert布尔值:
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=t,compress_diff_convert=true);
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert='t',compress_diff_convert=true);
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=f,compress_diff_convert=false);
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=yes,compress_diff_convert=TRUE);
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert=NO,compress_diff_convert=OFF);
+drop table if exists normal_test.tb1;
+create table normal_test.tb1 (c_int int, c_bool boolean) with (Compresstype=2,Compress_chunk_size=512,compress_byte_convert='1',compress_diff_convert=1);
+drop table if exists normal_test.tb1;
+
+--segment参数：
+create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = on);
+drop table if exists normal_test.t_bool_value;
+create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = off);
+drop table if exists normal_test.t_bool_value;
+create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = 1);
+drop table if exists normal_test.t_bool_value;
+create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = 0);
+drop table if exists normal_test.t_bool_value;
+create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = t);
+drop table if exists normal_test.t_bool_value;
+create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = 't');
+drop table if exists normal_test.t_bool_value;
+create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = yes);
+drop table if exists normal_test.t_bool_value;
+create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = no);
+drop table if exists normal_test.t_bool_value;
+
 drop schema normal_test cascade;
