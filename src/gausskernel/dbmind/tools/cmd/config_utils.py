@@ -17,6 +17,7 @@ from configparser import NoSectionError, NoOptionError
 from dbmind import constants
 from dbmind.common import security
 from dbmind.common.exceptions import InvalidPasswordException, ConfigSettingError
+from dbmind.common.security import check_ip_valid, check_port_valid
 from dbmind.common.utils import write_to_terminal
 from dbmind.metadatabase.dao.dynamic_config import dynamic_config_get, dynamic_config_set
 
@@ -55,34 +56,54 @@ CONFIG_OPTIONS = {
     'LOG-level': ['DEBUG', 'INFO', 'WARNING', 'ERROR']
 }
 
+# Used by check_config_validity().
+INTEGER_CONFIG = ['SELF-MONITORING-detection_interval',
+                  'SELF-MONITORING-last_detection_time',
+                  'SELF-MONITORING-forecasting_future_time',
+                  'LOG-maxbytes',
+                  'LOG-backupcount']
 
-def check_config_validity(section, option, value):
+
+def check_config_validity(section, option, value, silent=False):
     config_item = '%s-%s' % (section, option)
     # exceptional cases:
-    if config_item == 'METADATABASE-port':
-        return True, None
+    if config_item in ('METADATABASE-port', 'METADATABASE-host'):
+        if value.strip() == '' or value == NULL_TYPE:
+            return True, None
 
     # normal inspection process:
     if 'port' in option:
-        valid_port = str.isdigit(value) and 0 < int(value) <= 65535
+        valid_port = check_port_valid(value)
         if not valid_port:
-            return False, 'Invalid port %s' % value
+            return False, 'Invalid port for %s: %s(1024-65535)' % (config_item, value)
+    if 'host' in option:
+        valid_host = check_ip_valid(value)
+        if not valid_host:
+            return False, 'Invalid IP Address for %s: %s' % (config_item, value)
     if 'database' in option:
         if value == NULL_TYPE or value.strip() == '':
             return False, 'Unspecified database name'
-
+    if config_item in INTEGER_CONFIG:
+        if not str.isdigit(value) or int(value) <= 0:
+            return False, 'Invalid value for %s: %s' % (config_item, value)
     options = CONFIG_OPTIONS.get(config_item)
     if options and value not in options:
-        return False, 'Invalid choice: %s' % value
+        return False, 'Invalid choice for %s: %s' % (config_item, value)
 
-    if 'dbtype' in option and value == 'opengauss':
+    if 'dbtype' in option and value == 'opengauss' and not silent:
         write_to_terminal(
             'WARN: default PostgreSQL connector (psycopg2-binary) does not support openGauss.\n'
             'It would help if you compiled psycopg2 with openGauss manually or '
             'created a connection user after setting the GUC password_encryption_type to 1.',
             color='yellow'
         )
-
+    if 'dbtype' in option and value == 'sqlite' and not silent:
+        write_to_terminal(
+            'NOTE: SQLite currently only supports local deployment, so you only need to provide '
+            'METADATABASE-database information. if you provide other information, DBMind will '
+            'ignore them.',
+            color='yellow'
+        )
     # Add more checks here.
     return True, None
 
@@ -115,10 +136,27 @@ def load_sys_configs(confile):
                 s2 = dynamic_config_get('dbmind_config', 'cipher_s2')
                 iv = dynamic_config_get('iv_table', '%s-%s' % (section, option))
                 try:
-                    value = security.decrypt(s1, s2, iv, value.lstrip(ENCRYPTED_SIGNAL))
+                    real_value = value[len(ENCRYPTED_SIGNAL):] if value.startswith(ENCRYPTED_SIGNAL) else value
+                    value = security.decrypt(s1, s2, iv, real_value)
                 except Exception as e:
                     raise InvalidPasswordException(e)
+
+            else:
+                valid, reason = check_config_validity(section, option, value, silent=True)
+                if not valid:
+                    raise ConfigSettingError('DBMind failed to start due to %s.' % reason)
+
             return value
+
+        @staticmethod
+        def getint(section, option, *args, **kwargs):
+            """Faked getint() for ConfigParser class."""
+            value = configs.get(section, option, *args, **kwargs)
+            valid, reason = check_config_validity(section, option, value, silent=True)
+            if not valid:
+                raise ConfigSettingError('DBMind failed to start due to %s.' % reason)
+
+            return int(value)
 
     return ConfigWrapper()
 

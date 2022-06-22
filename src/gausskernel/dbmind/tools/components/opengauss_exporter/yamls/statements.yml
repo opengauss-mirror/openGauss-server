@@ -17,45 +17,47 @@ pg_sql_statement_history:
   query:
     - name: pg_sql_statement_history
       sql: "
-      SELECT H.unique_query_id,
-            H.db_name AS datname,
-            H.schema_name AS SCHEMA,
-      	  H.query,
-      	  (extract(epoch
-      			  FROM H.start_time) * 1000)::bigint as start_time,
-      	  (extract(epoch
-      			  FROM H.finish_time) * 1000)::bigint as finish_time,
-      	  extract(epoch
-      			  FROM H.finish_time - H.start_time)* 1000 AS exc_time,
-      	  H.cpu_time,
-      	  H.data_io_time,
-      	  H.n_returned_rows,
-      	  H.n_tuples_fetched,
-      	  H.n_tuples_returned,
-      	  H.n_tuples_inserted,
-      	  H.n_tuples_updated,
-      	  H.n_tuples_deleted,
-      	  (H.n_blocks_hit / (H.n_blocks_fetched+0.01)) AS hit_rate,
-      	  (H.n_blocks_fetched / (H.n_blocks_hit+0.01)) AS fetch_rate,
-      	  H.lock_wait_count,
-      	  H.lwlock_wait_count,
-      	  S.n_calls,
-      	  S.sort_count / S.n_calls AS sort_count,
-         	S.sort_mem_used / S.n_calls AS sort_mem_used,
-         	S.sort_spill_count / S.n_calls AS sort_spill_count,
-         	S.hash_count / S.n_calls AS hash_count,
-         	S.hash_mem_used / S.n_calls AS hash_mem_used,
-         	S.hash_spill_count / S.n_calls AS hash_spill_count
-      FROM dbe_perf.statement_history H inner join dbe_perf.statement S
-      on H.unique_query_id = S.unique_sql_id
-      WHERE H.query !='COMMIT'
-        AND H.application_name != 'gs_clean'
-        AND S.n_calls > 1
-        AND (H.start_time > now() - (1 / 24 / 60 / 60) * ({scrape_interval} / 1000)
-			OR (exc_time > {scrape_interval} AND H.finish_time > now() - (1 / 24 / 60 / 60) * ({scrape_interval} / 1000))
-		)
-      ORDER BY H.start_time DESC
-      LIMIT 50;"
+        SELECT H.unique_query_id,
+		H.db_name AS datname,
+		H.schema_name AS SCHEMA,
+	  H.query,
+	  H.query_plan,
+	  (extract(epoch
+					  FROM H.start_time) * 1000)::bigint as start_time,
+	  (extract(epoch
+					  FROM H.finish_time) * 1000)::bigint as finish_time,
+	  extract(epoch
+					  FROM H.finish_time - H.start_time) * 1000 AS exc_time,
+	  H.cpu_time,
+	  H.data_io_time,
+	  H.n_returned_rows,
+	  H.n_tuples_fetched,
+	  H.n_tuples_returned,
+	  H.n_tuples_inserted,
+	  H.n_tuples_updated,
+	  H.n_tuples_deleted,
+	  (H.n_blocks_hit / (H.n_blocks_fetched+0.01)) AS hit_rate,
+	  (H.n_blocks_fetched / (H.n_blocks_hit+0.01)) AS fetch_rate,
+	  H.lock_wait_count,
+	  H.lwlock_wait_count,
+	  S.n_calls,
+	  S.sort_count / S.n_calls AS sort_count,
+			S.sort_mem_used / S.n_calls AS sort_mem_used,
+			S.sort_spill_count / S.n_calls AS sort_spill_count,
+			S.hash_count / S.n_calls AS hash_count,
+			S.hash_mem_used / S.n_calls AS hash_mem_used,
+			S.hash_spill_count / S.n_calls AS hash_spill_count
+  FROM dbe_perf.statement_history H inner join dbe_perf.statement S
+  on H.unique_query_id = S.unique_sql_id
+  WHERE H.query !='COMMIT'
+	AND H.application_name != 'gs_clean'
+	AND S.n_calls > 1
+	AND (H.start_time > extract(epoch from now()) * 1000 - (1 / 24 / 60 / 60) * ({scrape_interval})
+					OR (exc_time > {scrape_interval}
+					AND H.finish_time > extract(epoch from now()) * 1000 - (1 / 24 / 60 / 60) * ({scrape_interval}))
+			)
+  ORDER BY H.start_time DESC
+  LIMIT 50;"
       version: '>=0.0.0'
       timeout: 10
       status: enable
@@ -74,6 +76,9 @@ pg_sql_statement_history:
       usage: LABEL
     - name: query
       description: query text
+      usage: LABEL
+    - name: query_plan
+      description: query plan text
       usage: LABEL
     - name: unique_query_id
       description: unique query id
@@ -140,6 +145,52 @@ pg_sql_statement_history:
       usage: LABEL
     - name: hash_spill_count
       description: hash spill count
+      usage: LABEL
+  status: enable
+  ttl: 0
+  timeout: 1
+
+
+pg_sql_statement_full:
+  name: pg_sql_statement_full
+  desc: Extract full SQL statements from openGauss, which is a sampling process.
+  query:
+    - name: pg_sql_statement_full
+      sql: "
+      SELECT   count(1),
+               datname,
+               application_name,
+               query
+      FROM     pg_stat_activity
+      WHERE    application_name NOT IN ('Asp',
+                                        'statement flush thread',
+                                        'JobScheduler',
+                                        'WDRSnapshot',
+                                        'PercentileJob',
+                                        'gs_clean')
+      AND      Pg_current_sessid() != sessionid
+      AND      query ilike '%FROM%'
+      AND      (
+                        query_start > now() - (1 / 24 / 60 / 60) * ({scrape_interval} / 1000))
+      GROUP BY datname,
+               application_name,
+               query;
+      "
+      version: '>=0.0.0'
+      timeout: 10
+      status: enable
+  metrics:
+    - name: count
+      description: count
+      usage: GAUGE
+    - name: datname
+      description: Name of database
+      usage: LABEL
+    - name: application_name
+      description: Name of applacation
+      usage: LABEL
+    - name: query
+      description: SQL statement
       usage: LABEL
   status: enable
   ttl: 0

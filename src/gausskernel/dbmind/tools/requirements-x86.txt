@@ -15,4 +15,5 @@ pyyaml
 prometheus-client
 ## X-Tuner ##
 bayesian-optimization
-ptable
+prettytable>=2.5.0
+

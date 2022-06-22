@@ -259,7 +259,7 @@ class LocalExec(Executor):
                 # Have to use the `cwd` argument.
                 # Otherwise, we can not change the current directory.
                 if line.strip().startswith('cd '):
-                    cwd = line.lstrip('cd ')
+                    cwd = line.strip()[len('cd'):]
                     continue
 
                 proc = subprocess.Popen(shlex.split(line),

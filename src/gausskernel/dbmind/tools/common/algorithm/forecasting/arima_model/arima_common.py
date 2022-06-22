@@ -91,8 +91,6 @@ def lagmat(x_raw, maxlag, trim='forward', original='ex'):
     lags = lmat[startobs:stopobs, dropidx:]
     if original == 'sep':
         leads = lmat[startobs:stopobs, :dropidx]
-
-    if original == 'sep':
         return lags, leads
 
     return lags
@@ -129,7 +127,7 @@ def get_k_constant(x_raw):
     return k_constant
 
 
-class OLS():
+class OLS:
     """The OLS can compute linear correlation coefficient about x and y"""
     def __init__(self, y_raw, x_raw):
         self._x = np.asarray(x_raw)

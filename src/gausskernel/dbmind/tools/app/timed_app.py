@@ -11,6 +11,7 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 import logging
+from datetime import timedelta, datetime
 
 from dbmind import constants
 from dbmind import global_vars
@@ -44,30 +45,6 @@ golden_kpi = list(map(
     ).split(',')
 ))
 
-
-def quickly_forecast_wrapper(sequence, forecasting_minutes):
-    forecast_result = quickly_forecast(sequence, forecasting_minutes)
-    metric_value_range = metric_value_range_map.get(sequence.name)
-    if metric_value_range and forecast_result:
-        metric_value_range = metric_value_range.split(",")
-        try:
-            metric_value_low = float(metric_value_range[0])
-            metric_value_high = float(metric_value_range[1])
-        except ValueError as ex:
-            logging.warning("quickly_forecast_wrapper value error:%s,"
-                            " so forecast_result will not be cliped." % ex)
-            return forecast_result
-
-        f_values = list(forecast_result.values)
-        for i in range(len(f_values)):
-            if f_values[i] < metric_value_low:
-                f_values[i] = metric_value_low
-            if f_values[i] > metric_value_high:
-                f_values[i] = metric_value_high
-        forecast_result.values = tuple(f_values)
-    return forecast_result
-
-
 @timer(detection_interval)
 def self_monitoring():
     # diagnose for slow queries
@@ -96,10 +73,19 @@ def forecast_kpi():
         )
         return
 
+    start = datetime.now() - timedelta(minutes=enough_history_minutes)
+    end = datetime.now()
     for metric in golden_kpi:
-        last_sequences = dai.get_latest_metric_sequence(metric, enough_history_minutes).fetchall()
+        last_sequences = dai.get_metric_sequence(metric, start, end).fetchall()
+
+        try:
+            metric_value_range = global_vars.metric_value_range_map.get(metric)
+            lower, upper = map(float, metric_value_range.split(','))
+        except Exception:
+            lower, upper = 0, float("inf")
+
         future_sequences = global_vars.worker.parallel_execute(
-            quickly_forecast_wrapper, ((sequence, how_long_to_forecast_minutes)
+            quickly_forecast, ((sequence, how_long_to_forecast_minutes, lower, upper)
                                        for sequence in last_sequences)
         )
         detect_materials = list()

@@ -28,6 +28,13 @@ def update_session_clz_from_configs():
     port = global_vars.configs.get('METADATABASE', 'port')
     username = global_vars.configs.get('METADATABASE', 'username')
     password = global_vars.configs.get('METADATABASE', 'password')
+    if db_type in ('opengauss', 'postgres'):
+        valid_port = port.strip() != '' and port is not None 
+        valid_host = host.strip() != '' and host is not None 
+        if not valid_port:
+            raise ValueError('Invalid port for metadatabase %s: %s.' % (db_type, port))
+        if not valid_host:
+            raise ValueError('Invalid host for metadatabase %s: %s.' % (db_type, host))
 
     dsn = create_dsn(db_type, database, host, port, username, password)
     postgres_dsn = create_dsn(db_type, 'postgres', host, port, username, password)

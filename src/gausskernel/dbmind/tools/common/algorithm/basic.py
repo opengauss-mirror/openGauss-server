@@ -34,7 +34,7 @@ def binary_search(L, target):
     return -1
 
 
-def how_many_lesser_elements(L, target):
+def binary_search_leftmost(L, target):
     """The function bases on finding the leftmost element with binary search.
 
     About Binary Search
@@ -68,7 +68,18 @@ def how_many_lesser_elements(L, target):
     return lo
 
 
-def how_many_larger_elements(L, target):
+def binary_search_left(L, target):
+    """Wrap the function ``how_many_lesser_elements(L, target)`` by adding
+    a check for return target.
+
+    :return -1 when not found the target target.
+    """
+    lo = binary_search_leftmost(L, target)
+    return -1 if lo >= len(L) or L[lo] != target else lo
+
+
+def binary_search_rightmost(L, target):
+    """Similar to above function."""
     if len(L) == 0:
         return -1
     # [0, length - 1]
@@ -86,18 +97,16 @@ def how_many_larger_elements(L, target):
     return hi
 
 
-def binary_search_left(L, target):
-    """Wrap the function ``how_many_lesser_elements(L, target)`` by adding
-    a check for return target.
-
-    :return -1 when not found the target target.
-    """
-    lo = how_many_lesser_elements(L, target)
-    return -1 if lo >= len(L) or L[lo] != target else lo
-
-
 def binary_search_right(L, target):
-    """Similar to above function."""
-    hi = how_many_larger_elements(L, target)
+    hi = binary_search_rightmost(L, target)
     return -1 if hi < 0 or L[hi] != target else hi
 
+
+how_many_lesser_elements = binary_search_leftmost
+
+
+def how_many_larger_elements(L, target):
+    right_most = binary_search_right(L, target)
+    if right_most >= 0:
+        return len(L) - 1 - right_most
+    return len(L) - binary_search_leftmost(L, target)

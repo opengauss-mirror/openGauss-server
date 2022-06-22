@@ -22,7 +22,7 @@ from tuner.exceptions import ExecutionError
 path = ''
 # Measure current total committed transactions that do not include xact_rollback.
 cmd = "gsql -U {user} -W {password} -d postgres -p {port} -c " \
-      "\"SELECT sum(xact_commit) FROM pg_stat_database where datname = '{db}';\""
+      "\"SELECT pg_catalog.sum(xact_commit) FROM pg_catalog.pg_stat_database where datname = '{db}';\""
 
 
 # This script captures the performance indicators in the user's periodic execution task, and measures the quality

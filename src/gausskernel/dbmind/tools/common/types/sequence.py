@@ -12,8 +12,7 @@
 # See the Mulan PSL v2 for more details.
 from typing import Optional
 
-from dbmind.common.algorithm.basic import binary_search
-from dbmind.common.algorithm.basic import how_many_lesser_elements, how_many_larger_elements
+from dbmind.common.algorithm.basic import binary_search, binary_search_leftmost, binary_search_rightmost
 from ..either import OptionalContainer, OptionalValue
 from ..utils import cached_property
 
@@ -140,8 +139,8 @@ class Sequence:
         # ``how_many_larger_elements()`` can ensure that
         # the position of the searching element always stays
         # at the position of the last element not greater than it in the array.
-        start_position = how_many_lesser_elements(timestamps, ts_start)
-        end_position = how_many_larger_elements(timestamps, ts_end)
+        start_position = binary_search_leftmost(timestamps, ts_start)
+        end_position = binary_search_rightmost(timestamps, ts_end)
         return end_position - start_position + 1
 
     def to_2d_array(self):
@@ -151,15 +150,15 @@ class Sequence:
     def values(self):
         """The property will generate a copy."""
         timestamps, values, ts_start, ts_end = self._get_entity()
-        return values[how_many_lesser_elements(timestamps, ts_start):
-                      how_many_larger_elements(timestamps, ts_end) + 1]
+        return values[binary_search_leftmost(timestamps, ts_start):
+                      binary_search_rightmost(timestamps, ts_end) + 1]
 
-    @cached_property
+    @property
     def timestamps(self):
         """The property will generate a copy."""
         timestamps, values, ts_start, ts_end = self._get_entity()
-        return timestamps[how_many_lesser_elements(timestamps, ts_start):
-                          how_many_larger_elements(timestamps, ts_end) + 1]
+        return timestamps[binary_search_leftmost(timestamps, ts_start):
+                          binary_search_rightmost(timestamps, ts_end) + 1]
 
     @cached_property
     def step(self):

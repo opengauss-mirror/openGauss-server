@@ -12,10 +12,19 @@
 # See the Mulan PSL v2 for more details.
 import logging
 
+from dbmind.common.platform import LINUX
 from dbmind.common.types.root_cause import RootCause
+
 from .slow_sql.analyzer import SlowSQLAnalyzer
 
-_analyzer = SlowSQLAnalyzer()
+if LINUX:
+    from dbmind.common.dispatcher.task_worker import get_mp_sync_manager
+
+    shared_sql_buffer = get_mp_sync_manager().list()
+else:
+    shared_sql_buffer = None
+
+_analyzer = SlowSQLAnalyzer(buffer=shared_sql_buffer)
 
 
 def diagnose_query(slow_query):
@@ -25,3 +34,4 @@ def diagnose_query(slow_query):
         slow_query.add_cause(RootCause.get('LACK_INFORMATION'))
         logging.exception(e)
     return slow_query
+

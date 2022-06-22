@@ -23,7 +23,7 @@ from dbmind.cmd.config_utils import (
 )
 from dbmind.cmd.edbmind import SKIP_LIST
 from dbmind.common import utils, security
-from dbmind.common.exceptions import SetupError, SQLExecutionError
+from dbmind.common.exceptions import SetupError, SQLExecutionError, DuplicateTableError
 from dbmind.metadatabase import (
     create_dynamic_config_schema,
     create_metadatabase_schema,
@@ -103,7 +103,8 @@ def initialize_and_check_config(confpath, interactive=False):
     utils.write_to_terminal('Starting to connect to meta-database and create tables...', color='green')
     try:
         create_metadatabase_schema(check_first=False)
-    except SQLExecutionError:
+        utils.write_to_terminal('The setup process finished successfully.', color='green')
+    except DuplicateTableError:
         utils.write_to_terminal('The given database has duplicate tables. '
                                 'If you want to reinitialize the database, press [R]. '
                                 'If you want to keep the existent tables, press [K].', color='red')
@@ -117,7 +118,10 @@ def initialize_and_check_config(confpath, interactive=False):
             create_metadatabase_schema(check_first=True)
         if input_char == 'K':
             utils.write_to_terminal('Ignoring...', color='green')
-    utils.write_to_terminal('The setup process finished successfully.', color='green')
+        utils.write_to_terminal('The setup process finished successfully.', color='green')
+    except SQLExecutionError:
+        utils.write_to_terminal('Failed to link metadatabase due to unknown error, '
+                                'please check the database and its configuration.', color='red')
 
 
 def setup_directory_interactive(confpath):
