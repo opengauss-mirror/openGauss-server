@@ -183,6 +183,7 @@ typedef struct knl_session_attr_sql {
     char* behavior_compat_string;
     char* connection_info;
     char* retry_errcode_list;
+    char* sql_ignore_strategy_string;
     /* the vmoptions to start JVM */
     char* pljava_vmoptions;
     int backslash_quote;

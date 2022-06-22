@@ -166,7 +166,7 @@ static char* get_str_from_var_sci(NumericVar* var, int rscale);
 
 static void apply_typmod(NumericVar* var, int32 typmod);
 
-static int32 numericvar_to_int32(const NumericVar* var);
+static int32 numericvar_to_int32(const NumericVar* var, bool can_ignore = false);
 static double numeric_to_double_no_overflow(Numeric num);
 static double numericvar_to_double_no_overflow(NumericVar* var);
 
@@ -2912,7 +2912,7 @@ Datum numeric_int4(PG_FUNCTION_ARGS)
 
     /* Convert to variable format, then convert to int4 */
     init_var_from_num(num, &x);
-    result = numericvar_to_int32(&x);
+    result = numericvar_to_int32(&x, fcinfo->can_ignore);
     PG_RETURN_INT32(result);
 }
 
@@ -2921,13 +2921,19 @@ Datum numeric_int4(PG_FUNCTION_ARGS)
  * exceeds the range of an int32, raise the appropriate error via
  * ereport(). The input NumericVar is *not* free'd.
  */
-static int32 numericvar_to_int32(const NumericVar* var)
+static int32 numericvar_to_int32(const NumericVar* var, bool can_ignore)
 {
     int32 result;
     int64 val;
 
-    if (!numericvar_to_int64(var, &val))
+    if (!numericvar_to_int64(var, &val, can_ignore))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
+
+    /* return INT32_MAX/INT32_MIN if SQL can ignore overflowing */
+    if (can_ignore && (val > INT_MAX || val < INT_MIN)) {
+        ereport(WARNING, (errmsg("integer out of range")));
+        return val > INT_MAX ? INT_MAX : INT_MIN;
+    }
 
     /* Down-convert to int4 */
     result = (int32)val;
@@ -2975,7 +2981,7 @@ Datum numeric_int8(PG_FUNCTION_ARGS)
     /* Convert to variable format and thence to int8 */
     init_var_from_num(num, &x);
 
-    if (!numericvar_to_int64(&x, &result))
+    if (!numericvar_to_int64(&x, &result, fcinfo->can_ignore))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("bigint out of range")));
 
     PG_RETURN_INT64(result);
@@ -3018,8 +3024,14 @@ Datum numeric_int2(PG_FUNCTION_ARGS)
     /* Convert to variable format and thence to int8 */
     init_var_from_num(num, &x);
 
-    if (!numericvar_to_int64(&x, &val))
+    if (!numericvar_to_int64(&x, &val, fcinfo->can_ignore))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("smallint out of range")));
+
+    /* return INT16_MAX/INT16_MIN if SQL can ignore overflowing */
+    if (fcinfo->can_ignore && (val > SHRT_MAX || val < SHRT_MIN)) {
+        ereport(WARNING, (errmsg("smallint out of range")));
+        PG_RETURN_INT16(val > SHRT_MAX ? SHRT_MAX : SHRT_MIN);
+    }
 
     /* Down-convert to int2 */
     result = (int16)val;
@@ -3069,12 +3081,18 @@ Datum numeric_int1(PG_FUNCTION_ARGS)
     /* Convert to variable format and thence to uint8 */
     init_var_from_num(num, &x);
 
-    if (x.sign == NUMERIC_NEG) {
+    if (x.sign == NUMERIC_NEG && !fcinfo->can_ignore) {
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
     }
 
-    if (!numericvar_to_int64(&x, &val))
+    if (!numericvar_to_int64(&x, &val, fcinfo->can_ignore))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
+
+    /* return UINT8_MAX/UINT8_MIN if SQL can ignore overflowing */
+    if (fcinfo->can_ignore && (val > UCHAR_MAX || val < 0)) {
+        ereport(WARNING, (errmsg("tinyint out of range")));
+        PG_RETURN_UINT8(val > UCHAR_MAX ? UCHAR_MAX : 0);
+    }
 
     /* Down-convert to int1 */
     result = (uint8)val;
@@ -3211,7 +3229,11 @@ Datum numeric_float4(PG_FUNCTION_ARGS)
 
     tmp = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
 
-    result = DirectFunctionCall1(float4in, CStringGetDatum(tmp));
+    if (fcinfo->can_ignore) {
+        result = DirectFunctionCall1Coll(float4in, InvalidOid, CStringGetDatum(tmp), true);
+    } else {
+        result = DirectFunctionCall1(float4in, CStringGetDatum(tmp));
+    }
 
     pfree_ext(tmp);
 
@@ -4594,9 +4616,13 @@ static void apply_typmod(NumericVar* var, int32 typmod)
 /*
  * Convert numeric to int8, rounding if needed.
  *
+ * Note: param can_ignore controls the function raising ERROR or WARNING. TRUE means overflowing will report WARNING
+ * and set result to INT64_MAX/INT64_MIN instead. FALSE make it raise ERROR directly. FALSE DEFAULTED. It should be only
+ * used for controls of keyword IGNORE.
+ *
  * If overflow, return false (no error is raised).  Return true if okay.
  */
-bool numericvar_to_int64(const NumericVar* var, int64* result)
+bool numericvar_to_int64(const NumericVar* var, int64* result, bool can_ignore)
 {
     NumericDigit* digits = NULL;
     int ndigits;
@@ -4638,12 +4664,22 @@ bool numericvar_to_int64(const NumericVar* var, int64* result)
     for (i = 1; i <= weight; i++) {
         if (unlikely(pg_mul_s64_overflow(val, NBASE, &val))) {
             free_var(&rounded);
+            if (can_ignore) {
+                *result = neg ? LONG_MIN : LONG_MAX;
+                ereport(WARNING, (errmsg("value out of range")));
+                return true;
+            }
             return false;
         }
 
         if (i < ndigits) {
             if (unlikely(pg_sub_s64_overflow(val, digits[i], &val))) {
                 free_var(&rounded);
+                if (can_ignore) {
+                    *result = neg ? LONG_MIN : LONG_MAX;
+                    ereport(WARNING, (errmsg("value out of range")));
+                    return true;
+                }
                 return false;
             }
         }

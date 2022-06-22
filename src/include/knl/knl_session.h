@@ -640,6 +640,8 @@ typedef struct knl_u_utils_context {
     bool enable_memory_context_control;
 
     syscalllock deleMemContextMutex;
+
+    unsigned int sql_ignore_strategy_val;
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {

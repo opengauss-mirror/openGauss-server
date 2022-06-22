@@ -2449,7 +2449,7 @@ static const char *ExecRelCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *sl
     return NULL;
 }
 
-void ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate)
+bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate)
 {
     Relation rel = resultRelInfo->ri_RelationDesc;
     TupleDesc tupdesc = RelationGetDescr(rel);
@@ -2481,21 +2481,23 @@ void ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
                         ExecBuildSlotValueDescription(RelationGetRelid(rel), slot, tupdesc, modifiedCols, maxfieldlen);
                 }
 
-                ereport(ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                bool can_ignore = estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore;
+                ereport(can_ignore ? WARNING : ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION),
                     errmsg("null value in column \"%s\" violates not-null constraint",
                     NameStr(tupdesc->attrs[attrChk - 1]->attname)),
                     val_desc ? errdetail("Failing row contains %s.", val_desc) : 0));
+                return false;
             }
         }
     }
 
     if (constr->num_check == 0) {
-        return;
+        return true;
     }
 
     const char *failed = ExecRelCheck(resultRelInfo, slot, estate);
     if (failed == NULL) {
-        return;
+        return true;
     }
 
     char *val_desc = NULL;
@@ -2525,6 +2527,7 @@ void ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
                 errcause("some rows copy failed"),
                 erraction("set client_min_messages = info for more details")));
     }
+    return true;
 }
 
 /*

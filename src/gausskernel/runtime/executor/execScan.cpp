@@ -196,6 +196,9 @@ TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd access_mtd, /* funct
              * Found a satisfactory scan tuple.
              */
             if (proj_info != NULL) {
+                if (node->ps.state && node->ps.state->es_plannedstmt) {
+                    econtext->can_ignore = node->ps.state->es_plannedstmt->hasIgnore;
+                }
                 /*
                  * Form a projection tuple, store it in the result tuple slot
                  * and return it --- unless we find we can project no tuples

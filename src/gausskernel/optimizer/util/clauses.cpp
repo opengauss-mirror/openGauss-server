@@ -4171,7 +4171,11 @@ static Expr* evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
     newexpr->args = args;
     newexpr->location = -1;
 
-    return evaluate_expr((Expr*)newexpr, result_type, result_typmod, result_collid);
+    bool can_ignore = false;
+    if (context != NULL && context->root != NULL && context->root->parse != NULL && context->root->parse->hasIgnore) {
+        can_ignore = true;
+    }
+    return evaluate_expr((Expr*)newexpr, result_type, result_typmod, result_collid, can_ignore);
 }
 
 /*
@@ -4600,8 +4604,10 @@ static void sql_inline_error_callback(void* arg)
  *
  * We use the executor's routine ExecEvalExpr() to avoid duplication of
  * code and ensure we get the same result as the executor would get.
+ *
+ * Note: parameter can_ignore indicates whether ERROR is ignorable when casting type. TRUE if SQL has keyword IGNORE.
  */
-Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result_collation)
+Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result_collation, bool can_ignore)
 {
     EState* estate = NULL;
     ExprState* exprstate = NULL;
@@ -4636,7 +4642,11 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
      * fortuitous, but it's not so unreasonable --- a constant expression does
      * not depend on context, by definition, n'est ce pas?
      */
-    const_val = ExecEvalExprSwitchContext(exprstate, GetPerTupleExprContext(estate), &const_is_null, NULL);
+    ExprContext* econtext = GetPerTupleExprContext(estate);
+    if (econtext != NULL) {
+        econtext->can_ignore = can_ignore;
+    }
+    const_val = ExecEvalExprSwitchContext(exprstate, econtext, &const_is_null, NULL);
 
     /* Get info needed about result datatype */
     get_typlenbyval(result_type, &resultTypLen, &resultTypByVal);

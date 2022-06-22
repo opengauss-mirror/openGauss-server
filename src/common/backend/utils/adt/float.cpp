@@ -356,6 +356,17 @@ Datum float4in(PG_FUNCTION_ARGS)
      * if we get here, we have a legal double, still need to check to see if
      * it's a legal float4
      */
+    if (fcinfo->can_ignore) {
+        if (isinf((float4)val) && !isinf(val)) {
+            ereport(WARNING, (errmsg("value out of range: overflow")));
+            PG_RETURN_FLOAT4(num < 0 ? FLT_MIN : FLT_MAX);
+        }
+        if (((float4)val) == 0.0 && val != 0) {
+            ereport(WARNING, (errmsg("value out of range: underflow")));
+            PG_RETURN_FLOAT4(0);
+        }
+        PG_RETURN_FLOAT4((float4)val);
+    }
     CHECKFLOATVAL((float4)val, isinf(val), val == 0);
 
     PG_RETURN_FLOAT4((float4)val);
@@ -1175,6 +1186,18 @@ Datum dtof(PG_FUNCTION_ARGS)
 {
     float8 num = PG_GETARG_FLOAT8(0);
 
+    if (fcinfo->can_ignore) {
+        if (isinf((float4)num) && !isinf(num)) {
+            ereport(WARNING, (errmsg("value out of range: overflow")));
+            PG_RETURN_FLOAT4(num < 0 ? FLT_MIN : FLT_MAX);
+        }
+        if (((float4)num) == 0.0 && num != 0) {
+            ereport(WARNING, (errmsg("value out of range: underflow")));
+            PG_RETURN_FLOAT4(0);
+        }
+        PG_RETURN_FLOAT4((float4)num);
+    }
+
     CHECKFLOATVAL((float4)num, isinf(num), num == 0);
 
     PG_RETURN_FLOAT4((float4)num);
@@ -1200,8 +1223,13 @@ Datum dtoi4(PG_FUNCTION_ARGS)
      * exact power of 2, so it will be represented exactly; but PG_INT32_MAX
      * isn't, and might get rounded off, so avoid using it.
      */
-    if (num < (float8)PG_INT32_MIN || num >= -((float8)PG_INT32_MIN) || isnan(num))
+    if (num < (float8)PG_INT32_MIN || num >= -((float8)PG_INT32_MIN) || isnan(num)) {
+        if (fcinfo->can_ignore && !isnan(num)) {
+            ereport(WARNING, (errmsg("integer out of range")));
+            PG_RETURN_INT32(num < (float8)PG_INT32_MIN ? INT_MIN : INT_MAX);
+        }
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
+    }
 
     PG_RETURN_INT32((int32)num);
 }
@@ -1226,8 +1254,13 @@ Datum dtoi2(PG_FUNCTION_ARGS)
      * exact power of 2, so it will be represented exactly; but PG_INT16_MAX
      * isn't, and might get rounded off, so avoid using it.
      */
-    if (num < (float8)PG_INT16_MIN || num >= -((float8)PG_INT16_MIN) || isnan(num))
+    if (num < (float8)PG_INT16_MIN || num >= -((float8)PG_INT16_MIN) || isnan(num)) {
+        if (fcinfo->can_ignore && !isnan(num)) {
+            ereport(WARNING, (errmsg("smallint out of range")));
+            PG_RETURN_INT16(num < (float8)PG_INT16_MIN ? SHRT_MAX : SHRT_MIN);
+        }
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("smallint out of range")));
+    }
 
     PG_RETURN_INT16((int16)num);
 }
@@ -1272,6 +1305,17 @@ Datum ftoi4(PG_FUNCTION_ARGS)
      * exact power of 2, so it will be represented exactly; but PG_INT32_MAX
      * isn't, and might get rounded off, so avoid using it.
      */
+
+    if (fcinfo->can_ignore && num < (float4)PG_INT32_MIN) {
+        ereport(WARNING, (errmsg("integer out of range")));
+        PG_RETURN_INT32((int32)INT_MIN);
+    }
+
+    if (fcinfo->can_ignore && num >= -((float4)PG_INT32_MIN)) {
+        ereport(WARNING, (errmsg("integer out of range")));
+        PG_RETURN_INT32((int32)INT_MAX);
+    }
+
     if (num < (float4)PG_INT32_MIN || num >= -((float4)PG_INT32_MIN) || isnan(num))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
 
@@ -1298,6 +1342,16 @@ Datum ftoi2(PG_FUNCTION_ARGS)
      * exact power of 2, so it will be represented exactly; but PG_INT16_MAX
      * isn't, and might get rounded off, so avoid using it.
      */
+    if (fcinfo->can_ignore && num < (float4)PG_INT16_MIN) {
+        ereport(WARNING, (errmsg("smallint out of range")));
+        PG_RETURN_INT16((int16)SHRT_MIN);
+    }
+
+    if (fcinfo->can_ignore && num >= -((float4)PG_INT16_MIN)) {
+        ereport(WARNING, (errmsg("smallint out of range")));
+        PG_RETURN_INT16((int16)SHRT_MAX);
+    }
+
     if (num < (float4)PG_INT16_MIN || num >= -((float4)PG_INT16_MIN) || isnan(num))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("smallint out of range")));
 

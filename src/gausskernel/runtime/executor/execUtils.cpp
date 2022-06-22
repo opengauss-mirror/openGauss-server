@@ -63,6 +63,13 @@
 #include "optimizer/var.h"
 #include "utils/resowner.h"
 #include "miscadmin.h"
+#include "utils/date.h"
+#include "utils/nabstime.h"
+#include "utils/geo_decls.h"
+#include "utils/varbit.h"
+#include "utils/json.h"
+#include "utils/jsonb.h"
+#include "utils/xml.h"
 
 static bool get_last_attnums(Node* node, ProjectionInfo* projInfo);
 static bool index_recheck_constraint(
@@ -1831,7 +1838,6 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
         } else {
             checkUnique = UNIQUE_CHECK_PARTIAL;
         }
-
         satisfiesConstraint = index_insert(actualindex, /* index relation */
             values,                                     /* array of index Datums */
             isnull,                                     /* null flags */
@@ -2429,4 +2435,172 @@ void PthreadRwLockInit(pthread_rwlock_t* rwlock, pthread_rwlockattr_t *attr)
         ereport(ERROR,
             (errcode(ERRCODE_INITIALIZE_FAILED), errmsg("init rwlock failed")));
     }
+}
+
+/*
+ * Get defaulted value of specific time type
+ */
+static Datum GetTimeTypeZeroValue(Form_pg_attribute att_tup)
+{
+    Datum result;
+    switch (att_tup->atttypid) {
+        case TIMESTAMPOID: {
+            result = (Datum)DirectFunctionCall3(timestamp_in, CStringGetDatum("now"), ObjectIdGetDatum(InvalidOid),
+                                                Int32GetDatum(-1));
+            break;
+        }
+        case TIMESTAMPTZOID: {
+            result = clock_timestamp(NULL);
+            break;
+        }
+        case TIMETZOID: {
+            result = (Datum)DirectFunctionCall3(
+                timetz_in, CStringGetDatum("00:00:00"), ObjectIdGetDatum(0), Int32GetDatum(-1));
+            break;
+        }
+        case INTERVALOID: {
+            result = (Datum)DirectFunctionCall3(
+                interval_in, CStringGetDatum("00:00:00"), ObjectIdGetDatum(0), Int32GetDatum(-1));
+            break;
+        }
+        case TINTERVALOID: {
+            Datum epoch = (Datum)DirectFunctionCall1(timestamp_abstime, (TimestampGetDatum(SetEpochTimestamp())));
+            result = (Datum)DirectFunctionCall2(mktinterval, epoch, epoch);
+            break;
+        }
+        case SMALLDATETIMEOID: {
+            result = (Datum)DirectFunctionCall3(
+                smalldatetime_in, CStringGetDatum("1970-01-01 08:00:00"), ObjectIdGetDatum(0), Int32GetDatum(-1));
+            break;
+        }
+        default: {
+            result = timestamp2date(SetEpochTimestamp());
+            break;
+        }
+    }
+    return result;
+}
+
+/*
+ * Get defaulted value of specific non-time type
+ */
+static Datum GetNotTimeTypeZeroValue(Form_pg_attribute att_tup)
+{
+    Datum result;
+    switch (att_tup->atttypid) {
+        case UUIDOID: {
+            result = (Datum)DirectFunctionCall3(uuid_in, CStringGetDatum("00000000-0000-0000-0000-000000000000"),
+                                                ObjectIdGetDatum(0), Int32GetDatum(-1));
+            break;
+        }
+        case NAMEOID: {
+            result = (Datum)DirectFunctionCall1(namein, CStringGetDatum(""));
+            break;
+        }
+        case POINTOID: {
+            result = (Datum)DirectFunctionCall1(point_in, CStringGetDatum("(0,0)"));
+            break;
+        }
+        case PATHOID: {
+            result = (Datum)DirectFunctionCall1(path_in, CStringGetDatum("0,0"));
+            break;
+        }
+        case POLYGONOID: {
+            result = (Datum)DirectFunctionCall1(poly_in, CStringGetDatum("(0,0)"));
+            break;
+        }
+        case CIRCLEOID: {
+            result = (Datum)DirectFunctionCall1(circle_in, CStringGetDatum("0,0,0"));
+            break;
+        }
+        case LSEGOID:
+        case BOXOID: {
+            result = (Datum)DirectFunctionCall1(box_in, CStringGetDatum("0,0,0,0"));
+            break;
+        }
+        case JSONOID: {
+            result = (Datum)DirectFunctionCall1(json_in, CStringGetDatum("0"));
+            break;
+        }
+        case JSONBOID: {
+            result = (Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("0"));
+            break;
+        }
+        case XMLOID: {
+            result = (Datum)DirectFunctionCall1(xml_in, CStringGetDatum(""));
+            (Datum)DirectFunctionCall1(numeric_in, CStringGetDatum("0"));
+            break;
+        }
+        case BITOID: {
+            result = (Datum)DirectFunctionCall3(bit_in, CStringGetDatum(""), ObjectIdGetDatum(0), Int32GetDatum(-1));
+            break;
+        }
+        case NUMERICOID: {
+            result =
+                (Datum)DirectFunctionCall3(numeric_in, CStringGetDatum("0"), ObjectIdGetDatum(0), Int32GetDatum(0));
+            break;
+        }
+        default: {
+            bool typeIsVarlena = (!att_tup->attbyval) && (att_tup->attlen == -1);
+            if (typeIsVarlena) {
+                result = CStringGetTextDatum("");
+            } else {
+                result = (Datum)0;
+            }
+            break;
+        }
+    }
+    return result;
+}
+
+/*
+ * Replace tuple from the slot with a new one. The new tuple will replace null column with defaulted values according to
+ * its type.
+ */
+Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
+{
+    /* find out all null column first */
+    int natts = tupleDesc->natts;
+    Datum values[natts];
+    bool replaces[natts];
+    bool nulls[natts];
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    int attrChk;
+    for (attrChk = 1; attrChk <= natts; attrChk++) {
+        if (tupleDesc->attrs[attrChk - 1]->attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
+            bool isTimeType = (tupleDesc->attrs[attrChk - 1]->atttypid == DATEOID ||
+                               tupleDesc->attrs[attrChk - 1]->atttypid == TIMESTAMPOID ||
+                               tupleDesc->attrs[attrChk - 1]->atttypid == TIMESTAMPTZOID ||
+                               tupleDesc->attrs[attrChk - 1]->atttypid == TIMETZOID ||
+                               tupleDesc->attrs[attrChk - 1]->atttypid == INTERVALOID ||
+                               tupleDesc->attrs[attrChk - 1]->atttypid == TINTERVALOID ||
+                               tupleDesc->attrs[attrChk - 1]->atttypid == SMALLDATETIMEOID);
+            values[attrChk - 1] = isTimeType ? GetTimeTypeZeroValue(tupleDesc->attrs[attrChk - 1])
+                                             : GetNotTimeTypeZeroValue(tupleDesc->attrs[attrChk - 1]);
+            replaces[attrChk - 1] = true;
+        }
+    }
+    Tuple oldTup = slot->tts_tuple;
+    Tuple newTup = tableam_tops_modify_tuple(oldTup, tupleDesc, values, nulls, replaces);
+    
+    /* revise members of slot */
+    slot->tts_tuple = newTup;
+    for (attrChk = 1; attrChk <= natts; attrChk++) {
+        if (!replaces[attrChk - 1]) {
+            continue;
+        }
+        slot->tts_isnull[attrChk - 1] = false;
+        slot->tts_values[attrChk - 1] = values[attrChk - 1];
+    }
+    
+    tableam_tops_free_tuple(oldTup);
+    return newTup;
 }

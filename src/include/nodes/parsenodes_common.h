@@ -424,6 +424,7 @@ typedef struct HintState {
     List* cache_plan_hint; /* enforce cplan or gplan */
     List* no_expand_hint;  /* forbid sub query pull-up */
     List* no_gpc_hint;     /* supress saving to global plan cache */
+    bool sql_ignore_hint;  /* hint of keyword ignore in SQL*/
 } HintState;
 
 /* ----------------------
@@ -452,6 +453,7 @@ typedef struct InsertStmt {
     UpsertClause *upsertClause; /* DUPLICATE KEY UPDATE clause */
     HintState *hintState;
     bool isRewritten;           /* is this Stmt created by rewritter or end user? */
+    bool hasIgnore;             /* is this Stmt containing ignore keyword? */
 } InsertStmt;
 
 /* ----------------------
@@ -482,6 +484,7 @@ typedef struct UpdateStmt {
     List *returningList;    /* list of expressions to return */
     WithClause *withClause; /* WITH clause */
     HintState *hintState;
+    bool hasIgnore;         /* is this Stmt containing ignore keyword? */
 } UpdateStmt;
 
 /* ----------------------
@@ -1863,6 +1866,7 @@ typedef struct Query {
     bool hasForUpdate;    /* FOR [KEY] UPDATE/SHARE was specified */
     bool hasRowSecurity;  /* rewriter has applied some RLS policy */
     bool hasSynonyms;     /* has synonym mapping in rtable */
+    bool hasIgnore;       /* has keyword ignore in query string */
 
     List* cteList; /* WITH list (of CommonTableExpr's) */
 

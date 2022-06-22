@@ -919,3 +919,4 @@ test: gs_dump_encrypt substr
 test: composite_datum_record mysql_function
 
 test: join_test_alias
+test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition

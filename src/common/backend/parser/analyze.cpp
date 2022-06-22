@@ -1875,6 +1875,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     /* Set query tdTruncCastStatus to recored if auto truncation enabled or not. */
     qry->tdTruncCastStatus = pstate->tdTruncCastStatus;
     qry->hintState = stmt->hintState;
+    qry->hasIgnore = stmt->hasIgnore;
 
     return qry;
 }
@@ -3429,6 +3430,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
 
     assign_query_collations(pstate, qry);
     qry->hintState = stmt->hintState;
+    qry->hasIgnore = stmt->hasIgnore;
 
     return qry;
 }

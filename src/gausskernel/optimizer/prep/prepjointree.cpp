@@ -1025,6 +1025,7 @@ void pull_up_subquery_hint(PlannerInfo* root, Query* parse, HintState* hint_stat
     parse->hintState->skew_hint = list_concat(parse->hintState->skew_hint, hint_state->skew_hint);
     parse->hintState->nall_hints = parse->hintState->nall_hints + hint_state->nall_hints;
     parse->hintState->multi_node_hint = hint_state->multi_node_hint;
+    parse->hintState->sql_ignore_hint = hint_state->sql_ignore_hint;
     /* no_expand hint, set hint, no_gpc hint should not be pulled up */
 
     if (hint_state->block_name_hint) {

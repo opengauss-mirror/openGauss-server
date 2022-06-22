@@ -49,6 +49,7 @@ static const hintKeyword parsers[] =
 	{HINT_GPLAN, USE_GPLAN_P},
 	{HINT_NO_EXPAND, No_expand_P},
 	{HINT_NO_GPC, NO_GPC_P},
+	{HINT_SQL_IGNORE, SQL_IGNORE_P},
 };
 
 static const hintKeyword* HintKeywordLookup(const char *str);

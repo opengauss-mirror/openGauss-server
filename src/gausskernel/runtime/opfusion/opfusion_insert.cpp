@@ -106,6 +106,7 @@ void InsertFusion::InitLocals(ParamListInfo params)
 {
     m_c_local.m_estate = CreateExecutorState();
     m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+    m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
     if (m_global->m_table_type == TAM_USTORE) {
         m_local.m_reslot->tts_tupslotTableAm = TAM_USTORE;
@@ -200,7 +201,10 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     Assert(tuple != NULL);
     if (RELATION_IS_PARTITIONED(rel)) {
         m_c_local.m_estate->esfRelations = NULL;
-        partOid = heapTupleGetPartitionId(rel, tuple);
+        partOid = heapTupleGetPartitionId(rel, tuple, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
+        if (m_c_local.m_estate->es_plannedstmt->hasIgnore && partOid == InvalidOid) {
+            return 1;
+        }
         part = partitionOpen(rel, partOid, RowExclusiveLock);
         partRel = partitionGetRelation(rel, part);
     }
@@ -225,7 +229,18 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     }
 
     if (rel->rd_att->constr) {
-        ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
+        /*
+         * If values violate constraints, directly return.
+         */
+        if(!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate)) {
+            if (u_sess->utils_cxt.sql_ignore_strategy_val != SQL_OVERWRITE_NULL) {
+                return 1;
+            }
+            tuple = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot);
+            /* Double check constraints in case that new val in column with not null constraints
+             * violated check constraints */
+            ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
+        }
     }
     Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
     Relation target_rel = (bucket_rel == NULL) ? destRel : bucket_rel;
@@ -238,6 +253,34 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
         (void)MemoryContextSwitchTo(old_context);
         tableam_tops_free_tuple(tmp_tuple);
     }
+
+    /* check unique constraint first if SQL has keyword IGNORE */
+    bool isgpi = false;
+    ConflictInfoData conflictInfo;
+    Oid conflictPartOid = InvalidOid;
+    int2 conflictBucketid = InvalidBktId;
+    if (m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore &&
+        !ExecCheckIndexConstraints(m_local.m_reslot, m_c_local.m_estate, target_rel, part, &isgpi, bucketid,
+                                   &conflictInfo, &conflictPartOid, &conflictBucketid)) {
+        ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                 RelationGetRelationName(target_rel))));
+        
+        /* clear before ended */
+        tableam_tops_free_tuple(tuple);
+        (void)ExecClearTuple(m_local.m_reslot);
+        ExecCloseIndices(result_rel_info);
+        ExecDoneStepInFusion(m_c_local.m_estate);
+        if (bucket_rel != NULL) {
+            bucketCloseRelation(bucket_rel);
+        }
+        if (RELATION_IS_PARTITIONED(rel)) {
+            partitionClose(rel, part, RowExclusiveLock);
+            releaseDummyRelation(&partRel);
+        }
+
+        return 1;
+    }
+
     (void)tableam_tuple_insert(bucket_rel == NULL ? destRel : bucket_rel, tuple, mycid, 0, NULL);
 
     if (!RELATION_IS_PARTITIONED(rel)) {
@@ -306,7 +349,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     InitResultRelInfo(result_rel_info, rel, 1, 0);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
-        ExecOpenIndices(result_rel_info, false);
+        ExecOpenIndices(result_rel_info, true);
     }
 
     init_gtt_storage(CMD_INSERT, result_rel_info);

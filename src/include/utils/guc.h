@@ -384,6 +384,11 @@ typedef enum {
     OPT_VECTOR_ENGINE
 } TryVectorEngineStrategy;
 
+typedef enum {
+    SQL_IGNORE_NULL,
+    SQL_OVERWRITE_NULL
+}SqlIgnoreHandleStrategy;
+
 #define ENABLE_PRED_PUSH(root) \
     ((PRED_PUSH & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
 

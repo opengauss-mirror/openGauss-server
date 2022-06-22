@@ -1092,8 +1092,13 @@ Datum int84(PG_FUNCTION_ARGS)
     result = (int32)arg;
 
     /* Test for overflow by reverse-conversion. */
-    if ((int64)result != arg)
+    if ((int64)result != arg) {
+        if (fcinfo->can_ignore) {
+            ereport(WARNING, (errmsg("integer out of range")));
+            PG_RETURN_INT32(arg < INT_MIN ? INT_MIN : INT_MAX);
+        }
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("integer out of range")));
+    }
 
     PG_RETURN_INT32(result);
 }
@@ -1113,8 +1118,13 @@ Datum int82(PG_FUNCTION_ARGS)
     result = (int16)arg;
 
     /* Test for overflow by reverse-conversion. */
-    if ((int64)result != arg)
+    if ((int64)result != arg) {
+        if (fcinfo->can_ignore) {
+            ereport(WARNING, (errmsg("smallint out of range")));
+            PG_RETURN_INT32(arg < SHRT_MIN ? SHRT_MIN : SHRT_MAX);
+        }
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("smallint out of range")));
+    }
 
     PG_RETURN_INT16(result);
 }
@@ -1149,8 +1159,13 @@ Datum dtoi8(PG_FUNCTION_ARGS)
      * exact power of 2, so it will be represented exactly; but PG_INT64_MAX
      * isn't, and might get rounded off, so avoid using it.
      */
-    if (num < (float8)PG_INT64_MIN || num >= -((float8)PG_INT64_MIN) || isnan(num))
+    if (num < (float8)PG_INT64_MIN || num >= -((float8)PG_INT64_MIN) || isnan(num)) {
+        if (fcinfo->can_ignore && !isnan(num)) {
+            ereport(WARNING, (errmsg("bigint out of range")));
+            PG_RETURN_INT64(num < (float8)PG_INT64_MIN ? LONG_MIN : LONG_MAX);
+        }
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("bigint out of range")));
+    }
 
     PG_RETURN_INT64((int64)num);
 }
@@ -1185,8 +1200,13 @@ Datum ftoi8(PG_FUNCTION_ARGS)
      * exact power of 2, so it will be represented exactly; but PG_INT64_MAX
      * isn't, and might get rounded off, so avoid using it.
      */
-    if (num < (float4)PG_INT64_MIN || num >= -((float4)PG_INT64_MIN) || isnan(num))
+    if (num < (float4)PG_INT64_MIN || num >= -((float4)PG_INT64_MIN) || isnan(num)) {
+        if (fcinfo->can_ignore && !isnan(num)) {
+            ereport(WARNING, (errmsg("bigint out of range")));
+            PG_RETURN_INT64(num < (float4)PG_INT64_MIN ? LONG_MIN : LONG_MAX);
+        }
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("bigint out of range")));
+    }
 
     PG_RETURN_INT64((int64)num);
 }

@@ -58,6 +58,7 @@
 #define HINT_CPLAN "Use_cplan"
 #define HINT_GPLAN "Use_gplan"
 #define HINT_NO_GPC "No_gpc"
+#define HINT_SQL_IGNORE "Ignore_error"
 
 #define BLOCK_COMMENT_START "/*"
 #define BLOCK_COMMENT_END "*/"
@@ -104,6 +105,7 @@ typedef enum HintKeyword {
     HINT_KEYWORD_SET,
     HINT_KEYWORD_CPLAN,
     HINT_KEYWORD_GPLAN,
+    HINT_KEYWORD_IGNORE,
     HINT_KEYWORD_NO_GPC,
 } HintKeyword;
 
@@ -282,6 +284,12 @@ typedef struct PlanCacheHint {
 typedef struct NoGPCHint {
     Hint base; /* base hint */
 } NoGPCHint;
+
+/* sql ignore hints for storing keyword ignore in hint_string */
+typedef struct SqlIgnoreHint {
+    Hint base;         /* base hint */
+    bool sql_ignore_hint;
+} SqlIgnoreHint;
 
 typedef struct hintKeyword {
     const char* name;

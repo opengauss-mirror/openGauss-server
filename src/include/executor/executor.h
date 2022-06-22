@@ -224,7 +224,7 @@ extern void InitResultRelInfo(
     ResultRelInfo* resultRelInfo, Relation resultRelationDesc, Index resultRelationIndex, int instrument_options);
 extern ResultRelInfo* ExecGetTriggerResultRel(EState* estate, Oid relid);
 extern bool ExecContextForcesOids(PlanState* planstate, bool* hasoids);
-extern void ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, EState* estate);
+extern bool ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, EState* estate);
 extern ExecRowMark* ExecFindRowMark(EState* estate, Index rti);
 extern ExecAuxRowMark* ExecBuildAuxRowMark(ExecRowMark* erm, List* targetlist);
 extern TupleTableSlot* EvalPlanQual(EState* estate, EPQState* epqstate, Relation relation, Index rti,
@@ -466,6 +466,7 @@ extern void ExecSimpleRelationDelete(EState *estate, EPQState *epqstate, TupleTa
     FakeRelationPartition *relAndPart);
 extern void CheckCmdReplicaIdentity(Relation rel, CmdType cmd);
 extern void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeRelationPartition *relAndPart);
+extern Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot* slot);
 
 // AutoMutexLock
 //		Auto object for non-recursive pthread_mutex_t lock

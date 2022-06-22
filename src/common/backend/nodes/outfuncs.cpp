@@ -528,6 +528,9 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     WRITE_UINT64_FIELD(queryId);
     WRITE_BOOL_FIELD(hasReturning);
     WRITE_BOOL_FIELD(hasModifyingCTE);
+    if (t_thrd.proc->workingVersionNum >= KEYWORD_IGNORE_COMPART_VERSION_NUM) {
+        WRITE_BOOL_FIELD(hasIgnore);
+    }
     WRITE_BOOL_FIELD(canSetTag);
     WRITE_BOOL_FIELD(transientPlan);
     WRITE_BOOL_FIELD(dependsOnRole);
@@ -3674,6 +3677,9 @@ static void _outInsertStmt(StringInfo str, InsertStmt* node)
 	WRITE_NODE_FIELD(upsertClause);
 #endif	
     WRITE_NODE_FIELD(hintState);
+    if (t_thrd.proc->workingVersionNum >= KEYWORD_IGNORE_COMPART_VERSION_NUM) {
+        WRITE_BOOL_FIELD(hasIgnore);
+    }
 }
 
 static void _outUpdateStmt(StringInfo str, UpdateStmt* node)
@@ -3687,6 +3693,9 @@ static void _outUpdateStmt(StringInfo str, UpdateStmt* node)
     WRITE_NODE_FIELD(returningList);
     WRITE_NODE_FIELD(withClause);
     WRITE_NODE_FIELD(hintState);
+    if (t_thrd.proc->workingVersionNum >= KEYWORD_IGNORE_COMPART_VERSION_NUM) {
+        WRITE_BOOL_FIELD(hasIgnore);
+    }
 }
 
 static void _outSelectStmt(StringInfo str, SelectStmt* node)
@@ -4314,6 +4323,9 @@ static void _outQuery(StringInfo str, Query* node)
     WRITE_BOOL_FIELD(hasRowSecurity);
     if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
         WRITE_BOOL_FIELD(hasSynonyms);
+    }
+    if (t_thrd.proc->workingVersionNum >= KEYWORD_IGNORE_COMPART_VERSION_NUM) {
+        WRITE_BOOL_FIELD(hasIgnore);
     }
     WRITE_NODE_FIELD(cteList);
     WRITE_NODE_FIELD(rtable);

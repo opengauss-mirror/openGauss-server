@@ -738,8 +738,8 @@ typedef enum NodeTag {
     T_SetHint,
     T_PlanCacheHint,
     T_NoExpandHint,
+    T_SqlIgnoreHint,
     T_NoGPCHint,
-
     /*
      * pgfdw
      */

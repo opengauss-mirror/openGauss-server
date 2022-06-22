@@ -18329,6 +18329,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 				$6->returningList = $7;
 				$6->withClause = $1;
 				$6->hintState = create_hintstate($3);
+				$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 				$$ = (Node *) $6;
 			}
 			| opt_with_clause INSERT hint_string INTO insert_target insert_rest upsert_clause returning_clause
@@ -18383,6 +18384,8 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						$6->relation = $5;
 						$6->returningList = $8;
 						$6->withClause = $1;
+						$6->hintState = create_hintstate($3);
+						$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 #ifdef ENABLE_MULTIPLE_NODES						
 						if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
 							UpsertClause *uc = makeNode(UpsertClause);
@@ -18417,7 +18420,6 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						if ($7 != NULL)
 							m->mergeWhenClauses = list_concat(list_make1($7), m->mergeWhenClauses);
 
-						m->hintState = create_hintstate($3);
 
 						$$ = (Node *)m;
 					} else {
@@ -18426,6 +18428,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						$6->withClause = $1;
 						$6->upsertClause = (UpsertClause *)$7;
 						$6->hintState = create_hintstate($3);
+						$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 						$$ = (Node *) $6;
 					}
 				}
@@ -18670,6 +18673,7 @@ UpdateStmt: opt_with_clause UPDATE hint_string relation_expr_opt_alias
 					n->returningList = $9;
 					n->withClause = $1;
 					n->hintState = create_hintstate($3);
+					n->hasIgnore = (n->hintState != NULL && n->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 					$$ = (Node *)n;
 				}
 		;
