@@ -1454,7 +1454,14 @@ FuncCandidateList sort_candidate_func_list(FuncCandidateList oldCandidates)
         }
         candidates[smallestIndex] = NULL;
     }
-
+    
+    for (int i = 0; i < size; i++) {
+        if (candidates[i] != NULL) {
+            lastCandidate->next = candidates[i];
+            lastCandidate = lastCandidate->next;
+        }
+    }
+    lastCandidate->next = NULL;
     pfree(candidates);
     return sortedCandidates;
 }
