@@ -293,7 +293,7 @@ static void show_version(int alls)
         printf("VERSION = ");
     }
     printf("PostgreSQL 9.2.4\n");
-#ifdef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_MULTIPLE_NODES
     if (alls) {
 	printf("OPENGAUSS_VERSION = ");
     }
