@@ -1606,6 +1606,7 @@ void ApplyWorkerMain()
     options.protoVersion = LOGICALREP_PROTO_VERSION_NUM;
     options.publicationNames = t_thrd.applyworker_cxt.mySubscription->publications;
     options.binary = t_thrd.applyworker_cxt.mySubscription->binary;
+    options.useSnapshot = AM_TABLESYNC_WORKER;
 
     /* Start normal logical streaming replication. */
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_startstreaming(&options);
