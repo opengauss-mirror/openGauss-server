@@ -13,18 +13,22 @@
 
 import numpy as np
 from scipy import signal
-from .statistics import trim_head_and_tail_nan
+from .stat_utils import trim_head_and_tail_nan
 import warnings
+
 warnings.filterwarnings("ignore")
 
-def acf(x_raw: np, nlags=None):
-    """the acf can compute correlation from x[t] and x[t -k]"""
-    x_raw = np.array(x_raw)
-    x_diff = x_raw - x_raw.mean()
-    n_x = len(x_raw)
-    d_param = n_x * np.ones(2 * n_x - 1)
-    acov = np.correlate(x_diff, x_diff, "full")[n_x - 1:] / d_param[n_x - 1:]
-    return acov[: nlags + 1] / acov[0]
+
+def acf(x_raw: np.array, nlags=None):
+    x = np.array(x_raw)
+    n = x.shape[0]
+    if nlags is None:
+        nlags = min(int(10 * np.log10(n)), n - 1)
+
+    x_diff = x - x.mean()
+    avf = np.correlate(x_diff, x_diff, "full")[n - 1:] / n
+    res = avf[: nlags + 1] / avf[0]
+    return res
 
 
 def _padding_nans(x_raw, trim_head=None, trim_tail=None):
@@ -41,50 +45,47 @@ def _padding_nans(x_raw, trim_head=None, trim_tail=None):
     return result
 
 
-def _get_trend(x_raw, filt):
-    """"use filt to extract trend component"""
-    trim_head = int(np.ceil(len(filt) / 2.) - 1) or None
-    trim_tail = int(np.ceil(len(filt) / 2.) - len(filt) % 2) or None
-    result = signal.convolve(x_raw, filt, mode='valid')
+def _get_trend(x_raw, filter_):
+    """"use the filter to extract trend component"""
+    length = len(filter_)
+    trim_tail = (length - 1) // 2 or None
+    trim_head = length - 1 - trim_tail or None
+    result = signal.convolve(x_raw, filter_, mode='valid')
     result = _padding_nans(result, trim_head, trim_tail)
-
     return result
 
 
 def is_seasonal_series(s_values, high_ac_threshold: float = 0.7, min_seasonal_freq=3):
-    """judge series whether is seasonal with acf alg"""
-    result = False
-    period = None
+    """Judge whether the series is seasonal by using the acf alg"""
     s_ac = acf(s_values, nlags=len(s_values))
     diff_ac = np.diff(s_ac)
-    high_ac_peak_pos = (1 + np.argwhere((diff_ac[:-1] > 0) & (diff_ac[1:] < 0)
-                                        & (s_ac[1: -1] > high_ac_threshold)).flatten())
+    high_ac_peak_pos = 1 + np.argwhere(
+        (diff_ac[:-1] > 0) & (diff_ac[1:] < 0) & (s_ac[1: -1] > high_ac_threshold)
+    ).flatten()
 
     for i in high_ac_peak_pos:
         if i > min_seasonal_freq:
-            period = high_ac_peak_pos[np.argmax(s_ac[high_ac_peak_pos])]
-            result = True
-            break
-    return result, period
+            return True, high_ac_peak_pos[np.argmax(s_ac[high_ac_peak_pos])]
+
+    return False, None
 
 
-def get_seasonal_period(s_values, high_ac_threshold: float = 0.5):
+def get_seasonal_period(s_values, high_ac_threshold: float = 0.5, min_seasonal_freq=3):
     """"return seasonal period"""
-    result = is_seasonal_series(s_values, high_ac_threshold)
-    return result[1]
+    return is_seasonal_series(s_values, high_ac_threshold, min_seasonal_freq)[1]
 
 
-def _get_filt(period):
+def _get_filter(period):
     """the filter to extract trend component"""
     if period % 2 == 0:
-        filt = np.array([.5] + [1] * (period - 1) + [.5]) / period
+        filter_ = np.array([.5] + [1] * (period - 1) + [.5]) / period
     else:
-        filt = np.repeat(1. / period, period)
-    return filt
+        filter_ = np.repeat(1. / period, period)
+    return filter_
 
 
 def _get_seasonal(x_raw, detrended, period):
-    """"return seasonal component from x_raw, detrended and period"""
+    """"return the seasonal component from x_raw, detrended and period"""
     nobs = len(x_raw)
     period_averages = np.array([np.nanmean(detrended[i::period]) for i in range(period)])
     period_averages -= np.mean(period_averages, axis=0)
@@ -94,23 +95,22 @@ def _get_seasonal(x_raw, detrended, period):
 
 
 def seasonal_decompose(x_raw, period=None):
-    """seasonal series can decompose three component: trend, seasonal, resid"""
-    pfreq = period
+    """decompose a series into three components: seasonal, trend, residual"""
 
     if np.ndim(x_raw) > 1:
-        raise ValueError("x ndim > 1 not implemented")
+        raise ValueError("The input data must be 1-D array.")
 
     if period is None:
-        raise ValueError("preiod must not None")
+        raise ValueError("You must specify a period.")
 
     if not np.all(np.isfinite(x_raw)):
-        raise ValueError("the x has no valid values")
+        raise ValueError("The input data has infinite value or nan.")
 
-    if x_raw.shape[0] < 2 * pfreq:
-        raise ValueError(f"the x length:{x_raw.shape[0]} not meet 2 preiod:{2 * pfreq}")
+    if x_raw.shape[0] < 2 * period:
+        raise ValueError(f"The input data should be longer than two periods:{2 * period} at least")
+
     x_raw = trim_head_and_tail_nan(x_raw)
-    filt = _get_filt(period)
-    trend = _get_trend(x_raw, filt)
+    trend = _get_trend(x_raw, _get_filter(period))
     trend = trim_head_and_tail_nan(trend)
     detrended = x_raw - trend
 

@@ -11,20 +11,21 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
+import concurrent
 import logging
 import os
 import signal
 from abc import ABC, abstractmethod
-from concurrent.futures.process import ProcessPoolExecutor
 from concurrent.futures import as_completed, wait
-import concurrent
-from multiprocessing import Event
+from concurrent.futures.process import ProcessPoolExecutor
 
 from dbmind.common import utils
 from dbmind.common.platform import WIN32
 
 IN_PROCESS = 'DBMind [Worker Process] [IN PROCESS]'
 PENDING = 'DBMind [Worker Process] [IDLE]'
+
+_mp_sync_mgr_instance = None
 
 
 def _initializer():
@@ -77,19 +78,44 @@ class AbstractWorker(ABC):
         self.status = self.CLOSED
 
 
+def get_mp_sync_manager():
+    global _mp_sync_mgr_instance
+
+    from multiprocessing.managers import DictProxy, SyncManager
+    from collections import defaultdict
+
+    class MPSyncManager(SyncManager):
+        __proc_title__ = 'DBMind [SyncManager Process]'
+
+        @staticmethod
+        def _initializer():
+            utils.set_proc_title(MPSyncManager.__proc_title__)
+
+        def start(self):
+            super().start(initializer=MPSyncManager._initializer)
+
+    MPSyncManager.register('defaultdict', defaultdict, DictProxy)
+    if not _mp_sync_mgr_instance:
+        _mp_sync_mgr_instance = MPSyncManager()
+        _mp_sync_mgr_instance.start()
+    return _mp_sync_mgr_instance
+
+
 class _ProcessPoolExecutor(ProcessPoolExecutor):
 
     @staticmethod
     def _wait_for_notify(event):
+        # Set the status of the current work process.
+        _initializer()
         event.wait()
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, worker_num):
+        super().__init__(worker_num)
         # Make the process pool is a fixed process pool, which creates many idle processes and waits for the
         # scheduler's task. Why not use lazy-loading mode? Because the worker process forked from the master process,
         # the master process maybe have some running backend threads while forking. This action will cause unexpected
         # behaviors, such as timed backend threads also being forked and run in the child process.
-        event = Event()
+        event = get_mp_sync_manager().Event()
         for _ in range(self._max_workers):
             self.submit(self._wait_for_notify, event)
         event.set()
@@ -121,7 +147,7 @@ class ProcessWorker(AbstractWorker):
             from concurrent.futures.thread import ThreadPoolExecutor
             self.pool = ThreadPoolExecutor(worker_num)
         else:
-            self.pool = _ProcessPoolExecutor(worker_num, initializer=_initializer)
+            self.pool = _ProcessPoolExecutor(worker_num)
 
         super().__init__(worker_num)
 
@@ -167,7 +193,7 @@ class ProcessWorker(AbstractWorker):
         self.pool.shutdown(True, cancel_futures=cancel_futures)
 
 
-def get_worker_instance(_type, process_num, hosts=None) -> AbstractWorker:
+def get_worker_instance(_type, process_num) -> AbstractWorker:
     if _type == 'local':
         return ProcessWorker(process_num)
     elif _type == 'dist':

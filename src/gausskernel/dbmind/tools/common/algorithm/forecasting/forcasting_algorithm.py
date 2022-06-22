@@ -12,53 +12,19 @@
 # See the Mulan PSL v2 for more details.
 
 import logging
-import numpy as np
-import itertools
 from types import SimpleNamespace
-from ...types import Sequence
-from ..statistics import sequence_interpolate, trim_head_and_tail_nan
+import threading
+from typing import Union, List
+
+import numpy as np
+
 from .. import seasonal as seasonal_interface
+from ..stat_utils import sequence_interpolate, trim_head_and_tail_nan
+from ...types import Sequence
 
+from dbmind.common.utils import dbmind_assert
 
-MAX_AR_ORDER = 5
-MAX_MA_ORDER = 5
-MIN_DATA_LENGTH = max(MAX_AR_ORDER, MAX_MA_ORDER)
-
-
-def estimate_order_of_model_parameters(raw_data, k_ar_min=0, k_diff_min=0,
-                                 k_ma_min=0, k_diff_max=0):
-    """return model type and model order"""
-    diff_data = np.diff(raw_data)
-    algorithm_name = "linear"
-    k_ar_valid, k_ma_valid = 0, 0
-    min_bic = np.inf
-    bic_result_list = []
-    for k_ar, k_diff, k_ma in \
-            itertools.product(range(k_ar_min, MAX_AR_ORDER + 1),
-                              range(k_diff_min, k_diff_max + 1),
-                              range(k_ma_min, MAX_MA_ORDER + 1)):
-        if k_ar == 0 and k_diff == 0 and k_ma == 0:
-            continue
-
-        try:
-            from .arima_model.arima_alg import ARIMA
-
-            model = ARIMA(diff_data, order=(k_ar, k_diff, k_ma), )
-            model.fit()
-            bic_result = model.bic
-            bic_result_list.append(bic_result)
-            if not np.isnan(bic_result) and bic_result < min_bic:
-                algorithm_name = "arima"
-                min_bic = bic_result
-                k_ar_valid = k_ar
-                k_ma_valid = k_ma
-        except ValueError:
-            """Ignore while ValueError occurred."""
-        except Exception as e:
-            logging.warning("Warning occurred when estimate order of model parameters, "
-                            "warning_msg is: %s", e)
-    order = (k_ar_valid, 1, k_ma_valid)
-    return algorithm_name, order
+LINEAR_THRESHOLD = 0.80
 
 
 class ForecastingAlgorithm:
@@ -68,37 +34,48 @@ class ForecastingAlgorithm:
         """the subclass should implement, tarin model param"""
         pass
 
-    def forecast(self, forecast_length: int) -> Sequence:
+    def forecast(self, forecast_length: int) -> Union[List, np.array]:
         """the subclass should implement, forecast series according history series"""
         pass
 
 
 class ForecastingFactory:
     """the ForecastingFactory can create forecast model"""
-    _CACHE = {}  # Reuse an instantiated object.
+    _CACHE = threading.local()  # Reuse an instantiated object.
 
     @staticmethod
-    def get_instance(raw_data) -> ForecastingAlgorithm:
-        """return forecast model according algorithm_name"""
-        algorithm_name, order = estimate_order_of_model_parameters(raw_data)
-        logging.debug('Choose %s algorithm to forecast.', algorithm_name)
-        if algorithm_name == "linear":
-            from .simple_forecasting import SimpleLinearFitting
-            ForecastingFactory._CACHE[algorithm_name] = SimpleLinearFitting()
-        elif algorithm_name == "arima" or algorithm_name is None:
-            from .arima_model.arima_alg import ARIMA
-            ForecastingFactory._CACHE[algorithm_name] = ARIMA(raw_data, order)
-        else:
-            raise NotImplementedError(f'Failed to load {algorithm_name} algorithm.')
+    def _get(algorithm_name):
+        if not hasattr(ForecastingFactory._CACHE, algorithm_name):
+            if algorithm_name == 'linear':
+                from .simple_forecasting import SimpleLinearFitting
+                setattr(ForecastingFactory._CACHE, algorithm_name, SimpleLinearFitting(avoid_repetitive_fitting=True))
+            elif algorithm_name == 'arima':
+                from .arima_model.arima_alg import ARIMA
+                setattr(ForecastingFactory._CACHE, algorithm_name, ARIMA())
+            else:
+                raise NotImplementedError(f'Failed to load {algorithm_name} algorithm.')
 
-        return ForecastingFactory._CACHE[algorithm_name]
+        return getattr(ForecastingFactory._CACHE, algorithm_name)
+
+    @staticmethod
+    def get_instance(sequence) -> ForecastingAlgorithm:
+        """Return a forecast model according to the feature of given sequence."""
+        linear = ForecastingFactory._get('linear')
+        linear.refit()
+        linear.fit(sequence)
+        if linear.r2_score >= LINEAR_THRESHOLD:
+            logging.debug('Choose linear fitting algorithm to forecast.')
+            return linear
+        logging.debug('Choose ARIMA algorithm to forecast.')
+        return ForecastingFactory._get('arima')
 
 
 def _check_forecasting_minutes(forecasting_minutes):
     """
-    check input params: forecasting_minutes whether is valid.
-    :param forecasting_minutes: type->int or float
+    check whether input params forecasting_minutes is valid.
+    :param forecasting_minutes: int or float
     :return: None
+    :exception: raise ValueError if given parameter is invalid.
     """
     check_result = True
     message = ""
@@ -118,66 +95,96 @@ def _check_forecasting_minutes(forecasting_minutes):
 
 def decompose_sequence(sequence):
     seasonal_data = None
-    raw_data = np.array(list(sequence.values))
-    is_seasonal, period = seasonal_interface.is_seasonal_series(raw_data)
+    raw_data = np.array(sequence.values)
+    is_seasonal, period = seasonal_interface.is_seasonal_series(
+        raw_data,
+        high_ac_threshold=0.5,
+        min_seasonal_freq=3
+    )
     if is_seasonal:
-        decompose_results = seasonal_interface.seasonal_decompose(raw_data, period=period)
-        seasonal = decompose_results[0]
-        trend = decompose_results[1]
-        resid = decompose_results[2]
+        seasonal, trend, residual = seasonal_interface.seasonal_decompose(raw_data, period=period)
         train_sequence = Sequence(timestamps=sequence.timestamps, values=trend)
         train_sequence = sequence_interpolate(train_sequence)
         seasonal_data = SimpleNamespace(is_seasonal=is_seasonal,
                                         seasonal=seasonal,
                                         trend=trend,
-                                        resid=resid,
+                                        resid=residual,
                                         period=period)
     else:
         train_sequence = sequence
     return seasonal_data, train_sequence
 
 
-def compose_sequence(seasonal_data, train_sequence, forecast_length, forecast_data):
+def compose_sequence(seasonal_data, train_sequence, forecast_values):
+    forecast_length = len(forecast_values)
     if seasonal_data and seasonal_data.is_seasonal:
         start_index = len(train_sequence) % seasonal_data.period
-        forecast_data = seasonal_data.seasonal[start_index: start_index + forecast_length] + \
-                        forecast_data + \
-                        seasonal_data.resid[start_index: start_index + forecast_length]
-    forecast_timestamps = [train_sequence.timestamps[-1] + train_sequence.step * (i + 1)
-                           for i in range(int(forecast_length))]
-    return Sequence(timestamps=forecast_timestamps, values=forecast_data)
+        seasonal = seasonal_data.seasonal
+        resid = seasonal_data.resid
+        dbmind_assert(len(seasonal) == len(resid))
+
+        if len(seasonal) - start_index < forecast_length:
+            # pad it.
+            padding_length = forecast_length - (len(seasonal) - start_index)
+            seasonal = np.pad(seasonal, (0, padding_length), mode='wrap')
+            resid = np.pad(resid, (0, padding_length), mode='wrap')
+        seasonal = seasonal[start_index: start_index + forecast_length]
+        resid = resid[start_index: start_index + forecast_length]
+        forecast_values = seasonal + forecast_values + resid
+
+    forecast_timestamps = [train_sequence.timestamps[-1] + train_sequence.step * i
+                           for i in range(1, forecast_length + 1)]
+    return forecast_timestamps, forecast_values
 
 
-def quickly_forecast(sequence, forecasting_minutes):
+def quickly_forecast(sequence, forecasting_minutes, lower=0, upper=float('inf')):
     """
-    return forecast sequence in forecasting_minutes from raw sequnece
+    Return forecast sequence in forecasting_minutes from raw sequence.
     :param sequence: type->Sequence
     :param forecasting_minutes: type->int or float
-    :return: forecase sequence: type->Sequence
+    :param lower: The lower limit of the forecast result
+    :param upper: The upper limit of the forecast result.
+    :return: forecast sequence: type->Sequence
     """
-    # 1 check forecasting minutes
+    if len(sequence) <= 1:
+        return Sequence()
+
+    # 1. check for forecasting minutes
     _check_forecasting_minutes(forecasting_minutes)
-    forecasting_length = int(forecasting_minutes * 60 * 1000 // sequence.step)
+    forecasting_length = int(forecasting_minutes * 60 * 1000 / sequence.step)
     if forecasting_length == 0 or forecasting_minutes == 0:
         return Sequence()
 
-    # 2 interpolate
-    sequence = sequence_interpolate(sequence)
+    # 2. interpolate
+    interpolated_sequence = sequence_interpolate(sequence)
 
-    # 3 decompose sequence
-    seasonal_data, train_sequence = decompose_sequence(sequence)
+    # 3. decompose sequence
+    seasonal_data, train_sequence = decompose_sequence(interpolated_sequence)
 
-    # 4 get model from ForecastingFactory
-    model = ForecastingFactory.get_instance(list(train_sequence.values))
+    # 4. get model from ForecastingFactory
+    model = ForecastingFactory.get_instance(train_sequence)
 
-    # 5 model fit and forecast
+    # 5. fit and forecast
     model.fit(train_sequence)
+
     forecast_data = model.forecast(forecasting_length)
     forecast_data = trim_head_and_tail_nan(forecast_data)
+    dbmind_assert(len(forecast_data) == forecasting_length)
 
-    # 6 compose sequence
-    forecast_sequence = compose_sequence(seasonal_data,
-                                         train_sequence,
-                                         forecasting_length,
-                                         forecast_data)
-    return forecast_sequence
+    # 6. compose sequence
+    forecast_timestamps, forecast_values = compose_sequence(
+        seasonal_data,
+        train_sequence,
+        forecast_data
+    )
+
+    for i in range(len(forecast_values)):
+        forecast_values[i] = min(forecast_values[i], upper)
+        forecast_values[i] = max(forecast_values[i], lower)
+
+    return Sequence(
+        timestamps=forecast_timestamps,
+        values=forecast_values,
+        name=sequence.name,
+        labels=sequence.labels
+    )

@@ -13,11 +13,10 @@
 
 import sqlalchemy
 from sqlalchemy.engine import create_engine
-from sqlalchemy.exc import ProgrammingError
 
 from .base import Base, DynamicConfig
 from .schema import load_all_schema_models
-from ..common.exceptions import SQLExecutionError
+from ..common.exceptions import SQLExecutionError, DuplicateTableError
 
 
 def create_metadatabase_schema(check_first=True):
@@ -32,6 +31,8 @@ def create_metadatabase_schema(check_first=True):
             checkfirst=check_first
         )
     except Exception as e:
+        if 'DuplicateTable' in str(e):
+            raise DuplicateTableError(e)
         raise SQLExecutionError(e)
 
 
@@ -46,6 +47,8 @@ def destroy_metadatabase():
             session_clz.get('engine')
         )
     except Exception as e:
+        if 'DuplicateTable' in str(e):
+            raise DuplicateTableError(e)
         raise SQLExecutionError(e)
 
 

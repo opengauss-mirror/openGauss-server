@@ -29,7 +29,7 @@ from .exceptions import OptionError
 from .xtuner import procedure_main
 from . import utils
 
-__version__ = '3.0.0'
+__version__ = '2.1.0'
 __description__ = 'X-Tuner: a self-tuning tool integrated by openGauss.'
 
 
@@ -189,8 +189,11 @@ def get_config(filepath):
             break
 
     benchmark_script = cp['Benchmark'].get('benchmark_script', '')
-    if benchmark_script.rstrip('.py') + '.py' not in benchmarks:
+    if benchmark_script.endswith('.py'):
+        benchmark_script = benchmark_script[:-len('.py')]
+    if benchmark_script + '.py' not in benchmarks:
         raise OptionError(invalid_opt_msg % ('benchmark_script', benchmarks))
+
     config['benchmark_path'] = cp['Benchmark'].get('benchmark_path', '')
     config['benchmark_cmd'] = cp['Benchmark'].get('benchmark_cmd', '')
     benchmark_period = cp['Benchmark'].get('benchmark_period', '0')

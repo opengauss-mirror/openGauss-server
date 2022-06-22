@@ -19,11 +19,13 @@ pg_db:
       sql: |-
         SELECT d.datid,d.datname,numbackends,
           xact_commit,xact_rollback,xact_rollback + xact_commit AS xact_total,
-          blks_read,blks_hit,blks_read + blks_hit AS blks_access,
+          blks_read,blks_hit,(blks_hit / (blks_read+blks_hit+0.001)) AS blks_access,
           tup_returned,tup_fetched,tup_inserted,tup_updated,tup_deleted,tup_inserted + tup_updated + tup_deleted AS tup_modified,
           conflicts,temp_files,temp_bytes,deadlocks,
           blk_read_time,blk_write_time, extract(epoch from stats_reset) as stats_reset,
-          confl_tablespace,confl_lock,confl_snapshot,confl_bufferpin,confl_deadlock
+          confl_tablespace,confl_lock,confl_snapshot,confl_bufferpin,confl_deadlock,
+          tup_returned / (extract (epoch from (pg_catalog.now() - stats_reset))) AS read_tup_speed,
+        (tup_inserted + tup_updated + tup_deleted) / (extract (epoch from (pg_catalog.now() - stats_reset))) AS write_tup_speed
         FROM pg_stat_database d,pg_stat_database_conflicts pdc
         WHERE pdc.datname = d.datname and d.datname NOT IN ('postgres', 'template0', 'template1');
       version: '>=0.0.0'
@@ -53,6 +55,9 @@ pg_db:
     - name: blks_hit
       description: Number of times disk blocks were found already in the buffer cache, so that a read was not necessary (this only includes hits in the OpenGauss buffer cache, not the operating system's file system cache)
       usage: COUNTER
+    - name: blks_access
+      description: hit rate of database
+      usage: GAUGE
     - name: tup_returned
       description: Number of rows returned by queries in this database
       usage: COUNTER
@@ -104,6 +109,12 @@ pg_db:
     - name: confl_deadlock
       description: Number of queries in this database that have been canceled due to deadlocks
       usage: COUNTER
+    - name: read_tup_speed
+      description: read_tup_speed
+      usage: COUNTER
+    - name: write_tup_speed
+      description: write_tup_speed
+      usage: COUNTER
   status: enable
   ttl: -1
   timeout: 1
@@ -115,11 +126,11 @@ pg_meta:
   query:
     - name: pg_meta
       sql: |-
-        SELECT (SELECT system_identifier FROM pg_control_system()) AS cluster_id,
-          current_setting('port')                             AS listen_port,
-          current_setting('wal_level')                        AS wal_level,
-          current_setting('server_version')                   AS version,
-          current_setting('server_version_num')               AS ver_num,
+        SELECT (SELECT system_identifier FROM pg_catalog.pg_control_system()) AS cluster_id,
+          pg_catalog.current_setting('port')                             AS listen_port,
+          pg_catalog.current_setting('wal_level')                        AS wal_level,
+          pg_catalog.current_setting('server_version')                   AS version,
+          pg_catalog.current_setting('server_version_num')               AS ver_num,
           'N/A'                                               AS primary_conninfo,
           1                                                   AS info;
       version: '>=0.0.0'
@@ -158,21 +169,24 @@ pg_connections:
   desc: OpenGauss database connections
   query:
     - name: pg_connections
-      sql: select max_conn,used_conn,max_conn-used_conn res_for_normal from (select count(*) used_conn from pg_stat_activity) t1,(select setting::int max_conn from pg_settings where name='max_connections') t2;
-      version: '>=0.0.0'
+      sql: select t1.used_conn, t2.enqueue_sql, t3.idle_session from (select pg_catalog.count(*) used_conn from pg_stat_activity) t1,
+             (select pg_catalog.count(*) enqueue_sql from pg_stat_activity where enqueue is not NULL) t2,
+             (select pg_catalog.count(*) idle_session from pg_stat_activity where state='idle') t3;
+      version: '>=0.0.0' 
       timeout: 1
       status: enable
       dbRole: ""
   metrics:
-    - name: max_conn
-      description: total of connections
-      usage: GAUGE
     - name: used_conn
       description: used of connections
       usage: GAUGE
-    - name: res_for_normal
-      description: reserve of connections
+    - name: idle_session
+      description: idle session number
       usage: GAUGE
+    - name: enqueue_sql
+      description: running sql
+      usage: GAUGE
+
   status: enable
   ttl: 60
   timeout: 1
@@ -183,7 +197,7 @@ pg_session_connection:
   desc: OpenGauss backend activity group by state
   query:
     - name: pg_session_connection
-      sql: select client_addr,state,count(1) as count from pg_stat_activity group by client_addr,state order by 3 desc limit 20 ;
+      sql: select client_addr,state,pg_catalog.count(1) as count from pg_stat_activity group by client_addr,state order by 3 desc limit 20 ;
       version: '>=0.0.0'
       timeout: 1
       status: enable
@@ -202,7 +216,6 @@ pg_session_connection:
   ttl: 60
   timeout: 1
   public: true
-
 
 
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -238,15 +251,15 @@ pg_activity:
                coalesce(max_conn_duration, 0) AS max_conn_duration
         FROM (SELECT d.oid AS database, d.datname, a.state
               FROM pg_database d,
-                   unnest(ARRAY ['active','idle','idle in transaction','idle in transaction (aborted)','fastpath function call','disabled']) a(state)
+                   pg_catalog.unnest(ARRAY ['active','idle','idle in transaction','idle in transaction (aborted)','fastpath function call','disabled']) a(state)
               WHERE d.datname NOT IN ('template0','template1')) base
                  LEFT JOIN (
             SELECT datname, state,
-                   count(*) AS count,
-                   max(extract(epoch from now() - state_change)) AS max_duration,
-                   max(extract(epoch from now() - xact_start))   AS max_tx_duration,
-                   max(extract(epoch from now() - backend_start)) AS max_conn_duration
-            FROM pg_stat_activity WHERE pid <> pg_backend_pid()
+                   pg_catalog.count(*) AS count,
+                   pg_catalog.max(extract(epoch from pg_catalog.now() - state_change)) AS max_duration,
+                   pg_catalog.max(extract(epoch from pg_catalog.now() - xact_start))   AS max_tx_duration,
+                   pg_catalog.max(extract(epoch from pg_catalog.now() - backend_start)) AS max_conn_duration
+            FROM pg_stat_activity WHERE pid <> pg_catalog.pg_backend_pid()
             GROUP BY datname, state
         ) a USING (datname, state);
       version: '>=1.0.0'
@@ -297,8 +310,8 @@ pg_downstream:
     - name: pg_downstream
       sql: |
         SELECT l.state, coalesce(count, 0 ) AS count
-        FROM unnest(ARRAY ['Streaming','Startup','Catchup', 'Backup', 'Stopping']) l(state)
-        LEFT JOIN (SELECT state, count(*) AS count FROM pg_stat_replication GROUP BY state)r ON l.state =  r.state
+        FROM pg_catalog.unnest(ARRAY ['Streaming','Startup','Catchup', 'Backup', 'Stopping']) l(state)
+        LEFT JOIN (SELECT state, pg_catalog.count(*) AS count FROM pg_stat_replication GROUP BY state)r ON l.state =  r.state
       version: '>=0.0.0'
       timeout: 0.5
       ttl: 10
@@ -371,13 +384,13 @@ pg_replication:
         from
           (
           select pr.pid,client_addr,application_name,pr.state,pr.sync_state,
-            pg_xlog_location_diff (case when pg_is_in_recovery() then pg_last_xlog_receive_location() else pg_current_xlog_location() end, '0/0') as lsn,
-            pg_xlog_location_diff(pr.sender_sent_location,'0/0') as sent_location,
-            pg_xlog_location_diff(pr.receiver_write_location,'0/0') as write_location,
-            pg_xlog_location_diff(pr.receiver_flush_location,'0/0') as flush_location,
-            pg_xlog_location_diff(pr.receiver_replay_location,'0/0') as replay_location,
-            pg_xlog_location_diff(pr.receiver_replay_location, pg_current_xlog_location()) as replay_lag,
-            extract(EPOCH from now() - backend_start) as backend_uptime,pr.sync_priority
+            pg_xlog_location_diff (case when pg_catalog.pg_is_in_recovery() then pg_catalog.pg_last_xlog_receive_location() else pg_catalog.pg_current_xlog_location() end, '0/0') as lsn,
+            pg_catalog.pg_xlog_location_diff(pr.sender_sent_location,'0/0') as sent_location,
+            pg_catalog.pg_xlog_location_diff(pr.receiver_write_location,'0/0') as write_location,
+            pg_catalog.pg_xlog_location_diff(pr.receiver_flush_location,'0/0') as flush_location,
+            pg_catalog.pg_xlog_location_diff(pr.receiver_replay_location,'0/0') as replay_location,
+            pg_catalog.pg_xlog_location_diff(pr.receiver_replay_location, pg_catalog.pg_current_xlog_location()) as replay_lag,
+            extract(EPOCH from pg_catalog.now() - backend_start) as backend_uptime,pr.sync_priority
           from
             pg_stat_replication pr
         );
@@ -460,10 +473,10 @@ pg_replication:
 # ┃ LABEL    xmin                           replication xid
 # ┃ LABEL    catalog_xmin                   logical decode xid
 # ┃ LABEL    restart_lsn                    Xlog info
-# ┃ GAUGE    delay_lsn                      delay lsn from pg_current_xlog_location()
+# ┃ GAUGE    delay_lsn                      delay lsn from pg_catalog.pg_current_xlog_location()
 # ┃ DISCARD  dummy_standby                  Is real standby
 # ┣┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
-# ┃ pg_replication_slots_delay_lsn{slot_name,plugin,slot_type,datoid,database,active,xmin,catalog_xmin,restart_lsn}  GAUGE    delay lsn from pg_current_xlog_location()
+# ┃ pg_replication_slots_delay_lsn{slot_name,plugin,slot_type,datoid,database,active,xmin,catalog_xmin,restart_lsn}  GAUGE    delay lsn from pg_catalog.pg_current_xlog_location()
 # ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 pg_slot:
   name: pg_replication_slots
@@ -476,8 +489,8 @@ pg_slot:
             (case active when 't' then 1 else 0 end)as active,
             coalesce(xmin,'_') as xmin,
             dummy_standby,
-            pg_xlog_location_diff(CASE WHEN pg_is_in_recovery() THEN restart_lsn
-            ELSE pg_current_xlog_location() END , restart_lsn)  AS delay_lsn
+            pg_catalog.pg_xlog_location_diff(CASE WHEN pg_catalog.pg_is_in_recovery() THEN restart_lsn
+            ELSE pg_catalog.pg_current_xlog_location() END , restart_lsn)  AS delay_lsn
         from pg_replication_slots;
       version: '>=1.0.0'
       timeout: 1
@@ -507,7 +520,7 @@ pg_slot:
       description: replication xid
       usage: LABEL
     - name: delay_lsn
-      description: delay lsn from pg_current_xlog_location()
+      description: delay lsn from pg_catalog.pg_current_xlog_location()
       usage: GAUGE
     - name: dummy_standby
       description: Is real standby
@@ -526,14 +539,14 @@ pg_slot:
 # ┣┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
 # ┃ LABEL    datname                        Name of this database
 # ┃ GAUGE    size_bytes                     Disk space used by the database
-# ┃ GAUGE    age                            database age calculated by age(datfrozenxid64)
+# ┃ GAUGE    age                            database age calculated by pg_catalog.age(datfrozenxid64)
 # ┃ GAUGE    is_template                    1 for template db and 0 for normal db
 # ┃ GAUGE    allow_conn                     1 allow connection and 0 does not allow
 # ┃ GAUGE    conn_limit                     connection limit, -1 for no limit
 # ┃ GAUGE    frozen_xid                     tuple with xmin below this will always be visable (until wrap around)
 # ┣┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
 # ┃ pg_database_size_bytes{datname}   GAUGE    Disk space used by the database
-# ┃ pg_database_age{datname}          GAUGE    database age calculated by age(datfrozenxid64)
+# ┃ pg_database_age{datname}          GAUGE    database age calculated by pg_catalog.age(datfrozenxid64)
 # ┃ pg_database_is_template{datname}  GAUGE    1 for template db and 0 for normal db
 # ┃ pg_database_allow_conn{datname}   GAUGE    1 allow connection and 0 does not allow
 # ┃ pg_database_conn_limit{datname}   GAUGE    connection limit, -1 for no limit
@@ -546,8 +559,8 @@ pg_database:
     - name: pg_database
       sql: |-
         SELECT datname,
-          pg_database_size(pg_database.datname) as size_bytes,
-          age(datfrozenxid64)          AS age,
+          pg_catalog.pg_database_size(pg_database.datname) as size_bytes,
+          pg_catalog.age(datfrozenxid64)          AS age,
           datistemplate              AS is_template,
           datallowconn               AS allow_conn,
           datconnlimit               AS conn_limit,
@@ -562,8 +575,8 @@ pg_database:
     - name: pg_database
       sql: |-
         SELECT datname,
-          pg_database_size(pg_database.datname) as size_bytes,
-          age(datfrozenxid64)          AS age,
+          pg_catalog.pg_database_size(pg_database.datname) as size_bytes,
+          pg_catalog.age(datfrozenxid64)          AS age,
           datistemplate              AS is_template,
           datallowconn               AS allow_conn,
           datconnlimit               AS conn_limit,
@@ -583,7 +596,7 @@ pg_database:
       description: Disk space used by the database
       usage: GAUGE
     - name: age
-      description: database age calculated by age(datfrozenxid64)
+      description: database age calculated by pg_catalog.age(datfrozenxid64)
       usage: GAUGE
     - name: is_template
       description: 1 for template db and 0 for normal db
@@ -668,8 +681,8 @@ pg_checkpoint:
            oldest_xid_dbid::text::BIGINT,
            oldest_active_xid::text::BIGINT,
            checkpoint_time                             AS time,
-           extract(epoch from now() - checkpoint_time) AS elapse
-        FROM pg_control_checkpoint();
+           extract(epoch from pg_catalog.now() - checkpoint_time) AS elapse
+        FROM pg_catalog.pg_control_checkpoint();
       version: '>=0.0.0'
       timeout: 1
       ttl: 5
@@ -757,7 +770,7 @@ pg_run_times:
   desc: OpenGauss database run times
   query:
     - name: pg_run_times
-      sql: select 'cluster_runtime' as run_name,(case pg_is_in_recovery() when 'f' then 1 else 0 end) as db_role,extract(epoch from(now() - pg_postmaster_start_time())) as run_time;
+      sql: select 'cluster_runtime' as run_name,(case pg_catalog.pg_is_in_recovery() when 'f' then 1 else 0 end) as db_role,extract(epoch from(pg_catalog.now() - pg_catalog.pg_postmaster_start_time())) as run_time;
       version: '>=0.0.0'
       timeout: 1
       ttl: 60
@@ -823,22 +836,24 @@ pg:
       desc: 'primary database '
       sql: |
         SELECT extract(EPOCH FROM CURRENT_TIMESTAMP)                        AS timestamp,
-           extract(EPOCH FROM now() - pg_postmaster_start_time())       AS uptime,
-           extract(EPOCH FROM pg_postmaster_start_time())               AS boot_time,
-           pg_xlog_location_diff(pg_current_xlog_location() , '0/0')      AS lsn,
-           pg_xlog_location_diff(pg_current_xlog_insert_location(),'0/0')   AS insert_lsn,
-           pg_xlog_location_diff(pg_current_xlog_location() , '0/0')        AS write_lsn,
-           pg_xlog_location_diff(pg_current_xlog_location() , '0/0')    AS flush_lsn,
+           extract(EPOCH FROM pg_catalog.now() - pg_catalog.pg_postmaster_start_time())       AS uptime,
+           extract(EPOCH FROM pg_catalog.pg_postmaster_start_time())               AS boot_time,
+           pg_catalog.pg_xlog_location_diff(pg_catalog.pg_current_xlog_location() , '0/0')      AS lsn,
+           pg_catalog.pg_xlog_location_diff(pg_catalog.pg_current_xlog_insert_location(),'0/0')   AS insert_lsn,
+           pg_catalog.pg_xlog_location_diff(pg_catalog.pg_current_xlog_location() , '0/0')        AS write_lsn,
+           pg_catalog.pg_xlog_location_diff(pg_catalog.pg_current_xlog_location() , '0/0')    AS flush_lsn,
            NULL::BIGINT                                           AS receive_lsn,
            NULL::BIGINT                                           AS replay_lsn,
-           extract(EPOCH FROM now() - pg_conf_load_time())        AS conf_reload_time,
+           extract(EPOCH FROM pg_catalog.now() - pg_catalog.pg_conf_load_time())        AS conf_reload_time,
            NULL::FLOAT                                            AS last_replay_time,
            0::FLOAT                                               AS lag,
-           pg_is_in_recovery()                                    AS is_in_recovery,
-           FALSE                                                  AS is_wal_replay_paused
+           pg_catalog.pg_is_in_recovery()                                    AS is_in_recovery,
+           FALSE                                                  AS is_wal_replay_paused,
+           extract(epoch from pg_catalog.avg(pg_catalog.now()-backend_start))           AS avg_time
+           from pg_stat_activity where client_port is not null
            ;
       version: '>=0.0.0'
-      timeout: 0.1
+      timeout: 1
       ttl: 10
       status: enable
       dbRole: primary
@@ -846,22 +861,24 @@ pg:
       desc: 'standby database '
       sql: |
         SELECT extract(EPOCH FROM CURRENT_TIMESTAMP)                                AS timestamp,
-           extract(EPOCH FROM now() - pg_postmaster_start_time())                   AS uptime,
-           extract(EPOCH FROM pg_postmaster_start_time())                           AS boot_time,
-           pg_xlog_location_diff(pg_last_xlog_receive_location() , '0/0')           AS lsn,
+           extract(EPOCH FROM pg_catalog.now() - pg_catalog.pg_postmaster_start_time())                   AS uptime,
+           extract(EPOCH FROM pg_catalog.pg_postmaster_start_time())                           AS boot_time,
+           pg_catalog.pg_xlog_location_diff(pg_catalog.pg_last_xlog_receive_location() , '0/0')           AS lsn,
            NULL::BIGINT                                                             AS insert_lsn,
            NULL::BIGINT                                                             AS write_lsn,
            NULL::BIGINT                                                             AS flush_lsn,
-           pg_xlog_location_diff(pg_last_xlog_receive_location() , '0/0')           AS receive_lsn,
-           pg_xlog_location_diff(pg_last_xlog_receive_location() , '0/0')           AS replay_lsn,
-           extract(EPOCH FROM now() - pg_conf_load_time())                          AS conf_reload_time,
-           extract(EPOCH FROM pg_last_xact_replay_timestamp())                      AS last_replay_time,
-           pg_is_in_recovery()                                                      AS is_in_recovery
+           pg_catalog.pg_xlog_location_diff(pg_catalog.pg_last_xlog_receive_location() , '0/0')           AS receive_lsn,
+           pg_catalog.pg_xlog_location_diff(pg_catalog.pg_last_xlog_receive_location() , '0/0')           AS replay_lsn,
+           extract(EPOCH FROM pg_catalog.now() - pg_catalog.pg_conf_load_time())                          AS conf_reload_time,
+           extract(EPOCH FROM pg_catalog.pg_last_xact_replay_timestamp())                      AS last_replay_time,
+           pg_catalog.pg_is_in_recovery()                                                      AS is_in_recovery,
+           extract(epoch from pg_catalog.avg(now()-backend_start))                             AS avg_time
+           from pg_stat_activity where client_port is not null
            ;
       version: '>=0.0.0'
-      timeout: 0.1
+      timeout: 1
       ttl: 10
-      status: enable
+      status: disable
       dbRole: standby
   metrics:
     - name: timestamp
@@ -906,6 +923,9 @@ pg:
     - name: is_wal_replay_paused
       description: 1 if wal play is paused
       usage: GAUGE
+    - name: avg_time
+      description: avg_time
+      usage: GAUGE
   status: enable
   ttl: 60
   timeout: 0.1
@@ -917,13 +937,13 @@ pg_setting:
   query:
     - name: pg_setting
       sql: |-
-        SELECT current_setting('max_connections')           AS max_connections,
-            current_setting('max_prepared_transactions') AS max_prepared_transactions,
-            current_setting('max_replication_slots')     AS max_replication_slots,
-            current_setting('max_wal_senders')           AS max_wal_senders,
-            current_setting('max_locks_per_transaction') AS max_locks_per_transaction,
-            current_setting('block_size')                AS block_size,
-            CASE current_setting('wal_log_hints') WHEN 'on' THEN 1 ELSE 0 END AS wal_log_hints;
+        SELECT pg_catalog.current_setting('max_connections')           AS max_connections,
+            pg_catalog.current_setting('max_prepared_transactions') AS max_prepared_transactions,
+            pg_catalog.current_setting('max_replication_slots')     AS max_replication_slots,
+            pg_catalog.current_setting('max_wal_senders')           AS max_wal_senders,
+            pg_catalog.current_setting('max_locks_per_transaction') AS max_locks_per_transaction,
+            pg_catalog.current_setting('block_size')                AS block_size,
+            CASE pg_catalog.current_setting('wal_log_hints') WHEN 'on' THEN 1 ELSE 0 END AS wal_log_hints;
       version: '>=0.0.0'
       timeout: 1
       ttl: 60
@@ -963,7 +983,7 @@ pg_class:
     - name: pg_class
       sql: |-
         SELECT CURRENT_CATALOG AS datname,(select nspname from pg_namespace where oid=relnamespace) as nspname,relname,relkind,relpages,reltuples,
-          CASE WHEN relkind = 'i' THEN NULL ELSE age(relfrozenxid64) END AS relage,pg_relation_size(oid) AS relsize
+          CASE WHEN relkind = 'i' THEN NULL ELSE pg_catalog.age(relfrozenxid64) END AS relage,pg_catalog.pg_relation_size(oid) AS relsize
         FROM pg_class
         WHERE relkind = 'r' and relname not like 'pg_%' and relname not like 'gs_%' and nspname not in ('information_schema', 'pg_catalog')
         ORDER BY relpages DESC LIMIT 32;
@@ -975,7 +995,7 @@ pg_class:
     - name: pg_class
       sql: |-
         SELECT CURRENT_CATALOG AS datname,(select nspname from pg_namespace where oid=relnamespace) as nspname,relname,relkind,relpages,reltuples,
-          CASE WHEN relkind = 'i' THEN NULL ELSE age(relfrozenxid64) END AS relage,pg_relation_size(oid) AS relsize
+          CASE WHEN relkind = 'i' THEN NULL ELSE pg_catalog.age(relfrozenxid64) END AS relage,pg_catalog.pg_relation_size(oid) AS relsize
         FROM pg_class
         WHERE relkind = 'r' and relname not like 'pg_%' and relname not like 'gs_%' and nspname not in ('information_schema', 'pg_catalog')
         ORDER BY relpages DESC LIMIT 32;
@@ -1036,9 +1056,9 @@ pg_lock:
         SELECT datname, mode, coalesce(count, 0) AS count
         FROM (
           SELECT d.oid AS database, d.datname, l.mode
-          FROM pg_database d,unnest(ARRAY ['AccessShareLock','RowShareLock','RowExclusiveLock','ShareUpdateExclusiveLock','ShareLock','ShareRowExclusiveLock','ExclusiveLock','AccessExclusiveLock']) l(mode)
+          FROM pg_database d,pg_catalog.unnest(ARRAY ['AccessShareLock','RowShareLock','RowExclusiveLock','ShareUpdateExclusiveLock','ShareLock','ShareRowExclusiveLock','ExclusiveLock','AccessExclusiveLock']) l(mode)
           WHERE d.datname NOT IN ('template0','template1')) base
-        LEFT JOIN (SELECT database, mode, count(1) AS count FROM pg_locks WHERE database IS NOT NULL GROUP BY database, mode) cnt
+        LEFT JOIN (SELECT database, mode, pg_catalog.count(1) AS count FROM pg_locks WHERE database IS NOT NULL GROUP BY database, mode) cnt
         USING (database, mode);
       version: '>=0.0.0'
       timeout: 1
@@ -1070,7 +1090,7 @@ pg_lock:
 #        with tl as (select usename,granted,locktag,query_start,query
 #                    from pg_locks l,pg_stat_activity a
 #                    where l.pid=a.pid and locktag in(select locktag from pg_locks where granted='f'))
-#        select ts.usename locker_user,ts.query_start locker_query_start,ts.granted locker_granted,ts.query locker_query,tt.query locked_query,tt.query_start locked_query_start,tt.granted locked_granted,tt.usename locked_user,extract(epoch from now() - tt.query_start) as locked_times
+#        select ts.usename locker_user,ts.query_start locker_query_start,ts.granted locker_granted,ts.query locker_query,tt.query locked_query,tt.query_start locked_query_start,tt.granted locked_granted,tt.usename locked_user,extract(epoch from pg_catalog.now() - tt.query_start) as locked_times
 #        from (select * from tl where granted='t') as ts,(select * from tl where granted='f') tt
 #        where ts.locktag=tt.locktag order by 1;
 #      version: '>=0.0.0'
@@ -1120,7 +1140,7 @@ pg_locker:
         with tl as (select usename,granted,locktag,query_start,query
                     from pg_locks l,pg_stat_activity a
                     where l.pid=a.pid and locktag in(select locktag from pg_locks where granted='f'))
-        select usename,query_start,granted,query,count(query) count
+        select usename,query_start,granted,query,pg_catalog.count(query) count
         from tl where granted='t' group by usename,query_start,granted,query order by 5 desc;
       version: '>=0.0.0'
       timeout: 1
@@ -1153,7 +1173,7 @@ pg_active_slowsql:
   desc: OpenGauss active slow query
   query:
     - name: pg_active_slowsql
-      sql: select datname,usename,client_addr,pid,query_start::text,extract(epoch from (now() - query_start)) as query_runtime,xact_start::text,extract(epoch from(now() - xact_start)) as xact_runtime,state,query from pg_stat_activity where state not in('idle') and query_start is not null;
+      sql: select datname,usename,client_addr,pid,query_start::text,extract(epoch from (pg_catalog.now() - query_start)) as query_runtime,xact_start::text,extract(epoch from(pg_catalog.now() - xact_start)) as xact_runtime,state,query from pg_stat_activity where state not in('idle') and query_start is not null;
       version: '>=0.0.0'
       timeout: 1
       ttl: 60
@@ -1241,8 +1261,8 @@ pg_table:
             n_tup_ins,n_tup_upd,n_tup_del,(n_tup_ins + n_tup_upd + n_tup_del) AS n_tup_mod,
             n_tup_hot_upd,n_live_tup,n_dead_tup,
             nvl(last_vacuum::text,'1970-01-01') as last_vacuum,nvl(last_autovacuum::text,'1970-01-01') as last_autovacuum,nvl(last_analyze::text,'1970-01-01') as last_analyze,nvl(last_autoanalyze::text,'1970-01-01') as last_autoanalyze,vacuum_count,autovacuum_count,analyze_count,autoanalyze_count,
-            extract(epoch from now() -(case when nvl(last_vacuum,'1970-01-01')>nvl(last_autovacuum,'1970-01-01') then nvl(last_vacuum,'1970-01-01') else nvl(last_autovacuum,'1970-01-01') end))::int vacuum_delay,
-            extract(epoch from now() -(case when nvl(last_analyze,'1970-01-01')>nvl(last_autoanalyze,'1970-01-01') then nvl(last_analyze,'1970-01-01') else nvl(last_autoanalyze,'1970-01-01') end))::int analyze_delay,
+            extract(epoch from pg_catalog.now() -(case when nvl(last_vacuum,'1970-01-01')>nvl(last_autovacuum,'1970-01-01') then nvl(last_vacuum,'1970-01-01') else nvl(last_autovacuum,'1970-01-01') end))::int vacuum_delay,
+            extract(epoch from pg_catalog.now() -(case when nvl(last_analyze,'1970-01-01')>nvl(last_autoanalyze,'1970-01-01') then nvl(last_analyze,'1970-01-01') else nvl(last_autoanalyze,'1970-01-01') end))::int analyze_delay,
             heap_blks_read,heap_blks_hit,idx_blks_read,idx_blks_hit,
             toast_blks_read,toast_blks_hit,tidx_blks_read,tidx_blks_hit
           FROM pg_stat_user_tables psut,pg_statio_user_tables psio
@@ -1259,8 +1279,8 @@ pg_table:
             n_tup_ins,n_tup_upd,n_tup_del,(n_tup_ins + n_tup_upd + n_tup_del) AS n_tup_mod,
             n_tup_hot_upd,n_live_tup,n_dead_tup,
             nvl(last_vacuum::text,'1970-01-01') as last_vacuum,nvl(last_autovacuum::text,'1970-01-01') as last_autovacuum,nvl(last_analyze::text,'1970-01-01') as last_analyze,nvl(last_autoanalyze::text,'1970-01-01') as last_autoanalyze,vacuum_count,autovacuum_count,analyze_count,autoanalyze_count,
-            extract(epoch from now() -(case when nvl(last_vacuum,'1970-01-01')>nvl(last_autovacuum,'1970-01-01') then nvl(last_vacuum,'1970-01-01') else nvl(last_autovacuum,'1970-01-01') end))::int vacuum_delay,
-            extract(epoch from now() -(case when nvl(last_analyze,'1970-01-01')>nvl(last_autoanalyze,'1970-01-01') then nvl(last_analyze,'1970-01-01') else nvl(last_autoanalyze,'1970-01-01') end))::int analyze_delay,
+            extract(epoch from pg_catalog.now() -(case when nvl(last_vacuum,'1970-01-01')>nvl(last_autovacuum,'1970-01-01') then nvl(last_vacuum,'1970-01-01') else nvl(last_autovacuum,'1970-01-01') end))::int vacuum_delay,
+            extract(epoch from pg_catalog.now() -(case when nvl(last_analyze,'1970-01-01')>nvl(last_autoanalyze,'1970-01-01') then nvl(last_analyze,'1970-01-01') else nvl(last_autoanalyze,'1970-01-01') end))::int analyze_delay,
             heap_blks_read,heap_blks_hit,idx_blks_read,idx_blks_hit,
             toast_blks_read,toast_blks_hit,tidx_blks_read,tidx_blks_hit
           FROM pg_stat_user_tables psut,pg_statio_user_tables psio
@@ -1386,7 +1406,7 @@ pg_index:
   query:
     - name: pg_index
       sql: |-
-          SELECT CURRENT_CATALOG AS datname,psui.schemaname AS nspname,psui.relname AS tablename,psui.indexrelname AS relname,
+          SELECT CURRENT_CATALOG AS datname,psui.schemaname AS nspname,psui.relname AS tablename,psui.indexrelname AS relname, pg_get_indexdef(psui.indexrelid) AS indexdef,
           idx_scan, idx_tup_read,idx_tup_fetch,idx_blks_read,idx_blks_hit
           FROM pg_stat_user_indexes psui,pg_statio_user_indexes psio
           WHERE psio.indexrelid = psui.indexrelid and psui.schemaname not in ('pg_catalog', 'information_schema','snapshot')
@@ -1398,7 +1418,7 @@ pg_index:
       status: enable
     - name: pg_index
       sql: |-
-          SELECT CURRENT_CATALOG AS datname,psui.schemaname AS nspname,psui.relname AS tablename,psui.indexrelname AS relname,
+          SELECT CURRENT_CATALOG AS datname,psui.schemaname AS nspname,psui.relname AS tablename,psui.indexrelname AS relname, pg_get_indexdef(psui.indexrelid) AS indexdef,
           idx_scan,idx_tup_read,idx_tup_fetch,idx_blks_read,idx_blks_hit
           FROM pg_stat_user_indexes psui,pg_statio_user_indexes psio
           WHERE psio.indexrelid = psui.indexrelid and psui.schemaname not in ('pg_catalog', 'information_schema','snapshot')
@@ -1420,6 +1440,9 @@ pg_index:
       usage: LABEL
     - name: relname
       description: index name of this relation
+      usage: LABEL
+    - name: indexdef
+      description: index definition of this relation
       usage: LABEL
     - name: idx_scan
       description: index scans initiated on this index
@@ -1447,10 +1470,10 @@ pg_tables_size:
     - name: pg_tables_size
       sql: |-
           SELECT CURRENT_CATALOG AS datname,nsp.nspname,rel.relname,
-             pg_total_relation_size(rel.oid)       AS bytes,
-             pg_relation_size(rel.oid)             AS relsize,
-             pg_indexes_size(rel.oid)              AS indexsize,
-             pg_total_relation_size(reltoastrelid) AS toastsize
+             pg_catalog.pg_total_relation_size(rel.oid)       AS bytes,
+             pg_catalog.pg_relation_size(rel.oid)             AS relsize,
+             pg_catalog.pg_indexes_size(rel.oid)              AS indexsize,
+             pg_catalog.pg_total_relation_size(reltoastrelid) AS toastsize
           FROM pg_namespace nsp JOIN pg_class rel ON nsp.oid = rel.relnamespace
           WHERE nspname NOT IN ('pg_catalog', 'information_schema','snapshot') AND rel.relkind = 'r'
           order by 4 desc limit 100;
@@ -1462,10 +1485,10 @@ pg_tables_size:
     - name: pg_tables_size
       sql: |-
           SELECT CURRENT_CATALOG AS datname,nsp.nspname,rel.relname,
-             pg_total_relation_size(rel.oid)       AS bytes,
-             pg_relation_size(rel.oid)             AS relsize,
-             pg_indexes_size(rel.oid)              AS indexsize,
-             pg_total_relation_size(reltoastrelid) AS toastsize
+             pg_catalog.pg_total_relation_size(rel.oid)       AS bytes,
+             pg_catalog.pg_relation_size(rel.oid)             AS relsize,
+             pg_catalog.pg_indexes_size(rel.oid)              AS indexsize,
+             pg_catalog.pg_total_relation_size(reltoastrelid) AS toastsize
           FROM pg_namespace nsp JOIN pg_class rel ON nsp.oid = rel.relnamespace
           WHERE nspname NOT IN ('pg_catalog', 'information_schema','snapshot') AND rel.relkind = 'r'
           order by 4 desc limit 100;
@@ -1506,7 +1529,7 @@ pg_indexes_size:
   query:
     - name: pg_indexes_size
       sql: |-
-        select schemaname schema_name,relname table_name,indexrelname index_name,pg_table_size(indexrelid) as index_size
+        select schemaname schema_name,relname table_name,indexrelname index_name,pg_catalog.pg_table_size(indexrelid) as index_size
         from pg_stat_user_indexes
         where schemaname not in('pg_catalog', 'information_schema','snapshot')
         order by 4 desc limit 100;
@@ -1517,7 +1540,7 @@ pg_indexes_size:
       status: disable
     - name: pg_indexes_size
       sql: |-
-        select schemaname schema_name,relname table_name,indexrelname index_name,pg_table_size(indexrelid) as index_size
+        select schemaname schema_name,relname table_name,indexrelname index_name,pg_catalog.pg_table_size(indexrelid) as index_size
         from pg_stat_user_indexes
         where schemaname not in('pg_catalog', 'information_schema','snapshot')
         order by 4 desc limit 100;
@@ -1549,9 +1572,9 @@ pg_need_indexes:
   query:
     - name: pg_need_indexes
       sql: |-
-        select schemaname||'.'||relname as tablename, pg_size_pretty(pg_table_size(relid)) as table_size, seq_scan, seq_tup_read, coalesce(idx_scan,0) idx_scan, coalesce(idx_tup_fetch,0) idx_tup_fetch,coalesce((idx_scan/(case when (seq_scan+idx_scan) >0 then (seq_scan+idx_scan) else 1 end) * 100),0) as rate
+        select schemaname||'.'||relname as tablename, pg_catalog.pg_size_pretty(pg_catalog.pg_table_size(relid)) as table_size, seq_scan, seq_tup_read, coalesce(idx_scan,0) idx_scan, coalesce(idx_tup_fetch,0) idx_tup_fetch,coalesce((idx_scan/(case when (seq_scan+idx_scan) >0 then (seq_scan+idx_scan) else 1 end) * 100),0) as rate
         from pg_stat_user_tables
-        where schemaname not in('pg_catalog', 'information_schema','snapshot') and pg_table_size(relid) > 1024*1024*1024 and coalesce((idx_scan/(case when (seq_scan+idx_scan) >0 then (seq_scan+idx_scan) else 1 end) * 100),0) < 90
+        where schemaname not in('pg_catalog', 'information_schema','snapshot') and pg_catalog.pg_table_size(relid) > 1024*1024*1024 and coalesce((idx_scan/(case when (seq_scan+idx_scan) >0 then (seq_scan+idx_scan) else 1 end) * 100),0) < 90
         order by seq_scan desc limit 10;
       version: '>=0.0.0'
       timeout: 10
@@ -1560,9 +1583,9 @@ pg_need_indexes:
       status: enable
     - name: pg_need_indexes
       sql: |-
-        select schemaname||'.'||relname as tablename, pg_size_pretty(pg_table_size(relid)) as table_size, seq_scan, seq_tup_read, coalesce(idx_scan,0) idx_scan, coalesce(idx_tup_fetch,0) idx_tup_fetch,coalesce((idx_scan/(case when (seq_scan+idx_scan) >0 then (seq_scan+idx_scan) else 1 end) * 100),0) as rate
+        select schemaname||'.'||relname as tablename, pg_catalog.pg_size_pretty(pg_catalog.pg_table_size(relid)) as table_size, seq_scan, seq_tup_read, coalesce(idx_scan,0) idx_scan, coalesce(idx_tup_fetch,0) idx_tup_fetch,coalesce((idx_scan/(case when (seq_scan+idx_scan) >0 then (seq_scan+idx_scan) else 1 end) * 100),0) as rate
         from pg_stat_user_tables
-        where schemaname not in('pg_catalog', 'information_schema','snapshot') and pg_table_size(relid) > 1024*1024*1024 and coalesce((idx_scan/(case when (seq_scan+idx_scan) >0 then (seq_scan+idx_scan) else 1 end) * 100),0) < 90
+        where schemaname not in('pg_catalog', 'information_schema','snapshot') and pg_catalog.pg_table_size(relid) > 1024*1024*1024 and coalesce((idx_scan/(case when (seq_scan+idx_scan) >0 then (seq_scan+idx_scan) else 1 end) * 100),0) < 90
         order by seq_scan desc limit 10;
       version: '>=0.0.0'
       timeout: 10
@@ -1601,7 +1624,7 @@ pg_never_used_indexes:
   query:
     - name: pg_never_used_indexes
       sql: |-
-        select CURRENT_CATALOG as datname, pi.schemaname, pi.relname, pi.indexrelname, pg_table_size(pi.indexrelid) as index_size
+        select CURRENT_CATALOG as datname, pi.schemaname, pi.relname, pi.indexrelname, pg_catalog.pg_table_size(pi.indexrelid) as index_size
         from pg_indexes pis
         join pg_stat_user_indexes pi
         on pis.schemaname = pi.schemaname and pis.tablename = pi.relname and pis.indexname = pi.indexrelname
@@ -1610,8 +1633,8 @@ pg_never_used_indexes:
         where pco.contype is distinct from 'p' and pco.contype is distinct from 'u'
         and (idx_scan,idx_tup_read,idx_tup_fetch) = (0,0,0)
         and pis.indexdef !~ ' UNIQUE INDEX '
-        and pis.schemaname not in('pg_catalog', 'information_schema','snapshot')
-        order by pg_table_size(indexrelid) desc;
+        and pis.schemaname not in('pg_catalog', 'information_schema','snapshot', 'dbe_pldeveloper')
+        order by pg_catalog.pg_table_size(indexrelid) desc;
       version: '>=0.0.0'
       timeout: 10
       ttl: 3600
@@ -1619,7 +1642,7 @@ pg_never_used_indexes:
       status: enable
     - name: pg_never_used_indexes
       sql: |-
-        select CURRENT_CATALOG as datname, pi.schemaname, pi.relname, pi.indexrelname, pg_table_size(pi.indexrelid) as index_size
+        select CURRENT_CATALOG as datname, pi.schemaname, pi.relname, pi.indexrelname, pg_catalog.pg_table_size(pi.indexrelid) as index_size
         from pg_indexes pis
         join pg_stat_user_indexes pi
         on pis.schemaname = pi.schemaname and pis.tablename = pi.relname and pis.indexname = pi.indexrelname
@@ -1628,8 +1651,8 @@ pg_never_used_indexes:
         where pco.contype is distinct from 'p' and pco.contype is distinct from 'u'
         and (idx_scan,idx_tup_read,idx_tup_fetch) = (0,0,0)
         and pis.indexdef !~ ' UNIQUE INDEX '
-        and pis.schemaname not in('pg_catalog', 'information_schema','snapshot')
-        order by pg_table_size(indexrelid) desc;
+        and pis.schemaname not in('pg_catalog', 'information_schema','snapshot', 'dbe_pldeveloper')
+        order by pg_catalog.pg_table_size(indexrelid) desc;
       version: '>=0.0.0'
       timeout: 10
       ttl: 3600
@@ -1661,15 +1684,11 @@ pg_tables_expansion_rate:
   query:
     - name: pg_tables_expansion_rate
       sql: |-
-        select CURRENT_CATALOG as datname, schemaname,relname,n_live_tup,n_dead_tup,round((n_dead_tup/(n_dead_tup+n_live_tup) *100),2) as dead_rate,
-        extract(epoch from coalesce(last_vacuum,'1970-01-01')::text) as last_vacuum,
-        extract(epoch from coalesce(last_autovacuum,'1970-01-01')::text) as last_autovacuum ,
-        extract(epoch from coalesce(last_analyze,'1970-01-01')::text) as last_analyze,
-        extract(epoch from coalesce(last_autoanalyze,'1970-01-01')::text) as last_autoanalyze,
-        vacuum_count,autovacuum_count,analyze_count,autoanalyze_count
-        from pg_stat_user_tables
-        where n_live_tup > 0
-        order by 5 asc;
+        select t1.*, t2.column_number from (select CURRENT_CATALOG as datname, schemaname,relname,n_live_tup,n_dead_tup,round(n_dead_tup/(n_live_tup+1),2) as dead_rate,
+        last_vacuum, last_autovacuum, last_analyze, last_autoanalyze, vacuum_count,autovacuum_count,analyze_count,autoanalyze_count
+        from pg_stat_user_tables where n_live_tup > 0 order by 5 asc) t1 join
+        (select table_schema, table_name, count(column_name) as column_number from information_schema.columns group by table_schema, table_name)
+        t2 on t1.schemaname=t2.table_schema and t1.relname=t2.table_name;
       version: '>=0.0.0'
       timeout: 1
       status: enable
@@ -1689,6 +1708,9 @@ pg_tables_expansion_rate:
     - name: n_dead_tup
       description: dead tup of table
       usage: LABEL
+    - name: column_number
+      description: column number of table
+      usage: label
     - name: dead_rate
       description: Dead rate of table
       usage: GAUGE
@@ -1742,7 +1764,7 @@ pg_lock_sql:
           (locked_act.xact_start)::text as locked_xact_start,
           (locker_act.query_start)::text as locker_query_start,
           (locked_act.query_start)::text as locked_query_start,
-          extract(epoch from now() - locked_act.query_start) as locked_times,
+          extract(epoch from pg_catalog.now() - locked_act.query_start) as locked_times,
           locker_act.query as locker_query,
           locked_act.query as locked_query
         from pg_locks locked,
@@ -1828,7 +1850,7 @@ og_memory_info:
   desc: OpenGauss memory usage informations
   query:
     - name: og_memory_info
-      sql: select memorytype,memorymbytes from pv_total_memory_detail();
+      sql: select memorytype,memorymbytes from pg_catalog.pv_total_memory_detail();
       version: '>=0.0.0'
       timeout: 1
       ttl: 60
@@ -1895,14 +1917,14 @@ og_context_memory:
   name: og_context_memory
   desc: OpenGauss context use memory information
   query:
-    - name: og_session_memory
+    - name: og_context_memory
       sql: |-
         select contextname,
-              sum(usedsize)::bigint as usedsize,
-              sum(totalsize)::bigint as totalsize
+              pg_catalog.sum(usedsize)::bigint as usedsize,
+              pg_catalog.sum(totalsize)::bigint as totalsize
         from gs_session_memory_detail
         group by contextname
-        order by sum(totalsize) desc limit 10;
+        order by pg_catalog.sum(totalsize) desc limit 10;
       version: '>=0.0.0'
       timeout: 30
       ttl: 600
@@ -1956,7 +1978,7 @@ og_cpu_load:
   desc: OpenGauss cpu load
   query:
     - name: og_cpu_load
-      sql: select 'og_total_cpu' og_total_cpu,total_cpu() total_cpu;
+      sql: select 'og_total_cpu' og_total_cpu,pg_catalog.total_cpu() total_cpu;
       version: '>=0.0.0'
       timeout: 1
       ttl: 10
@@ -1974,3 +1996,334 @@ og_cpu_load:
   timeout: 1
   public: true
 
+
+
+pg_thread_pool:
+  name: pg_thread_pool
+  desc: OpenGauss thread pool
+  query:
+    - name: pf_thread_pool
+      sql: select group_id, listener, worker_info, session_info from dbe_perf.GLOBAL_THREADPOOL_STATUS;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: group_id
+      description: group id
+      usage: LABEL
+    - name: listener
+      description: listener
+      usage: GAUGE
+    - name: worker_info
+      description: worker info
+      usage: LABEL
+    - name: session_info
+      description: session info
+      usage: LABEL
+  status: enable
+  ttl: 10
+  timeout: 1
+  public: true
+
+
+pg_recovery_status:
+  name: pg_recovery_status
+  desc: pg recovery status
+  query:
+    - name: pg_recovery_status
+      sql:  SELECT standby_node_name, current_sleep_time, current_rto FROM dbe_perf.global_recovery_status;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: standby_node_name
+      description: node name
+      usage: LABEL
+    - name: current_sleep_time
+      description: current sleep time
+      usage: LABEL
+    - name: current_rto
+      description: current rto
+      usage: GAUGE
+  status: enable
+  ttl: 10
+  timeout: 1
+  public: true
+
+
+pg_stat_get_wal_senders:
+  name: pg_stat_get_wal_senders
+  desc: pg stat get wal senders
+  query:
+    - name: pg_stat_get_wal_senders
+      sql:  SELECT pid, sender_flush_location, receiver_replay_location,pg_catalog.pg_xlog_location_diff(sender_flush_location,receiver_replay_location) as xlog_location_diff FROM pg_catalog.pg_stat_get_wal_senders();
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: pid
+      description: pid
+      usage: GAUGE
+    - name: sender_flush_location
+      description: sender flush location
+      usage: LABEL
+    - name: receiver_replay_location
+      description: receiver replay location
+      usage: LABEL
+    - name: xlog_location_diff
+      description: xlog_location_diff
+      usage: LABEL
+  status: enable
+  ttl: 10
+  timeout: 1
+  public: true
+
+
+statement_responsetime_percentile:
+  name: statement_responsetime_percentile
+  desc: statement responsetime percentile
+  query:
+    - name: statement_responsetime_percentile
+      sql:  SELECT p80, p95 FROM dbe_perf.statement_responsetime_percentile;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: p80
+      description: 80percent SQL rt
+      usage: GAUGE
+    - name: p95
+      description: 95percent SQL rt
+      usage: GAUGE
+  status: enable
+  ttl: 10
+  timeout: 1
+  public: true
+
+pg_node_info:
+  name: pg_node_info
+  desc: the information of current node
+  query:
+    - name: pg_node_info
+      sql:  SELECT CURRENT_CATALOG AS datname, CASE WHEN pg_catalog.pg_is_in_recovery() THEN 'Y' ELSE 'N' END AS is_slave, node_name, installpath, datapath, EXTRACT(EPOCH FROM pg_catalog.now() - pg_catalog.pg_postmaster_start_time()) AS uptime, pg_catalog.version() FROM pg_catalog.pg_stat_get_env();
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 100
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: is_slave
+      description: is slave node?
+      usage: LABEL
+    - name: node_name
+      description: node name
+      usage: LABEL
+    - name: installpath
+      description: install path
+      usage: LABEL
+    - name: datapath
+      description: data path
+      usage: LABEL
+    - name: uptime
+      description: uptime
+      usage: GAUGE
+    - name: version
+      description: database version
+      usage: LABEL
+    - name: datname
+      description: current connecting database
+      usage: LABEL
+  status: enable
+  ttl: 100
+  timeout: 1
+  public: true
+
+pg_stat_bgwriter:
+  name: pg_stat_bgwriter
+  desc: the information of current node
+  query:
+    - name: pg_stat_bgwriter
+      sql: |-
+        select checkpoint_sync_time / (checkpoints_timed + checkpoints_req) AS checkpoint_avg_sync_time,
+        checkpoints_req / (checkpoints_timed + checkpoints_req) AS checkpoint_proactive_triggering_ratio,
+        buffers_checkpoint, buffers_clean, buffers_backend, buffers_alloc from pg_stat_bgwriter;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 100
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: checkpoint_avg_sync_time
+      description: checkpoint_avg_sync_time
+      usage: GAUGE
+    - name: checkpoint_proactive_triggering_ratio
+      description: checkpoint_proactive_triggering_ratio
+      usage: GAUGE
+    - name: buffers_checkpoint
+      description: number of checkpoint write buffers
+      usage: LABEL
+    - name: buffers_clean
+      description: number of write buffers of the backend writer process
+      usage: LABEL
+    - name: buffers_backend
+      description: number of direct write buffers through the backend
+      usage: LABEL
+    - name: buffers_alloc
+      description: number of buffers allocated
+      usage: LABEL
+
+pg_statio_all_tables:
+  name: pg_statio_all_tables
+  desc: the information of current node
+  query:
+    - name: pg_statio_all_tables
+      sql: |-
+           select pg_catalog.sum(heap_blks_hit)*100/(pg_catalog.sum(heap_blks_read)+pg_catalog.sum(heap_blks_hit)+1) AS shared_buffer_heap_hit_rate,
+           pg_catalog.sum(toast_blks_hit)*100/(pg_catalog.sum(toast_blks_read)+pg_catalog.sum(toast_blks_hit)+1)     AS shared_buffer_toast_hit_rate,
+           pg_catalog.sum(tidx_blks_hit)*100/(pg_catalog.sum(tidx_blks_read)+pg_catalog.sum(tidx_blks_hit)+1)        AS shared_buffer_tidx_hit_rate,
+           pg_catalog.sum(idx_blks_hit)*100/(pg_catalog.sum(idx_blks_read)+pg_catalog.sum(idx_blks_hit)+1)           AS shared_buffer_idx_hit_rate
+           from pg_statio_all_tables ;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 100
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: shared_buffer_heap_hit_rate
+      description: shared_buffer_heap_hit_rate
+      usage: GAUGE
+    - name: shared_buffer_toast_hit_rate
+      description: shared_buffer_toast_hit_rate
+      usage: GAUGE
+    - name: shared_buffer_tidx_hit_rate
+      description: shared_buffer_tidx_hit_rate
+      usage: GAUGE
+    - name: shared_buffer_idx_hit_rate
+      description: shared_buffer_idx_hit_rate
+      usage: GAUGE
+  status: enable
+  ttl: 100
+  timeout: 1
+  public: true
+
+pg_prepared_xacts:
+  name: pg_prepared_xacts
+  desc: the information of current node
+  query:
+    - name: pg_prepared_xacts
+      sql: select pg_catalog.count(1) AS count from pg_prepared_xacts;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 100
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: count
+      description: current_prepared_xacts_count
+      usage: GAUGE
+  status: enable
+  ttl: 100
+  timeout: 1
+  public: true
+
+pg_stat_database:
+  name: pg_stat_database
+  desc: the information of current node
+  query:
+    - name: pg_stat_database
+      sql: select pg_catalog.max(temp_bytes / temp_files) / 1024 AS temp_file_size from pg_stat_database where temp_files > 0;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 100
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: temp_file_size
+      description: temp_file_size
+      usage: GAUGE
+  status: enable
+  ttl: 100
+  timeout: 1
+  public: true
+
+
+pg_lock_time_info:
+  name: pg_lock_time_info
+  desc: pg_lock_time_info
+  query:
+    - name: pg_lock_time_info
+      sql: SELECT
+            d.datname,
+            pg_catalog.sum(extract(epoch
+                    FROM pg_catalog.now() - s.xact_start)) AS holding_time
+            FROM pg_locks AS l
+            INNER JOIN pg_database AS d ON l.database = d.oid
+            INNER JOIN pg_stat_activity AS s ON l.pid = s.pid
+            WHERE s.pid != pg_catalog.pg_backend_pid() group by d.datname;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 100
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: datname
+      description: database name
+      usage: LABEL
+    - name: holding_time
+      description: database lock holding time
+      usage: GAUGE
+  status: enable
+  ttl: 100
+  timeout: 1
+  public: true
+
+gs_sql_count:
+  name: gs_sql_count
+  desc: gs_sql_count
+
+  query:
+    - name: gs_sql_count
+      sql: |-
+        select sum(select_count) as select, sum(update_count) as update, sum(insert_count) as insert, sum(delete_count) as delete, sum(mergeinto_count) as mergeinto,
+        sum(ddl_count) as ddl, sum(dml_count) as dml, sum(dcl_count) as dcl from gs_sql_count;
+      version: '>=0.0.0'
+      timeout: 1
+      ttl: 100
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: node_name
+      description: the name of node
+      usage: LABEL
+    - name: select
+      description: the count of select sql
+      usage: LABEL
+    - name: insert
+      description: the count of delete sql
+      usage: LABEL
+    - name: delete
+      description: Table distribution skew variance
+      usage: LABEL
+    - name: update
+      description: Table distribution skew ratio
+      usage: LABEL
+    - name: mergeinto
+      description: Table distribution skew ratio
+      usage: LABEL
+    - name: ddl
+      description: Table distribution skew ratio
+      usage: LABEL
+    - name: dml
+      description: Table distribution skew ratio
+      usage: LABEL
+    - name: dcl
+      description: Table distribution skew ratio
+      usage: GAUGE

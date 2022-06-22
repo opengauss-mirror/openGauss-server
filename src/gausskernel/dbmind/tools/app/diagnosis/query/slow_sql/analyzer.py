@@ -93,13 +93,13 @@ class SlowSQLAnalyzer:
     Classes for diagnosing slow SQL
     """
 
-    def __init__(self, topk: int = 3, buffer_capacity: int = 500):
+    def __init__(self, topk: int = 3, buffer_capacity: int = 500, buffer=None):
         """
         :param topk: The number of output root causes
         :param buffer_capacity: The length of slow SQL buffer queue
         """
         self.topk = topk
-        self.sql_buffers = []
+        self.sql_buffers = buffer if buffer is not None else []
         self.buffer_capacity = buffer_capacity
 
     def run(self, slow_query_instance: SlowQuery) -> [SlowQuery, None]:
@@ -128,13 +128,37 @@ class SlowSQLAnalyzer:
         self.sql_buffers.append(diagnosed_flag)
         return False
 
+    @staticmethod
+    def associate_table_with_schema(schema_infos: Dict, query: str, schema_name: str, exist_tables: Dict):
+        """
+        Find schema and table in query, there are the following three situations:
+          1. schema.table: We can match out table information based on regularity.
+          2. find table information based on pg_class if SLOW_SQL's schema in pg_class(schema_infos).
+          3. if the second step is not found, then find out possible table information from pg_class(schema_infos).
+        """
+        regex_result = re.findall(r"([\w\d_]+)\.([\w\d_]+)", query)
+        if regex_result:
+            for schema, table in regex_result:
+                exist_tables[schema].append(table)
+                query.replace("%s.%s" % (schema, table), ' ')
+        if schema_name in schema_infos:
+            for table in schema_infos[schema_name]:
+                if table in query:
+                    exist_tables[schema_name].append(table)
+        else:
+            for schema, tables in schema_infos.items():
+                for table in tables:
+                    if table.upper() in query.upper():
+                        exist_tables[schema].append(table)
+                        return
+
     def _analyze(self, slow_sql_instance: SlowQuery, data_factory: query_info_source.QueryContext,
                  schema_infos: Dict) -> [SlowQuery,
                                          None]:
         """Slow SQL diagnosis main process"""
         logging.debug(f"[SLOW QUERY] Diagnosing SQL: {slow_sql_instance.query}")
         exist_tables = defaultdict(list)
-        if slow_sql_instance.query.upper() == 'COMMIT' or slow_sql_instance.query.upper().startswith('SET'):
+        if slow_sql_instance.query.strip().upper() == 'COMMIT' or slow_sql_instance.query.strip().upper().startswith('SET'):
             title = FEATURES_CAUSE_MAPPER.get('C_UNKNOWN')
             root_cause = RootCause.get(title)
             slow_sql_instance.add_cause(root_cause)
@@ -147,16 +171,8 @@ class SlowSQLAnalyzer:
             root_cause = RootCause.get(FEATURES_CAUSE_MAPPER.get('C_SQL'))
             slow_sql_instance.add_cause(root_cause)
             return
-        if schema_infos:
-            query = slow_sql_instance.query
-            regex_result = re.findall(r"([\w\d_]+)\.([\w\d_]+)", slow_sql_instance.query)
-            if regex_result:
-                for schema, table in regex_result:
-                    exist_tables[schema].append(table)
-                    query.replace("%s.%s" % (schema, table), ' ')
-            for table in schema_infos[slow_sql_instance.schema_name]:
-                if table in query:
-                    exist_tables[slow_sql_instance.schema_name].append(table)
+        query = slow_sql_instance.query
+        self.associate_table_with_schema(schema_infos, query, slow_sql_instance.schema_name, exist_tables)
         slow_sql_instance.tables_name = exist_tables
         feature_generator = QueryFeature(slow_sql_instance, data_factory)
         feature_generator.initialize_metrics()

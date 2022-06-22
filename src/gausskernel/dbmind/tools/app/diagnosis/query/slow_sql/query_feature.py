@@ -150,7 +150,9 @@ class QueryFeature:
             return False
         live_tuples_list = {f"{item.schema_name}:{item.table_name}": item.live_tuples for item in
                             self.table_structure}
-        if (fetched_tuples + returned_tuples) / max(live_tuples_list.values()) > _get_threshold('fetch_rate_limit'):
+        if (fetched_tuples + returned_tuples) / max(live_tuples_list.values()) > _get_threshold(
+                'fetch_rate_limit') or (fetched_tuples + returned_tuples) > _get_threshold(
+                'fetch_tuples_limit'):
             self.detail['fetched_tuples'] = fetched_tuples + returned_tuples
             self.detail['fetched_tuples_rate'] = round(
                 (fetched_tuples + returned_tuples) / max(live_tuples_list.values()), 4)
@@ -171,7 +173,7 @@ class QueryFeature:
         live_tuples_list = {f"{item.schema_name}:{item.table_name}": item.live_tuples for item in
                             self.table_structure}
         if returned_rows / max(live_tuples_list.values()) > _get_threshold(
-                'returned_rate_limit'):
+                'returned_rate_limit') or returned_rows > _get_threshold('returned_rows_limit'):
             self.detail['returned_rows'] = returned_rows
             self.detail['returned_rows_rate'] = round(returned_rows / max(live_tuples_list.values()), 4)
             return True
@@ -231,7 +233,7 @@ class QueryFeature:
         live_tuples_list = {f"{item.schema_name}:{item.table_name}": item.live_tuples for item in
                             self.table_structure}
         if updated_tuples / max(live_tuples_list.values()) > _get_threshold(
-                'updated_rate_limit'):
+                'updated_rate_limit') or updated_tuples > _get_threshold('updated_tuples_limit'):
             self.detail['updated_tuples'] = updated_tuples
             self.detail['updated_tuples_rate'] = round(updated_tuples / max(live_tuples_list.values()), 4)
             return True
@@ -251,7 +253,7 @@ class QueryFeature:
         live_tuples_list = {f"{item.schema_name}:{item.table_name}": item.live_tuples for item in
                             self.table_structure}
         if inserted_tuples / max(live_tuples_list.values()) > _get_threshold(
-                'inserted_rate_limit'):
+                'inserted_rate_limit') or inserted_tuples > _get_threshold('inserted_tuples_limit'):
             self.detail['inserted_tuples'] = inserted_tuples
             self.detail['inserted_tuples_rate'] = round(inserted_tuples / max(live_tuples_list.values()), 4)
             return True
@@ -291,7 +293,7 @@ class QueryFeature:
         live_tuples_list = {f"{item.schema_name}:{item.table_name}": item.live_tuples for item in
                             self.table_structure}
         if deleted_tuples / max(live_tuples_list.values()) > _get_threshold(
-                'deleted_rate_limit'):
+                'deleted_rate_limit') or deleted_tuples > _get_threshold('deleted_tuples_limit'):
             self.detail['deleted_tuples'] = deleted_tuples
             self.detail['deleted_tuples_rate'] = round(deleted_tuples / max(live_tuples_list.values()), 4)
             return True

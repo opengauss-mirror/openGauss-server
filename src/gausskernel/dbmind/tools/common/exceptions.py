@@ -33,3 +33,6 @@ class SQLExecutionError(Exception):
 class ConfigSettingError(Exception):
     pass
 
+
+class DuplicateTableError(Exception):
+    pass

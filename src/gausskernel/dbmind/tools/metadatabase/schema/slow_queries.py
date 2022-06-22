@@ -10,7 +10,7 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-from sqlalchemy import Column, String, Integer, BigInteger, Float, Index
+from sqlalchemy import Column, String, Integer, BigInteger, Float, Index, TEXT
 
 from .. import Base
 
@@ -21,7 +21,7 @@ class SlowQueries(Base):
     slow_query_id = Column(Integer, primary_key=True, autoincrement=True)
     schema_name = Column(String(64), nullable=False)
     db_name = Column(String(64), nullable=False)
-    query = Column(String(1024), nullable=False)
+    query = Column(TEXT, nullable=False)
     template_id = Column(BigInteger)
     start_at = Column(BigInteger, nullable=False)
     duration_time = Column(Float, nullable=False)

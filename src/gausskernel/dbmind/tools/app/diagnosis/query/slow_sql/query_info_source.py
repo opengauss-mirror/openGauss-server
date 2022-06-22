@@ -18,7 +18,7 @@ from dbmind.common.parser.sql_parsing import is_num, str2int
 from dbmind.common.utils import ExceptionCatch
 from dbmind.service import dai
 
-excetpion_catcher = ExceptionCatch(strategy='exit', name='SLOW QUERY')
+exception_catcher = ExceptionCatch(strategy='warn', name='SLOW QUERY')
 
 
 class TableStructure:
@@ -74,7 +74,7 @@ class SystemInfo:
     def __init__(self):
         self.db_host = None
         self.db_port = None
-        self.iops = 0.0
+        self.iops = 0
         self.ioutils = {}
         self.iocapacity = 0.0
         self.iowait = 0.0
@@ -86,7 +86,7 @@ class SystemInfo:
 class QueryContext:
     """The object of slow query data processing factory"""
 
-    def __init__(self, slow_sql_instance, default_fetch_interval=15, expansion_factor=5,
+    def __init__(self, slow_sql_instance, default_fetch_interval=15, expansion_factor=8,
                  retrieval_time=5):
         """
         :param slow_sql_instance: The instance of slow query
@@ -108,13 +108,13 @@ class QueryContext:
         logging.debug('[SLOW QUERY] fetch start time: %s, fetch end time: %s', self.query_start_time, self.query_end_time)
         logging.debug('[SLOW QUERY] fetch interval: %s', self.fetch_interval)
 
-
-    @excetpion_catcher
+    @exception_catcher
     def acquire_pg_class(self) -> Dict:
         """Get all object information in the database"""
         pg_class = {}
         sequences = dai.get_metric_sequence('pg_class_relsize', self.query_start_time, self.query_end_time).from_server(
             f"{self.slow_sql_instance.db_host}:{self.slow_sql_instance.db_port}").fetchall()
+        sequences = [sequence for sequence in sequences if sequence.labels]
         for sequence in sequences:
             pg_class['db_host'] = self.slow_sql_instance.db_host
             pg_class['db_port'] = self.slow_sql_instance.db_port
@@ -132,7 +132,7 @@ class QueryContext:
                 pg_class[db_name][schema_name].append(table_name)
         return pg_class
 
-    @excetpion_catcher
+    @exception_catcher
     def acquire_fetch_interval(self) -> int:
         """Get data source collection frequency"""
         sequence = dai.get_latest_metric_sequence("os_disk_iops", self.retrieval_time).from_server(
@@ -143,7 +143,7 @@ class QueryContext:
             self.fetch_interval = int(timestamps[-1]) // 1000 - int(timestamps[-2]) // 1000
         return self.fetch_interval
 
-    @excetpion_catcher
+    @exception_catcher
     def acquire_lock_info(self) -> LockInfo:
         """Get lock information during slow SQL execution"""
         blocks_info = LockInfo()
@@ -152,6 +152,7 @@ class QueryContext:
             f"{self.slow_sql_instance.db_host}:{self.slow_sql_instance.db_port}").fetchall()
         logging.debug('[SLOW QUERY] acquire_lock_info: %s.', locks_sequences)
         locked_query, locked_query_start, locker_query, locker_query_start = [], [], [], []
+        locks_sequences = [sequence for sequence in locks_sequences if sequence.labels]
         for locks_sequence in locks_sequences:
             logging.debug('[SLOW QUERY] acquire_lock_info: %s.', locks_sequence)
             locked_query.append(locks_sequence.labels.get('locked_query', 'Unknown'))
@@ -165,7 +166,7 @@ class QueryContext:
 
         return blocks_info
 
-    @excetpion_catcher
+    @exception_catcher
     def acquire_tables_structure_info(self) -> List:
         """Acquire table structure information related to slow query"""
         table_structure = []
@@ -224,12 +225,12 @@ class QueryContext:
                 if index_number_info:
                     table_info.index = [item.labels['relname'] for item in index_number_info if item.labels]
                 if redundant_index_info:
-                    table_info.redundant_index = [item.labels['indexrelname'] for item in redundant_index_info]
+                    table_info.redundant_index = [item.labels['indexrelname'] for item in redundant_index_info if item.labels]
                 table_structure.append(table_info)
 
         return table_structure
 
-    @excetpion_catcher
+    @exception_catcher
     def acquire_database_info(self) -> DatabaseInfo:
         """Acquire table database information related to slow query"""
         database_info = DatabaseInfo()
@@ -262,7 +263,7 @@ class QueryContext:
 
         return database_info
 
-    @excetpion_catcher
+    @exception_catcher
     def acquire_system_info(self) -> SystemInfo:
         """Acquire system information on the database server """
         system_info = SystemInfo()
@@ -288,16 +289,23 @@ class QueryContext:
                                                  self.query_end_time).from_server(
             f"{self.slow_sql_instance.db_host}").fetchone()
         logging.debug('[SLOW QUERY] acquire_database_info[mem_usage]: %s.', mem_usage_info)
-        load_average_info = dai.get_metric_sequence("node_load1", self.query_start_time, self.query_end_time).filter(
-            instance=f"{self.slow_sql_instance.db_host}:9100").fetchone()
+        load_average_info = dai.get_metric_sequence("load_average", self.query_start_time, self.query_end_time).from_server(
+            f"{self.slow_sql_instance.db_host}").fetchone()
         logging.debug('[SLOW QUERY] acquire_database_info[load_average]: %s.', load_average_info)
-        system_info.iops = int(max(iops_info.values))
-        ioutils_dict = {item.labels['device']: round(float(max(item.values)), 4) for item in ioutils_info}
-        system_info.ioutils = ioutils_dict
-        system_info.iocapacity = round(float(max(iocapacity_info.values)), 4)
-        system_info.iowait = round(float(max(iowait_info.values)), 4)
-        system_info.cpu_usage = round(float(max(cpu_usage_info.values)), 4)
-        system_info.mem_usage = round(float(max(mem_usage_info.values)), 4)
-        system_info.load_average = round(float(max(load_average_info.values)), 4)
+        if iops_info.values:
+            system_info.iops = int(max(iops_info.values))
+        if ioutils_info:
+            ioutils_dict = {item.labels['device']: round(float(max(item.values)), 4) for item in ioutils_info if item.labels} 
+            system_info.ioutils = ioutils_dict
+        if iocapacity_info.values:
+            system_info.iocapacity = round(float(max(iocapacity_info.values)), 4)
+        if iowait_info.values:
+            system_info.iowait = round(float(max(iowait_info.values)), 4)
+        if cpu_usage_info.values:
+            system_info.cpu_usage = round(float(max(cpu_usage_info.values)), 4)
+        if mem_usage_info.values:
+            system_info.mem_usage = round(float(max(mem_usage_info.values)), 4)
+        if load_average_info.values:
+            system_info.load_average = round(float(max(load_average_info.values)), 4)
 
         return system_info

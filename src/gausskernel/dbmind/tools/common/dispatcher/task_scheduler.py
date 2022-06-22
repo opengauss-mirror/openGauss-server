@@ -29,7 +29,7 @@ class RepeatedTimer(Thread):
         self._args = args
         self._kwargs = kwargs
         self._finished = Event()
-        Thread.__init__(self)
+        Thread.__init__(self, daemon=True)
 
     def run(self):
         while not self._finished.is_set():

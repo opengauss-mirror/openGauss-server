@@ -30,7 +30,11 @@ local_ssh = ExecutorFactory() \
 
 
 def get_benchmark_instance(script, path, cmd, db_info):
-    name = script.rstrip('.py')
+    if script.endswith('.py'):
+        name = script[:-len('.py')]
+    else:
+        name = script
+
     if not os.path.exists(os.path.join(os.path.dirname(__file__), name + '.py')):
         raise ConfigureError('Incorrect configuration option benchmark_script. '
                              'Enter the filename of the script in the benchmark directory '

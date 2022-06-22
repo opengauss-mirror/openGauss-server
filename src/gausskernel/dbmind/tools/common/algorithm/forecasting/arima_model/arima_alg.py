@@ -10,16 +10,34 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
+"""\
+Some snippets and implementations refer to Python library statsmodels (BSD-3 license).
+But we cannot import the library directly because this library includes
+so many statistical modeling and econometric algorithms that we never use.
+On the other hand, this library introduces other heavy dependencies, leading to lightweight DBMind loss.
+"""
+import itertools
 from types import SimpleNamespace
-import numpy as np
 import logging
-import time
+
+import numpy as np
 from numpy import dot, log, zeros, pi
 from scipy import optimize
 from scipy import signal
 from scipy.signal import lfilter
+
 from .arima_common import lagmat, OLS
+from ..forcasting_algorithm import ForecastingAlgorithm
+
+MAX_AR_ORDER = 5
+MAX_MA_ORDER = 5
+K_AR_MIN = K_DIFF_MIN = K_MA_MIN = 0
+K_DIFF_MAX = 2
+MIN_DATA_LENGTH = max(MAX_AR_ORDER, MAX_MA_ORDER)
+
+
+class InvalidParameter(Exception):
+    pass
 
 
 def _ar_transparams(params):
@@ -76,7 +94,6 @@ def _ma_transparams(params):
 def _ma_invtransparams(macoefs):
     """
     return the inverse of the ma params.
-    :param params: type->np.array
     :return invmacoefs: type->np.array
     """
     tmp = macoefs.copy()
@@ -91,7 +108,7 @@ def _ma_invtransparams(macoefs):
 
 
 class DummyArray:
-    """ support __array_interface__ and base"""
+    """support __array_interface__ and base"""
 
     def __init__(self, interface, base=None):
         self.__array_interface__ = interface
@@ -182,15 +199,17 @@ def yule_walker(x_raw, order=1):
     adj_needed = method == "adjusted"
 
     if x_raw.ndim > 1 and x_raw.shape[1] != 1:
-        raise ValueError("expecting a vector to estimate ar parameters")
+        raise InvalidParameter("expecting a vector to estimate ar parameters")
     r_raw = np.zeros(order + 1, np.float64)
     r_raw[0] = (x_raw ** 2).sum() / num
     for k in range(1, order + 1):
         r_raw[k] = (x_raw[0:-k] * x_raw[k:]).sum() / (num - k * adj_needed)
     r_tope = _toeplitz(r_raw[:-1])
-    rho = np.linalg.solve(r_tope, r_raw[1:])
-
-    return rho
+    try:
+        rho = np.linalg.solve(r_tope, r_raw[1:])
+        return rho
+    except np.linalg.LinAlgError as e:
+        raise InvalidParameter(e)
 
 
 def _arma_impulse_response(new_ar_coeffs, new_ma_coeffs, leads=100):
@@ -435,12 +454,15 @@ def _compute_start_ar_ma_coeffs(k_ar, k_ma, y_raw):
     _x_mat, _y_mat = lagmat(y_raw, ar_order, original="sep")
     _y_mat = _y_mat[ar_order:]
     _x_mat = _x_mat[ar_order:]
-    ols_mod = OLS(_y_mat, _x_mat)
+    try:
+        ols_mod = OLS(_y_mat, _x_mat)
+    except ValueError as e:
+        raise InvalidParameter(e)
     ols_res = ols_mod.fit()
     arcoefs_tmp = ols_res
 
     if ar_order + k_ma >= len(y_raw):
-        raise ValueError("start ar order is not valid")
+        raise InvalidParameter("start ar order is not valid")
 
     lag_endog, lag_resid = _get_lag_data_and_resid(y_raw,
                                                    ar_order,
@@ -480,21 +502,14 @@ def _get_errors(params, raw_data, order):
     return errors
 
 
-class ARIMA:
-    """ARIMA model can forecast series according to history series"""
+class ARIMA(ForecastingAlgorithm):
+    """ARIMA model can forecast series according to historical series"""
 
-    def __init__(self, y_raw, order):
-        """
-        :param y_raw: type->np.array
-        :param order: type->tuple
-        """
-        k_ar, k_diff, k_ma = order
-        self.order = SimpleNamespace(k_ar=k_ar, k_diff=k_diff, k_ma=k_ma)
-        y_raw = np.asarray(y_raw) if isinstance(y_raw, (list, tuple)) else y_raw
-        y_fit = np.diff(y_raw, n=k_diff)
-        x_fit = np.ones((len(y_fit), 1))
-        self.raw_data = SimpleNamespace(x=x_fit, y=y_fit, raw_y=y_raw, k_trend=1)
-        self.nobs = len(y_fit) - k_ar
+    def __init__(self):
+        self.order = None
+        self.given_data = None
+        self.once_data = None
+        self.nobs = None
         self.is_transparams = True
         self.resid = None
         self.params = None
@@ -508,8 +523,8 @@ class ARIMA:
         k_ar, k_ma, k_trend = order
         start_params = zeros((k_ar + k_ma + k_trend))
 
-        y_raw = np.array(self.raw_data.y, np.float64)
-        x_raw = self.raw_data.x
+        y_raw = np.array(self.once_data.y, np.float64)
+        x_raw = self.once_data.x
         if k_trend != 0:
             ols_params = OLS(y_raw, x_raw).fit()
             start_params[:k_trend] = ols_params
@@ -529,10 +544,10 @@ class ARIMA:
 
         if k_ar and not np.all(np.abs(np.roots(np.r_[1, -start_params[k_trend:k_trend + k_ar]]
                                                )) < 1):
-            raise ValueError("the ar start coeffs is invalid")
+            raise InvalidParameter("the ar start coeffs %s is invalid" % k_ar)
         if k_ma and not np.all(np.abs(np.roots(np.r_[1, start_params[k_trend + k_ar:]]
                                                )) < 1):
-            raise ValueError("the ma start coeffs is invalid")
+            raise InvalidParameter("the ma start coeffs %s is invalid." % k_ma)
 
         return self._invtransparams(start_params)
 
@@ -547,7 +562,7 @@ class ARIMA:
             newparams = self._transparams(params)
         else:
             newparams = params
-        errors = _get_errors(newparams, self.raw_data, self.order)
+        errors = _get_errors(newparams, self.once_data, self.order)
 
         ssr = np.dot(errors, errors)
         sigma2 = ssr / nobs
@@ -561,7 +576,7 @@ class ARIMA:
         :return newparams: type->np.array
         """
         k_ar, k_ma = self.order.k_ar, self.order.k_ma
-        k = self.raw_data.k_trend
+        k = self.once_data.k_trend
         newparams = np.zeros_like(params)
 
         if k != 0:
@@ -581,7 +596,7 @@ class ARIMA:
         :return newparams: type->np.array
         """
         k_ar, k_ma = self.order.k_ar, self.order.k_ma
-        k = self.raw_data.k_trend
+        k = self.once_data.k_trend
         newparams = start_params.copy()
         arcoefs = newparams[k:k + k_ar]
         macoefs = newparams[k + k_ar:]
@@ -602,16 +617,61 @@ class ARIMA:
     def bic(self):
         """the BIC is for optimal parameters:(p d q)"""
         nobs = self.nobs
-        df_model = self.raw_data.k_trend + self.order.k_ar + self.order.k_ma
+        df_model = self.once_data.k_trend + self.order.k_ar + self.order.k_ma
         return -2 * self.llf + np.log(nobs) * (df_model + 1)
 
-    def fit(self, sequence=None):
+    def fit(self, sequence):
+        self.given_data = np.array(sequence.values).astype('float32')
+
+        min_bic = np.inf
+        optimal_ar = optimal_ma = 0
+
+        diff_data = np.diff(self.given_data)
+        # Look for the optimal parameters.
+        for k_ar, k_diff, k_ma in \
+                itertools.product(range(K_AR_MIN, MAX_AR_ORDER + 1, 2),
+                                  range(K_DIFF_MIN, K_DIFF_MAX + 1),
+                                  range(K_MA_MIN, MAX_MA_ORDER + 1, 2)):
+            if k_ar == 0 and k_diff == 0 and k_ma == 0:
+                continue
+
+            try:
+                self.is_transparams = True
+                self.fit_once(diff_data, k_ar, k_diff, k_ma)
+                if not np.isnan(self.bic) and self.bic < min_bic:
+                    min_bic = self.bic
+                    optimal_ar = k_ar
+                    optimal_ma = k_ma
+            except InvalidParameter:
+                """Ignore while InvalidParameter occurred."""
+
+        self.is_transparams = True
+        try:
+            self.fit_once(self.given_data, optimal_ar, 1, optimal_ma)
+        except InvalidParameter:
+            logging.warning('[ARIMA] Found invalid parameters for forecasting metric %s: ar %d, diff 1, ma %d.',
+                            sequence.name, optimal_ar, optimal_ma, exc_info=True)
+            self.is_transparams = True
+            self.fit_once(self.given_data, 2, 1, 0)
+
+    def fit_once(self, y_raw, k_ar, k_diff, k_ma):
         """
         fit trend_coeffs, ar_coeffs, ma_coeffs for ARIMA model.
         :return None
         """
-        k = self.raw_data.k_trend
-        nobs = self.raw_data.y.shape[0]
+        """
+        :param y_raw: type->np.array
+        :param order: type->tuple
+        """
+        self.order = SimpleNamespace(k_ar=k_ar, k_diff=k_diff, k_ma=k_ma)
+        y_fit = np.array(np.diff(y_raw, n=k_diff))
+        x_fit = np.ones((len(y_fit), 1))
+        self.once_data = SimpleNamespace(x=x_fit, y=y_fit, raw_y=y_raw, k_trend=1)
+        self.nobs = len(y_fit) - k_ar
+        self.params = None
+
+        k = self.once_data.k_trend
+        nobs = self.once_data.y.shape[0]
         start_params = self._fit_start_coeffs((self.order.k_ar, self.order.k_ma, k))
 
         def loglike(params, *args):
@@ -633,20 +693,14 @@ class ARIMA:
         :param steps: type->int
         :return forecast: type->np.array
         """
-        ctime = int(time.time())
-        logging.debug("[ARIMA:forecast:%s]: steps:%s, order:%s, coeffs:%s" %
-                      (ctime, steps, self.order, self.params))
-        logging.debug("[ARIMA:forecast:%s]: raw_data:%s" % (ctime, self.raw_data.y))
-        self.resid = _get_errors(self.params, self.raw_data, self.order).squeeze()
+        self.resid = _get_errors(self.params, self.once_data, self.order).squeeze()
         forecast = _arma_predict_out_of_sample(self.params, steps, self.resid,
-                                               self.order, self.raw_data)
-
+                                               self.order, self.once_data)
         forecast = unintegrate(
             forecast,
             unintegrate_levels(
-                self.raw_data.raw_y[-self.order.k_diff:],
+                self.once_data.raw_y[-self.order.k_diff:],
                 self.order.k_diff
             )
         )[self.order.k_diff:]
-        logging.debug("[ARIMA:forecast:%s]: forecast result: %s" % (ctime, forecast))
         return forecast
