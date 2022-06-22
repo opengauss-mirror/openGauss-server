@@ -915,7 +915,7 @@ test: subscription
 test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
-test: gs_dump_encrypt
+test: gs_dump_encrypt substr
 test: composite_datum_record mysql_function
 
 test: join_test_alias
