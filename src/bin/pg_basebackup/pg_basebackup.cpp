@@ -54,7 +54,13 @@ typedef struct TablespaceList {
     TablespaceListCell* tail;
 } TablespaceList;
 
-
+typedef struct {
+    PGconn *bgconn;
+    XLogRecPtr startptr;
+    char xlogdir[MAXPGPATH];
+    char *sysidentifier;
+    int timeline;
+} logstreamer_param;
 
 /* Global options */
 char* basedir = NULL;
@@ -67,6 +73,7 @@ int compresslevel = 0;
 bool includewal = true;
 bool streamwal = true;
 bool fastcheckpoint = false;
+logstreamer_param *g_childParam = NULL;
 
 extern char **tblspaceDirectory;
 extern int tblspaceCount;
@@ -365,29 +372,26 @@ static bool reached_end_position(XLogRecPtr segendpos, uint32 timeline, bool seg
     return false;
 }
 
-typedef struct {
-    PGconn *bgconn;
-    XLogRecPtr startptr;
-    char xlogdir[MAXPGPATH];
-    char *sysidentifier;
-    int timeline;
-} logstreamer_param;
-
 static int LogStreamerMain(logstreamer_param *param)
 {
+    int ret = 0;
+
+    /* get second connection info in child process for the sake of memmory leak */
+    param->bgconn = GetConnection();
     if (!ReceiveXlogStream(param->bgconn, param->startptr, param->timeline, (const char *)param->sysidentifier,
-        (const char *)param->xlogdir, reached_end_position, standby_message_timeout_local, true))
+        (const char *)param->xlogdir, reached_end_position, standby_message_timeout_local, true)) {
 
         /*
          * Any errors will already have been reported in the function process,
          * but we need to tell the parent that we didn't shutdown in a nice
          * way.
          */
-        return 1;
+        ret = 1;
+    }
 
     PQfinish(param->bgconn);
     param->bgconn = NULL;
-    return 0;
+    return ret;
 }
 
 /*
@@ -397,44 +401,30 @@ static int LogStreamerMain(logstreamer_param *param)
  */
 static void StartLogStreamer(const char *startpos, uint32 timeline, char *sysidentifier)
 {
-    logstreamer_param *param = NULL;
     uint32 hi, lo;
     uint32 pathlen = 0;
     errno_t errorno = EOK;
 
-    param = (logstreamer_param *)xmalloc0(sizeof(logstreamer_param));
-    param->timeline = timeline;
-    param->sysidentifier = sysidentifier;
-
     /* Convert the starting position */
     if (sscanf_s(startpos, "%X/%X", &hi, &lo) != 2) {
         pg_log(stderr, _("%s: could not parse transaction log location \"%s\"\n"), progname, startpos);
-        PQfreemem(param);
-        param = NULL;
         disconnect_and_exit(1);
     }
-    param->startptr = ((uint64)hi) << 32 | lo;
-    /* Round off to even segment position */
-    param->startptr -= param->startptr % XLOG_SEG_SIZE;
 
 #ifndef WIN32
     /* Create our background pipe */
     if (pipe(bgpipe) < 0) {
         pg_log(stderr, _("%s: could not create pipe for background process: %s\n"), progname, strerror(errno));
-        PQfreemem(param);
-        param = NULL;
         disconnect_and_exit(1);
     }
 #endif
 
-    /* Get a second connection */
-    param->bgconn = GetConnection();
-    if (NULL == param->bgconn) {
-        /* Error message already written in GetConnection() */
-        PQfreemem(param);
-        param = NULL;
-        exit(1);
-    }
+    g_childParam = (logstreamer_param *)xmalloc0(sizeof(logstreamer_param));
+    g_childParam->timeline = timeline;
+    g_childParam->sysidentifier = sysidentifier;
+    g_childParam->startptr = ((uint64)hi) << 32 | lo;
+    /* Round off to even segment position */
+    g_childParam->startptr -= g_childParam->startptr % XLOG_SEG_SIZE;
 
     /*
      * Always in plain format, so we can write to basedir/pg_xlog. But the
@@ -442,10 +432,10 @@ static void StartLogStreamer(const char *startpos, uint32 timeline, char *syside
      * created before we start.
      */
     pathlen = strlen("pg_xlog") + 1 + strlen(basedir) + 1;
-    errorno = snprintf_s(param->xlogdir, sizeof(param->xlogdir), pathlen, "%s/pg_xlog", basedir);
+    errorno = snprintf_s(g_childParam->xlogdir, sizeof(g_childParam->xlogdir), pathlen, "%s/pg_xlog", basedir);
     securec_check_ss_c(errorno, "", "");
 
-    verify_dir_is_empty_or_create(param->xlogdir);
+    verify_dir_is_empty_or_create(g_childParam->xlogdir);
 
     /*
      * Start a child process and tell it to start streaming. On Unix, this is
@@ -455,11 +445,11 @@ static void StartLogStreamer(const char *startpos, uint32 timeline, char *syside
     bgchild = fork();
     if (bgchild == 0) {
         /* in child process */
-        exit(LogStreamerMain(param));
+        exit(LogStreamerMain(g_childParam));
     } else if (bgchild < 0) {
         fprintf(stderr, _("%s: could not create background process: %s\n"), progname, strerror(errno));
-        PQfreemem(param);
-        param = NULL;
+        PQfreemem(g_childParam);
+        g_childParam = NULL;
         disconnect_and_exit(1);
     }
 
@@ -1470,6 +1460,10 @@ static void BaseBackup(void)
 
     PQfinish(conn);
     conn = NULL;
+    if (g_childParam != NULL) {
+        PQfreemem(g_childParam);
+        g_childParam = NULL;
+    }
 
     if (format == 'p') {
         /* delete dw file if exists, recreate it and write a page of zero */
@@ -1557,6 +1551,7 @@ int main(int argc, char **argv)
         return GsTar(argc, argv);
     } else {
         fprintf(stderr, _("unsupported progname: %s"), progname);
+        GS_FREE(progname);
         return 0;
     }
 }
@@ -1612,7 +1607,8 @@ static int GsTar(int argc, char** argv)
     int c;
     int option_index;
     char* tarfilename = NULL;
-
+    GS_FREE(progname);
+    progname = "gs_tar";
     GsTarHelp(argc, argv);
 
     while ((c = getopt_long(argc, argv, "D:F:", long_options, &option_index)) != -1) {
@@ -1898,6 +1894,7 @@ static int GsBaseBackup(int argc, char** argv)
                                            {"progress", no_argument, NULL, 'P'},
                                            {NULL, 0, NULL, 0}};
     int c = 0, option_index = 0;
+    GS_FREE(progname);
     progname = "gs_basebackup";
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_basebackup"));
 
