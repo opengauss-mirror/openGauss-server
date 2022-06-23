@@ -787,11 +787,19 @@ bool handleCopyIn(PGconn* conn, FILE* copystream, bool isbinary)
                         copydone = true;
                         break;
                     }
+
+                    free(pset.decryptInfo.decryptBuff);
+                    pset.decryptInfo.decryptBuff = NULL;
                 }
             }
             if (copystream == pset.cur_cmd_source)
                 pset.lineno++;
         }
+    }
+
+    if (pset.decryptInfo.decryptBuff != NULL) {
+        free(pset.decryptInfo.decryptBuff);
+        pset.decryptInfo.decryptBuff = NULL;
     }
 
     /* Check for read error */
