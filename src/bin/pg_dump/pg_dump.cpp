@@ -1187,6 +1187,7 @@ static void free_dump()
     GS_FREE(encrypt_key);
     GS_FREE(rolepasswd);
     GS_FREE(encrypt_salt);
+    GS_FREE(gdatcompatibility);
 }
 
 /*
@@ -3168,7 +3169,7 @@ static void dumpDatabase(Archive* fout)
     if (isHasDatcompatibility) {
         i_datcompatibility = PQfnumber(res, "datcompatibility");
         datcompatibility = PQgetvalue(res, 0, i_datcompatibility);
-        gdatcompatibility = datcompatibility;
+        gdatcompatibility = gs_strdup(datcompatibility);
     }
 
     appendPQExpBuffer(creaQry, "CREATE DATABASE %s WITH TEMPLATE = template0", fmtId(datname));
@@ -12847,6 +12848,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
             destroyPQExpBuffer(delqry);
             destroyPQExpBuffer(labelq);
             destroyPQExpBuffer(asPart);
+            destroyPQExpBuffer(definerquery);
             return;
         }
     }
@@ -12966,8 +12968,6 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
         appendPQExpBuffer(q, "CREATE DEFINER = %s %s %s ", definer, funcKind, funcfullsig);
         PQclear(defres);
-        destroyPQExpBuffer(definerquery);
-        
     } else {
          appendPQExpBuffer(q, "CREATE %s %s ", funcKind, funcfullsig);
     }
@@ -13129,6 +13129,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
     destroyPQExpBuffer(delqry);
     destroyPQExpBuffer(labelq);
     destroyPQExpBuffer(asPart);
+    destroyPQExpBuffer(definerquery);
 
     GS_FREE(funcsig);
     GS_FREE(funcfullsig);
