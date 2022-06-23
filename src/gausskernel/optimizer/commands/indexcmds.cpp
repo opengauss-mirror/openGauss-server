@@ -1071,7 +1071,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("Can not use compress option in ustore index.")));
             }
-            if (pg_strcasecmp(defElem->defname, "segment") == 0 && defGetBoolean(defElem)) {
+            if (pg_strcasecmp(defElem->defname, "segment") == 0 && ReadBoolFromDefElem(defElem)) {
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("Can not use compress option in segment storage.")));
             }
