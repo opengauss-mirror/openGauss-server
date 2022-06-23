@@ -84,6 +84,7 @@ static void parse_output_parameters(List *options, PGOutputData *data)
     bool protocol_version_given = false;
     bool publication_names_given = false;
     bool binary_option_given = false;
+    bool use_snapshot_given = false;
 
     data->binary = false;
 
@@ -121,6 +122,12 @@ static void parse_output_parameters(List *options, PGOutputData *data)
             binary_option_given = true;
 
             data->binary = defGetBoolean(defel);
+        } else if (strcmp(defel->defname, "usesnapshot") == 0) {
+            if (use_snapshot_given)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            use_snapshot_given = true;
+
+            t_thrd.walsender_cxt.isUseSnapshot = true;
         } else
             elog(ERROR, "unrecognized pgoutput option: %s", defel->defname);
     }

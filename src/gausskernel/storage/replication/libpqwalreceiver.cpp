@@ -266,6 +266,10 @@ void StartRemoteStreaming(const LibpqrcvConnectParam *options)
             ereport(DEBUG5, (errmsg("append binary true")));
         }
 
+        if (options->useSnapshot) {
+            appendStringInfoString(&cmd, ", usesnapshot 'true'");
+        }
+
         appendStringInfoChar(&cmd, ')');
     }
 
