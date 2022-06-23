@@ -1028,7 +1028,7 @@ static void SyncRepGetStandbyGroupAndPriority(int* gid, int* prio)
     if (AM_WAL_STANDBY_SENDER || AM_WAL_SHARE_STORE_SENDER || AM_WAL_HADR_DNCN_SENDER || AM_WAL_DB_SENDER)
         return;
 
-    if (!SyncStandbysDefined() || t_thrd.syncrep_cxt.SyncRepConfig == NULL || !SyncRepRequested())
+    if (!SyncStandbysDefined() || t_thrd.syncrep_cxt.SyncRepConfig == NULL)
         return;
 
     for (group = 0; group < t_thrd.syncrep_cxt.SyncRepConfigGroups && !found; group++) {
