@@ -16,10 +16,15 @@ SET SESSION AUTHORIZATION 'regress_publication_user' PASSWORD 'Abcdef@123';
 CREATE TABLE testpub_tbl1 (id int primary key, data text);
 CREATE TABLE testpub_tbl2 (id int primary key, data text);
 CREATE TABLE testpub_tbl3 (id int primary key, data text);
+CREATE TABLE testpub_tbl_col(id int) WITH (orientation=column);
 --- create publication
 CREATE PUBLICATION testpub_default;
 ------ for all tables
 CREATE PUBLICATION testpub_foralltables FOR ALL TABLES;
+------ after create all table publication, do IUD to non-pk column table, should ok
+INSERT INTO testpub_tbl_col values(1);
+UPDATE testpub_tbl_col set id = 66 where id = 1;
+DELETE FROM testpub_tbl_col;
 CREATE TABLE testpub_tbl4 (id int primary key, data text);
 select pubname, tablename from pg_publication_tables where pubname='testpub_foralltables' AND tablename like 'testpub_%' order by tablename;
 ------ for only table testpub_tbl1
@@ -52,6 +57,11 @@ ALTER PUBLICATION testpub_default SET TABLE testpub_tbl2;
 select pubname, tablename from pg_publication_tables where pubname='testpub_default';
 ------ drop table
 ALTER PUBLICATION testpub_multitbls DROP TABLE ONLY testpub_tbl2;
+------ fail - add column table
+ALTER PUBLICATION testpub_multitbls ADD TABLE testpub_tbl_col;
+------ fail - add internal schema table
+ALTER PUBLICATION testpub_multitbls ADD TABLE db4ai.snapshot;
+ALTER PUBLICATION testpub_multitbls ADD TABLE dbe_pldeveloper.gs_source;
 select pubname, tablename from pg_publication_tables where pubname='testpub_multitbls';
 ------ SET (parameter xxx)
 ALTER PUBLICATION testpub_default SET (publish='insert, delete');
@@ -77,6 +87,7 @@ DROP PUBLICATION IF EXISTS testpub_nonexists;
 DROP TABLE testpub_tbl2;
 DROP TABLE testpub_tbl3;
 DROP TABLE testpub_tbl4;
+DROP TABLE testpub_tbl_col;
 DROP VIEW testpub_view;
 DROP PUBLICATION IF EXISTS testpub_default;
 DROP PUBLICATION IF EXISTS testpub_only_tbl1;
