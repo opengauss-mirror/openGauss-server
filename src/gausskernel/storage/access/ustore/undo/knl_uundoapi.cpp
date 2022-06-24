@@ -647,6 +647,9 @@ void RecoveryUndoSystemMeta(void)
 void AllocateUndoZone()
 {
 #ifndef ENABLE_MULTIPLE_NODES
+    if (!g_instance.attr.attr_storage.enable_ustore) {
+        return;
+    }
     AllocateZonesBeforXid();
 #endif
 }
