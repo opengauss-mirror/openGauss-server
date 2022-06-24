@@ -3323,20 +3323,24 @@ static void BufferSync(int flags)
          * Header spinlock is enough to examine BM_DIRTY, see comment in
          * SyncOneBuffer.
          */
-        buf_state = LockBufHdr(buf_desc);
+        pg_memory_barrier();
+        buf_state = pg_atomic_read_u32(&buf_desc->state);
         if ((buf_state & mask) == mask) {
-            CkptSortItem *item = NULL;
-            buf_state |= BM_CHECKPOINT_NEEDED;
-            item = &g_instance.ckpt_cxt_ctl->CkptBufferIds[num_to_scan++];
-            item->buf_id = buf_id;
-            item->tsId = buf_desc->tag.rnode.spcNode;
-            item->relNode = buf_desc->tag.rnode.relNode;
-            item->bucketNode = buf_desc->tag.rnode.bucketNode;
-            item->forkNum = buf_desc->tag.forkNum;
-            item->blockNum = buf_desc->tag.blockNum;
+            buf_state = LockBufHdr(buf_desc);
+            if ((buf_state & mask) == mask) {
+                CkptSortItem *item = NULL;
+                buf_state |= BM_CHECKPOINT_NEEDED;
+                item = &g_instance.ckpt_cxt_ctl->CkptBufferIds[num_to_scan++];
+                item->buf_id = buf_id;
+                item->tsId = buf_desc->tag.rnode.spcNode;
+                item->relNode = buf_desc->tag.rnode.relNode;
+                item->bucketNode = buf_desc->tag.rnode.bucketNode;
+                item->forkNum = buf_desc->tag.forkNum;
+                item->blockNum = buf_desc->tag.blockNum;
+            }
+            UnlockBufHdr(buf_desc, buf_state);
         }
 
-        UnlockBufHdr(buf_desc, buf_state);
     }
 
     if (num_to_scan == 0) {
