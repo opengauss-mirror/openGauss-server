@@ -729,7 +729,6 @@ static void knl_g_audit_init(knl_g_audit_context *audit_cxt)
         false);
 
     g_instance.audit_cxt.sys_audit_pipes = NULL;
-    g_instance.audit_cxt.index_file_lock = NULL;
     g_instance.audit_cxt.audit_indextbl = NULL;
     g_instance.audit_cxt.audit_indextbl_old = NULL;
     g_instance.audit_cxt.current_audit_index = 0;
