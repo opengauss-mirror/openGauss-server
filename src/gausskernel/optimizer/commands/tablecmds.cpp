@@ -2586,7 +2586,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
             }
         }
 
-        if (colDef->raw_default != NULL) {
+        if ((colDef->raw_default != NULL || colDef->update_default != NULL) && colDef->cooked_default == NULL) {
             RawColumnDefault* rawEnt = NULL;
 
             if (relkind == RELKIND_FOREIGN_TABLE) {
@@ -2617,9 +2617,10 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
             rawEnt->attnum = attnum;
             rawEnt->raw_default = colDef->raw_default;
             rawEnt->generatedCol = colDef->generatedCol;
+            rawEnt->update_expr = colDef->update_default;
             rawDefaults = lappend(rawDefaults, rawEnt);
             descriptor->attrs[attnum - 1]->atthasdef = true;
-        } else if (colDef->cooked_default != NULL) {
+        } else if (colDef->cooked_default != NULL || colDef->update_default != NULL) {
             CookedConstraint* cooked = NULL;
 
             cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));
@@ -2635,6 +2636,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
             cooked->is_local = true; /* not used for defaults */
             cooked->inhcount = 0;    /* ditto */
             cooked->is_no_inherit = false;
+            cooked->update_expr = colDef->update_default;
             cookedDefaults = lappend(cookedDefaults, cooked);
             descriptor->attrs[attnum - 1]->atthasdef = true;
         }
@@ -4717,6 +4719,7 @@ static List* MergeAttributes(
                     coldef->is_not_null = restdef->is_not_null;
                     coldef->raw_default = restdef->raw_default;
                     coldef->cooked_default = restdef->cooked_default;
+                    coldef->update_default = restdef->update_default;
                     coldef->constraints = restdef->constraints;
                     coldef->is_from_type = false;
                     coldef->kvtype = restdef->kvtype;
@@ -4912,6 +4915,7 @@ static List* MergeAttributes(
                 def->kvtype = attribute->attkvtype;
                 def->cmprs_mode = attribute->attcmprmode;
                 def->raw_default = NULL;
+                def->update_default = NULL;
                 def->generatedCol = '\0';
                 def->cooked_default = NULL;
                 def->collClause = NULL;
@@ -4926,6 +4930,7 @@ static List* MergeAttributes(
              */
             if (attribute->atthasdef) {
                 Node* this_default = NULL;
+                Node* this_update_default = NULL;
                 AttrDefault* attrdef = NULL;
                 int i;
 
@@ -4938,10 +4943,13 @@ static List* MergeAttributes(
                 for (i = 0; i < constr->num_defval; i++) {
                     if (attrdef[i].adnum == parent_attno) {
                         this_default = (Node*)stringToNode_skip_extern_fields(attrdef[i].adbin);
+                        if (attrdef[i].has_on_update) {
+                            this_update_default = (Node*)stringToNode_skip_extern_fields(attrdef[i].adbin_on_update);
+                        }
                         break;
                     }
                 }
-                Assert(this_default != NULL);
+                Assert(this_default != NULL || this_update_default != NULL);
 
                 /*
                  * If default expr could contain any vars, we'd need to fix
@@ -4960,6 +4968,8 @@ static List* MergeAttributes(
                     def->cooked_default = &u_sess->cmd_cxt.bogus_marker;
                     have_bogus_defaults = true;
                 }
+                if (def->update_default == NULL)
+                    def->update_default = this_update_default;
             }
         }
 
@@ -5103,6 +5113,9 @@ static List* MergeAttributes(
                 if (newdef->raw_default != NULL) {
                     def->raw_default = newdef->raw_default;
                     def->cooked_default = newdef->cooked_default;
+                }
+                if (newdef->update_default != NULL) {
+                    def->update_default = newdef->update_default;
                 }
             } else {
                 /*
@@ -9530,6 +9543,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
         rawEnt = (RawColumnDefault*)palloc(sizeof(RawColumnDefault));
         rawEnt->attnum = attribute.attnum;
         rawEnt->raw_default = (Node*)copyObject(colDef->raw_default);
+        rawEnt->update_expr = (Node*)copyObject(colDef->update_default);
 
         rawEnt->generatedCol = colDef->generatedCol;
 
@@ -10067,6 +10081,33 @@ static void ATExecColumnDefault(Relation rel, const char* colName, Node* newDefa
             errmsg("column \"%s\" of relation \"%s\" is a generated column", colName, RelationGetRelationName(rel))));
     }
 
+    HeapTuple htup = NULL;
+    bool isnull = false;
+    char* tempUpdateExpr = NULL;
+    bool on_update = FALSE;
+    htup = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
+    if (!HeapTupleIsValid(htup))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+            errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
+    Form_pg_attribute attTup = (Form_pg_attribute)GETSTRUCT(htup);
+    AttrNumber temp_attnum = attTup->attnum;
+
+    ScanKeyData skey[2];
+    Relation adrel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
+    ScanKeyInit(&skey[0], Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
+    ScanKeyInit(&skey[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(temp_attnum));
+    SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 2, skey);
+
+    if (HeapTupleIsValid(htup = systable_getnext(adscan))) {
+        Datum val = heap_getattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
+        if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
+            tempUpdateExpr = TextDatumGetCString(val);
+            on_update = TRUE;
+        }
+    }
+    systable_endscan(adscan);
+    heap_close(adrel, RowExclusiveLock);
+
     /*
      * Remove any old default for the column.  We use RESTRICT here for
      * safety, but at present we do not expect anything to depend on the
@@ -10076,9 +10117,11 @@ static void ATExecColumnDefault(Relation rel, const char* colName, Node* newDefa
      * is preparatory to adding a new default, but as a user-initiated
      * operation when the user asked for a drop.
      */
-    RemoveAttrDefault(RelationGetRelid(rel), attnum, DROP_RESTRICT, false, newDefault == NULL ? false : true);
+    if (!on_update) {
+        RemoveAttrDefault(RelationGetRelid(rel), attnum, DROP_RESTRICT, false, newDefault == NULL ? false : true);
+    }
 
-    if (newDefault != NULL) {
+    if (newDefault != NULL || (on_update && newDefault == NULL)) {
         /* SET DEFAULT */
         RawColumnDefault* rawEnt = NULL;
 
@@ -10086,6 +10129,7 @@ static void ATExecColumnDefault(Relation rel, const char* colName, Node* newDefa
         rawEnt->attnum = attnum;
         rawEnt->raw_default = newDefault;
         rawEnt->generatedCol = '\0';
+        rawEnt->update_expr = NULL;
 
         /*
          * This function is intended for CREATE TABLE, so it processes a
@@ -12944,6 +12988,16 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
     SysScanDesc scan;
     HeapTuple depTup;
     char generatedCol = '\0';
+    Node* update_expr = NULL;
+    bool flagDropOnUpdateTimestamp = false;
+    bool existOnUpdateTimestamp = false;
+    /* def->constraints maybe is null when execute sql(alter table x alter column type new_type) */
+    if (cmd->subtype == AT_AlterColumnType && def->constraints && def->constraints->head) {
+        Constraint* temp_cons = (Constraint*)lfirst(def->constraints->head);
+        if (temp_cons->contype == CONSTR_DEFAULT && temp_cons->update_expr != NULL) {
+            update_expr = temp_cons->update_expr;
+        }
+    }
 
     attrelation = heap_open(AttributeRelationId, RowExclusiveLock);
 
@@ -13018,25 +13072,27 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
      */
     if (attTup->atthasdef) {
         defaultexpr = build_column_default(rel, attnum);
-        Assert(defaultexpr);
-        defaultexpr = strip_implicit_coercions(defaultexpr);
-        defaultexpr = coerce_to_target_type(NULL, /* no UNKNOWN params */
-            defaultexpr,
-            exprType(defaultexpr),
-            targettype,
-            targettypmod,
-            COERCION_ASSIGNMENT,
-            COERCE_IMPLICIT_CAST,
-            -1);
-        if (defaultexpr == NULL) {
-            if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
-                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("generation expression for column \"%s\" cannot be cast automatically to type %s", colName,
-                    format_type_be(targettype))));
-            } else {
-                ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("default for column \"%s\" cannot be cast automatically to type %s", colName,
-                    format_type_be(targettype))));
+        /* for column only with on update but no default ,here could be NULL*/
+        if (defaultexpr != NULL) {
+            defaultexpr = strip_implicit_coercions(defaultexpr);
+            defaultexpr = coerce_to_target_type(NULL, /* no UNKNOWN params */
+                defaultexpr,
+                exprType(defaultexpr),
+                targettype,
+                targettypmod,
+                COERCION_ASSIGNMENT,
+                COERCE_IMPLICIT_CAST,
+                -1);
+            if (defaultexpr == NULL) {
+                if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
+                    ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_DATATYPE_MISMATCH),
+                        errmsg("generation expression for column \"%s\" cannot be cast automatically to type %s", colName,
+                        format_type_be(targettype))));
+                } else {
+                    ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                        errmsg("default for column \"%s\" cannot be cast automatically to type %s", colName,
+                        format_type_be(targettype))));
+                }
             }
         }
     } else
@@ -13181,7 +13237,6 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
                  * Ignore the column's default expression, since we will fix
                  * it below.
                  */
-                Assert(defaultexpr);
                 break;
 
             case OCLASS_PROC:
@@ -13268,6 +13323,27 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
         RemoveStatistics<'c'>(RelationGetRelid(rel), attnum);
     }
 
+    /* when the default expr is NULL and on update expr exist, the defaultexpr should be NULL.
+     * because the build_column_default maybe return the on update expr. */
+    if (rel->rd_att->constr && rel->rd_att->constr->num_defval > 0) {
+        int ndef = rel->rd_att->constr->num_defval -1;
+        while (ndef >= 0 && rel->rd_att->constr->defval[ndef].adnum != attnum) {
+            /* modify column on update expr when the column don't at the end of table */
+            --ndef;
+        }
+        if (ndef >= 0) {
+            if (pg_strcasecmp(rel->rd_att->constr->defval[ndef].adbin, "") == 0 &&
+                rel->rd_att->constr->defval[ndef].has_on_update) {
+                existOnUpdateTimestamp = true;
+                if (update_expr == NULL) {
+                    CommandCounterIncrement();
+                    RemoveAttrDefault(RelationGetRelid(rel), attnum, DROP_RESTRICT, true, true);
+                    flagDropOnUpdateTimestamp = true;
+                }
+            }
+        }
+    }
+
     /*
      * Update the default, if present, by brute force --- remove and re-add
      * the default.  Probably unsafe to take shortcuts, since the new version
@@ -13275,7 +13351,7 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
      * rather than after other ALTER TYPE commands, since the default won't
      * depend on other column types.)
      */
-    if (defaultexpr != NULL) {
+    if ((defaultexpr != NULL || update_expr != NULL) && !flagDropOnUpdateTimestamp) {
         /* Must make new row visible since it will be updated again */
         CommandCounterIncrement();
 
@@ -13283,9 +13359,19 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
          * We use RESTRICT here for safety, but at present we do not expect
          * anything to depend on the default.
          */
-        RemoveAttrDefault(RelationGetRelid(rel), attnum, DROP_RESTRICT, true, true);
+        if (defaultexpr != NULL || (update_expr != NULL && existOnUpdateTimestamp)) {
+            RemoveAttrDefault(RelationGetRelid(rel), attnum, DROP_RESTRICT, true, true);
+        }
+        if (update_expr != NULL) {
+            ParseState* pstate = make_parsestate(NULL);
+            RangeTblEntry*  rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, true);
+            addRTEtoQuery(pstate, rte, true, true, true);
+            pstate->p_rawdefaultlist = NULL;
+            update_expr = cookDefault(pstate, update_expr, attTup->atttypid, attTup->atttypmod, NameStr(attTup->attname),
+                def->generatedCol);
+        }
 
-        StoreAttrDefault(rel, attnum, defaultexpr, generatedCol);
+        StoreAttrDefault(rel, attnum, defaultexpr, generatedCol, update_expr);
     }
 
     /* Cleanup */

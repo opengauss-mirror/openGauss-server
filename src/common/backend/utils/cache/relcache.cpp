@@ -1717,11 +1717,14 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
             constr->num_defval = ndef;
             constr->generatedCols = (char *)MemoryContextAllocZero(LocalMyDBCacheMemCxt(),
                 RelationGetNumberOfAttributes(relation) * sizeof(char));
+            constr->has_on_update = (bool *)MemoryContextAllocZero(LocalMyDBCacheMemCxt(),
+                RelationGetNumberOfAttributes(relation) * sizeof(bool));
             AttrDefaultFetch(relation);
         } else {
             constr->num_defval = 0;
             constr->defval = NULL;
             constr->generatedCols = NULL;
+            constr->has_on_update = NULL;
         }
 
         if (relation->rd_rel->relchecks > 0) /* CHECKs */
@@ -5528,6 +5531,28 @@ static void GeneratedColFetch(TupleConstr *constr, HeapTuple htup, Relation adre
 }
 
 /*
+ * Load updated column attribute value definitions for the relation.
+ */
+static void UpdatedColFetch(TupleConstr *constr, HeapTuple htup, Relation adrel, int attrdefIndex)
+{
+    bool *on_update = constr->has_on_update;
+    AttrDefault *attrdef = constr->defval;
+    bool updatedCol = false;
+    if (HeapTupleHeaderGetNatts(htup->t_data, adrel->rd_att) >= Anum_pg_attrdef_adsrc_on_update) {
+        bool isnull = false;
+        Datum val;
+        val = fastgetattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
+        if (val && pg_strcasecmp(TextDatumGetCString(val), "") == 0) {
+            updatedCol = false;
+        } else {
+            updatedCol = true;
+        }
+    }
+    attrdef[attrdefIndex].has_on_update = updatedCol;
+    on_update[attrdef[attrdefIndex].adnum - 1] = updatedCol;
+}
+
+/*
  * Load any default attribute value definitions for the relation.
  */
 static void AttrDefaultFetch(Relation relation)
@@ -5563,12 +5588,18 @@ static void AttrDefaultFetch(Relation relation)
                 GeneratedColFetch(relation->rd_att->constr, htup, adrel, i);
             }
 
+            UpdatedColFetch(relation->rd_att->constr, htup, adrel, i);
+
             val = fastgetattr(htup, Anum_pg_attrdef_adbin, adrel->rd_att, &isnull);
             if (isnull)
                 ereport(WARNING, (errmsg("null adbin for attr %s of rel %s",
                     NameStr(relation->rd_att->attrs[adform->adnum - 1]->attname), RelationGetRelationName(relation))));
             else
                 attrdef[i].adbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+
+            val = fastgetattr(htup, Anum_pg_attrdef_adbin_on_update, adrel->rd_att, &isnull);
+            if (!isnull)
+                attrdef[i].adbin_on_update = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
             break;
         }
 

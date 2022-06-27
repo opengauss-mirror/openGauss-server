@@ -534,6 +534,7 @@ Oid *namespaceid, bool isFirstNode)
         col->collOid = InvalidOid;
         col->constraints = NIL;
         col->fdwoptions = NIL;
+        col->update_default = NULL;
         transformColumnDefinition(&cxt, col, !isFirstNode && preCheck);
     }
 
@@ -1000,14 +1001,19 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
                 break;
 
             case CONSTR_DEFAULT:
-                if (saw_default)
+                if (saw_default && constraint->update_expr == NULL)
                     ereport(ERROR,
                         (errcode(ERRCODE_SYNTAX_ERROR),
                             errmsg("multiple default values specified for column \"%s\" of table \"%s\"",
                                 column->colname,
                                 cxt->relation->relname),
                             parser_errposition(cxt->pstate, constraint->location)));
-                column->raw_default = constraint->raw_expr;
+                if (!saw_default) {
+                    column->raw_default = constraint->raw_expr;
+                }
+                if (constraint->update_expr != NULL) {
+                    column->update_default = constraint->update_expr;
+                }
                 AssertEreport(constraint->cooked_expr == NULL, MOD_OPT, "");
                 saw_default = true;
                 break;
@@ -1664,6 +1670,7 @@ static void transformTableLikeClause(
             }
             def->raw_default = NULL;
             def->cooked_default = NULL;
+            def->update_default = NULL;
             def->collClause = NULL;
             def->collOid = attribute->attcollation;
             def->constraints = NIL;
@@ -1682,6 +1689,7 @@ static void transformTableLikeClause(
          */
         if (attribute->atthasdef) {
             Node* this_default = NULL;
+            Node* update_default = NULL;
             AttrDefault* attrdef = NULL;
             int i;
             Oid seqId = InvalidOid;
@@ -1692,25 +1700,30 @@ static void transformTableLikeClause(
             for (i = 0; i < constr->num_defval; i++) {
                 if (attrdef[i].adnum == parent_attno) {
                     this_default = (Node*)stringToNode_skip_extern_fields(attrdef[i].adbin);
+                    if (attrdef[i].has_on_update) {
+                        update_default = (Node*)stringToNode_skip_extern_fields(attrdef[i].adbin_on_update);
+                    }
                     break;
                 }
             }
-            Assert(this_default != NULL);
+            Assert(this_default != NULL || update_default != NULL);
 
             /*
              *  Whether default expr is serial type and the sequence is owned by the table.
              */
             if (!IsCreatingSeqforAnalyzeTempTable(cxt) && (table_like_clause->options & CREATE_TABLE_LIKE_DEFAULTS_SERIAL)) {
-                seqId = searchSeqidFromExpr(this_default);
-                if (OidIsValid(seqId)) {
-                    List* seqs = getOwnedSequences(relation->rd_id);
-                    if (seqs != NULL && list_member_oid(seqs, DatumGetObjectId(seqId))) {
-                        /* is serial type */
-                        def->is_serial = true;
-                        bool large = (get_rel_relkind(seqId) == RELKIND_LARGE_SEQUENCE);
-                        /* Special actions for SERIAL pseudo-types */
+                if (this_default != NULL) {
+                    seqId = searchSeqidFromExpr(this_default);
+                    if (OidIsValid(seqId)) {
+                        List* seqs = getOwnedSequences(relation->rd_id);
+                        if (seqs != NULL && list_member_oid(seqs, DatumGetObjectId(seqId))) {
+                            /* is serial type */
+                            def->is_serial = true;
+                            bool large = (get_rel_relkind(seqId) == RELKIND_LARGE_SEQUENCE);
+                            /* Special actions for SERIAL pseudo-types */
 
-                        createSeqOwnedByTable(cxt, def, preCheck, large);
+                            createSeqOwnedByTable(cxt, def, preCheck, large);
+                        }
                     }
                 }
             }
@@ -1722,11 +1735,22 @@ static void transformTableLikeClause(
                  * but it can't; so default is ready to apply to child.
                  */
                 def->cooked_default = this_default;
+                def->update_default = update_default;
             } else if (!def->is_serial && (table_like_clause->options & CREATE_TABLE_LIKE_GENERATED) &&
                 GetGeneratedCol(tupleDesc, parent_attno - 1)) {
                 bool found_whole_row = false;
-                def->cooked_default =
-                    map_variable_attnos(this_default, 1, 0, attmap, tupleDesc->natts, &found_whole_row);
+                if (this_default != NULL) {
+                    def->cooked_default =
+                        map_variable_attnos(this_default, 1, 0, attmap, tupleDesc->natts, &found_whole_row);
+                } else {
+                    def->cooked_default = NULL;
+                }
+                if (update_default != NULL) {
+                    def->update_default =
+                        map_variable_attnos(update_default, 1, 0, attmap, tupleDesc->natts, &found_whole_row);
+                } else {
+                    def->update_default = NULL;
+                }
                 if (found_whole_row) {
                     ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("cannot convert whole-row table reference"),
@@ -2353,6 +2377,7 @@ static void transformOfType(CreateStmtContext* cxt, TypeName* ofTypename)
         /* CREATE TYPE CANNOT provied compression feature, so the default is set. */
         n->cmprs_mode = ATT_CMPR_UNDEFINED;
         n->raw_default = NULL;
+        n->update_default = NULL;
         n->cooked_default = NULL;
         n->collClause = NULL;
         n->collOid = attr->attcollation;

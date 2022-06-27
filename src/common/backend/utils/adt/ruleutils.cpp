@@ -1583,6 +1583,8 @@ static int get_table_attribute(
                 HeapTuple tup = NULL;
                 bool isnull = false;
                 char generatedCol = '\0';
+                bool isDefault = false;
+                bool isOnUpdate = false;
 
                 attrdefDesc = heap_open(AttrDefaultRelationId, AccessShareLock);
 
@@ -1597,6 +1599,18 @@ static int get_table_attribute(
 
                     Datum txt = DirectFunctionCall2(pg_get_expr, val, ObjectIdGetDatum(tableoid));
 
+                    if (txt && pg_strcasecmp(TextDatumGetCString(txt), "") == 0) {
+                        isDefault = false;
+                    } else {
+                        isDefault = true;
+                    }
+                    Datum onUpdateExpr = fastgetattr(tup, Anum_pg_attrdef_adsrc_on_update, attrdefDesc->rd_att, &isnull);
+                    if (onUpdateExpr && pg_strcasecmp(TextDatumGetCString(onUpdateExpr), "") == 0) {
+                        isOnUpdate = false;
+                    } else {
+                        isOnUpdate = true;
+                    }
+
                     if (attrdef->adnum == att_tup->attnum) {
                         val = fastgetattr(tup, Anum_pg_attrdef_adgencol, attrdefDesc->rd_att, &isnull);
                         if (!isnull) {
@@ -1604,8 +1618,11 @@ static int get_table_attribute(
                         }
                         if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
                             appendStringInfo(buf, " GENERATED ALWAYS AS (%s) STORED", TextDatumGetCString(txt));
-                        } else {
+                        } else if (isDefault) {
                             appendStringInfo(buf, " DEFAULT %s", TextDatumGetCString(txt));
+                        }
+                        if (isOnUpdate) {
+                            appendStringInfo(buf, " ON UPDATE %s", TextDatumGetCString(onUpdateExpr));
                         }
                         break;
                     }

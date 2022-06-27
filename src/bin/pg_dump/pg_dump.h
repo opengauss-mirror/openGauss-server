@@ -289,6 +289,7 @@ typedef struct _attrDefInfo {
     char* adef_expr;     /* decompiled DEFAULT expression */
     bool separate;       /* TRUE if must dump as separate item */
     char generatedCol;
+    char* adupd_expr;    /* on update expression of on update timestamp syntax on Mysql dbcompatibility */
 } AttrDefInfo;
 
 typedef struct _tableDataInfo {

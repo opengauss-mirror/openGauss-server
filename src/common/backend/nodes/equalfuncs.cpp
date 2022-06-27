@@ -2571,7 +2571,7 @@ static bool _equalColumnDef(const ColumnDef* a, const ColumnDef* b)
     COMPARE_NODE_FIELD(constraints);
     COMPARE_NODE_FIELD(fdwoptions);
     COMPARE_NODE_FIELD(columnOptions);
-
+    COMPARE_NODE_FIELD(update_default);
     return true;
 }
 
@@ -2604,6 +2604,7 @@ static bool _equalConstraint(const Constraint* a, const Constraint* b)
     COMPARE_SCALAR_FIELD(skip_validation);
     COMPARE_SCALAR_FIELD(initially_valid);
     COMPARE_NODE_FIELD(constraintOptions);
+    COMPARE_NODE_FIELD(update_expr);
 
     return true;
 }
