@@ -81,9 +81,12 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
 		char *temp_lsn = NULL;	    
 		res = pgut_execute(backup_conn, "SELECT pg_cbm_tracked_location()", 0, NULL);
 		if (PQnfields(res) != 1) {
-		    elog(ERROR, "cannot get cbm tracked lsn location");
+			elog(ERROR, "cannot get cbm tracked lsn location, maybe enable_cbm_tracking is off");
 		}
 		temp_lsn = pg_strdup(PQgetvalue(res, 0, 0));
+		if (strlen(temp_lsn)==0){
+			elog(ERROR, "cannot get cbm tracked lsn location, maybe enable_cbm_tracking is off");
+		}
 		ret = sscanf_s(temp_lsn, "%X/%X", &lsn_hi, &lsn_lo);
 		securec_check_for_sscanf_s(ret, 2, "\0", "\0");
 		pfree(temp_lsn);
