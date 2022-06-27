@@ -506,8 +506,13 @@ typedef struct ResultRelInfo {
     /* array of stored generated columns expr states */
     ExprState **ri_GeneratedExprs;
 
+    /* array of stored UpdateExpr columns expr states */
+    ExprState **ri_UpdatedExprs;
+
     /* number of stored generated columns we need to compute */
     int ri_NumGeneratedNeeded;
+    /* number of stored UpdateExpr columns we need to compute */
+    int ri_NumUpdatedNeeded;
 } ResultRelInfo;
 
 /* bloom filter controller */

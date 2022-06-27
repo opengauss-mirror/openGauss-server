@@ -100,6 +100,7 @@ extern const uint32 PUBLICATION_INITIAL_DATA_VERSION_NAME;
 extern const uint32 CREATE_FUNCTION_DEFINER_VERSION;
 extern const uint32 KEYWORD_IGNORE_COMPART_VERSION_NUM;
 extern const uint32 COMMENT_SUPPORT_VERSION_NUM;
+extern const uint32 ON_UPDATE_TIMESTAMP_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

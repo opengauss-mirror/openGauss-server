@@ -906,7 +906,7 @@ static int errstate;
 			DROP_SUBPARTITION
 			NOT_ENFORCED
 			VALID_BEGIN
-			DECLARE_CURSOR
+			DECLARE_CURSOR ON_UPDATE_TIME
 			START_WITH CONNECT_BY
 
 /* Precedence: lowest to highest */
@@ -2795,8 +2795,38 @@ modify_column_cmd:
 					def->typname = $2;
 					def->collClause = NULL;
 					def->raw_default = NULL;
+					def->update_default = NULL;
 					def->clientLogicColumnRef=NULL;
 					$$ = (Node *)n;
+				}
+			| ColId Typename ON_UPDATE_TIME UPDATE b_expr
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						AlterTableCmd *n = makeNode(AlterTableCmd);
+						ColumnDef *def = makeNode(ColumnDef);
+						Constraint *cons = makeNode(Constraint);
+						n->subtype = AT_AlterColumnType;
+						n->name = $1;
+						n->def = (Node *) def;
+						/* We only use these three fields of the ColumnDef node */
+						def->typname = $2;
+						def->constraints = list_make1(cons);
+						cons->contype = CONSTR_DEFAULT;
+						cons->location = @3;
+						cons->update_expr = $5;
+						cons->cooked_expr = NULL;
+						$$ = (Node *)n;
+					} else {
+						const char* message = "on update syntax be supported dbcompatibility B.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+                                                                 errcode(ERRCODE_SYNTAX_ERROR),
+                                                                 errmsg("on update syntax is supported in dbcompatibility B."),
+                                                                 parser_errposition(@1)));
+						$$ = NULL;
+					}
 				}
 			| ColId NOT NULL_P opt_enable
 				{
@@ -4329,6 +4359,7 @@ alter_type_cmd:
 					def->clientLogicColumnRef=NULL;
 					def->collClause = (CollateClause *) $7;
 					def->raw_default = NULL;
+					def->update_default = NULL;
 					$$ = (Node *)n;
 				}
 		;
@@ -5892,6 +5923,7 @@ columnDef:	ColId Typename KVType ColCmprsMode create_generic_options ColQualList
 					n->storage = 0;
 					n->cmprs_mode = $4;
 					n->raw_default = NULL;
+					n->update_default = NULL;
 					n->cooked_default = NULL;
 					n->collOid = InvalidOid;
 					n->fdwoptions = $5;
@@ -6294,6 +6326,27 @@ ColConstraintElem:
 					n->raw_expr = $2;
 					n->cooked_expr = NULL;
 					$$ = (Node *)n;
+				}
+			| ON_UPDATE_TIME UPDATE b_expr
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_DEFAULT;
+						n->location = @1;
+						n->update_expr = $3;
+						n->cooked_expr = NULL;
+						$$ = (Node *)n;
+					} else {
+						const char* message = "on update syntax be supported dbcompatibility B.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+                                                                 errcode(ERRCODE_SYNTAX_ERROR),
+                                                                 errmsg("on update syntax is supported in dbcompatibility B."),
+                                                                 parser_errposition(@1)));
+						$$ = NULL;
+					}
 				}
 			| GENERATED ALWAYS AS '(' a_expr ')' STORED
 				{

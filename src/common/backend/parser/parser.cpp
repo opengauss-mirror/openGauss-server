@@ -480,6 +480,38 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     break;
             }
             break;
+        case ON:
+            cur_yylval = lvalp->core_yystype;
+            cur_yylloc = *llocp;
+            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+            /* get first token after ON (Normal UPDATE). We don't care what it is */
+            yyextra->lookahead_token[1] = next_token;
+            yyextra->lookahead_yylval[1] = lvalp->core_yystype;
+            yyextra->lookahead_yylloc[1] = *llocp;
+
+            /* get the second token after ON. */
+            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+            yyextra->lookahead_token[0] = next_token;
+            yyextra->lookahead_yylval[0] = lvalp->core_yystype;
+            yyextra->lookahead_yylloc[0] = *llocp;
+            yyextra->lookahead_num = 2;
+            switch (next_token) {
+            case CURRENT_TIMESTAMP:
+            case CURRENT_TIME:
+            case CURRENT_DATE:
+            case LOCALTIME:
+            case LOCALTIMESTAMP:
+                cur_token = ON_UPDATE_TIME;
+                lvalp->core_yystype = cur_yylval;
+                *llocp = cur_yylloc;
+                break;
+            default:
+                /* and back up the output info to cur_token */
+                lvalp->core_yystype = cur_yylval;
+                *llocp = cur_yylloc;
+                break;
+            }
+            break;
         default:
             break;
     }

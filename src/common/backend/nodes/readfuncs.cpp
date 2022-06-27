@@ -5285,7 +5285,9 @@ static ColumnDef* _readColumnDef()
     IF_EXIST(generatedCol) {
         READ_CHAR_FIELD(generatedCol);
     }
-
+    IF_EXIST(update_default) {
+        READ_NODE_FIELD(update_default);
+    }
     READ_DONE();
 }
 
@@ -5427,6 +5429,9 @@ static Constraint* _readConstraint()
     } else if (MATCH_TYPE("DEFAULT")) {
         local_node->contype = CONSTR_DEFAULT;
         READ_NODE_FIELD(raw_expr);
+        if (t_thrd.proc->workingVersionNum >= ON_UPDATE_TIMESTAMP_VERSION_NUM) {
+            READ_NODE_FIELD(update_expr);
+        }
         READ_STRING_FIELD(cooked_expr);
     } else if (MATCH_TYPE("CHECK")) {
         local_node->contype = CONSTR_CHECK;

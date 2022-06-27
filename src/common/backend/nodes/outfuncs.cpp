@@ -3818,6 +3818,9 @@ static void _outColumnDef(StringInfo str, ColumnDef* node)
         if (node->generatedCol)
             WRITE_CHAR_FIELD(generatedCol);
     }
+    if (t_thrd.proc->workingVersionNum >= ON_UPDATE_TIMESTAMP_VERSION_NUM) {
+        WRITE_NODE_FIELD(update_default);
+    }
 }
 
 static void _outTypeName(StringInfo str, TypeName* node)
@@ -4999,6 +5002,9 @@ static void _outConstraint(StringInfo str, Constraint* node)
         case CONSTR_DEFAULT:
             appendStringInfo(str, "DEFAULT");
             WRITE_NODE_FIELD(raw_expr);
+            if (t_thrd.proc->workingVersionNum >= ON_UPDATE_TIMESTAMP_VERSION_NUM) {
+                WRITE_NODE_FIELD(update_expr);
+            }
             WRITE_STRING_FIELD(cooked_expr);
             break;
 

@@ -4103,7 +4103,7 @@ static ColumnDef* _copyColumnDef(const ColumnDef* from)
     COPY_NODE_FIELD(columnOptions);
     COPY_NODE_FIELD(clientLogicColumnRef);
     COPY_NODE_FIELD(position);
-
+    COPY_NODE_FIELD(update_default);
     return newnode;
 }
 
@@ -4148,6 +4148,7 @@ static Constraint* _copyConstraint(const Constraint* from)
     COPY_SCALAR_FIELD(skip_validation);
     COPY_SCALAR_FIELD(initially_valid);
     COPY_NODE_FIELD(inforConstraint);
+    COPY_NODE_FIELD(update_expr);
 
     return newnode;
 }

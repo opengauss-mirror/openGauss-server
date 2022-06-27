@@ -591,3 +591,18 @@ select * from pg_get_tabledef('generated_test');
 drop table generated_test;
 reset current_schema;
 drop schema test_get_table_def cascade;
+create database mysql dbcompatibility 'B';
+\c mysql
+create table if not exists test(a int, b timestamp default now() on update current_timestamp);
+select * from pg_get_tabledef('test');
+                               pg_get_tabledef                               
+-----------------------------------------------------------------------------
+ SET search_path = public;                                                  +
+ CREATE TABLE test (                                                        +
+     a integer,                                                             +
+     b timestamp without time zone DEFAULT now() ON UPDATE pg_systimestamp()+
+ )                                                                          +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+\c regression
