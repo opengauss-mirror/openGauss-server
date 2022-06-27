@@ -238,7 +238,7 @@ static bool foreign_expr_walker_var(Node *node, foreign_glob_cxt *glob_cxt,  Oid
 
 }
 
-static void foreign_expr_walker_const(Node *node,   Oid *collation,FDWCollateState * state)
+static bool foreign_expr_walker_const(Node *node,   Oid *collation,FDWCollateState * state)
 {
     Const *c = (Const *)node;
 
@@ -255,9 +255,10 @@ static void foreign_expr_walker_const(Node *node,   Oid *collation,FDWCollateSta
         *state = FDW_COLLATE_UNSAFE;
     }
 
+    return true;
 }
 
-static void foreign_expr_walker_param(Node *node, Oid *collation,FDWCollateState * state)
+static bool foreign_expr_walker_param(Node *node, Oid *collation,FDWCollateState * state)
 {
     Param *p = (Param *)node;
 
@@ -271,6 +272,7 @@ static void foreign_expr_walker_param(Node *node, Oid *collation,FDWCollateState
         *state = FDW_COLLATE_UNSAFE;
     }
 
+    return true;
 }
 
 static bool foreign_expr_walker_arrayref(Node *node, foreign_glob_cxt *glob_cxt,  foreign_loc_cxt *inner_cxt,Oid *collation,FDWCollateState * state)
@@ -626,11 +628,11 @@ static bool foreign_expr_walker(Node *node, foreign_glob_cxt *glob_cxt, foreign_
         } break;
         case T_Const: {
 
-            foreign_expr_walker_const(node,   &collation, &state);
+            walker_result = foreign_expr_walker_const(node,   &collation, &state);
         } break;
         case T_Param: {
 
-            foreign_expr_walker_param(node, &collation, &state);
+            walker_result = foreign_expr_walker_param(node, &collation, &state);
         } break;
         case T_ArrayRef: {
 
