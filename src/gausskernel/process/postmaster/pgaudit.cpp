@@ -1433,7 +1433,7 @@ static void pgaudit_cleanup(void)
     uint64 filesize = u_sess->attr.attr_security.Audit_RotationSize * g_instance.audit_cxt.thread_num *
                       1024L;  // filesize for current writting files
 
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+    LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
     index = g_instance.audit_cxt.audit_indextbl->begidx;
     while (g_instance.audit_cxt.pgaudit_totalspace + filesize >=
         ((uint64)u_sess->attr.attr_security.Audit_SpaceLimit * 1024L) ||
@@ -1490,7 +1490,7 @@ static void pgaudit_cleanup(void)
         g_instance.audit_cxt.audit_indextbl->begidx = (index + 1) % g_instance.audit_cxt.audit_indextbl->maxnum;
         index = g_instance.audit_cxt.audit_indextbl->begidx;
     }
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
 
     if (truncated) {
         pgaudit_update_indexfile(PG_BINARY_W, true);
@@ -2051,7 +2051,7 @@ static void pgaudit_read_indexfile(const char* audit_directory)
             ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("fail to read indextbl maxnum")));
         }
 
-        LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+        LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
 
         /* free the current audit index table */
         pfree_ext(g_instance.audit_cxt.audit_indextbl);
@@ -2071,7 +2071,7 @@ static void pgaudit_read_indexfile(const char* audit_directory)
                     (errcode_for_file_access(), errmsg("could not read audit index file \"%s\": %m", tblfile_path)));
         }
 
-        LWLockRelease(g_instance.audit_cxt.index_file_lock);
+        LWLockRelease(AuditIndexFileLock);
     }
 
     pgaudit_close_file(fp, tblfile_path);
@@ -2105,7 +2105,7 @@ static void pgaudit_update_indexfile(const char* mode, bool allow_errors)
     }
     /* check upgrade version to do audit upgrade processing */
     pgaudit_indexfile_upgrade();
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+    LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
     if (g_instance.audit_cxt.audit_indextbl != NULL) {
         count = g_instance.audit_cxt.audit_indextbl->maxnum * sizeof(AuditIndexItem) + indextbl_header_size;
         nwritten = fwrite(g_instance.audit_cxt.audit_indextbl, 1, count, fp);
@@ -2113,7 +2113,7 @@ static void pgaudit_update_indexfile(const char* mode, bool allow_errors)
             ereport(allow_errors ? LOG : FATAL,
                 (errcode_for_file_access(), errmsg("could not write to audit index file: %m")));
     }
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
     ereport(DEBUG1, (errmsg("pgaudit_update_indexfile index size: %ld", (long)ftell(fp))));
 
     pgaudit_close_file(fp, tblfile_path);
@@ -2177,11 +2177,11 @@ static void pgaudit_indexfile_upgrade(void)
         /* version is equal to AUDIT_INDEX_TABLE_VERSION_NUM upgrade success */
         if (stat(tblfile_path, &statbuf) == 0) {
             /* find old index table and delete it */
-            LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+            LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
             if (unlink(tblfile_path) < 0) {
                 ereport(WARNING, (errmsg("could not remove audit old index table file \"%s\": %m", tblfile_path)));
             }
-            LWLockRelease(g_instance.audit_cxt.index_file_lock);
+            LWLockRelease(AuditIndexFileLock);
         }
     } else {
         /* upgrade processing and sync old index table for old version */
@@ -2235,7 +2235,7 @@ static void pgaudit_indexfile_sync(const char* mode, bool allow_errors)
             securec_check(errorno, "\0", "\0");
         }
         /* write down the current values from audit_indextbl to audit_indextbl_old */
-        LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+        LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
         if (g_instance.audit_cxt.audit_indextbl_old != NULL) {
             count = g_instance.audit_cxt.audit_indextbl_old->maxnum * sizeof(AuditIndexItem) + old_indextbl_header_size;
             nwritten = fwrite(g_instance.audit_cxt.audit_indextbl_old, 1, count, fp);
@@ -2243,7 +2243,7 @@ static void pgaudit_indexfile_sync(const char* mode, bool allow_errors)
                 ereport(allow_errors ? LOG : FATAL,
                     (errcode_for_file_access(), errmsg("could not write to audit old index file: %m")));
         }
-        LWLockRelease(g_instance.audit_cxt.index_file_lock);
+        LWLockRelease(AuditIndexFileLock);
         ereport(LOG, (errmsg("pgaudit_indexfile_sync index size: %ld", (long)ftell(fp))));
         pgaudit_close_file(fp, tblfile_path);
     }
@@ -2283,7 +2283,7 @@ static void pgaudit_rewrite_indexfile(void)
         if (old_index_tbl.maxnum == 0 || old_index_tbl.maxnum > (1024 * 1024 + 1)) {
             ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("fail to read indextbl maxnum")));
         }
-        LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+        LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
         /* free the current audit index table */
         pfree_ext(g_instance.audit_cxt.audit_indextbl);
         pfree_ext(g_instance.audit_cxt.audit_indextbl_old);
@@ -2313,7 +2313,7 @@ static void pgaudit_rewrite_indexfile(void)
                     (errcode_for_file_access(), errmsg("could not read audit index file \"%s\": %m", tblfile_path)));
         }
 
-        LWLockRelease(g_instance.audit_cxt.index_file_lock);
+        LWLockRelease(AuditIndexFileLock);
     }
     pgaudit_close_file(fp, tblfile_path);
 }
@@ -2490,9 +2490,9 @@ static void pgaudit_reset_indexfile()
 
     /* If file remain threshold parameter changed, than copy the old audit index table to the new table */
     if (old_maxnum != (uint32)u_sess->attr.attr_security.Audit_RemainThreshold + 1) {
-        LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+        LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
         pgaudit_update_maxnum();
-        LWLockRelease(g_instance.audit_cxt.index_file_lock);
+        LWLockRelease(AuditIndexFileLock);
     }
 
     pgaudit_update_indexfile(PG_BINARY_W, true);
@@ -3001,7 +3001,7 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
      * then use the local thread one when iterate all audit files
      */
     pgaudit_read_indexfile(audit_dir);
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
+    LWLockAcquire(AuditIndexFileLock, LW_SHARED);
     pfree_ext(t_thrd.audit.audit_indextbl);
     if (g_instance.audit_cxt.audit_indextbl != NULL) {
         int indextbl_len =
@@ -3011,7 +3011,7 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
             memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
         securec_check(errorno, "\0", "\0");
     }
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
 
     per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
     oldcontext = MemoryContextSwitchTo(per_query_ctx);
@@ -3078,7 +3078,7 @@ Datum pg_delete_audit(PG_FUNCTION_ARGS)
      * then use the local thread one when iterate all audit files
      */
     pgaudit_read_indexfile(g_instance.attr.attr_security.Audit_directory);
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
+    LWLockAcquire(AuditIndexFileLock, LW_SHARED);
     pfree_ext(t_thrd.audit.audit_indextbl);
     if (g_instance.audit_cxt.audit_indextbl != NULL) {
         int indextbl_len =
@@ -3088,7 +3088,7 @@ Datum pg_delete_audit(PG_FUNCTION_ARGS)
             memcpy_s(t_thrd.audit.audit_indextbl, indextbl_len, g_instance.audit_cxt.audit_indextbl, indextbl_len);
         securec_check(errorno, "\0", "\0");
     }
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
 
     int thread_num = g_instance.audit_cxt.thread_num;
     if (begtime < endtime && (t_thrd.audit.audit_indextbl != NULL) && t_thrd.audit.audit_indextbl->count > 0) {
@@ -3149,10 +3149,10 @@ static void CheckAuditFile(void)
     errno_t rc;
     int thread_idx = t_thrd.audit.cur_thread_idx;
 
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
+    LWLockAcquire(AuditIndexFileLock, LW_SHARED);
     item = g_instance.audit_cxt.audit_indextbl->data + g_instance.audit_cxt.audit_indextbl->curidx[thread_idx];
     fnum = item->filenum;
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
 
     rc = snprintf_s(t_thrd.audit.pgaudit_filepath, MAXPGPATH, MAXPGPATH - 1, pgaudit_filename,
                     g_instance.attr.attr_security.Audit_directory, fnum);
@@ -3221,7 +3221,7 @@ static void pgaudit_mark_corrupt_info(uint32 fnum)
      */
     int thread_num = g_instance.audit_cxt.thread_num;
 
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
+    LWLockAcquire(AuditIndexFileLock, LW_SHARED);
 
     /*
      * iterate the all writing index looking for the thread idx of fnum
@@ -3236,7 +3236,7 @@ static void pgaudit_mark_corrupt_info(uint32 fnum)
         }
     }
 
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
 
     /* old audit files */
     if (thread_idx == -1) {
@@ -3333,11 +3333,6 @@ void audit_process_cxt_init()
     MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.audit_cxt.global_audit_context);
     g_instance.audit_cxt.thread_num = thread_num;
 
-    if (g_instance.audit_cxt.index_file_lock == NULL) {
-        g_instance.audit_cxt.index_file_lock = LWLockAssign(LWTRANCHE_AUDIT_INDEX_WAIT);
-        ereport(LOG, (errmsg("audit_process_cxt_init index file lock init ok")));
-    }
-
     /* init all pipes for all audit threads */
     if (g_instance.audit_cxt.sys_audit_pipes == NULL) {
         g_instance.audit_cxt.sys_audit_pipes =
@@ -3403,11 +3398,11 @@ uint32 pgaudit_get_auditfile_num()
 
     uint32 fnum = 0;
     int thread_idx = t_thrd.audit.cur_thread_idx;
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_SHARED);
+    LWLockAcquire(AuditIndexFileLock, LW_SHARED);
     AuditIndexItem *item =
         g_instance.audit_cxt.audit_indextbl->data + g_instance.audit_cxt.audit_indextbl->curidx[thread_idx];
     fnum = item->filenum;
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
     return fnum;
 }
 
@@ -3418,14 +3413,14 @@ uint32 pgaudit_get_auditfile_num()
 void pgaudit_update_auditfile_time(pg_time_t timestamp, bool exist)
 {
     int thread_idx = t_thrd.audit.cur_thread_idx;
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+    LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
     if (!exist) {
         AuditIndexItem *item =
             g_instance.audit_cxt.audit_indextbl->data + g_instance.audit_cxt.audit_indextbl->curidx[thread_idx];
         item->ctime = timestamp;
         ++g_instance.audit_cxt.audit_indextbl->count;
     }
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
 }
 
 /*
@@ -3438,7 +3433,7 @@ void pgaudit_switch_next_auditfile()
     uint32 new_fnum = 0;
     int thread_idx = t_thrd.audit.cur_thread_idx;
 
-    LWLockAcquire(g_instance.audit_cxt.index_file_lock, LW_EXCLUSIVE);
+    LWLockAcquire(AuditIndexFileLock, LW_EXCLUSIVE);
 
     /* update the current item filesize */
     item = g_instance.audit_cxt.audit_indextbl->data + g_instance.audit_cxt.audit_indextbl->curidx[thread_idx];
@@ -3461,7 +3456,7 @@ void pgaudit_switch_next_auditfile()
     item = g_instance.audit_cxt.audit_indextbl->data + g_instance.audit_cxt.audit_indextbl->curidx[thread_idx];
     item->filenum = ++current_max_fnum;
 
-    LWLockRelease(g_instance.audit_cxt.index_file_lock);
+    LWLockRelease(AuditIndexFileLock);
     ereport(DEBUG1, (errmsg("pgaudit_switch_next_auditfile new fnum :%d cur pgaudit_totalspace: %ld MB", new_fnum,
         g_instance.audit_cxt.pgaudit_totalspace)));
 }
