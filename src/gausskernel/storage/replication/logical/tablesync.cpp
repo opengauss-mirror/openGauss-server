@@ -866,7 +866,9 @@ char *LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
          * breakdown then it wouldn't have succeeded so trying it next time
          * seems like a better bet.
          */
+        StartTransactionCommand();
         ReplicationSlotDropAtPubNode(slotname, true);
+        CommitTransactionCommand();
     } else if (t_thrd.applyworker_cxt.curWorker->relstate == SUBREL_STATE_FINISHEDCOPY) {
         /*
          * The COPY phase was previously done, but tablesync then crashed
