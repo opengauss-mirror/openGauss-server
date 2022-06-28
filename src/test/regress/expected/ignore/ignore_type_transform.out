@@ -492,8 +492,8 @@ select * from t_smallint;
 --------
     100
    -100
- -32768
   32767
+ -32768
     100
    -100
 (6 rows)
@@ -579,14 +579,14 @@ CONTEXT:  referenced column: num
 insert /*+ ignore_error */ into t_float4 values(123.123::float8);
 insert /*+ ignore_error */ into t_float4 values(-123.123::float8);
 select * from t_float4;
-     num     
--------------
-     123.123
-    -123.123
- 3.40282e+38
- 1.17549e-38
-     123.123
-    -123.123
+     num      
+--------------
+      123.123
+     -123.123
+  3.40282e+38
+ -3.40282e+38
+      123.123
+     -123.123
 (6 rows)
 
 -- test for numeric to float4
@@ -602,10 +602,10 @@ CONTEXT:  referenced column: num
 WARNING:  value out of range: overflow
 CONTEXT:  referenced column: num
 select * from t_float4;
-     num     
--------------
- 3.40282e+38
- 3.40282e+38
+     num      
+--------------
+  3.40282e+38
+ -3.40282e+38
 (2 rows)
 
 -- test for char(n) converting

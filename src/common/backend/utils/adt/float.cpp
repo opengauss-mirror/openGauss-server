@@ -359,7 +359,7 @@ Datum float4in(PG_FUNCTION_ARGS)
     if (fcinfo->can_ignore) {
         if (isinf((float4)val) && !isinf(val)) {
             ereport(WARNING, (errmsg("value out of range: overflow")));
-            PG_RETURN_FLOAT4(num < 0 ? FLT_MIN : FLT_MAX);
+            PG_RETURN_FLOAT4(val < 0 ? -FLT_MAX : FLT_MAX);
         }
         if (((float4)val) == 0.0 && val != 0) {
             ereport(WARNING, (errmsg("value out of range: underflow")));
@@ -1189,7 +1189,7 @@ Datum dtof(PG_FUNCTION_ARGS)
     if (fcinfo->can_ignore) {
         if (isinf((float4)num) && !isinf(num)) {
             ereport(WARNING, (errmsg("value out of range: overflow")));
-            PG_RETURN_FLOAT4(num < 0 ? FLT_MIN : FLT_MAX);
+            PG_RETURN_FLOAT4(num < 0 ? -FLT_MAX : FLT_MAX);
         }
         if (((float4)num) == 0.0 && num != 0) {
             ereport(WARNING, (errmsg("value out of range: underflow")));
@@ -1257,7 +1257,7 @@ Datum dtoi2(PG_FUNCTION_ARGS)
     if (num < (float8)PG_INT16_MIN || num >= -((float8)PG_INT16_MIN) || isnan(num)) {
         if (fcinfo->can_ignore && !isnan(num)) {
             ereport(WARNING, (errmsg("smallint out of range")));
-            PG_RETURN_INT16(num < (float8)PG_INT16_MIN ? SHRT_MAX : SHRT_MIN);
+            PG_RETURN_INT16(num < (float8)PG_INT16_MIN ? SHRT_MIN : SHRT_MAX);
         }
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("smallint out of range")));
     }
