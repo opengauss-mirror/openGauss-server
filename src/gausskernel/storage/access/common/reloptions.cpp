@@ -2635,7 +2635,7 @@ void ForbidUserToSetCompressedOptions(List *options)
     if (FindInvalidOption(options, unSupportOptions, lengthof(unSupportOptions), &firstInvalidOpt)) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 (errmsg("Un-support feature"), errdetail("Option \"%s\" doesn't allow ALTER on uncompressed table",
+                 (errmsg("Un-support feature"), errdetail("Option \"%s\" doesn't allow ALTER",
                                                           unSupportOptions[firstInvalidOpt]))));
     }
 }
