@@ -4579,7 +4579,12 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             "%s/postgresql.conf.lock",
             t_thrd.proc_cxt.DataDir);
         securec_check_intval(rc, , );
-        if (get_file_lock(gucconf_lock_file, &filelock) != CODE_OK) {
+        /**
+         * Get two locks for config file before making changes, please refer to 
+         * AlterSystemSetConfigFile() in guc.cpp for detailed explanations.
+         */
+        if (get_file_lock(gucconf_lock_file, &filelock) != CODE_OK || 
+            !LWLockConditionalAcquire(ConfigFileLock, LW_EXCLUSIVE)) {
             ereport(WARNING, (errmsg("the last sigup signal is processing,get file lock failed.")));
             (void)PG_SETMASK(&t_thrd.libpq_cxt.UnBlockSig);
             errno = save_errno;
@@ -4588,6 +4593,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
 
         ProcessConfigFile(PGC_SIGHUP);
         release_file_lock(&filelock);
+        LWLockRelease(ConfigFileLock);
 
         (void)SignalChildren(SIGHUP);
         if (ENABLE_THREAD_POOL) {

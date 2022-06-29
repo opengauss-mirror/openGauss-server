@@ -2509,12 +2509,15 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
         ereport(LOG, (errmsg("Modify the postgresql.conf failed : can not get the file lock ")));
         return false;
     }
+    LWLockAcquire(ConfigFileLock, LW_EXCLUSIVE);
+
 
     /* 2. load reserved parameters to reserve_item(array in memeory) */
     retcode = copy_asyn_lines(t_thrd.walreceiver_cxt.gucconf_file, reserve_item, g_reserve_param);
     if (retcode != CODE_OK) {
         release_opt_lines(reserve_item);
         release_file_lock(&filelock);
+        LWLockRelease(ConfigFileLock);
         ereport(LOG, (errmsg("copy asynchronization items failed: %s\n", gs_strerror(retcode))));
         return false;
     }
@@ -2524,6 +2527,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
     if (retcode != CODE_OK) {
         release_opt_lines(reserve_item);
         release_file_lock(&filelock);
+        LWLockRelease(ConfigFileLock);
         ereport(LOG, (errmsg("create %s failed: %s\n", conf_bak, gs_strerror(retcode))));
         return false;
     }
@@ -2532,6 +2536,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
     retcode = update_temp_file(conf_bak, reserve_item, g_reserve_param);
     if (retcode != CODE_OK) {
         release_file_lock(&filelock);
+        LWLockRelease(ConfigFileLock);
         release_opt_lines(reserve_item);
         ereport(LOG, (errmsg("update gaussdb config file failed: %s\n", gs_strerror(retcode))));
         return false;
@@ -2539,6 +2544,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
         ereport(LOG, (errmsg("update gaussdb config file success")));
         if (rename(conf_bak, t_thrd.walreceiver_cxt.gucconf_file) != 0) {
             release_file_lock(&filelock);
+            LWLockRelease(ConfigFileLock);
             release_opt_lines(reserve_item);
             ereport(LOG, (errcode_for_file_access(), errmsg("could not rename \"%s\" to \"%s\": %m", conf_bak,
                                                             t_thrd.walreceiver_cxt.gucconf_file)));
@@ -2550,6 +2556,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
     if (lstat(t_thrd.walreceiver_cxt.gucconf_file, &statbuf) != 0) {
         if (errno != ENOENT) {
             release_file_lock(&filelock);
+            LWLockRelease(ConfigFileLock);
             release_opt_lines(reserve_item);
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m",
                                                               t_thrd.walreceiver_cxt.gucconf_file)));
@@ -2565,6 +2572,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
     }
 
     release_file_lock(&filelock);
+    LWLockRelease(ConfigFileLock);
     release_opt_lines(reserve_item);
 
     /* notify postmaster the config file has changed */
