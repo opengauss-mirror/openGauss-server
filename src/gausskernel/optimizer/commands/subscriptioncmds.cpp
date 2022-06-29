@@ -181,6 +181,11 @@ static void parse_subscription_options(const List *options, char **conninfo, Lis
                 errmsg("subscription with slot_name = NONE must also set enabled = false")));
         }
     }
+
+    if (copy_data && *copy_data && u_sess->attr.attr_storage.max_sync_workers_per_subscription == 0) {
+        ereport(WARNING, (errmsg("you need to set max_sync_workers_per_subscription because it is zero but "
+                                 "copy_data is true")));
+    }
 }
 
 /*
@@ -859,6 +864,8 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     if (publications != NIL) {
         values[Anum_pg_subscription_subpublications - 1] = publicationListToArray(publications);
         replaces[Anum_pg_subscription_subpublications - 1] = true;
+    } else {
+        publications = sub->publications;
     }
 
     tup = heap_modify_tuple(tup, RelationGetDescr(rel), values, nulls, replaces);
