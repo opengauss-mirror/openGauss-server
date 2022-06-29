@@ -223,6 +223,7 @@ static void check_outarg_info(const bool *have_assigend,
 				const char *argmodes,const int proargnum);
 bool IsValidIdentClientKey(const char *input);
 bool IsValidIdent(char *input);
+bool IsValidIdentUsername(char *input);
 bool IsValidGroupname(const char *input);
 static bool checkNlssortArgs(const char *argname);
 static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yyscan_t yyscanner);
@@ -1167,7 +1168,7 @@ CreateRoleStmt:
 					CreateRoleStmt *n = makeNode(CreateRoleStmt);
 					n->stmt_type = ROLESTMT_ROLE;
 					if (!isRestoreMode)
-						IsValidIdent($3);
+						IsValidIdentUsername($3);
 					n->role = $3;
 					n->options = $5;
 					$$ = (Node *)n;
@@ -1476,7 +1477,7 @@ CreateUserStmt:
 				{
 					CreateRoleStmt *n = makeNode(CreateRoleStmt);
 					n->stmt_type = ROLESTMT_USER;
-					IsValidIdent($3);
+					IsValidIdentUsername($3);
 					n->role = $3;
 					n->options = $5;
 					$$ = (Node *)n;
@@ -12730,7 +12731,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_ROLE;
 					n->subname = $3;
-					IsValidIdent($6);
+					IsValidIdentUsername($6);
 					n->newname = $6;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -12740,7 +12741,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_USER;
 					n->subname = $3;
-					IsValidIdent($6);
+					IsValidIdentUsername($6);
 					n->newname = $6;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -23615,6 +23616,42 @@ IsValidIdent(char *input)
 	{
 		c = input[i];
 		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '$')
+		{
+			continue;
+		}
+		else
+		{
+			ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("invalid name: %s", input)));
+			return false;
+		}
+	}
+	return true;
+}
+
+/* judge if username is valid
+ * Only letters, numbers, dollar signs ($), number signs (#) and the underscore are allowed in name
+ * and The first character must be letter or underscore
+*/
+bool
+IsValidIdentUsername(char *input)
+{
+	char c = input[0];
+	/*The first character id numbers or dollar*/
+	if ((c >= '0' && c <= '9') || c == '$')
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_SYNTAX_ERROR),
+			errmsg("invalid name: %s", input)));
+		return false;
+	}
+
+	int len = strlen(input);
+	for (int i = 0; i < len; i++)
+	{
+		c = input[i];
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '$' || c == '#')
 		{
 			continue;
 		}
