@@ -2124,11 +2124,12 @@ lreplace:
                 bool row_movement = false;
                 bool need_create_file = false;
                 int seqNum = -1;
+                bool can_ignore = estate->es_plannedstmt->hasIgnore;
                 if (!partKeyUpdate) {
                     row_movement = false;
                     new_partId = oldPartitionOid;
                 } else {
-                    partitionRoutingForTuple(result_relation_desc, tuple, u_sess->exec_cxt.route);
+                    partitionRoutingForTuple(result_relation_desc, tuple, u_sess->exec_cxt.route, can_ignore);
 
                     if (u_sess->exec_cxt.route->fileExist) {
                         new_partId = u_sess->exec_cxt.route->partitionId;
@@ -2136,11 +2137,11 @@ lreplace:
                             Partition part = partitionOpen(result_relation_desc, new_partId, RowExclusiveLock);
                             Relation partRel = partitionGetRelation(result_relation_desc, part);
 
-                            partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route);
+                            partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route, can_ignore);
                             if (u_sess->exec_cxt.route->fileExist) {
                                 new_partId = u_sess->exec_cxt.route->partitionId;
                             } else {
-                                int level = estate->es_plannedstmt->hasIgnore ? WARNING : ERROR;
+                                int level = can_ignore ? WARNING : ERROR;
                                 ereport(level, (errmodule(MOD_EXECUTOR),
                                                 (errcode(ERRCODE_PARTITION_ERROR),
                                                  errmsg("fail to update partitioned table \"%s\"",
@@ -2150,7 +2151,7 @@ lreplace:
 
                             releaseDummyRelation(&partRel);
                             partitionClose(result_relation_desc, part, NoLock);
-                            if (!u_sess->exec_cxt.route->fileExist && estate->es_plannedstmt->hasIgnore) {
+                            if (!u_sess->exec_cxt.route->fileExist && can_ignore) {
                                 return NULL;
                             }
                         }
@@ -2174,7 +2175,7 @@ lreplace:
                          * it can not be a range area 
                          */
                         if (u_sess->exec_cxt.route->partArea != PART_AREA_INTERVAL) {
-                            if (epqstate->parentestate->es_plannedstmt->hasIgnore) {
+                            if (can_ignore) {
                                 ereport(WARNING, (errmsg("fail to update partitioned table \"%s\".new tuple does not "
                                                          "map to any table partition.",
                                                          RelationGetRelationName(result_relation_desc))));
@@ -2235,7 +2236,7 @@ lreplace:
                         /*
                          * check constraints first if SQL has keyword IGNORE
                          */
-                        if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                        if (can_ignore &&
                             !ExecCheckIndexConstraints(slot, estate, fake_relation, partition, &isgpi, bucketid,
                                                        &conflictInfo, &conflictPartOid, &conflictBucketid)) {
                             ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
@@ -2447,7 +2448,7 @@ lreplace:
                         /*
                          * check constraints first if SQL has keyword IGNORE
                          */
-                        if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                        if (can_ignore &&
                             !ExecCheckIndexConstraints(slot, estate, fake_insert_relation, insert_partition, &isgpi,
                                                        bucketid, &conflictInfo, &conflictPartOid, &conflictBucketid)) {
                             ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",

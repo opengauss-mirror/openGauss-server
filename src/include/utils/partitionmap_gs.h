@@ -146,7 +146,7 @@ typedef struct HashPartitionMap {
         }                                                                              \
     } while (0)
 
-#define partitionRoutingForTuple(rel, tuple, partIdentfier)                                                           \
+#define partitionRoutingForTuple(rel, tuple, partIdentfier, canIgnore)                                                \
     do {                                                                                                              \
         TupleDesc tuple_desc = NULL;                                                                                  \
         int2vector *partkey_column = NULL;                                                                            \
@@ -169,6 +169,14 @@ typedef struct HashPartitionMap {
                 transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);       \
         }                                                                                                             \
         if (PartitionMapIsInterval((rel)->partMap) && values[0]->constisnull) {                                       \
+            if (canIgnore) {                                                                                          \
+                /* treat type as PART_TYPE_RANGE because PART_TYPE_INTERVAL will create a new partition.              \
+                 * this will be handled by caller and directly return */                                              \
+                (partIdentfier)->partArea = PART_AREA_RANGE;                                                          \
+                (partIdentfier)->fileExist = false;                                                                   \
+                (partIdentfier)->partitionId = InvalidOid;                                                            \
+                break;                                                                                                \
+            }                                                                                                         \
             ereport(ERROR,                                                                                            \
                     (errcode(ERRCODE_INTERNAL_ERROR), errmsg("inserted partition key does not map to any partition"), \
                      errdetail("inserted partition key cannot be NULL for interval-partitioned table")));             \
