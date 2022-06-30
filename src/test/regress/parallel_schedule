@@ -816,3 +816,6 @@ test: ledger_table_case
 
 # wlm_memory_trace
 test: wlm_memory_trace
+
+# vacuum_deltamerge
+test: col_vacuum_deltamerge

@@ -45,6 +45,7 @@
 #include "access/heapam.h"
 #include "access/tableam.h"
 #include "access/transam.h"
+#include "access/tuptoaster.h"
 #include "access/visibilitymap.h"
 #include "access/xlog.h"
 #include "access/multixact.h"
@@ -225,6 +226,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
 
             InsertArg args;
             HeapTuple deltaTup = NULL;
+            HeapTuple deltaTupFlattened = NULL;
             ResultRelInfo *resultRelInfo = NULL;
             if (onerel->rd_rel->relhasindex) {
                 resultRelInfo = makeNode(ResultRelInfo);
@@ -246,13 +248,22 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
             bulkload_rows batchRow(tupDesc, RelationGetMaxBatchRows(onerel), true);
 
             while ((deltaTup = (HeapTuple) tableam_scan_getnexttuple(deltaScanDesc, ForwardScanDirection)) != NULL) {
-                tableam_tops_deform_tuple(deltaTup, tupDesc, val, null);
+                /* need to flatten toast attributes before append into cu */
+                if (HeapTupleHasExternal(deltaTup)) {
+                    deltaTupFlattened = toast_flatten_tuple(deltaTup, RelationGetDescr(deltaRel));
+                    tableam_tops_deform_tuple(deltaTupFlattened, tupDesc, val, null);
+                } else {
+                    tableam_tops_deform_tuple(deltaTup, tupDesc, val, null);
+                }
 
                 /* ignore returned value because only one tuple is appended into */
                 (void)batchRow.append_one_tuple(val, null, tupDesc);
 
                 /* delete the current tuple from delta table */
                 simple_heap_delete(deltaRel, &deltaTup->t_self);
+
+                /* free possibly flattened delta tuple */
+                heap_freetuple_ext(deltaTupFlattened);
 
                 if (batchRow.full_rownum()) {
                     /*  insert into main table */

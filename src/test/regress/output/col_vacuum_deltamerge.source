@@ -1,0 +1,40 @@
+--restart_node
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_delta_store=on"
+--?.*
+--?.*
+--?gs_guc set: enable_delta_store=on.*postgresql.conf.*
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1/ > @abs_bindir@/../datanode1.restart.log 2>&1
+--?.*
+
+drop table if exists test_oid_rep;
+NOTICE:  table "test_oid_rep" does not exist, skipping
+create table test_oid_rep(
+    id int,
+    a varchar(4000),
+    b varchar(4000),
+    c varchar(4000),
+    d varchar(4000)
+) with(orientation=column,deltarow_threshold=10);
+declare
+bigstr text;
+begin
+for i in 0..100 loop
+bigstr=bigstr||' '||md5(i);
+end loop;
+for i in 0..100 loop
+insert into test_oid_rep
+values(i,bigstr||md5(i+1),bigstr||md5(i+2),bigstr||md5(i+3),bigstr||md5(i+4));
+end loop;
+end;
+/
+vacuum deltamerge test_oid_rep;
+select md5(a || b|| c|| d) from test_oid_rep limit 1;
+               md5                
+----------------------------------
+ 46d912eee8a933de0b9c252f2ab29ab7
+(1 row)
+
