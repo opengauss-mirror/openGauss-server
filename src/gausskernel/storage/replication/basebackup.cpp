@@ -1988,8 +1988,8 @@ static void SendCompressedFile(char* readFileName, int basePathLen, struct stat&
     BlockNumber totalBlockNum = (BlockNumber)pg_atomic_read_u32(&map->nblocks);
 
     /* some chunks may have been allocated but not used.
-     * Reserve 0 chunks for avoiding the error when the size of a compressed block extends */
-    auto reservedChunks = 0;
+     * Reserve 160kb for avoiding the error when the size of a compressed block extends */
+    int reservedChunks = (BLCKSZ / chunkSize) * 20;
     securec_check(memcpy_s(transfer, pcaFileLen, map, pcaFileLen), "", "");
     decltype(statbuf.st_size) realSize = (map->allocated_chunks + reservedChunks)  * chunkSize;
     statbuf.st_size = statbuf.st_size >= realSize ? statbuf.st_size : realSize;
