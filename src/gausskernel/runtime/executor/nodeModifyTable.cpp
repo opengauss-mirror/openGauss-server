@@ -1852,12 +1852,12 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
                 TupleTableSlot *tmp_slot = node->mt_insert_constr_slot == NULL ? slot : node->mt_insert_constr_slot;
-                if (!ExecConstraints(result_rel_info, slot, estate)) {
+                if (!ExecConstraints(result_rel_info, tmp_slot, estate)) {
                     if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
-                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), slot);
+                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
                         /* Double check constraints in case that new val in column with not null constraints
                          * violated check constraints */
-                        ExecConstraints(result_rel_info, slot, estate);
+                        ExecConstraints(result_rel_info, tmp_slot, estate);
                     } else {
                         return NULL;
                     }
