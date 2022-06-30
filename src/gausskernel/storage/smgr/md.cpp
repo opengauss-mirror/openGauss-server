@@ -1158,8 +1158,8 @@ static MdfdVec *mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
         RelFileNodeForkNum pcdRelFileNode = RelFileNodeForkNumFill(reln->smgr_rnode, PCD_FORKNUM, 0);
         fd_pcd = DataFileIdOpenFile(pcfile_path, pcdRelFileNode, flags, FILE_RW_PERMISSION);
         if (fd_pcd < 0) {
-            fd_pcd = MdOpenRetryOpenFile(pcfile_path, pcaRelFileNode, behavior, flags);
-            if (fd_pca < 0) {
+            fd_pcd = MdOpenRetryOpenFile(pcfile_path, pcdRelFileNode, behavior, flags);
+            if (fd_pcd < 0) {
                 pfree(path);
                 return NULL;
             }
