@@ -1202,6 +1202,8 @@ static PGresult *libpqrcv_PQexec(const char *query)
          * blocking.
          */
         while (PQisBusy(t_thrd.libwalreceiver_cxt.streamConn)) {
+            CHECK_FOR_INTERRUPTS();
+
             /*
              * We don't need to break down the sleep into smaller increments,
              * and check for interrupts after each nap, since we can just
