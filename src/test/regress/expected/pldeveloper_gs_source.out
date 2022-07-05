@@ -836,7 +836,12 @@ begin
 null;
 end;
 /
+set behavior_compat_options='';
 set plsql_show_all_error to on;
+set  check_function_bodies to off;
+create or replace procedure test1 is begin null; end;
+/
+set  check_function_bodies to on;
 select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
      name     |     type     | status |                                       src                                       
 --------------+--------------+--------+---------------------------------------------------------------------------------
@@ -945,7 +950,8 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | begin                                                                          +
               |              |        | insert int a;                                                                  +
               |              |        | end;
-(16 rows)
+ test1        | procedure    | t      | create or replace procedure test1 is begin null; end;
+(17 rows)
 
 select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
     name    |     type     | line |                  src                  
@@ -996,11 +1002,6 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | return var1;                                                                   +
                |              |        |              | end;                                                                           +
                |              |        |              | $$;
- gs_developper | error2       | t      | package      | CREATE OR REPLACE PACKAGE error2 IS                                            +
-               |              |        |              | a int;b int;                                                                   +
-               |              |        |              | FUNCTION func1(a in int, b inout int, c out int) return int;                   +
-               |              |        |              | FUNCTION func2(a in int, b inout int, c out int) return int;                   +
-               |              |        |              | END error2;
  gs_developper | error2       | f      | package body | CREATE OR REPLACE PACKAGE BODY error2 IS                                       +
                |              |        |              | FUNCTION func1 (a in int, b inout int c out int) return int                    +
                |              |        |              | IS                                                                             +
@@ -1017,6 +1018,11 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | a1 :=10;                                                                       +
                |              |        |              | RETURN(a1 + a + b);                                                            +
                |              |        |              | END;                                                                           +
+               |              |        |              | END error2;
+ gs_developper | error2       | t      | package      | CREATE OR REPLACE PACKAGE error2 IS                                            +
+               |              |        |              | a int;b int;                                                                   +
+               |              |        |              | FUNCTION func1(a in int, b inout int, c out int) return int;                   +
+               |              |        |              | FUNCTION func2(a in int, b inout int, c out int) return int;                   +
                |              |        |              | END error2;
  gs_developper | func00       | t      | procedure    | create or replace procedure func00                                             +
                |              |        |              | is                                                                             +
@@ -1051,19 +1057,6 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | a inv%d;                                                                       +
                |              |        |              | procedure proc1(c ff%F);                                                       +
                |              |        |              | end pkg2;
- gs_developper | pkg3         | f      | package body | create or replace package body pkg3                                            +
-               |              |        |              | is                                                                             +
-               |              |        |              | a b c d;                                                                       +
-               |              |        |              | procedure proc1()                                                              +
-               |              |        |              | is                                                                             +
-               |              |        |              | begin                                                                          +
-               |              |        |              | insert int asd asd;                                                            +
-               |              |        |              | end;                                                                           +
-               |              |        |              | end pkg3;
- gs_developper | pkg3         | t      | package      | create or replace package pkg3                                                 +
-               |              |        |              | is                                                                             +
-               |              |        |              | a int;                                                                         +
-               |              |        |              | end pkg3;
  gs_developper | pkg4         | f      | package      | create or replace package pkg4                                                 +
                |              |        |              | is                                                                             +
                |              |        |              | a a;                                                                           +
@@ -1091,14 +1084,15 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | begin                                                                          +
                |              |        |              | insert int a;                                                                  +
                |              |        |              | end;
-(16 rows)
+ gs_developper | test1        | t      | procedure    | create or replace procedure test1 is begin null; end;
+(15 rows)
 
 truncate DBE_PLDEVELOPER.gs_source;
 truncate DBE_PLDEVELOPER.gs_errors;
 reset role;
 reset behavior_compat_options;
 drop schema gs_source cascade;
-NOTICE:  drop cascades to 14 other objects
+NOTICE:  drop cascades to 15 other objects
 DETAIL:  drop cascades to function gourav88(integer,integer,integer)
 drop cascades to function func1()
 drop cascades to function mask()
@@ -1113,5 +1107,6 @@ drop cascades to function gs_source.func1(integer,integer)
 drop cascades to function gs_source.func2(integer,integer)
 drop cascades to function func00()
 drop cascades to function skipinsertgssource()
+drop cascades to function test1()
 drop role jackson_src;
 drop role gs_developper;

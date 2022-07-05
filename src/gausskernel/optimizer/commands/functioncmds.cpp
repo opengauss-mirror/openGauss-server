@@ -1842,9 +1842,22 @@ void AlterFunction(AlterFunctionStmt* stmt)
     DefElem* shippable_item = NULL;
     DefElem* package_item = NULL;
     bool isNull = false;
-    rel = heap_open(ProcedureRelationId, RowExclusiveLock);
 
     funcOid = LookupFuncNameTypeNames(stmt->func->funcname, stmt->func->funcargs, false);
+    #ifndef ENABLE_MULTIPLE_NODES
+    char* schemaName = NULL;
+    char* pkgname = NULL;
+    char* procedureName = NULL;
+    DeconstructQualifiedName(stmt->func->funcname, &schemaName, &procedureName, &pkgname);
+    if (schemaName == NULL) {
+        tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcOid));
+        procForm = (Form_pg_proc)GETSTRUCT(tup);
+        schemaName = get_namespace_name(procForm->pronamespace);
+        ReleaseSysCache(tup);
+    }
+    LockProcName(schemaName, pkgname, procedureName);
+#endif
+    rel = heap_open(ProcedureRelationId, RowExclusiveLock);
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow alter the builtin functions
      */

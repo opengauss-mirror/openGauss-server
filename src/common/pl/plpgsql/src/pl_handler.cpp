@@ -1359,13 +1359,6 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
             PG_RE_THROW();
         }
         PG_END_TRY();
-        /* Skip validation on Initdb */
-#ifndef ENABLE_MULTIPLE_NODES
-        if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
-            ProcInsertGsSource(funcoid, true);
-        }
-#endif
-
         bool isNotComipilePkg = u_sess->plsql_cxt.curr_compile_context == NULL ||
             (u_sess->plsql_cxt.curr_compile_context != NULL &&
             u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL);
@@ -1386,7 +1379,11 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
                 u_sess->ClientAuthInProgress = saved_client_auth;
         }
     }
-
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
+        ProcInsertGsSource(funcoid, true);
+    }
+#endif
 #ifndef ENABLE_MULTIPLE_NODES
     u_sess->plsql_cxt.isCreateFunction = false;
     u_sess->opt_cxt.query_dop = outerDop;

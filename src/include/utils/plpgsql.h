@@ -1640,6 +1640,7 @@ extern void exec_get_datum_type_info(PLpgSQL_execstate* estate, PLpgSQL_datum* d
 extern Datum exec_simple_cast_datum(
     PLpgSQL_execstate* estate, Datum value, Oid valtype, Oid reqtype, int32 reqtypmod, bool isnull);
 extern void ResetCursorOption(Portal portal, bool reset);
+extern void LockProcName(char* schemaname, char* pkgname, const char* funcname);
 #ifndef ENABLE_MULTIPLE_NODES
 extern void ResetCursorAtrribute(Portal portal);
 #endif
