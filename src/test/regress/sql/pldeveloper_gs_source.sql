@@ -283,7 +283,12 @@ begin
 null;
 end;
 /
+set behavior_compat_options='';
 set plsql_show_all_error to on;
+set  check_function_bodies to off;
+create or replace procedure test1 is begin null; end;
+/
+set  check_function_bodies to on;
 select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
 select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
 drop package if exists pkg4;
