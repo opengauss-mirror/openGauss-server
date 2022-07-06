@@ -467,6 +467,7 @@ static void bgwriter_request_shutdown_handler(SIGNAL_ARGS)
     int save_errno = errno;
 
     t_thrd.bgwriter_cxt.shutdown_requested = true;
+    t_thrd.int_cxt.ProcDiePending = true;
 
     if (t_thrd.proc)
         SetLatch(&t_thrd.proc->procLatch);
