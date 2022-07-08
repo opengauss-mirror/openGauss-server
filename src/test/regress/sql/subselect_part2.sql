@@ -338,6 +338,19 @@ SELECT 'z'
 FROM location_type
 WHERE 1=0);
 
+--
+-- Check EXISTS simplification with LIMIT
+--
+explain (costs off)
+select * from int4_tbl o where exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit null);
+explain (costs off)
+select * from int4_tbl o where not exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit 1);
+explain (costs off)
+select * from int4_tbl o where exists
+  (select 1 from int4_tbl i where i.f1=o.f1 limit 0);
+
 
 drop table if exists location_type cascade;
 drop table if exists item_inventory_plan cascade;
