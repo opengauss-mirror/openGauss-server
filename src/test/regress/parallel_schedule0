@@ -7,7 +7,7 @@
 # ----------
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
-test: uppercase_attribute_name
+test: uppercase_attribute_name decode_compatible_with_o
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views
 
 # parse xlog and page

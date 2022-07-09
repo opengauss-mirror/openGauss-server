@@ -1,3 +1,1046 @@
+-- test regexp_count(source_char, pattern [, position [, match_param] ])
+set behavior_compat_options = aformat_regexp_match;
+select regexp_count('abc', '^a');
+ regexp_count 
+--------------
+            1
+(1 row)
+
+select regexp_count('abc', '');
+ regexp_count 
+--------------
+             
+(1 row)
+
+select regexp_count(null, '');
+ regexp_count 
+--------------
+             
+(1 row)
+
+select regexp_count(null, null);
+ regexp_count 
+--------------
+             
+(1 row)
+
+select regexp_count('abc', null);
+ regexp_count 
+--------------
+             
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', '^(a|d)');
+ regexp_count 
+--------------
+            1
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', '^(a|d)', 1, 'm');
+ regexp_count 
+--------------
+            2
+(1 row)
+
+select regexp_count('abc'||chr(13)||chr(10)||'def', '^(a|d)', 1, 'm');
+ regexp_count 
+--------------
+            2
+(1 row)
+
+select regexp_count('abc'||chr(13)||chr(10)||'def', '^(a|d)', 1, 'n');
+ regexp_count 
+--------------
+            1
+(1 row)
+
+select regexp_count('abc'||chr(13)||chr(10)||'def', '^(a|d)', 1, 'p');
+ regexp_count 
+--------------
+            1
+(1 row)
+
+select regexp_count('abc'||chr(13)||chr(10)||'def', '^(a|d)', 1, 'w');
+ regexp_count 
+--------------
+            2
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', 'abc.d');
+ regexp_count 
+--------------
+            0
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', 'abc.d', 1, 'w');
+ regexp_count 
+--------------
+            1
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', 'abc.d', 1, 'g');
+ERROR:  invalid regexp option: "g"
+CONTEXT:  referenced column: regexp_count
+select regexp_count('abc'||chr(10)||'def', 'abc.d', 1, 'p');
+ regexp_count 
+--------------
+            0
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', 'abc.d', 2, 'w');
+ regexp_count 
+--------------
+            0
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', 'abc.d', null, 'w');
+ regexp_count 
+--------------
+             
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', 'abc.d', 1000, 'w');
+ regexp_count 
+--------------
+            0
+(1 row)
+
+select regexp_count('abc'||chr(10)||'def', 'abc.d', 1000, null);
+ regexp_count 
+--------------
+            0
+(1 row)
+
+select regexp_count('abc', 'b', 0, '');
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_count
+select regexp_count('abc', 'b', -1, '');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_count
+select regexp_count(null, 'b', -1, '');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_count
+select regexp_count(null, 'b', 1, 'g');
+ERROR:  invalid regexp option: "g"
+CONTEXT:  referenced column: regexp_count
+select regexp_count('abc', null, 1, 'g');
+ERROR:  invalid regexp option: "g"
+CONTEXT:  referenced column: regexp_count
+select regexp_count('abc def', '[a-z]{0,}');
+ regexp_count 
+--------------
+            4
+(1 row)
+
+select regexp_count('abc def', '[a-z]*');
+ regexp_count 
+--------------
+            4
+(1 row)
+
+select regexp_count('abc def', '[a-z]+');
+ regexp_count 
+--------------
+            2
+(1 row)
+
+select regexp_count('smishtm1_23','^\w+$',3);
+ regexp_count 
+--------------
+            0
+(1 row)
+
+select regexp_count('smishtm1_23','\w+$',3);
+ regexp_count 
+--------------
+            1
+(1 row)
+
+select regexp_count('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 5);
+ regexp_count 
+--------------
+            5
+(1 row)
+
+select regexp_count('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 20);
+ regexp_count 
+--------------
+            3
+(1 row)
+
+select regexp_count('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 35);
+ regexp_count 
+--------------
+            1
+(1 row)
+
+select regexp_count('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 36);
+ regexp_count 
+--------------
+            0
+(1 row)
+
+create table regexptable(id int,char_value CHAR(255), nchar_value NCHAR(255), varchar2_value VARCHAR2(255), nvarchar2_value NVARCHAR2(255), clob_value CLOB, text_value TEXT);
+insert into regexptable values(1,'123jui','56700986.58 ','ring1023','smishtm1_23','qwe@qq.com','homeoooo9876000');
+insert into regexptable values(2,'rooob000','-89098.980 ','9999.99900','j_ack_990','123@sina.com','-765489097.07658');
+insert into regexptable values(3,'ring1023','9999.99900 ','marry_10','marry_10','qwe@11.cm','kingqueen0980_');
+insert into regexptable values(4,'happyeveryday999','-900876','KINGGGkingooo765','_123abc','rty@qq.com','oplplPPPPPP11098');
+insert into regexptable values(5,'clobbiger9098','654799009.9076','KINGkoo5','__acbcbf__','qwe@sina.com','oplplPPPPPP11098');
+insert into regexptable values(6,'homeoooo9876000','-765489097.07658','KINGKkingooo098','kingqueen0980_','123@163.com','oplplPPPPPP11098');
+insert into regexptable values(7,regexp_count('1233444',''),regexp_count('1233444',''),regexp_count('1233444','1'),regexp_count('1233444','2'),regexp_count('1233444','3'),regexp_count('1233444','4'));
+select id, regexp_count(char_value,'^[A-Za-z0-9]+$',1) as result , char_value from regexptable order by 1, 2, 3;
+ id | result |                                                                                                                           char_value                                                                                                                            
+----+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 |      1 | 123jui                                                                                                                                                                                                                                                         
+  2 |      1 | rooob000                                                                                                                                                                                                                                                       
+  3 |      1 | ring1023                                                                                                                                                                                                                                                       
+  4 |      1 | happyeveryday999                                                                                                                                                                                                                                               
+  5 |      1 | clobbiger9098                                                                                                                                                                                                                                                  
+  6 |      1 | homeoooo9876000                                                                                                                                                                                                                                                
+  7 |        | 
+(7 rows)
+
+--error
+select id, regexp_count(char_value,'^[A-Za-z0-9]+$',2) as result , char_value from regexptable order by 1, 2, 3;
+ id | result |                                                                                                                           char_value                                                                                                                            
+----+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 |      0 | 123jui                                                                                                                                                                                                                                                         
+  2 |      0 | rooob000                                                                                                                                                                                                                                                       
+  3 |      0 | ring1023                                                                                                                                                                                                                                                       
+  4 |      0 | happyeveryday999                                                                                                                                                                                                                                               
+  5 |      0 | clobbiger9098                                                                                                                                                                                                                                                  
+  6 |      0 | homeoooo9876000                                                                                                                                                                                                                                                
+  7 |        | 
+(7 rows)
+
+select id, regexp_count(nchar_value,'^[1-9]\d*\.\d*|0\.\d*[1-9]\d*$') as result , nchar_value from regexptable order by 1, 2, 3;
+ id | result |                                                                                                                           nchar_value                                                                                                                           
+----+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 |      1 | 56700986.58                                                                                                                                                                                                                                                    
+  2 |      0 | -89098.980                                                                                                                                                                                                                                                     
+  3 |      1 | 9999.99900                                                                                                                                                                                                                                                     
+  4 |      0 | -900876                                                                                                                                                                                                                                                        
+  5 |      1 | 654799009.9076                                                                                                                                                                                                                                                 
+  6 |      0 | -765489097.07658                                                                                                                                                                                                                                               
+  7 |        | 
+(7 rows)
+
+--error
+select id, regexp_count(nchar_value,'^[1-9]\d*\.\d*|0\.\d*[1-9]\d*$',2) as result , nchar_value from regexptable order by 1, 2, 3;
+ id | result |                                                                                                                           nchar_value                                                                                                                           
+----+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1 |      0 | 56700986.58                                                                                                                                                                                                                                                    
+  2 |      0 | -89098.980                                                                                                                                                                                                                                                     
+  3 |      0 | 9999.99900                                                                                                                                                                                                                                                     
+  4 |      0 | -900876                                                                                                                                                                                                                                                        
+  5 |      0 | 654799009.9076                                                                                                                                                                                                                                                 
+  6 |      0 | -765489097.07658                                                                                                                                                                                                                                               
+  7 |        | 
+(7 rows)
+
+select id, regexp_count(varchar2_value,'^.{3,8}$',1,'i') as result , varchar2_value from regexptable order by 1, 2, 3;
+ id | result |  varchar2_value  
+----+--------+------------------
+  1 |      1 | ring1023
+  2 |      0 | 9999.99900
+  3 |      1 | marry_10
+  4 |      0 | KINGGGkingooo765
+  5 |      1 | KINGkoo5
+  6 |      0 | KINGKkingooo098
+  7 |      0 | 1
+(7 rows)
+
+-- test regexp_instr(source_char, pattern [, position [, occurrence [, return_opt [, match_param]]]])
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '');
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr(null, '');
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('abc', '');
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('abc', null);
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr(null, 'b', 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr(null, 'b', 1);
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('abc', 'b', null);
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('abc', 'b', 1, null);
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('abc', 'b', -1, '');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr(null, 'b', -1, '');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr(null, 'b', 1, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr(null, 'b', 1, 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('abc', null, 1, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('abc', null, 1, 1, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 0
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('abc', null, 1, 1, 0);
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('abc def', '[a-z]{0,}', 1, 1);
+ regexp_instr 
+--------------
+            1
+(1 row)
+
+select regexp_instr('abc def', '[a-z]{0,}', 1, 2);
+ regexp_instr 
+--------------
+            4
+(1 row)
+
+select regexp_instr('abc def', '[a-z]{0,}', 1, 3);
+ regexp_instr 
+--------------
+            5
+(1 row)
+
+select regexp_instr('abc def', '[a-z]{0,}', 1, 4);
+ regexp_instr 
+--------------
+            8
+(1 row)
+
+select regexp_instr('abc def', '[a-z]{0,}', 1000);
+ regexp_instr 
+--------------
+            0
+(1 row)
+
+select regexp_instr('abc def', '[a-z]{0,}', 7);
+ regexp_instr 
+--------------
+            7
+(1 row)
+
+select regexp_instr('abc def', '[a-z]{0,}', 8);
+ regexp_instr 
+--------------
+            0
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', null);
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+');
+ regexp_instr 
+--------------
+            1
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 0, 6);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', -1, 6);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 1, 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', null, 1);
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 1, null);
+ regexp_instr 
+--------------
+             
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 1, 6, 0);
+ regexp_instr 
+--------------
+           34
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 1, 6, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 0
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 1, 6, 1);
+ regexp_instr 
+--------------
+           36
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 5, 5);
+ regexp_instr 
+--------------
+           34
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 5, 5, 2);
+ regexp_instr 
+--------------
+           36
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 100, 5);
+ regexp_instr 
+--------------
+            0
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 100, 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 100, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 1, 100);
+ regexp_instr 
+--------------
+            0
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[s|r|p][[:alpha:]]{6}', 3, 2, 0, 'i');
+ regexp_instr 
+--------------
+           18
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[s|r|p][[:alpha:]]{6}', 3, 2, 1, 'i');
+ regexp_instr 
+--------------
+           25
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[s|r|p][[:alpha:]]{6}', 3, 2, 1, 'c');
+ regexp_instr 
+--------------
+            0
+(1 row)
+
+select regexp_instr('500 OMG Parkway, Redwood Shores, CA', '[s|r|p][[:alpha:]]{6}', 3, 2, 1, 'g');
+ERROR:  invalid regexp option: "g"
+CONTEXT:  referenced column: regexp_instr
+select regexp_instr('abc'||chr(10)||'def', '^(a|d)?.', 1, 2, 0, 'm');
+ regexp_instr 
+--------------
+            5
+(1 row)
+
+select regexp_instr('abc'||chr(10)||'def', '^(a|d)?.', 1, 2, 1, 'm');
+ regexp_instr 
+--------------
+            7
+(1 row)
+
+select regexp_instr('smishtm1_23','^\w+$',3);
+ regexp_instr 
+--------------
+            0
+(1 row)
+
+select regexp_instr('smishtm1_23','\w+$',3);
+ regexp_instr 
+--------------
+            3
+(1 row)
+
+-- test regexp_substr(source_char, pattern [, position [, occurrence [, match_param]]])
+select regexp_substr('', '[^ ]+');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr(null, '[^ ]+');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr(null, '');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc', '');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc', null);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr(null, 'b', 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_substr
+select regexp_substr(null, 'b', 1);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc', 'b', null);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc', 'b', 1, null);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc', 'b', -1, '');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_substr
+select regexp_substr(null, 'b', -1, '');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_substr
+select regexp_substr(null, 'b', 1, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_substr
+select regexp_substr(null, 'b', 1, 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_substr
+select regexp_substr(null, 'b', 1, 1);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('smishtm1_23','^\w+$',3,1);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc def', '[a-z]{0,}', 7);
+ regexp_substr 
+---------------
+ f
+(1 row)
+
+select regexp_substr('abc def', '[a-z]{0,}', 8);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc def', '[a-z]{0,}', 9);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('sping'||chr(10)||'sppkg', 'sp.+g');
+ regexp_substr 
+---------------
+ sping
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', null);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+');
+ regexp_substr 
+---------------
+ 500
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', null);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_substr
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 1);
+ regexp_substr 
+---------------
+ 500
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 1000);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9);
+ regexp_substr 
+---------------
+ Parkway,
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9, null);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9, 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_substr
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9, 1);
+ regexp_substr 
+---------------
+ Parkway,
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9, 3);
+ regexp_substr 
+---------------
+ Shores,
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9, 5);
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9, 4, '');
+ regexp_substr 
+---------------
+ CA
+(1 row)
+
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9, 4, 'g');
+ERROR:  invalid regexp option: "g"
+CONTEXT:  referenced column: regexp_substr
+select regexp_substr('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', 9, 4, null);
+ regexp_substr 
+---------------
+ CA
+(1 row)
+
+select regexp_substr('', '^(a|d)?.', 1, 2, 'm');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr(null, '^(a|d)?.', 1, 2, 'm');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc'||chr(10)||'def', null, 1, 2, 'm');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc'||chr(10)||'def', '', 1, 2, 'm');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+select regexp_substr('abc'||chr(10)||'def', '^(a|d)?.', 1, 2, 'm');
+ regexp_substr 
+---------------
+ de
+(1 row)
+
+select regexp_substr('abc'||chr(10)||'def', '^(a|d)?.', 1, null, 'm');
+ regexp_substr 
+---------------
+ 
+(1 row)
+
+-- test regexp_replace(source_char, pattern [, replace_str [, position [, occurrence [, match_param]]]])
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+');
+ regexp_replace 
+----------------
+      
+(1 row)
+
+select regexp_replace('', '[^ ]+');
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('abc', '');
+ regexp_replace 
+----------------
+ abc
+(1 row)
+
+select regexp_replace('abc', null);
+ regexp_replace 
+----------------
+ abc
+(1 row)
+
+select regexp_replace(null, '[^ ]+');
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '');
+           regexp_replace            
+-------------------------------------
+ 500 OMG Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('', '[^ ]+', '-', 1);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace(null, '[^ ]+', '-', 1);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace(null, 'b', 'a', 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace(null, 'b', 'a', 1);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('abc', 'b', 'a', null);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('abc', 'b', 'a', 1, null);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('abc', 'b', 'a', -1, '');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace(null, 'b', 'a', -1, '');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace(null, 'b', 'a', 1, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 0
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace(null, 'b', 'a', 1, 0);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace(null, 'b', 'a', 1, 1);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('abc', 'b', null, 1, 1);
+ regexp_replace 
+----------------
+ ac
+(1 row)
+
+select regexp_replace('abc', 'b', null, 1, null);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('abc', 'b', null, 1, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 0
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace('abc', 'b', '-', null, -1, 'n');
+ERROR:  argument '-1' is out of range
+HINT:  should start from 0
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace('sping'||chr(10)||'sppkg', 'sp.+g', '-');
+ regexp_replace 
+----------------
+ -             +
+ -
+(1 row)
+
+select regexp_replace('smishtm1_23','^\w+$','*',3,1);
+ regexp_replace 
+----------------
+ smishtm1_23
+(1 row)
+
+select regexp_replace('123abc', '[0-9]*','9',100);
+ regexp_replace 
+----------------
+ 123abc
+(1 row)
+
+select regexp_replace('', '[a-z]{0,}', '$');
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('a', '[a-z]{0,}', '$');
+ regexp_replace 
+----------------
+ $$
+(1 row)
+
+select regexp_replace('abc def', '[a-z]{0,}', '$');
+ regexp_replace 
+----------------
+ $$ $$
+(1 row)
+
+select regexp_replace('abc def', '[a-z]{0,}', '$', 3);
+ regexp_replace 
+----------------
+ ab$$ $$
+(1 row)
+
+select regexp_replace('abc def', '[a-z]{0,}', '$', 4);
+ regexp_replace 
+----------------
+ abc$ $$
+(1 row)
+
+select regexp_replace('abc def', '[a-z]{0,}', '$', 5);
+ regexp_replace 
+----------------
+ abc $$
+(1 row)
+
+select regexp_replace('abc def', '[a-z]{0,}', '$', 7);
+ regexp_replace 
+----------------
+ abc de$$
+(1 row)
+
+select regexp_replace('abc def', '[a-z]{0,}', '$', 8);
+ regexp_replace 
+----------------
+ abc def
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '', '-', null);
+           regexp_replace            
+-------------------------------------
+ 500 OMG Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '', '-', 1);
+           regexp_replace            
+-------------------------------------
+ 500 OMG Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', null, '-', 1);
+           regexp_replace            
+-------------------------------------
+ 500 OMG Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '', 1);
+ regexp_replace 
+----------------
+      
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', null, 1);
+ regexp_replace 
+----------------
+      
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 0);
+ERROR:  argument '0' is out of range
+HINT:  should start from 1
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1000);
+           regexp_replace            
+-------------------------------------
+ 500 OMG Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 5);
+ regexp_replace 
+----------------
+ 500 - - - - -
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 34);
+           regexp_replace           
+------------------------------------
+ 500 OMG Parkway, Redwood Shores, -
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 35);
+           regexp_replace            
+-------------------------------------
+ 500 OMG Parkway, Redwood Shores, C-
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, -1);
+ERROR:  argument '-1' is out of range
+HINT:  should start from 0
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, 0);
+ regexp_replace 
+----------------
+ - - - - - -
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, 1);
+          regexp_replace           
+-----------------------------------
+ - OMG Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, 6);
+           regexp_replace           
+------------------------------------
+ 500 OMG Parkway, Redwood Shores, -
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, 7);
+           regexp_replace            
+-------------------------------------
+ 500 OMG Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, null);
+ regexp_replace 
+----------------
+ 
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, 2, null);
+          regexp_replace           
+-----------------------------------
+ 500 - Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, 2, '');
+          regexp_replace           
+-----------------------------------
+ 500 - Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, 2, 'm');
+          regexp_replace           
+-----------------------------------
+ 500 - Parkway, Redwood Shores, CA
+(1 row)
+
+select regexp_replace('500 OMG Parkway, Redwood Shores, CA', '[^ ]+', '-', 1, 2, 'g');
+ERROR:  invalid regexp option: "g"
+CONTEXT:  referenced column: regexp_replace
+select regexp_replace('abc'||chr(10)||'def', '^(a|d)?.', '-', 1, 2, 'm');
+ regexp_replace 
+----------------
+ abc           +
+ -f
+(1 row)
+
+select regexp_replace('abc'||chr(13)||chr(10)||'def', '^(a|d)?.', '-', 1, 2, 'm');
+ regexp_replace 
+----------------
+ abc\r         +
+ -f
+(1 row)
+
+set behavior_compat_options = '';
 -- Test regexp_matches
 select regexp_matches('abb', '(?<=a)b*');
  regexp_matches 
