@@ -142,6 +142,7 @@ typedef enum CompressAlg
 #ifdef HAVE_LIBZ
     ZLIB_COMPRESS,
 #endif
+    ZSTD_COMPRESS,
 } CompressAlg;
 
 typedef enum ForkName
