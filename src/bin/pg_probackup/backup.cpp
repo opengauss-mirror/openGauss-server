@@ -854,6 +854,7 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
     PGconn  *backup_conn = NULL;
     PGNodeInfo  nodeInfo;
     errno_t rc = 0;
+    PGresult *res = NULL;
 
     /* Initialize PGInfonode */
     pgNodeInit(&nodeInfo);
@@ -923,6 +924,10 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
     /* add note to backup if requested */
     if (set_backup_params && set_backup_params->note)
         add_note(&current, set_backup_params->note);
+
+    /* for long time backup, session will timeout, then backup will fail. So set the timeout */
+    res = pgut_execute(backup_conn, "SET session_timeout = 0;", 0, NULL);
+    PQclear(res);
 
     /* backup data */
     do_backup_instance(backup_conn, &nodeInfo, no_sync, backup_logs);
