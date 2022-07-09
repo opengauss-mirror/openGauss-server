@@ -892,6 +892,11 @@ compress_init(void)
     if (instance_config.compress_alg == ZLIB_COMPRESS && instance_config.compress_level == 0)
         elog(WARNING, "Compression level 0 will lead to data bloat!");
 
+    if (instance_config.compress_alg == LZ4_COMPRESS && instance_config.compress_level > 1)
+    {
+        elog(WARNING, "Compression level will be set to 1 due to lz4 only supports level 1!");
+    }
+
     if (backup_subcmd == BACKUP_CMD)
     {
 #ifndef HAVE_LIBZ
