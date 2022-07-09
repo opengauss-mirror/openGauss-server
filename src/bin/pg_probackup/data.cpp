@@ -26,6 +26,7 @@
 
 #include "thread.h"
 #include "common/fe_memutils.h"
+#include "lz4.h"
 
 /* Union to ease operations on relation pages */
 typedef struct DataPage
@@ -142,6 +143,45 @@ zlib_decompress(void *dst, size_t dst_size, void const *src, size_t src_size)
 }
 #endif
 
+/* Implementation of lz4 compression method */
+static int32
+lz4_compress(const char *src, size_t src_size, char *dst, size_t dst_size)
+{
+    int write_len;
+
+    write_len = LZ4_compress_default(src, dst, src_size, dst_size);
+    if (write_len <= 0) {
+        elog(ERROR, "lz4 compress data failed, return: %d.", write_len);
+        elog(LOG, "lz4 compress error, src: [%s], src size: %u, dest size: %u, written size: %d.",
+            src, src_size, dst_size, write_len);
+        return -1;
+    }
+
+    return write_len;
+}
+
+/* Implementation of lz4 decompression method */
+static int32
+lz4_decompress(const char *src, size_t src_size, char *dst, size_t dst_size)
+{
+    int write_len;
+
+    write_len = LZ4_decompress_safe(src, dst, src_size, dst_size);
+    if (write_len <= 0) {
+        elog(ERROR, "lz4 decompress data failed, return: %d.", write_len);
+        elog(LOG, "lz4 decompress error, src size: %u, dest size: %u, written size: %d.",
+            src_size, dst_size, write_len);
+        return -1;
+    }
+
+    /* Upper will check if write_len equal to dst_size */
+    if (write_len != (int)dst_size) {
+        elog(WARNING, "lz4 decompress data corrupted, actually written: %d, expected: %u.", write_len, dst_size);
+    }
+
+    return write_len;
+}
+
 /*
  * Compresses source into dest using algorithm. Returns the number of bytes
  * written in the destination buffer, or -1 if compression fails.
@@ -167,6 +207,8 @@ do_compress(void* dst, size_t dst_size, void const* src, size_t src_size,
 #endif
         case PGLZ_COMPRESS:
             return pglz_compress((const char*)src, src_size, (char*)dst, PGLZ_strategy_always);
+        case LZ4_COMPRESS: 
+            return lz4_compress((const char*)src, src_size, (char*)dst, dst_size);
     }
 
     return -1;
@@ -199,6 +241,8 @@ do_decompress(void* dst, size_t dst_size, void const* src, size_t src_size,
 #endif
         case PGLZ_COMPRESS:
             return pglz_decompress((const char*)src, src_size, (char*)dst, dst_size, true);
+        case LZ4_COMPRESS:
+            return lz4_decompress((const char*)src, src_size, (char*)dst, dst_size);
     }
 
     return -1;
