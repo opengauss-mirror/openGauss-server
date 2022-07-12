@@ -57,6 +57,7 @@ extern Node* coerce_to_specific_type(ParseState* pstate, Node* node, Oid targetT
 extern int parser_coercion_errposition(ParseState* pstate, int coerce_location, Node* input_expr);
 
 extern Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Node** which_expr);
+extern bool check_all_in_whitelist(List* resultexprs);
 extern Node* coerce_to_common_type(ParseState* pstate, Node* node, Oid targetTypeId, const char* context);
 
 extern bool check_generic_type_consistency(Oid* actual_arg_types, Oid* declared_arg_types, int nargs);

@@ -1634,12 +1634,28 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
     }
     newc->defresult = (Expr*)transformExpr(pstate, defresult);
 
+    /* check results in resultexprs and defresult whether all are in the whitelist. */
+    List* defresultexprs = NIL;
+    defresultexprs = lappend(defresultexprs, newc->defresult);
+    bool allInWhitelist = check_all_in_whitelist(resultexprs) && check_all_in_whitelist(defresultexprs);
+
+    list_free_ext(defresultexprs);
+
     /*
      * Note: default result is considered the most significant type in
      * determining preferred type. This is how the code worked before, but it
      * seems a little bogus to me --- tgl
+     *
+     * For A format, result1 is considered the most significant type in
+     * determining preferred type. So append default result to the end of
+     * the list. Make sure result1 is the first element of the list.
      */
-    resultexprs = lcons(newc->defresult, resultexprs);
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT &&
+        ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) && allInWhitelist) {
+        resultexprs = lappend(resultexprs, newc->defresult);
+    } else {
+        resultexprs = lcons(newc->defresult, resultexprs);
+    }
 
     ptype = select_common_type(pstate, resultexprs, "CASE", NULL);
     AssertEreport(OidIsValid(ptype), MOD_OPT, "");
