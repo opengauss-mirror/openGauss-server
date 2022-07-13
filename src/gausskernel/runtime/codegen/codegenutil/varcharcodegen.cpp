@@ -48,12 +48,32 @@ int Wrapmbstrlen(int str_len, char* str_data)
 }
 
 /*
- * @Description	: Wrap the 'Wrapmbstrlen' function in LLVM
+ * @Description	: The simple case of bcTruelen.
+ * @in strlen	: the length of strdata in bytes.
+ * @in strdata	: the cstring data.
+ * @return 		: "True" length (not counting trailing blanks)
+ */
+int WrapBcTrueLen(int str_len, char* str_data)
+{
+    int i = str_len - 1;
+    for (; i >= 0; i--) {
+        if (str_data[i] != ' ') {
+            break;
+        }
+    }
+    return i + 1;
+}
+
+/*
+ * @Description	: Wrap the 'funcAddr' function in LLVM, used to get str length in specific method
  * @in ptrbuilder : LLVM builder structure used to call the IR function.
  * @in strlen	: the length of the cstring in LLVM assemble.
  * @in strdata	: the cstring data in LLVM assemble.
+ * @in funcName : llvm function name
+ * @in funcAddr : llvm function address
  */
-llvm::Value* WrapmbstrlenCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value* str_len, llvm::Value* str_data)
+llvm::Value* WrapstrlenCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value* str_len, llvm::Value* str_data,
+    const char* funcName, void* funcAddr)
 {
     GsCodeGen* llvmCodeGen = (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj;
     llvm::LLVMContext& context = llvmCodeGen->context();
@@ -64,13 +84,13 @@ llvm::Value* WrapmbstrlenCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value
 
     llvm::Value* result = NULL;
 
-    llvm::Function* jitted_wrapmbstrlen = llvmCodeGen->module()->getFunction("LLVMIRWrapmbstrlen");
+    llvm::Function* jitted_wrapmbstrlen = llvmCodeGen->module()->getFunction(funcName);
     if (jitted_wrapmbstrlen == NULL) {
-        GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "LLVMIRWrapmbstrlen", int32Type);
+        GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, funcName, int32Type);
         fn_prototype.addArgument(GsCodeGen::NamedVariable("str_len", int32Type));
         fn_prototype.addArgument(GsCodeGen::NamedVariable("str_data", int8PtrType));
         jitted_wrapmbstrlen = fn_prototype.generatePrototype(NULL, NULL);
-        llvm::sys::DynamicLibrary::AddSymbol("LLVMIRWrapmbstrlen", (void*)Wrapmbstrlen);
+        llvm::sys::DynamicLibrary::AddSymbol(funcName, funcAddr);
     }
     result = ptrbuilder->CreateCall(jitted_wrapmbstrlen, {str_len, str_data});
 
@@ -243,9 +263,14 @@ llvm::Function* bpcharlen_codegen(int current_encoding)
     llvm::Value* lhs_val = builder.CreateCall(func_varlena, lhs_arg, "lval");
     str_len = builder.CreateExtractValue(lhs_val, 0);
 
+    if (DB_IS_CMPT(PG_FORMAT | B_FORMAT)) {
+        str_data = builder.CreateExtractValue(lhs_val, 1);
+        str_len = WrapstrlenCodeGen(&builder, str_len, str_data, "LLVMIRWrapBcTrueLen", (void*)WrapBcTrueLen);
+    }
+
     if (current_encoding == PG_UTF8) {
         str_data = builder.CreateExtractValue(lhs_val, 1);
-        str_len = WrapmbstrlenCodeGen(&builder, str_len, str_data);
+        str_len = WrapstrlenCodeGen(&builder, str_len, str_data, "LLVMIRWrapmbstrlen", (void*)Wrapmbstrlen);
     }
 
     str_len = builder.CreateZExt(str_len, int64Type);
