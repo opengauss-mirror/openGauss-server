@@ -95,13 +95,14 @@ extern void ClearCurrentNumaNodeId()
 extern bool InitMasstreeThreadinfo()
 {
     if (mtSessionThreadInfo == nullptr) {
-        mtSessionThreadInfo = (threadinfo*)malloc(sizeof(threadinfo));
-
+        MOT_LOG_TRACE("InitMasstreeThreadinfo(): Create mtSessionThreadInfo %p. MOTCurrThreadId: %u\n",
+            mtSessionThreadInfo,
+            MOTCurrThreadId);
+        mtSessionThreadInfo =
+            threadinfo::make(mtSessionThreadInfo, threadinfo::TI_PROCESS, MOTCurrThreadId, 0 /* Create object */);
         if (mtSessionThreadInfo == nullptr) {
             return false;
         }
-
-        mtSessionThreadInfo = threadinfo::make(mtSessionThreadInfo, threadinfo::TI_PROCESS, MOTCurrThreadId, 0);
     }
     return true;
 }
@@ -109,7 +110,11 @@ extern bool InitMasstreeThreadinfo()
 extern void DestroyMasstreeThreadinfo()
 {
     if (mtSessionThreadInfo != nullptr) {
-        free(mtSessionThreadInfo);
+        MOT_LOG_TRACE("DestroyMasstreeThreadinfo(): Destroy mtSessionThreadInfo %p. MOTCurrThreadId: %u\n",
+            mtSessionThreadInfo,
+            MOTCurrThreadId);
+
+        threadinfo::make(mtSessionThreadInfo, threadinfo::TI_PROCESS, MOTCurrThreadId, -1 /* Destroy object */);
         mtSessionThreadInfo = nullptr;
     }
 }
