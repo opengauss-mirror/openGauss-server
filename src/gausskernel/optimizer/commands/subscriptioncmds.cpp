@@ -55,6 +55,7 @@ static void CreateSlotInPublisherAndInsertSubRel(char *slotname, Oid subid, List
 static void ValidateReplicationSlot(char *slotname, List *publications);
 static List *fetch_table_list(List *publications);
 static void ReportSlotConnectionError(List *rstates, Oid subid, char *slotname);
+static bool CheckPublicationsExistOnPublisher(List *publications);
 
 /*
  * Common option parsing function for CREATE and ALTER SUBSCRIPTION commands.
@@ -519,6 +520,10 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
             ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Failed to connect to publisher.")));
         }
 
+        if (!CheckPublicationsExistOnPublisher(publications)) {
+            ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
+        }
+
         CreateSlotInPublisherAndInsertSubRel(slotname, subid, publications, copy_data);
         (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
     }
@@ -882,10 +887,25 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
     heap_freetuple(tup);
     heap_close(rel, RowExclusiveLock);
 
+    /* case 0: keep the subscription enabled, it's over here */
+    /* case 1: deactivating subscription */
     if (sub->enabled && !enabled) {
         ereport(ERROR, (errmsg("If you want to deactivate this subscription, use DROP SUBSCRIPTION.")));
     }
-    /* enabling subscription, but slot hasn't been created,
+
+    /* case 2: keep the subscription active */
+    if (sub->enabled) {
+        if (!AttemptConnectPublisher(encryptConninfo, finalSlotName, true)) {
+            ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg( "Failed to connect to publisher.")));
+        }
+        if (!CheckPublicationsExistOnPublisher(publications)) {
+            ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
+        }
+        (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+    }
+
+    /* case 3:
+     * enabling subscription, but slot hasn't been created,
      * then mark createSlot to true.
      */
     if (!sub->enabled && enabled && (!sub->slotname || !*(sub->slotname))) {
@@ -896,6 +916,10 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt, bool isTopLevel)
         if (!AttemptConnectPublisher(encryptConninfo, finalSlotName, true)) {
             ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg(
                 checkConn ? "The new conninfo cannot connect to new publisher." : "Failed to connect to publisher.")));
+        }
+
+        if (!CheckPublicationsExistOnPublisher(publications)) {
+            ereport(ERROR, (errmsg("There are some publications not exist on the publisher.")));
         }
 
         if (createSlot) {
@@ -1578,4 +1602,46 @@ static void ReportSlotConnectionError(List *rstates, Oid subid, char *slotname)
     ereport(ERROR, (errmsg("could not connect to publisher when attempting to "
                            "drop the replication slot \"%s\"", slotname),
                     errdetail("The error was: %s", PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+}
+
+/*
+ * Check whether publications exist on publisher
+ */
+static bool CheckPublicationsExistOnPublisher(List *publications)
+{
+    Assert(list_length(publications) > 0);
+
+    StringInfoData cmd;
+    initStringInfo(&cmd);
+    appendStringInfo(&cmd, "SELECT 1 FROM pg_catalog.pg_publication t"
+                        " WHERE t.pubname IN (");
+    ListCell *lc;
+    bool first  = true;
+    foreach (lc, publications) {
+        char *pubname = strVal(lfirst(lc));
+        if (first) {
+            first = false;
+        } else {
+            appendStringInfoString(&cmd, ", ");
+        }
+        appendStringInfo(&cmd, "%s", quote_literal_cstr(pubname));
+    }
+    appendStringInfoString(&cmd, ")");
+
+    WalRcvExecResult *res;
+    Oid tableRow[1] = {INT4OID};
+    res = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_exec(cmd.data, 1, tableRow);
+    FreeStringInfo(&cmd);
+
+    if (res->status != WALRCV_OK_TUPLES) {
+        ereport(ERROR, (errmsg("Failed to get publication list from the publisher.")));
+    }
+    bool exists = false;
+    if (tuplestore_get_memtupcount(res->tuplestore) == list_length(publications)) {
+        exists = true;
+    }
+
+    walrcv_clear_result(res);
+
+    return exists;
 }
