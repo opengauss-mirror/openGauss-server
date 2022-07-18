@@ -1007,3 +1007,6 @@ test: aioptimizer
 test: aioptimizer_small
 test: pgfincore
 test: rename_table
+
+# debug instrument
+test: test_debug5

@@ -6951,7 +6951,8 @@ static void get_insert_query_def(Query* query, deparse_context* context)
          */
         foreach (l, query->rtable) {
             rte = (RangeTblEntry*)lfirst(l);
-            if (rte->rtekind == RTE_SUBQUERY) {
+            if (rte->rtekind == RTE_SUBQUERY && !(rte->pulled_from_subquery)) {
+		/* subquery rte pulled up from nested subquery is ignored here */
                 is_fqs_inselect = true;
                 if (select_rte != NULL) {
                     ereport(ERROR, (errcode(ERRCODE_RESTRICT_VIOLATION), errmsg("too many subquery RTEs in INSERT")));
