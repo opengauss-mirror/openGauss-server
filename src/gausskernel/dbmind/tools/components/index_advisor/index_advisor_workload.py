@@ -26,11 +26,9 @@ import logging
 try:
     from .dao.gsql_execute import GSqlExecute
     from .dao.execute_factory import ExecuteFactory
-    from .mcts import MCTS
 except ImportError:
     from dao.gsql_execute import GSqlExecute
     from dao.execute_factory import ExecuteFactory
-    from mcts import MCTS
 
 ENABLE_MULTI_NODE = False
 SAMPLE_NUM = 5
@@ -130,10 +128,12 @@ class IndexItem:
 
 def singleton(cls):
     instances = {}
+
     def _singleton(*args, **kwargs):
         if not cls in instances:
             instances[cls] = cls(*args, **kwargs)
         return instances[cls]
+
     return _singleton
 
 
@@ -163,13 +163,13 @@ class IndexAdvisor:
 
     def retain_lower_cost_index(self, candidate_indexes):
         remove_indexes = []
-        for i in range(len(candidate_indexes)-1):
-            if candidate_indexes[i].table != candidate_indexes[i+1].table:
+        for i in range(len(candidate_indexes) - 1):
+            if candidate_indexes[i].table != candidate_indexes[i + 1].table:
                 continue
-            if candidate_indexes[i].columns == candidate_indexes[i+1].columns:
+            if candidate_indexes[i].columns == candidate_indexes[i + 1].columns:
                 if self.index_cost_total[candidate_indexes[i].atomic_pos] <= \
-                   self.index_cost_total[candidate_indexes[i+1].atomic_pos]:
-                    remove_indexes.append(i+1)
+                        self.index_cost_total[candidate_indexes[i + 1].atomic_pos]:
+                    remove_indexes.append(i + 1)
                 else:
                     remove_indexes.append(i)
         for index in remove_indexes[::-1]:
@@ -200,12 +200,9 @@ class IndexAdvisor:
                                                     self.workload_used_index))
         if DRIVER:
             self.db.close_conn()
-        if MAX_INDEX_STORAGE:
-            opt_config = MCTS(self.workload_info[0], atomic_config_total, candidate_indexes,
-                              MAX_INDEX_STORAGE, MAX_INDEX_NUM)
-        else:
-            opt_config = greedy_determine_opt_config(self.workload_info[0], atomic_config_total,
-                                                     candidate_indexes, self.index_cost_total[0])
+
+        opt_config = greedy_determine_opt_config(self.workload_info[0], atomic_config_total,
+                                                 candidate_indexes, self.index_cost_total[0])
         self.retain_lower_cost_index(candidate_indexes)
         if len(opt_config) == 0:
             print("No optimal indexes generated!")
@@ -214,16 +211,16 @@ class IndexAdvisor:
 
     def retain_high_benefit_index(self, candidate_indexes):
         remove_indexes = []
-        for i in range(len(candidate_indexes)-1):
+        for i in range(len(candidate_indexes) - 1):
             candidate_indexes[i].cost_pos = i + 1
-            if candidate_indexes[i].table != candidate_indexes[i+1].table:
+            if candidate_indexes[i].table != candidate_indexes[i + 1].table:
                 continue
-            if candidate_indexes[i].columns == candidate_indexes[i+1].columns:
-                if candidate_indexes[i].benefit >= candidate_indexes[i+1].benefit:
-                    remove_indexes.append(i+1)
+            if candidate_indexes[i].columns == candidate_indexes[i + 1].columns:
+                if candidate_indexes[i].benefit >= candidate_indexes[i + 1].benefit:
+                    remove_indexes.append(i + 1)
                 else:
                     remove_indexes.append(i)
-        candidate_indexes[len(candidate_indexes)-1].cost_pos = len(candidate_indexes)
+        candidate_indexes[len(candidate_indexes) - 1].cost_pos = len(candidate_indexes)
         for index in remove_indexes[::-1]:
             candidate_indexes.pop(index)
 
@@ -270,7 +267,7 @@ class IndexAdvisor:
             # calculate the average benefit of each positive SQL
             for pos in index.positive_pos:
                 sql_optimzed += 1 - self.workload_info[0][pos].cost_list[cost_list_pos] / \
-                    self.workload_info[0][pos].cost_list[0]
+                                self.workload_info[0][pos].cost_list[0]
             negative_sql_ratio = 0
             if index.total_sql_num:
                 negative_sql_ratio = (index.insert_sql_num + index.delete_sql_num +
@@ -388,16 +385,18 @@ class IndexAdvisor:
                                   workload_file_path):
         def rm_schema(table_name):
             return table_name.split('.')[-1]
+
         # display historical effective indexes
         if self.integrate_indexes['historyIndexes']:
             print_header_boundary(" Historical effective indexes ")
             for table_name, index_list in self.integrate_indexes['historyIndexes'].items():
                 for column in index_list:
                     index_name = 'idx_%s_%s%s' % (rm_schema(table_name),
-                        (column[1] + '_' if column[1] else ''),
-                         '_'.join(column[0].split(', ')))
+                                                  (column[1] + '_' if column[1] else ''),
+                                                  '_'.join(column[0].split(', ')))
                     statement = 'CREATE INDEX %s ON %s%s%s;' % (index_name, table_name,
-                        '(' + column[0] + ')', (' ' + column[1] if column[1] else ''))
+                                                                '(' + column[0] + ')',
+                                                                (' ' + column[1] if column[1] else ''))
                     print(statement)
         # display historical invalid indexes
         if history_invalid_indexes:
@@ -405,10 +404,11 @@ class IndexAdvisor:
             for table_name, index_list in history_invalid_indexes.items():
                 for column in index_list:
                     index_name = 'idx_%s_%s%s' % (rm_schema(table_name),
-                        (column[1] + '_' if column[1] else ''),
-                        '_'.join(column[0].split(', ')))
+                                                  (column[1] + '_' if column[1] else ''),
+                                                  '_'.join(column[0].split(', ')))
                     statement = 'CREATE INDEX %s ON %s%s%s;' % (index_name, table_name,
-                        '(' + column[0] + ')', (' ' + column[1] if column[1] else ''))
+                                                                '(' + column[0] + ')',
+                                                                (' ' + column[1] if column[1] else ''))
                     print(statement)
         # save integrate indexes result
         integrate_indexes_file = os.path.join(os.path.realpath(os.path.dirname(workload_file_path)),
@@ -577,10 +577,10 @@ def get_valid_index_dict(table_index_dict, query, db):
 
 def print_candidate_indexes(column_sqls, table, candidate_indexes):
     if column_sqls[0][1]:
-        print("table: ", table, "columns: ",column_sqls[0][0],
+        print("table: ", table, "columns: ", column_sqls[0][0],
               "type: ", column_sqls[0][1])
     else:
-        print("table: ", table, "columns: ",column_sqls[0][0])
+        print("table: ", table, "columns: ", column_sqls[0][0])
     if (table, tuple(column_sqls[0][0]), column_sqls[0][1]) not in IndexItemFactory().indexes:
         index = IndexItemFactory().get_index(table, column_sqls[0][0], 'local')
         index.index_type = 'global'
@@ -599,30 +599,30 @@ def filter_redundant_indexes(index_dict):
         merged_column_sqls = []
         # merge sqls 
         for i in range(len(sorted_column_sqls) - 1):
-            if re.match(sorted_column_sqls[i][0][0] + ',', sorted_column_sqls[i+1][0][0]) and \
-                    sorted_column_sqls[i][0][1] == sorted_column_sqls[i+1][0][1]:
-                sorted_column_sqls[i+1][1].extend(sorted_column_sqls[i][1])
+            if re.match(sorted_column_sqls[i][0][0] + ',', sorted_column_sqls[i + 1][0][0]) and \
+                    sorted_column_sqls[i][0][1] == sorted_column_sqls[i + 1][0][1]:
+                sorted_column_sqls[i + 1][1].extend(sorted_column_sqls[i][1])
             else:
                 merged_column_sqls.append(sorted_column_sqls[i])
         else:
             merged_column_sqls.append(sorted_column_sqls[-1])
         # sort using columns
         merged_column_sqls.sort(key=lambda item: item[0][0])
-        for i in range(len(merged_column_sqls)-1):
+        for i in range(len(merged_column_sqls) - 1):
             # same columns 
             if merged_column_sqls[i][0][0] == \
-                merged_column_sqls[i+1][0][0]:
+                    merged_column_sqls[i + 1][0][0]:
                 print_candidate_indexes(merged_column_sqls[i],
-                                       table,
-                                       candidate_indexes)
+                                        table,
+                                        candidate_indexes)
                 continue
             # left match for the partation table
             if re.match(merged_column_sqls[i][0][0] + ',',
-                        merged_column_sqls[i+1][0][0]):
-                merged_column_sqls[i+1][1].extend(
-                   merged_column_sqls[i][1])
-                merged_column_sqls[i+1] = ((merged_column_sqls[i+1][0][0], 'global'),
-                                           merged_column_sqls[i+1][1])
+                        merged_column_sqls[i + 1][0][0]):
+                merged_column_sqls[i + 1][1].extend(
+                    merged_column_sqls[i][1])
+                merged_column_sqls[i + 1] = ((merged_column_sqls[i + 1][0][0], 'global'),
+                                             merged_column_sqls[i + 1][1])
                 continue
             print_candidate_indexes(merged_column_sqls[i], table, candidate_indexes)
         else:
@@ -644,7 +644,7 @@ def filter_duplicate_indexes(valid_index_dict, index_dict, workload, pos):
                 column_sql = {(columns, index_type): [pos]}
                 index_dict[table].update(column_sql)
             workload[pos].valid_index_list.append(
-                    IndexItemFactory().get_index(table, columns, index_type=index_type))
+                IndexItemFactory().get_index(table, columns, index_type=index_type))
 
 
 def generate_candidate_indexes(workload, db):
@@ -809,8 +809,8 @@ def display_redundant_indexes(redundant_indexes, unused_index_columns, remove_li
             # redundant objects are not in the useless index set or
             # both redundant objects and redundant index in useless index must be redundant index
             index_exist = redundant_obj.indexname not in unused_index_columns.keys() or \
-                (unused_index_columns.get(redundant_obj.indexname) and
-                 unused_index_columns.get(index.indexname))
+                          (unused_index_columns.get(redundant_obj.indexname) and
+                           unused_index_columns.get(index.indexname))
             if index_exist:
                 is_redundant = True
         if not is_redundant:
@@ -823,7 +823,7 @@ def display_redundant_indexes(redundant_indexes, unused_index_columns, remove_li
     # redundant index
     for index in redundant_indexes:
         statement = "DROP INDEX %s.%s;" % \
-            (index.schema, index.indexname)
+                    (index.schema, index.indexname)
         print(statement)
         existing_index = [item.indexname + ':' +
                           item.columns for item in index.redundant_obj]
@@ -945,7 +945,7 @@ def check_parameter(args):
         raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
                                          args.max_index_num)
     if args.max_index_storage is not None and args.max_index_storage <= 0:
-        raise argparse.ArgumentTypeError("%s is an invalid positive float value" %
+        raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
                                          args.max_index_storage)
     JSON_TYPE = args.json
     MAX_INDEX_NUM = args.max_index_num
@@ -963,7 +963,7 @@ def main(argv):
     arg_parser.add_argument("p", help="Port of database", type=int)
     arg_parser.add_argument("d", help="Name of database", action=CheckValid)
     arg_parser.add_argument(
-        "--h", help="Host for database",  action=CheckValid)
+        "--h", help="Host for database", action=CheckValid)
     arg_parser.add_argument(
         "-U", help="Username for database log-in", action=CheckValid)
     arg_parser.add_argument(
@@ -973,7 +973,7 @@ def main(argv):
     arg_parser.add_argument(
         "--max_index_num", help="Maximum number of suggested indexes", type=int)
     arg_parser.add_argument("--max_index_storage",
-                            help="Maximum storage of suggested indexes/MB", type=float)
+                            help="Maximum storage of suggested indexes/MB", type=int)
     arg_parser.add_argument("--multi_iter_mode", action='store_true',
                             help="Whether to use multi-iteration algorithm", default=False)
     arg_parser.add_argument("--multi_node", action='store_true',
