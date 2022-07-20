@@ -39,6 +39,8 @@
 #include <cmath>
 #include "mot_engine.h"
 
+static_assert(MASSTREE_MAXKEYLEN == MAX_KEY_SIZE, "MASSTREE_MAXKEYLEN must be equal to MAX_KEY_SIZE");
+
 namespace MOT {
 /**
  * @class MasstreePrimaryIndex.
@@ -485,27 +487,28 @@ public:
     bool RecordMemRcu(void* ptr, int size, enum memtag tag)
     {
         void* ptrToFree = nullptr;
+        GcManager* gc_session = (GcManager*)mtSessionThreadInfo->get_gc_session();
+        MOT_ASSERT(gc_session);
         switch (tag) {
             case memtag_masstree_leaf:
-                mtSessionThreadInfo->get_gc_session()->GcRecordObject(
+                gc_session->GcRecordObject(
                     GetIndexId(), (void*)m_leafsPool, ptr, DeallocateFromPoolCallBack, m_leafsPool->m_size);
                 return true;
 
             case memtag_masstree_internode:
-                mtSessionThreadInfo->get_gc_session()->GcRecordObject(
+                gc_session->GcRecordObject(
                     GetIndexId(), (void*)m_internodesPool, ptr, DeallocateFromPoolCallBack, m_internodesPool->m_size);
                 return true;
 
             case memtag_masstree_ksuffixes:
                 MOT_ASSERT((size >> 16) == 0);  // validate that size using 2 bytes or less
                 ptrToFree = (void*)((uint64_t)ptr | ((uint64_t)size << 48));
-                mtSessionThreadInfo->get_gc_session()->GcRecordObject(
+                gc_session->GcRecordObject(
                     GetIndexId(), (void*)m_ksuffixSlab, ptrToFree, DeallocateFromSlabCallBack, size);
                 return true;
 
             case memtag_masstree_gc:
-                mtSessionThreadInfo->get_gc_session()->GcRecordObject(
-                    GetIndexId(), (void*)m_ksuffixSlab, ptr, DeallocateFromSlabGcCallBack, size);
+                gc_session->GcRecordObject(GetIndexId(), (void*)m_ksuffixSlab, ptr, DeallocateFromSlabGcCallBack, size);
                 return true;
 
             default:

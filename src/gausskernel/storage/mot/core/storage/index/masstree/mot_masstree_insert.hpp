@@ -31,12 +31,13 @@
 
 namespace Masstree {
 template <typename P>
-void* basic_table<P>::insert(MOT::Key const* const& key, void* const& entry, bool& result, const uint32_t& pid)
+void* basic_table<P>::insert(
+    const uint8_t* key, const uint32_t key_len, void* const& entry, bool& result, const uint32_t& pid)
 {
 
     MOT_LOG_DEBUG("table: %s", name_.c_str());
     // This should be optimized at compile time by bitshifts and using ctz
-    cursor_type lp(*this, key->GetKeyBuf(), ALIGN8(key->GetKeyLength()));
+    cursor_type lp(*this, key, ALIGN8(key_len));
     void* value_to_return = nullptr;
 
     /*  The handler represents a thread and its main purpose is to work lockless
