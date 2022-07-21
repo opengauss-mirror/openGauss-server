@@ -1317,7 +1317,7 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
                         "to enable this feature.")));
     }
 
-    if (!(operation == CMD_UTILITY || operation == CMD_INSERT)) {
+    if (!(operation == CMD_UTILITY || operation == CMD_INSERT || operation == CMD_MERGE)) {
         return;
     }
 
