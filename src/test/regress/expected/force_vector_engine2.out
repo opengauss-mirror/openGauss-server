@@ -47,6 +47,24 @@ explain (analyze on, timing off) select /*+ set(try_vector_engine_strategy force
 --?.*
 (13 rows)
 
+set try_vector_engine_strategy=force;
+create table force_tb1(c1 int,c2 int);
+insert into force_tb1 values(1,1);
+insert into force_tb1 values(2,2);
+create incremental materialized view v_force as select * from force_tb1;
+select * from v_force order by 1;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+(2 rows)
+
+set try_vector_engine_strategy=off;
 drop table force_vector_test;
 drop schema test_force_vector2 cascade;
-NOTICE:  drop cascades to table force_vector_partition
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to table force_vector_partition
+drop cascades to table force_tb1
+drop cascades to materialized view v_force
+--?.*
+--?.*
