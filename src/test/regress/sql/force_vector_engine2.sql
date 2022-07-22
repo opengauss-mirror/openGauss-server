@@ -18,5 +18,13 @@ analyze force_vector_partition;
 explain (analyze on, timing off) select /*+ set(try_vector_engine_strategy force) */ id, val1*2, val2+val1 as val3 from force_vector_test where id < 5000 and val1 < 500 order by id limit 10;
 explain (analyze on, timing off) select /*+ set(try_vector_engine_strategy force) */ id, avg(val1), sum(val2) from force_vector_partition group by id order by id limit 10;
 
+set try_vector_engine_strategy=force;
+create table force_tb1(c1 int,c2 int);
+insert into force_tb1 values(1,1);
+insert into force_tb1 values(2,2);
+create incremental materialized view v_force as select * from force_tb1;
+select * from v_force order by 1;
+set try_vector_engine_strategy=off;
+
 drop table force_vector_test;
 drop schema test_force_vector2 cascade;
