@@ -5274,6 +5274,9 @@ static ColumnDef* _readColumnDef()
     READ_OID_FIELD(collOid);
     READ_NODE_FIELD(constraints);
     READ_NODE_FIELD(fdwoptions);
+    IF_EXIST(columnOptions) {
+        READ_NODE_FIELD(columnOptions);
+    }
     READ_NODE_FIELD(clientLogicColumnRef);
     if (local_node->storage == '0') {
         local_node->storage = 0;
@@ -5383,6 +5386,9 @@ static IndexStmt* _readIndexStmt()
     READ_OID_FIELD(indexOid);
     READ_OID_FIELD(oldNode);
     READ_NODE_FIELD(partClause);
+    IF_EXIST(columnOptions) {
+        READ_NODE_FIELD(indexOptions);
+    }
     READ_BOOL_FIELD(isPartitioned);
     READ_BOOL_FIELD(unique);
     READ_BOOL_FIELD(primary);

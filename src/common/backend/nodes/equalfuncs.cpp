@@ -1155,6 +1155,7 @@ static bool _equalCreateStmt(const CreateStmt* a, const CreateStmt* b)
     COMPARE_NODE_FIELD(distributeby);
     COMPARE_NODE_FIELD(subcluster);
 #endif
+    COMPARE_NODE_FIELD(tableOptions);
     COMPARE_STRING_FIELD(internalData);
     COMPARE_NODE_FIELD(uuids);
     COMPARE_SCALAR_FIELD(relkind);
@@ -1395,6 +1396,7 @@ static bool _equalIndexStmt(const IndexStmt* a, const IndexStmt* b)
     COMPARE_SCALAR_FIELD(indexOid);
     COMPARE_SCALAR_FIELD(oldNode);
     COMPARE_NODE_FIELD(partClause);
+    COMPARE_NODE_FIELD(indexOptions);
     COMPARE_SCALAR_FIELD(isPartitioned);
     COMPARE_SCALAR_FIELD(unique);
     COMPARE_SCALAR_FIELD(primary);
@@ -2562,6 +2564,7 @@ static bool _equalColumnDef(const ColumnDef* a, const ColumnDef* b)
     COMPARE_SCALAR_FIELD(collOid);
     COMPARE_NODE_FIELD(constraints);
     COMPARE_NODE_FIELD(fdwoptions);
+    COMPARE_NODE_FIELD(columnOptions);
 
     return true;
 }

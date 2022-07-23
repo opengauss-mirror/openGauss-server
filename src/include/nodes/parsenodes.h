@@ -1277,6 +1277,7 @@ typedef struct IndexStmt {
     List* partIndexOldPSortOid; /* partition psort oid, if any */
     Node* partClause;           /* partition index define */
     bool* partIndexUsable;      /* is partition index usable */
+    List* indexOptions;         /* b compatiblity options */
     /* @hdfs
      * is a partitioned index? The foreign table dose not index. The isPartitioned
      * value is false when relation is a foreign table.

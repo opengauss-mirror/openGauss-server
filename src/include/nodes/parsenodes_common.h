@@ -1006,6 +1006,7 @@ typedef struct ColumnDef {
     Oid collOid;               /* collation OID (InvalidOid if not set) */
     List *constraints;         /* other constraints on column */
     List *fdwoptions;          /* per-column FDW options */
+    List *columnOptions;       /* b compatiblity options */
     ClientLogicColumnRef *clientLogicColumnRef;
     Position *position;
     Form_pg_attribute dropped_attr; /* strcuture for dropped attribute during create table like OE */
@@ -1170,6 +1171,7 @@ typedef struct CreateStmt {
     List *uuids;        /* list of uuid, used for create sequence(like 'create table t(a serial))' */
     Oid oldBucket;      /* bucketoid of resizing table */
     List *oldNode;      /* relfilenode of resizing table */
+    List *tableOptions; /* b compatiblity options */
     List *oldToastNode; /* toastnode of resizing table  */
     char relkind;       /* type of object */
 } CreateStmt;
