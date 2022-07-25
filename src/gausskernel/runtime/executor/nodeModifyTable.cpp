@@ -551,22 +551,29 @@ static inline void ReleaseResourcesForUpsertGPI(bool isgpi, Relation parentRel, 
     }
 }
 
-void CheckPartitionOidForSpecifiedPartition(RangeTblEntry *rte, Oid partitionid)
+bool CheckPartitionOidForSpecifiedPartition(RangeTblEntry *rte, Oid partitionid, bool canIgnore = false)
 {
+    int level = canIgnore ? WARNING : ERROR;
     if (rte->isContainPartition && rte->partitionOid != partitionid) {
-        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+        ereport(level, (errcode(ERRCODE_NO_DATA_FOUND),
                         (errmsg("inserted partition key does not map to the table partition"), errdetail("N/A."),
                          errcause("The value is incorrect."), erraction("Use the correct value."))));
+        return false;
     }
+    return true;
 }
 
-void CheckSubpartitionOidForSpecifiedSubpartition(RangeTblEntry *rte, Oid partitionid, Oid subPartitionId)
+bool CheckSubpartitionOidForSpecifiedSubpartition(RangeTblEntry *rte, Oid partitionid, Oid subPartitionId,
+                                                  bool canIgnore = false)
 {
+    int level = canIgnore ? WARNING : ERROR;
     if (rte->isContainSubPartition && (rte->partitionOid != partitionid || rte->subpartitionOid != subPartitionId)) {
-        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+        ereport(level, (errcode(ERRCODE_NO_DATA_FOUND),
                         (errmsg("inserted subpartition key does not map to the table subpartition"), errdetail("N/A."),
                          errcause("The value is incorrect."), erraction("Use the correct value."))));
+        return false;
     }
+    return true;
 }
 
 static void ReportErrorForSpecifiedPartitionOfUpsert(char *partition, char *table)
@@ -1125,7 +1132,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (estate->es_plannedstmt->hasIgnore && partition_id == InvalidOid) {
                             return NULL;
                         }
-                        CheckPartitionOidForSpecifiedPartition(rte, partition_id);
+                        bool partitionCheckPassed = CheckPartitionOidForSpecifiedPartition(
+                            rte, partition_id, estate->es_plannedstmt->hasIgnore);
+                        if (!partitionCheckPassed) {
+                            return NULL;
+                        }
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
                             result_relation_desc, partition_id, heap_rel, partition, RowExclusiveLock);
@@ -1175,7 +1186,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (estate->es_plannedstmt->hasIgnore && partitionId == InvalidOid) {
                             return NULL;
                         }
-                        CheckPartitionOidForSpecifiedPartition(rte, partitionId);
+                        bool partitionCheckPassed =
+                            CheckPartitionOidForSpecifiedPartition(rte, partitionId, estate->es_plannedstmt->hasIgnore);
+                        if (!partitionCheckPassed) {
+                            return NULL;
+                        }
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
                                                          result_relation_desc, partitionId, partRel, part,
@@ -1186,7 +1201,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (estate->es_plannedstmt->hasIgnore && subPartitionId == InvalidOid) {
                             return NULL;
                         }
-                        CheckSubpartitionOidForSpecifiedSubpartition(rte, partitionId, subPartitionId);
+                        bool subpartitionCheckPassed = CheckSubpartitionOidForSpecifiedSubpartition(
+                            rte, partitionId, subPartitionId, estate->es_plannedstmt->hasIgnore);
+                        if (!subpartitionCheckPassed) {
+                            return NULL;
+                        }
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, partRel,
                                                          subPartitionId, subPartRel, subPart, RowExclusiveLock);
