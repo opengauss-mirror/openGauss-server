@@ -385,48 +385,6 @@ bool CStoreAllocator::ColSpaceCacheExist(const CFileNode* cnodes, int nColumn)
     return found;
 }
 
-/**
- * science we loose lock after get max cuid we will doubt the max cuid system 
- * here we recheck max cuid located in index
- * we want to make sure if there is on another larger cuid in index 
- */
-uint32 CStoreAllocator::recheck_max_cuid(Relation m_rel, uint32 max_cuid, int index_num, Relation* m_idxRelation)
-{
-    bool find = false;
-    List* index_rel_list = NIL;
-
-    for (int i = 0; i < index_num; ++i) {
-        Oid am_oid = m_idxRelation[i]->rd_rel->relam;
-        if (am_oid == CBTREE_AM_OID || am_oid == CGIN_AM_OID) {
-            index_rel_list = lappend(index_rel_list, m_idxRelation[i]);
-        }
-    }
-
-    if (list_length(index_rel_list) == 0) {
-        return max_cuid;
-    }
-    uint32 max_idx_cuid = CStore::GetMaxIndexCUID(m_rel, index_rel_list) + 1;
-    list_free_ext(index_rel_list);
-    
-    if (max_idx_cuid == MaxCUID) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-        errmsg("No CUID is left for new CU in relation \"%u\".", m_rel->rd_id)));
-    }
-    
-    if (max_idx_cuid > max_cuid) {
-        CStoreColFileDesc* entry = NULL;
-        CStoreColumnFileTag tag(m_rel->rd_node, VirtualSpaceCacheColID, MAIN_FORKNUM);
-        (void)LWLockAcquire(CStoreColspaceCacheLock, LW_EXCLUSIVE);
-        entry = (CStoreColFileDesc*)hash_search(CStoreColspaceCache, (void*)&tag, HASH_FIND, &find);
-        Assert(find);
-        entry->maxCuid = max_idx_cuid + 1;
-        LWLockRelease(CStoreColspaceCacheLock);
-        return max_idx_cuid;
-    }
-    return max_cuid;
-}
-    
-
 void CStoreFreeSpace::Initialize(int maxSize)
 {
     m_maxSize = maxSize;
