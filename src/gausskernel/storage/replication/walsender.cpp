@@ -4496,6 +4496,7 @@ static void InitWalSnd(void)
             walsnd->lastCalTime = 0;
             walsnd->lastCalWrite = InvalidXLogRecPtr;
             walsnd->catchupRate = 0;
+            walsnd->slot_idx = -1;
             SpinLockRelease(&walsnd->mutex);
             /* don't need the lock anymore */
             OwnLatch((Latch *)&walsnd->latch);

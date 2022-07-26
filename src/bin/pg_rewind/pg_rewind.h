@@ -66,6 +66,10 @@ extern BuildErrorCode waitEndTargetFileStatThread(void);
 extern BuildErrorCode targetFilemapProcess(void);
 void recordReadTest(const char* datadir, XLogRecPtr ptr, TimeLineID tli);
 void openDebugLog(void);
+bool FindConfirmedLSN(const char* dataDir, XLogRecPtr *confirmedLsn);
+BuildErrorCode CheckConfirmedLSNOnTarget(const char *datadir, TimeLineID tli, XLogRecPtr ckptRedo, XLogRecPtr confirmedLSN,
+    uint32 term);
+bool CheckIfEanbedSaveSlots();
 
 #define PG_CHECKBUILD_AND_RETURN()                  \
     do {                                            \

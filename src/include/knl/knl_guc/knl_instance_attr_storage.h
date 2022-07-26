@@ -166,6 +166,9 @@ typedef struct knl_instance_attr_storage {
     int max_logical_replication_workers;
     char *redo_bind_cpu_attr;
     int max_active_gtt;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool enable_save_confirmed_lsn;
+#endif
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

@@ -1851,6 +1851,11 @@ static TransactionId RecordTransactionCommit(void)
              * clog and still show as running in the procarray and continue to hold locks.
              */
             if (wrote_xlog && u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+#ifndef ENABLE_MULTIPLE_NODES
+                if (g_instance.attr.attr_storage.enable_save_confirmed_lsn) {
+                    t_thrd.proc->syncSetConfirmedLSN = t_thrd.xlog_cxt.ProcLastRecPtr;
+                }
+#endif
                 SyncRepWaitForLSN(t_thrd.xlog_cxt.XactLastRecEnd, !markXidCommitted);
                 g_instance.comm_cxt.localinfo_cxt.set_term = true;
             }

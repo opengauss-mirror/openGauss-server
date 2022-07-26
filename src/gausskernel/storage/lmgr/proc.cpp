@@ -903,6 +903,7 @@ void InitProcess(void)
     t_thrd.proc->waitLSN = 0;
     t_thrd.proc->syncRepState = SYNC_REP_NOT_WAITING;
     t_thrd.proc->syncRepInCompleteQueue = false;
+    t_thrd.proc->syncSetConfirmedLSN = 0;
     SHMQueueElemInit(&(t_thrd.proc->syncRepLinks));
 
     /* Initialize fields for data sync rep */
