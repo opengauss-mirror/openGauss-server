@@ -10352,7 +10352,7 @@ void PlanTable::set_plan_table_ops(int plan_node_id, char* operation, char* opti
     if (operation != NULL) {
         /* Transform the vaules into upper case. */
         operation = set_strtoupper(operation, OPERATIONLEN);
-        rc = strncpy_s(m_plan_table[plan_node_id - 1]->m_datum->operation, OPERATIONLEN, operation, strlen(operation));
+        rc = strncpy_s(m_plan_table[plan_node_id - 1]->m_datum->operation, OPERATIONLEN, operation, OPERATIONLEN - 1);
         securec_check(rc, "\0", "\0");
         pfree(operation);
 
@@ -10360,7 +10360,7 @@ void PlanTable::set_plan_table_ops(int plan_node_id, char* operation, char* opti
     }
     if (options != NULL) {
         options = set_strtoupper(options, OPTIONSLEN);
-        rc = strncpy_s(m_plan_table[plan_node_id - 1]->m_datum->options, OPTIONSLEN, options, strlen(options));
+        rc = strncpy_s(m_plan_table[plan_node_id - 1]->m_datum->options, OPTIONSLEN, options, OPTIONSLEN - 1);
         securec_check(rc, "\0", "\0");
         pfree(options);
 
