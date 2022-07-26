@@ -1020,3 +1020,18 @@ end;
 NOTICE:  @ 0
 NOTICE:  @ 0
 NOTICE:  @ 0
+SELECT to_timestamp(' Infinity'::float);
+ to_timestamp 
+--------------
+ infinity
+(1 row)
+
+SELECT to_timestamp('-Infinity'::float);
+ to_timestamp 
+--------------
+ -infinity
+(1 row)
+
+SELECT to_timestamp('NaN'::float);
+ERROR:  timestamp cannot be NaN
+CONTEXT:  referenced column: to_timestamp
