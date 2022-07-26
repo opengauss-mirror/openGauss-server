@@ -1993,6 +1993,11 @@ void EndPrepare(GlobalTransaction gxact)
         if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
             SyncPaxosWaitForLSN(gxact->prepare_end_lsn);
         } else {
+#ifndef ENABLE_MULTIPLE_NODES
+            if (g_instance.attr.attr_storage.enable_save_confirmed_lsn) {
+                t_thrd.proc->syncSetConfirmedLSN = t_thrd.xlog_cxt.ProcLastRecPtr;
+            }
+#endif
             SyncRepWaitForLSN(gxact->prepare_end_lsn);
             g_instance.comm_cxt.localinfo_cxt.set_term = true;
         }

@@ -144,6 +144,8 @@ typedef struct WalSnd {
     /* Whether the interaction between the active and standby clusters of the streaming disaster recovery switchover is complete */
     bool isInteractionCompleted;
     TimestampTz lastRequestTimestamp;
+    /* The idx of replication slot */
+    int slot_idx;
 } WalSnd;
 
 extern THR_LOCAL WalSnd* MyWalSnd;
