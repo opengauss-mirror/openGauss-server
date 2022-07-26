@@ -156,6 +156,18 @@ typedef struct {
 
 #define TIMESTAMP_NOT_FINITE(j) (TIMESTAMP_IS_NOBEGIN(j) || TIMESTAMP_IS_NOEND(j))
 
+/* Timestamp limits */
+#define MIN_TIMESTAMP	INT64CONST(-211813488000000000)
+#define END_TIMESTAMP	INT64CONST(9223371331200000000)
+
+/* First allowed date, and first disallowed date, in Julian-date form */
+#define DATETIME_MIN_JULIAN (0)
+#define DATE_END_JULIAN (2147483494)	/* == date2j(JULIAN_MAXYEAR, 1, 1) */
+#define TIMESTAMP_END_JULIAN (109203528)	/* == date2j(294277, 1, 1) */
+
+/* Range-check a timestamp */
+#define IS_VALID_TIMESTAMP(t)  (MIN_TIMESTAMP <= (t) && (t) < END_TIMESTAMP)
+
 /*
  * Julian date support.
  *
