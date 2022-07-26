@@ -2772,6 +2772,13 @@ typedef struct knl_session_context {
     struct knl_u_clientConnTime_context clientConnTime_cxt;
 
     knl_u_hook_context hook_cxt;
+
+    /* The datetime cache in current transaction. */
+    TimestampTz cache_ts = 0;
+    pg_tz* cache_timezone = NULL;
+    struct pg_tm cache_tm;
+    fsec_t cache_fsec;
+    int cache_tz;
 } knl_session_context;
 
 enum stp_xact_err_type {
