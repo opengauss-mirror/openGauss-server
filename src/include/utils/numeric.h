@@ -288,6 +288,8 @@ extern int32 get_ndigit_from_numeric(_in_ Numeric num);
  * This is feasible because the digit buffer is separate from the variable.
  * ----------
  */
+#define NUMERIC_LOCAL_NDIG  36  /* number of 'digits' in local digits[] */
+#define NUMERIC_LOCAL_NMAX  (NUMERIC_LOCAL_NDIG - 2)
 typedef struct NumericVar {
     int ndigits;          /* # of digits in digits[] - can be 0! */
     int weight;           /* weight of first digit */
@@ -295,13 +297,55 @@ typedef struct NumericVar {
     int dscale;           /* display scale */
     NumericDigit* buf;    /* start of palloc'd space for digits[] */
     NumericDigit* digits; /* base-NBASE digits */
+    NumericDigit ndb[NUMERIC_LOCAL_NDIG]; /* local space for digits[] */
 } NumericVar;
 
-#define init_var(v)        MemSetAligned(v, 0, sizeof(NumericVar))
+#define quick_init_var(v)    \
+    do {                     \
+        (v)->buf = (v)->ndb; \
+        (v)->digits = NULL;  \
+    } while (0)
+
+#define init_var(v)          \
+    do {                     \
+        quick_init_var((v)); \
+        (v)->ndigits = 0;    \
+        (v)->weight = 0;     \
+        (v)->sign = 0;       \
+        (v)->dscale = 0;     \
+    } while (0)
+
+#define digitbuf_alloc(ndigits) \
+    ((NumericDigit*) palloc((ndigits) * sizeof(NumericDigit)))
+
+#define digitbuf_free(v)            \
+    do {                            \
+        if ((v)->buf != (v)->ndb) { \
+            pfree((v)->buf);        \
+            (v)->buf = (v)->ndb;    \
+        }                           \
+    } while (0)
+
+#define free_var(v) digitbuf_free((v));
+
+/*
+ * Init a var and allocate digit buffer of ndigits digits (plus a spare digit for rounding).
+ * Called when first using a var.
+ */
+#define init_alloc_var(v, n)                    \
+    do  {                                       \
+        (v)->buf = (v)->ndb;                    \
+        (v)->ndigits = (n);                     \
+        if ((n) > NUMERIC_LOCAL_NMAX) {         \
+            (v)->buf = digitbuf_alloc((n) + 1); \
+        }                                       \
+        (v)->buf[0] = 0;                        \
+        (v)->digits = (v)->buf + 1;             \
+    } while (0)
+
 Numeric makeNumeric(NumericVar* var);
 extern Numeric make_result(NumericVar *var);
 extern void init_var_from_num(Numeric num, NumericVar* dest);
-extern void free_var(NumericVar *var);
 extern bool numericvar_to_int64(const NumericVar* var, int64* result, bool can_ignore = false);
 extern void int64_to_numericvar(int64 val, NumericVar *var);
 extern void add_var(NumericVar *var1, NumericVar *var2, NumericVar *result);
