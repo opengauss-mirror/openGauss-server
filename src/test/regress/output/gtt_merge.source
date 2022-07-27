@@ -1,0 +1,20 @@
+CREATE TABLE test_template ( A INT );
+INSERT INTO test_template VALUES( 1 );
+CREATE USER test_user WITH PASSWORD 'openGauss@123';
+GRANT ALL PRIVILEGES TO test_user;
+\! @abs_bindir@/gsql -r -U test_user -W openGauss@123 -p @portstring@ -d regression -c "CREATE GLOBAL TEMPORARY TABLE test_gt ( ID INT, NAME TEXT );"
+CREATE TABLE
+SELECT pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\! @abs_bindir@/gsql -r -U test_user -W openGauss@123 -p @portstring@ -d regression -c "MERGE INTO test_gt USING test_template ON test_template.a >= 1 WHEN NOT MATCHED THEN INSERT VALUES ( 1, '1' ) WHEN MATCHED THEN UPDATE SET name = '1'; SELECT * FROM test_gt;"
+MERGE 1
+ id | name 
+----+------
+  1 | 1
+(1 row)
+
+DROP USER test_user CASCADE;
