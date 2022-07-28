@@ -500,6 +500,10 @@ bool ThreadPoolListener::GetSessIshang(instr_time* current_time, uint64* session
     return ishang;
 }
 
+bool ThreadPoolListener::hasNoReadySession() {
+    return (m_readySessionList->GetLength() == 0);
+}
+
 Dlelem *ThreadPoolListener::GetFreeWorker(knl_session_context* session)
 {
     /* only lite mode need find right threadworker, 
