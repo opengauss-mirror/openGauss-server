@@ -2463,7 +2463,8 @@ void PostgresInitializer::SetDatabaseByName()
         ereport(FATAL, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", m_indbname)));
     }
     dbform = (Form_pg_database)GETSTRUCT(tuple);
-    // Do not set u_sess->proc_cxt.MyDatabaseId before LockDatabase. Other processes will assume that the session is connected to this database.
+    // Do not set u_sess->proc_cxt.MyDatabaseId before LockDatabase. 
+    // Other processes will assume that the session is connected to this database.
     m_dboid = HeapTupleGetOid(tuple);
     u_sess->proc_cxt.MyDatabaseTableSpace = dbform->dattablespace;
     /* take database name from the caller, just for paranoia */
@@ -2491,7 +2492,8 @@ void PostgresInitializer::SetDatabaseByOid()
         ereport(FATAL, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database %u does not exist", m_dboid)));
     }
     dbform = (Form_pg_database)GETSTRUCT(tuple);
-    // Do not set u_sess->proc_cxt.MyDatabaseId before LockDatabase. Other processes will assume that the session is connected to this database.
+    // Do not set u_sess->proc_cxt.MyDatabaseId before LockDatabase. 
+    // Other processes will assume that the session is connected to this database.
     u_sess->proc_cxt.MyDatabaseTableSpace = dbform->dattablespace;
     strlcpy(m_dbname, NameStr(dbform->datname), sizeof(m_dbname));
     if (EnableLocalSysCache()) {
@@ -2524,7 +2526,6 @@ void PostgresInitializer::LockDatabase()
      */
 
     LockSharedObject(DatabaseRelationId, m_dboid, 0, RowExclusiveLock);
-    
     // Set u_sess->proc_cxt.MyDatabaseId here. It's safe. 
     u_sess->proc_cxt.MyDatabaseId = m_dboid;
     /*
