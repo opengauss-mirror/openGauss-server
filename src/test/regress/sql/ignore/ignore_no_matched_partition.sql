@@ -86,6 +86,40 @@ select * from ignore_range_range;
 update /*+ ignore_error */ ignore_range_range set dept_code = '4' where dept_code = '1';
 select * from ignore_range_range;
 
+drop table if exists t_specified_partition;
+-- test for table with specified partition/subpartition provided
+create table t_specified_partition(
+  month_code VARCHAR2(30) primary key,
+  dept_code VARCHAR2(30) NOT NULL,
+  user_no VARCHAR2(30) NOT NULL,
+  sales_amt int
+)
+PARTITION BY RANGE(month_code) SUBPARTITION BY LIST(dept_code)
+(
+    PARTITION p_201901 VALUES LESS THAN('201906')
+    (
+        SUBPARTITION p_201901_a values('1'),
+        SUBPARTITION p_201901_b values('2')
+    ),
+    PARTITION p_201902 VALUES LESS THAN('201910')
+    (
+        SUBPARTITION p_201902_a values('1'),
+        SUBPARTITION p_201902_b values('2')
+    )
+);
+set enable_opfusion = on;
+set enable_partition_opfusion = on;
+insert /*+ ignore_error */ into t_specified_partition partition(p_201901) values('201906', '1', '1', 1);
+insert /*+ ignore_error */ into t_specified_partition subpartition(p_201901_a) values('201905', '2', '1', 1);
+insert /*+ ignore_error */ into t_specified_partition partition(p_201901) values('201904', '1', '1', 1);
+select * from t_specified_partition;
+set enable_opfusion = off;
+set enable_partition_opfusion = off;
+insert /*+ ignore_error */ into t_specified_partition partition(p_201901) values('201906', '1', '1', 1);
+insert /*+ ignore_error */ into t_specified_partition subpartition(p_201901_a) values('201905', '2', '1', 1);
+insert /*+ ignore_error */ into t_specified_partition subpartition(p_201901_a) values('201903', '1', '1', 1);
+select * from t_specified_partition;
+
 -- test for ustore table
 drop table if exists t_ignore;
 CREATE TABLE t_ignore
