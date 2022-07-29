@@ -195,6 +195,7 @@ select * from t_json;
 insert into t_json values('111');
 update /*+ ignore_error */ t_json set c = null;
 select * from t_json;
+select * from t_json where c::text = 'null';
 
 -- jsonb
 create table t_jsonb(c jsonb not null);
@@ -203,6 +204,7 @@ select * from t_jsonb;
 insert into t_jsonb values('111');
 update /*+ ignore_error */ t_jsonb set c = null;
 select * from t_jsonb;
+select * from t_jsonb where c::text = 'null';
 
 -- bit
 create table t_bit(c bit not null);

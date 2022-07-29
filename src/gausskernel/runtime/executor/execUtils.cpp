@@ -2519,11 +2519,11 @@ static Datum GetNotTimeTypeZeroValue(Form_pg_attribute att_tup)
             break;
         }
         case JSONOID: {
-            result = (Datum)DirectFunctionCall1(json_in, CStringGetDatum("0"));
+            result = (Datum)DirectFunctionCall1(json_in, CStringGetDatum("null"));
             break;
         }
         case JSONBOID: {
-            result = (Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("0"));
+            result = (Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("null"));
             break;
         }
         case XMLOID: {

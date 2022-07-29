@@ -583,9 +583,9 @@ insert /*+ ignore_error */ into t_json values (null);
 WARNING:  null value in column "c" violates not-null constraint
 DETAIL:  Failing row contains (null).
 select * from t_json;
- c 
----
- 0
+  c   
+------
+ null
 (1 row)
 
 insert into t_json values('111');
@@ -595,10 +595,17 @@ DETAIL:  Failing row contains (null).
 WARNING:  null value in column "c" violates not-null constraint
 DETAIL:  Failing row contains (null).
 select * from t_json;
- c 
----
- 0
- 0
+  c   
+------
+ null
+ null
+(2 rows)
+
+select * from t_json where c::text = 'null';
+  c   
+------
+ null
+ null
 (2 rows)
 
 -- jsonb
@@ -607,9 +614,9 @@ insert /*+ ignore_error */ into t_jsonb values (null);
 WARNING:  null value in column "c" violates not-null constraint
 DETAIL:  Failing row contains (null).
 select * from t_jsonb;
- c 
----
- 0
+  c   
+------
+ null
 (1 row)
 
 insert into t_jsonb values('111');
@@ -619,10 +626,17 @@ DETAIL:  Failing row contains (null).
 WARNING:  null value in column "c" violates not-null constraint
 DETAIL:  Failing row contains (null).
 select * from t_jsonb;
- c 
----
- 0
- 0
+  c   
+------
+ null
+ null
+(2 rows)
+
+select * from t_jsonb where c::text = 'null';
+  c   
+------
+ null
+ null
 (2 rows)
 
 -- bit
