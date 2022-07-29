@@ -838,6 +838,11 @@ void knl_instance_init()
     knl_g_csn_barrier_init(&g_instance.csn_barrier_cxt);
     knl_g_audit_init(&g_instance.audit_cxt);
     knl_plugin_vec_func_init(&g_instance.plugin_vec_func_cxt);
+#ifndef ENABLE_MULTIPLE_NODES
+    for (int i = 0; i < DB_CMPT_MAX; i++) {
+        pthread_mutex_init(&g_instance.loadPluginLock[i], NULL);
+    }
+#endif
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)
