@@ -2260,6 +2260,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         } else if (vacuumMainPartition((uint32)(vacstmt->flags))) {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
             GPIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
+            pgstat_report_vacuum(relid, InvalidOid, false, 0);
         } else {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
             lazy_vacuum_rel(onerel, vacstmt, vac_strategy);

@@ -66,5 +66,18 @@ VACUUM FULL vactst;
 VACUUM ANALYZE vaccluster(i,i);
 ANALYZE vaccluster(i,i);
 
+create table vacuum_p_a(a int) partition by range(a)(partition a1 values less than(100), partition a2 values less than(maxvalue));
+insert into vacuum_p_a select generate_series(1,1000);
+select relname,last_vacuum,last_autovacuum,vacuum_count,autovacuum_count
+from pg_stat_user_tables
+where relid in (select oid from pg_class where relname like 'vacuum_p_a');
+vacuum vacuum_p_a;
+select pg_sleep(1);
+select relname,vacuum_count,autovacuum_count,last_vacuum,last_autovacuum
+from pg_stat_user_tables
+where relid in (select oid from pg_class where relname like 'vacuum_p_a');
+
+
 DROP TABLE vaccluster;
 DROP TABLE vactst;
+DROP TABLE vacuum_p_a;
