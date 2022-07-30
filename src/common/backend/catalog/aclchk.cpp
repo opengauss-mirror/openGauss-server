@@ -417,49 +417,55 @@ static void restrict_and_check_grant(AclMode* this_privileges, bool is_grant,
     ddl_privileges = REMOVE_DDL_FLAG(ddl_privileges);
     this_privileges[DDL_PRIVS_INDEX] = ddl_privileges & ACL_OPTION_TO_PRIVS(avail_ddl_goptions);
 
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    int level = WARNING;
+#else
+    int level = ERROR;
+#endif
+
     if (is_grant) {
         if (this_privileges[DML_PRIVS_INDEX] == 0 && this_privileges[DDL_PRIVS_INDEX] == 0) {
             if (objkind == ACL_KIND_COLUMN && colname != NULL)
-                ereport(WARNING,
+                ereport(level,
                     (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
                         errmsg("no privileges were granted for column \"%s\" of relation \"%s\"", colname, objname)));
             else
-                ereport(WARNING,
+                ereport(level,
                     (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
                         errmsg("no privileges were granted for \"%s\"", objname)));
         } else if (!all_privs && ((this_privileges[DML_PRIVS_INDEX] != privileges) ||
             (this_privileges[DDL_PRIVS_INDEX] != ddl_privileges))) {
             if (objkind == ACL_KIND_COLUMN && colname != NULL)
-                ereport(WARNING,
+                ereport(level,
                     (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
                         errmsg(
                             "not all privileges were granted for column \"%s\" of relation \"%s\"", colname, objname)));
             else
-                ereport(WARNING,
+                ereport(level,
                     (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
                         errmsg("not all privileges were granted for \"%s\"", objname)));
         }
     } else {
         if (this_privileges[DML_PRIVS_INDEX] == 0 && this_privileges[DDL_PRIVS_INDEX] == 0) {
             if (objkind == ACL_KIND_COLUMN && colname != NULL)
-                ereport(WARNING,
+                ereport(level,
                     (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_REVOKED),
                         errmsg(
                             "no privileges could be revoked for column \"%s\" of relation \"%s\"", colname, objname)));
             else
-                ereport(WARNING,
+                ereport(level,
                     (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_REVOKED),
                         errmsg("no privileges could be revoked for \"%s\"", objname)));
         } else if (!all_privs && ((this_privileges[DML_PRIVS_INDEX] != privileges) ||
             (this_privileges[DDL_PRIVS_INDEX] != ddl_privileges))) {
             if (objkind == ACL_KIND_COLUMN && colname != NULL)
-                ereport(WARNING,
+                ereport(level,
                     (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_REVOKED),
                         errmsg("not all privileges could be revoked for column \"%s\" of relation \"%s\"",
                             colname,
                             objname)));
             else
-                ereport(WARNING,
+                ereport(level,
                     (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_REVOKED),
                         errmsg("not all privileges could be revoked for \"%s\"", objname)));
         }
