@@ -1001,6 +1001,9 @@ void log_disconnections(int code, Datum arg);
 void cleanGPCPlanProcExit(int code, Datum arg);
 
 void ResetInterruptCxt();
+#ifndef ENABLE_MULTIPLE_NODES
+void LoadSqlPlugin();
+#endif
 
 #define MSG_A_REPEAT_NUM_MAX 1024
 #define OVERRIDE_STACK_LENGTH_MAX 1024
