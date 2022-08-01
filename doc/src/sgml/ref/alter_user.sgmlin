@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-ALTER USER user_name [ [ WITH ] option [ ... ] ];
+ALTER USER [ IF EXISTS ] user_name [ [ WITH ] option [ ... ] ];
 ALTER USER user_name
     RENAME TO new_name;
 ALTER USER user_name [ IN DATABASE database_name ]

@@ -473,8 +473,14 @@ void createdb(const CreatedbStmt* stmt)
      * message than "unique index violation".  There's a race condition but
      * we're willing to accept the less friendly message in that case.
      */
-    if (OidIsValid(get_database_oid(dbname, true)))
-        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_DATABASE), errmsg("database \"%s\" already exists", dbname)));
+    if (OidIsValid(get_database_oid(dbname, true))) {
+        if (stmt->missing_ok) {
+            ereport(NOTICE, (errmsg("database \"%s\" already exists, skipping", dbname)));
+            return;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_DATABASE), errmsg("database \"%s\" already exists", dbname)));
+        }
+    }
 
     /*
      * The source DB can't have any active backends, except this one

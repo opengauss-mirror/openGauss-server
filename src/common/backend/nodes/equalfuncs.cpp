@@ -1660,6 +1660,7 @@ static bool _equalAlterOpFamilyStmt(const AlterOpFamilyStmt* a, const AlterOpFam
 static bool _equalCreatedbStmt(const CreatedbStmt* a, const CreatedbStmt* b)
 {
     COMPARE_STRING_FIELD(dbname);
+    COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_NODE_FIELD(options);
 
     return true;
@@ -2138,6 +2139,7 @@ static bool _equalCreateRoleStmt(const CreateRoleStmt* a, const CreateRoleStmt* 
 static bool _equalAlterRoleStmt(const AlterRoleStmt* a, const AlterRoleStmt* b)
 {
     COMPARE_STRING_FIELD(role);
+    COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_NODE_FIELD(options);
     COMPARE_SCALAR_FIELD(action);
     COMPARE_SCALAR_FIELD(lockstatus);
@@ -2196,6 +2198,7 @@ static bool _equalReindexStmt(const ReindexStmt* a, const ReindexStmt* b)
 static bool _equalCreateSchemaStmt(const CreateSchemaStmt* a, const CreateSchemaStmt* b)
 {
     COMPARE_STRING_FIELD(schemaname);
+    COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_STRING_FIELD(authid);
     COMPARE_SCALAR_FIELD(hasBlockChain);
     COMPARE_NODE_FIELD(schemaElts);

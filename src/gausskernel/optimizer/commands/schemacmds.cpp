@@ -174,6 +174,14 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     if (saved_uid != owner_uid)
         SetUserIdAndSecContext(owner_uid, (uint32)save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
 
+    /* make sure there is no existing namespace of same name */
+    if (stmt->missing_ok) {
+        if (SearchSysCacheExists1(NAMESPACENAME, PointerGetDatum(schemaName))) {
+            ereport(NOTICE, (errmsg("schema \"%s\" already exists,skipping", schemaName)));
+            return;
+        }
+    } 
+
     /* Create the schema's namespace */
     namespaceId = NamespaceCreate(schemaName, owner_uid, false, hasBlockChain);
 
