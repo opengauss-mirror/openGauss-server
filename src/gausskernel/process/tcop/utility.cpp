@@ -196,6 +196,8 @@ static bool IsAllTempObjectsInVacuumStmt(Node* parsetree);
 static int64 getCopySequenceMaxval(const char *nspname, const char *relname, const char *colname);
 static int64 getCopySequenceCountval(const char *nspname, const char *relname);
 
+void BCompatibilityCreateTableOptions(CreateStmt* stmt, Oid relOid);
+static inline void RelOrIndexOrColumnCreateComment(List* list,  Oid oid, char *columnName = NULL);
 /* the hash value of extension script */
 #define POSTGIS_VERSION_NUM 2
 
@@ -2160,6 +2162,9 @@ void CreateCommand(CreateStmt *parse_tree, const char *query_string, ParamListIn
             AlterCStoreCreateTables(rel_oid, toast_options, (CreateStmt*)stmt);
             AlterDfsCreateTables(rel_oid, toast_options, (CreateStmt*)stmt);
             AlterCreateChainTables(rel_oid, toast_options, (CreateStmt *)stmt);
+
+            BCompatibilityCreateTableOptions((CreateStmt*)stmt, rel_oid);
+
 #ifdef ENABLE_MULTIPLE_NODES
             Datum reloptions = transformRelOptions(
                 (Datum)0, ((CreateStmt*)stmt)->options, NULL, validnsps, true, false);
@@ -4907,6 +4912,9 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 DefineDeltaUniqueIndex(rel_id, stmt, indexRelOid);
             }
 #endif
+            /* index options */
+            RelOrIndexOrColumnCreateComment(((IndexStmt *)stmt)->indexOptions, indexRelOid);
+
             pgstat_report_waitstatus(oldStatus);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR && !stmt->isconstraint && !IsConnFromCoord()) {
@@ -13403,4 +13411,41 @@ static int64 getCopySequenceMaxval(const char *nspname, const char *relname, con
     }
     SPI_finish();
     return DatumGetInt64(attval);
+}
+
+ /**
+  * b stmt create index. Only the last one of comments takes effect.
+  * @param list table or index or column option
+  * @param oid oid of table or index
+  */
+ static inline void RelOrIndexOrColumnCreateComment(List* list,  Oid oid, char *columnName) 
+{
+    ListCell *cell = NULL;
+    foreach (cell, list) {
+        void *pointer = lfirst(cell);
+        if (IsA(pointer, CommentStmt)) {
+            CommentStmt *commentStmt = (CommentStmt *)pointer;
+            CreateComments(oid, RelationRelationId, columnName == NULL ? 0 : get_attnum(oid, columnName),
+                           commentStmt->comment);
+            return;
+        }
+    }
+}
+
+/**
+ * B Compatibility Create Table Options
+ * @params: stmt createStmt
+ * @params: relOid oid of table created
+ */
+void BCompatibilityCreateTableOptions(CreateStmt *stmt, Oid relOid)
+{
+    /* table Options */
+    RelOrIndexOrColumnCreateComment(stmt->tableOptions, relOid);
+
+    /* column Options */
+    ListCell *cell = NULL;
+    foreach (cell, stmt->tableElts) {
+        ColumnDef *columnDef = (ColumnDef *)lfirst(cell);
+        RelOrIndexOrColumnCreateComment(columnDef->columnOptions, relOid, columnDef->colname);
+    }
 }

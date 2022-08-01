@@ -3472,6 +3472,9 @@ static void _outCreateStmtInfo(StringInfo str, const CreateStmt* node)
         WRITE_BOOL_FIELD(ivm);
     }
     WRITE_NODE_FIELD(partTableState);
+    if (t_thrd.proc->workingVersionNum >= COMMENT_SUPPORT_VERSION_NUM) {
+        WRITE_NODE_FIELD(tableOptions);
+    }
     WRITE_NODE_FIELD(uuids);
     if (t_thrd.proc->workingVersionNum >= MATVIEW_VERSION_NUM) {
         WRITE_CHAR_FIELD(relkind);
@@ -3608,6 +3611,9 @@ static void _outIndexStmt(StringInfo str, IndexStmt* node)
     WRITE_OID_FIELD(indexOid);
     WRITE_OID_FIELD(oldNode);
     WRITE_NODE_FIELD(partClause);
+    if (t_thrd.proc->workingVersionNum >= COMMENT_SUPPORT_VERSION_NUM) {
+        WRITE_NODE_FIELD(indexOptions);
+    }
     WRITE_BOOL_FIELD(isPartitioned);
     WRITE_BOOL_FIELD(unique);
     WRITE_BOOL_FIELD(primary);
@@ -3804,6 +3810,9 @@ static void _outColumnDef(StringInfo str, ColumnDef* node)
     WRITE_OID_FIELD(collOid);
     WRITE_NODE_FIELD(constraints);
     WRITE_NODE_FIELD(fdwoptions);
+    if (t_thrd.proc->workingVersionNum >= COMMENT_SUPPORT_VERSION_NUM) {
+        WRITE_NODE_FIELD(columnOptions);
+    }
     WRITE_NODE_FIELD(clientLogicColumnRef);
     if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
         if (node->generatedCol)

@@ -4100,6 +4100,7 @@ static ColumnDef* _copyColumnDef(const ColumnDef* from)
     COPY_SCALAR_FIELD(collOid);
     COPY_NODE_FIELD(constraints);
     COPY_NODE_FIELD(fdwoptions);
+    COPY_NODE_FIELD(columnOptions);
     COPY_NODE_FIELD(clientLogicColumnRef);
     COPY_NODE_FIELD(position);
 
@@ -4965,6 +4966,7 @@ static void CopyCreateStmtFields(const CreateStmt* from, CreateStmt* newnode)
     COPY_NODE_FIELD(distributeby);
     COPY_NODE_FIELD(subcluster);
 #endif
+    COPY_NODE_FIELD(tableOptions);
     COPY_STRING_FIELD(internalData);
     COPY_NODE_FIELD(uuids);
     COPY_SCALAR_FIELD(relkind);
@@ -5109,6 +5111,7 @@ static IndexStmt* _copyIndexStmt(const IndexStmt* from)
     COPY_SCALAR_FIELD(oldNode);
     COPY_NODE_FIELD(partClause);
     COPY_SCALAR_FIELD(partIndexUsable);
+    COPY_NODE_FIELD(indexOptions);
     COPY_SCALAR_FIELD(isPartitioned);
     COPY_SCALAR_FIELD(unique);
     COPY_SCALAR_FIELD(primary);
