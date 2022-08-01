@@ -279,7 +279,7 @@ static ParallelLogicalDecodingContext *ParallelStartupDecodingContext(List *outp
 
     ctx->output_plugin_options = output_plugin_options;
     ctx->fast_forward = fast_forward;
-
+    ctx->writeLocationBuffer = makeStringInfo();
     (void)MemoryContextSwitchTo(old_context);
 
     return ctx;

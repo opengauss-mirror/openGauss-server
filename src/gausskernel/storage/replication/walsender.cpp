@@ -1779,9 +1779,6 @@ void WalSndWriteDataHelper(StringInfo out, XLogRecPtr lsn, TransactionId xid, bo
 {
     errno_t rc;
 
-    /* output previously gathered data in a CopyData packet */
-    pq_putmessage_noblock('d', out->data, out->len);
-
     /*
      * Fill the send timestamp last, so that it is taken as late as
      * possible. This is somewhat ugly, but the protocol's set as it's already
@@ -1792,6 +1789,11 @@ void WalSndWriteDataHelper(StringInfo out, XLogRecPtr lsn, TransactionId xid, bo
     rc = memcpy_s(&(out->data[1 + sizeof(int64) + sizeof(int64)]), out->len,
                   t_thrd.walsender_cxt.tmpbuf->data, sizeof(int64));
     securec_check(rc, "\0", "\0");
+
+    /* output previously gathered data in a CopyData packet */
+    pq_putmessage_noblock('d', out->data, out->len);
+
+    CHECK_FOR_INTERRUPTS();
 
     /* fast path */
     /* Try to flush pending output to the client */
