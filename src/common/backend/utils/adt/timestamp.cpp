@@ -5865,7 +5865,8 @@ Datum float8_timestamptz(PG_FUNCTION_ARGS)
         /* Out of range? */
         if (seconds < (float8) SECS_PER_DAY * (DATETIME_MIN_JULIAN - UNIX_EPOCH_JDATE) ||
             seconds >= (float8) SECS_PER_DAY * (TIMESTAMP_END_JULIAN - UNIX_EPOCH_JDATE)) {
-            ereport(ERROR, (errmsg("timestamp out of range: \"%g\"", seconds)));
+            ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                            errmsg("timestamp out of range: \"%g\"", seconds)));
         }
 
         /* Convert UNIX epoch to Postgres epoch */
@@ -5876,7 +5877,8 @@ Datum float8_timestamptz(PG_FUNCTION_ARGS)
 
         /* Recheck in case roundoff produces something just out of range */
         if (!IS_VALID_TIMESTAMP(result)) {
-            ereport(ERROR, (errmsg("timestamp out of range: \"%g\"", PG_GETARG_FLOAT8(0))));
+            ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                            errmsg("timestamp out of range: \"%g\"", PG_GETARG_FLOAT8(0))));
         }
     }
 
