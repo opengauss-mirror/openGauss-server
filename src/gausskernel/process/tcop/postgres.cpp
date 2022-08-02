@@ -7149,7 +7149,11 @@ void LoadSqlPlugin()
         if (!u_sess->attr.attr_sql.dolphin) {
             /* recheck and load dolphin within lock */
             pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
+
+            start_xact_command();
             u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists("dolphin");
+            finish_xact_command();
+
             if (!u_sess->attr.attr_sql.dolphin) {
                 LoadDolphinIfNeeded();
             } else {
