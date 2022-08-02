@@ -84,13 +84,16 @@ static void setEncryptedColumnRef(ColumnDef *def, TargetEntry *tle)
  * work harder.
  * ---------------------------------------------------------------------
  */
-static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, List* options, ObjectType relkind)
+static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, List* options, ObjectType relkind,
+                                    ViewStmt* stmt)
 {
     Oid viewOid;
     LOCKMODE lockmode;
     CreateStmt* createStmt = makeNode(CreateStmt);
     List* attrList = NIL;
     ListCell* t = NULL;
+    char* definer = stmt->definer;
+    bool is_alter = stmt->is_alter;
 
     /*
      * create a list of ColumnDef nodes based on the names and types of the
@@ -148,6 +151,10 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
     lockmode = replace ? AccessExclusiveLock : NoLock;
     (void)RangeVarGetAndCheckCreationNamespace(relation, lockmode, &viewOid, RELKIND_VIEW);
     
+    if (!OidIsValid(viewOid) && is_alter) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("view \"%s\" does not exist", relation->relname)));
+    }
+
     bool flag = OidIsValid(viewOid) && replace;
     if (flag) {
         Relation rel;
@@ -203,6 +210,16 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
         atcmd->subtype = AT_ReplaceRelOptions;
         atcmd->def = (Node*)options;
         atcmds = lappend(atcmds, atcmd);
+
+        /* 
+         * set definer by AlterTameCmd
+         */
+        if (definer != NULL) {
+            atcmd = makeNode(AlterTableCmd);
+            atcmd->subtype = AT_ChangeOwner;
+            atcmd->name = definer;
+            atcmds = lappend(atcmds, atcmd);
+        }
 
         /*
          * If new attributes have been added, we must add pg_attribute entries
@@ -263,6 +280,14 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
         createStmt->oncommit = ONCOMMIT_NOOP;
         createStmt->tablespacename = NULL;
         createStmt->if_not_exists = false;
+        Oid ownerOid = InvalidOid;
+
+        /* 
+         * get oid by user name
+         */
+        if (definer != NULL) {
+            ownerOid = get_role_oid(definer, false);
+        }
 
         /*
          * finally create the relation (this will error out if there's an
@@ -270,9 +295,9 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
          * is false).
          */
         if (relkind == OBJECT_CONTQUERY) {
-            relid = DefineRelation(createStmt, RELKIND_CONTQUERY, InvalidOid);
+            relid = DefineRelation(createStmt, RELKIND_CONTQUERY, ownerOid);
         } else {
-            relid = DefineRelation(createStmt, RELKIND_VIEW, InvalidOid);
+            relid = DefineRelation(createStmt, RELKIND_VIEW, ownerOid);
         }
         Assert(relid != InvalidOid);
         return relid;
@@ -572,7 +597,7 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
          * NOTE: if it already exists and replace is false, the xact will be
          * aborted.
          */
-        viewOid = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options, stmt->relkind);
+        viewOid = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options, stmt->relkind, stmt);
 
         /*
          * The relation we have just created is not visible to any other commands

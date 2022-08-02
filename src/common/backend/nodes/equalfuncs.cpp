@@ -1583,6 +1583,8 @@ static bool _equalViewStmt(const ViewStmt* a, const ViewStmt* b)
     COMPARE_SCALAR_FIELD(ivm);
     COMPARE_NODE_FIELD(options);
     COMPARE_SCALAR_FIELD(relkind);
+    COMPARE_STRING_FIELD(definer);
+    COMPARE_SCALAR_FIELD(is_alter);
 
     return true;
 }

@@ -1992,6 +1992,8 @@ typedef struct ViewStmt {
     ObjectType relkind;  /* type of object */
     Node* mv_stmt;
     char *mv_sql;
+    char* definer;
+    bool is_alter;
 #ifdef ENABLE_MULTIPLE_NODES
     struct PGXCSubCluster* subcluster; /* subcluster of table */
 #endif

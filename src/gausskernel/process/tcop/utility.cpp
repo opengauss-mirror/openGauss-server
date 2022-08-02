@@ -8378,6 +8378,9 @@ const char* CreateCommandTag(Node* parse_tree)
             else
 #endif   /* ENABLE_MULTIPLE_NODES */
                 tag = "CREATE VIEW";
+            if (((ViewStmt*)parse_tree)->is_alter) {
+                tag = "ALTER VIEW";
+            }
             if ((((ViewStmt*)parse_tree)->relkind) == OBJECT_CONTQUERY) {
                 if (!is_multiple_nodes) {
                     ereport(ERROR,

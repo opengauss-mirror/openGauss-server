@@ -5366,6 +5366,8 @@ static ViewStmt* _copyViewStmt(const ViewStmt* from)
     COPY_SCALAR_FIELD(ivm);
     COPY_NODE_FIELD(options);
     COPY_SCALAR_FIELD(relkind);
+    COPY_STRING_FIELD(definer);
+    COPY_SCALAR_FIELD(is_alter);
 
     return newnode;
 }
