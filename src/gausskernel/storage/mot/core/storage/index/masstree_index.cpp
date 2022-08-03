@@ -71,7 +71,7 @@ Sentinel* MasstreePrimaryIndex::IndexInsertImpl(const Key* key, Sentinel* sentin
 
     mtSessionThreadInfo->set_last_error(MT_MERR_OK);
 
-    existingItem = m_index.insert(key, sentinel, inserted, pid);
+    existingItem = m_index.insert(key->GetKeyBuf(), key->GetKeyLength(), sentinel, inserted, pid);
 
     mtSessionThreadInfo->set_gc_session(NULL);
     mtSessionThreadInfo->set_working_index(NULL);
@@ -91,7 +91,7 @@ Sentinel* MasstreePrimaryIndex::IndexReadImpl(const Key* key, uint32_t pid) cons
     void* output = nullptr;
 
     // Operation does not allocate memory from pools nor remove nodes. No need to set index's ptr
-    m_index.find(key, output, result, pid);
+    m_index.find(key->GetKeyBuf(), key->GetKeyLength(), output, result, pid);
 
     if (result) {
         sentinel = reinterpret_cast<Sentinel*>(output);

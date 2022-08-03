@@ -25,6 +25,8 @@
 #ifndef MOT_MASSTREE_HPP
 #define MOT_MASSTREE_HPP
 
+using namespace MOT;
+
 #include "masstree.hh"
 
 namespace Masstree {

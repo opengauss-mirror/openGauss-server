@@ -31,7 +31,7 @@
 
 namespace Masstree {
 template <typename P>
-void basic_table<P>::iteratorScan(const char* keybuf, uint32_t keylen, const bool& matchKey, Iterator* const& it,
+void basic_table<P>::iteratorScan(const char* keybuf, uint32_t keylen, const bool& matchKey, void* const& it,
     const bool& forwardDirection, bool& result, const uint32_t& pid)
 {
     ForwardIterator* fit = nullptr;

@@ -90,7 +90,7 @@ void* threadinfo::allocate(size_t sz, memtag tag, size_t* actual_size)
     int size = sz;
     void* p = nullptr;
     if (likely(!use_pool())) {
-        p = cur_working_index->AllocateMem(size, tag);
+        p = ((MasstreePrimaryIndex*)cur_working_index)->AllocateMem(size, tag);
     } else {
         p = malloc(sz + memdebug_size);
     }
@@ -110,7 +110,7 @@ void threadinfo::deallocate(void* p, size_t sz, memtag tag)
     MOT_ASSERT(p);
     p = memdebug::check_free(p, sz, tag);
     if (likely(!use_pool())) {
-        cur_working_index->DeallocateMem(p, sz, tag);
+        ((MasstreePrimaryIndex*)cur_working_index)->DeallocateMem(p, sz, tag);
     } else {
         free(p);
     }
@@ -121,16 +121,17 @@ void threadinfo::ng_record_rcu(void* p, int sz, memtag tag)
 {
     MOT_ASSERT(p);
     memdebug::check_rcu(p, sz, tag);
-    cur_working_index->RecordMemRcu(p, sz, tag);
+    ((MasstreePrimaryIndex*)cur_working_index)->RecordMemRcu(p, sz, tag);
     mark(threadcounter(tc_alloc + (tag > memtag_value)), -sz);
 }
 
-void threadinfo::set_gc_session(MOT::GcManager* gc_session)
+// MOT is using MOT::GcManager class to manage gc_session
+void threadinfo::set_gc_session(void* gc_session)
 {
     gc_session_ = gc_session;
 }
 
-inline MOT::GcManager* threadinfo::get_gc_session()
+inline void* threadinfo::get_gc_session()
 {
     return gc_session_;
 }
