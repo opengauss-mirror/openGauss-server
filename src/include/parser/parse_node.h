@@ -189,6 +189,7 @@ struct ParseState {
     List *sw_fromClause;
     WithClause *origin_with;
     bool p_hasStartWith;
+    bool p_has_ignore;  /* whether SQL has ignore hint */
 
     /*
      * Optional hook functions for parser callbacks.  These are null unless

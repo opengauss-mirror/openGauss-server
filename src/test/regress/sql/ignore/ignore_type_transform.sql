@@ -342,5 +342,56 @@ create table t_int(num int);
 insert /*+ ignore_error */ into t_int values('12a34');
 select * from t_int;
 
+-- test for inconvertible type transform.
+drop table if exists t_int;
+create table t_int(num int);
+insert /*+ ignore_error */ into t_int values('2011-8-2'::timestamp);
+select * from t_int;
+
+delete from t_int;
+drop table if exists t_timestamp;
+create table t_timestamp(val timestamp);
+insert into t_timestamp values('2011-8-2');
+insert /*+ ignore_error */ into t_int select val from t_timestamp;
+select * from t_int;
+
+delete from t_int;
+insert into t_int values(999);
+update /*+ ignore_error */ t_int set num = '2011-8-2'::timestamp;
+select * from t_int;
+
+drop table if exists t_multi;
+create table t_multi(c1 int unique, c2 int);
+insert /*+ ignore_error */ into t_multi values('2011-8-2'::timestamp, 1);
+insert /*+ ignore_error */ into t_multi values(0, 0) on duplicate key update c2 = 2;
+select * from t_multi;
+insert /*+ ignore_error */ into t_multi values('2011-8-2'::timestamp , 3) on duplicate key update c2 = 3;
+select * from t_multi;
+
+drop table if exists t_float8;
+create table t_float8(num float8);
+insert /*+ ignore_error */ into t_float8 values('2011-8-2'::timestamp);
+select * from t_float8;
+
+delete from t_float8;
+insert into t_float8 values(123.999);
+update /*+ ignore_error */ t_float8 set num = '2011-8-2'::timestamp;
+select * from t_float8;
+
+drop table if exists t_uuid;
+create table t_uuid(val uuid);
+insert /*+ ignore_error */ into t_uuid values(0);
+select * from t_uuid;
+
+drop table if exists t_date;
+create table t_date(val date);
+insert /*+ ignore_error */ into t_date values(0);
+select * from t_date;
+
+delete from t_date;
+insert into t_date values('2011-8-2');
+update /*+ ignore_error */ t_date set val = 0;
+select * from t_date;
+
 \c postgres
 drop database if exists sql_ignore_type_transform_test;

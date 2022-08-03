@@ -1356,6 +1356,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     qry->commandType = CMD_INSERT;
     pstate->p_is_insert = true;
+    pstate->p_has_ignore = stmt->hasIgnore;
     /* set io state for backend status for the thread, we will use it to check user space */
     pgstat_set_io_state(IOSTATE_WRITE);
 
@@ -3325,6 +3326,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
 
     qry->commandType = CMD_UPDATE;
     pstate->p_is_insert = false;
+    pstate->p_has_ignore = stmt->hasIgnore;
 
     /* set io state for backend status for the thread, we will use it to check user space */
     pgstat_set_io_state(IOSTATE_READ);

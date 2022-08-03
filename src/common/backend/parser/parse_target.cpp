@@ -33,6 +33,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/typcache.h"
+#include "executor/executor.h"
 #include "gs_ledger/ledger_utils.h"
 
 static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var, int levelsup);
@@ -513,17 +514,24 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
                     colname, format_type_be(attrtype), format_type_be(type_id)),
                     errhint("You will need to rewrite or cast the expression."),
                     parser_errposition(pstate, exprLocation(orig_expr))));
+            } else {
+                if (!pstate->p_has_ignore) {
+                    ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                        errmsg("column \"%s\" is of type %s"
+                               " but expression is of type %s",
+                               colname, format_type_be(attrtype), format_type_be(type_id)),
+                               errhint("You will need to rewrite or cast the expression."),
+                               parser_errposition(pstate, exprLocation(orig_expr))));
+                }
+                expr = (Expr*)makeConst(attrtype, attrtypmod, attrcollation, rd->rd_att->attrs[attrno - 1]->attlen,
+                                        GetTypeZeroValue(rd->rd_att->attrs[attrno - 1]), false,
+                                        rd->rd_att->attrs[attrno - 1]->attbyval);
+                ereport(WARNING, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                                errmsg("column \"%s\" is of type %s"
+                                       " but expression is of type %s. Data truncated automatically.",
+                                       colname, format_type_be(attrtype), format_type_be(type_id))));
             }
-            ereport(ERROR,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("column \"%s\" is of type %s"
-                           " but expression is of type %s",
-                        colname,
-                        format_type_be(attrtype),
-                        format_type_be(type_id)),
-                    errhint("You will need to rewrite or cast the expression."),
-                    parser_errposition(pstate, exprLocation(orig_expr))));
-		}
+        }
     }
 
     ELOG_FIELD_NAME_END;
