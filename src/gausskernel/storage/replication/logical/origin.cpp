@@ -116,7 +116,7 @@ typedef struct ReplicationStateOnDisk {
 
 static void replorigin_check_prerequisites(bool check_slots, bool recoveryOK)
 {
-#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
+#ifdef ENABLE_MULTIPLE_NODES
     ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("openGauss does not support replication origin yet"),

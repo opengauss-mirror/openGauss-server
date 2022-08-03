@@ -2180,8 +2180,8 @@ keep_going: /* We will come back to here until there is
 
 #ifdef ENABLE_LITE_MODE
                 /* For replication connection request under lite mode, client ip bind is forced */
-                if ((bind_addr == NULL || strcmp(bind_addr, "0.0.0.0") == 0) &&
-                    conn->replication != NULL && strcmp(conn->pglocalhost, "0.0.0.0") != 0) {
+                if ((bind_addr == NULL || strcmp(bind_addr, "0.0.0.0") == 0) && conn->replication != NULL &&
+                    conn->pglocalhost != NULL && strcmp(conn->pglocalhost, "0.0.0.0") != 0) {
                     comm_client_bind = true;
                     bind_addr = conn->pglocalhost;
                 }

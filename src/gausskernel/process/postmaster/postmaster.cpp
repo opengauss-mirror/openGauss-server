@@ -3133,7 +3133,7 @@ static int ServerLoop(void)
             pmState == PM_RUN && !dummyStandbyMode) {
             g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
         }
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
         if (u_sess->attr.attr_common.upgrade_mode == 0 && g_instance.pid_cxt.ApplyLauncerPID == 0 &&
             pmState == PM_RUN && !dummyStandbyMode) {
             g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
@@ -4765,7 +4765,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.UndoLauncherPID != 0) {
             signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGHUP);
         }
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
         if (g_instance.pid_cxt.ApplyLauncerPID != 0) {
             signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGHUP);
         }
@@ -5030,7 +5030,7 @@ static void pmdie(SIGNAL_ARGS)
             if (g_instance.pid_cxt.UndoLauncherPID != 0) {
                 signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
             }
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.ApplyLauncerPID != 0) {
                 signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
             }
@@ -5324,7 +5324,7 @@ static void ProcessDemoteRequest(void)
 
                 if (g_instance.pid_cxt.UndoLauncherPID != 0)
                     signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
                 if (g_instance.pid_cxt.ApplyLauncerPID != 0)
                     signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
 #endif
@@ -5506,7 +5506,7 @@ static void ProcessDemoteRequest(void)
 
                 if (g_instance.pid_cxt.UndoLauncherPID != 0)
                     signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
                 if (g_instance.pid_cxt.ApplyLauncerPID != 0)
                     signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
 #endif
@@ -5811,7 +5811,7 @@ static void reaper(SIGNAL_ARGS)
             if (g_instance.attr.attr_storage.enable_ustore && g_instance.pid_cxt.GlobalStatsPID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
 
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
             if (u_sess->attr.attr_common.upgrade_mode == 0 &&
                 g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode) {
                 g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
@@ -6578,7 +6578,7 @@ static void reaper(SIGNAL_ARGS)
                 LogChildExit(LOG, _("undo launcher process"), pid, exitstatus);
             continue;
         }
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
         if (pid == g_instance.pid_cxt.ApplyLauncerPID) {
             g_instance.pid_cxt.ApplyLauncerPID = 0;
 
@@ -7001,7 +7001,7 @@ static void PostmasterStateMachineReadOnly(void)
 
             if (g_instance.pid_cxt.UndoLauncherPID != 0)
                 signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
             if (g_instance.pid_cxt.ApplyLauncerPID != 0)
                 signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
 #endif
@@ -7083,7 +7083,7 @@ static void AsssertAllChildThreadExit()
     Assert(g_instance.pid_cxt.CommPoolerCleanPID == 0);
     Assert(g_instance.pid_cxt.UndoLauncherPID == 0);
     Assert(g_instance.pid_cxt.UndoRecyclerPID == 0);
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
     Assert(g_instance.pid_cxt.ApplyLauncerPID == 0);
 #endif
     Assert(g_instance.pid_cxt.GlobalStatsPID == 0);
@@ -7150,7 +7150,7 @@ static void PostmasterStateMachine(void)
 
             g_instance.pid_cxt.UndoLauncherPID == 0 && g_instance.pid_cxt.UndoRecyclerPID == 0 &&
             g_instance.pid_cxt.GlobalStatsPID == 0 &&
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.ApplyLauncerPID == 0 &&
 #endif
             IsAllPageWorkerExit() && IsAllBuildSenderExit()) {

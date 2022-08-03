@@ -10442,7 +10442,7 @@ void StartupXLOG(void)
     /*
      * Recover knowledge about replay progress of known replication partners.
      */
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
     StartupReplicationOrigin();
 #endif
     TrimCLOG();
@@ -12091,7 +12091,7 @@ static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags, bool doFullChec
      * need wait pagewriter thread flush dirty page.
      */
     CheckPointBuffers(flags, doFullCheckpoint); /* performs all required fsyncs */
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
     CheckPointReplicationOrigin();
 #endif
     /* We deliberately delay 2PC checkpointing as long as possible */

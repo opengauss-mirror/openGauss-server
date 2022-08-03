@@ -742,6 +742,7 @@
 ./lib/postgresql/security_plugin.so
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
+./lib/postgresql/pgoutput.so
 ./lib/libxgboost.so
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
