@@ -1221,7 +1221,7 @@ int main(int argc, char** argv)
         rc = snprintf_s(query,
             sizeof(query),
             sizeof(query) - 1,
-            "CREATE_REPLICATION_SLOT %s LOGICAL %s",
+            "CREATE_REPLICATION_SLOT \"%s\" LOGICAL %s",
             replication_slot,
             plugin);
         securec_check_ss_c(rc, "\0", "\0");
