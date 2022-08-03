@@ -618,7 +618,7 @@ static int errstate;
 
 %type <ival>	Iconst SignedIconst
 %type <str>		Sconst comment_text notify_payload
-%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user
+%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user definer_expression
 %type <list>	var_list
 %type <str>		ColId ColLabel var_name type_function_name param_name
 %type <node>	var_value zone_value
@@ -12425,13 +12425,19 @@ invoker_rights:	 AUTHID DEFINER
 				}
 			;
 
-definer_user: DEFINER '=' RoleId
+definer_expression: DEFINER '=' RoleId
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
 						$$ = $3;
 					} else {
 						parser_yyerror("not support DEFINER function");
 					}
+				}
+			;
+
+definer_user: definer_expression
+				{
+					$$ = $1;
 				}
 			| /* EMPTY */
 				{
@@ -13977,6 +13983,45 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
+			| ALTER VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility !=  B_FORMAT)
+#endif
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("ALTER VIEW AS is not supported.")));
+					}
+					ViewStmt *n = makeNode(ViewStmt);
+					n->view = $3;
+					n->aliases = $4;
+					n->query = $6;
+					n->replace = true;
+					n->sql_statement = NULL;
+					n->is_alter = true;
+					$$ = (Node *) n;
+				}
+			| ALTER definer_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility !=  B_FORMAT)
+#endif
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("ALTER VIEW AS is not supported.")));
+					}
+					ViewStmt *n = makeNode(ViewStmt);
+					n->definer = $2;
+					n->view = $4;
+					n->aliases = $5;
+					n->query = $7;
+					n->replace = true;
+					n->sql_statement = NULL;
+					n->is_alter = true;
+					$$ = (Node *) n;
+				}
 			| ALTER MATERIALIZED VIEW qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
@@ -15366,6 +15411,20 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->replace = true;
 					n->options = $8;
                                                                                 n->sql_statement = NULL;
+					$$ = (Node *) n;
+				}
+		| CREATE opt_or_replace definer_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
+				AS SelectStmt opt_check_option
+				{
+					ViewStmt *n = makeNode(ViewStmt);
+					n->definer = $3;
+					n->view = $6;
+					n->view->relpersistence = $4;
+					n->aliases = $7;
+					n->query = $10;
+					n->replace = $2;
+					n->options = $8;
+					n->sql_statement = NULL;
 					$$ = (Node *) n;
 				}
 		;

@@ -212,6 +212,83 @@ select * from char_test where a = '零0';
 select * from char_test where b = '零1二3';
 drop table char_test;
 
+-- Testing the behavior of CREATE VIEW statement permissions in B-compatibility mode
+CREATE SCHEMA test_schema;
+CREATE SCHEMA view_schema;
+CREATE TABLE test_schema.test_table (a int);
+CREATE VIEW test_schema.test_view AS SELECT ascii('a');
+CREATE FUNCTION test_schema.bit2float8 (bit) RETURNS float8 AS
+$$
+BEGIN
+    RETURN (SELECT int8($1));
+END;
+$$
+LANGUAGE plpgsql;
+
+CREATE USER test_c WITH PASSWORD 'openGauss@123';
+CREATE USER test_d WITH PASSWORD 'openGauss@123';
+
+GRANT USAGE ON SCHEMA test_schema TO test_d;
+GRANT CREATE ON SCHEMA view_schema TO test_d;
+
+GRANT USAGE ON SCHEMA test_schema TO test_c;
+GRANT CREATE ON SCHEMA view_schema TO test_c;
+
+REVOKE EXECUTE ON FUNCTION test_schema.bit2float8(bit) FROM public;
+
+SET ROLE test_c PASSWORD 'openGauss@123';
+
+CREATE DEFINER=test_d VIEW view_schema.new_view1 AS SELECT * FROM test_schema.test_table;
+CREATE DEFINER=test_d VIEW view_schema.new_view2 AS SELECT * FROM test_schema.test_view;
+CREATE DEFINER=test_d VIEW view_schema.new_view3 AS SELECT * FROM test_schema.bit2float8(b'1111');
+
+RESET ROLE;
+
+GRANT test_d TO test_c;
+
+SET ROLE test_c PASSWORD 'openGauss@123';
+
+CREATE DEFINER=test_d VIEW view_schema.new_view1 AS SELECT * FROM test_schema.test_table;
+CREATE DEFINER=test_d VIEW view_schema.new_view2 AS SELECT * FROM test_schema.test_view;
+CREATE DEFINER=test_d VIEW view_schema.new_view3 AS SELECT * FROM test_schema.bit2float8(b'1111');
+
+SELECT * FROM view_schema.new_view1;
+SELECT * FROM view_schema.new_view2;
+SELECT * FROM view_schema.new_view3;
+
+RESET ROLE;
+
+SET ROLE test_d PASSWORD 'openGauss@123';
+
+SELECT * FROM view_schema.new_view1;
+SELECT * FROM view_schema.new_view2;
+SELECT * FROM view_schema.new_view3;
+
+RESET ROLE;
+
+GRANT SELECT ON TABLE test_schema.test_table TO test_d;
+GRANT SELECT ON TABLE test_schema.test_view TO test_d;
+GRANT EXECUTE ON FUNCTION test_schema.bit2float8(bit) TO test_d;
+GRANT USAGE ON SCHEMA view_schema TO test_d;
+
+SET ROLE test_d PASSWORD 'openGauss@123';
+
+SELECT * FROM view_schema.new_view1;
+SELECT * FROM view_schema.new_view2;
+SELECT * FROM view_schema.new_view3;
+
+RESET ROLE;
+
+SET ROLE test_c PASSWORD 'openGauss@123';
+
+SELECT * FROM view_schema.new_view1;
+SELECT * FROM view_schema.new_view2;
+SELECT * FROM view_schema.new_view3;
+
+RESET ROLE;
+
 \c regression
 
 drop database b;
+DROP USER test_c;
+DROP USER test_d;
