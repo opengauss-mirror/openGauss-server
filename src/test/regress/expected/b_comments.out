@@ -1,4 +1,4 @@
-/* unsupport */
+/* unsupported */
 create schema b_comments;
 set search_path to 'b_comments';
 create table test_row(a int not null comment 'test_row.a');
@@ -21,7 +21,36 @@ create  index partition_test_index on partition_test (logdate) local
     partition sip3_index_local tablespace PG_DEFAULT
 ) comment 'partition_test_index';
 ERROR:  Comment is supported only in B compatible database.
+create table  test( id int comment 'test.id',  uid int comment 'test.uid',  checkid int comment 'test.checkid',  primary key ( id ) comment 'pkey.id',  unique ( uid ) comment 'ukey.uid', check(checkid > 0) comment 'check.checkid') comment 'test';
+ERROR:  Comment is supported only in B compatible database.
+create index test_id_index on test(id) comment 'test_id_index';
+ERROR:  Comment is supported only in B compatible database.
+create function test_function(a int) returns void as $$ begin end; $$ language plpgsql comment 'test_function';
+ERROR:  Comment is supported only in B compatible database.
+create procedure test_procedure(int,int) comment 'test_procedure' as begin select $1 + $2;end;
+/
+ERROR:  Comment is supported only in B compatible database.
+create table test_alter(id int);
+alter table test_alter comment 'test_alter';
+ERROR:  Comment is supported only in B compatible database.
+alter table test_alter add column id2 int comment 'test_alter.id2';
+ERROR:  Comment is supported only in B compatible database.
+alter table test_alter add constraint test_alter_id_check check (id > 0) comment 'test_alter.constraint';
+ERROR:  Comment is supported only in B compatible database.
+alter table test_alter add constraint primary_key unique(id) comment 'test_alter.primary_key';
+ERROR:  Comment is supported only in B compatible database.
+create function test_alter_function(a int) returns void as $$ begin end; $$ language plpgsql;
+alter function test_alter_function(a int) comment 'test_alter_function';
+ERROR:  Comment is supported only in B compatible database.
+create procedure test_alter_procedure(int,int) as begin select $1 + $2;end;
+/
+alter procedure test_alter_procedure(int,int) comment 'test_alter_procedure';
+ERROR:  Comment is supported only in B compatible database.
 drop schema b_comments cascade;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table test_alter
+drop cascades to function test_alter_function(integer)
+drop cascades to function test_alter_procedure(integer,integer)
 create database b_comments dbcompatibility 'B';
 \c b_comments
 create schema b_comments;
@@ -48,6 +77,24 @@ create  index partition_test_index on partition_test (logdate) local
     partition sip2_index_local tablespace PG_DEFAULT,
     partition sip3_index_local tablespace PG_DEFAULT
 ) comment 'partition_test_index';
+create table  test_new( id int comment 'test_new.id',  uid int comment 'test_new.uid',  checkid int comment 'test_new.checkid',  primary key ( id ) comment 'pkey.id',  unique ( uid ) comment 'ukey.uid', check(checkid > 0) comment 'check.checkid') comment 'test_new';
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_new_pkey" for table "test_new"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_new_uid_key" for table "test_new"
+create index test_id_index on test_new(id) comment 'test_new_id_index';
+create function test_function(a int) returns void as $$ begin end; $$ language plpgsql comment 'test_function';
+create procedure test_procedure(int,int) comment 'test_procedure' as begin select $1 + $2;end;
+/
+create table test_alter(id int);
+alter table test_alter comment 'test_alter';
+alter table test_alter add column id2 int comment 'test_alter.id2';
+alter table test_alter add constraint test_alter_id_check check (id > 0) comment 'test_alter.constraint';
+alter table test_alter add constraint primary_key unique(id) comment 'test_alter.primary_key';
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "primary_key" for table "test_alter"
+create function test_alter_function(a int) returns void as $$ begin end; $$ language plpgsql;
+alter function test_alter_function(a int) comment 'test_alter_function';
+create procedure test_alter_procedure(int,int) as begin select $1 + $2;end;
+/
+alter procedure test_alter_procedure(int,int) comment 'test_alter_procedure';
 /* result */
 select description
 from pg_description
@@ -55,27 +102,43 @@ where objoid in (select relfilenode
                  from pg_class
                  where relnamespace in (select oid from pg_catalog.pg_namespace where nspname = 'b_comments'))
 order by description;
-     description      
-----------------------
+      description       
+------------------------
  partition_test
  partition_test_index
+ pkey.id
  test
+ test_alter
+ test_alter.id2
+ test_alter.primary_key
  test_column
  test_column.a
  test_column.b
  test_index
+ test_new
+ test_new.checkid
+ test_new.id
+ test_new_id_index
+ test_new.uid
  test_row
  test_row.a
  test_row.b
  test_row_index
-(11 rows)
+ ukey.uid
+(21 rows)
 
 drop schema b_comments cascade;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to table test_row
 drop cascades to table test_column
 drop cascades to table test
 drop cascades to table partition_test
+drop cascades to table test_new
+drop cascades to function test_function(integer)
+drop cascades to function test_procedure(integer,integer)
+drop cascades to table test_alter
+drop cascades to function test_alter_function(integer)
+drop cascades to function test_alter_procedure(integer,integer)
 reset search_path;
 \c postgres
 drop database b_comments;

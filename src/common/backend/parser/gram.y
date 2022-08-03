@@ -493,6 +493,10 @@ static int errstate;
 /* b compatibility: comment start */
 %type <list>	opt_index_options index_options opt_table_options table_options opt_column_options column_options
 %type <node>	index_option table_option column_option
+
+%type <str>     opt_part_options
+%type <list>    part_options
+%type <node>    part_option
 /* b compatibility: comment end */
 
 %type <list>	group_by_list
@@ -2840,6 +2844,31 @@ modify_column_cmd:
 					cons->location = @2;
 					$$ = (Node *)n;
 				}
+			/* modify column comments start */
+			| COLUMN ColId opt_column_options
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					ColumnDef *def = makeNode(ColumnDef);
+					def->columnOptions = $3;
+					def->colname = $2;
+					n->subtype = AT_COMMENTS;
+					n->def = (Node *) def;
+					n->name = NULL;
+					$$ = (Node *)n;
+				}
+			;
+			| ColId opt_column_options
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					ColumnDef *def = makeNode(ColumnDef);
+					def->columnOptions = $2;
+					def->colname = $1;
+					n->subtype = AT_COMMENTS;
+					n->def = (Node *) def;
+					n->name = NULL;
+					$$ = (Node *)n;
+				}
+			/* modify column comments end */
 			;
 opt_enable:	ENABLE_P		{}
 			| /* empty */	{}
@@ -2916,7 +2945,7 @@ alter_partition_cmd:
 			}
 		/* ALTER TABLE ADD PARTITION: use less/than */
 		| ADD_PARTITION name VALUES LESS THAN
-		'(' maxValueList ')' OptTableSpace
+		'(' maxValueList ')' opt_part_options
 			{
 				RangePartitionDefState *p = makeNode(RangePartitionDefState);
 				AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -2931,7 +2960,7 @@ alter_partition_cmd:
 				$$ = (Node *)n;
 			}
 		/* ALTER TABLE ADD PARTITION: use START/END */
-		| ADD_PARTITION name START '(' maxValueList ')'  END_P '(' maxValueList ')' opt_range_every_list OptTableSpace
+		| ADD_PARTITION name START '(' maxValueList ')'  END_P '(' maxValueList ')' opt_range_every_list opt_part_options
 			{
 				RangePartitionStartEndDefState *p = makeNode(RangePartitionStartEndDefState);
 				AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -2947,7 +2976,7 @@ alter_partition_cmd:
 				n->def = (Node*)s;
 				$$ = (Node *)n;
 			}
-		| ADD_PARTITION name END_P '(' maxValueList ')' OptTableSpace
+		| ADD_PARTITION name END_P '(' maxValueList ')' opt_part_options
 			{
 				RangePartitionStartEndDefState *p = makeNode(RangePartitionStartEndDefState);
 				AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -2963,7 +2992,7 @@ alter_partition_cmd:
 				n->def = (Node*)s;
 				$$ = (Node *)n;
 			}
-		| ADD_PARTITION name START '(' maxValueList ')' OptTableSpace
+		| ADD_PARTITION name START '(' maxValueList ')' opt_part_options
 			{
 				RangePartitionStartEndDefState *p = makeNode(RangePartitionStartEndDefState);
 				AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -2979,7 +3008,7 @@ alter_partition_cmd:
 				n->def = (Node*)s;
 				$$ = (Node *)n;
 			}
-		| ADD_PARTITION name VALUES '(' expr_list ')' OptTableSpace
+		| ADD_PARTITION name VALUES '(' expr_list ')' opt_part_options
 			{
 				ListPartitionDefState *p = makeNode(ListPartitionDefState);
 				AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -2993,7 +3022,7 @@ alter_partition_cmd:
 				n->def = (Node*)s;
 				$$ = (Node *)n;
 			}
-		| ADD_PARTITION name VALUES '(' DEFAULT ')' OptTableSpace
+		| ADD_PARTITION name VALUES '(' DEFAULT ')' opt_part_options
 			{
 				ListPartitionDefState *p = makeNode(ListPartitionDefState);
 				AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -3011,7 +3040,7 @@ alter_partition_cmd:
 				$$ = (Node *)n;
 			}
 		| ADD_PARTITION name VALUES LESS THAN
-		'(' maxValueList ')' OptTableSpace '(' subpartition_definition_list ')'
+		'(' maxValueList ')' opt_part_options '(' subpartition_definition_list ')'
 			{
 				RangePartitionDefState *p = makeNode(RangePartitionDefState);
 				AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -3037,7 +3066,7 @@ alter_partition_cmd:
 				n->def = (Node*)s;
 				$$ = (Node *)n;
 			}
-		| ADD_PARTITION name VALUES '(' expr_list ')' OptTableSpace '(' subpartition_definition_list ')'
+		| ADD_PARTITION name VALUES '(' expr_list ')' opt_part_options '(' subpartition_definition_list ')'
 			{
 				ListPartitionDefState *p = makeNode(ListPartitionDefState);
 				AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -4008,6 +4037,16 @@ alter_table_cmd:
 					$$ = (Node *)n;
 				}
 /* PGXC_END */
+/* table comments start */
+            | COMMENT opt_equal Sconst
+            {
+            		BCompatibilityOptionSupportCheck();
+                    AlterTableCmd *n = makeNode(AlterTableCmd);
+                    n->subtype = AT_COMMENTS;
+                    n->name = $3;
+                    $$ = (Node *)n;
+            }
+/* table comments end */
 		;
 
 alter_column_default:
@@ -4161,6 +4200,30 @@ column_option:
 					n->objargs = NIL;
 					n->comment = $2;
 					$$ = (Node*)n;
+			 }
+			 ;
+
+opt_part_options:
+			 OptTableSpace part_options  { $$ = $1; }
+			 | OptTableSpace               { $$ = $1; }
+			 ;
+/* set null return for grammer comparitibility */
+part_options:
+			 part_option
+			 {
+					BCompatibilityOptionSupportCheck();
+					$$ = NULL;
+			 }
+			 | part_options part_option
+			 {
+					$$ = NULL;
+			 }
+			 ;
+part_option:
+			 COMMENT opt_equal Sconst
+			 {
+					u_sess->parser_cxt.hasPartitionComment = true;
+					$$ = (Node*)NULL;
 			 }
 			 ;
 
@@ -5423,7 +5486,7 @@ subpartition_definition_list:
 		;
 
 subpartition_item:
-		SUBPARTITION name VALUES '(' expr_list ')' OptTableSpace
+		SUBPARTITION name VALUES '(' expr_list ')' opt_part_options
 			{
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
@@ -5432,7 +5495,7 @@ subpartition_item:
 
 				$$ = (Node *)n;
 			}
-		| SUBPARTITION name VALUES '(' DEFAULT ')' OptTableSpace
+		| SUBPARTITION name VALUES '(' DEFAULT ')' opt_part_options
 			{
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
@@ -5443,7 +5506,7 @@ subpartition_item:
 				n->tablespacename = $7;
 				$$ = (Node *)n;
 			}
-		| SUBPARTITION name OptTableSpace
+		| SUBPARTITION name opt_part_options
 			{
 				HashPartitionDefState *n = makeNode(HashPartitionDefState);
 				n->partitionName = $2;
@@ -5452,7 +5515,7 @@ subpartition_item:
 				$$ = (Node*)n;
 			}
 		| SUBPARTITION name VALUES LESS THAN
-		'(' maxValueList ')' OptTableSpace
+		'(' maxValueList ')' opt_part_options
 			{
 				RangePartitionDefState *n = makeNode(RangePartitionDefState);
 				n->partitionName = $2;
@@ -5566,7 +5629,7 @@ range_less_than_list:
 		;
 
 list_partition_item:
-		PARTITION name VALUES '(' expr_list ')' OptTableSpace
+		PARTITION name VALUES '(' expr_list ')' opt_part_options
 			{
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
@@ -5575,7 +5638,7 @@ list_partition_item:
 
 				$$ = (Node *)n;
 			}
-		| PARTITION name VALUES '(' DEFAULT ')' OptTableSpace
+		| PARTITION name VALUES '(' DEFAULT ')' opt_part_options
 			{
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
@@ -5586,7 +5649,7 @@ list_partition_item:
 				n->tablespacename = $7;
 				$$ = (Node *)n;
 			}
-		| PARTITION name VALUES '(' expr_list ')' OptTableSpace '(' subpartition_definition_list ')'
+		| PARTITION name VALUES '(' expr_list ')' opt_part_options '(' subpartition_definition_list ')'
 			{
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
@@ -5606,7 +5669,7 @@ list_partition_item:
 				}
 				$$ = (Node *)n;
 			}
-		| PARTITION name VALUES '(' DEFAULT ')' OptTableSpace '(' subpartition_definition_list ')'
+		| PARTITION name VALUES '(' DEFAULT ')' opt_part_options '(' subpartition_definition_list ')'
 			{
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
@@ -5632,7 +5695,7 @@ list_partition_item:
 		;
 
 hash_partition_item:
-		PARTITION name OptTableSpace
+		PARTITION name opt_part_options
 			{
 				HashPartitionDefState *n = makeNode(HashPartitionDefState);
 				n->partitionName = $2;
@@ -5640,7 +5703,7 @@ hash_partition_item:
 
 				$$ = (Node*)n;
 			}
-		| PARTITION name OptTableSpace '(' subpartition_definition_list ')'
+		| PARTITION name opt_part_options '(' subpartition_definition_list ')'
 			{
 				HashPartitionDefState *n = makeNode(HashPartitionDefState);
 				n->partitionName = $2;
@@ -5663,7 +5726,7 @@ hash_partition_item:
 
 range_less_than_item:
 		PARTITION name VALUES LESS THAN
-		'(' maxValueList ')' OptTableSpace
+		'(' maxValueList ')' opt_part_options
 			{
 				RangePartitionDefState *n = makeNode(RangePartitionDefState);
 				n->partitionName = $2;
@@ -5673,7 +5736,7 @@ range_less_than_item:
 				$$ = (Node *)n;
 			}
 		| PARTITION name VALUES LESS THAN
-		'(' maxValueList ')' OptTableSpace '(' subpartition_definition_list ')'
+		'(' maxValueList ')' opt_part_options '(' subpartition_definition_list ')'
 			{
 				RangePartitionDefState *n = makeNode(RangePartitionDefState);
 				n->partitionName = $2;
@@ -5708,7 +5771,7 @@ range_start_end_list:
 		;
 	
 range_start_end_item:
-		PARTITION name START '(' maxValueList ')'  END_P '(' maxValueList ')' opt_range_every_list OptTableSpace
+		PARTITION name START '(' maxValueList ')'  END_P '(' maxValueList ')' opt_range_every_list opt_part_options
 			{
 				RangePartitionStartEndDefState *n = makeNode(RangePartitionStartEndDefState);
 				n->partitionName = $2;
@@ -5719,7 +5782,7 @@ range_start_end_item:
 
 				$$ = (Node *)n;
 			}
-		| PARTITION name END_P '(' maxValueList ')' OptTableSpace
+		| PARTITION name END_P '(' maxValueList ')' opt_part_options
 			{
 				RangePartitionStartEndDefState *n = makeNode(RangePartitionStartEndDefState);
 				n->partitionName = $2;
@@ -5730,7 +5793,7 @@ range_start_end_item:
 
 				$$ = (Node *)n;
 			}
-		| PARTITION name START '(' maxValueList ')' OptTableSpace
+		| PARTITION name START '(' maxValueList ')' opt_part_options
 			{
 				RangePartitionStartEndDefState *n = makeNode(RangePartitionStartEndDefState);
 				n->partitionName = $2;
@@ -6520,15 +6583,21 @@ internal_data_body: 	{
  * - thomas 1997-12-03
  */
 TableConstraint:
-			CONSTRAINT name ConstraintElem
+			CONSTRAINT name ConstraintElem opt_index_options
 				{
 					Constraint *n = (Constraint *) $3;
 					Assert(IsA(n, Constraint));
 					n->conname = $2;
 					n->location = @1;
+					n->constraintOptions = $4;
 					$$ = (Node *) n;
 				}
-			| ConstraintElem  						{ $$ = $1; }
+			| ConstraintElem opt_index_options
+			    {
+					Constraint *n = (Constraint *) $1;
+					n->constraintOptions = $2;
+					$$ = (Node *) n;
+                }
 		;
 
 ConstraintElem:
@@ -6813,7 +6882,7 @@ OnCommitOption:  ON COMMIT DROP				{ $$ = ONCOMMIT_DROP; }
 			| /*EMPTY*/						{ $$ = ONCOMMIT_NOOP; }
 		;
 
-OptTableSpace:   TABLESPACE name					{ $$ = $2; }
+OptTableSpace:   TABLESPACE opt_equal name					{ $$ = $3; }
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
 OptGPI: 	UPDATE GLOBAL INDEX 	{ $$ = TRUE; }
@@ -12045,15 +12114,15 @@ range_partition_index_list:
 
 
 range_partition_index_item:
-						PARTITION index_name OptTableSpace
-						{
-							RangePartitionindexDefState* def = makeNode(RangePartitionindexDefState);
-							def->name = $2;
-							def->tablespace = $3;
-							$$ = (Node*)def;
+                        PARTITION index_name opt_part_options
+                        {
+                            RangePartitionindexDefState* def = makeNode(RangePartitionindexDefState);
+                            def->name = $2;
+                            def->tablespace = $3;
+                            $$ = (Node*)def;
 
-						}
-                        | PARTITION index_name OptTableSpace opt_subpartition_index_def
+                        }
+                        | PARTITION index_name opt_part_options opt_subpartition_index_def
                         {
                             RangePartitionindexDefState* def = makeNode(RangePartitionindexDefState);
                             def->name = $2;
@@ -12082,7 +12151,7 @@ range_subpartition_index_list:
                         ;
 
 range_subpartition_index_item:
-                       SUBPARTITION index_name OptTableSpace
+                       SUBPARTITION index_name opt_part_options
                         {
                             RangePartitionindexDefState* def = makeNode(RangePartitionindexDefState);
                             def->name = $2;
@@ -13058,6 +13127,11 @@ common_func_opt_item:
 				{
 					$$ = makeDefElem("package", (Node *)makeInteger(true));
 				}
+			| COMMENT Sconst
+			    {
+					BCompatibilityOptionSupportCheck();
+					$$ = makeDefElem("comment", (Node *)makeString($2));
+			    }
 		;
 
 createfunc_opt_item:

@@ -419,6 +419,8 @@ typedef struct knl_u_parser_context {
     bool isCreateFuncOrProc;
     
     bool isTimeCapsule;
+
+    bool hasPartitionComment;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {

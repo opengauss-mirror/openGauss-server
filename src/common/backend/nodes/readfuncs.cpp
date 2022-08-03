@@ -5386,7 +5386,7 @@ static IndexStmt* _readIndexStmt()
     READ_OID_FIELD(indexOid);
     READ_OID_FIELD(oldNode);
     READ_NODE_FIELD(partClause);
-    IF_EXIST(columnOptions) {
+    IF_EXIST(indexOptions) {
         READ_NODE_FIELD(indexOptions);
     }
     READ_BOOL_FIELD(isPartitioned);
@@ -5489,7 +5489,9 @@ static Constraint* _readConstraint()
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("_readConstraint(): badly contype \"%s\"...", token)));
     }
-
+    IF_EXIST(constraintOptions) {
+        READ_NODE_FIELD(constraintOptions);
+    }
     READ_DONE();
 }
 
