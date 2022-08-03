@@ -12946,7 +12946,7 @@ Datum disable_conn(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                         errmsg("must be superuser/sysadmin account to perform disable_conn()")));
     }
-    ValidateName(disconn_mode);
+    ReplicationSlotValidateName(disconn_mode);
 
     if (0 == strcmp(disconn_mode, POLLING_CONNECTION_STR)) {
         disconn_node.conn_mode = POLLING_CONNECTION;
@@ -13003,7 +13003,7 @@ Datum disable_conn(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INVALID_ATTRIBUTE), errmsg("Invalid null pointer attribute for disable_conn()")));
         }
         host = TextDatumGetCString(arg1);
-        ValidateName(host);
+        ReplicationSlotValidateName(host);
         if (!isVaildIp(host)) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("host is invalid")));
         }

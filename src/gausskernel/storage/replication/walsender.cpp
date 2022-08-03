@@ -1277,8 +1277,8 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
     slot_name = NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name);
 
     if (cmd->kind == REPLICATION_KIND_LOGICAL) {
-        ValidateName(cmd->slotname);
-        ValidateName(cmd->plugin);
+        ReplicationSlotValidateName(cmd->slotname);
+        ReplicationSlotValidateName(cmd->plugin);
         char *fullname = NULL;
 
         /*
