@@ -181,7 +181,8 @@ int pg_regexec(regex_t* re, const chr* string, size_t len, size_t search_start, 
         return REG_INVARG;
     if (re->re_csize != sizeof(chr))
         return REG_MIXED;
-
+    if (search_start > len)
+        return REG_NOMATCH;
     /* Initialize locale-dependent support */
     pg_set_regex_collation(re->re_collation);
 
