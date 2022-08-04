@@ -190,6 +190,7 @@ extern void RemoveAttributeById(Oid relid, AttrNumber attnum);
 extern void RemoveAttrDefault(Oid relid, AttrNumber attnum, DropBehavior behavior, bool complain, bool internal);
 extern void RemoveAttrDefaultById(Oid attrdefId);
 
+extern void CopyStatistics(Oid fromrelid, Oid torelid);
 template<char starelkind>
 extern void RemoveStatistics(Oid relid, AttrNumber attnum);
 

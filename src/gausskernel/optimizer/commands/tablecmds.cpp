@@ -3763,10 +3763,12 @@ static void RangeVarCallbackForDropRelation(
     char relkind;
     Form_pg_class classform;
     LOCKMODE heap_lockmode;
+    bool invalid_system_index;
 
     state = (struct DropRelationCallbackState*)arg;
     relkind = state->relkind;
     heap_lockmode = state->concurrent ? ShareUpdateExclusiveLock : AccessExclusiveLock;
+    invalid_system_index = false;
 
     if (target_is_partition)
         heap_lockmode = AccessShareLock;
@@ -3801,10 +3803,37 @@ static void RangeVarCallbackForDropRelation(
         DropErrorMsgWrongType(rel->relname, classform->relkind, relkind);
     }
 
+    /*
+    * Check the case of a system index that might have been invalidated by a
+    * failed concurrent process and allow its drop. For the time being, this
+    * only concerns indexes of toast relations that became invalid during a
+    * REINDEX CONCURRENTLY process.
+    */
+    if(IsSystemClass(classform)&&relkind == RELKIND_INDEX) {
+        HeapTuple locTuple;
+        Form_pg_index indexform;
+        bool indisvalid;
+
+        locTuple = SearchSysCache1(INDEXRELID,ObjectIdGetDatum(relOid));
+        if(!HeapTupleIsValid(locTuple)) {
+            ReleaseSysCache(tuple);
+            return;
+        }
+
+        indexform = (Form_pg_index) GETSTRUCT(locTuple);
+        indisvalid = indexform->indisvalid;
+        ReleaseSysCache(locTuple);
+
+        /*Mark object as being an invaild index of system catalogs*/
+        if(!indisvalid)
+            invalid_system_index = true;
+    }
+
+
     /* Permission Check */
     DropRelationPermissionCheck(relkind, relOid, classform->relnamespace, rel->relname);
 
-    if (!CheckClassFormPermission(classform)) {
+    if (!invalid_system_index && !CheckClassFormPermission(classform)) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog", rel->relname)));

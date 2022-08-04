@@ -2191,6 +2191,7 @@ static bool _equalReindexStmt(const ReindexStmt* a, const ReindexStmt* b)
     COMPARE_STRING_FIELD(name);
     COMPARE_SCALAR_FIELD(do_system);
     COMPARE_SCALAR_FIELD(do_user);
+    COMPARE_SCALAR_FIELD(concurrent);
 
     return true;
 }

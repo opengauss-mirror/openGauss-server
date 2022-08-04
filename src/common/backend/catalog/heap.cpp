@@ -4454,6 +4454,44 @@ static Node* cookConstraint(ParseState* pstate, Node* raw_constraint, char* reln
 }
 
 /*
+ * CopyStatistics --- copy entries in pg_statistic from one rel to another
+ */
+void CopyStatistics(Oid fromrelid, Oid torelid)
+{
+    HeapTuple tup;
+    SysScanDesc scan;
+    ScanKeyData key[1];
+    Relation statrel;
+
+    statrel = heap_open(StatisticRelationId, RowExclusiveLock);
+
+    /* Now search for stat records */
+    ScanKeyInit(&key[0], Anum_pg_statistic_starelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(fromrelid));
+
+    scan = systable_beginscan(statrel, StatisticRelidKindAttnumInhIndexId, true, NULL, 1, key);
+
+    while (HeapTupleIsValid((tup = systable_getnext(scan))))
+    {
+        Form_pg_statistic statform;
+
+        /* make a modifiable copy */
+        tup = heap_copytuple(tup);
+        statform = (Form_pg_statistic) GETSTRUCT(tup);
+
+        /* update the copy of the tuple and insert it */
+        statform->starelid = torelid;
+        (void)simple_heap_insert(statrel, tup);
+        CatalogUpdateIndexes(statrel, tup);
+
+        heap_freetuple(tup);
+    }
+
+    systable_endscan(scan);
+
+    heap_close(statrel, RowExclusiveLock);
+}
+
+/*
  * RemoveStatistics --- remove entries in pg_statistic for a rel or column
  *
  * If attnum is zero, remove all entries for rel;

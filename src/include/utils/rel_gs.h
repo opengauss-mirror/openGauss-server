@@ -798,6 +798,7 @@ extern bool RelationIsPaxFormatByOid(Oid relid);
 extern bool RelationIsMOTTableByOid(Oid relid);
 #endif
 extern bool RelationIsCUFormatByOid(Oid relid);
+extern bool RelationIsUStoreFormatByOid(Oid relid);
 
 #define IS_FOREIGNTABLE(rel) ((rel)->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
 #define IS_STREAM_TABLE(rel) ((rel)->rd_rel->relkind == RELKIND_STREAM)
