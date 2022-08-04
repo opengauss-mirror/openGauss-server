@@ -153,9 +153,9 @@ zstd_compress(const char *src, size_t src_size, char *dst, size_t dst_size, int 
 
     write_len = ZSTD_compress(dst, dst_size, src, src_size, level);
     if (ZSTD_isError(write_len)) {
-        elog(ERROR, "zstd compress data failed, return: %u.", write_len);
         elog(LOG, "zstd compress error, src: [%s], src size: %u, dest size: %u, written size: %u.",
             src, src_size, dst_size, write_len);
+        elog(ERROR, "zstd compress data failed, return: %u.", write_len);
         return -1;
     }
 
@@ -170,9 +170,9 @@ zstd_decompress(const char *src, size_t src_size, char *dst, size_t dst_size)
 
     write_len = ZSTD_decompress(dst, dst_size, src, src_size);
     if (ZSTD_isError(write_len)) {
-        elog(ERROR, "zstd decompress data failed, return: %u.", write_len);
         elog(LOG, "zstd decompress error, src size: %u, dest size: %u, written size: %u.",
             src_size, dst_size, write_len);
+        elog(ERROR, "zstd decompress data failed, return: %u.", write_len);
         return -1;
     }
 
