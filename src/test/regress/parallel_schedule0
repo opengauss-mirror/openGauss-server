@@ -910,6 +910,12 @@ test: row_compression/twophase
 test: component_view_enhancements 
 test: single_node_user_mapping
 
+# reindex concurrently
+test: reindex_concurrently
+test: reindex_concurrently_parallel
+test: reindex_concurrently_partition
+test: reindex_concurrently_partition_parallel
+
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
 test: publication
 test: subscription
@@ -921,9 +927,3 @@ test: composite_datum_record mysql_function b_comments
 
 test: join_test_alias
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition
-
-# reindex concurrently
-test: reindex_concurrently
-test: reindex_concurrently_parallel
-test: reindex_concurrently_partition
-test: reindex_concurrently_partition_parallel

@@ -247,7 +247,7 @@ extern void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid,
                                                    LOCKMODE callbackobj_lockMode);
 extern void reindex_partIndex(Relation heapRel,  Partition heapPart, Relation indexRel , Partition indexPart);
 extern bool reindexPartition(Oid relid, Oid partOid, int flags, int reindexType);
-extern Oid heapPartitionIdGetindexPartitionId(Oid indexId, Oid partOid);
+extern Oid indexIdAndPartitionIdGetIndexPartitionId(Oid indexId, Oid partOid);
 extern void AddGPIForPartition(Oid partTableOid, Oid partOid);
 extern void AddGPIForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid);
 void AddCBIForPartition(Relation partTableRel, Relation tempTableRel, const List* indexRelList, 

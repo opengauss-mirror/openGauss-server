@@ -309,9 +309,8 @@ extern long changeDependencyFor(Oid classId,
                                 Oid oldRefObjectId,
                                 Oid newRefObjectId);
 
-/*use for reindex concurrently*/
-extern long changeDependenciesOf(Oid classId, Oid oldObjectId, Oid newObjectId);
-extern long changeDependenciesOn(Oid refClassId, Oid oldRefObjectId, Oid newRefObjectId);
+extern void changeDependenciesOf(Oid classId, Oid oldObjectId, Oid newObjectId);
+extern void changeDependenciesOn(Oid refClassId, Oid oldRefObjectId, Oid newRefObjectId);
 
 extern Oid	getExtensionOfObject(Oid classId, Oid objectId);
 

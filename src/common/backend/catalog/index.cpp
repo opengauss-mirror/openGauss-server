@@ -1317,12 +1317,12 @@ Oid partition_index_create(const char* partIndexName, /* the name of partition i
  * by caller. The index is inserted into catalogs and needs to be built later
  * on. This is called during concurrent reindex processing.
  * 
- * If index is partitioned, every partition indexes will be created, but not be built.
+ * If index is partitioned, every index partitions will be created, but not be built.
  * 
- * If oldIndexPartId is not NULL, return new partition index oid, this new partition
- * index is on the same partition with old partition index.
+ * If oldIndexPartId is not InvalidOid, return new index partition oid, this new index
+ * partition is on the same partition with old index partition.
  * 
- * If oldIndexPartId is NULL, return new index oid.
+ * If oldIndexPartId is InvalidOid, return new index oid.
  */
 Oid index_concurrently_create_copy(Relation heapRelation, Oid oldIndexId, Oid oldIndexPartId, const char* newName)
 {
@@ -1457,7 +1457,7 @@ Oid index_concurrently_create_copy(Relation heapRelation, Oid oldIndexId, Oid ol
     ListCell* partCell = NULL;
     indexPartOidList = indexGetPartitionOidList(indexRelation);
 
-    /* Now create new partition indexs */
+    /* Now create new index partitions */
     foreach (partCell, indexPartOidList) {
         Oid partId = lfirst_oid(partCell);
         Oid heapPartId = InvalidOid;
@@ -1580,29 +1580,15 @@ void index_concurrently_build(Oid heapRelationId, Oid indexRelationId, bool isPr
 } 
 
 /*
- * index_concurrently_swap
- * Swap name, dependencies, and constraints of the old index over to the new
- * index, while marking the old index as invalid and the new as valid.
+ * index_concurrently_swap_name
+ * Swap name of the old index over to the new index.
  */
-void index_concurrently_swap(Oid newIndexId, Oid oldIndexId, const char* oldName)
+void index_concurrently_swap_name(Oid newIndexId, Oid oldIndexId, const char* oldName)
 {
-    Relation pg_class, pg_index, pg_constraint, pg_trigger;
-    Relation oldClassRel, newClassRel;
+    Relation pg_class;
     HeapTuple oldClassTuple, newClassTuple;
     Form_pg_class oldClassForm, newClassForm;
-    HeapTuple oldIndexTuple, newIndexTuple;
-    Form_pg_index oldIndexForm, newIndexForm;
-    Oid indexConstraintOid;
-    List* constraintOids = NIL;
-    ListCell* lc;
 
-    /*
-     * Take a necessary lock on the old and new index before swaping them.
-     */
-    oldClassRel = relation_open(oldIndexId, ShareUpdateExclusiveLock);
-    newClassRel = relation_open(newIndexId, ShareUpdateExclusiveLock);
-
-    /* Now swap names and dependencies of those indexs */
     pg_class = heap_open(RelationRelationId, RowExclusiveLock);
 
     oldClassTuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(oldIndexId));
@@ -1628,7 +1614,20 @@ void index_concurrently_swap(Oid newIndexId, Oid oldIndexId, const char* oldName
     heap_freetuple(oldClassTuple);
     heap_freetuple(newClassTuple);
 
-    /* Now swap index info */
+    heap_close(pg_class, RowExclusiveLock);
+}
+
+/*
+ * index_concurrently_swap_attr
+ * Swap some attributes of the old index over to the new index,
+ * while marking the old index as invalid and the new as valid.
+ */
+void index_concurrently_swap_attr(Oid newIndexId, Oid oldIndexId)
+{
+    Relation pg_index;
+    HeapTuple oldIndexTuple, newIndexTuple;
+    Form_pg_index oldIndexForm, newIndexForm;
+
     pg_index = heap_open(IndexRelationId, RowExclusiveLock);
 
     oldIndexTuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(oldIndexId));
@@ -1674,9 +1673,19 @@ void index_concurrently_swap(Oid newIndexId, Oid oldIndexId, const char* oldName
     heap_freetuple(oldIndexTuple);
     heap_freetuple(newIndexTuple);
 
-    /*
-     * Move constraints and triggers over to the new index
-     */
+    heap_close(pg_index, RowExclusiveLock);
+}
+
+/*
+ * index_concurrently_swap_constraints
+ * Swap constraints of the old index over to the new index
+ */
+void index_concurrently_swap_constraints(Oid newIndexId, Oid oldIndexId)
+{
+    Relation pg_constraint, pg_trigger;
+    Oid indexConstraintOid;
+    List* constraintOids = NIL;
+    ListCell* lc;
 
     constraintOids = get_index_ref_constraints(oldIndexId);
 
@@ -1737,40 +1746,73 @@ void index_concurrently_swap(Oid newIndexId, Oid oldIndexId, const char* oldName
         systable_endscan(scan);
     }
 
-    /*
-     * Move comment if any
-     */
-    
-    {
-        Relation description;
-        ScanKeyData skey[3];
-        SysScanDesc sd;
-        HeapTuple tuple;
-        Datum values[Natts_pg_description] = {0};
-        bool nulls[Natts_pg_description] = {0};
-        bool replaces[Natts_pg_description] = {0};
+    heap_close(pg_constraint, RowExclusiveLock);
+    heap_close(pg_trigger, RowExclusiveLock);
+}
 
-        values[Anum_pg_description_objoid - 1] = ObjectIdGetDatum(newIndexId);
-        replaces[Anum_pg_description_objoid - 1] = true;
+/*
+ * index_concurrently_swap_description
+ * Swap descriptions of the old index over to the new index.
+ */
+void index_concurrently_swap_description(Oid newIndexId, Oid oldIndexId)
+{
+    Relation description;
+    ScanKeyData skey[3];
+    SysScanDesc sd;
+    HeapTuple tuple;
+    Datum values[Natts_pg_description] = {0};
+    bool nulls[Natts_pg_description] = {0};
+    bool replaces[Natts_pg_description] = {0};
 
-        ScanKeyInit(&skey[0], Anum_pg_description_objoid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(oldIndexId));
-        ScanKeyInit(&skey[1], Anum_pg_description_classoid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
-        ScanKeyInit(&skey[2], Anum_pg_description_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(0));
+    values[Anum_pg_description_objoid - 1] = ObjectIdGetDatum(newIndexId);
+    replaces[Anum_pg_description_objoid - 1] = true;
 
-        description = heap_open(DescriptionRelationId, RowExclusiveLock);
+    ScanKeyInit(&skey[0], Anum_pg_description_objoid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(oldIndexId));
+    ScanKeyInit(&skey[1], Anum_pg_description_classoid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
+    ScanKeyInit(&skey[2], Anum_pg_description_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(0));
 
-        sd = systable_beginscan(description, DescriptionObjIndexId, true, NULL, 3, skey);
+    description = heap_open(DescriptionRelationId, RowExclusiveLock);
 
-        while ((tuple = systable_getnext(sd)) != NULL) {
-            tuple = heap_modify_tuple(tuple, RelationGetDescr(description), values, nulls, replaces);
-            simple_heap_update(description, &tuple->t_self, tuple);
-            CatalogUpdateIndexes(description, tuple);
-            break;                    /* Assume there can be only one match */
-        }
+    sd = systable_beginscan(description, DescriptionObjIndexId, true, NULL, 3, skey);
 
-        systable_endscan(sd);
-        heap_close(description, NoLock);
+    while ((tuple = systable_getnext(sd)) != NULL) {
+        tuple = heap_modify_tuple(tuple, RelationGetDescr(description), values, nulls, replaces);
+        simple_heap_update(description, &tuple->t_self, tuple);
+        CatalogUpdateIndexes(description, tuple);
+        break;                    /* Assume there can be only one match */
     }
+
+    systable_endscan(sd);
+    heap_close(description, NoLock);
+}
+
+
+/*
+ * index_concurrently_swap
+ * Swap name, dependencies, and constraints of the old index over to the new
+ * index, while marking the old index as invalid and the new as valid.
+ */
+void index_concurrently_swap(Oid newIndexId, Oid oldIndexId, const char* oldName)
+{
+    Relation oldIndexRel, newIndexRel;
+
+    /*
+     * Take a necessary lock on the old and new index before swaping them.
+     */
+    oldIndexRel = relation_open(oldIndexId, ShareUpdateExclusiveLock);
+    newIndexRel = relation_open(newIndexId, ShareUpdateExclusiveLock);
+
+    /* Now swap names of those indexs */
+    index_concurrently_swap_name(newIndexId, oldIndexId, oldName);
+
+    /* Now swap index info */
+    index_concurrently_swap_attr(newIndexId, oldIndexId);
+
+    /* Move constraints and triggers over to the new index */
+    index_concurrently_swap_constraints(newIndexId, oldIndexId);
+    
+    /* Move comment if any */
+    index_concurrently_swap_description(newIndexId, oldIndexId);
 
     /*
      * Swap all dependencies of and on the old index to the new one, and
@@ -1788,33 +1830,28 @@ void index_concurrently_swap(Oid newIndexId, Oid oldIndexId, const char* oldName
      */
     {
         PgStat_StatTabKey tabkey;
-        PgStat_StatTabEntry *tabentry;
+        PgStat_StatTabEntry* tabentry = NULL;
 
         tabkey.tableid = oldIndexId;
+        tabkey.statFlag = InvalidOid;
         tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-        if (tabentry) {
-            if (newClassRel->pgstat_info) {
-                newClassRel->pgstat_info->t_counts.t_numscans = tabentry->numscans;
-                newClassRel->pgstat_info->t_counts.t_tuples_returned = tabentry->tuples_returned;
-                newClassRel->pgstat_info->t_counts.t_tuples_fetched = tabentry->tuples_fetched;
-                newClassRel->pgstat_info->t_counts.t_blocks_fetched = tabentry->blocks_fetched;
-                newClassRel->pgstat_info->t_counts.t_blocks_hit = tabentry->blocks_hit;
+        if (PointerIsValid(tabentry)) {
+            if (newIndexRel->pgstat_info) {
+                newIndexRel->pgstat_info->t_counts.t_numscans = tabentry->numscans;
+                newIndexRel->pgstat_info->t_counts.t_tuples_returned = tabentry->tuples_returned;
+                newIndexRel->pgstat_info->t_counts.t_tuples_fetched = tabentry->tuples_fetched;
+                newIndexRel->pgstat_info->t_counts.t_blocks_fetched = tabentry->blocks_fetched;
+                newIndexRel->pgstat_info->t_counts.t_blocks_hit = tabentry->blocks_hit;
                 /* The data will be sent by the next pgstat_report_stat() call. */
             }
         }
     }
     /* Copy data of pg_statistic from the old index to the new one */
-    CopyStatistics(oldIndexId, newIndexId);
-
-    /* Close relations */
-    heap_close(pg_class, RowExclusiveLock);
-    heap_close(pg_index, RowExclusiveLock);
-    heap_close(pg_constraint, RowExclusiveLock);
-    heap_close(pg_trigger, RowExclusiveLock);
+    CopyStatistics(oldIndexId, newIndexId, STARELKIND_CLASS);
 
     /* The lock taken previously is not released until the end of transaction */
-    relation_close(oldClassRel, NoLock);
-    relation_close(newClassRel, NoLock);
+    relation_close(oldIndexRel, NoLock);
+    relation_close(newIndexRel, NoLock);
 }
 
 /*
@@ -1864,7 +1901,7 @@ void index_concurrently_set_dead(Oid heapId, Oid indexId)
 /* 
  * index_concurrently_part_build
  *
- * Build partition index for a concurrent operation. Low-level locks are taken when
+ * Build index partition for a concurrent operation. Low-level locks are taken when
  * this operation is performed to prevent only schema change, but they need
  * to be kept until the end of the transaction performing this operation.
  */
@@ -1923,8 +1960,8 @@ void index_concurrently_part_build(Oid heapRelationId, Oid heapPartitionId, Oid 
 /* 
  * index_concurrently_part_swap
  *
- * Swap name of the old partition index over to the new partition
- * index, swap parent index oid while marking the old partition index as unusable.
+ * Swap name of the old index partition over to the new  index partition, 
+ * swap parent index oid while marking the old index partition as unusable.
  */
 void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const char *oldName)
 {
@@ -1932,18 +1969,21 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
     Partition oldIndexPartition, newIndexPartition;
     HeapTuple oldIndexPartTuple, newIndexPartTuple;
     Form_pg_partition oldIndexPartForm, newIndexPartForm;
-    Oid oldIndexRelationId = PartIdGetParentId(oldIndexPartId,false);
+    Oid swapParentId = InvalidOid;
+
+    Oid oldIndexRelationId = PartIdGetParentId(oldIndexPartId, false);
     Oid newIndexRelationId = PartIdGetParentId(newIndexPartId, false);
+    
     Relation oldIndexRelation = index_open(oldIndexRelationId, ShareUpdateExclusiveLock);
     Relation newIndexRelation = index_open(newIndexRelationId, ShareUpdateExclusiveLock);
 
     /*
-     * Take a necessary lock on the old and new part index before swaping them.
+     * Take a necessary lock on the old and new index part before swaping them.
      */
     oldIndexPartition = partitionOpen(oldIndexRelation, oldIndexPartId, ShareUpdateExclusiveLock);
     newIndexPartition = partitionOpen(newIndexRelation, newIndexPartId, ShareUpdateExclusiveLock);
 
-    /* Now swap names of those part indexs */
+    /* Now swap names of those index parts */
     pg_partition = heap_open(PartitionRelationId, RowExclusiveLock);
 
     oldIndexPartTuple = SearchSysCacheCopy1(PARTRELID, ObjectIdGetDatum(oldIndexPartId));
@@ -1961,12 +2001,12 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
     namestrcpy(&newIndexPartForm->relname, NameStr(oldIndexPartForm->relname));
     namestrcpy(&oldIndexPartForm->relname, oldName);
 
-    /* Mark old part index as unusable*/
+    /* Mark old index part as unusable*/
     newIndexPartForm->indisusable = true;
     oldIndexPartForm->indisusable = false;
 
     /* Swap the parent index oid */
-    Oid swapParentId = newIndexPartForm->parentid;
+    swapParentId = newIndexPartForm->parentid;
     newIndexPartForm->parentid = oldIndexPartForm->parentid;
     oldIndexPartForm->parentid = swapParentId;
 
@@ -1977,8 +2017,24 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
 
     heap_freetuple(oldIndexPartTuple);
     heap_freetuple(newIndexPartTuple);
+
+    /* Get parentid from oldIndexPartition for init new index partition stat info, 
+     * because new index partition parentid in catalog is old partitioned index.
+     *
+     * if not swap and init, the old index partition stat info will be lost.
+     */
+    swapParentId = newIndexPartition->pd_part->parentid;
+    newIndexPartition->pd_part->parentid = oldIndexPartition->pd_part->parentid;
+#ifdef PGXC
+    if (IS_PGXC_DATANODE) {
+#endif
+    pgstat_initstats_partition(newIndexPartition);
+#ifdef PGXC
+    }
+#endif
+
     /*
-     * Copy over statistics from old to new part index
+     * Copy over statistics from old to new index part
      */
     {
         PgStat_StatTabKey tabkey;
@@ -1986,7 +2042,7 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
 
         tabkey.tableid = oldIndexPartId;
         tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-        if (tabentry) {
+        if (PointerIsValid(tabentry)) {
             if (newIndexPartition->pd_pgstat_info) {
                 newIndexPartition->pd_pgstat_info->t_counts.t_numscans = tabentry->numscans;
                 newIndexPartition->pd_pgstat_info->t_counts.t_tuples_returned = tabentry->tuples_returned;
@@ -1997,6 +2053,9 @@ void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const 
             }
         }
     }
+
+    /* swap back for partitionClose */
+    newIndexPartition->pd_part->parentid = swapParentId;
 
     /* Close relation */
     heap_close(pg_partition, RowExclusiveLock);
@@ -5944,7 +6003,7 @@ bool reindexPartition(Oid relid, Oid partOid, int flags, int reindexType)
 /*
  * Use PartitionOid and indexId look for indexPartitionOid
  */
-Oid heapPartitionIdGetindexPartitionId(Oid indexId, Oid partOid) {
+Oid indexIdAndPartitionIdGetIndexPartitionId(Oid indexId, Oid partOid) {
     Relation partRel = NULL;
     SysScanDesc partScan;
     HeapTuple partTuple;
@@ -6055,7 +6114,7 @@ static void reindexPartIndex(Oid indexId, Oid partOid, bool skip_constraint_chec
 
         // step 1: rebuild index partition
         /* Use partOid and indexOid look for indexPartOid */
-        indexPartOid = heapPartitionIdGetindexPartitionId(indexId, partOid);
+        indexPartOid = indexIdAndPartitionIdGetIndexPartitionId(indexId, partOid);
 
         /* Now, we have get the index partition oid and open it. */
         heapPart = partitionOpen(heapRelation, partOid, ShareLock);

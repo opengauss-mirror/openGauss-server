@@ -4455,40 +4455,86 @@ static Node* cookConstraint(ParseState* pstate, Node* raw_constraint, char* reln
 
 /*
  * CopyStatistics --- copy entries in pg_statistic from one rel to another
+ * 
+ * This function was enhanced by multi-column statistics.
  */
-void CopyStatistics(Oid fromrelid, Oid torelid)
+void CopyStatistics(Oid fromrelid, Oid torelid, char starelkind)
 {
-    HeapTuple tup;
+    Relation pgstatistic;
     SysScanDesc scan;
-    ScanKeyData key[1];
-    Relation statrel;
-
-    statrel = heap_open(StatisticRelationId, RowExclusiveLock);
+    ScanKeyData key[2];
+    int nkeys = 2;
+    HeapTuple tuple;
 
     /* Now search for stat records */
     ScanKeyInit(&key[0], Anum_pg_statistic_starelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(fromrelid));
+    if (starelkind == STARELKIND_CLASS) {
+        ScanKeyInit(
+            &key[1], Anum_pg_statistic_starelkind, BTEqualStrategyNumber, F_CHAREQ, ObjectIdGetDatum(STARELKIND_CLASS));
+    }
+    /* retain this interface for partition */
+    else if (starelkind == STARELKIND_PARTITION) {
+        ScanKeyInit(&key[1],
+            Anum_pg_statistic_starelkind,
+            BTEqualStrategyNumber,
+            F_CHAREQ,
+            ObjectIdGetDatum(STARELKIND_PARTITION));
+    }
+    /* invalid starelkind, report ERROR */
+    else {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PARAMETER), errmsg("invalid starelkind for pg_statistic")));
+    }
 
-    scan = systable_beginscan(statrel, StatisticRelidKindAttnumInhIndexId, true, NULL, 1, key);
+    pgstatistic = heap_open(StatisticRelationId, RowExclusiveLock);
 
-    while (HeapTupleIsValid((tup = systable_getnext(scan))))
+    scan = systable_beginscan(pgstatistic, StatisticRelidKindAttnumInhIndexId, true, NULL, nkeys, key);
+
+    while (HeapTupleIsValid((tuple = systable_getnext(scan))))
     {
         Form_pg_statistic statform;
 
         /* make a modifiable copy */
-        tup = heap_copytuple(tup);
-        statform = (Form_pg_statistic) GETSTRUCT(tup);
+        tuple = heap_copytuple(tuple);
+        statform = (Form_pg_statistic) GETSTRUCT(tuple);
 
         /* update the copy of the tuple and insert it */
         statform->starelid = torelid;
-        (void)simple_heap_insert(statrel, tup);
-        CatalogUpdateIndexes(statrel, tup);
+        (void)simple_heap_insert(pgstatistic, tuple);
+        CatalogUpdateIndexes(pgstatistic, tuple);
 
-        heap_freetuple(tup);
+        heap_freetuple(tuple);
     }
 
     systable_endscan(scan);
 
-    heap_close(statrel, RowExclusiveLock);
+    heap_close(pgstatistic, RowExclusiveLock);
+
+    /*
+     * NOTE: scan key is reused. Since the two keys have the same attrnum 
+     * in pg_statistic and pg_statistic_ext, we don't need to change it
+     */
+    pgstatistic = heap_open(StatisticExtRelationId, RowExclusiveLock);
+    scan = systable_beginscan(pgstatistic, StatisticExtRelidKindInhKeyIndexId, true, NULL, nkeys, key);
+
+    while (HeapTupleIsValid((tuple = systable_getnext(scan))))
+    {
+        Form_pg_statistic_ext statform;
+
+        /* make a modifiable copy */
+        tuple = heap_copytuple(tuple);
+        statform = (Form_pg_statistic_ext) GETSTRUCT(tuple);
+
+        /* update the copy of the tuple and insert it */
+        statform->starelid = torelid;
+        (void)simple_heap_insert(pgstatistic, tuple);
+        CatalogUpdateIndexes(pgstatistic, tuple);
+
+        heap_freetuple(tuple);
+    }
+
+    systable_endscan(scan);
+
+    heap_close(pgstatistic, RowExclusiveLock);
 }
 
 /*

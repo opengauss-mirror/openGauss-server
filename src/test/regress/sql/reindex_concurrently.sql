@@ -51,6 +51,31 @@ WHERE classid = 'pg_class'::regclass AND
 -- Check views 
 CREATE VIEW concur_reindex_view AS SELECT * FROM concur_reindex_tab;
 REINDEX TABLE CONCURRENTLY concur_reindex_view; -- Error
+
+-- Check column store table
+CREATE TABLE test_cstore (t1 int, t2 int) with (orientation = column);
+CREATE INDEX ind_cstore ON test_cstore(t1);
+REINDEX INDEX CONCURRENTLY ind_cstore; -- Error
+REINDEX TABLE CONCURRENTLY test_cstore; -- Error
+
+-- Check ustore table
+CREATE TABLE test_ustore (t1 int, t2 int) with (storage_type = ustore);
+CREATE INDEX ind_ustore ON test_ustore(t1);
+REINDEX INDEX CONCURRENTLY ind_ustore; -- Error
+REINDEX TABLE CONCURRENTLY test_ustore; -- Error
+
+-- Check temp table
+CREATE TEMP TABLE test_temp (t1 int, t2 int);
+CREATE INDEX ind_temp ON test_temp(t1);
+REINDEX INDEX CONCURRENTLY ind_temp; -- Error
+REINDEX TABLE CONCURRENTLY test_temp; -- Error
+
+-- Check global temp table
+CREATE GLOBAL TEMP TABLE test_global (t1 int, t2 int);
+CREATE INDEX ind_global ON test_global(t1);
+REINDEX INDEX CONCURRENTLY ind_global; -- Error
+REINDEX TABLE CONCURRENTLY test_global; -- Error
+
 -- Check that comments are preserved
 CREATE TABLE testcomment (i int);
 CREATE INDEX testcomment_idx1 ON testcomment(i);
@@ -82,6 +107,8 @@ REINDEX SYSTEM CONCURRENTLY postgres; -- not allowed for SYSTEM
 
 -- Check the relation status, there should not be invalid indexe
 \d concur_reindex_tab
+DROP TABLE test_temp, test_global;
+DROP TABLE test_cstore, test_ustore;
 DROP VIEW concur_reindex_view;
 DROP MATERIALIZED VIEW concur_reindex_matview;
 DROP TABLE concur_reindex_tab, concur_reindex_tab2;

@@ -3246,7 +3246,7 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
             continue;
         }
         
-	    /*  cstore relation doesn't support concurrent REINDEX now. */
+        /*  cstore relation doesn't support concurrent REINDEX now. */
         if (concurrent && (RelationIsCUFormatByOid(HeapTupleGetOid(tuple)) || IsCStoreNamespace(classtuple->relnamespace))) {
             ereport(WARNING,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -3330,7 +3330,7 @@ static void checkTableForReindexConcurrently(Relation heapRelation) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("concurrent reindex is not supported for share relation")));
 
-    if (IsSystemNamespace(get_rel_namespace(heapId)))
+    if (IsCatalogRelation(heapRelation))
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("concurrent reindex is not supported for system catalog relations")));
 
@@ -3456,7 +3456,7 @@ static List* getToastOidsInReindexConcurrently(Relation heapRelation, Oid heapPa
             toastOid = ((Form_pg_partition)GETSTRUCT(partitionTup))->reltoastrelid;
             if(OidIsValid(toastOid)) {
                 relToastOids = lappend_oid(relToastOids, toastOid);
-                    }
+            }
             ReleaseSysCache(partitionTup);
             heap_close(pg_partition, AccessShareLock);
         } else {
@@ -3539,7 +3539,7 @@ static void prepareReindexTableConcurrently(Oid relationOid, Oid relationPartOid
             if (OidIsValid(relationPartOid)) {
                 Oid indexPartitionOid = InvalidOid;
 
-                indexPartitionOid = heapPartitionIdGetindexPartitionId(cellOid, relationPartOid);
+                indexPartitionOid = indexIdAndPartitionIdGetIndexPartitionId(cellOid, relationPartOid);
 
                 if (checkIndexPartitionForReindexConcurrently(indexRelation, indexPartitionOid)) {
                     /* Save the list of partition OIDs in private context */
@@ -3834,14 +3834,15 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
      * 5. mark old indexes as dead
      * 6. drop old indexes
      * 
-     * The phases of reindex concurrently partition index now are:
+     * The phases of reindex concurrently index partition now are:
      * 
-     * 1. create new indexs and new partition indexes in the catalog
-     * 2. build new partition indexes
-     * 3. let new partition indexes catch up with tuples inserted in the meantime
-     * 4. swap partition index names and parentids
-     * 5. mark new indexes as dead
-     * 6. drop new indexes
+     * 1. create new partitioned indexes and new index partitions in the catalog
+     * 2. build new index partitions
+     * 3. let new index partitions catch up with tuples inserted in the meantime
+     * 4. swap index partition names and parentids, so that old partitioned index has new index partitions
+     *    and new partitioned index has old index partitions.
+     * 5. mark new partitioned indexes as dead because they have old index partitiones
+     * 6. drop new partitioned indexes
      * 
      * We process each phase for all indexes before moving to the next phase,
      * for efficiency.
@@ -3853,7 +3854,7 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
      * only registed in catalogs and will be built later. Then get session
      * locks on all involved tables. See analogous code in DefineIndex() for
      * more detailed comments.
-     * If index is partitioned, create partition indexes too.
+     * If index is partitioned, create index partitions too.
      */
 
     foreach (lc, indexIds) {
@@ -4050,10 +4051,10 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
         /* Save the list of locks in private context */
         oldcontext = MemoryContextSwitchTo(private_context);
 
-        /* Add lockrelid of heap relation to the list of locked relations */
+        /* Add lockrelid of heap partition to the list of locked partitions */
         heapPartlocktag = (LOCKTAG*) palloc(sizeof(LOCKTAG));
 
-        /* Save the LOCKTAG for this parent relation for the wait phase */
+        /* Save the LOCKTAG for this parent partition for the wait phase */
         SET_LOCKTAG_PARTITION(*heapPartlocktag, heapPartition->pd_lockInfo.lockRelId.dbId,
                              heapId, heapPartition->pd_lockInfo.lockRelId.relId);
         partitionLocks = lappend(partitionLocks, heapPartlocktag);
@@ -4094,7 +4095,7 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
      * the index open with the old list of indexes. See "phase 2" in
      * DefineIndex() for more details. 
      * 
-     * If index is partitioned, build the new partition indexes.
+     * If index is partitioned, build the new index partitions.
      */
     foreach (lc, lockTags) {
         LOCKTAG* locktag = (LOCKTAG*) lfirst(lc);
@@ -4142,13 +4143,13 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
             /* Perform concurrent build of new index */
             index_concurrently_build(heapId, newIndexId, isPrimary, memInfo, dbWide);
         else {
-            /* Perform concurrent build of new part index */
+            /* Perform concurrent build of new index partition */
             ListCell* partCell;
 
-            /* avoid build autoadd interval partition indexes */
+            /* avoid build autoadd interval index partitions */
             foreach (partCell, heapPartitionIds) {
                 Oid heapPartId = lfirst_oid(partCell);
-                Oid newIndexPartId = heapPartitionIdGetindexPartitionId(newIndexId, heapPartId);
+                Oid newIndexPartId = indexIdAndPartitionIdGetIndexPartitionId(newIndexId, heapPartId);
 
                 index_concurrently_part_build(heapId, heapPartId, newIndexId, newIndexPartId, memInfo, dbWide);
             }
@@ -4168,7 +4169,7 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
         List* heapPartIds;
         ListCell* partCell;
 
-        /* Start new transaction for this partition index's concurrent build */
+        /* Start new transaction for this index partition's concurrent build */
         StartTransactionCommand();
 
         /*
@@ -4185,10 +4186,17 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
         heapPartId = PartIndexGetPartition(newIndexPartId, false);
         heapId = PartIdGetParentId(heapPartId, false);
 
-        /* Perform concurrent build of new part index */
+        /* Perform concurrent build of new index part */
         index_concurrently_part_build(heapId, heapPartId, indexId, newIndexPartId, memInfo, dbWide);
 
         heapPartIds = getPartitionObjectIdList(heapId, PART_OBJ_TYPE_TABLE_PARTITION);
+        
+        /* Invalidate the partcache for other partition, so that after this commit
+         * all sessions will refresh any cached plans that might reference the
+         * partitioned index.
+         * 
+         * The partcache which is related to heapPartId has been invalidate in index_concurrently_part_build();
+         */
         foreach(partCell, heapPartIds) {
             Oid otherHeapPartId = lfirst_oid(partCell);
 
@@ -4221,11 +4229,12 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
     }
     CommitTransactionCommand();
 
+    TransactionId limitXmin = InvalidTransactionId;
+
     foreach (lc, newIndexIds) {
         Oid newIndexId = lfirst_oid(lc);
         Oid heapId;
         Relation indexRelation;
-        TransactionId limitXmin;
         Snapshot snapshot;
 
         StartTransactionCommand();
@@ -4252,10 +4261,10 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
         else {
             ListCell* partCell = NULL;
 
-            /* avoid validate autoadd interval partition indexes */
+            /* avoid validate autoadd interval index partition */
             foreach(partCell, heapPartitionIds) {
                 Oid heapPartId = lfirst_oid(partCell);
-                Oid indexPartId = heapPartitionIdGetindexPartitionId(newIndexId, heapPartId);
+                Oid indexPartId = indexIdAndPartitionIdGetIndexPartitionId(newIndexId, heapPartId);
 
                 validate_index(heapPartId, indexPartId, snapshot, true);
             }
@@ -4263,9 +4272,10 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
 
         /*
          * We can now do away with our active snapshot, we still need to save
-         * the xmin limit to wait for older snapshot.
+         * the first snapshot xmin limit to wait for older snapshot in two loop.
          */
-        limitXmin = snapshot->xmin;
+        if (TransactionIdPrecedes(limitXmin, snapshot->xmin))
+            limitXmin = snapshot->xmin;
 
         PopActiveSnapshot();
         UnregisterSnapshot(snapshot);
@@ -4278,23 +4288,11 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
          * it.
          */
         CommitTransactionCommand();
-        StartTransactionCommand();
-
-        /*
-         * The index is now valid in the sense that it contains all currently
-         * interesting tuples. But since it might not contain tuples deleted just
-         * before the reference snap was taken, we have to wait out any
-         * transactions that might have older snapshots.
-         */
-        WaitForOlderSnapshots(limitXmin);
-
-        CommitTransactionCommand();
     }
     
     foreach (lc, newIndexPartIds) {
         Oid newIndexPartId = lfirst_oid(lc);
         Oid heapPartId;
-        TransactionId limitXmin;
         Snapshot snapshot;
 
         StartTransactionCommand();
@@ -4319,9 +4317,10 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
 
         /*
          * We can now do away with our active snapshot, we still need to save
-         * the xmin limit to wait for older snapshot.
+         * the first snapshot xmin limit to wait for older snapshot in two loop.
          */
-        limitXmin = snapshot->xmin;
+        if (TransactionIdPrecedes(limitXmin, snapshot->xmin))
+            limitXmin = snapshot->xmin;
 
         PopActiveSnapshot();
         UnregisterSnapshot(snapshot);
@@ -4332,18 +4331,19 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
          * it.
          */
         CommitTransactionCommand();
-        StartTransactionCommand();
-
-        /*
-         * The index is now valid in the sense that it contains all currently
-         * interesting tuples. But since it might not contain tuples deleted just
-         * before the reference snap was taken, we have to wait out any
-         * transactions that might have older snapshots.
-         */
-        WaitForOlderSnapshots(limitXmin);
-
-        CommitTransactionCommand();
     }
+
+    StartTransactionCommand();
+
+    /*
+     * The index is now valid in the sense that it contains all currently
+     * interesting tuples. But since it might not contain tuples deleted just
+     * before the reference snap was taken, we have to wait out any
+     * transactions that might have older snapshots.
+     */
+    WaitForOlderSnapshots(limitXmin);
+
+    CommitTransactionCommand();
 
     /*
      * Phase 4 of REINDEX CONCURRENTLY
@@ -4357,8 +4357,8 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
      * indexes with the correct names.
      * 
      * If index is partitioned,
-     * we mark the old partition indexes are unuse and swap name and parentid
-     * between the new partition index and the old one 
+     * we mark the old index partitions are unuse and swap name and parentid
+     * between the new index partition and the old one 
      */
     StartTransactionCommand();
 
@@ -4408,18 +4408,18 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
         } else {
             ListCell* partCell;
             
-            /* avoid swap autoadd interval partition indexes */
+            /* avoid swap autoadd interval index partitions */
             foreach (partCell, heapPartitionIds) {
                 Oid heapPartId = lfirst_oid(partCell);
-                Oid oldIndexPartId = heapPartitionIdGetindexPartitionId(oldIndexId, heapPartId);
-                Oid newIndexPartId = heapPartitionIdGetindexPartitionId(newIndexId, heapPartId);
+                Oid oldIndexPartId = indexIdAndPartitionIdGetIndexPartitionId(oldIndexId, heapPartId);
+                Oid newIndexPartId = indexIdAndPartitionIdGetIndexPartitionId(newIndexId, heapPartId);
                 
-                /* Choose a partition name for old part index */
+                /* Choose a partition name for old index part */
                 oldName = ChoosePartitionName(getPartitionName(oldIndexPartId, false),
                                             NULL, "ccold", oldIndexId,
                                             PART_OBJ_TYPE_INDEX_PARTITION);
                 /*
-                 * Swap old part index with the new one. This also marks the old one 
+                 * Swap old index part with the new one. This also marks the old one 
                  * as not usable.
                  */
                 index_concurrently_part_swap(newIndexPartId, oldIndexPartId, oldName);
@@ -4442,8 +4442,8 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
             }
 
             /* 
-             * swap index id for drop new index, because this new index has
-             * old partition indexes.
+             * swap index id for drop new partitioned index, because this new partitioned 
+             * index has old index partitions.
              */
             lc->data.oid_value = newIndexId;
             lc2->data.oid_value = oldIndexId;
@@ -4468,12 +4468,12 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
         oldIndexId = PartIdGetParentId(oldIndexPartId, false);
         heapPartId = PartIndexGetPartition(oldIndexPartId, false);
 
-        /* Choose a partition name for old part index */
+        /* Choose a partition name for old index part */
         oldName = ChoosePartitionName(getPartitionName(oldIndexPartId, false),
                                     NULL, "ccold", oldIndexId,
                                     PART_OBJ_TYPE_INDEX_PARTITION);
         /*
-         * Swap old part index with the new one. This also marks the old one
+         * Swap old index part with the new one. This also marks the old one
          * as not usable.
          */
         index_concurrently_part_swap(newIndexPartId, oldIndexPartId, oldName);
@@ -4502,9 +4502,10 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
     /*
      * Phase 5 of REINDEXX CONCURRENTLY 
      * 
-     * Mark the old indexes as dead, First we must wait until no running 
-     * transaction could be using the index for a query. See also
-     * index_drop() for more details.
+     * Mark the old indexes or new partitioned indexes as dead, because 
+     * new partitioned indexes have old index partitions. First we must
+     * wait until no running transaction could be using the index 
+     * for a query. See also index_drop() for more details.
      */
     foreach (lc, lockTags) {
         LOCKTAG* locktag = (LOCKTAG*) lfirst(lc);
@@ -4552,7 +4553,7 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
     /*
      * Phase 6 of REINDEX CONCURRENTLY 
      * 
-     * Drop the old indexes and new indexes which have old partition indexes.
+     * Drop the old indexes and new partitioned indexes which have old index partitions.
      */
     foreach (lc, lockTags) {
         LOCKTAG* locktag = (LOCKTAG*) lfirst(lc);

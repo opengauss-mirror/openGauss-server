@@ -404,12 +404,9 @@ long changeDependencyFor(Oid classId, Oid objectId, Oid refClassId, Oid oldRefOb
  *
  * classId/oldObjectId specify the old referencing object.
  * newObjectId is the new referencing object (must be of class classId).
- *
- * Returns the number of records updated.
  */
-long changeDependenciesOf(Oid classId, Oid oldObjectId, Oid newObjectId)
+void changeDependenciesOf(Oid classId, Oid oldObjectId, Oid newObjectId)
 {
-    long        count = 0;
     Relation    depRel;
     ScanKeyData key[2];
     SysScanDesc scan;
@@ -443,15 +440,11 @@ long changeDependenciesOf(Oid classId, Oid oldObjectId, Oid newObjectId)
         CatalogUpdateIndexes(depRel, tup);
 
         heap_freetuple_ext(tup);
-
-        count++;
     }
 
     systable_endscan(scan);
 
     heap_close(depRel, RowExclusiveLock);
-
-    return count;
 }
 
 /*
@@ -459,12 +452,9 @@ long changeDependenciesOf(Oid classId, Oid oldObjectId, Oid newObjectId)
  *
  * refClassId/oldRefObjectId specify the old referenced object.
  * newRefObjectId is the new referenced object (must be of class refClassId).
- * 
- * Returns the number of records updated.
  */
-long changeDependenciesOn(Oid refClassId, Oid oldRefObjectId, Oid newRefObjectId)
+void changeDependenciesOn(Oid refClassId, Oid oldRefObjectId, Oid newRefObjectId)
 {
-    long count = 0;
     Relation depRel = NULL;
     ScanKeyData key[2];
     SysScanDesc scan = NULL;
@@ -521,15 +511,11 @@ long changeDependenciesOn(Oid refClassId, Oid oldRefObjectId, Oid newRefObjectId
 
             heap_freetuple_ext(tup);
         }
-
-        count++;
     }
 
     systable_endscan(scan);
 
     heap_close(depRel, RowExclusiveLock);
-
-    return count;
 }
 
 /*
