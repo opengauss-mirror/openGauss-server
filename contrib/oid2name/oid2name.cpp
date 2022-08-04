@@ -11,7 +11,7 @@
 
 extern char* optarg;
 
-#include "libpq-fe.h"
+#include "libpq/libpq-fe.h"
 
 /* an extensible array to keep track of elements to show */
 typedef struct {
