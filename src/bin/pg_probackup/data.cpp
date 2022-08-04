@@ -151,9 +151,9 @@ lz4_compress(const char *src, size_t src_size, char *dst, size_t dst_size)
 
     write_len = LZ4_compress_default(src, dst, src_size, dst_size);
     if (write_len <= 0) {
-        elog(ERROR, "lz4 compress data failed, return: %d.", write_len);
         elog(LOG, "lz4 compress error, src: [%s], src size: %u, dest size: %u, written size: %d.",
             src, src_size, dst_size, write_len);
+        elog(ERROR, "lz4 compress data failed, return: %d.", write_len);
         return -1;
     }
 
@@ -168,9 +168,9 @@ lz4_decompress(const char *src, size_t src_size, char *dst, size_t dst_size)
 
     write_len = LZ4_decompress_safe(src, dst, src_size, dst_size);
     if (write_len <= 0) {
-        elog(ERROR, "lz4 decompress data failed, return: %d.", write_len);
         elog(LOG, "lz4 decompress error, src size: %u, dest size: %u, written size: %d.",
             src_size, dst_size, write_len);
+        elog(ERROR, "lz4 decompress data failed, return: %d.", write_len);
         return -1;
     }
 
