@@ -506,6 +506,7 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
                  * replayed.
                  */
                 /* mod blocksize 8k to avoid half page write */
+                oldsize = statbuf.oldsize;
                 RewindCompressInfo oldRewindCompressInfo;
                 bool sourceCompressed = info != NULL;
                 bool targetCompressed = isreldatafile && ProcessLocalPca(path, &oldRewindCompressInfo, pg_data);
