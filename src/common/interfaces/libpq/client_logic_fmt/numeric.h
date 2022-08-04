@@ -39,6 +39,8 @@ typedef int16 NumericDigit;
 #define DEC_DIGITS 4 /* decimal digits per NBASE digit */
 #define NUMERIC_MAX_PRECISION 1000
 #define NUMERIC_MAX_RESULT_SCALE (NUMERIC_MAX_PRECISION * 2)
+#define NUMERIC_LOCAL_NDIG  36  /* number of 'digits' in local digits[] */
+#define NUMERIC_LOCAL_NMAX  (NUMERIC_LOCAL_NDIG - 2)
 
 typedef struct NumericVar {
     int ndigits;          /* # of digits in digits[] - can be 0! */
@@ -47,6 +49,7 @@ typedef struct NumericVar {
     int dscale;           /* display scale */
     NumericDigit *buf;    /* start of palloc'd space for digits[] */
     NumericDigit *digits; /* base-NBASE digits */
+    NumericDigit ndb[NUMERIC_LOCAL_NDIG]; /* local space for digits[] */
 } NumericVar;
 struct NumericShort {
     uint16 n_header;        /* Sign + display scale + weight */
