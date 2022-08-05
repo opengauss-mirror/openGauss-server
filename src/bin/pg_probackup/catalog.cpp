@@ -2382,6 +2382,8 @@ parse_compress_alg(const char *arg)
 
     if (pg_strncasecmp("zlib", arg, len) == 0)
         return ZLIB_COMPRESS;
+    else if (pg_strncasecmp("lz4", arg, len) == 0)
+        return LZ4_COMPRESS;
     else if (pg_strncasecmp("pglz", arg, len) == 0)
         return PGLZ_COMPRESS;
     else if (pg_strncasecmp("none", arg, len) == 0)
@@ -2404,6 +2406,8 @@ deparse_compress_alg(int alg)
             return "zlib";
         case PGLZ_COMPRESS:
             return "pglz";
+        case LZ4_COMPRESS:
+            return "lz4";
     }
 
     return NULL;
