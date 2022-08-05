@@ -1,0 +1,108 @@
+DROP DATABASE IF EXISTS test_db;
+NOTICE:  database "test_db" does not exist, skipping
+CREATE DATABASE test_db DBCOMPATIBILITY 'B';
+CREATE USER root_test WITH PASSWORD 'openGauss@123';
+GRANT ALL PRIVILEGES TO root_test;
+\c test_db
+SET ROLE root_test PASSWORD 'openGauss@123';
+CREATE USER test_user with password 'openGauss@123';
+CREATE VIEW definer_test_view1 AS SELECT log(10, 100);
+CREATE DEFINER=test_user VIEW definer_test_view2 AS SELECT log(10, 100);
+ERROR:  permission denied for schema public
+DETAIL:  N/A
+CREATE OR REPLACE DEFINER=test_user VIEW definer_test_view3 AS SELECT log(10, 100);
+ERROR:  permission denied for schema public
+DETAIL:  N/A
+GRANT ALL PRIVILEGES TO test_user;
+CREATE DEFINER=test_user VIEW definer_test_view2 AS SELECT log(10, 100);
+CREATE OR REPLACE DEFINER=test_user VIEW definer_test_view3 AS SELECT log(10, 100);
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+     view_name      |  rolname  
+--------------------+-----------
+ definer_test_view1 | root_test
+ definer_test_view2 | test_user
+ definer_test_view3 | test_user
+(3 rows)
+
+CREATE USER test_user2 with password 'openGauss@123';
+SELECT * FROM definer_test_view1;
+        log         
+--------------------
+ 2.0000000000000000
+(1 row)
+
+ALTER VIEW definer_test_view1 AS SELECT log(10, 1000);
+SELECT * FROM definer_test_view1;
+        log         
+--------------------
+ 3.0000000000000000
+(1 row)
+
+ALTER DEFINER=test_user2 VIEW definer_test_view2 AS SELECT log(10, 100);
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+     view_name      |  rolname   
+--------------------+------------
+ definer_test_view1 | root_test
+ definer_test_view2 | test_user2
+ definer_test_view3 | test_user
+(3 rows)
+
+-- dump all views
+\! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^ALTER|^DROP'| tr -s ‘'\n' > @abs_bindir@/definer_view_dump.sql 2>&1
+\! cat @abs_bindir@/definer_view_dump.sql
+
+CREATE SCHEMA test_user;
+CREATE SCHEMA test_user2;
+CREATE  DEFINER = root_test  VIEW definer_test_view1(log) AS
+    SELECT log((10)::numeric, (1000)::numeric) AS log;
+CREATE  DEFINER = test_user2  VIEW definer_test_view2(log) AS
+    SELECT log((10)::numeric, (100)::numeric) AS log;
+CREATE  DEFINER = test_user  VIEW definer_test_view3(log) AS
+    SELECT log((10)::numeric, (100)::numeric) AS log;
+DROP VIEW definer_test_view1;
+DROP VIEW definer_test_view2;
+DROP VIEW definer_test_view3;
+DROP SCHEMA test_user;
+DROP SCHEMA test_user2;
+GRANT ALL PRIVILEGES TO test_user2;
+\i @abs_bindir@/definer_view_dump.sql
+CREATE SCHEMA test_user;
+CREATE SCHEMA test_user2;
+CREATE  DEFINER = root_test  VIEW definer_test_view1(log) AS
+    SELECT log((10)::numeric, (1000)::numeric) AS log;
+CREATE  DEFINER = test_user2  VIEW definer_test_view2(log) AS
+    SELECT log((10)::numeric, (100)::numeric) AS log;
+CREATE  DEFINER = test_user  VIEW definer_test_view3(log) AS
+    SELECT log((10)::numeric, (100)::numeric) AS log;
+SELECT * FROM definer_test_view1;
+        log         
+--------------------
+ 3.0000000000000000
+(1 row)
+
+SELECT * FROM definer_test_view2;
+        log         
+--------------------
+ 2.0000000000000000
+(1 row)
+
+SELECT * FROM definer_test_view3;
+        log         
+--------------------
+ 2.0000000000000000
+(1 row)
+
+SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
+     view_name      |  rolname   
+--------------------+------------
+ definer_test_view1 | root_test
+ definer_test_view2 | test_user2
+ definer_test_view3 | test_user
+(3 rows)
+
+RESET ROLE;
+\c regression
+drop database test_db;
+DROP USER test_user;
+DROP USER test_user2;
+DROP USER root_test CASCADE;

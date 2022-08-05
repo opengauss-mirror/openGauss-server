@@ -669,13 +669,13 @@ char* session_options(void)
 
         char *rawString = strdup(value);
         SplitIdentifierString(rawString, ',', &value_list);
-        free(rawString);
         foreach (l, value_list) {
             char* value = (char*)lfirst(l);
             appendStringInfoString(&options, value);
             if (lnext(l))
                 appendStringInfoChar(&options, ',');
         }
+        free(rawString);
 
         list_free_ext(value_list);
     }

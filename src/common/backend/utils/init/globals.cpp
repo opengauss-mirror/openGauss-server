@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92609;
+const uint32 GRAND_VERSION_NUM = 92612;
 
 const uint32 PREDPUSH_SAME_LEVEL_VERSION_NUM = 92522;
 const uint32 UPSERT_WHERE_VERSION_NUM = 92514;
@@ -138,6 +138,8 @@ bool InplaceUpgradePrecommit = false;
 const uint32 DISASTER_READ_VERSION_NUM = 92592;
 
 const uint32 PITR_INIT_VERSION_NUM = 92599;
+
+const uint32 COMMENT_SUPPORT_VERSION_NUM = 92612;
 
 #ifdef PGXC
 bool useLocalXid = false;

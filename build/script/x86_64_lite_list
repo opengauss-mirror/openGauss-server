@@ -45,8 +45,6 @@
 ./share/postgresql/extension/hdfs_fdw.control
 ./share/postgresql/extension/log_fdw--1.0.sql
 ./share/postgresql/extension/log_fdw.control
-./share/postgresql/extension/postgres_fdw--1.0.sql
-./share/postgresql/extension/postgres_fdw.control
 ./share/postgresql/timezone/GB-Eire
 ./share/postgresql/timezone/Turkey
 ./share/postgresql/timezone/Kwajalein

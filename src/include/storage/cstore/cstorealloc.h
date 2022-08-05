@@ -133,7 +133,6 @@ public:
 
     static uint64 GetExtendOffset(uint64 max_offset);
     static uint32 CalcExtendSize(uint64 cu_offset, uint32 cu_size, uint64 extend_offset);
-    static uint32 recheck_max_cuid(Relation m_rel, uint32 max_cuid, int index_num, Relation* m_idxRelation);
 };
 
 #endif

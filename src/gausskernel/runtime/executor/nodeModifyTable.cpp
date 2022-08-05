@@ -551,22 +551,29 @@ static inline void ReleaseResourcesForUpsertGPI(bool isgpi, Relation parentRel, 
     }
 }
 
-void CheckPartitionOidForSpecifiedPartition(RangeTblEntry *rte, Oid partitionid)
+bool CheckPartitionOidForSpecifiedPartition(RangeTblEntry *rte, Oid partitionid, bool canIgnore = false)
 {
+    int level = canIgnore ? WARNING : ERROR;
     if (rte->isContainPartition && rte->partitionOid != partitionid) {
-        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+        ereport(level, (errcode(ERRCODE_NO_DATA_FOUND),
                         (errmsg("inserted partition key does not map to the table partition"), errdetail("N/A."),
                          errcause("The value is incorrect."), erraction("Use the correct value."))));
+        return false;
     }
+    return true;
 }
 
-void CheckSubpartitionOidForSpecifiedSubpartition(RangeTblEntry *rte, Oid partitionid, Oid subPartitionId)
+bool CheckSubpartitionOidForSpecifiedSubpartition(RangeTblEntry *rte, Oid partitionid, Oid subPartitionId,
+                                                  bool canIgnore = false)
 {
+    int level = canIgnore ? WARNING : ERROR;
     if (rte->isContainSubPartition && (rte->partitionOid != partitionid || rte->subpartitionOid != subPartitionId)) {
-        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+        ereport(level, (errcode(ERRCODE_NO_DATA_FOUND),
                         (errmsg("inserted subpartition key does not map to the table subpartition"), errdetail("N/A."),
                          errcause("The value is incorrect."), erraction("Use the correct value."))));
+        return false;
     }
+    return true;
 }
 
 static void ReportErrorForSpecifiedPartitionOfUpsert(char *partition, char *table)
@@ -1125,7 +1132,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (estate->es_plannedstmt->hasIgnore && partition_id == InvalidOid) {
                             return NULL;
                         }
-                        CheckPartitionOidForSpecifiedPartition(rte, partition_id);
+                        bool partitionCheckPassed = CheckPartitionOidForSpecifiedPartition(
+                            rte, partition_id, estate->es_plannedstmt->hasIgnore);
+                        if (!partitionCheckPassed) {
+                            return NULL;
+                        }
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
                             result_relation_desc, partition_id, heap_rel, partition, RowExclusiveLock);
@@ -1175,7 +1186,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (estate->es_plannedstmt->hasIgnore && partitionId == InvalidOid) {
                             return NULL;
                         }
-                        CheckPartitionOidForSpecifiedPartition(rte, partitionId);
+                        bool partitionCheckPassed =
+                            CheckPartitionOidForSpecifiedPartition(rte, partitionId, estate->es_plannedstmt->hasIgnore);
+                        if (!partitionCheckPassed) {
+                            return NULL;
+                        }
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
                                                          result_relation_desc, partitionId, partRel, part,
@@ -1186,7 +1201,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (estate->es_plannedstmt->hasIgnore && subPartitionId == InvalidOid) {
                             return NULL;
                         }
-                        CheckSubpartitionOidForSpecifiedSubpartition(rte, partitionId, subPartitionId);
+                        bool subpartitionCheckPassed = CheckSubpartitionOidForSpecifiedSubpartition(
+                            rte, partitionId, subPartitionId, estate->es_plannedstmt->hasIgnore);
+                        if (!subpartitionCheckPassed) {
+                            return NULL;
+                        }
 
                         searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, partRel,
                                                          subPartitionId, subPartRel, subPart, RowExclusiveLock);
@@ -1852,12 +1871,12 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
                 TupleTableSlot *tmp_slot = node->mt_insert_constr_slot == NULL ? slot : node->mt_insert_constr_slot;
-                if (!ExecConstraints(result_rel_info, slot, estate)) {
+                if (!ExecConstraints(result_rel_info, tmp_slot, estate)) {
                     if (u_sess->utils_cxt.sql_ignore_strategy_val == SQL_OVERWRITE_NULL) {
-                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), slot);
+                        tuple = ReplaceTupleNullCol(RelationGetDescr(result_relation_desc), tmp_slot);
                         /* Double check constraints in case that new val in column with not null constraints
                          * violated check constraints */
-                        ExecConstraints(result_rel_info, slot, estate);
+                        ExecConstraints(result_rel_info, tmp_slot, estate);
                     } else {
                         return NULL;
                     }
@@ -2124,11 +2143,12 @@ lreplace:
                 bool row_movement = false;
                 bool need_create_file = false;
                 int seqNum = -1;
+                bool can_ignore = estate->es_plannedstmt->hasIgnore;
                 if (!partKeyUpdate) {
                     row_movement = false;
                     new_partId = oldPartitionOid;
                 } else {
-                    partitionRoutingForTuple(result_relation_desc, tuple, u_sess->exec_cxt.route);
+                    partitionRoutingForTuple(result_relation_desc, tuple, u_sess->exec_cxt.route, can_ignore);
 
                     if (u_sess->exec_cxt.route->fileExist) {
                         new_partId = u_sess->exec_cxt.route->partitionId;
@@ -2136,11 +2156,11 @@ lreplace:
                             Partition part = partitionOpen(result_relation_desc, new_partId, RowExclusiveLock);
                             Relation partRel = partitionGetRelation(result_relation_desc, part);
 
-                            partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route);
+                            partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route, can_ignore);
                             if (u_sess->exec_cxt.route->fileExist) {
                                 new_partId = u_sess->exec_cxt.route->partitionId;
                             } else {
-                                int level = estate->es_plannedstmt->hasIgnore ? WARNING : ERROR;
+                                int level = can_ignore ? WARNING : ERROR;
                                 ereport(level, (errmodule(MOD_EXECUTOR),
                                                 (errcode(ERRCODE_PARTITION_ERROR),
                                                  errmsg("fail to update partitioned table \"%s\"",
@@ -2150,7 +2170,7 @@ lreplace:
 
                             releaseDummyRelation(&partRel);
                             partitionClose(result_relation_desc, part, NoLock);
-                            if (!u_sess->exec_cxt.route->fileExist && estate->es_plannedstmt->hasIgnore) {
+                            if (!u_sess->exec_cxt.route->fileExist && can_ignore) {
                                 return NULL;
                             }
                         }
@@ -2174,7 +2194,7 @@ lreplace:
                          * it can not be a range area 
                          */
                         if (u_sess->exec_cxt.route->partArea != PART_AREA_INTERVAL) {
-                            if (epqstate->parentestate->es_plannedstmt->hasIgnore) {
+                            if (can_ignore) {
                                 ereport(WARNING, (errmsg("fail to update partitioned table \"%s\".new tuple does not "
                                                          "map to any table partition.",
                                                          RelationGetRelationName(result_relation_desc))));
@@ -2235,7 +2255,7 @@ lreplace:
                         /*
                          * check constraints first if SQL has keyword IGNORE
                          */
-                        if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                        if (can_ignore &&
                             !ExecCheckIndexConstraints(slot, estate, fake_relation, partition, &isgpi, bucketid,
                                                        &conflictInfo, &conflictPartOid, &conflictBucketid)) {
                             ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
@@ -2447,7 +2467,7 @@ lreplace:
                         /*
                          * check constraints first if SQL has keyword IGNORE
                          */
-                        if (estate->es_plannedstmt && estate->es_plannedstmt->hasIgnore &&
+                        if (can_ignore &&
                             !ExecCheckIndexConstraints(slot, estate, fake_insert_relation, insert_partition, &isgpi,
                                                        bucketid, &conflictInfo, &conflictPartOid, &conflictBucketid)) {
                             ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",

@@ -246,6 +246,9 @@ static char* MakeConnectByRootColName(char* tabname, char* colname);
 static void FilterStartWithUseCases(SelectStmt* stmt, List* locking_clause, core_yyscan_t yyscanner, int location);
 static FuncCall* MakePriorAsFunc();
 
+/* B Compatibility Check */
+static void BCompatibilityOptionSupportCheck();
+
 #ifndef ENABLE_MULTIPLE_NODES
 static bool CheckWhetherInColList(char *colname, List *col_list);
 #endif
@@ -486,6 +489,11 @@ static int errstate;
 				relation_expr_list dostmt_opt_list
 				merge_values_clause publication_name_list
 
+/* b compatibility: comment start */
+%type <list>	opt_index_options index_options opt_table_options table_options opt_column_options column_options
+%type <node>	index_option table_option column_option
+/* b compatibility: comment end */
+
 %type <list>	group_by_list
 %type <node>	group_by_item empty_grouping_set rollup_clause cube_clause
 %type <node>	grouping_sets_clause
@@ -610,7 +618,7 @@ static int errstate;
 
 %type <ival>	Iconst SignedIconst
 %type <str>		Sconst comment_text notify_payload
-%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user
+%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst definer_user definer_expression
 %type <list>	var_list
 %type <str>		ColId ColLabel var_name type_function_name param_name
 %type <node>	var_value zone_value
@@ -901,6 +909,7 @@ static int errstate;
 			START_WITH CONNECT_BY
 
 /* Precedence: lowest to highest */
+%nonassoc   COMMENT
 %nonassoc   PARTIAL_EMPTY_PREC
 %nonassoc   CLUSTER
 %nonassoc	SET				/* see relation_expr_opt_alias */
@@ -4045,6 +4054,92 @@ opt_reloptions:		WITH reloptions					{ $$ = $2; }
 			 |		/* EMPTY */						{ $$ = NIL; }
 		;
 
+opt_index_options:
+			 /* EMPTY */						{ $$ = NIL; }
+			 | index_options  { $$ = $1; }
+			 ;
+index_options:
+			 index_option
+			 {
+					BCompatibilityOptionSupportCheck();
+					$$ = list_make1($1);
+			 }
+			 | index_options index_option
+			 {
+					$$ = lcons($2, $1);
+			 }
+			 ;
+index_option:
+			 COMMENT opt_equal Sconst
+			 {
+					CommentStmt *n = makeNode(CommentStmt);
+					n->objtype = OBJECT_INDEX;
+					n->objname = NIL;
+					n->objargs = NIL;
+					n->comment = $3;
+					$$ = (Node*)n;
+			 }
+			 ;
+
+opt_table_options:
+			 /* EMPTY */						{ $$ = NIL; }
+			 | table_options  { $$ = $1; }
+			 ;
+table_options:
+			 table_option
+			 {
+					BCompatibilityOptionSupportCheck();
+					$$ = list_make1($1);
+			 }
+			 | table_options opt_comma table_option
+			 {
+					$$ = lcons($3, $1);
+			 }
+			 ;
+table_option:
+			 COMMENT opt_equal Sconst
+			 {
+					CommentStmt *n = makeNode(CommentStmt);
+					n->objtype = OBJECT_TABLE;
+					n->objname = NIL;
+					n->objargs = NIL;
+					n->comment = $3;
+					$$ = (Node*)n;
+			 }
+			 ;
+
+opt_comma:
+          /* empty */
+        | ','
+        ;
+
+opt_column_options:
+			 /* EMPTY */						{ $$ = NIL; }
+			 | column_options  { $$ = $1; }
+			 ;
+column_options:
+			 column_option
+			 {
+					BCompatibilityOptionSupportCheck();
+					$$ = list_make1($1);
+			 }
+			 | column_options column_option
+			 {
+					$$ = lcons($2, $1);
+			 }
+			 ;
+column_option:
+			 COMMENT Sconst
+			 {
+					CommentStmt *n = makeNode(CommentStmt);
+					n->objtype = OBJECT_COLUMN;
+					n->objname = NIL;
+					n->objargs = NIL;
+					n->comment = $2;
+					$$ = (Node*)n;
+			 }
+			 ;
+
 reloption_list:
 			reloption_elem							{ $$ = list_make1($1); }
 			| reloption_list ',' reloption_elem		{ $$ = lappend($1, $3); }
@@ -4912,12 +5007,13 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 /* PGXC_BEGIN */
 			OptDistributeBy OptSubCluster
 /* PGXC_END */
+			opt_table_options
 			opt_table_partitioning_clause
 			opt_internal_data OptKind
 				{
 					CreateStmt *n = makeNode(CreateStmt);
 					$4->relpersistence = $2;
-					n->relkind = $17;
+					n->relkind = $18;
 					n->relation = $4;
 					n->tableElts = $6;
 					n->inhRelations = $8;
@@ -4931,8 +5027,9 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->distributeby = $13;
 					n->subcluster = $14;
 /* PGXC_END */
-					n->partTableState = (PartitionState *)$15;
-					n->internalData = $16;
+					n->tableOptions = $15;
+					n->partTableState = (PartitionState *)$16;
+					n->internalData = $17;
 					$$ = (Node *)n;
 				}
 		| CREATE OptTemp TABLE IF_P NOT EXISTS qualified_name '('
@@ -4941,6 +5038,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 /* PGXC_BEGIN */
 			OptDistributeBy OptSubCluster
 /* PGXC_END */
+			opt_table_options
 			opt_table_partitioning_clause
 			opt_internal_data
 				{
@@ -4959,8 +5057,9 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->distributeby = $16;
 					n->subcluster = $17;
 /* PGXC_END */
-					n->partTableState = (PartitionState *)$18;
-					n->internalData = $19;
+					n->tableOptions = $18;
+					n->partTableState = (PartitionState *)$19;
+					n->internalData = $20;
 					$$ = (Node *)n;
 				}
 		| CREATE OptTemp TABLE qualified_name OF any_name
@@ -4968,6 +5067,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 /* PGXC_BEGIN */
 			OptDistributeBy OptSubCluster
 /* PGXC_END */
+			opt_table_options
 				{
 					CreateStmt *n = makeNode(CreateStmt);
 					$4->relpersistence = $2;
@@ -4985,6 +5085,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->distributeby = $12;
 					n->subcluster = $13;
 /* PGXC_END */
+					n->tableOptions = $14;
 					n->partTableState = NULL;
 					n->internalData = NULL;
 					$$ = (Node *)n;
@@ -4994,6 +5095,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 /* PGXC_BEGIN */
 			OptDistributeBy OptSubCluster
 /* PGXC_END */
+			opt_table_options
 				{
 					CreateStmt *n = makeNode(CreateStmt);
 					$7->relpersistence = $2;
@@ -5011,6 +5113,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->distributeby = $15;
 					n->subcluster = $16;
 /* PGXC_END */
+					n->tableOptions = $17;
 					n->partTableState = NULL;
 					n->internalData = NULL;
 					$$ = (Node *)n;
@@ -5752,7 +5855,7 @@ TypedTableElement:
 			| TableConstraint	 				{ $$ = $1; }
 		;
 
-columnDef:	ColId Typename KVType ColCmprsMode create_generic_options ColQualList
+columnDef:	ColId Typename KVType ColCmprsMode create_generic_options ColQualList opt_column_options
 				{
 					ColumnDef *n = makeNode(ColumnDef);
 					n->colname = $1;
@@ -5775,6 +5878,7 @@ columnDef:	ColId Typename KVType ColCmprsMode create_generic_options ColQualList
 						SplitColQualList($6, &n->constraints, &n->collClause,
 										yyscanner);
 					}
+					n->columnOptions = $7;
 					$$ = (Node *)n;
 				}
 		;
@@ -5846,7 +5950,7 @@ ColConstraint:
 					$$ = (Node *) n;
 				}
 			| ENCRYPTED with_algorithm
-				{ 
+				{
 					$$=$2;
 				}
 		;	
@@ -11683,7 +11787,7 @@ defacl_privilege_target:
 
 IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 			ON qualified_name access_method_clause '(' index_params ')'
-			opt_include opt_reloptions OptPartitionElement where_clause
+			opt_include opt_reloptions OptPartitionElement opt_index_options where_clause
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
@@ -11696,7 +11800,8 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->indexIncludingParams = $12;
 					n->options = $13;
 					n->tableSpace = $14;
-					n->whereClause = $15;
+					n->indexOptions = $15;
+					n->whereClause = $16;
 					n->excludeOpNames = NIL;
 					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
@@ -11712,7 +11817,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 				}
 				| CREATE opt_unique INDEX opt_concurrently opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
-					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace
+					LOCAL opt_partition_index_def opt_include opt_reloptions OptTableSpace opt_index_options
 				{
 
 					IndexStmt *n = makeNode(IndexStmt);
@@ -11727,6 +11832,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->indexIncludingParams = $14;
 					n->options = $15;
 					n->tableSpace = $16;
+					n->indexOptions = $17;
 					n->isPartitioned = true;
 					n->isGlobal = false;
 					n->excludeOpNames = NIL;
@@ -11742,7 +11848,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 				}
 				| CREATE opt_unique INDEX opt_concurrently opt_index_name
 					ON qualified_name access_method_clause '(' index_params ')'
-					GLOBAL opt_include opt_reloptions OptTableSpace
+					GLOBAL opt_include opt_reloptions OptTableSpace opt_index_options
 				{
 
 					IndexStmt *n = makeNode(IndexStmt);
@@ -11757,6 +11863,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->indexIncludingParams = $13;
 					n->options = $14;
 					n->tableSpace = $15;
+					n->indexOptions = $16;
 					n->isPartitioned = true;
 					n->isGlobal = true;
 					n->excludeOpNames = NIL;
@@ -12318,13 +12425,19 @@ invoker_rights:	 AUTHID DEFINER
 				}
 			;
 
-definer_user: DEFINER '=' RoleId
+definer_expression: DEFINER '=' RoleId
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility ==  B_FORMAT) {
 						$$ = $3;
 					} else {
 						parser_yyerror("not support DEFINER function");
 					}
+				}
+			;
+
+definer_user: definer_expression
+				{
+					$$ = $1;
 				}
 			| /* EMPTY */
 				{
@@ -13870,6 +13983,45 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
+			| ALTER VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility !=  B_FORMAT)
+#endif
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("ALTER VIEW AS is not supported.")));
+					}
+					ViewStmt *n = makeNode(ViewStmt);
+					n->view = $3;
+					n->aliases = $4;
+					n->query = $6;
+					n->replace = true;
+					n->sql_statement = NULL;
+					n->is_alter = true;
+					$$ = (Node *) n;
+				}
+			| ALTER definer_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility !=  B_FORMAT)
+#endif
+					{
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("ALTER VIEW AS is not supported.")));
+					}
+					ViewStmt *n = makeNode(ViewStmt);
+					n->definer = $2;
+					n->view = $4;
+					n->aliases = $5;
+					n->query = $7;
+					n->replace = true;
+					n->sql_statement = NULL;
+					n->is_alter = true;
+					$$ = (Node *) n;
+				}
 			| ALTER MATERIALIZED VIEW qualified_name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
@@ -15259,6 +15411,20 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->replace = true;
 					n->options = $8;
                                                                                 n->sql_statement = NULL;
+					$$ = (Node *) n;
+				}
+		| CREATE opt_or_replace definer_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
+				AS SelectStmt opt_check_option
+				{
+					ViewStmt *n = makeNode(ViewStmt);
+					n->definer = $3;
+					n->view = $6;
+					n->view->relpersistence = $4;
+					n->aliases = $7;
+					n->query = $10;
+					n->replace = $2;
+					n->options = $8;
+					n->sql_statement = NULL;
 					$$ = (Node *) n;
 				}
 		;
@@ -26423,6 +26589,17 @@ static bool CheckWhetherInColList(char *colname, List *col_list)
 	return false;
 }
 #endif
+
+static void BCompatibilityOptionSupportCheck()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Comment is not yet supported.")));
+#endif
+    if (DB_IS_CMPT(B_FORMAT)) {
+        return;
+    }
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Comment is supported only in B compatible database.")));
+}
 
 static int GetFillerColIndex(char *filler_col_name, List *col_list)
 {

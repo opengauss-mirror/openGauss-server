@@ -223,6 +223,7 @@ install(CODE "message(\"-- Created symlink: libatomic.so -> libatomic.so.1.2.0\"
 install(CODE "message(\"-- Created symlink: libatomic.so.1 -> libatomic.so.1.2.0\")")
 endif()
 
+install(FILES ${SECUREDYNAMICLIB_HOME}/libsecurec.so DESTINATION lib)
 install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgcc_s.so.1 DESTINATION lib)
 install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgomp.so DESTINATION lib)
 install(FILES ${BUILDTOOLS_PATH}/gcc7.3/gcc/lib64/libgomp.so.1 DESTINATION lib)

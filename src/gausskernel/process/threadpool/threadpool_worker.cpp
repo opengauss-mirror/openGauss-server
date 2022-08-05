@@ -854,15 +854,7 @@ static bool InitSession(knl_session_context* session)
     SetProcessingMode(NormalProcessing);
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
-        if (!u_sess->attr.attr_sql.dolphin) {
-            LoadDolphinIfNeeded();
-        } else {
-            InitBSqlPluginHookIfNeeded();
-        }
-    } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
-            InitASqlPluginHookIfNeeded();
-    }
+    LoadSqlPlugin();
 #endif
 
     init_session_share_memory();

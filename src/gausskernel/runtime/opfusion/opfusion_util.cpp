@@ -257,8 +257,8 @@ const char* getBypassReason(FusionType result)
         case NOBYPASS_PARTITION_BYPASS_NOT_OPEN: {
             return "enable_partition_opfusion is in the closed state";
         }
-        case NOBYPASS_PARTITION_NOT_SUPPORT_IN_LIST_OR_HASH_PARTITION: {
-            return "Bypass not support in list/hash partition currently";
+        case NOBYPASS_PARTITION_TYPE_NOT_SUPPORT: {
+            return "Bypass only support in range partition currently";
         }
 
         case NOBYPASS_VERSION_SCAN_PLAN: {
@@ -826,7 +826,7 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
     }
     if (checkPartitionType(rel)) {
         heap_close(rel, AccessShareLock);
-        return NOBYPASS_PARTITION_NOT_SUPPORT_IN_LIST_OR_HASH_PARTITION;
+        return NOBYPASS_PARTITION_TYPE_NOT_SUPPORT;
     }
     heap_close(rel, AccessShareLock);
 
@@ -948,7 +948,7 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
     }
     if (checkPartitionType(rel)) {
         heap_close(rel, AccessShareLock);
-        return NOBYPASS_PARTITION_NOT_SUPPORT_IN_LIST_OR_HASH_PARTITION;
+        return NOBYPASS_PARTITION_TYPE_NOT_SUPPORT;
     }
     heap_close(rel, AccessShareLock);
     /*
@@ -1018,7 +1018,7 @@ FusionType getUpdateFusionType(List *stmt_list, ParamListInfo params)
     }
     if (checkPartitionType(rel)) {
         heap_close(rel, AccessShareLock);
-        return NOBYPASS_PARTITION_NOT_SUPPORT_IN_LIST_OR_HASH_PARTITION;
+        return NOBYPASS_PARTITION_TYPE_NOT_SUPPORT;
     }
     heap_close(rel, AccessShareLock);
 
@@ -1095,7 +1095,7 @@ FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params)
     }
     if (checkPartitionType(rel)) {
         heap_close(rel, AccessShareLock);
-        return NOBYPASS_PARTITION_NOT_SUPPORT_IN_LIST_OR_HASH_PARTITION;
+        return NOBYPASS_PARTITION_TYPE_NOT_SUPPORT;
     }
     heap_close(rel, AccessShareLock);
 

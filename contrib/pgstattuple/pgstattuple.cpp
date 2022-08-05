@@ -36,6 +36,7 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
 #include "utils/builtins.h"
+#include "utils/snapmgr.h"
 
 PG_MODULE_MAGIC;
 
@@ -195,7 +196,7 @@ static Datum pgstat_relation(Relation rel, FunctionCallInfo fcinfo)
     switch (rel->rd_rel->relkind) {
         case RELKIND_RELATION:
         case RELKIND_TOASTVALUE:
-        case RELKIND_UNCATALOGED:
+        //case RELKIND_UNCATALOGED:
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
             return pgstat_heap(rel, fcinfo);
@@ -250,7 +251,7 @@ static Datum pgstat_relation(Relation rel, FunctionCallInfo fcinfo)
  */
 static Datum pgstat_heap(Relation rel, FunctionCallInfo fcinfo)
 {
-    HeapScanDesc scan;
+    TableScanDesc scan;
     HeapTuple tuple;
     BlockNumber nblocks;
     BlockNumber block = 0; /* next block to count free space in */

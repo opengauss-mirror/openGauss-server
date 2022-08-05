@@ -966,12 +966,12 @@ select
     decode(1, 2, 'never', col_bool)
 from test_decode_coercion;
 
--- still invalid
+-- now supported
 select 
     decode(1, 2, 'never', col_date)
 from test_decode_coercion;
 
--- still invalid
+-- now supported
 select 
     decode(1, 2, 'never', col_time)
 from test_decode_coercion;

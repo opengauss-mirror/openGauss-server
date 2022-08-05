@@ -1787,12 +1787,13 @@ ScalarVector* vbpcharlen(PG_FUNCTION_ARGS)
     int len;
     int eml;
     eml = pg_database_encoding_max_length();
+    bool getTrueLen = DB_IS_CMPT(PG_FORMAT | B_FORMAT);
 
     if (pselection != NULL) {
         for (k = 0; k < nvalues; k++) {
             if (pselection[k]) {
                 if (NOT_NULL(vflag[k])) {
-                    len = VARSIZE_ANY_EXHDR(varg->m_vals[k]);
+                    len = getTrueLen ? bcTruelen((BpChar*)varg->m_vals[k]) : VARSIZE_ANY_EXHDR(varg->m_vals[k]);
                     if (eml != 1)
                         len = pg_mbstrlen_with_len_eml(VARDATA_ANY(varg->m_vals[k]), len, eml);
                     vresult->m_vals[k] = Int32GetDatum(len);
@@ -1805,7 +1806,7 @@ ScalarVector* vbpcharlen(PG_FUNCTION_ARGS)
     } else {
         for (k = 0; k < nvalues; k++) {
             if (NOT_NULL(vflag[k])) {
-                len = VARSIZE_ANY_EXHDR(varg->m_vals[k]);
+                len = getTrueLen ? bcTruelen((BpChar*)varg->m_vals[k]) : VARSIZE_ANY_EXHDR(varg->m_vals[k]);
                 if (eml != 1)
                     len = pg_mbstrlen_with_len_eml(VARDATA_ANY(varg->m_vals[k]), len, eml);
                 vresult->m_vals[k] = Int32GetDatum(len);

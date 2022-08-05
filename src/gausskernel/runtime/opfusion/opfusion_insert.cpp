@@ -203,7 +203,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
         m_c_local.m_estate->esfRelations = NULL;
         partOid = heapTupleGetPartitionId(rel, tuple, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
         if (m_c_local.m_estate->es_plannedstmt->hasIgnore && partOid == InvalidOid) {
-            return 1;
+            return 0;
         }
         part = partitionOpen(rel, partOid, RowExclusiveLock);
         partRel = partitionGetRelation(rel, part);
@@ -234,7 +234,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
          */
         if(!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate)) {
             if (u_sess->utils_cxt.sql_ignore_strategy_val != SQL_OVERWRITE_NULL) {
-                return 1;
+                return 0;
             }
             tuple = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot);
             /* Double check constraints in case that new val in column with not null constraints
@@ -278,7 +278,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
             releaseDummyRelation(&partRel);
         }
 
-        return 1;
+        return 0;
     }
 
     (void)tableam_tuple_insert(bucket_rel == NULL ? destRel : bucket_rel, tuple, mycid, 0, NULL);
@@ -361,7 +361,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
      * step 2: begin insert *
      ************************/
 
-    (this->*(m_global->m_exec_func_ptr))(rel, result_rel_info);
+    unsigned long nprocessed = (this->*(m_global->m_exec_func_ptr))(rel, result_rel_info);
     heap_close(rel, RowExclusiveLock);
 
     /****************
@@ -371,9 +371,10 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     m_local.m_isCompleted = true;
     if (m_local.m_ledger_hash_exist && !IsConnFromApp()) {
         errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-            "INSERT 0 1 %lu\0", m_local.m_ledger_relhash);
+            "INSERT 0 %ld %lu\0", nprocessed, m_local.m_ledger_relhash);
     } else {
-        errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "INSERT 0 1");
+        errorno =
+            snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "INSERT 0 %ld", nprocessed);
     }
     securec_check_ss(errorno, "\0", "\0");
 

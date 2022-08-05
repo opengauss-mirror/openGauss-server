@@ -173,6 +173,60 @@ select * from ignore_range_range;
  201901     | 1         | 1       |         1
 (1 row)
 
+drop table if exists t_specified_partition;
+NOTICE:  table "t_specified_partition" does not exist, skipping
+-- test for table with specified partition/subpartition provided
+create table t_specified_partition(
+  month_code VARCHAR2(30) primary key,
+  dept_code VARCHAR2(30) NOT NULL,
+  user_no VARCHAR2(30) NOT NULL,
+  sales_amt int
+)
+PARTITION BY RANGE(month_code) SUBPARTITION BY LIST(dept_code)
+(
+    PARTITION p_201901 VALUES LESS THAN('201906')
+    (
+        SUBPARTITION p_201901_a values('1'),
+        SUBPARTITION p_201901_b values('2')
+    ),
+    PARTITION p_201902 VALUES LESS THAN('201910')
+    (
+        SUBPARTITION p_201902_a values('1'),
+        SUBPARTITION p_201902_b values('2')
+    )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_specified_partition_pkey" for table "t_specified_partition"
+set enable_opfusion = on;
+set enable_partition_opfusion = on;
+insert /*+ ignore_error */ into t_specified_partition partition(p_201901) values('201906', '1', '1', 1);
+WARNING:  inserted partition key does not map to the table partition
+DETAIL:  N/A.
+insert /*+ ignore_error */ into t_specified_partition subpartition(p_201901_a) values('201905', '2', '1', 1);
+WARNING:  inserted subpartition key does not map to the table subpartition
+DETAIL:  N/A.
+insert /*+ ignore_error */ into t_specified_partition partition(p_201901) values('201904', '1', '1', 1);
+select * from t_specified_partition;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201904     | 1         | 1       |         1
+(1 row)
+
+set enable_opfusion = off;
+set enable_partition_opfusion = off;
+insert /*+ ignore_error */ into t_specified_partition partition(p_201901) values('201906', '1', '1', 1);
+WARNING:  inserted partition key does not map to the table partition
+DETAIL:  N/A.
+insert /*+ ignore_error */ into t_specified_partition subpartition(p_201901_a) values('201905', '2', '1', 1);
+WARNING:  inserted subpartition key does not map to the table subpartition
+DETAIL:  N/A.
+insert /*+ ignore_error */ into t_specified_partition subpartition(p_201901_a) values('201903', '1', '1', 1);
+select * from t_specified_partition;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201904     | 1         | 1       |         1
+ 201903     | 1         | 1       |         1
+(2 rows)
+
 -- test for ustore table
 drop table if exists t_ignore;
 CREATE TABLE t_ignore
@@ -302,6 +356,71 @@ select * from t_ignore;
  col1 | col2 
 ------+------
  3000 | abc
+(1 row)
+
+-- test for interval partition table
+drop table if exists t_interval_partition cascade;
+NOTICE:  table "t_interval_partition" does not exist, skipping
+create table t_interval_partition
+(
+    id1 integer primary key,
+    id3 integer,
+    c_3 date
+)
+PARTITION BY RANGE (c_3) INTERVAL('1 year')
+(
+    PARTITION P1 values less than ('2018-03-16 16:27:04'),
+    PARTITION P2 values less than ('2020-03-16 16:27:04'),
+    PARTITION P4 values less than ('2022-03-16 16:27:04')
+) ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_interval_partition_pkey" for table "t_interval_partition"
+-- test for interval partition table, opfusion: on
+set enable_partition_opfusion = on;
+insert into t_interval_partition values (1, 1, null);
+ERROR:  inserted partition key does not map to any partition
+DETAIL:  inserted partition key cannot be NULL for interval-partitioned table
+insert /*+ ignore_error */ into t_interval_partition values (1, 1, null);
+WARNING:  inserted partition key does not map to any table partition
+select * from t_interval_partition;
+ id1 | id3 | c_3 
+-----+-----+-----
+(0 rows)
+
+insert into t_interval_partition values (1, 1, '2023-02-01 00:00:00');
+update t_interval_partition set c_3 = null where id1 = 1;
+ERROR:  inserted partition key does not map to any partition
+DETAIL:  inserted partition key cannot be NULL for interval-partitioned table
+update /*+ ignore_error */ t_interval_partition set c_3 = null where id1 = 1;
+WARNING:  fail to update partitioned table "t_interval_partition".new tuple does not map to any table partition.
+select * from t_interval_partition;
+ id1 | id3 |    c_3     
+-----+-----+------------
+   1 |   1 | 02-01-2023
+(1 row)
+
+-- test for interval partition table, opfusion: off
+delete from t_interval_partition;
+set enable_partition_opfusion = off;
+insert into t_interval_partition values (1, 1, null);
+ERROR:  inserted partition key does not map to any partition
+DETAIL:  inserted partition key cannot be NULL for interval-partitioned table
+insert /*+ ignore_error */ into t_interval_partition values (1, 1, null);
+WARNING:  inserted partition key does not map to any table partition
+select * from t_interval_partition;
+ id1 | id3 | c_3 
+-----+-----+-----
+(0 rows)
+
+insert into t_interval_partition values (1, 1, '2023-02-01 00:00:00');
+update t_interval_partition set c_3 = null where id1 = 1;
+ERROR:  inserted partition key does not map to any partition
+DETAIL:  inserted partition key cannot be NULL for interval-partitioned table
+update /*+ ignore_error */ t_interval_partition set c_3 = null where id1 = 1;
+WARNING:  fail to update partitioned table "t_interval_partition".new tuple does not map to any table partition.
+select * from t_interval_partition;
+ id1 | id3 |    c_3     
+-----+-----+------------
+   1 |   1 | 02-01-2023
 (1 row)
 
 set enable_opfusion = on;

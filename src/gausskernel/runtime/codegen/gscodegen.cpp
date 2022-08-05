@@ -351,7 +351,16 @@ void GsCodeGen::loadIRFile()
     if (NULL != exec_path && strcmp(exec_path, "\0") != 0) {
         char* exec_path_r = realpath(exec_path, NULL);
         if (exec_path_r) {
-            appendStringInfo(filename, "%s/share/llvmir/GaussDB_expr.ir", exec_path_r);
+            char *llvmIrFilePath = "share/llvmir/GaussDB_expr.ir";
+#ifndef ENABLE_MULTIPLE_NODES
+            if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
+                int id = GetCustomParserId();
+                if (id >= 0 && g_instance.llvmIrFilePath[id] != NULL) {
+                    llvmIrFilePath = g_instance.llvmIrFilePath[id];
+                }
+            }
+#endif
+            appendStringInfo(filename, "%s/%s", exec_path_r, llvmIrFilePath);
             check_backend_env(exec_path);
             free(exec_path_r);
         } else {

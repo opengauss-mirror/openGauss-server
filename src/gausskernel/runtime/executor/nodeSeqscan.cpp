@@ -288,18 +288,60 @@ void ExecStoreTupleBatchMode(TableScanDesc scanDesc, TupleTableSlot** slot)
     }
 }
 
+bool FetchEpqTupleBatchMode(ScanState* node)
+{
+    EState* estate = node->ps.state;
+    Index scan_rel_id = ((Scan*)node->ps.plan)->scanrelid;
+    Assert(scan_rel_id > 0);
+ 
+    if (estate->es_epqTupleSet[scan_rel_id - 1]) {
+        TupleTableSlot* slot = node->scanBatchState->scanBatch.scanTupleSlotInBatch[0];
+ 
+        /* Return empty slot if we already returned a tuple */
+        if (estate->es_epqScanDone[scan_rel_id - 1]) {
+            (void)ExecClearTuple(slot);
+            return true;
+        }
+        /* Else mark to remember that we shouldn't return more */
+        estate->es_epqScanDone[scan_rel_id - 1] = true;
+ 
+        /* Return empty slot if we haven't got a test tuple */
+        if (estate->es_epqTuple[scan_rel_id - 1] == NULL) {
+            (void)ExecClearTuple(slot);
+            return true;
+        }
+ 
+        /* Store test tuple in the plan node's scan slot */
+        (void)ExecStoreTuple(estate->es_epqTuple[scan_rel_id - 1], slot, InvalidBuffer, false);
+ 
+        return true;
+    }
+ 
+    return false;
+}
+
 static ScanBatchResult *SeqNextBatchMode(SeqScanState *node)
 {
     TableScanDesc scanDesc;
-    EState *estate = NULL;
+    EState *estate = node->ps.state;
     ScanDirection direction;
-    TupleTableSlot **slot = NULL;
+    TupleTableSlot **slot = &(node->scanBatchState->scanBatch.scanTupleSlotInBatch[0]);
+ 
+    /* while inside an EvalPlanQual recheck, return a test tuple */
+    if (estate->es_epqTuple != NULL && FetchEpqTupleBatchMode(node)) {
+        if (TupIsNull(slot[0])) {
+            node->scanBatchState->scanBatch.rows = 0;
+            return NULL;
+        } else {
+            node->scanBatchState->scanBatch.rows = 1;
+            return &node->scanBatchState->scanBatch;
+        }
+    }
 
     /* get information from the estate and scan state */
     scanDesc = node->ss_currentScanDesc;
     estate = node->ps.state;
     direction = estate->es_direction;
-    slot = &(node->scanBatchState->scanBatch.scanTupleSlotInBatch[0]);
 
     /* get tuples from the table. */
     scanDesc->rs_maxScanRows = node->scanBatchState->scanTupleSlotMaxNum;

@@ -7142,6 +7142,33 @@ void RemoveTempNamespace()
     }
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+void LoadSqlPlugin()
+{
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
+        if (!u_sess->attr.attr_sql.dolphin) {
+            /* recheck and load dolphin within lock */
+            pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
+
+            start_xact_command();
+            u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists("dolphin");
+            finish_xact_command();
+
+            if (!u_sess->attr.attr_sql.dolphin) {
+                LoadDolphinIfNeeded();
+            } else {
+                InitBSqlPluginHookIfNeeded();
+            }
+            pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+        } else {
+            InitBSqlPluginHookIfNeeded();
+        }
+    } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
+        InitASqlPluginHookIfNeeded();
+    }
+}
+#endif
+
 /* ----------------------------------------------------------------
  * PostgresMain
  *	   openGauss main loop -- all backends, interactive or otherwise start here
@@ -7599,15 +7626,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         init_set_params_htab();
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
-        if (!u_sess->attr.attr_sql.dolphin) {
-            LoadDolphinIfNeeded();
-        } else {
-            InitBSqlPluginHookIfNeeded();
-        }
-    } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
-            InitASqlPluginHookIfNeeded();
-    }
+    LoadSqlPlugin();
 #endif
 
     /*

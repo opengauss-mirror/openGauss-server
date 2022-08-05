@@ -7,7 +7,7 @@
 # ----------
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
-test: uppercase_attribute_name
+test: uppercase_attribute_name decode_compatible_with_o
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views
 
 # parse xlog and page
@@ -27,7 +27,7 @@ test: pl_debugger_server pl_debugger_client
 test: update_for_wait_s1 update_for_wait_s2
 test: plan_hint plan_hint_set plan_hint_no_expand plan_hint_iud null_test_opt deserialize_func
 test: large_sequence int16 gs_dump_sequence
-test: gs_dump_tableof
+test: gs_dump_tableof view_definer_test
 test: analyze_commands
 #test: single_node_job
 test: single_node_ddl
@@ -319,6 +319,7 @@ test: gtt_function
 test: gtt_prepare
 test: gtt_parallel_1 gtt_parallel_2
 test: gtt_clean
+test: gtt_merge
 
 #openGauss synchronization test cases
 test: partiton_pathkey_col_plan partiton_pathkey_col_randomexec partiton_pathkey_row_plan partiton_pathkey_row_randomexec
@@ -916,7 +917,7 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
 test: gs_dump_encrypt substr
-test: composite_datum_record mysql_function
+test: composite_datum_record mysql_function b_comments
 
 test: join_test_alias
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition

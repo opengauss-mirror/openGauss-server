@@ -1020,3 +1020,21 @@ end;
 NOTICE:  @ 0
 NOTICE:  @ 0
 NOTICE:  @ 0
+SELECT to_timestamp(' Infinity'::float);
+ to_timestamp 
+--------------
+ infinity
+(1 row)
+
+SELECT to_timestamp('-Infinity'::float);
+ to_timestamp 
+--------------
+ -infinity
+(1 row)
+
+SELECT to_timestamp('NaN'::float);
+ERROR:  timestamp cannot be NaN
+CONTEXT:  referenced column: to_timestamp
+SELECT to_timestamp(-999888762478);
+ERROR:  timestamp out of range: "-9.99889e+11"
+CONTEXT:  referenced column: to_timestamp

@@ -1199,26 +1199,28 @@ from test_decode_coercion;
 select 
     decode(1, 2, 'never', col_bool)
 from test_decode_coercion;
-ERROR:  CASE types boolean and text cannot be matched
+ERROR:  CASE types text and boolean cannot be matched
 LINE 2:     decode(1, 2, 'never', col_bool)
-                         ^
+                                  ^
 CONTEXT:  referenced column: col_bool
--- still invalid
+-- now supported
 select 
     decode(1, 2, 'never', col_date)
 from test_decode_coercion;
-ERROR:  CASE types timestamp without time zone and text cannot be matched
-LINE 2:     decode(1, 2, 'never', col_date)
-                         ^
-CONTEXT:  referenced column: col_date
--- still invalid
+         col_date         
+--------------------------
+ Sat Jan 01 01:01:01 2000
+(1 row)
+
+-- now supported
 select 
     decode(1, 2, 'never', col_time)
 from test_decode_coercion;
-ERROR:  CASE types timestamp without time zone and text cannot be matched
-LINE 2:     decode(1, 2, 'never', col_time)
-                         ^
-CONTEXT:  referenced column: col_time
+         col_time         
+--------------------------
+ Sat Jan 01 01:01:01 2000
+(1 row)
+
 drop schema forall_save_exceptions cascade;
 NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table test_forall

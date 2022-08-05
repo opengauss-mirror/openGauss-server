@@ -32,11 +32,10 @@
 
 namespace Masstree {
 template <typename P>
-void basic_table<P>::find(MOT::Key const* const& key, void*& output, bool& found, const uint32_t& pid) const
+void basic_table<P>::find(
+    const uint8_t* key, const uint32_t key_len, void*& output, bool& found, const uint32_t& pid) const
 {
-
-    unlocked_cursor_type lp(
-        *this, reinterpret_cast<const unsigned char*>(key->GetKeyBuf()), ALIGN8(key->GetKeyLength()));
+    unlocked_cursor_type lp(*this, reinterpret_cast<const unsigned char*>(key), ALIGN8(key_len));
 
     found = lp.find_unlocked(*mtSessionThreadInfo);
 

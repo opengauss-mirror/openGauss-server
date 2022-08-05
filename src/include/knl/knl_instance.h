@@ -1231,6 +1231,8 @@ typedef struct knl_instance_context {
 #ifndef ENABLE_MULTIPLE_NODES
     void *raw_parser_hook[DB_CMPT_MAX];
     void *plsql_parser_hook[DB_CMPT_MAX];
+    char *llvmIrFilePath[DB_CMPT_MAX];
+    pthread_mutex_t loadPluginLock[DB_CMPT_MAX];
 #endif
     pg_atomic_uint32 extensionNum;
     knl_g_audit_context audit_cxt;

@@ -2438,9 +2438,9 @@ void PthreadRwLockInit(pthread_rwlock_t* rwlock, pthread_rwlockattr_t *attr)
 }
 
 /*
- * Get defaulted value of specific time type
+ * Get defaulted value of specific type
  */
-static Datum GetTimeTypeZeroValue(Form_pg_attribute att_tup)
+Datum GetTypeZeroValue(Form_pg_attribute att_tup)
 {
     Datum result;
     switch (att_tup->atttypid) {
@@ -2473,21 +2473,10 @@ static Datum GetTimeTypeZeroValue(Form_pg_attribute att_tup)
                 smalldatetime_in, CStringGetDatum("1970-01-01 08:00:00"), ObjectIdGetDatum(0), Int32GetDatum(-1));
             break;
         }
-        default: {
+        case DATEOID: {
             result = timestamp2date(SetEpochTimestamp());
             break;
         }
-    }
-    return result;
-}
-
-/*
- * Get defaulted value of specific non-time type
- */
-static Datum GetNotTimeTypeZeroValue(Form_pg_attribute att_tup)
-{
-    Datum result;
-    switch (att_tup->atttypid) {
         case UUIDOID: {
             result = (Datum)DirectFunctionCall3(uuid_in, CStringGetDatum("00000000-0000-0000-0000-000000000000"),
                                                 ObjectIdGetDatum(0), Int32GetDatum(-1));
@@ -2519,11 +2508,11 @@ static Datum GetNotTimeTypeZeroValue(Form_pg_attribute att_tup)
             break;
         }
         case JSONOID: {
-            result = (Datum)DirectFunctionCall1(json_in, CStringGetDatum("0"));
+            result = (Datum)DirectFunctionCall1(json_in, CStringGetDatum("null"));
             break;
         }
         case JSONBOID: {
-            result = (Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("0"));
+            result = (Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("null"));
             break;
         }
         case XMLOID: {
@@ -2576,15 +2565,7 @@ Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
     int attrChk;
     for (attrChk = 1; attrChk <= natts; attrChk++) {
         if (tupleDesc->attrs[attrChk - 1]->attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
-            bool isTimeType = (tupleDesc->attrs[attrChk - 1]->atttypid == DATEOID ||
-                               tupleDesc->attrs[attrChk - 1]->atttypid == TIMESTAMPOID ||
-                               tupleDesc->attrs[attrChk - 1]->atttypid == TIMESTAMPTZOID ||
-                               tupleDesc->attrs[attrChk - 1]->atttypid == TIMETZOID ||
-                               tupleDesc->attrs[attrChk - 1]->atttypid == INTERVALOID ||
-                               tupleDesc->attrs[attrChk - 1]->atttypid == TINTERVALOID ||
-                               tupleDesc->attrs[attrChk - 1]->atttypid == SMALLDATETIMEOID);
-            values[attrChk - 1] = isTimeType ? GetTimeTypeZeroValue(tupleDesc->attrs[attrChk - 1])
-                                             : GetNotTimeTypeZeroValue(tupleDesc->attrs[attrChk - 1]);
+            values[attrChk - 1] = GetTypeZeroValue(tupleDesc->attrs[attrChk - 1]);
             replaces[attrChk - 1] = true;
         }
     }

@@ -265,3 +265,8 @@ begin
 	set timezone to default;
 end;
 /
+
+SELECT to_timestamp(' Infinity'::float);
+SELECT to_timestamp('-Infinity'::float);
+SELECT to_timestamp('NaN'::float);
+SELECT to_timestamp(-999888762478);

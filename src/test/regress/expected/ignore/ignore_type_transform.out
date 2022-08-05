@@ -791,5 +791,123 @@ select * from t_int;
   12
 (1 row)
 
+-- test for inconvertible type transform.
+drop table if exists t_int;
+create table t_int(num int);
+insert /*+ ignore_error */ into t_int values('2011-8-2'::timestamp);
+WARNING:  column "num" is of type integer but expression is of type timestamp without time zone. Data truncated automatically.
+CONTEXT:  referenced column: num
+select * from t_int;
+ num 
+-----
+   0
+(1 row)
+
+delete from t_int;
+drop table if exists t_timestamp;
+NOTICE:  table "t_timestamp" does not exist, skipping
+create table t_timestamp(val timestamp);
+insert into t_timestamp values('2011-8-2');
+insert /*+ ignore_error */ into t_int select val from t_timestamp;
+WARNING:  column "num" is of type integer but expression is of type timestamp without time zone. Data truncated automatically.
+CONTEXT:  referenced column: num
+select * from t_int;
+ num 
+-----
+   0
+(1 row)
+
+delete from t_int;
+insert into t_int values(999);
+update /*+ ignore_error */ t_int set num = '2011-8-2'::timestamp;
+WARNING:  column "num" is of type integer but expression is of type timestamp without time zone. Data truncated automatically.
+CONTEXT:  referenced column: num
+select * from t_int;
+ num 
+-----
+   0
+(1 row)
+
+drop table if exists t_multi;
+NOTICE:  table "t_multi" does not exist, skipping
+create table t_multi(c1 int unique, c2 int);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "t_multi_c1_key" for table "t_multi"
+insert /*+ ignore_error */ into t_multi values('2011-8-2'::timestamp, 1);
+WARNING:  column "c1" is of type integer but expression is of type timestamp without time zone. Data truncated automatically.
+CONTEXT:  referenced column: c1
+insert /*+ ignore_error */ into t_multi values(0, 0) on duplicate key update c2 = 2;
+select * from t_multi;
+ c1 | c2 
+----+----
+  0 |  2
+(1 row)
+
+insert /*+ ignore_error */ into t_multi values('2011-8-2'::timestamp , 3) on duplicate key update c2 = 3;
+WARNING:  column "c1" is of type integer but expression is of type timestamp without time zone. Data truncated automatically.
+CONTEXT:  referenced column: c1
+select * from t_multi;
+ c1 | c2 
+----+----
+  0 |  3
+(1 row)
+
+drop table if exists t_float8;
+NOTICE:  table "t_float8" does not exist, skipping
+create table t_float8(num float8);
+insert /*+ ignore_error */ into t_float8 values('2011-8-2'::timestamp);
+WARNING:  column "num" is of type double precision but expression is of type timestamp without time zone. Data truncated automatically.
+CONTEXT:  referenced column: num
+select * from t_float8;
+ num 
+-----
+   0
+(1 row)
+
+delete from t_float8;
+insert into t_float8 values(123.999);
+update /*+ ignore_error */ t_float8 set num = '2011-8-2'::timestamp;
+WARNING:  column "num" is of type double precision but expression is of type timestamp without time zone. Data truncated automatically.
+CONTEXT:  referenced column: num
+select * from t_float8;
+ num 
+-----
+   0
+(1 row)
+
+drop table if exists t_uuid;
+NOTICE:  table "t_uuid" does not exist, skipping
+create table t_uuid(val uuid);
+insert /*+ ignore_error */ into t_uuid values(0);
+WARNING:  column "val" is of type uuid but expression is of type integer. Data truncated automatically.
+CONTEXT:  referenced column: val
+select * from t_uuid;
+                 val                  
+--------------------------------------
+ 00000000-0000-0000-0000-000000000000
+(1 row)
+
+drop table if exists t_date;
+NOTICE:  table "t_date" does not exist, skipping
+create table t_date(val date);
+insert /*+ ignore_error */ into t_date values(0);
+WARNING:  column "val" is of type date but expression is of type integer. Data truncated automatically.
+CONTEXT:  referenced column: val
+select * from t_date;
+    val     
+------------
+ 01-01-1970
+(1 row)
+
+delete from t_date;
+insert into t_date values('2011-8-2');
+update /*+ ignore_error */ t_date set val = 0;
+WARNING:  column "val" is of type date but expression is of type integer. Data truncated automatically.
+CONTEXT:  referenced column: val
+select * from t_date;
+    val     
+------------
+ 01-01-1970
+(1 row)
+
 \c postgres
 drop database if exists sql_ignore_type_transform_test;
