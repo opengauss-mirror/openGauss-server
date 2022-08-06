@@ -6126,14 +6126,14 @@ static void ln_var(NumericVar* arg, NumericVar* result, int rscale)
     init_var(&elem);
     init_var(&fact);
 
-    set_var_from_var(arg, &x);
-    set_var_from_var(&const_two, &fact);
+    init_var_from_var(arg, &x);
+    init_var_from_var(&const_two, &fact);
 
     /*
      * Reduce input into range 0.9 < x < 1.1 with repeated sqrt() operations.
      *
      * The final logarithm will have up to around rscale+6 significant digits.
-     * Each sqrt() will roughly halve the weight of x, so adjust the local
+     * Each sqrt() will roughly have the weight of x, so adjust the local
      * rscale as we work so that we keep this many significant digits at each
      * step (plus a few more for good measure).
      */
