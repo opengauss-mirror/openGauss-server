@@ -192,6 +192,9 @@ static void ResetStreamStatus()
         pfree_ext(t_thrd.log_cxt.msgbuf->data);
     }
 
+    t_thrd.proc->databaseId = InvalidOid;
+    t_thrd.proc->roleId = InvalidOid;
+
     /*
      * Reset extended-query-message flag, so that any errors
      * encountered in "idle" state don't provoke skip.
