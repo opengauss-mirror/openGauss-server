@@ -2174,7 +2174,7 @@ Datum numeric_sub(PG_FUNCTION_ARGS)
     init_var_from_num(num1, &arg1);
     init_var_from_num(num2, &arg2);
 
-    init_var(&result);
+    quick_init_var(&result);
     sub_var(&arg1, &arg2, &result);
 
     res = make_result(&result);
@@ -6705,6 +6705,7 @@ static void sub_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
     int var2ndigits = var2->ndigits;
     NumericDigit* var1digits = var1->digits;
     NumericDigit* var2digits = var2->digits;
+    NumericDigit tdig[NUMERIC_LOCAL_NDIG];
 
     res_weight = var1->weight;
 
@@ -6720,7 +6721,10 @@ static void sub_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
         res_ndigits = 1;
     }
 
-    res_buf = digitbuf_alloc(res_ndigits + 1);
+    res_buf = tdig;
+    if (res_ndigits > NUMERIC_LOCAL_NMAX) {
+        res_buf = digitbuf_alloc(res_ndigits + 1);
+    }
     res_buf[0] = 0; /* spare digit for later rounding */
     res_digits = res_buf + 1;
 
@@ -6747,8 +6751,18 @@ static void sub_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
 
     digitbuf_free(result);
     result->ndigits = res_ndigits;
-    result->buf = res_buf;
-    result->digits = res_digits;
+    if (res_buf != tdig)
+    {
+        result->buf = res_buf;
+        result->digits = res_digits;
+    } else {
+        result->buf = result->ndb;
+        result->digits = result->buf;
+        errno_t rc = memcpy_s(result->buf, sizeof(NumericDigit) * (res_ndigits + 1),
+                              res_buf, sizeof(NumericDigit) * (res_ndigits + 1));
+        securec_check(rc, "\0", "\0");
+        result->digits ++;
+    }
     result->weight = res_weight;
     result->dscale = res_dscale;
 
