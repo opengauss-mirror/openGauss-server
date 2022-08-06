@@ -154,6 +154,7 @@ static void zero_var(NumericVar* var);
 static const char* set_var_from_str(const char* str, const char* cp, NumericVar* dest);
 static void set_var_from_num(Numeric value, NumericVar* dest);
 static void set_var_from_var(const NumericVar* value, NumericVar* dest);
+static void init_var_from_var(const NumericVar *value, NumericVar *dest);
 static char* get_str_from_var(NumericVar* var);
 static char* get_str_from_var_sci(NumericVar* var, int rscale);
 
@@ -2594,7 +2595,7 @@ Datum numeric_sqrt(PG_FUNCTION_ARGS)
      */
     init_var_from_num(num, &arg);
 
-    init_var(&result);
+    quick_init_var(&result);
 
     /* Assume the input was normalized, so arg.weight is accurate */
     sweight = (arg.weight + 1) * DEC_DIGITS / 2 - 1;
@@ -4165,6 +4166,27 @@ static void set_var_from_var(const NumericVar* value, NumericVar* dest)
     dest->digits = newbuf + 1;
 }
 
+/*
+ * init_var_from_var() -
+ *
+ *	init one variable from another - they must NOT be the same variable
+ */
+static void
+init_var_from_var(const NumericVar *value, NumericVar *dest)
+{
+    init_alloc_var(dest, value->ndigits);
+
+    dest->weight = value->weight;
+    dest->sign = value->sign;
+    dest->dscale = value->dscale;
+
+    errno_t rc = memcpy_s(dest->digits,
+                          value->ndigits * sizeof(NumericDigit),
+                          value->digits,
+                          value->ndigits * sizeof(NumericDigit));
+    securec_check(rc, "\0", "\0");
+}
+
 static void remove_tail_zero(char *ascii)
 {
     if (!HIDE_TAILING_ZERO || ascii == NULL) {
@@ -5482,6 +5504,7 @@ static void div_var_fast(NumericVar* var1, NumericVar* var2, NumericVar* result,
     int var2ndigits = var2->ndigits;
     NumericDigit* var1digits = var1->digits;
     NumericDigit* var2digits = var2->digits;
+    int tdiv[NUMERIC_LOCAL_NDIG];
 
     /*
      * First of all division by zero check; we must not be handed an
@@ -5529,7 +5552,14 @@ static void div_var_fast(NumericVar* var1, NumericVar* var2, NumericVar* result,
      * position of dividend space.	A final pass of carry propagation takes
      * care of any mistaken quotient digits.
      */
-    div = (int*)palloc0((div_ndigits + 1) * sizeof(int));
+    i = (div_ndigits + 1) * sizeof(int);
+    if (div_ndigits > NUMERIC_LOCAL_NMAX) {
+        div = (int *) palloc0(i);
+    } else {
+        errno_t rc = memset_s(tdiv, i, 0, i);
+        securec_check(rc, "\0", "\0");
+        div = tdiv;
+    }
     for (i = 0; i < var1ndigits; i++)
         div[i + 1] = var1digits[i];
 
@@ -5672,7 +5702,9 @@ static void div_var_fast(NumericVar* var1, NumericVar* var2, NumericVar* result,
     }
     Assert(carry == 0);
 
-    pfree_ext(div);
+    if (div != tdiv) {
+        pfree_ext(div);
+    }
 
     /*
      * Finally, round the result to the requested precision.
@@ -5850,12 +5882,8 @@ static void sqrt_var(NumericVar* arg, NumericVar* result, int rscale)
             (errcode(ERRCODE_INVALID_ARGUMENT_FOR_POWER_FUNCTION),
                 errmsg("cannot take square root of a negative number")));
 
-    init_var(&tmp_arg);
-    init_var(&tmp_val);
-    init_var(&last_val);
-
     /* Copy arg in case it is the same var as result */
-    set_var_from_var(arg, &tmp_arg);
+    init_var_from_var(arg, &tmp_arg);
 
     /*
      * Initialize the result to the first guess
@@ -5867,7 +5895,8 @@ static void sqrt_var(NumericVar* arg, NumericVar* result, int rscale)
     result->weight = tmp_arg.weight / 2;
     result->sign = NUMERIC_POS;
 
-    set_var_from_var(result, &last_val);
+    init_var_from_var(result, &last_val);
+    quick_init_var(&tmp_val);
 
     for (;;) {
         div_var_fast(&tmp_arg, result, &tmp_val, local_rscale, true);
