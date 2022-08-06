@@ -113,13 +113,47 @@ typedef union {
 } varattrib_4b_fe;
 
 
-#define init_var(v) MemSetAligned(v, 0, sizeof(NumericVar))
-#define digitbuf_alloc(ndigits) ((NumericDigit *)palloc((ndigits) * sizeof(NumericDigit)))
+#define quick_init_var(v)    \
+    do {                     \
+        (v)->buf = (v)->ndb; \
+        (v)->digits = NULL;  \
+    } while (0)
 
+#define init_var(v)          \
+    do {                     \
+        quick_init_var((v)); \
+        (v)->ndigits = 0;    \
+        (v)->weight = 0;     \
+        (v)->sign = 0;       \
+        (v)->dscale = 0;     \
+    } while (0)
 
-#define digitbuf_free(buf) do { \
-        if ((buf) != NULL)      \
-            FREE_POINTER(buf);  \
+#define digitbuf_alloc(ndigits) \
+    ((NumericDigit*) palloc((ndigits) * sizeof(NumericDigit)))
+
+#define digitbuf_free(v)            \
+    do {                            \
+        if ((v)->buf != (v)->ndb) { \
+            pfree((v)->buf);        \
+            (v)->buf = (v)->ndb;    \
+        }                           \
+    } while (0)
+
+#define free_var(v) digitbuf_free((v));
+
+/*
+ * Init a var and allocate digit buffer of ndigits digits (plus a spare digit for rounding).
+ * Called when first using a var.
+ */
+#define init_alloc_var(v, n)                    \
+    do  {                                       \
+        (v)->buf = (v)->ndb;                    \
+        (v)->ndigits = (n);                     \
+        if ((n) > NUMERIC_LOCAL_NMAX) {         \
+            (v)->buf = digitbuf_alloc((n) + 1); \
+        }                                       \
+        (v)->buf[0] = 0;                        \
+        (v)->digits = (v)->buf + 1;             \
     } while (0)
 
 
@@ -128,7 +162,6 @@ static void alloc_var(NumericVar *var, int ndigits);
 static void strip_var(NumericVar *var);
 
 static const char *set_var_from_str(const char *str, const char *cp, NumericVar *dest, char *err_msg);
-static void free_var(NumericVar *var);
 static void init_var_from_num(NumericData* num, NumericVar *dest);
 static bool get_str_from_var(const NumericVar *var, char *str, size_t max_size);
 static NumericVar const_nan = { 0, 0, NUMERIC_NAN, 0, NULL, NULL };
@@ -155,27 +188,8 @@ static void dump_numeric(const char *str, NumericData* num);
  */
 static void alloc_var(NumericVar *var, int ndigits)
 {
-    digitbuf_free(var->buf);
-    var->buf = digitbuf_alloc(ndigits + 1);
-    if (var->buf == NULL) {
-        return;
-    }
-    var->buf[0] = 0; /* spare digit for rounding */
-    var->digits = var->buf + 1;
-    var->ndigits = ndigits;
-}
-
-
-/*
- * free_var() -
- * Return the digit buffer of a variable to the free pool
- */
-static void free_var(NumericVar *var)
-{
-    digitbuf_free(var->buf);
-    var->buf = NULL;
-    var->digits = NULL;
-    var->sign = NUMERIC_NAN;
+    digitbuf_free(var);
+    init_alloc_var(var, ndigits);
 }
 
 
@@ -187,9 +201,8 @@ static void free_var(NumericVar *var)
  */
 static void zero_var(NumericVar *var)
 {
-    digitbuf_free(var->buf);
-    var->buf = NULL;
-    var->digits = NULL;
+    digitbuf_free(var);
+    quick_init_var(var);
     var->ndigits = 0;
     var->weight = 0;         /* by convention; doesn't really matter */
     var->sign = NUMERIC_POS; /* anything but NAN... */
@@ -758,7 +771,7 @@ static inline void init_var_from_num(NumericData* num, NumericVar* dest)
     dest->sign = NUMERIC_SIGN(num);
     dest->dscale = NUMERIC_DSCALE(num);
     dest->digits = NUMERIC_DIGITS(num);
-    dest->buf = NULL; /* digits array is not palloc'd */
+    dest->buf = dest->ndb;
 }
 
 /*
