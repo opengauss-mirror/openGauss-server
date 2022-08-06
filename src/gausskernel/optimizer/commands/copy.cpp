@@ -272,6 +272,7 @@ static Datum CopyReadBinaryAttribute(
     CopyState cstate, int column_no, FmgrInfo* flinfo, Oid typioparam, int32 typmod, bool* isnull);
 static void CopyAttributeOutText(CopyState cstate, char* string);
 static void CopyAttributeOutCSV(CopyState cstate, char* string, bool use_quote, bool single_attr);
+static void CopyNonEncodingAttributeOut(CopyState cstate, char* string, bool use_quote);
 List* CopyGetAttnums(TupleDesc tupDesc, Relation rel, List* attnamelist);
 List* CopyGetAllAttnums(TupleDesc tupDesc, Relation rel);
 
@@ -3194,19 +3195,25 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
                 }
             } else {
                 if (!IS_BINARY(cstate)) {
-                    string = OutputFunctionCall(&out_functions[attnum - 1], value);
-                    switch (cstate->fileformat) {
-                        case FORMAT_CSV:
-                            CopyAttributeOutCSV(cstate,
-                                string,
-                                cstate->force_quote_flags[attnum - 1],
-                                list_length(cstate->attnumlist) == 1);
-                            break;
-                        case FORMAT_TEXT:
-                            CopyAttributeOutText(cstate, string);
-                            break;
-                        default:
-                            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Invalid file format")));
+                    bool use_quote = cstate->force_quote_flags[attnum - 1];
+
+		    string = OutputFunctionCall(&out_functions[attnum - 1], value);
+                    if (out_functions[attnum -1].fn_oid == 1702) {  /* numeric_out */
+                        CopyNonEncodingAttributeOut(cstate, string, use_quote);
+                    } else {
+                        switch (cstate->fileformat) {
+                            case FORMAT_CSV:
+                                CopyAttributeOutCSV(cstate,
+                                    string,
+                                    use_quote,
+                                    list_length(cstate->attnumlist) == 1);
+                                break;
+                            case FORMAT_TEXT:
+                                CopyAttributeOutText(cstate, string);
+                                break;
+                            default:
+                                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Invalid file format")));
+                        }
                     }
                 } else {
                     bytea* outputbytes = NULL;
@@ -8010,6 +8017,30 @@ static void CopyAttributeOutCSV(CopyState cstate, char* string, bool use_quote, 
             break;
         default:
             CopyAttributeOutCSVT<true>(cstate, string, use_quote, single_attr);
+    }
+}
+
+/*
+ * Send text representation of one attribute, without encoding conversion.
+ */
+static void CopyNonEncodingAttributeOut(CopyState cstate, char* string, bool use_quote)
+{
+    char quotec = cstate->quote ? cstate->quote[0] : '\0';
+
+    /*
+     * Numerics don't need quoting, or transcoding to client char set.
+     * We still quote them if FORCE QUOTE was used, though.
+     * And we force quoting if it matches null_print.
+     */
+    if (!use_quote && strcmp(string, cstate->null_print) == 0) {
+        use_quote = true;
+    }
+    if (use_quote) {
+        CopySendChar(cstate, quotec);
+    }
+    CopySendData(cstate, string, strlen(string));
+    if (use_quote) {
+        CopySendChar(cstate, quotec);
     }
 }
 
