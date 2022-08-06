@@ -348,15 +348,52 @@ void GetCurrentDateTime(struct pg_tm* tm)
  *
  * Get the transaction start time ("now()") broken down as a struct pg_tm,
  * including fractional seconds and timezone offset.
+ *
+ * Internally, we cache the result, since this could be called many times
+ * in a transaction, within which now() doesn't change.
  */
 void GetCurrentTimeUsec(struct pg_tm* tm, fsec_t* fsec, int* tzp)
 {
-    int tz;
+    TimestampTz cur_ts = GetCurrentTransactionStartTimestamp();
 
-    timestamp2tm(GetCurrentTransactionStartTimestamp(), &tz, tm, fsec, NULL, NULL);
-    /* Note: don't pass NULL tzp to timestamp2tm; affects behavior */
-    if (tzp != NULL)
-        *tzp = tz;
+    /*
+     * The cache key must include both current time and current timezone.
+     * By representing the timezone by just a pointer, we're assuming that
+     * distinct timezone settings could never have the same pointer value.
+     * This is true by virtue of the hashtable used inside pg_tzset();
+     * however, it might need another look if we ever allow entries in that
+     * hash to be recycled.
+     */
+    if (cur_ts != u_sess->cache_ts || session_timezone != u_sess->cache_timezone) {
+        /*
+         * Make sure cache is marked invalid in case of error after partial
+         * update within timestamp2tm.
+         */
+        u_sess->cache_timezone = NULL;
+
+        /*
+         * Perform the computation, storing results into cache.  We do not
+         * really expect any error here, since current time surely ought to be
+         * within range, but check just for sanity's sake.
+         */
+        if (timestamp2tm(cur_ts,
+                         &u_sess->cache_tz, &u_sess->cache_tm, &u_sess->cache_fsec,
+                         NULL, session_timezone) != 0) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                     errmsg("timestamp out of range")));
+        }
+
+        /* OK, so mark the cache valid. */
+        u_sess->cache_ts = cur_ts;
+        u_sess->cache_timezone = session_timezone;
+    }
+
+    *tm = u_sess->cache_tm;
+    *fsec = u_sess->cache_fsec;
+    if (tzp != NULL) {
+        *tzp = u_sess->cache_tz;
+    }
 }
 
 /* TrimTrailingZeros()
