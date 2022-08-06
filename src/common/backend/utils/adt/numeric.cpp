@@ -151,6 +151,8 @@ static void dump_var(const char* str, NumericVar* var);
 static void alloc_var(NumericVar* var, int ndigits);
 static void zero_var(NumericVar* var);
 
+static void init_ro_var_from_var(const NumericVar* value, NumericVar* dest);
+
 static const char* set_var_from_str(const char* str, const char* cp, NumericVar* dest);
 static void set_var_from_num(Numeric value, NumericVar* dest);
 static void set_var_from_var(const NumericVar* value, NumericVar* dest);
@@ -859,20 +861,18 @@ Datum numeric_sign(PG_FUNCTION_ARGS)
             PG_RETURN_NUMERIC(make_result(&const_nan));
     }
 
-    init_var(&result);
-
     /*
      * The packed format is known to be totally zero digit trimmed always. So
      * we can identify a ZERO by the fact that there are no digits at all.
      */
     if (NUMERIC_NDIGITS(num) == 0)
-        set_var_from_var(&const_zero, &result);
+        init_ro_var_from_var(&const_zero, &result);
     else {
         /*
          * And if there are some, we return a copy of ONE with the sign of our
          * argument
          */
-        set_var_from_var(&const_one, &result);
+        init_ro_var_from_var(&const_one, &result);
         result.sign = NUMERIC_SIGN(num);
     }
 
@@ -4138,6 +4138,21 @@ void init_var_from_num(Numeric num, NumericVar* dest)
     dest->sign = NUMERIC_SIGN(num);
     dest->dscale = NUMERIC_DSCALE(num);
     dest->digits = NUMERIC_DIGITS(num);
+    dest->buf = dest->ndb;
+}
+
+/*
+ * init_ro_var_from_var() -
+ *
+ *	Initialize a variable from another variable
+ */
+static void init_ro_var_from_var(const NumericVar* value, NumericVar* dest)
+{
+    dest->ndigits = value->ndigits;
+    dest->weight = value->weight;
+    dest->sign = value->sign;
+    dest->dscale = value->dscale;
+    dest->digits = value->digits;
     dest->buf = dest->ndb;
 }
 
