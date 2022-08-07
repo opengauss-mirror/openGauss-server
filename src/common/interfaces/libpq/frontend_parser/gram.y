@@ -386,7 +386,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 %type <node>	TableConstraint TableLikeClause
 %type <ival>	excluding_option_list TableLikeOptionList TableLikeIncludingOption TableLikeExcludingOption
-%type <list>	ColQualList
+%type <list>	ColQualList WithOptions
 %type <node>	ColConstraint ColConstraintElem ConstraintAttr InformationalConstraintElem
 %type <ival>	key_actions key_delete key_match key_update key_action
 %type <ival>    ConstraintAttributeSpec ConstraintAttributeElem
@@ -4846,7 +4846,7 @@ ColCmprsMode:	DELTA		{$$ = ATT_CMPR_DELTA;}  /* delta compression */
 		| /* EMPTY */	{$$ = ATT_CMPR_UNDEFINED;} /* not specified by user */
 ;
 
-columnOptions:	ColId WITH OPTIONS ColQualList
+columnOptions:	ColId WithOptions ColQualList
 				{
 					ColumnDef *n = makeNode(ColumnDef);
 					n->colname = $1;
@@ -4861,10 +4861,14 @@ columnOptions:	ColId WITH OPTIONS ColQualList
 					n->collOid = InvalidOid;
                     n->clientLogicColumnRef=NULL;
 
-                    SplitColQualList($4, &n->constraints, &n->collClause,&n->clientLogicColumnRef, yyscanner);
+                    SplitColQualList($3, &n->constraints, &n->collClause,&n->clientLogicColumnRef, yyscanner);
 					$$ = (Node *)n;
 				}
 		;
+
+WithOptions:
+			WITH OPTIONS							{$$ = NIL; }
+			| /*EMPTY*/								{$$ = NIL; }
 
 ColQualList:
 			ColQualList ColConstraint				{ $$ = lappend($1, $2); }
