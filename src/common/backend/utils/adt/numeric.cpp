@@ -4195,11 +4195,13 @@ init_var_from_var(const NumericVar *value, NumericVar *dest)
     dest->sign = value->sign;
     dest->dscale = value->dscale;
 
-    errno_t rc = memcpy_s(dest->digits,
-                          value->ndigits * sizeof(NumericDigit),
-                          value->digits,
-                          value->ndigits * sizeof(NumericDigit));
-    securec_check(rc, "\0", "\0");
+    if (value->ndigits > 0) {
+        errno_t rc = memcpy_s(dest->digits,
+                              value->ndigits * sizeof(NumericDigit),
+                              value->digits,
+                              value->ndigits * sizeof(NumericDigit));
+        securec_check(rc, "\0", "\0");
+    }
 }
 
 static void remove_tail_zero(char *ascii)
