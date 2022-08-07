@@ -928,7 +928,13 @@ static bool contain_unsupport_expression(Node* expr, void* context)
                 }
             }
         } break;
-
+	case T_Rownum: {
+            sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                NOTPLANSHIPPING_LENGTH,
+                "Rownum can not be shipped.");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            cxt->current_shippable = false;
+        } break;
         default:
             /* Record return type is not stream supported */
             if (exprType(expr) == RECORDOID) {
