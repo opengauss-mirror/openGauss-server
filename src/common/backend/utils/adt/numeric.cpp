@@ -5856,8 +5856,7 @@ static void floor_var(NumericVar* var, NumericVar* result)
 {
     NumericVar tmp;
 
-    init_var(&tmp);
-    set_var_from_var(var, &tmp);
+    init_var_from_var(var, &tmp);
 
     trunc_var(&tmp, 0);
 
