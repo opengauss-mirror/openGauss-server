@@ -1,0 +1,18 @@
+create schema alter_ctable_compress;
+set search_path='alter_ctable_compress';
+create table test1(id int) with (orientation='column', compression=yes);
+create table test2(id int) with (orientation='column', compression=no);
+alter table test1 set nocompress;
+alter table test2 set compress;
+insert into test1 select generate_series(1,50000);
+insert into test2 select generate_series(1,50000);
+select pg_table_size('test1') > pg_table_size('test2') as t;
+ t 
+---
+ t
+(1 row)
+
+drop schema alter_ctable_compress cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table test1
+drop cascades to table test2
