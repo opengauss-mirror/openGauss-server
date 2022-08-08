@@ -944,6 +944,7 @@ test: subscription
 test: fdw_audit
 test: gs_global_config_audit
 <<<<<<< HEAD
+<<<<<<< HEAD
 test: detail
 test: gs_dump_encrypt
 test: composite_datum_record
@@ -957,5 +958,4 @@ test: builtin_func_13
 
 # test for slow_sql
 test: slow_sql
-
 test: alter_ctable_compress
