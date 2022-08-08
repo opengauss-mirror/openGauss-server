@@ -775,6 +775,7 @@ inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
         case AT_ColumnDefault:
         case AT_SetStatistics:
         case AT_AddStatistics:
+        case AT_SET_COMPRESS:
         case AT_DeleteStatistics:
         case AT_SetTableSpace:
         case AT_SetPartitionTableSpace:
