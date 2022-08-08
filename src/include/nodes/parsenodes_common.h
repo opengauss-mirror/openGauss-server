@@ -2158,6 +2158,11 @@ typedef struct CreatePackageBodyStmt {
     bool pkgsecdef;
 } CreatePackageBodyStmt;
 
+typedef struct RenameCell {
+    RangeVar* original_name;
+    RangeVar* modify_name;
+} RenameCell;
+
 /* ----------------------
  *		Alter Object Rename Statement
  * ----------------------
@@ -2174,6 +2179,8 @@ typedef struct RenameStmt {
     char* newname;           /* the new name */
     DropBehavior behavior;   /* RESTRICT or CASCADE behavior */
     bool missing_ok;         /* skip error if missing? */
+    List* renameTargetList = NULL;
+    bool renameTableflag = false;
 } RenameStmt;
 
 /* ----------------------

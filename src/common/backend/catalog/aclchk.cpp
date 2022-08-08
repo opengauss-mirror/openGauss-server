@@ -101,19 +101,6 @@
  * represented in col_privs and col_ddl_privs (this is a list of untransformed AccessPriv nodes).
  * Column privileges are only valid for objtype ACL_OBJECT_RELATION.
  */
-typedef struct {
-    bool is_grant;
-    GrantObjectType objtype;
-    List* objects;
-    bool all_privs;
-    AclMode privileges;
-    AclMode ddl_privileges;
-    List* col_privs;
-    List* col_ddl_privs;
-    List* grantees;
-    bool grant_option;
-    DropBehavior behavior;
-} InternalGrant;
 
 /*
  * Internal format used by ALTER DEFAULT PRIVILEGES.
@@ -224,7 +211,7 @@ const struct AclClassId {
 };
 
 static void ExecGrantStmt_oids(InternalGrant* istmt);
-static void ExecGrant_Relation(InternalGrant* grantStmt);
+void ExecGrant_Relation(InternalGrant* grantStmt);
 static void ExecGrant_Database(InternalGrant* grantStmt);
 static void ExecGrant_Fdw(InternalGrant* grantStmt);
 static void ExecGrant_ForeignServer(InternalGrant* grantStmt);
@@ -2103,7 +2090,7 @@ static void ExecGrantRelationPrivilegesCheck(Form_pg_class tuple, AclMode* privi
 /*
  *	This processes both sequences and non-sequences.
  */
-static void ExecGrant_Relation(InternalGrant* istmt)
+void ExecGrant_Relation(InternalGrant* istmt)
 {
     Relation relation = NULL;
     Relation attRelation = NULL;

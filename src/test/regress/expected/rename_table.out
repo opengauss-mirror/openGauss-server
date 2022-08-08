@@ -1,0 +1,49 @@
+drop database if exists mysql;
+create database mysql dbcompatibility 'B';
+\c mysql
+create schema test; create schema tbinfo;
+create table test.t1(id int);
+create table test.t2(c_id int not null primary key, name varchar) partition by range (c_id) (partition t2_p1 values less than(100), partition t2_p2 values less than(200), partition t2_p3 values less than(MAXVALUE));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "t2"
+create view test.t3 as select * from test.t1;
+rename table test.t1 to tbinfo.t1, test.t2 to tbinfo.t2, test.t3 to test.t4;
+\d tbinfo.t1;
+      Table "tbinfo.t1"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ id     | integer | 
+
+\d tbinfo.t2;
+           Table "tbinfo.t2"
+ Column |       Type        | Modifiers 
+--------+-------------------+-----------
+ c_id   | integer           | not null
+ name   | character varying | 
+Indexes:
+    "t2_pkey" PRIMARY KEY, btree (c_id) LOCAL TABLESPACE pg_default
+Partition By RANGE(c_id)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+
+\d test.t4;
+        View "test.t4"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ id     | integer | 
+
+rename table test.t4 to tbinfo.t3;
+ERROR:  relation t4 is view, Rename table don't support span schemaes.
+create temp table t5(id int);
+rename table t5 to tt;
+ERROR:  relation t5 is temporary table, Rename table don't support.
+\c regression
+drop database mysql;
+create schema test; create schema tbinfo;
+create table test.t1(id int);
+rename table test.t1 to tbinfo.t1;
+ERROR:  rename table syntax is supported on dbcompatibility B.
+LINE 1: rename table test.t1 to tbinfo.t1;
+        ^
+alter table test.t1 rename to t2;
+drop table test.t2;
+drop schema test cascade;
+drop schema tbinfo cascade;
