@@ -1992,7 +1992,9 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
             }
         }
     }
-
+    if (IsBootstrapProcessingMode()) {
+        variadicType = func->provariadic;
+    }
     /* construct the spcified struct  */
     parameterTypes = buildoidvector(func->proargtypes.values, func->proargtypes.count);
     defargpos = buildint2vector(func->prodefaultargpos->values, func->prodefaultargpos->count);
