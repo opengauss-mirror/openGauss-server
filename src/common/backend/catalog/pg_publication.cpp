@@ -43,6 +43,8 @@
 #include "utils/rel.h"
 #include "utils/syscache.h"
 
+#include "storage/tcap.h"
+
 /* check if namespace is internal schema, internal schema doesn't need publish */
 static inline bool IsInternalSchema(Oid relnamespace)
 {
@@ -174,6 +176,11 @@ static bool is_publishable_class(Oid relid, HeapTuple tuple, Relation rel)
          * and toast schemas.
          */
         relid < FirstNormalObjectId) {
+        return false;
+    }
+
+    /* skip recycle relation */
+    if (TrIsRefRbObjectEx(RelationRelationId, relid, NameStr(reltuple->relname))) {
         return false;
     }
 

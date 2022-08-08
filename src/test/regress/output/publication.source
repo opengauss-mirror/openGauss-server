@@ -246,3 +246,21 @@ select pg_get_replica_identity_index('replica_test');
 
 drop table replica_test;
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+-- skip recycle object
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = on" > /dev/null 2>&1
+create table t_ustore_test1(a int) with (storage_type = ustore);
+drop table t_ustore_test1;
+select count(*) from pg_class where relname like 'BIN$%';
+ count 
+-------
+     1
+(1 row)
+
+create publication pub_test for all tables;
+select * from pg_publication_tables where tablename like 'BIN$%';
+ pubname | schemaname | tablename 
+---------+------------+-----------
+(0 rows)
+
+purge table t_ustore_test1;
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
