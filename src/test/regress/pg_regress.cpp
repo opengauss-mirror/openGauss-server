@@ -464,6 +464,7 @@ static bool to_create_jdbc_user = false;
 static bool is_skip_environment_cleanup = false;
 static char* client_logic_hook = "encryption";
 static _stringlist* destination_files = NULL;
+static char *g_db_compatibility = "A";
 
 static bool directory_exists(const char* dir);
 static void make_directory(const char* dir);
@@ -5354,14 +5355,16 @@ static void create_database(const char* dbname)
     header(_("creating database \"%s\""), dbname);
     if (encoding)
         psql_command("postgres",
-            "CREATE DATABASE \"%s\" DBCOMPATIBILITY='A' TEMPLATE=TEMPLATE0 ENCODING='%s'%s",
+            "CREATE DATABASE \"%s\" DBCOMPATIBILITY='%s' TEMPLATE=TEMPLATE0 ENCODING='%s'%s",
             dbname,
+            g_db_compatibility,
             encoding,
             (nolocale) ? " LC_COLLATE='C' LC_CTYPE='C'" : "");
     else
         psql_command("postgres",
-            "CREATE DATABASE \"%s\" DBCOMPATIBILITY='A' TEMPLATE=TEMPLATE0%s",
+            "CREATE DATABASE \"%s\" DBCOMPATIBILITY='%s' TEMPLATE=TEMPLATE0%s",
             dbname,
+            g_db_compatibility,
             (nolocale) ? " LC_COLLATE='C' LC_CTYPE='C'" : "");
 
     /*
@@ -5474,10 +5477,10 @@ static void help(void)
     printf(_("  --port=PORT               use postmaster running at PORT\n"));
     printf(_("  --user=USER               connect as USER\n"));
     printf(_("  --psqldir=DIR             use gsql in DIR (default: find in PATH)\n"));
-    printf(_("  --enable-segment          create table default with segment=on"));
-    printf(_("  --jdbc          enable jdbc regression test"));
-    printf(_("  --ecpg          enable ecpg regression test"));
-    printf(_("\n"));
+    printf(_("  --enable-segment          create table default with segment=on\n"));
+    printf(_("  --jdbc          enable jdbc regression test\n"));
+    printf(_("  --ecpg          enable ecpg regression test\n"));
+    printf(_("  --dbcmpt=DBCMPT           create regression database with DBCMPT(default \"A\")\n"));
     printf(_("The exit status is 0 if all tests passed, 1 if some tests failed, and 2\n"));
     printf(_("if the tests could not be run for some reason.\n"));
 }
@@ -6373,6 +6376,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         {"jdbc", no_argument, NULL, 60},
         {"skip_environment_cleanup", no_argument, NULL, 61},
         {"ecpg", no_argument, NULL, 62},
+        {"dbcmpt", required_argument, NULL, 63},
         {NULL, 0, NULL, 0}
     };
 
@@ -6657,6 +6661,9 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
             case 62:
                 printf("\n starting with ecpg\n");
                 use_ecpg = true;
+                break;
+            case 63:
+                g_db_compatibility = strdup(optarg);
                 break;
             default:
                 /* getopt_long already emitted a complaint */
