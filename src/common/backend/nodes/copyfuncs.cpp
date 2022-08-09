@@ -5460,6 +5460,7 @@ static CreatedbStmt* _copyCreatedbStmt(const CreatedbStmt* from)
     CreatedbStmt* newnode = makeNode(CreatedbStmt);
 
     COPY_STRING_FIELD(dbname);
+    COPY_SCALAR_FIELD(missing_ok);
     COPY_NODE_FIELD(options);
 
     return newnode;
@@ -6039,6 +6040,7 @@ static AlterRoleStmt* _copyAlterRoleStmt(const AlterRoleStmt* from)
     AlterRoleStmt* newnode = makeNode(AlterRoleStmt);
 
     COPY_STRING_FIELD(role);
+    COPY_SCALAR_FIELD(missing_ok);
     COPY_NODE_FIELD(options);
     COPY_SCALAR_FIELD(action);
     COPY_SCALAR_FIELD(lockstatus);
@@ -6113,6 +6115,7 @@ static CreateSchemaStmt* _copyCreateSchemaStmt(const CreateSchemaStmt* from)
     CreateSchemaStmt* newnode = makeNode(CreateSchemaStmt);
 
     COPY_STRING_FIELD(schemaname);
+    COPY_SCALAR_FIELD(missing_ok);
     COPY_STRING_FIELD(authid);
     COPY_SCALAR_FIELD(hasBlockChain);
     COPY_NODE_FIELD(schemaElts);

@@ -131,6 +131,7 @@ typedef struct DropStmt {
 typedef struct AlterRoleStmt {
     NodeTag type;
     char* role;    /* role name */
+    bool missing_ok;          /* skip error if a role is missing? */
     List* options; /* List of DefElem nodes */
     int action;    /* +1 = add members, -1 = drop members */
     RoleLockType lockstatus;
@@ -710,6 +711,7 @@ typedef enum TempType {
 
 typedef struct CreateSchemaStmt {
     NodeTag type;
+    bool missing_ok; /* just do nothing if it already exists? */
     char *schemaname;  /* the name of the schema to create */
     char *authid;      /* the owner of the created schema */
     bool hasBlockChain;  /* whether this schema has blockchain */

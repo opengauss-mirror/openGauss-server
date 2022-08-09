@@ -1507,6 +1507,7 @@ typedef struct LoadStmt {
 typedef struct CreatedbStmt {
     NodeTag type;
     char* dbname;  /* name of database to create */
+    bool missing_ok; /* skip error if db is missing? */
     List* options; /* List of DefElem nodes */
 } CreatedbStmt;
 

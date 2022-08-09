@@ -559,7 +559,7 @@ test: copyselect copy_error_log copy_support_transform copy_from_support_paralle
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-test: drop_if_exists
+test: drop_if_exists test_if_not_exists
 #test: constraints
 
 #test: errors subplan_base

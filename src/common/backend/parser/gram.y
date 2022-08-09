@@ -1627,12 +1627,23 @@ AlterUserStmt:
 			ALTER USER RoleId opt_with AlterOptRoleList
 				 {
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
+					n->missing_ok = FALSE;
 					n->role = $3;
 					n->action = +1;	/* add, if there are members */
 					n->options = $5;
 					n->lockstatus = DO_NOTHING;
 					$$ = (Node *)n;
 				 }
+			| ALTER USER IF_P EXISTS RoleId opt_with AlterOptRoleList
+				 {
+					AlterRoleStmt *n = makeNode(AlterRoleStmt);
+					n->missing_ok = TRUE;
+					n->role = $5;
+					n->action = +1;	/* add, if there are members */
+					n->options = $7;
+					n->lockstatus = DO_NOTHING;
+					$$ = (Node *)n;
+				 }     
 			| ALTER USER RoleId opt_with ACCOUNT LOCK_P
 				{
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
@@ -1887,6 +1898,7 @@ CreateSchemaStmt:
 			| CREATE SCHEMA ColId OptBlockchainWith OptSchemaEltList
 				{
 					CreateSchemaStmt *n = makeNode(CreateSchemaStmt);
+					n->missing_ok = FALSE;
 					/* ...but not both */
 					n->schemaname = $3;
 					n->authid = NULL;
@@ -1894,6 +1906,17 @@ CreateSchemaStmt:
 					n->schemaElts = $5;
 					$$ = (Node *)n;
 				}
+			| CREATE SCHEMA IF_P NOT EXISTS ColId OptBlockchainWith OptSchemaEltList
+				{
+					CreateSchemaStmt *n = makeNode(CreateSchemaStmt);
+					n->missing_ok = TRUE;
+					/* ...but not both */
+					n->schemaname = $6;
+					n->authid = NULL;
+					n->hasBlockChain = $7;
+					n->schemaElts = $8;
+					$$ = (Node *)n;
+				}                
 		;
 
 OptSchemaName:
@@ -15782,9 +15805,19 @@ CreatedbStmt:
 					CreatedbStmt *n = makeNode(CreatedbStmt);
 					IsValidIdent($3);
 					n->dbname = $3;
+					n->missing_ok = FALSE;
 					n->options = $5;
 					$$ = (Node *)n;
 				}
+			| CREATE DATABASE IF_P NOT EXISTS database_name opt_with createdb_opt_list
+				{
+					CreatedbStmt *n = makeNode(CreatedbStmt);
+					IsValidIdent($6);
+					n->dbname = $6;
+					n->missing_ok = TRUE;
+					n->options = $8;
+					$$ = (Node *)n;
+				}                
 		;
 
 createdb_opt_list:

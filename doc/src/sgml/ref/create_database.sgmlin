@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-CREATE DATABASE database_name
+CREATE DATABASE [ IF NOT EXISTS ] database_name
     [ [ WITH ] {[ OWNER [=] user_name ]|
            [ TEMPLATE [=] template ]|
            [ ENCODING [=] encoding ]|

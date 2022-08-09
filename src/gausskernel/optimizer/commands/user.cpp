@@ -2075,10 +2075,16 @@ void AlterRole(AlterRoleStmt* stmt)
         str_reset(password);
         str_reset(replPasswd);
 
-        if (!have_createrole_privilege())
+        if (!have_createrole_privilege()) {
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("Permission denied.")));
-        else
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", stmt->role)));
+        } else {
+            if (stmt->missing_ok) {
+                ereport(NOTICE, (errmsg("role \"%s\" does not exist, skipping", stmt->role)));
+                return;
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", stmt->role)));
+            } 
+        }   
     }
     roleid = HeapTupleGetOid(tuple);
 

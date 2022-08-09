@@ -1,0 +1,22 @@
+create database db_testa;
+create database if not exists db_testa;
+create database db_testa;
+create database if not exists db_testb;
+drop database if exists db_testa;
+drop database if exists db_testb;
+
+
+create user test_user with password 'Abcd.123';
+ALTER USER IF EXISTS test_user IDENTIFIED BY 'Abcd.1234';
+ALTER USER test_user IDENTIFIED BY 'Abcd.12345';
+ALTER USER IF EXISTS test_user2 IDENTIFIED BY 'Abcd.1234';
+ALTER USER test_user2 IDENTIFIED BY 'Abcd.1234';
+DROP USER test_user;
+
+CREATE SCHEMA sch_name;
+CREATE SCHEMA IF NOT EXISTS sch_name;
+CREATE SCHEMA IF NOT EXISTS sch_name2;
+CREATE SCHEMA sch_name2;
+drop SCHEMA sch_name;
+drop SCHEMA sch_name2;
+
