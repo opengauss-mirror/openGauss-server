@@ -280,9 +280,9 @@ ifdef REGRESS
 
 # Select database to use for running the tests
 ifneq ($(USE_MODULE_DB),)
-  REGRESS_OPTS += --dbname=$(CONTRIB_TESTDB_MODULE)
+  REGRESS_OPTS := --dbname=$(CONTRIB_TESTDB_MODULE) $(REGRESS_OPTS)
 else
-  REGRESS_OPTS += --dbname=$(CONTRIB_TESTDB)
+  REGRESS_OPTS := --dbname=$(CONTRIB_TESTDB) $(REGRESS_OPTS)
 endif
 
 # where to find psql for running the tests
