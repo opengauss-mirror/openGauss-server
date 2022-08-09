@@ -393,7 +393,7 @@ static bool checkProcess(int port)
     return procexist;
 }
 
-void gstrace_destory(int code, void *arg)
+void gstrace_destroy(int code, void *arg)
 {
     trace_context* pTrcCxt = getTraceContext();
 
@@ -500,7 +500,7 @@ int gstrace_init(int key)
         pTrcCxt->pTrcCfg->hash_trace_config_file, LENGTH_TRACE_CONFIG_HASH, hash_str, LENGTH_TRACE_CONFIG_HASH);
     securec_check(ret, "\0", "\0");
 
-    (void)on_exit(gstrace_destory, NULL);
+    (void)on_exit(gstrace_destroy, NULL);
 
     return TRACE_OK;
 }
