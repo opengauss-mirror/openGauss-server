@@ -125,5 +125,6 @@ create publication pub_test for all tables;
 select * from pg_publication_tables where tablename like 'BIN$%';
 
 purge table t_ustore_test1;
+drop publication pub_test;
 
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
