@@ -13,11 +13,11 @@
 #include "dumputils.h"
 
 static void reindex_one_database(const char* name, const char* dbname_tem, const char* type, const char* host,
-    const char* port, const char* username, enum trivalue prompt_password, const char* progname_tem, bool echo);
+    const char* port, const char* username, enum trivalue prompt_password, const char* progname_tem, bool echo, bool concurrently);
 static void reindex_all_databases(const char* maintenance_db, const char* host, const char* port, const char* username,
-    enum trivalue prompt_password, const char* progname_tem, bool echo, bool quiet);
+    enum trivalue prompt_password, const char* progname_tem, bool echo, bool quiet, bool concurrently);
 static void reindex_system_catalogs(const char* dbname_tem, const char* host, const char* port, const char* username,
-    enum trivalue prompt_password, const char* progname_tem, bool echo);
+    enum trivalue prompt_password, const char* progname_tem, bool echo, bool concurrently);
 static void help(const char* progname_tem);
 
 int main(int argc, char* argv[])
@@ -34,6 +34,7 @@ int main(int argc, char* argv[])
         {"system", no_argument, NULL, 's'},
         {"table", required_argument, NULL, 't'},
         {"index", required_argument, NULL, 'i'},
+        {"concurrently", no_argument, NULL, 1},
         {"maintenance-db", required_argument, NULL, 2},
         {NULL, 0, NULL, 0}};
 
@@ -51,6 +52,7 @@ int main(int argc, char* argv[])
     bool alldb = false;
     bool echo = false;
     bool quiet = false;
+    bool concurrently = false;
     const char* table = NULL;
     const char* index = NULL;
 
@@ -98,6 +100,9 @@ int main(int argc, char* argv[])
             case 'i':
                 index = optarg;
                 break;
+            case 1:
+                concurrently = true;
+                break;
             case 2:
                 maintenance_db = optarg;
                 break;
@@ -142,7 +147,7 @@ int main(int argc, char* argv[])
             exit(1);
         }
 
-        reindex_all_databases(maintenance_db, host, port, username, prompt_password, progname_tem, echo, quiet);
+        reindex_all_databases(maintenance_db, host, port, username, prompt_password, progname_tem, echo, quiet, concurrently);
     } else if (syscatalog) {
         if (table != NULL) {
             fprintf(stderr, _("%s: cannot reindex a specific table and system catalogs at the same time\n"), progname_tem);
@@ -162,7 +167,7 @@ int main(int argc, char* argv[])
                 dbname_tem = get_user_name(progname_tem);
         }
 
-        reindex_system_catalogs(dbname_tem, host, port, username, prompt_password, progname_tem, echo);
+        reindex_system_catalogs(dbname_tem, host, port, username, prompt_password, progname_tem, echo, concurrently);
     } else {
         if (dbname_tem == NULL) {
             if (getenv("PGDATABASE") != NULL)
@@ -174,19 +179,19 @@ int main(int argc, char* argv[])
         }
 
         if (index != NULL)
-            reindex_one_database(index, dbname_tem, "INDEX", host, port, username, prompt_password, progname_tem, echo);
+            reindex_one_database(index, dbname_tem, "INDEX", host, port, username, prompt_password, progname_tem, echo, concurrently);
         if (table != NULL)
-            reindex_one_database(table, dbname_tem, "TABLE", host, port, username, prompt_password, progname_tem, echo);
+            reindex_one_database(table, dbname_tem, "TABLE", host, port, username, prompt_password, progname_tem, echo, concurrently);
         /* reindex database only if index or table is not specified */
         if (index == NULL && table == NULL)
-            reindex_one_database(dbname_tem, dbname_tem, "DATABASE", host, port, username, prompt_password, progname_tem, echo);
+            reindex_one_database(dbname_tem, dbname_tem, "DATABASE", host, port, username, prompt_password, progname_tem, echo, concurrently);
     }
 
     exit(0);
 }
 
 static void reindex_one_database(const char* name, const char* dbname_tem, const char* type, const char* host,
-    const char* port, const char* username, enum trivalue prompt_password, const char* progname_tem, bool echo)
+    const char* port, const char* username, enum trivalue prompt_password, const char* progname_tem, bool echo, bool concurrently)
 {
     PQExpBufferData sql;
 
@@ -194,13 +199,15 @@ static void reindex_one_database(const char* name, const char* dbname_tem, const
 
     initPQExpBuffer(&sql);
 
-    appendPQExpBuffer(&sql, "REINDEX");
-    if (strcmp(type, "TABLE") == 0)
-        appendPQExpBuffer(&sql, " TABLE %s", name);
-    else if (strcmp(type, "INDEX") == 0)
-        appendPQExpBuffer(&sql, " INDEX %s", name);
+    appendPQExpBuffer(&sql, "REINDEX ");
+    appendPQExpBuffer(&sql, type);
+    appendPQExpBuffer(&sql, " ");
+    if(concurrently)
+        appendPQExpBuffer(&sql, "CONCURRENTLY ");
+    if (strcmp(type, "TABLE") == 0 || strcmp(type, "INDEX") == 0)
+        appendPQExpBuffer(&sql, name);
     else if (strcmp(type, "DATABASE") == 0)
-        appendPQExpBuffer(&sql, " DATABASE %s", fmtId(name));
+        appendPQExpBuffer(&sql, fmtId(name));
     appendPQExpBuffer(&sql, ";\n");
 
     conn = connectDatabase(dbname_tem, host, port, username, prompt_password, progname_tem, false);
@@ -230,7 +237,7 @@ static void reindex_one_database(const char* name, const char* dbname_tem, const
 }
 
 static void reindex_all_databases(const char* maintenance_db, const char* host, const char* port, const char* username,
-    enum trivalue prompt_password, const char* progname_tem, bool echo, bool quiet)
+    enum trivalue prompt_password, const char* progname_tem, bool echo, bool quiet, bool concurrently)
 {
     PGconn* conn = NULL;
     PGresult* result = NULL;
@@ -248,14 +255,14 @@ static void reindex_all_databases(const char* maintenance_db, const char* host, 
             fflush(stdout);
         }
 
-        reindex_one_database(dbname_tem, dbname_tem, "DATABASE", host, port, username, prompt_password, progname_tem, echo);
+        reindex_one_database(dbname_tem, dbname_tem, "DATABASE", host, port, username, prompt_password, progname_tem, echo, concurrently);
     }
 
     PQclear(result);
 }
 
 static void reindex_system_catalogs(const char* dbname_tem, const char* host, const char* port, const char* username,
-    enum trivalue prompt_password, const char* progname_tem, bool echo)
+    enum trivalue prompt_password, const char* progname_tem, bool echo, bool concurrently)
 {
     PQExpBufferData sql;
 
@@ -263,7 +270,11 @@ static void reindex_system_catalogs(const char* dbname_tem, const char* host, co
 
     initPQExpBuffer(&sql);
 
-    appendPQExpBuffer(&sql, "REINDEX SYSTEM %s;\n", dbname_tem);
+    appendPQExpBuffer(&sql, "REINDEX SYSTEM ");
+    if(concurrently)
+        appendPQExpBuffer(&sql, "CONCURRENTLY ");
+    appendPQExpBuffer(&sql, "%s;\n", dbname_tem);
+
 
     conn = connectDatabase(dbname_tem, host, port, username, prompt_password, progname_tem, false);
     if (!executeMaintenanceCommand(conn, sql.data, echo)) {
@@ -282,6 +293,7 @@ static void help(const char* progname_tem)
     printf(_("  %s [OPTION]... [DBNAME]\n"), progname_tem);
     printf(_("\nOptions:\n"));
     printf(_("  -a, --all                 reindex all databases\n"));
+    printf(_("  --concurrently            reindex concurrently\n"));
     printf(_("  -d, --dbname=DBNAME       database to reindex\n"));
     printf(_("  -e, --echo                show the commands being sent to the server\n"));
     printf(_("  -i, --index=INDEX         recreate specific index only\n"));

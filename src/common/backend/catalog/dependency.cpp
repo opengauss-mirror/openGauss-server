@@ -204,6 +204,9 @@ extern char* pg_get_functiondef_worker(Oid funcid, int* headerlines);
  * a column default is dropped as an intermediate step while adding a new one,
  * that's an internal operation.  On the other hand, when the we drop something
  * because the user issued a DROP statement against it, that's not internal.
+ * 
+ * PERFORM_DELETION_CONCURRENT_LOCK: perform the drop normally but with a lock
+ * as if it were concurrent. This is used by REINDEX CONCURRENTLY
  */
 void performDeletion(const ObjectAddress* object, DropBehavior behavior, int flags)
 {
@@ -1181,9 +1184,10 @@ static void doDeletion(const ObjectAddress* object, int flags)
 
             if (relKind == RELKIND_INDEX || relKind == RELKIND_GLOBAL_INDEX) {
                 bool concurrent = (((uint32)flags & PERFORM_DELETION_CONCURRENTLY) == PERFORM_DELETION_CONCURRENTLY);
+                bool concurrent_lock_mode = (((uint32)flags & PERFORM_DELETION_CONCURRENTLY_LOCK) == PERFORM_DELETION_CONCURRENTLY_LOCK);
 
                 Assert(object->objectSubId == 0);
-                index_drop(object->objectId, concurrent);
+                index_drop(object->objectId, concurrent, concurrent_lock_mode);/*change for index concurrent*/
             } else {
                 /*
                  * relation_open() must be before the heap_drop_with_catalog(). If you reload

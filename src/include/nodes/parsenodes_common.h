@@ -877,6 +877,7 @@ typedef struct ReindexStmt {
     bool do_system;     /* include system tables in database case */
     bool do_user;       /* include user tables in database case */
     AdaptMem memUsage;  /* adaptive memory assigned for the stmt */
+    bool concurrent;    /* reindex concurrently */
 } ReindexStmt;
 
 typedef struct Position {

@@ -23,12 +23,12 @@ extern void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin
 
 /* commands/indexcmds.c */
 extern Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_alter_table, bool check_rights,
-    bool skip_build, bool quiet);
-extern void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem* mem_info);
-extern void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_info);
+    bool skip_build, bool quiet);  
+extern void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem* mem_info, bool concurrent);
+extern void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_info, bool concurrent);
 extern void ReindexInternal(RangeVar* relation, const char* partition_name);
 
-extern void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, AdaptMem* mem_info);
+extern void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, AdaptMem* mem_info, bool concurrent);
 extern char* makeObjectName(const char* name1, const char* name2, const char* label, bool reverseTruncate = false);
 extern char* ChooseRelationName(
     const char* name1, const char* name2, const char* label, size_t labelLength, Oid namespaceid,

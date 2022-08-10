@@ -222,6 +222,7 @@ typedef enum ObjectClass {
 #define PERFORM_DELETION_INVALID            0x0000
 #define PERFORM_DELETION_INTERNAL			0x0001
 #define PERFORM_DELETION_CONCURRENTLY		0x0002
+#define PERFORM_DELETION_CONCURRENTLY_LOCK  0x0020    /* normal drop with concurrent lock mode */
 
 /* ObjectAddressExtra flag bits */
 #define DEPFLAG_ORIGINAL 0x0001  /* an original deletion target */
@@ -308,6 +309,9 @@ extern long changeDependencyFor(Oid classId,
                                 Oid oldRefObjectId,
                                 Oid newRefObjectId);
 
+extern void changeDependenciesOf(Oid classId, Oid oldObjectId, Oid newObjectId);
+extern void changeDependenciesOn(Oid refClassId, Oid oldRefObjectId, Oid newRefObjectId);
+
 extern Oid	getExtensionOfObject(Oid classId, Oid objectId);
 
 extern bool sequenceIsOwned(Oid seqId, Oid *tableId, int32 *colId);
@@ -319,6 +323,9 @@ extern List *getOwnedSequences(Oid relid, List *attrList = NULL);
 extern Oid	get_constraint_index(Oid constraintId);
 
 extern Oid	get_index_constraint(Oid indexId);
+
+/* use for reindex concurrently */
+extern List *get_index_ref_constraints(Oid indexId);
 
 /* in pg_shdepend.c */
 extern void recordSharedDependencyOn(ObjectAddress *depender,

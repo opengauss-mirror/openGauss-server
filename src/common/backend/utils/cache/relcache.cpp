@@ -7842,6 +7842,24 @@ bool RelationIsCUFormatByOid(Oid relid)
     return rs;
 }
 
+bool RelationIsUStoreFormatByOid(Oid relid)
+{
+    bool rs = false;
+    Relation rel;
+
+    if (!OidIsValid(relid))
+        return false;
+
+    rel = try_relation_open(relid, AccessShareLock);
+    if (NULL == rel)
+        return false;
+
+    rs = RelationIsUstoreFormat(rel);
+    relation_close(rel, AccessShareLock);
+
+    return rs;
+}
+
 #ifdef ENABLE_MOT
 /*
  * Brief        : check whether the relation is MOT table.

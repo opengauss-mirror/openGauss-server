@@ -6106,6 +6106,7 @@ static ReindexStmt* _copyReindexStmt(const ReindexStmt* from)
     COPY_SCALAR_FIELD(do_user);
     COPY_SCALAR_FIELD(memUsage.work_mem);
     COPY_SCALAR_FIELD(memUsage.max_mem);
+    COPY_SCALAR_FIELD(concurrent);
 
     return newnode;
 }

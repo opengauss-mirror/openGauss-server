@@ -2698,10 +2698,18 @@ static char** PsqlCompletion(const char *text, int start, int end)
         COMPLETE_WITH_LIST(listReindex);
     } else if (pg_strcasecmp(PREV2_WD, "REINDEX") == 0) {
         if (pg_strcasecmp(PREV_WD, "TABLE") == 0)
-            COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_tm, NULL);
+            COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_tm, " UNION SELECT 'CONCURRENTLY'");
         else if (pg_strcasecmp(PREV_WD, "INDEX") == 0)
-            COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_indexes, NULL);
+            COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_indexes, " UNION SELECT 'CONCURRENTLY'");
         else if (pg_strcasecmp(PREV_WD, "SYSTEM") == 0 || pg_strcasecmp(PREV_WD, "DATABASE") == 0)
+            COMPLETE_WITH_QUERY(Query_for_list_of_databases " UNION SELECT 'CONCURRENTLY'");
+    } else if (pg_strcasecmp(PREV3_WD, "REINDEX") == 0) {
+        if (pg_strcasecmp(PREV2_WD, "TABLE") == 0 && pg_strcasecmp(PREV_WD, "CONCURRENTLY") == 0)
+            COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_tm, NULL);
+        else if (pg_strcasecmp(PREV2_WD, "INDEX") == 0 && pg_strcasecmp(PREV_WD, "CONCURRENTLY") == 0)
+            COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_indexes, NULL);
+        else if ((pg_strcasecmp(PREV2_WD, "SYSTEM") == 0 || pg_strcasecmp(PREV2_WD, "DATABASE") == 0) && 
+            pg_strcasecmp(PREV_WD, "CONCURRENTLY") == 0)
             COMPLETE_WITH_QUERY(Query_for_list_of_databases);
     }
 

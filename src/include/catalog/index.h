@@ -125,12 +125,20 @@ extern Oid index_create(Relation heapRelation, const char *indexRelationName, Oi
                         IndexCreateExtraArgs *extra, bool useLowLockLevel = false,
                         int8 relindexsplit = 0);
 
+
+extern Oid index_concurrently_create_copy(Relation heapRelation, Oid oldIndexId, Oid oldIndexPartId, const char *newName);
+extern void index_concurrently_build(Oid heapRelationId, Oid indexRelationId, bool isPrimary, AdaptMem* memInfo = NULL, bool dbWide = false);
+extern void index_concurrently_swap(Oid newIndexId, Oid oldIndexId, const char *oldName);
+extern void index_concurrently_set_dead(Oid heapId, Oid indexId);
+extern void index_concurrently_part_build(Oid heapRelationId, Oid heapPartitionId, Oid indexRelationId, Oid IndexPartitionId, AdaptMem* memInfo = NULL, bool dbWide = false);
+extern void index_concurrently_part_swap(Oid newIndexPartId, Oid oldIndexPartId, const char *oldName);
+
 extern void index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo *indexInfo,
                                     const char *constraintName, char constraintType, bool deferrable,
                                     bool initdeferred, bool mark_as_primary, bool update_pgindex,
                                     bool remove_old_dependencies, bool allow_system_table_mods);
 
-extern void index_drop(Oid indexId, bool concurrent);
+extern void index_drop(Oid indexId, bool concurrent, bool concurrent_lock_mode = false);
 
 extern IndexInfo *BuildIndexInfo(Relation index);
 extern IndexInfo *BuildDummyIndexInfo(Relation index);
@@ -175,7 +183,7 @@ extern double IndexBuildVectorBatchScan(Relation heapRelation, Relation indexRel
                                         void *transferFuncs);
 
 
-extern void validate_index(Oid heapId, Oid indexId, Snapshot snapshot);
+extern void validate_index(Oid heapId, Oid indexId, Snapshot snapshot, bool isPart = false);
 extern void validate_index_heapscan(
     Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo, Snapshot snapshot, v_i_state* state);
 
@@ -204,6 +212,9 @@ extern bool ReindexIsProcessingHeap(Oid heapOid);
 extern bool ReindexIsProcessingIndex(Oid indexOid);
 extern Oid IndexGetRelation(Oid indexId, bool missing_ok);
 
+extern Oid PartIndexGetPartition(Oid partIndexId, bool missing_ok);
+extern Oid PartIdGetParentId(Oid partIndexId, bool missing_ok);
+
 typedef struct
 {
     Oid  existingPSortOid;
@@ -221,7 +232,8 @@ extern Oid partition_index_create(const char* partIndexName,
                                   List *indexColNames,
                                   Datum  indexRelOptions,
                                   bool skipBuild,
-                                  PartIndexCreateExtraArgs *extra);
+                                  PartIndexCreateExtraArgs *extra,
+                                  bool isUsable = true);
 extern void addIndexForPartition(Relation partitionedRelation, Oid partOid);
 extern void dropIndexForPartition(Oid partOid);
 extern void index_update_stats(Relation rel, bool hasindex, bool isprimary,
@@ -235,6 +247,7 @@ extern void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid,
                                                    LOCKMODE callbackobj_lockMode);
 extern void reindex_partIndex(Relation heapRel,  Partition heapPart, Relation indexRel , Partition indexPart);
 extern bool reindexPartition(Oid relid, Oid partOid, int flags, int reindexType);
+extern Oid indexIdAndPartitionIdGetIndexPartitionId(Oid indexId, Oid partOid);
 extern void AddGPIForPartition(Oid partTableOid, Oid partOid);
 extern void AddGPIForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid);
 void AddCBIForPartition(Relation partTableRel, Relation tempTableRel, const List* indexRelList, 
