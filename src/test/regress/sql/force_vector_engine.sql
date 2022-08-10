@@ -112,3 +112,11 @@ drop table force_vt_tb1;
 drop table force_vt_tb1_col;
 \c regression;
 drop database pg_length_cmpt_db;
+
+-- Do not use vectorization engine
+create table force_vector_sysdomain(a information_schema.cardinal_number, b int);
+insert into force_vector_sysdomain values(10, 20);
+set try_vector_engine_strategy='force';
+select a,b from force_vector_sysdomain;
+drop table force_vector_sysdomain;
+set try_vector_engine_strategy='off';
