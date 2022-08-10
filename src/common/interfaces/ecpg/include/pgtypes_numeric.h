@@ -11,6 +11,7 @@
 #define NUMERIC_MIN_SIG_DIGITS 16
 
 #define DECSIZE 30
+#define NUMERIC_LOCAL_NDIG  36
 
 typedef unsigned char NumericDigit;
 typedef struct {
@@ -21,6 +22,7 @@ typedef struct {
     int sign;             /* NUMERIC_POS, NUMERIC_NEG, or NUMERIC_NAN */
     NumericDigit* buf;    /* start of alloc'd space for digits[] */
     NumericDigit* digits; /* decimal digits */
+    NumericDigit local[NUMERIC_LOCAL_NDIG];
 } numeric;
 
 typedef struct {
@@ -31,6 +33,38 @@ typedef struct {
     int sign;                     /* NUMERIC_POS, NUMERIC_NEG, or NUMERIC_NAN */
     NumericDigit digits[DECSIZE]; /* decimal digits */
 } decimal;
+
+#define digitbuf_alloc(ndigits) \
+        ((NumericDigit*) pgtypes_alloc((ndigits) * sizeof(NumericDigit)))
+
+#define digitbuf_free(v)                  \
+        do {                              \
+            if (((v)->buf != NULL) && ((v)->buf != (v)->local)) { \
+                free((v)->buf);           \
+                (v)->buf = (v)->local;    \
+            }                             \
+        } while (0)
+
+#define init_numeric(v)        \
+    do {                       \
+        (v)->buf = (v)->local; \
+        (v)->ndigits = 0;      \
+        (v)->weight = 0;       \
+        (v)->sign = 0;         \
+        (v)->rscale = 0;       \
+        (v)->dscale = 0;       \
+    } while (0)
+
+#define init_alloc_numeric(v, n)                \
+    do  {                                       \
+        (v)->buf = (v)->local;                  \
+        (v)->ndigits = (n);                     \
+        if ((n) > NUMERIC_LOCAL_NDIG) {         \
+            (v)->buf = digitbuf_alloc((n) + 1); \
+        }                                       \
+        (v)->buf[0] = 0;                        \
+        (v)->digits = (v)->buf + 1;             \
+    } while (0)
 
 #ifdef __cplusplus
 extern "C" {
