@@ -8439,6 +8439,15 @@ bool is_vector_scan(Plan* plan)
 
 static bool IsTypeUnSupportedByVectorEngine(Oid typeOid)
 {
+    /* we don't support the domain type. */
+    if (typeOid >= FirstBootstrapObjectId) {
+        if (typeOid != getBaseType(typeOid)) {
+            ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+                errmsg("Vectorize plan failed due to has unsupport type: %u", typeOid)));
+            return true;
+        }
+    }
+
     /* we don't support user defined type. */
     if (typeOid >= FirstNormalObjectId) {
         ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
