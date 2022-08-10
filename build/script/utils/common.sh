@@ -72,7 +72,7 @@ select_package_command
 export PLAT_FORM_STR=$(sh "${ROOT_DIR}/src/get_PlatForm_str.sh")
 if [ "${PLAT_FORM_STR}"x == "Failed"x -o "${PLAT_FORM_STR}"x == ""x ]
 then
-    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS, Kylin(aarch64), Asianux platform."
+    echo "We only support openEuler(aarch64), EulerOS(aarch64), FusionOS, CentOS, Kylin(aarch64), Asianux platform."
     exit 1;
 fi
 
@@ -91,6 +91,11 @@ elif [[ "$PLAT_FORM_STR" =~ "openeuler" ]]; then
     if [ "$PLATFORM_ARCH"X == "aarch64"X ];then 
         GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
     fi
+elif [[ "$PLAT_FORM_STR" =~ "fusionos" ]]; then
+    dist_version="FusionOS"
+    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then
+        GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
+    fi
 elif [[ "$PLAT_FORM_STR" =~ "kylin" ]]; then
     dist_version="Kylin"
     if [ "$PLATFORM_ARCH"X == "aarch64"X ];then 
@@ -102,15 +107,15 @@ elif [[ "$PLAT_FORM_STR" =~ "asianux" ]]; then
         GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA"
     fi
 else
-    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS, Kylin(aarch64), Asianux platform."
+    echo "We only support openEuler(aarch64), EulerOS(aarch64), FusionOS, CentOS, Kylin(aarch64), Asianux platform."
     echo "Kernel is $kernel"
     exit 1
 fi
 
 ##add platform architecture information
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
-    if [ "$dist_version" != "openEuler" ] && [ "$dist_version" != "EulerOS" ] && [ "$dist_version" != "Kylin" ] && [ "$dist_version" != "Asianux" ]; then
-        echo "We only support NUMA on openEuler(aarch64), EulerOS(aarch64), Kylin(aarch64), Asianux platform."
+    if [ "$dist_version" != "openEuler" ] && [ "$dist_version" != "EulerOS" ] && [ "$dist_version" != "FusionOS" ] && [ "$dist_version" != "Kylin" ] && [ "$dist_version" != "Asianux" ]; then
+        echo "We only support NUMA on openEuler(aarch64), EulerOS(aarch64), FusionOS(aarch64), Kylin(aarch64), Asianux platform."
         exit 1
     fi
 fi
