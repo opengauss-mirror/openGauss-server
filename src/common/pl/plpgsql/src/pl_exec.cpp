@@ -5395,8 +5395,16 @@ static void exec_prepare_plan(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, int
 
     /*
      * Generate and save the plan
+     *
+     * Self-defined parser is needed for dolphin to execute procedural program
+     * currently. When *parser_hook* is given NULL in pg_parse_query, it would
+     * use self-defined parser hook.
      */
-    plan = SPI_prepare_params(expr->query, (ParserSetupHook)plpgsql_parser_setup, (void*)expr, cursorOptions);
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_sql.dolphin) {
+        plan = SPI_prepare_params(expr->query, (ParserSetupHook)plpgsql_parser_setup, (void*)expr, cursorOptions, NULL);
+    } else {
+        plan = SPI_prepare_params(expr->query, (ParserSetupHook)plpgsql_parser_setup, (void*)expr, cursorOptions);
+    }
     if (plan == NULL) {
         /* Some SPI errors deserve specific error messages */
         switch (SPI_result) {
