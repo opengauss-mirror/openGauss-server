@@ -440,4 +440,6 @@ extern uint32 hash_multikey(MultiHashKey* mkeys);
 
 #define GetBucketID(hashval, hashmapsize)  (compute_modulo(abs((int)hashval), hashmapsize))
 
+typedef Datum (*computeHashFunc)(Oid type, Datum value, char locator);
+
 #endif   /* HASH_H */
