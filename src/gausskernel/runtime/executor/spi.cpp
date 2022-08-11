@@ -58,7 +58,7 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
 
 void _SPI_prepare_plan(const char *src, SPIPlanPtr plan);
 #ifdef PGXC
-static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlanPtr plan);
+static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlanPtr plan, parse_query_func parser);
 #endif
 
 void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan);
@@ -734,7 +734,7 @@ void SPI_restore_connection(void)
  * bypass the parse stage. This is achieved here by calling
  * _SPI_pgxc_prepare_plan which accepts a parse tree.
  */
-int SPI_execute_direct(const char *remote_sql, char *nodename)
+int SPI_execute_direct(const char *remote_sql, char *nodename, parse_query_func parser)
 {
     _SPI_plan plan;
     ExecDirectStmt *stmt = makeNode(ExecDirectStmt);
@@ -761,7 +761,7 @@ int SPI_execute_direct(const char *remote_sql, char *nodename)
     plan.spi_key = INVALID_SPI_KEY;
 
     /* Now pass the ExecDirectStmt parsetree node */
-    _SPI_pgxc_prepare_plan(execdirect.data, list_make1(stmt), &plan);
+    _SPI_pgxc_prepare_plan(execdirect.data, list_make1(stmt), &plan, parser);
 
     res = _SPI_execute_plan(&plan, NULL, InvalidSnapshot, InvalidSnapshot, false, true, 0, true);
 
@@ -775,7 +775,7 @@ int SPI_execute_direct(const char *remote_sql, char *nodename)
  * Parse, plan, and execute a query string 
  * @isCollectParam: default false, is used to collect sql info in sqladvisor online mode.
  */
-int SPI_execute(const char *src, bool read_only, long tcount, bool isCollectParam)
+int SPI_execute(const char *src, bool read_only, long tcount, bool isCollectParam, parse_query_func parser)
 {
     _SPI_plan plan;
 
@@ -794,7 +794,7 @@ int SPI_execute(const char *src, bool read_only, long tcount, bool isCollectPara
     plan.cursor_options = 0;
     plan.spi_key = INVALID_SPI_KEY;
 
-    _SPI_prepare_oneshot_plan(src, &plan);
+    _SPI_prepare_oneshot_plan(src, &plan, parser);
 
     res = _SPI_execute_plan(&plan, NULL, InvalidSnapshot, InvalidSnapshot, read_only, true, tcount);
 
@@ -810,9 +810,9 @@ int SPI_execute(const char *src, bool read_only, long tcount, bool isCollectPara
 }
 
 /* Obsolete version of SPI_execute */
-int SPI_exec(const char *src, long tcount)
+int SPI_exec(const char *src, long tcount, parse_query_func parser)
 {
-    return SPI_execute(src, false, tcount);
+    return SPI_execute(src, false, tcount, false, parser);
 }
 
 /* Execute a previously prepared plan */
@@ -907,7 +907,7 @@ int SPI_execute_snapshot(SPIPlanPtr plan, Datum *Values, const char *Nulls, Snap
  * SPI_execute_plan.
  */
 int SPI_execute_with_args(const char *src, int nargs, Oid *argtypes, Datum *Values, const char *Nulls, bool read_only,
-    long tcount, Cursor_Data *cursor_data)
+    long tcount, Cursor_Data *cursor_data, parse_query_func parser)
 {
     _SPI_plan plan;
 
@@ -935,7 +935,7 @@ int SPI_execute_with_args(const char *src, int nargs, Oid *argtypes, Datum *Valu
 
     ParamListInfo param_list_info = _SPI_convert_params(nargs, argtypes, Values, Nulls, cursor_data);
 
-    _SPI_prepare_oneshot_plan(src, &plan);
+    _SPI_prepare_oneshot_plan(src, &plan, parser);
 
     res = _SPI_execute_plan(&plan, param_list_info, InvalidSnapshot, InvalidSnapshot, read_only, true, tcount);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -948,12 +948,12 @@ int SPI_execute_with_args(const char *src, int nargs, Oid *argtypes, Datum *Valu
     return res;
 }
 
-SPIPlanPtr SPI_prepare(const char *src, int nargs, Oid *argtypes)
+SPIPlanPtr SPI_prepare(const char *src, int nargs, Oid *argtypes, parse_query_func parser)
 {
-    return SPI_prepare_cursor(src, nargs, argtypes, 0);
+    return SPI_prepare_cursor(src, nargs, argtypes, 0, parser);
 }
 
-SPIPlanPtr SPI_prepare_cursor(const char *src, int nargs, Oid *argtypes, int cursorOptions)
+SPIPlanPtr SPI_prepare_cursor(const char *src, int nargs, Oid *argtypes, int cursorOptions, parse_query_func parser)
 {
     _SPI_plan plan;
 
@@ -984,7 +984,7 @@ SPIPlanPtr SPI_prepare_cursor(const char *src, int nargs, Oid *argtypes, int cur
     u_sess->SPI_cxt._current->spi_hash_key = INVALID_SPI_KEY;
     PG_TRY();
     {
-        _SPI_prepare_plan(src, &plan);
+        _SPI_prepare_plan(src, &plan, parser);
     }
     PG_CATCH();
     {
@@ -1003,7 +1003,8 @@ SPIPlanPtr SPI_prepare_cursor(const char *src, int nargs, Oid *argtypes, int cur
     return result;
 }
 
-SPIPlanPtr SPI_prepare_params(const char *src, ParserSetupHook parserSetup, void *parserSetupArg, int cursorOptions)
+SPIPlanPtr SPI_prepare_params(const char *src, ParserSetupHook parserSetup, void *parserSetupArg, int cursorOptions,
+                              parse_query_func parser)
 {
     _SPI_plan plan;
 
@@ -1030,7 +1031,7 @@ SPIPlanPtr SPI_prepare_params(const char *src, ParserSetupHook parserSetup, void
     plan.spi_key = INVALID_SPI_KEY;
     plan.id = (uint32)-1;
 
-    _SPI_prepare_plan(src, &plan);
+    _SPI_prepare_plan(src, &plan, parser);
 
     /* copy plan to procedure context */
     SPIPlanPtr result = _SPI_make_plan_non_temp(&plan);
@@ -1497,7 +1498,7 @@ Portal SPI_cursor_open(const char *name, SPIPlanPtr plan, Datum *Values, const c
  * Parse and plan a query and open it as a portal.
  */
 Portal SPI_cursor_open_with_args(const char *name, const char *src, int nargs, Oid *argtypes, Datum *Values,
-    const char *Nulls, bool read_only, int cursorOptions)
+    const char *Nulls, bool read_only, int cursorOptions, parse_query_func parser)
 {
     _SPI_plan plan;
     errno_t errorno = EOK;
@@ -1542,7 +1543,7 @@ Portal SPI_cursor_open_with_args(const char *name, const char *src, int nargs, O
     u_sess->SPI_cxt._current->spi_hash_key = INVALID_SPI_KEY;
     PG_TRY();
     {
-        _SPI_prepare_plan(src, &plan);
+        _SPI_prepare_plan(src, &plan, parser);
     }
     PG_CATCH();
     {
@@ -2208,10 +2209,10 @@ void spi_printtup(TupleTableSlot *slot, DestReceiver *self)
  * what we are creating is a "temporary" SPIPlan.  Cruft generated during
  * parsing is also left in CurrentMemoryContext.
  */
-void _SPI_prepare_plan(const char *src, SPIPlanPtr plan)
+void _SPI_prepare_plan(const char *src, SPIPlanPtr plan, parse_query_func parser)
 {
 #ifdef PGXC
-    _SPI_pgxc_prepare_plan(src, NULL, plan);
+    _SPI_pgxc_prepare_plan(src, NULL, plan, parser);
 }
 
 /*
@@ -2220,7 +2221,7 @@ void _SPI_prepare_plan(const char *src, SPIPlanPtr plan)
  * called for internally executed execute-direct statements that are
  * transparent to the user.
  */
-static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlanPtr plan)
+static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlanPtr plan, parse_query_func parser)
 {
 #endif
     List *raw_parsetree_list = NIL;
@@ -2245,7 +2246,7 @@ static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlan
         raw_parsetree_list = src_parsetree;
     else
 #endif
-        raw_parsetree_list = pg_parse_query(src);
+        raw_parsetree_list = pg_parse_query(src, NULL, parser);
     /*
      * Do parse analysis and rule rewrite for each raw parsetree, storing the
      * results into unsaved plancache entries.
@@ -2398,7 +2399,7 @@ static void SPIParseOneShotPlan(CachedPlanSource* plansource, SPIPlanPtr plan)
  * what we are creating is a "temporary" SPIPlan.  Cruft generated during
  * parsing is also left in CurrentMemoryContext.
  */
-void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan)
+void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_func parser)
 {
     List *raw_parsetree_list = NIL;
     List *plancache_list = NIL;
@@ -2417,7 +2418,7 @@ void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan)
     /*
      * Parse the request string into a list of raw parse trees.
      */
-    raw_parsetree_list = pg_parse_query(src, &query_string_locationlist);
+    raw_parsetree_list = pg_parse_query(src, &query_string_locationlist, parser);
 
     /*
      * Construct plancache entries, but don't do parse analysis yet.
@@ -3690,7 +3691,7 @@ DestReceiver *createAnalyzeSPIDestReceiver(CommandDest dest)
  * Returns: void
  */
 void spi_exec_with_callback(CommandDest dest, const char *src, bool read_only, long tcount, bool direct_call,
-    void (*callbackFn)(void *), void *clientData)
+    void (*callbackFn)(void *), void *clientData, parse_query_func parser)
 {
     bool connected = false;
     int ret = 0;
@@ -3707,7 +3708,7 @@ void spi_exec_with_callback(CommandDest dest, const char *src, bool read_only, l
         elog(DEBUG1, "Executing SQL: %s", src);
 
         /* Do the query. */
-        ret = SPI_execute(src, read_only, tcount);
+        ret = SPI_execute(src, read_only, tcount, false, parser);
         Assert(ret > 0);
 
         if (direct_call && callbackFn != NULL) {
@@ -3770,9 +3771,9 @@ List* _SPI_get_querylist(SPIPlanPtr plan)
     return plan ? plan->stmt_list : NULL;
 }
 
-void _SPI_prepare_oneshot_plan_for_validator(const char *src, SPIPlanPtr plan)
+void _SPI_prepare_oneshot_plan_for_validator(const char *src, SPIPlanPtr plan, parse_query_func parser)
 {
-    _SPI_prepare_oneshot_plan(src, plan);
+    _SPI_prepare_oneshot_plan(src, plan, parser);
 }
 
 void InitSPIPlanCxt()

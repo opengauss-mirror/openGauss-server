@@ -873,7 +873,8 @@ void LoadDolphinIfNeeded()
  * we've seen a COMMIT or ABORT command; when we are in abort state, other
  * commands are not processed any further than the raw parse stage.
  */
-List* pg_parse_query(const char* query_string, List** query_string_locationlist)
+List* pg_parse_query(const char* query_string, List** query_string_locationlist,
+                     List* (*parser_hook)(const char*, List**))
 {
     List* raw_parsetree_list = NULL;
     PGSTAT_INIT_TIME_RECORD();
@@ -885,15 +886,17 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist)
 
     PGSTAT_START_TIME_RECORD();
 
-    List* (*parser_hook)(const char*, List**) = raw_parser;
+    if (parser_hook == NULL) {
+        parser_hook = raw_parser;
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
-        int id = GetCustomParserId();
-        if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
-            parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
+        if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
+            int id = GetCustomParserId();
+            if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
+                parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
+            }
         }
-    }
 #endif
+    }
     raw_parsetree_list = parser_hook(query_string, query_string_locationlist);
 
     PGSTAT_END_TIME_RECORD(PARSE_TIME);
