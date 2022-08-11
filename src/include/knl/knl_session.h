@@ -2640,6 +2640,7 @@ typedef struct knl_u_hook_context {
     void *analyzerRoutineHook;
     void *transformStmtHook;
     void *execInitExprHook;
+    void *computeHashHook;
 } knl_u_hook_context;
 
 typedef struct knl_session_context {
