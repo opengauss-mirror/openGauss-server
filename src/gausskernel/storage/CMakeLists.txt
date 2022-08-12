@@ -13,6 +13,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/replication
     ${CMAKE_CURRENT_SOURCE_DIR}/sync
     ${CMAKE_CURRENT_SOURCE_DIR}/dfs
+    ${CMAKE_CURRENT_SOURCE_DIR}/nvm
     ${CMAKE_CURRENT_SOURCE_DIR}/file
     ${CMAKE_CURRENT_SOURCE_DIR}/freespace
     ${CMAKE_CURRENT_SOURCE_DIR}/ipc
@@ -42,6 +43,7 @@ add_subdirectory(cstore)
 add_subdirectory(replication)
 add_subdirectory(sync)
 add_subdirectory(dfs)
+add_subdirectory(nvm)
 add_subdirectory(file)
 add_subdirectory(freespace)
 add_subdirectory(ipc)

@@ -22,13 +22,18 @@
 #include "utils/relcache.h"
 #include "postmaster/pagerepair.h"
 
+/* [ dram buffer | nvm buffer | segment buffer] */
+#define NVM_BUFFER_NUM (g_instance.attr.attr_storage.NNvmBuffers)
 #define SEGMENT_BUFFER_NUM (g_instance.attr.attr_storage.NSegBuffers) // 1GB
-#define SegmentBufferStartID (g_instance.attr.attr_storage.NBuffers)
-#define NORMAL_SHARED_BUFFER_NUM (SegmentBufferStartID)
-#define TOTAL_BUFFER_NUM (SEGMENT_BUFFER_NUM + NORMAL_SHARED_BUFFER_NUM)
-#define BufferIdOfSegmentBuffer(id)  ((id) + SegmentBufferStartID)
+#define NvmBufferStartID (g_instance.attr.attr_storage.NBuffers)
+#define SegmentBufferStartID (g_instance.attr.attr_storage.NBuffers + g_instance.attr.attr_storage.NNvmBuffers)
+#define NORMAL_SHARED_BUFFER_NUM (NvmBufferStartID)
+#define TOTAL_BUFFER_NUM (SEGMENT_BUFFER_NUM + NORMAL_SHARED_BUFFER_NUM + NVM_BUFFER_NUM)
+#define BufferIdOfSegmentBuffer(id) ((id) + SegmentBufferStartID)
+#define BufferIdOfNvmBuffer(id) ((id) + NvmBufferStartID)
 #define IsSegmentBufferID(id) ((id) >= SegmentBufferStartID)
-#define SharedBufferNumber (SegmentBufferStartID)
+#define IsNvmBufferID(id) ((id) >= NvmBufferStartID && (id) < SegmentBufferStartID)
+#define IsNormalBufferID(id) ((id) >= 0 && (id) < NvmBufferStartID)
 
 #define USE_CKPT_THREAD_SYNC (!g_instance.attr.attr_storage.enableIncrementalCheckpoint ||  \
                                IsBootstrapProcessingMode() ||                               \
@@ -181,6 +186,8 @@ struct WritebackContext;
  */
 #define BufferGetBlock(buffer)                                                           \
         (BufferIsLocal(buffer) ? u_sess->storage_cxt.LocalBufferBlockPointers[-(buffer)-1] \
+                              : IsNvmBufferID((buffer-1)) ? (Block)(t_thrd.storage_cxt.NvmBufferBlocks + ((Size)((uint)(buffer)-1-NvmBufferStartID)) * BLCKSZ) \
+                              : IsSegmentBufferID(buffer-1) ? (Block)(t_thrd.storage_cxt.BufferBlocks + ((Size)((uint)(buffer)-NVM_BUFFER_NUM-1)) * BLCKSZ) \
                               : (Block)(t_thrd.storage_cxt.BufferBlocks + ((Size)((uint)(buffer)-1)) * BLCKSZ))
 
 #define ADDR_IN_LOCAL_BUFFER_CONTENT(block)                                                     \
@@ -194,6 +201,11 @@ struct WritebackContext;
         (static_cast<const char *>(block) >= static_cast<const char *>(BufferGetBlock(1)) \
             && static_cast<const char *>(block) <= static_cast<const char *>(BufferGetBlock(TOTAL_BUFFER_NUM))))
 
+#define ADDR_IN_NVM_BUFFER_CONTENT(block) \
+    ( NVM_BUFFER_NUM > 0 && \
+        (static_cast<const char *>(block) >= static_cast<const char *>(BufferGetBlock(NvmBufferStartID + 1)) \
+            && static_cast<const char *>(block) <= static_cast<const char *>(BufferGetBlock(SegmentBufferStartID))))
+
 static inline Buffer BlockGetBuffer(const char *block)
 {
     if (ADDR_IN_LOCAL_BUFFER_CONTENT(block)) {
@@ -201,7 +213,15 @@ static inline Buffer BlockGetBuffer(const char *block)
     }
 
     if (ADDR_IN_SHARED_BUFFER_CONTENT(block)) {
-        return 1 + ((block - (const char*)BufferGetBlock(1))/BLCKSZ);
+        Buffer buffer = 1 + ((block - (const char*)BufferGetBlock(1))/BLCKSZ);
+        if (buffer > NvmBufferStartID) {
+            buffer += NVM_BUFFER_NUM;
+        }
+        return buffer;
+    }
+
+    if (ADDR_IN_NVM_BUFFER_CONTENT(block)) {
+        return 1 + ((block - (const char*)BufferGetBlock(NvmBufferStartID + 1))/BLCKSZ) + NvmBufferStartID;
     }
 
     return InvalidBuffer;
@@ -227,7 +247,10 @@ static inline Buffer BlockGetBuffer(const char *block)
 #define BufferGetPage(buffer) ((Page)BufferGetBlock(buffer))
 
 /* Note: these two macros only work on shared buffers, not local ones! */
-#define BufHdrGetBlock(bufHdr) ((Block)(t_thrd.storage_cxt.BufferBlocks + ((Size)(uint32)(bufHdr)->buf_id) * BLCKSZ))
+#define BufHdrGetBlock(bufHdr)                                                           \
+        (IsNvmBufferID((bufHdr)->buf_id) ? ((Block)(t_thrd.storage_cxt.NvmBufferBlocks + ((Size)(uint32)(bufHdr)->buf_id - NvmBufferStartID) * BLCKSZ)) \
+                              : IsSegmentBufferID((bufHdr)->buf_id) ? ((Block)(t_thrd.storage_cxt.BufferBlocks + ((Size)(uint32)(bufHdr)->buf_id - NVM_BUFFER_NUM) * BLCKSZ)) \
+                                                         : ((Block)(t_thrd.storage_cxt.BufferBlocks + ((Size)(uint32)(bufHdr)->buf_id) * BLCKSZ)))
 #define BufferGetLSN(bufHdr) (PageGetLSN(BufHdrGetBlock(bufHdr)))
 
 /* Note: this macro only works on local buffers, not shared ones! */
@@ -260,7 +283,14 @@ extern void UnlockReleaseBuffer(Buffer buffer);
 extern void MarkBufferDirty(Buffer buffer);
 extern void IncrBufferRefCount(Buffer buffer);
 extern Buffer ReleaseAndReadBuffer(Buffer buffer, Relation relation, BlockNumber blockNum);
+void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLock);
+#ifdef USE_ASSERT_CHECKING
+void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags);
+#endif
+uint32 WaitBufHdrUnlocked(BufferDesc* buf);
+void WaitIO(BufferDesc *buf);
 void InvalidateBuffer(BufferDesc *buf);
+void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock);
 
 extern void InitBufferPool(void);
 extern void InitBufferPoolAccess(void);
