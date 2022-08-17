@@ -7002,46 +7002,46 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         }
 
         case T_CreatePublicationStmt:
-#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("openGauss does not support PUBLICATION yet"),
+                    errmsg("PUBLICATION is not currently supported"),
                     errdetail("The feature is not currently supported")));
 #endif
             CreatePublication((CreatePublicationStmt *) parse_tree);
             break;
         case T_AlterPublicationStmt:
-#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("openGauss does not support PUBLICATION yet"),
+                    errmsg("PUBLICATION is not currently supported"),
                     errdetail("The feature is not currently supported")));
 #endif
             AlterPublication((AlterPublicationStmt *) parse_tree);
             break;
         case T_CreateSubscriptionStmt:
-#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("openGauss does not support SUBSCRIPTION yet"),
+                    errmsg("SUBSCRIPTION is not currently supported"),
                     errdetail("The feature is not currently supported")));
 #endif
             CreateSubscription((CreateSubscriptionStmt *) parse_tree, is_top_level);
             break;
         case T_AlterSubscriptionStmt:
-#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("openGauss does not support SUBSCRIPTION yet"),
+                    errmsg("SUBSCRIPTION is not currently supported"),
                     errdetail("The feature is not currently supported")));
 #endif
             AlterSubscription((AlterSubscriptionStmt *) parse_tree, is_top_level);
             break;
         case T_DropSubscriptionStmt:
-#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_LITE_MODE)
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("openGauss does not support SUBSCRIPTION yet"),
+                    errmsg("SUBSCRIPTION is not currently supported"),
                     errdetail("The feature is not currently supported")));
 #endif
             DropSubscription((DropSubscriptionStmt *) parse_tree, is_top_level);
