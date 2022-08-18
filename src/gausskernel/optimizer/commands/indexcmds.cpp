@@ -4441,6 +4441,10 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
                 CommandCounterIncrement();
             }
 
+            // call the internal function, if index is unusable, set it usable
+            ATExecSetIndexUsableState(IndexRelationId, oldIndexId, true);
+            CacheInvalidateRelcacheByRelid(heapId);
+
             /* 
              * swap index id for drop new partitioned index, because this new partitioned 
              * index has old index partitions.
