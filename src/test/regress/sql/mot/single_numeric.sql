@@ -13,6 +13,7 @@ CREATE FOREIGN TABLE num_exp_sqrt (id int4 not null, expected numeric(210,10)) S
 CREATE FOREIGN TABLE num_exp_ln (id int4 not null, expected numeric(210,10)) SERVER mot_server ;
 CREATE FOREIGN TABLE num_exp_log10 (id int4 not null, expected numeric(210,10)) SERVER mot_server ;
 CREATE FOREIGN TABLE num_exp_power_10_ln (id int4 not null, expected numeric(210,10)) SERVER mot_server ;
+CREATE FOREIGN TABLE num_exp_sign (id int4 not null, expected numeric(210,10)) SERVER mot_server ;
 
 CREATE FOREIGN TABLE num_result (id1 int4, id2 int4, result numeric(210,10)) SERVER mot_server ;
 
@@ -473,6 +474,18 @@ INSERT INTO num_exp_power_10_ln VALUES (8,'167361463828.07491320069016125952');
 INSERT INTO num_exp_power_10_ln VALUES (9,'107511333880052007.04141124673540337457');
 COMMIT TRANSACTION;
 START TRANSACTION;
+INSERT INTO num_exp_sign VALUES (0,'0');
+INSERT INTO num_exp_sign VALUES (1,'0');
+INSERT INTO num_exp_sign VALUES (2,'-1');
+INSERT INTO num_exp_sign VALUES (3,'1');
+INSERT INTO num_exp_sign VALUES (4,'1');
+INSERT INTO num_exp_sign VALUES (5,'1');
+INSERT INTO num_exp_sign VALUES (6,'1');
+INSERT INTO num_exp_sign VALUES (7,'-1');
+INSERT INTO num_exp_sign VALUES (8,'1');
+INSERT INTO num_exp_sign VALUES (9,'-1');
+COMMIT TRANSACTION;
+START TRANSACTION;
 INSERT INTO num_data VALUES (0, '0');
 INSERT INTO num_data VALUES (1, '0');
 INSERT INTO num_data VALUES (2, '-34338492.215397047');
@@ -497,6 +510,7 @@ CREATE UNIQUE INDEX num_exp_sqrt_idx ON num_exp_sqrt (id);
 CREATE UNIQUE INDEX num_exp_ln_idx ON num_exp_ln (id);
 CREATE UNIQUE INDEX num_exp_log10_idx ON num_exp_log10 (id);
 CREATE UNIQUE INDEX num_exp_power_10_ln_idx ON num_exp_power_10_ln (id);
+CREATE UNIQUE INDEX num_exp_sign_idx ON num_exp_sign (id);
 
 VACUUM ANALYZE num_exp_add;
 VACUUM ANALYZE num_exp_sub;
@@ -506,6 +520,7 @@ VACUUM ANALYZE num_exp_sqrt;
 VACUUM ANALYZE num_exp_ln;
 VACUUM ANALYZE num_exp_log10;
 VACUUM ANALYZE num_exp_power_10_ln;
+VACUUM ANALYZE num_exp_sign;
 
 -- ******************************
 -- * Now check the behaviour of the NUMERIC type
@@ -633,6 +648,17 @@ INSERT INTO num_result SELECT id, 0, POWER(numeric '10', LN(ABS(round(val,200)))
     WHERE val != '0.0';
 SELECT t1.id1, t1.result, t2.expected
     FROM num_result t1, num_exp_power_10_ln t2
+    WHERE t1.id1 = t2.id
+    AND t1.result != t2.expected;
+
+-- ******************************
+-- * SIGN(value) check
+-- ******************************
+DELETE FROM num_result;
+INSERT INTO num_result SELECT id, 0, SIGN(val)
+    FROM num_data;
+SELECT t1.id1, t1.result, t2.expected
+    FROM num_result t1, num_exp_sign t2
     WHERE t1.id1 = t2.id
     AND t1.result != t2.expected;
 
