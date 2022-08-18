@@ -716,9 +716,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     /* get cast owner and make sure current user is cast owner when execute cast-func */
     GetUserIdAndSecContext(&old_user, &save_sec_context);
     cast_owner = u_sess->exec_cxt.cast_owner;
-    if (InvalidCastOwnerId == cast_owner || !OidIsValid(cast_owner)) {
-        ereport(LOG, (errmsg("old system table pg_cast does not have castowner column, use old default permission")));
-    } else {
+    if (cast_owner != InvalidCastOwnerId && OidIsValid(cast_owner)) {
         SetUserIdAndSecContext(cast_owner, save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
         has_switch = true;
     }
