@@ -570,7 +570,9 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_SkewRelInfo, "SkewRelInfo"},
     {T_SkewColumnInfo, "SkewColumnInfo"},
     {T_SkewValueInfo, "SkewValueInfo"},
-    {T_QualSkewInfo, "QualSkewInfo"}};
+    {T_QualSkewInfo, "QualSkewInfo"},
+    {T_AdvanceCatalogXminCmd, "AdvanceCatalogXminCmd"}
+};
 
 char* nodeTagToString(NodeTag tag)
 {

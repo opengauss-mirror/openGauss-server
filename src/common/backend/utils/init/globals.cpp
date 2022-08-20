@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92301;
+const uint32 GRAND_VERSION_NUM = 92302;
 
 const uint32 MATVIEW_VERSION_NUM = 92213;
 const uint32 PARTIALPUSH_VERSION_NUM = 92087;
@@ -80,6 +80,8 @@ const uint32 FIX_SQL_ADD_RELATION_REF_COUNT = 92291;
 const uint32 STANDBY_ARCHIVING_VERSION_NUM = 92300;
 /* VERY IMPORTANT! This must be the last version num in branch 2.0.x of openGauss! */
 const uint32 STANDBY_STMTHIST_VERSION_NUM = 92301;
+
+const uint32 ADVANCE_CATALOG_XMIN_OLD_VERSION_NUM = 92302;
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;
 

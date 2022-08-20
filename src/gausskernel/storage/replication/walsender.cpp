@@ -1458,11 +1458,17 @@ static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd)
 
     /* Advance the restart_lsn in primary. */
     volatile ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
-    SpinLockAcquire(&slot->mutex);
-    slot->data.restart_lsn = cmd->restart_lsn;
-    SpinLockRelease(&slot->mutex);
+    if (XLByteLT(slot->data.restart_lsn, cmd->restart_lsn)) {
+        SpinLockAcquire(&slot->mutex);
+        slot->data.restart_lsn = cmd->restart_lsn;
+        SpinLockRelease(&slot->mutex);
+ 
+        /* After restart_lsn is updated, the replication slot is saved on disk again */
+        ReplicationSlotMarkDirty();
+        ReplicationSlotSave();
+        ReplicationSlotsComputeRequiredLSN(NULL);
+    }
 
-    ReplicationSlotMarkDirty();
     log_slot_advance(&t_thrd.slot_cxt.MyReplicationSlot->data);
 
     if (log_min_messages <= DEBUG2) {
@@ -1519,6 +1525,90 @@ static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd)
     ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.wal_sender_timeout);
     /* ReadyForQuery did pq_flush_if_available for us */
 
+    ReplicationSlotRelease();
+}
+
+static void AdvanceCatalogXmin(AdvanceCatalogXminCmd *cmd)
+{
+    StringInfoData buf;
+    char catalogXmin[MAXFNAMELEN];
+    int rc = 0;
+ 
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                        errmsg("couldn't advance in recovery")));
+    }
+ 
+    Assert(!t_thrd.slot_cxt.MyReplicationSlot);
+ 
+    /* Acquire the slot so we "own" it */
+    ReplicationSlotAcquire(cmd->slotname, false);
+ 
+    Assert(OidIsValid(t_thrd.slot_cxt.MyReplicationSlot->data.database));
+ 
+    /* Advance the catalog_xmin in primary. */
+    volatile ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
+    if (TransactionIdPrecedes(slot->data.catalog_xmin, cmd->catalogXmin)) {
+        SpinLockAcquire(&slot->mutex);
+        slot->candidate_catalog_xmin = InvalidTransactionId;
+        slot->data.catalog_xmin = cmd->catalogXmin;
+        SpinLockRelease(&slot->mutex);
+ 
+        /* After catalog_xmin is updated, the replication slot is saved on disk again */
+        ReplicationSlotMarkDirty();
+        ReplicationSlotSave();
+ 
+        /* Only after catalog_xmin is saved on disk, we can let the global value advance */
+        SpinLockAcquire(&slot->mutex);
+        slot->effective_catalog_xmin = slot->data.catalog_xmin;
+        SpinLockRelease(&slot->mutex);
+        ReplicationSlotsComputeRequiredXmin(false);
+        log_slot_advance(&t_thrd.slot_cxt.MyReplicationSlot->data);
+    }
+    rc = snprintf_s(catalogXmin, sizeof(catalogXmin), sizeof(catalogXmin) - 1,
+                    "%X/%X", (uint32)(cmd->catalogXmin >> 32), (uint32)cmd->catalogXmin);
+    securec_check_ss(rc, "\0", "\0");
+ 
+    pq_beginmessage(&buf, 'T');
+    pq_sendint16(&buf, 2); /* 2 field */
+ 
+    /* first field: slot name */
+    pq_sendstring(&buf, "slot_name"); /* col name */
+    pq_sendint32(&buf, 0);            /* table oid */
+    pq_sendint16(&buf, 0);            /* attnum */
+    pq_sendint32(&buf, TEXTOID);      /* type oid */
+    pq_sendint16(&buf, UINT16_MAX);   /* typlen */
+    pq_sendint32(&buf, 0);            /* typmod */
+    pq_sendint16(&buf, 0);            /* format code */
+ 
+    /* second field: catalog_xmin */
+    pq_sendstring(&buf, "catalog_xmin"); /* col name */
+    pq_sendint32(&buf, 0);               /* table oid */
+    pq_sendint16(&buf, 0);               /* attnum */
+    pq_sendint32(&buf, TEXTOID);         /* type oid */
+    pq_sendint16(&buf, UINT16_MAX);      /* typlen */
+    pq_sendint32(&buf, 0);               /* typmod */
+    pq_sendint16(&buf, 0);               /* format code */
+    pq_endmessage_noblock(&buf);
+ 
+    /* Send a DataRow message */
+    pq_beginmessage(&buf, 'D');
+    pq_sendint16(&buf, 2); /* # of columns */
+ 
+    /* slot_name */
+    pq_sendint32(&buf, strlen(cmd->slotname)); /* col1 len */
+    pq_sendbytes(&buf, cmd->slotname, strlen(cmd->slotname));
+ 
+    /* catalog_xmin */
+    pq_sendint32(&buf, strlen(catalogXmin)); /* col2 len */
+    pq_sendbytes(&buf, catalogXmin, strlen(catalogXmin));
+    pq_endmessage_noblock(&buf);
+ 
+    /* Send CommandComplete and ReadyForQuery messages */
+    EndCommand_noblock("SELECT", DestRemote);
+    ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.wal_sender_timeout);
+    /* ReadyForQuery did pq_flush_if_available for us */
+ 
     ReplicationSlotRelease();
 }
 
@@ -1847,6 +1937,13 @@ static bool cmdStringLengthCheck(const char* cmd_string)
 
 static void IdentifyCommand(Node* cmd_node, ReplicationCxt* repCxt, const char *cmd_string){
     switch (cmd_node->type) {
+        case T_AdvanceCatalogXminCmd: {
+            AdvanceCatalogXminCmd *cmd = (AdvanceCatalogXminCmd *)cmd_node;
+            AdvanceCatalogXmin(cmd);
+            repCxt->messageReceiveNoTimeout = true;
+            break;
+        }
+
         case T_IdentifySystemCmd:
             IdentifySystem();
             break;
@@ -2279,6 +2376,7 @@ static void AdvanceReplicationSlot(XLogRecPtr flush)
 
                 /* Notify the primary to advance logical slot location */
                 NotifyPrimaryAdvance(t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn, flush);
+                NotifyPrimaryCatalogXmin(t_thrd.slot_cxt.MyReplicationSlot->data.catalog_xmin);
             }
         } else {
             PhysicalConfirmReceivedLocation(flush);

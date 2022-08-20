@@ -1565,6 +1565,10 @@ loop:
         rc = memcpy_s(&slot->data, sizeof(ReplicationSlotPersistentData), &cp.slotdata,
                       sizeof(ReplicationSlotPersistentData));
         securec_check(rc, "\0", "\0");
+        /* reset physical slot catalog xmin to invalid transaction id */
+        if (slot->data.database == InvalidOid) {
+            slot->data.catalog_xmin = InvalidTransactionId;
+        }
 
         /* initialize in memory state */
         slot->effective_xmin = slot->data.xmin;
