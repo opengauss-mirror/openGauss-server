@@ -710,3 +710,16 @@ bool var_from_sublink_pulluped(Query *parse, Var *var)
 
     return tbl->sublink_pull_up;
 }
+
+/*
+ * Check if var comes from subquery pulled up
+ *  @in parse: the parse tree contained the vars.
+ *  @in var: the vars need be checked.
+ */
+bool var_from_subquery_pulluped(Query *parse, Var *var)
+{
+    Index varno = var->varno;
+    RangeTblEntry *tbl = rt_fetch((int)varno, parse->rtable);
+
+    return tbl->pulled_from_subquery;
+}

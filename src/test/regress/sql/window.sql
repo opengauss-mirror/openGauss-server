@@ -346,3 +346,18 @@ CREATE FUNCTION nth_value_def(val anyelement, n integer = 1) RETURNS anyelement
 SELECT nth_value_def(ten) OVER (PARTITION BY four order by unique1) as No1, *
   FROM (SELECT * FROM tenk1 WHERE unique2 < 10 ORDER BY four, ten) s order by No1;
 
+drop table bmsql_item;
+create table bmsql_item ( i_price numeric(5,2),i_data varchar(50));
+insert into bmsql_item values('1.0',1);
+select
+    first_value(avg(alias7.alias4)) over (order by 1) alias12,
+    length(alias7.alias5) alias14
+from (select
+            bmsql_item.i_price alias4,
+            cast(bmsql_item.i_data as varchar(100))as alias5
+        from
+            bmsql_item
+    ) alias7
+group by
+    alias7.alias5;
+drop table bmsql_item;

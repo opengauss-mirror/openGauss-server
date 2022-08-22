@@ -1403,3 +1403,23 @@ SELECT nth_value_def(ten) OVER (PARTITION BY four order by unique1) as No1, *
    1 |    6701 |       7 |   1 |    1 |   1 |      1 |       1 |      701 |         701 |      1701 |     6701 |   2 |    3 | TXAAAA   | HAAAAA   | VVVVxx
 (10 rows)
 
+drop table bmsql_item;
+create table bmsql_item ( i_price numeric(5,2),i_data varchar(50));
+insert into bmsql_item values('1.0',1);
+select
+    first_value(avg(alias7.alias4)) over (order by 1) alias12,
+    length(alias7.alias5) alias14
+from (select
+            bmsql_item.i_price alias4,
+            cast(bmsql_item.i_data as varchar(100))as alias5
+        from
+            bmsql_item
+    ) alias7
+group by
+    alias7.alias5;
+        alias12         | alias14 
+------------------------+---------
+ 1.00000000000000000000 |       1 
+(1 row)
+
+drop table bmsql_item;
