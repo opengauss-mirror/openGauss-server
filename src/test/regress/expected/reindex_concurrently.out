@@ -221,6 +221,41 @@ Indexes:
     "concur_reindex_ind5" UNIQUE, btree (c1) TABLESPACE pg_default
 
 DROP TABLE concur_reindex_tab4;
+-- Check handling of unusable indexes
+CREATE TABLE concur_reindex_tab5 (c1 int);
+CREATE INDEX concur_reindex_ind6 ON concur_reindex_tab5(c1);
+-- Set concur_reindex_ind6 unusable
+ALTER INDEX concur_reindex_ind6 UNUSABLE;
+\d concur_reindex_tab5
+Table "public.concur_reindex_tab5"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+Indexes:
+    "concur_reindex_ind6" btree (c1) TABLESPACE pg_default UNUSABLE
+
+-- The unusable index is not processed when running REINDEX TABLE.
+REINDEX TABLE CONCURRENTLY concur_reindex_tab5;
+NOTICE:  table "concur_reindex_tab5" has no indexes
+\d concur_reindex_tab5
+Table "public.concur_reindex_tab5"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+Indexes:
+    "concur_reindex_ind6" btree (c1) TABLESPACE pg_default UNUSABLE
+
+-- But it is fixes with REINDEX INDEX
+REINDEX INDEX CONCURRENTLY concur_reindex_ind6;
+\d concur_reindex_tab5
+Table "public.concur_reindex_tab5"
+ Column |  Type   | Modifiers 
+--------+---------+-----------
+ c1     | integer | 
+Indexes:
+    "concur_reindex_ind6" btree (c1) TABLESPACE pg_default
+
+DROP TABLE concur_reindex_tab5;
 -- Check handling of indexes with expressions and predicates.  The
 -- definitions of the rebuilt indexes should match the original
 -- definitions.
