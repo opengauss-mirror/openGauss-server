@@ -5093,6 +5093,11 @@ static int exec_stmt_raise(PLpgSQL_execstate* estate, PLpgSQL_stmt_raise* stmt)
                     extval = "<NULL>";
                 } else {
                     extval = convert_value_to_string(estate, paramvalue, paramtypeid);
+                    char *p = pg_server_to_client(extval, strlen(extval));
+                    if (p != extval) {
+                        pfree(extval);
+                        extval = p;
+                    }
                 }
                 appendStringInfoString(&ds, extval);
                 current_param = lnext(current_param);
