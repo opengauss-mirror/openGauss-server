@@ -1290,6 +1290,21 @@ static void AddWithClauseToBranch(ParseState *pstate, SelectStmt *stmt, List *re
     return;
 }
 
+static bool count_columnref_walker(Node *node, int *columnref_count)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (!IsA(node, ColumnRef)) {
+        return raw_expression_tree_walker(node, (bool (*)()) count_columnref_walker, (void*)columnref_count);
+    }
+
+    *columnref_count = *columnref_count + 1;
+
+    return false;
+}
+
 static bool walker_to_exclude_non_join_quals(Node *node, Node *context_node)
 {
     if (node == NULL) {
@@ -1301,17 +1316,22 @@ static bool walker_to_exclude_non_join_quals(Node *node, Node *context_node)
     }
 
     A_Expr* expr = (A_Expr*) node;
+    if (expr->kind != AEXPR_OP) {
+        return raw_expression_tree_walker(node, (bool (*)()) walker_to_exclude_non_join_quals, (void*)NULL);
+    }
     /*
      * this is to achieve consistent result sets with those produced by the original
      * start with .. connect by syntax, which does not push filter quals down to connect quals.
-     * if non-column item appears on any side of an operator, we guess that it is
+     * if no more than one column item appears inside an AEXPR_OP, we guess that it is
      * not a join qual so should not be filtered in sw op, and force it to be true.
      * this rule is not always correct but should work fine most of the time.
      * could be improved later on, e.g. find better ways to extract non-join quals
      * from the where clause.
      */
-    if (expr->kind == AEXPR_OP &&
-        (!IsA(expr->lexpr, ColumnRef) || !IsA(expr->rexpr, ColumnRef))) {
+    int columnref_count = 0;
+    raw_expression_tree_walker(node, (bool (*)()) count_columnref_walker, (void*)&columnref_count);
+ 
+    if (columnref_count < 2) {
         expr->lexpr = makeBoolAConst(true, -1);
         expr->rexpr = makeBoolAConst(true, -1);
         expr->kind = AEXPR_OR;
