@@ -916,6 +916,273 @@ SELECT * FROM view_schema.new_view3;
 
 RESET ROLE;
 \c regression
+-- test label:loop
+--error
+create or replace procedure doiterate(p1 int)
+as
+begin
+label1: loop
+p1 := p1+1;
+if p1 < 10 then
+iterate label1;
+end if;
+leave label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+ERROR:  'label:' is only supported in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "doiterate" near line 1
+--error
+create or replace procedure doiterate(p1 int)
+as
+begin
+<<label1>> loop
+p1 := p1+1;
+if p1 < 10 then
+iterate label1;
+end if;
+leave label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+ERROR:  'ITERATE label' is only in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "doiterate" near line 4
+--error
+create or replace procedure doiterate(p1 int)
+as
+begin
+<<label1>> loop
+p1 := p1+1;
+if p1 < 10 then
+continue label1;
+end if;
+leave label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+ERROR:  'LEAVE label' is only in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "doiterate" near line 5
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+<<label1>> loop
+p1 := p1+1;
+if p1 < 10 then
+continue label1;
+end if;
+exit label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+call doiterate(3);
+NOTICE:  p1:10
+ doiterate 
+-----------
+ 
+(1 row)
+
+drop procedure if exists doiterate;
+\c b
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+label1   :
+loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit;
+end loop label1;
+end;
+/
+call doiterate(2);
+NOTICE:  123
+ doiterate 
+-----------
+ 
+(1 row)
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+LABEL1:
+loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit LABEL1;
+end loop LABEL1;
+end;
+/
+call doiterate(2);
+NOTICE:  123
+ doiterate 
+-----------
+ 
+(1 row)
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+LAbEL1:
+loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit LABeL1;
+end loop LaBEL1;
+end;
+/
+call doiterate(2);
+NOTICE:  123
+ doiterate 
+-----------
+ 
+(1 row)
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+label1: loop
+p1 := p1+1;
+if p1 < 10 then
+iterate label1;
+end if;
+leave label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+call doiterate(3);
+NOTICE:  p1:10
+ doiterate 
+-----------
+ 
+(1 row)
+
+create or replace procedure doiterate(p1 int)
+as
+begin
+loop
+p1 := p1+1;
+if p1 < 10 then
+iterate;
+end if;
+leave;
+end loop;
+raise notice 'p1:%',p1;
+end;
+/
+call doiterate(3);
+NOTICE:  p1:10
+ doiterate 
+-----------
+ 
+(1 row)
+
+create or replace function labeltest(n int) return int
+as
+p int;
+i int;
+begin
+p :=2;
+label1:  loop
+if p < n then
+p := p+1;
+iterate label1;
+end if;
+leave label1;
+end loop label1;
+return p;
+end;
+/
+call labeltest(5);
+ labeltest 
+-----------
+         5
+(1 row)
+
+create or replace function labeltest(n int) return int
+as
+p int;
+i int;
+begin
+p :=2;
+LABEL1:  loop
+if p < n then
+p := p+1;
+iterate LABEL1;
+end if;
+leave LABEL1;
+end loop LABEL1;
+return p;
+end;
+/
+call labeltest(3);
+ labeltest 
+-----------
+         3
+(1 row)
+
+create or replace function labeltest(n int) return int
+as
+p int;
+i int;
+begin
+p :=2;
+lAbel1:  loop
+if p < n then
+p := p+1;
+iterate labEl1;
+end if;
+leave LAbel1;
+end loop labEL1;
+return p;
+end;
+/
+call labeltest(7);
+ labeltest 
+-----------
+         7
+(1 row)
+
+create or replace function labeltest(n int) return int
+as
+p int;
+i int;
+begin
+p :=2;
+loop
+if p < n then
+p := p+1;
+iterate;
+end if;
+leave;
+end loop;
+return p;
+end;
+/
+call labeltest(9);
+ labeltest 
+-----------
+         9
+(1 row)
+
+drop procedure if exists doiterate;
+drop function if exists labeltest;
+\c regression
 drop database b;
 DROP USER test_c;
 DROP USER test_d;

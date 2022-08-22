@@ -479,7 +479,9 @@ static bool need_build_row_for_func_arg(PLpgSQL_rec **rec, PLpgSQL_row **row, in
 %token <keyword>	K_INTERSECT
 %token <keyword>	K_INTO
 %token <keyword>	K_IS
+%token <keyword>        K_ITERATE
 %token <keyword>	K_LAST
+%token <keyword>        K_LEAVE
 %token <keyword>	K_LIMIT
 %token <keyword>	K_LOG
 %token <keyword>	K_LOOP
@@ -2731,6 +2733,31 @@ stmt_loop		: opt_block_label K_LOOP loop_body
                         /* register the stmt if it is labeled */
                         record_stmt_label($1, (PLpgSQL_stmt *)newp);
                     }
+                | ':' K_LOOP loop_body
+                    {
+                        /*
+                         * When the database is in mysql compatible mode
+                         * support "label: loop"
+                         */
+                        if(u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+                            yyerror("syntax error");
+
+                        PLpgSQL_stmt_loop  *newp;
+                        newp = (PLpgSQL_stmt_loop *)palloc0(sizeof(PLpgSQL_stmt_loop));
+                        newp->cmd_type = PLPGSQL_STMT_LOOP;
+                        newp->lineno   = plpgsql_location_to_lineno(@2);
+                        newp->label    = u_sess->plsql_cxt.curr_compile_context->ns_top->name;
+                        newp->body        = $3.stmts;
+                        newp->sqlString = plpgsql_get_curline_query();
+
+                        check_labels(u_sess->plsql_cxt.curr_compile_context->ns_top->name, $3.end_label, $3.end_label_location);
+                        plpgsql_ns_pop();
+
+                        $$ = (PLpgSQL_stmt *)newp;
+
+                        /* register the stmt if it is labeled */
+                        record_stmt_label(u_sess->plsql_cxt.curr_compile_context->ns_top->name, (PLpgSQL_stmt *)newp);
+                    }
                 ;
 
 stmt_while		: opt_block_label K_WHILE expr_until_loop loop_body
@@ -3530,6 +3557,30 @@ exit_type		: K_EXIT
                     }
                 | K_CONTINUE
                     {
+                        $$ = false;
+                    }
+                | K_LEAVE
+                    {
+                        /*
+                         * When the database is in mysql compatible mode
+                         * support "leave label"
+                         */
+                        if(u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+                             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                     errmsg("'LEAVE label' is only in database which dbcompatibility='B'.")));
+
+                        $$ = true;
+                    }
+                | K_ITERATE
+                    {
+                        /*
+                         * When the database is in mysql compatible mode
+                         * support "iterate label"
+                         */
+                        if(u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+                             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                     errmsg("'ITERATE label' is only in database which dbcompatibility='B'.")));
+
                         $$ = false;
                     }
                 ;
@@ -8473,7 +8524,7 @@ make_execsql_stmt(int firsttoken, int location)
     int					parenlevel = 0;
     List				*list_bracket = 0;		/* stack structure bracket tracker */
     List				*list_bracket_loc = 0;	/* location tracker */
-
+    bool                                label_loop = false;
     initStringInfo(&ds);
 
     /* special lookup mode for identifiers within the SQL text */
@@ -8584,6 +8635,55 @@ make_execsql_stmt(int firsttoken, int location)
             u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
             read_into_target(&rec, &row, &have_strict, have_bulk_collect);
             u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_EXPR;
+        }
+
+	/*
+	 * When the database is in mysql compatible mode, 
+	 * the loop syntax of mysql is compatible (label: loop)
+	 */
+        if (tok == ':' && prev_tok == T_WORD)
+        {
+            StringInfoData  lb;
+            initStringInfo(&lb);
+            int  lb_end = yylloc;
+            int  tok1 = yylex();
+            if(tok1 == K_LOOP)
+            {
+                if(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+                {
+                    int  count = 0;
+                    label_loop =  true;
+                    plpgsql_push_back_token(tok1);
+                    plpgsql_push_back_token(tok);
+                    plpgsql_append_source_text(&lb, location, lb_end);
+
+                    for(int i = lb.len-1; i > 0; i--)
+                    {
+                        if(lb.data[i] == ' ')
+                        {
+                            count++;
+                        }
+                        else
+                            break;
+                    }
+                    if(count > 0)
+                    {
+                        char*  name = (char*)palloc(lb.len-count+1);
+                        strncpy(name, lb.data, lb.len-count);
+                        name[lb.len-count] = '\0';
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(name));
+                        pfree(name);
+                    }
+                    else
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(lb.data));
+
+                    pfree_ext(lb.data);
+                    break;
+                }
+                else
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("'label:' is only supported in database which dbcompatibility='B'.")));
+            }
         }
 
         if (tok == T_CWORD && prev_tok!=K_SELECT 
@@ -8870,6 +8970,9 @@ make_execsql_stmt(int firsttoken, int location)
                 }
             }
         }
+    } else if (label_loop)
+    {
+        appendStringInfoString(&ds, "\n");
     } else {
         plpgsql_append_source_text(&ds, location, yylloc);
 
