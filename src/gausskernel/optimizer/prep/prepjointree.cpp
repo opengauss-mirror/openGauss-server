@@ -3369,8 +3369,9 @@ void reduce_inequality_fulljoins(PlannerInfo* root)
  */
 static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Node* jtnode)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     Assert(IS_STREAM_PLAN);
-
+#endif
     if (jtnode == NULL || IsA(jtnode, RangeTblRef)) {
         return jtnode; /* jtnode is returned unmodified */
     } else if (IsA(jtnode, FromExpr)) {

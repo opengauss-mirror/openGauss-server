@@ -1720,7 +1720,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     if (hasOuterJoins) {
         reduce_outer_joins(root);
         DEBUG_QRW("After outer-to-inner conversion");
-        if (IS_STREAM_PLAN) {
+#ifdef ENABLE_MULTIPLE_NODES
+        if (IS_STREAM_PLAN)
+#endif
+        {
             bool support_rewrite = true;
             if (!fulljoin_2_left_union_right_anti_support(root->parse))
                 support_rewrite = false;
