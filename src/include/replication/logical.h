@@ -196,6 +196,10 @@ typedef struct ParallelLogicalDecodingContext {
 
     bool random_mode;
     bool isParallel;
+    /*
+     * Buffer for updating write_location
+     */
+    StringInfo writeLocationBuffer;
 } ParallelLogicalDecodingContext;
 
 typedef struct ParallelDecodeWorker {

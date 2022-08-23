@@ -1297,26 +1297,37 @@ static void ParallelCheckPrepare(StringInfo out, logicalLog *change, ParallelDec
 /*
  * Parallel decoding check whether this batch should be sent.
  */
-static void ParallelCheckBatch(StringInfo out, ParallelDecodingData *pdata, int slotId,
+static void ParallelCheckBatch(ParallelLogicalDecodingContext *ctx, ParallelDecodingData *pdata, int slotId,
     MemoryContext *oldCtxPtr, bool emptyXact)
 {
     if (emptyXact) {
         MemoryContextSwitchTo(*oldCtxPtr);
         return;
     }
-    if (out->len > g_Logicaldispatcher[slotId].pOptions.sending_batch * g_batch_unit_length) {
+    if (ctx->out->len > g_Logicaldispatcher[slotId].pOptions.sending_batch * g_batch_unit_length) {
         if (pdata->pOptions.decode_style == 'b') {
-            appendStringInfoChar(out, 'F'); // the finishing char
+            appendStringInfoChar(ctx->out, 'F'); // the finishing char
         } else if (g_Logicaldispatcher[slotId].pOptions.sending_batch > 0) {
-            pq_sendint32(out, 0);
+            pq_sendint32(ctx->out, 0);
         }
         MemoryContextSwitchTo(*oldCtxPtr);
-        WalSndWriteDataHelper(out, 0, 0, false);
+        resetStringInfo(ctx->writeLocationBuffer);
+        if (XLogRecPtrIsValid(ctx->write_location)) {
+            pq_sendint64(ctx->writeLocationBuffer, ctx->write_location);
+            /* ctx->out->data[0] is msgtype 'w', skip it */
+            errno_t rc = memcpy_s(&(ctx->out->data[1]), sizeof(uint64), ctx->writeLocationBuffer->data, sizeof(uint64));
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(&(ctx->out->data[1 + sizeof(uint64)]), sizeof(uint64), ctx->writeLocationBuffer->data,
+                sizeof(uint64));
+            securec_check(rc, "\0", "\0");
+        }
+
+        WalSndWriteDataHelper(ctx->out, 0, 0, false);
         g_Logicaldispatcher[slotId].decodeTime = GetCurrentTimestamp();
         g_Logicaldispatcher[slotId].remainPatch = false;
     } else {
         if (pdata->pOptions.decode_style == 'b') {
-            appendStringInfoChar(out, 'P');
+            appendStringInfoChar(ctx->out, 'P');
         }
         g_Logicaldispatcher[slotId].remainPatch = true;
         MemoryContextSwitchTo(*oldCtxPtr);
@@ -1326,11 +1337,11 @@ static void ParallelCheckBatch(StringInfo out, ParallelDecodingData *pdata, int 
 /*
  * Parallel decoding deal with batch sending.
  */
-static inline void ParallelHandleBatch(StringInfo out, logicalLog *change, ParallelDecodingData *pdata, int slotId,
-    MemoryContext *oldCtxPtr)
+static inline void ParallelHandleBatch(ParallelLogicalDecodingContext *ctx, logicalLog *change,
+    ParallelDecodingData *pdata, int slotId, MemoryContext *oldCtxPtr)
 {
-    ParallelCheckBatch(out, pdata, slotId, oldCtxPtr, false);
-    ParallelCheckPrepare(out, change, pdata, slotId, oldCtxPtr);
+    ParallelCheckBatch(ctx, pdata, slotId, oldCtxPtr, false);
+    ParallelCheckPrepare(ctx->out, change, pdata, slotId, oldCtxPtr);
 }
 
 /*
@@ -1453,7 +1464,7 @@ void ParallelReorderBufferCommit(ParallelReorderBuffer *rb, logicalLog *change, 
 
     if (!pdata->pOptions.skip_empty_xacts) {
         ParallelOutputBegin(ctx->out, change, pdata, txn, g_Logicaldispatcher[slotId].pOptions.sending_batch > 0);
-        ParallelHandleBatch(ctx->out, change, pdata, slotId, &oldCtx);
+        ParallelHandleBatch(ctx, change, pdata, slotId, &oldCtx);
     }
 
     ParallelReorderBufferIterTXNState *volatile iterstate = NULL;
@@ -1464,20 +1475,26 @@ void ParallelReorderBufferCommit(ParallelReorderBuffer *rb, logicalLog *change, 
             stopDecode = true;
         }
         if (!stopDecode && logChange->out != NULL && logChange->out->len != 0) {
+            if (XLByteLT(ctx->write_location, logChange->lsn)) {
+                ctx->write_location = logChange->lsn;
+            }
             if (pdata->pOptions.skip_empty_xacts && !pdata->pOptions.xact_wrote_changes) {
                 ParallelOutputBegin(ctx->out, change, pdata, txn,
                     g_Logicaldispatcher[slotId].pOptions.sending_batch > 0);
-                ParallelHandleBatch(ctx->out, change, pdata, slotId, &oldCtx);
+                ParallelHandleBatch(ctx, change, pdata, slotId, &oldCtx);
                 pdata->pOptions.xact_wrote_changes = true;
             }
             appendBinaryStringInfo(ctx->out, logChange->out->data, logChange->out->len);
-            ParallelHandleBatch(ctx->out, change, pdata, slotId, &oldCtx);
+            ParallelHandleBatch(ctx, change, pdata, slotId, &oldCtx);
         }
         dlist_delete(&logChange->node);
 
         FreeLogicalLog(logChange, slotId);
     }
 
+    if (XLByteLT(ctx->write_location, change->lsn)) {
+        ctx->write_location = change->lsn;
+    }
     if (!pdata->pOptions.skip_empty_xacts || pdata->pOptions.xact_wrote_changes) {
         ParallelOutputCommit(ctx->out, change, pdata, txn,
             g_Logicaldispatcher[slotId].pOptions.sending_batch > 0);
@@ -1485,7 +1502,7 @@ void ParallelReorderBufferCommit(ParallelReorderBuffer *rb, logicalLog *change, 
     ParallelReorderBufferCleanupTXN(rb, txn);
     ParallelReorderBufferIterTXNFinish(iterstate, slotId);
 
-    ParallelCheckBatch(ctx->out, pdata, slotId, &oldCtx,
+    ParallelCheckBatch(ctx, pdata, slotId, &oldCtx,
         (pdata->pOptions.skip_empty_xacts && !pdata->pOptions.xact_wrote_changes));
     MemoryContextReset(pdata->context);
 }
