@@ -117,6 +117,10 @@ static void knl_u_attr_init(knl_session_attr* attr)
     attr->attr_common.client_min_messages = NOTICE;
     attr->attr_common.SessionTimeout = sessionDefaultTimeout;
     attr->attr_common.SessionTimeoutCount = 0;
+#ifndef ENABLE_MULTIPLE_NODES
+    attr->attr_common.IdleInTransactionSessionTimeout = 0;
+    attr->attr_common.IdleInTransactionSessionTimeoutCount = 0;
+#endif
     attr->attr_common.enable_full_encryption = false;
     attr->attr_storage.sync_method = DEFAULT_SYNC_METHOD;
     attr->attr_sql.under_explain = false;
@@ -1492,6 +1496,12 @@ knl_session_context* create_session_context(MemoryContext parent, uint64 id)
         * non-threadpool/fake session will direct call ReadCommand and enable alarm by sig timer
         * */
         (void)enable_session_sig_alarm(u_sess->attr.attr_common.SessionTimeout * secondToMilliSecond);
+#ifndef ENABLE_MULTIPLE_NODES
+        if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
+            (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock())) {
+            (void)enable_idle_in_transaction_session_sig_alarm(u_sess->attr.attr_common.IdleInTransactionSessionTimeout * 1000);
+        }
+#endif
     }
 
     // Switch to context group, in case knl_u_executor_init will alloc memory on CurrentMemoryContext.

@@ -60,6 +60,9 @@ public:
     void SigHupHandler();
     void HandlePoolerReload();
     void CheckSessionTimeout();
+#ifndef ENABLE_MULTIPLE_NODES
+    void CheckIdleInTransactionSessionTimeout();
+#endif
     void CheckPermissionForSendSignal(knl_session_context* sess, sig_atomic_t* lock);
     void getSessionMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, knl_sess_control** sess);
     void getSessionClientInfo(Tuplestorestate* tupStore, TupleDesc tupDesc);

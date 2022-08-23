@@ -84,6 +84,7 @@ max_connections = 200			# (change requires restart)
 
 #authentication_timeout = 1min		# 1s-600s
 session_timeout = 10min			# allowed duration of any unused session, 0s-86400s(1 day), 0 is disabled 
+#idle_in_transaction_session_timeout = 0    # Sets the maximum allowed idle time between queries, when in a transaction, 0 is disabled
 #ssl = off				# (change requires restart)
 #ssl_ciphers = 'ALL'			# allowed SSL ciphers
 					# (change requires restart)
