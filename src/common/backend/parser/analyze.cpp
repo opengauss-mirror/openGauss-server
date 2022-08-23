@@ -4681,7 +4681,7 @@ static void transformGroupConstToColumn(ParseState* pstate, Node* groupClause, L
                 }
 
                 long target_pos = intVal(val);
-                if (target_pos <= list_length(targetList)) {
+                if (target_pos > 0 && target_pos <= list_length(targetList)) {
                     TargetEntry* tle = (TargetEntry*)list_nth(targetList, target_pos - 1);
                     lfirst(lc) = copyObject(tle->expr);
 
