@@ -51,3 +51,52 @@ END AS is_type from t33
 )T6
 on T5.issue_type=T6.is_type
 ;
+
+-- full join with non-equal condition
+create table fulljointest(c1 int,c2 varchar2(20),c3 varchar2(20),c4 int);
+insert into fulljointest values(1,'li','adjani',100);
+insert into fulljointest values(2,'li','adjani',2000);
+insert into fulljointest values(3,'li','adjani',5000);
+
+set query_dop=1;
+
+explain(costs off) select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+join fulljointest t3 on case t3.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+order by 1,2,3,4;
+
+select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+join fulljointest t3 on case t3.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+order by 1,2,3,4;
+
+set query_dop=4;
+explain(costs off) select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+join fulljointest t3 on case t3.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+order by 1,2,3,4;
+
+select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+join fulljointest t3 on case t3.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+order by 1,2,3,4;

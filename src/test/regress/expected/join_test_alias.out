@@ -53,3 +53,108 @@ on T5.issue_type=T6.is_type
             | 首发
 (2 rows)
 
+-- full join with non-equal condition
+create table fulljointest(c1 int,c2 varchar2(20),c3 varchar2(20),c4 int);
+insert into fulljointest values(1,'li','adjani',100);
+insert into fulljointest values(2,'li','adjani',2000);
+insert into fulljointest values(3,'li','adjani',5000);
+set query_dop=1;
+explain(costs off) select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+join fulljointest t3 on case t3.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+order by 1,2,3,4;
+                                                                                                                                                       QUERY PLAN                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: t1.c1, t1.c2, t1.c3, t1.c4
+   ->  Nested Loop
+         ->  Result
+               ->  Append
+                     ->  Nested Loop Left Join
+                           ->  Seq Scan on fulljointest t1
+                           ->  Materialize
+                                 ->  Seq Scan on fulljointest t2
+                                       Filter: ((CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
+                     ->  Nested Loop Left Anti Full Join
+                           Join Filter: ((CASE t2.c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE t2.c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
+                           ->  Seq Scan on fulljointest t2
+                           ->  Materialize
+                                 ->  Seq Scan on fulljointest t1
+         ->  Materialize
+               ->  Seq Scan on fulljointest t3
+                     Filter: ((CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
+(18 rows)
+
+select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+join fulljointest t3 on case t3.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+order by 1,2,3,4;
+ c1 | c2 |   c3   |  c4  | c1 | c2 |   c3   |  c4  | c1 | c2 |   c3   |  c4  
+----+----+--------+------+----+----+--------+------+----+----+--------+------
+  1 | li | adjani |  100 |  3 | li | adjani | 5000 |  3 | li | adjani | 5000
+  2 | li | adjani | 2000 |  3 | li | adjani | 5000 |  3 | li | adjani | 5000
+  3 | li | adjani | 5000 |  3 | li | adjani | 5000 |  3 | li | adjani | 5000
+    |    |        |      |  1 | li | adjani |  100 |  3 | li | adjani | 5000
+    |    |        |      |  2 | li | adjani | 2000 |  3 | li | adjani | 5000
+(5 rows)
+
+set query_dop=4;
+explain(costs off) select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+join fulljointest t3 on case t3.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+order by 1,2,3,4;
+                                                                                                                                                       QUERY PLAN                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: t1.c1, t1.c2, t1.c3, t1.c4
+   ->  Nested Loop
+         ->  Result
+               ->  Append
+                     ->  Nested Loop Left Join
+                           ->  Seq Scan on fulljointest t1
+                           ->  Materialize
+                                 ->  Seq Scan on fulljointest t2
+                                       Filter: ((CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
+                     ->  Nested Loop Left Anti Full Join
+                           Join Filter: ((CASE t2.c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE t2.c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
+                           ->  Seq Scan on fulljointest t2
+                           ->  Materialize
+                                 ->  Seq Scan on fulljointest t1
+         ->  Materialize
+               ->  Seq Scan on fulljointest t3
+                     Filter: ((CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END >= 'high'::text) AND (CASE c4 WHEN 100 THEN 'low'::text WHEN 5000 THEN 'high'::text WHEN 2000 THEN 'medium'::text ELSE NULL::text END <= 'high'::text))
+(18 rows)
+
+select * from fulljointest t1 full join fulljointest t2 on case t2.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+join fulljointest t3 on case t3.c4 when 100 then 'low'
+when 5000 then 'high'
+when 2000 then 'medium'
+end between 'high' and 'high'
+order by 1,2,3,4;
+ c1 | c2 |   c3   |  c4  | c1 | c2 |   c3   |  c4  | c1 | c2 |   c3   |  c4  
+----+----+--------+------+----+----+--------+------+----+----+--------+------
+  1 | li | adjani |  100 |  3 | li | adjani | 5000 |  3 | li | adjani | 5000
+  2 | li | adjani | 2000 |  3 | li | adjani | 5000 |  3 | li | adjani | 5000
+  3 | li | adjani | 5000 |  3 | li | adjani | 5000 |  3 | li | adjani | 5000
+    |    |        |      |  1 | li | adjani |  100 |  3 | li | adjani | 5000
+    |    |        |      |  2 | li | adjani | 2000 |  3 | li | adjani | 5000
+(5 rows)
+
