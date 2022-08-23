@@ -225,4 +225,10 @@ drop rule if exists r1 on escapetest;
 drop table if exists test_statement;
 drop table if exists escapetest;
 
+-- unsupported rule
+create table t1 (id int, name varchar(10));
+create view v1 as select * from t1;
+create rule r1 as on update to v1 do also alter table t1 modify name varchar(20);
+drop table t1 cascade;
+
 drop schema schema_rule_test cascade;
