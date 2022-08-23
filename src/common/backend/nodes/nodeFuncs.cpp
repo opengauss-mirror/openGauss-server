@@ -68,6 +68,9 @@ Oid exprType(const Node* expr)
         case T_Const:
             type = ((const Const*)expr)->consttype;
             break;
+        case T_UserVar:
+            type = ((const Const*)(((UserVar*)expr)->value))->consttype;
+            break;
         case T_Param:
             type = ((const Param*)expr)->paramtype;
             break;
@@ -250,6 +253,8 @@ int32 exprTypmod(const Node* expr)
             return ((const Var*)expr)->vartypmod;
         case T_Const:
             return ((const Const*)expr)->consttypmod;
+        case T_UserVar:
+            return ((const Const*)(((UserVar*)expr)->value))->consttypmod;
         case T_Param:
             return ((const Param*)expr)->paramtypmod;
         case T_ArrayRef:
@@ -706,6 +711,9 @@ Oid exprCollation(const Node* expr)
         case T_NamedArgExpr:
             coll = exprCollation((Node*)((const NamedArgExpr*)expr)->arg);
             break;
+        case T_UserVar:
+            coll = ((const Const*)(((UserVar*)expr)->value))->constcollid;
+            break;
         case T_OpExpr:
             coll = ((const OpExpr*)expr)->opcollid;
             break;
@@ -908,6 +916,9 @@ void exprSetCollation(Node* expr, Oid collation)
             break;
         case T_Const:
             ((Const*)expr)->constcollid = collation;
+            break;
+        case T_UserVar:
+            ((Const*)(((UserVar*)expr)->value))->constcollid = collation;
             break;
         case T_Rownum:
             ((Rownum*)expr)->rownumcollid = collation;
@@ -1550,6 +1561,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Null:
         case T_PgFdwRemoteInfo:
         case T_Rownum:
+        case T_UserVar:
             /* primitive node types with no expression subnodes */
             break;
         case T_Aggref: {
@@ -2190,6 +2202,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             FLATCOPY(newnode, nexpr, NamedArgExpr, isCopy);
             MUTATE(newnode->arg, nexpr->arg, Expr*);
             return (Node*)newnode;
+        } break;
+        case T_UserVar: {
+            UserVar* oldnode = (UserVar *)node;
+            UserVar* newnode = NULL;
+
+            FLATCOPY(newnode, oldnode, UserVar, isCopy);
+            MUTATE(newnode->value, oldnode->value, Expr*);
+            return (Node *)newnode;
         } break;
         case T_OpExpr: {
             OpExpr* expr = (OpExpr*)node;

@@ -644,6 +644,8 @@ typedef struct knl_u_utils_context {
     syscalllock deleMemContextMutex;
 
     unsigned int sql_ignore_strategy_val;
+	
+    HTAB* set_user_params_htab;
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {

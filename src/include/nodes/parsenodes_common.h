@@ -525,7 +525,8 @@ typedef enum {
     VAR_SET_MULTI,   /* special case for SET TRANSACTION ... */
     VAR_SET_ROLEPWD, /* special case for SET ROLE PASSWORD... */
     VAR_RESET,       /* RESET var */
-    VAR_RESET_ALL    /* RESET ALL */
+    VAR_RESET_ALL,    /* RESET ALL */
+    VAR_SET_DEFINED   /* SET @var_name = expr and SET @var_name := expr */
 } VariableSetKind;
 
 typedef struct VariableSetStmt {
@@ -534,7 +535,20 @@ typedef struct VariableSetStmt {
     char *name;    /* variable to be set */
     List *args;    /* List of A_Const nodes */
     bool is_local; /* SET LOCAL? */
+    List *defined_args;   /* List of user_defined variable */
 } VariableSetStmt;
+
+typedef struct UserVar {
+    Expr xpr;
+    char* name;
+    Expr* value;    /* const */
+} UserVar;
+
+typedef struct UserSetElem {
+    Expr xpr;
+    List* name;    /* user_defined variable name list, UserVar*/
+    Expr* val;    /* user_defined variable value*/
+} UserSetElem;
 
 typedef struct AlterRoleSetStmt {
     NodeTag type;

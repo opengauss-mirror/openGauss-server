@@ -1152,6 +1152,13 @@ static List* pg_rewrite_query(Query* query)
             } else {
                 querytree_list = QueryRewriteCTAS(query);
             }
+        } else if (IsA(query->utilityStmt, PrepareStmt)) {
+            PrepareStmt *stmt = (PrepareStmt *)query->utilityStmt;
+            if (IsA(stmt->query, UserVar)) {
+                querytree_list = QueryRewritePrepareStmt(query);
+            } else {
+                querytree_list = list_make1(query);
+            }
         } else {
             querytree_list = list_make1(query);
         }
@@ -7289,6 +7296,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     if (!IsUnderPostmaster) {
         InitializeGUCOptions();
     }
+
+    /* set user-defined params */
+    init_set_user_params_htab();
 
     /*
      * Parse command-line options.

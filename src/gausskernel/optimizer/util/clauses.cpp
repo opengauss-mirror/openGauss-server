@@ -1324,6 +1324,7 @@ static bool contain_leaky_functions_walker(Node* node, void* context)
         case T_BooleanTest:
         case T_List:
         case T_HashFilter:
+        case T_UserVar:
 
             /*
              * We know these node types don't contain function calls; but
@@ -2342,6 +2343,24 @@ Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamListInfo
     context.active_fns = NIL; /* nothing being recursively simplified */
     context.case_val = NULL;  /* no CASE being examined */
     context.estimate = false; /* safe transformations only */
+    return eval_const_expressions_mutator(node, &context);
+}
+
+/*
+ * eval_const_expression_value
+ * only for set user_defined variables scenes.
+ * the difference between eval_const_expression_value and eval_const_expressions_params is
+ * that estimate is set to true.
+ */
+Node *eval_const_expression_value(PlannerInfo* root, Node* node, ParamListInfo boundParams)
+{
+    eval_const_expressions_context context;
+
+    context.boundParams = boundParams;
+    context.root = root;      /* for inlined-function dependencies */
+    context.active_fns = NIL; /* nothing being recursively simplified */
+    context.case_val = NULL;  /* no CASE being examined */
+    context.estimate = true; /* unsafe transformations OK */
     return eval_const_expressions_mutator(node, &context);
 }
 

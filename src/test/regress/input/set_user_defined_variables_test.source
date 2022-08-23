@@ -1,0 +1,476 @@
+-- error
+set @v1 := 1;
+select @v1;
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
+\! sleep 1
+
+-- error
+set @v1 := 1;
+select @v1;
+\c regression
+create database test_set dbcompatibility 'b';
+\c test_set
+show enable_set_variable_b_format;
+
+-- test var_name
+set @v1 := 1;
+set @1a_b.2$3 := 2;
+set @a_b.2$3 := 3;
+set @_ab.2$3 := 4;
+set @.ab_2$3 := 5;
+set @$ab.2_3 := 6;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3;
+
+-- error
+set @gdas()^& := 1;
+
+select lengthb('abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca');
+set @abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca := 64;
+select @abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca as value1, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc as value2, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab as value3;
+
+\c test_set
+set @'v1' := 1;
+set @'1a_b.2$3' := 2;
+set @'a_b.2$3' := 3;
+set @'_ab.2$3' := 4;
+set @'.ab_2$3' := 5;
+set @'$ab.2_3' := 6;
+set @'gdas()^&?<>cs' := 7;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3, @'v1', @'1a_b.2$3', @'a_b.2$3', @'_ab.2$3', @'.ab_2$3', @'$ab.2_3';
+select @'gdas()^&?<>cs';
+-- error
+select @gdas()^&?<>cs;
+
+set @'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca' := 64;
+select @'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca' as value1, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc' as value2, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab' as value3, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca as value4, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc as value5, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab as value6;
+
+
+\c test_set;
+set @"v1" := 1;
+set @"1a_b.2$3" := 2;
+set @"a_b.2$3" := 3;
+set @"_ab.2$3" := 4;
+set @".ab_2$3" := 5;
+set @"$ab.2_3" := 6;
+set @"gdas()^&?<>cs" := 7;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3, 
+@'v1', @'1a_b.2$3', @'a_b.2$3', @'_ab.2$3', @'.ab_2$3', @'$ab.2_3',
+@"v1", @"1a_b.2$3", @"a_b.2$3", @"_ab.2$3", @".ab_2$3", @"$ab.2_3";
+select @"gdas()^&?<>cs", @'gdas()^&?<>cs';
+-- error
+select @gdas()^&?<>cs;
+
+set @"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" := 64;
+select @"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" as value1, 
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc" as value2, 
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab" as value3, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca as value4, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc as value5, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab as value6,
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca' as value7, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc' as value8, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab' as value9;
+
+\c test_set;
+set @`v1` := 1;
+set @`1a_b.2$3` := 2;
+set @`a_b.2$3` := 3;
+set @`_ab.2$3` := 4;
+set @`.ab_2$3` := 5;
+set @`$ab.2_3` := 6;
+set @`gdas()^&?<>cs` := 7;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3, 
+@'v1', @'1a_b.2$3', @'a_b.2$3', @'_ab.2$3', @'.ab_2$3', @'$ab.2_3',
+@"v1", @"1a_b.2$3", @"a_b.2$3", @"_ab.2$3", @".ab_2$3", @"$ab.2_3",
+@`v1`, @`1a_b.2$3`, @`a_b.2$3`, @`_ab.2$3`, @`.ab_2$3`, @`$ab.2_3`;
+select @`gdas()^&?<>cs`, @"gdas()^&?<>cs", @'gdas()^&?<>cs';
+-- error
+select @gdas()^&?<>cs;
+
+set @`abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca` := 64;
+select @`abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca` as value1, 
+@`abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc` as value2, 
+@`abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab` as value3, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca as value4, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc as value5, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab as value6,
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca' as value7, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc' as value8, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab' as value9,
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" as value10, 
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc" as value11, 
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab" as value12;
+
+-- test expression
+\c test_set
+set @v1 := 10, @v2 := 10.3, @v3 := 'abc', @v4 := true, @v5 := date '12-10-2022';
+drop table if exists t_const;
+create table t_const as select @v1, @v2, @v3, @v4, @v5;
+\d+ t_const
+select * from t_const;
+
+drop table if exists t_bit;
+drop table if exists t_bit2;
+create table t_bit(f1 bit(8), f2 bit varying(20));
+insert into t_bit values(x'41', x'41');
+set @b1 := x'41', @b2 := x'41':: bit varying, @b3 := (select x'41'), @b4 := (select x'41' :: bit varying), @b5 := (select f1 from t_bit), @b6 := (select f2 from t_bit);
+create table t_bit2 as select @b1, @b2, @b3, @b4, @b5, @b6, x'41', x'41'::bit varying;
+\d+ t_bit2
+select * from t_bit2;
+
+set @v7 := '52093.89'::money;
+set @v8 := box '((0,0),(1,1))';
+set @v9 := '52093.89'::money::number;
+select @v9;
+
+set @abs := abs(-1), @concat := concat('hello', 'world'), @diameter := diameter(circle '((0,0),2.0)');
+set @time := timestamp '2001-09-28 01:00' + interval '23 hours', @age := age(timestamp '2001-04-10', timestamp '1957-06-13');
+select @abs, @concat, @diameter, @time, @age;
+
+-- error
+set @center := center(box '((0,0),(1,2))');
+
+set @value := 10;
+set @v_and := 1 and 4, @v_or := 1 or 4, @v_not := not 1;
+set @v_all := not ((1 and @value) or @value);
+select @value, @v_and, @v_or, @v_not, @v_all;
+
+set @v2 := 1 + 1, @v3 := 2 - 8, @v4 := 2 * 10, @v5 := @v1 / 2, @v6 := @v1 = 10;
+select @v2, @v3, @v4, @v5, @v6;
+
+set @between := 2 BETWEEN 1 AND 3, @not_between := 2 NOT BETWEEN 1 AND 3;
+set @is_null := 2 + NULL IS NULL, @is_not_null := 2 + 2 IS NOT NULL;
+set @isnull := @is_null ISNULL, @notnull := @is_not_null NOTNULL;
+set @distinct := @between or @not_between IS DISTINCT FROM NULL, @not_distinct := @between + @not_between * NULL IS NOT DISTINCT FROM NULL;
+select @between, @not_between, @is_null, @is_not_null, @isnull, @notnull, @distinct, @not_distinct;
+
+set @rownum := rownum;
+select @rownum;
+
+-- condition expression
+set @v1 := 1, @v2 := 0;
+set @v_case := CASE WHEN @v1 = 1 THEN 'one' WHEN @v2 = 2 THEN 'two' ELSE 'other' END;
+select @v_case;
+set @v1 := 0, @v2 := 2;
+set @v_case := CASE WHEN @v1 = 1 THEN 'one' WHEN @v2 = 2 THEN 'two' ELSE 'other' END;
+select @v_case;
+set @v1 := 0, @v2 := 0;
+set @v_case := CASE WHEN @v1 = 1 THEN 'one' WHEN @v2 = 2 THEN 'two' ELSE 'other' END;
+select @v_case;
+
+set @v_decode := DECODE('A','A',1,'B',2,0);
+set @v_coalesce1 := COALESCE('abc','Hello World'), @v_coalesce2 := COALESCE(NULL,'Hello World'), @v_coalesce3 := COALESCE(NULL, NULL, 'dajd');
+select @v_decode, @v_coalesce1, @v_coalesce2, @v_coalesce3;
+
+set @v_nullif := NULLIF('Hello','Hello World'), @v_greatest := greatest(9000,155555,2.01), @v_least := least(9000,2), @v_nvl := nvl(null,1);
+select @v_nullif, @v_greatest, @v_least, @v_nvl;
+
+-- subLink
+drop table if exists select_tt1;
+drop table if exists res_select1;
+drop table if exists res_select2;
+drop table if exists select_tt2;
+drop table if exists select_tt3;
+create table select_tt1(f1 int, f2 bool, f3 float, f4 number, f5 text, f6 bit(8), f7 bit varying(20), f8 timestamp);
+insert into select_tt1 values(1, false, 12.5, 18.888888888888888888888, NULL, x'41', x'41', timestamp '2001-09-29 03:00');
+set @v_select_bool1 := (select true), @v_select_bool2 := (select f2 from select_tt1);
+set @v_select_int1 := (select 1), @v_select_int2 := (select f1 from select_tt1);
+set @v_select_float1 := (select -14.4564), @v_select_float2 := (select f3 from select_tt1);
+set @v_select_number1 := (select 436721.2321::number), @v_select_number2 := (select f4 from select_tt1);
+set @v_select_text1 := (select 'dadsa'), @v_select_text2 := (select f5 from select_tt1);
+set @v_select_bit1 := (select x'42'), @v_select_bit2 := (select f6 from select_tt1);
+set @v_select_bitvaryng1 := (select x'42' :: bit varying), @v_select_bitvaryng2 := (select f7 from select_tt1);
+set @v_select_time1 := timestamp '2021-10-10 01:21:10', @v_select_time2 := (select f8 from select_tt1);
+create table res_select1 as select @v_select_bool1, @v_select_int1, @v_select_float1, @v_select_number1, @v_select_text1, @v_select_bit1, @v_select_bitvaryng1, @v_select_time1;
+\d+ res_select1
+select * from res_select1;
+create table res_select2 as select @v_select_bool2, @v_select_int2, @v_select_float2, @v_select_number2, @v_select_text2, @v_select_bit2, @v_select_bitvaryng2, @v_select_time2;
+\d+ res_select2
+select * from res_select2;
+
+create table select_tt2(f1 int, f2 bool);
+insert into select_tt2 values(10, true);
+-- error
+set @v := (select * from select_tt2);
+
+create table select_tt3(f1 int);
+insert into select_tt3 values(10), (11);
+-- error
+set @v := (select * from select_tt3);
+
+set @v_exists := exists (select 10), @v_notexists := not exists (select 10);
+select @v_exists, @v_notexists;
+
+set @v := 1;
+set @v_in := @v in (select 1), @v_notin := @v not in (select 2), @v_any := @v < any (select 3), @v_some := @v < some (select 1), @v_all := @v < all (select 2);
+select @v_in, @v_notin, @v_any, @v_some, @v_all;
+
+-- array expression
+set @v_in := 8000 + 500 IN (10000, 9000), @v_notin := 8000 + 500 NOT IN (10000, 9000);
+set @v_some := 8000 + 500 < SOME (array[10000, 9000]), @v_any := 8000 + 500 < ANY (array[10000, 9000]);
+set @v_all := 8000 + 500 < ALL (array[10000, 9000]);
+select @v_in, @v_notin, @v_any, @v_some, @v_all;
+
+-- row expression
+set @v_row := ROW(1,2,NULL) < ROW(1,3,0);
+select @v_row;
+
+-- test multi-variable
+\c test_set
+set @v1 := @v2 := @v3 := @v4 := 10;
+select @v1, @v2, @v3, @v4;
+
+set @v1 = @v2 := @v3 := @v4 := 20;
+select @v1, @v2, @v3, @v4;
+
+-- error
+set @v1 = @v2 := (@v3) = @v4 := v5 := 30;
+
+set @vx := 40;
+set @v1 := @v2 := @v3 := @v4 := @vx = 40;  
+select @v1, @v2, @v3, @v4, @vx;
+
+\c test_set
+set @v1 := 1, @v2 := 2, @v3 := 3;
+select @v1, @v2, @v3;
+
+set @v1 = 11, @v2 = 22, @v3 = 33;
+select @v1, @v2, @v3;
+
+set @v1 := -1, @v2 := -2, @v3 = -3, @v4 := -4;
+select @v1, @v2, @v3, @v4;
+
+-- test in application scenario
+\c test_set
+set @v1 := -1, @v2 := 'hello';
+select @v1 + 1, abs(@v1), concat(@v2, ' world!');
+
+drop table if exists test1;
+drop table if exists test2;
+create table test1(f1 int, f2 int, f3 varchar(20));
+insert into test1 values(@v1 + 1, abs(@v1), concat(@v2, ' world!'));
+select * from test1;
+
+create table test2 as select @v1 + 1, abs(@v1), concat(@v2, ' world!');
+select * from test2;
+
+update test1 set f3 = left(@v2, @v1 :: int);
+select * from test1;
+
+-- test prepare
+-- selectStmt
+\c test_set
+set @v1 := 'select * from test1';
+prepare stmt1 as @v1;
+execute stmt1;
+
+-- insertStmt
+set @v2 := 'insert into test1 values(1, 2, 123)';
+prepare stmt2 as @v2;
+execute stmt2;
+select * from test1;
+
+-- updateStmt
+set @vx := 2, @vy := 'world';
+set @v3 := 'update test1 set f3 = left(@vy, (@vx) :: int)';
+prepare stmt3 as @v3;
+execute stmt3;
+select * from test1;
+
+-- deleteStmt
+set @v4 := 'delete from test1 where f1 = 1';
+prepare stmt4 as @v4;
+execute stmt4;
+select * from test1;
+
+-- mergeStmt
+set @v5 := 'merge into test1 using test2 on (test2.abs = test1.f2) WHEN MATCHED THEN update set test1.f3 = test2.concat';
+prepare stmt5 as @v5;
+execute stmt5;
+select * from test1;
+
+-- otherStmt
+set @v6 := 'drop table test2';
+-- error
+prepare stmt6 as @v6;
+
+-- multiStmt
+set @v7 := 'select 1; select 2;';
+-- error
+prepare stmt6 as @v7;
+
+-- other scenario
+\c test_set
+select @ 1;
+drop table if exists test_opr;
+create table test_opr(f1 int);
+insert into test_opr(-1), (-2);
+select @ f1 from test_opr;
+select @v1;
+set @v1 := -10;
+select @ @v1;
+
+set @v1 := 10, @v2 := 'abc';
+drop table if exists test_pro;
+create table test_pro(f1 int, f2 varchar(20));
+create or replace procedure pro_insert()
+as
+begin
+    insert into test_pro values(@v1, @v2);
+end;
+/
+call pro_insert();
+select * from test_pro;
+set @v1 := 11, @v2 := 'xxx';
+call pro_insert();
+select * from test_pro;
+\c test_set
+call pro_insert();
+select * from test_pro;
+
+set @v1 := 10, @v2 := 20;
+set @in1 := -2, @in2 := -5;
+create or replace function func_add_sql(num1 bigint, num2 bigint) return bigint
+as
+begin
+    return num1 - num2 + @v1;
+end;
+/
+call func_add_sql(-2, -5);
+call func_add_sql(num1 => @in1, num2 => @in2);
+call func_add_sql(num2 := @in2, num1 := @in1);
+call func_add_sql(@in1, @in2);
+
+create or replace function func_test() return bigint
+as
+declare
+    v1 bigint := 5;
+begin
+    v1 := -5;
+    return @v1 + @v2 + v1;
+end;
+/
+call func_test();
+
+\c test_set
+drop table if exists t2;
+create table t2(a int, b int);
+insert into t2 values(1,2);
+select * from t2;
+
+create or replace procedure autonomous_4(a int, b int) as
+declare
+	num3 int := a;
+	num4 int := b;
+	pragma autonomous_transaction;
+begin
+	insert into t2 values(num3, num4);
+	insert into t2 values(@v1, @v2);
+end;
+/
+
+create or replace procedure autonomous_5(a int, b int) as
+declare
+begin
+	insert into t2 values(111, 222);
+	autonomous_4(a,b);
+	rollback;
+end;
+/
+
+set @v1 = 1111, @v2 = 2222;
+select autonomous_5(11, 22);
+select * from t2;
+
+-- AUTONOMOUS TRANSACTION will start a new session, so user_defined_variable is null.
+
+\c test_set
+drop table if exists tt;
+create table tt(f1 int, f2 text, f3 float, f4 bool);
+create or replace procedure pro_test1(in a int, in b text, in c float, in d bool) as
+declare
+    num1 int := a;
+    num2 text := b;
+    num3 float := c;
+    num4 bool := d;
+begin
+    set @v1 := num1, @v2 := num2, @v3 := num3, @v4 := num4;
+    insert into tt values(@v1, @v2, @v3, @v4);
+    insert into tt values(@v1 + 1, concat(@v2, ' world'), @v3 / 2, @v4);
+end;
+/
+call pro_test1(1, 'hello', 12.12, true);
+select * from tt;
+call pro_test1((select 1) + 1, (select 'hello'), 12.12, exists (select 10));
+select * from tt;
+delete tt;
+\c test_set
+call pro_test1(1, 'hello', 12.12, true);
+select * from tt;
+call pro_test1((select 1) + 1, (select 'hello'), 12.12, exists (select 10));
+select * from tt;
+delete tt;
+
+set @v := 0;
+create or replace procedure pro_test2(in a int, in b text, in c float, in d bool)
+is
+begin
+    set @v1 := a, @v2 := b, @v3 := c, @v4 := d;
+    insert into tt values(@v1, @v2, @v3, @v4);
+    set @v1 := a + (select 1), @v2 := concat(b, (select ' world')), @v3 := abs(c / 2), @v4 := @v in (select 1) or d;
+    insert into tt values(@v1, @v2, @v3, @v4);
+    insert into tt values(@v1 + 1, concat(@v2, ' world'), @v3 / 2, @v4);
+    set @v5 := @v1 + 1, @v6 := concat(@v2, '123'), @v7 := @v3 * 2, @v8 := @v4 and @v;
+    insert into tt values(@v5, @v6, @v7, @v8);
+end;
+/
+call pro_test2(1, 'hello', 12.12, true);
+select * from tt;
+call pro_test2((select 1) + 1, (select 'hello'), 12.12, exists (select 10));
+select * from tt;
+delete tt;
+\c test_set
+set @v := 0;
+call pro_test2(1, 'hello', 12.12, true);
+select * from tt;
+call pro_test2((select 1) + 1, (select 'hello'), 12.12, exists (select 10));
+select * from tt;
+delete tt;
+
+\c test_set
+start TRANSACTION;
+set @v1 := 1;
+select @v1;
+set client_encoding = SQL_ASCII;
+ROLLBACK;
+show client_encoding;
+select @v1;
+
+-- exception scenario
+\c test_set
+set @v2 := 2;
+select 100>@v2;
+select 100<@v2;
+select 100=@v2;
+set @v1=@v2+1;
+select 100> @v2, 100< @v2, 100= @v2;
+set @v1= @v2+1;
+select @v1;
+set @ v1:=10;
+select @v1:=10;
+
+\c regression
+drop database if exists test_set;
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
+\! sleep 1
+
+show enable_set_variable_b_format;

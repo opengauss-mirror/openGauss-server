@@ -67,6 +67,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/print.h"
 #include "optimizer/planner.h"
 #include "parser/gramparse.h"
 #include "parser/parse_type.h"
@@ -661,6 +662,9 @@ static int errstate;
 %type <with>	with_clause opt_with_clause
 %type <list>	cte_list
 
+%type <list>	user_defined_list
+%type <node>	uservar_name user_defined_single
+
 %type <list>	within_group_clause pkg_body_subprogram
 %type <list>	window_clause window_definition_list opt_partition_clause
 %type <windef>	window_definition over_clause window_specification
@@ -782,7 +786,7 @@ static int errstate;
  * DOT_DOT is unused in the core SQL grammar, and so will always provoke
  * parse errors.  It is needed by PL/pgsql.
  */
-%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp COMMENTSTRING
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp COMMENTSTRING SET_USER_IDENT
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS
 
@@ -925,7 +929,7 @@ static int errstate;
 %left		OR
 %left		AND
 %right		NOT
-%right		'='
+%right		'=' COLON_EQUALS
 %nonassoc	'<' '>' CmpOp
 %nonassoc	LIKE ILIKE SIMILAR
 %nonassoc	ESCAPE
@@ -2002,7 +2006,34 @@ VariableSetStmt:
 					n->is_local = false;
 					$$ = (Node *) n;
 				}
-		;
+			| SET user_defined_list
+				{
+#ifdef			ENABLE_MULTIPLE_NODES
+					const char* message = "SET @var_name := expr is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("SET @var_name := expr is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.enable_set_variable_b_format) {
+						VariableSetStmt *n = makeNode(VariableSetStmt);
+						n->kind = VAR_SET_DEFINED;
+						n->name = "USER DEFINED VARIABLE";
+						n->defined_args = $2;
+						n->is_local = false;
+						$$ = (Node *)n;
+					} else {
+						const char* message = "SET @var_name := expr is supported only in B-format database, and enable_set_variable_b_format = on.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("SET @var_name := expr is supported only in B-format database, and enable_set_variable_b_format = on."),
+								parser_errposition(@1)));
+						$$ = NULL;/* not reached */						
+					}
+				}
+			;
 
 set_rest:
 			TRANSACTION transaction_mode_list
@@ -2022,6 +2053,9 @@ set_rest:
 					$$ = n;
 				}
 			| set_rest_more
+				{
+					$$ = $1;
+				}
 			;
 
 generic_set:
@@ -2217,6 +2251,61 @@ set_rest_more:  /* Generic SET syntaxes: */
 					$$ = n;
 				}
 		;
+		
+user_defined_list:
+			user_defined_single					{ $$ = list_make1($1); }
+			| user_defined_list ',' user_defined_single		{ $$ = lappend($1, $3); }
+			;
+
+user_defined_single:
+			uservar_name COLON_EQUALS a_expr
+				{
+					UserSetElem *n = makeNode(UserSetElem);
+					n->name = list_make1($1);
+					n->val = (Expr *)$3;
+					$$ = (Node *)n;
+				}
+			| uservar_name '=' a_expr
+				{
+					UserSetElem *n = makeNode(UserSetElem);
+					n->name = list_make1($1);
+					n->val = (Expr *)$3;
+					$$ = (Node *)n;
+				}
+			;
+
+
+uservar_name:
+			SET_USER_IDENT						
+			{ 
+				int len = strlen($1);
+				error_t errorno = EOK;
+
+				if (len < 1) {
+					ereport(errstate,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("Incorrect user_defined variable."),
+							parser_errposition(@1)));
+				}
+
+				char *name = (char *)palloc(len + 1);
+				errorno = memset_s(name, len + 1, 0, len + 1);
+				securec_check(errorno, "\0", "\0");
+				if ((len > 2) && (strncmp($1, "'", 1) == 0 || strncmp($1, "\"", 1) == 0 || strncmp($1, "`", 1) == 0)) {
+					errorno = strncpy_s(name, len + 1, $1 + 1, len + 1);
+					securec_check(errorno, "\0", "\0");
+					name[len - 2] = '\0';
+				} else {
+					errorno = strncpy_s(name, len + 1, $1, len + 1);
+					securec_check(errorno, "\0", "\0");
+					name[len] = '\0';
+				}
+
+				UserVar *n = makeNode(UserVar);
+				n->name = downcase_truncate_identifier(name, strlen(name), true);
+				$$ = (Node *)n;
+			}
+			;
 
 var_name:	ColId								{ $$ = $1; }
 			| var_name '.' ColId
@@ -18484,7 +18573,29 @@ PreparableStmt:
 			| UpdateStmt
 			| DeleteStmt					/* by default all are $$=$1 */
 			| MergeStmt
-		;
+			| uservar_name
+				{
+#ifdef			ENABLE_MULTIPLE_NODES
+					const char* message = "@var_name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("@var_name is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.enable_set_variable_b_format) {
+						$$ = $1;
+					} else {
+						const char* message = "@var_name is supported only in B-format database, and enable_set_variable_b_format = on.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("@var_name is supported only in B-format database, and enable_set_variable_b_format = on."),
+								parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+				}
+			;
 
 /*****************************************************************************
  *
@@ -21346,7 +21457,32 @@ a_expr:		c_expr									{ $$ = $1; }
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "=", $1, $3, @2); }
                         | a_expr '@' a_expr
                                 { $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "@", $1, $3, @2); }
-			| a_expr CmpOp a_expr
+			| uservar_name COLON_EQUALS a_expr
+				{
+#ifdef			ENABLE_MULTIPLE_NODES
+					const char* message = "@var_name := expr is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("@var_name := expr is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.enable_set_variable_b_format) {
+						UserSetElem *n = makeNode(UserSetElem);
+						n->name = list_make1((Node *)$1);
+						n->val = (Expr *)$3;
+						$$ = (Node *) n;
+					} else {
+						const char* message = "@var_name := expr is supported only in B-format database, and enable_set_variable_b_format = on.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("@var_name := expr is supported only in the SET syntax of B-format database, and enable_set_variable_b_format = on."),
+								parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+				}
+            | a_expr CmpOp a_expr
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, $2, $1, $3, @2); }
 			| a_expr qual_Op a_expr				%prec Op
 				{ $$ = (Node *) makeA_Expr(AEXPR_OP, $2, $1, $3, @2); }
@@ -22001,7 +22137,29 @@ c_expr:		columnref %prec UMINUS						        { $$ = $1; }
 				  g->location = @1;
 				  $$ = (Node *)g;
 			  }
-		;
+			| uservar_name           %prec UMINUS
+				{
+#ifdef			ENABLE_MULTIPLE_NODES
+					const char* message = "@var_name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("@var_name is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.enable_set_variable_b_format) {
+						$$ = $1;
+					} else {
+						const char* message = "@var_name is supported only in B-format database, and enable_set_variable_b_format = on.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("@var_name is supported only in B-format database, and enable_set_variable_b_format = on."),
+								parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+				}
+			;
 
 /* Used for List Distribution to avoid reduce/reduce conflict. This is unavoidable, since Bison is LALR(1) compiler */
 c_expr_noparen:		columnref								{ $$ = $1; }

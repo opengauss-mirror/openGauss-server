@@ -1041,7 +1041,17 @@ static Datum ExecEvalWholeRowSlow(
  */
 static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone)
 {
-    Const* con = (Const*)exprstate->expr;
+    Const* con = NULL;
+    if (IsA(exprstate->expr, UserVar)) {
+        bool found = false;
+        UserVar *uservar = (UserVar *)exprstate->expr;
+        GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab, uservar->name, HASH_FIND, &found);
+
+        /* if not found, return a null const */
+        con = found ? entry->value : makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+    } else {
+        con = (Const*)exprstate->expr;
+    }
 
     if (isDone != NULL)
         *isDone = ExprSingleResult;
@@ -5220,6 +5230,7 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             }
             break;
         case T_Const:
+        case T_UserVar:
             state = (ExprState*)makeNode(ExprState);
             state->evalfunc = ExecEvalConst;
             break;

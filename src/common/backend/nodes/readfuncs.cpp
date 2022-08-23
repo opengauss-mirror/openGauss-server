@@ -5749,6 +5749,26 @@ static TdigestData* _readTdigestData()
     READ_DONE();
 }
 
+static UserSetElem* _readUserSetElem()
+{
+    READ_LOCALS(UserSetElem);
+
+    READ_NODE_FIELD(name);
+    READ_NODE_FIELD(val);
+
+    READ_DONE();
+}
+
+static UserVar* _readUserVar()
+{
+    READ_LOCALS(UserVar);
+
+    READ_STRING_FIELD(name);
+    READ_NODE_FIELD(value);
+
+    READ_DONE();
+}
+
 /*
  * parseNodeString
  *
@@ -6208,6 +6228,10 @@ Node* parseNodeString(void)
         return_value = _readPLDebug_frame();
     } else if (MATCH("TdigestData", 11)) {
         return_value = _readTdigestData();
+    } else if (MATCH("USERSETELEM", 11)) {
+        return_value = _readUserSetElem();
+    } else if (MATCH("USERVAR", 7)) {
+        return_value = _readUserVar();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

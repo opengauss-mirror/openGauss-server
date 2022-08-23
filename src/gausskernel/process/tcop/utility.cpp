@@ -5592,7 +5592,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #endif
 
         case T_VariableSetStmt:
-            ExecSetVariableStmt((VariableSetStmt*)parse_tree);
+            ExecSetVariableStmt((VariableSetStmt*)parse_tree, params);
 #ifdef PGXC
             /* Let the pooler manage the statement */
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
@@ -8523,6 +8523,7 @@ const char* CreateCommandTag(Node* parse_tree)
                 case VAR_SET_DEFAULT:
                 case VAR_SET_MULTI:
                 case VAR_SET_ROLEPWD:
+                case VAR_SET_DEFINED:
                     tag = "SET";
                     break;
                 case VAR_RESET:
@@ -9501,6 +9502,10 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             break;
 
         case T_VariableSetStmt:
+            lev = LOGSTMT_ALL;
+            break;
+
+        case T_UserVar:
             lev = LOGSTMT_ALL;
             break;
 

@@ -3914,6 +3914,23 @@ static void _outIndexElem(StringInfo str, IndexElem* node)
     WRITE_ENUM_FIELD(ordering, SortByDir);
     WRITE_ENUM_FIELD(nulls_ordering, SortByNulls);
 }
+
+static void _outUserSetElem(StringInfo str, UserSetElem* node)
+{
+    WRITE_NODE_TYPE("USERSETELEM");
+
+    WRITE_NODE_FIELD(name);
+    WRITE_NODE_FIELD(val);
+}
+
+static void _outUserVar(StringInfo str, UserVar* node)
+{
+    WRITE_NODE_TYPE("USERVAR");
+
+    WRITE_STRING_FIELD(name);
+    WRITE_NODE_FIELD(value);
+}
+
 static void _outDefElem(StringInfo str, DefElem* node)
 {
     WRITE_NODE_TYPE("DEFELEM");
@@ -6506,6 +6523,12 @@ static void _outNode(StringInfo str, const void* obj)
                 _outNoGPCHint(str, (NoGPCHint*) obj);
             case T_TrainModel:
                 _outTrainModel(str, (TrainModel*)obj);
+                break;
+            case T_UserSetElem:
+                _outUserSetElem(str, (UserSetElem *) obj);
+                break;
+            case T_UserVar:
+                _outUserVar(str, (UserVar *) obj);
                 break;
             case T_PLDebug_variable:
                 _outPLDebug_variable(str, (PLDebug_variable*) obj);

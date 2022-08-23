@@ -1216,6 +1216,7 @@ static bool pgxc_shippability_walker(Node* node, Shippability_context* sc_contex
     switch (nodeTag(node)) {
         /* Constants are always shippable */
         case T_Const:
+        case T_UserVar:
             pgxc_set_exprtype_shippability(exprType(node), sc_context);
             break;
 

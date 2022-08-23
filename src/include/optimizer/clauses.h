@@ -95,6 +95,8 @@ extern Node* eval_const_expressions(PlannerInfo* root, Node* node);
 
 extern Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamListInfo boundParams);
 
+extern Node *eval_const_expression_value(PlannerInfo* root, Node* node, ParamListInfo boundParams);
+
 extern Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate = NULL);
 
 extern Query* inline_set_returning_function(PlannerInfo* root, RangeTblEntry* rte);

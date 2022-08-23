@@ -31,6 +31,7 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
+#include "optimizer/clauses.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -166,6 +167,71 @@ Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid ta
         }
 
     return result;
+}
+
+/*
+ * user_defined variables only store integer, float, bit, string and null,
+ * therefor, we convert the constant to the corresponding type.
+ * atttypid: datatype
+ * isSelect: subquery flag
+ */
+Node *type_transfer(Node *node, Oid atttypid, bool isSelect)
+{
+    Node *result = NULL;
+    Const *con = (Const *)node;
+    if (con->constisnull) {
+        return node;
+    }
+
+    switch (atttypid) {
+        case BOOLOID:
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+            result = coerce_type(NULL, node, con->consttype,
+                INT8OID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+        case FLOAT4OID:
+        case FLOAT8OID:
+        case NUMERICOID:
+            result = coerce_type(NULL, node, con->consttype,
+                FLOAT8OID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+        case BITOID:
+            result = coerce_type(NULL, node, con->consttype,
+                BITOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+        case VARBITOID:
+            result = coerce_type(NULL, node, con->consttype,
+                VARBITOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+        default:
+            result = isSelect ? node :
+                coerce_type(NULL, node, con->consttype, TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+    }
+
+    return result;
+}
+
+/*
+ * convert expression to const.
+ */
+Node *const_expression_to_const(Node *node)
+{
+    Node *result = NULL;
+    Const *con = (Const *)node;
+
+    if (nodeTag(node) != T_Const) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("The value of a user_defined variable must be convertible to a constant.")));
+    }
+
+    /* user_defined varibale only stores integer, float, bit, string, null. */
+    result = type_transfer(node, con->consttype, false);
+    return eval_const_expression_value(NULL, result, NULL);
 }
 
 /*

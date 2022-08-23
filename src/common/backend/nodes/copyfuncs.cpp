@@ -4079,6 +4079,28 @@ static IndexElem* _copyIndexElem(const IndexElem* from)
     return newnode;
 }
 
+static UserSetElem* _copyUserSetElem(const UserSetElem* from)
+{
+    UserSetElem* newnode = makeNode(UserSetElem);
+
+    COPY_SCALAR_FIELD(xpr.selec);
+    COPY_NODE_FIELD(name);
+    COPY_NODE_FIELD(val);
+
+    return newnode;
+}
+
+static UserVar* _copyUserVar(const UserVar* from)
+{
+    UserVar* newnode = makeNode(UserVar);
+
+    COPY_SCALAR_FIELD(xpr.selec);
+    COPY_STRING_FIELD(name);
+    COPY_NODE_FIELD(value);
+
+    return newnode;
+}
+
 static ColumnDef* _copyColumnDef(const ColumnDef* from)
 {
     ColumnDef* newnode = makeNode(ColumnDef);
@@ -5598,6 +5620,7 @@ static VariableSetStmt* _copyVariableSetStmt(const VariableSetStmt* from)
     COPY_STRING_FIELD(name);
     COPY_NODE_FIELD(args);
     COPY_SCALAR_FIELD(is_local);
+    COPY_NODE_FIELD(defined_args);
 
     return newnode;
 }
@@ -8015,6 +8038,12 @@ void* copyObject(const void* from)
             break;
         case T_AlterSubscriptionStmt:
             retval = _copyAlterSubscriptionStmt((AlterSubscriptionStmt *)from);
+            break;
+        case T_UserSetElem:
+            retval = _copyUserSetElem((UserSetElem *)from);
+            break;
+        case T_UserVar:
+            retval = _copyUserVar((UserVar *)from);
             break;
         case T_PredictByFunction:
             retval = _copyPredictByFunctionStmt((PredictByFunction *)from);

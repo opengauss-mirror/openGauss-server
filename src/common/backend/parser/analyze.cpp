@@ -102,6 +102,7 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt);
 static void checkUpsertTargetlist(Relation targetTable, List* updateTlist);
 static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upsertClause, RangeVar* relation);
 static int count_rowexpr_columns(ParseState* pstate, Node* expr);
+static Query* transformVariableSetStmt(ParseState* pstate, VariableSetStmt* stmt);
 static Query* transformSelectStmt(
     ParseState* pstate, SelectStmt* stmt, bool isFirstNode = true, bool isCreateView = false);
 static Query* transformValuesClause(ParseState* pstate, SelectStmt* stmt);
@@ -434,6 +435,27 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
             result = transformCreateModelStmt(pstate, (CreateModelStmt*) parseTree);
             break;
 
+        case T_VariableSetStmt: {
+            VariableSetStmt* n = (VariableSetStmt*)parseTree;
+            if (n->kind == VAR_SET_DEFINED) {
+                result = transformVariableSetStmt(pstate, n);
+            } else {
+                result = makeNode(Query);
+                result->commandType = CMD_UTILITY;
+                result->utilityStmt = (Node*)parseTree;
+            }
+        } break;
+
+        case T_PrepareStmt: {
+            PrepareStmt* n = (PrepareStmt *)parseTree;
+            if (IsA(n->query, UserVar)) {
+                Node *uvar = transformExpr(pstate, n->query);
+                n->query = (Node *)copyObject((UserVar *)uvar);
+            }
+            result = makeNode(Query);
+            result->commandType = CMD_UTILITY;
+            result->utilityStmt = (Node*)parseTree;
+        } break;
 
         default:
 
@@ -515,6 +537,12 @@ bool analyze_requires_snapshot(Node* parseTree)
             }
             break;
 
+        case T_VariableSetStmt:
+            /* user-defined variables support sublink */
+            if (((VariableSetStmt *)parseTree)->defined_args != NULL) {
+                result = true;
+            }
+            break;
         default:
             /* other utility statements don't have any real parse analysis */
             result = false;
@@ -2235,6 +2263,39 @@ static bool shouldTransformStartWithStmt(ParseState* pstate, SelectStmt* stmt, Q
     selectQuery->sql_statement = fetchSelectStmtFromCTAS((char*)pstate->p_sourcetext);
 
     return true;
+}
+
+/*
+ * transformVariableSetStmt - transforms a user-defined variable
+ */
+static Query* transformVariableSetStmt(ParseState* pstate, VariableSetStmt* stmt)
+{
+    Query *query = makeNode(Query);
+    List *resultList = NIL;
+    ListCell *temp = NULL;
+
+    foreach (temp, stmt->defined_args) {
+        UserSetElem *userElem = (UserSetElem *)lfirst(temp);
+        UserSetElem *newUserElem = makeNode(UserSetElem);
+        newUserElem->name = userElem->name;
+        
+        Node *node = transformExpr(pstate, (Node *)userElem->val);
+
+        if (IsA(node, UserSetElem)) {
+            newUserElem->name = list_concat(newUserElem->name, ((UserSetElem *)node)->name);
+            newUserElem->val = ((UserSetElem *)node)->val;
+        } else {
+            newUserElem->val = (Expr *)node;
+        }
+        
+        resultList = lappend(resultList, newUserElem);
+    }
+    stmt->defined_args = resultList;
+
+    query->commandType = CMD_UTILITY;
+    query->utilityStmt = (Node*)stmt;
+
+    return query;
 }
 
 /*

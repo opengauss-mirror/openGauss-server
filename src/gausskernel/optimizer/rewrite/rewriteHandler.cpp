@@ -42,6 +42,8 @@
 #include "catalog/pg_constraint.h"
 #include "catalog/namespace.h"
 #include "client_logic/client_logic.h"
+#include "catalog/pg_proc.h"
+#include "commands/sqladvisor.h"
 
 #ifdef PGXC
 #include "pgxc/locator.h"
@@ -3274,4 +3276,127 @@ List* QueryRewriteCTAS(Query* parsetree)
         }
     }
 }
+
+/*
+ * User_defined variables is a string in prepareStmt.
+ * Get selectStmt/insertStmt/updateStmt/deleteStmt/mergeStmt from user_defined variables by pg_parse_query.
+ * Then, execute SQL: PREPARE stmt AS selectStmt/insertStmt/updateStmt/deleteStmt/mergeStmt.
+ */
+List* QueryRewritePrepareStmt(Query* parsetree)
+{
+    char *sqlstr = NULL;
+    List* raw_parsetree_list = NIL;
+    List* querytree_list = NULL;
+
+    PrepareStmt *stmt = (PrepareStmt *)parsetree->utilityStmt;
+    UserVar *uservar = (UserVar *)stmt->query;
+    Const* value = (Const *)uservar->value;
+
+    if (value->consttype != TEXTOID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("userdefined variable in prepate statement must be text type.")));
+    }
+
+    sqlstr = TextDatumGetCString(value->constvalue);
+
+    raw_parsetree_list = pg_parse_query(sqlstr);
+
+    if (raw_parsetree_list->length != 1) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("prepare user_defined variable can contain only one SQL statement.")));
+    }
+
+    switch (nodeTag(linitial(raw_parsetree_list))) {
+        case T_SelectStmt:
+        case T_InsertStmt:
+        case T_UpdateStmt:
+        case T_DeleteStmt:
+        case T_MergeStmt:
+            stmt->query = (Node *)copyObject((Node *)linitial(raw_parsetree_list));
+            break;
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("the statement in prepate is not supported.")));
+            break;
+    }
+
+    querytree_list = pg_analyze_and_rewrite((Node*)stmt, sqlstr, NULL, 0);
+    return querytree_list;
+}
+
+/*
+ * Get value from a subquery or non-constant expression by constructing SQL.
+ * input:
+         node: a subquery expression or non-constant expression.
+ * return: Const expression.
+ */
+Node* QueryRewriteNonConstant(Node *node)
+{
+    Query* cparsetree = NULL;
+    Const* con = NULL;
+    List *p_target = NIL;
+    Node *res = NULL;
+    SelectStmt* select_stmt = makeNode(SelectStmt);
+
+    /* get targetList. */
+    TargetEntry* target = makeTargetEntry((Expr*)node, (AttrNumber)1, NULL, false);
+    p_target = list_make1(target);
+    select_stmt->targetList = list_copy(p_target);
+
+    /* construct Query node for subquery. */
+    cparsetree = (Query *)makeNode(Query);
+    cparsetree->commandType = CMD_SELECT;
+    cparsetree->utilityStmt = (Node *)select_stmt;
+    cparsetree->hasSubLinks = true;
+    cparsetree->canSetTag = true;
+    cparsetree->jointree = makeFromExpr(NULL, NULL);
+    cparsetree->targetList = list_copy(p_target);
+
+    StringInfo select_sql = makeStringInfo();
+
+    /* deparse the SQL statement from the subquery. */
+    deparse_query(cparsetree, select_sql, NIL, false, false);
+
+    StmtResult *result = execute_stmt(select_sql->data, true);
+
+    DestroyStringInfo(select_sql);
+
+    bool isnull = result->isnulls[0];
+    if (isnull) {
+        /* return a null const */
+        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+        (*result->pub.rDestroy)((DestReceiver *)result);
+        return (Node *)con;
+    }
+
+    char* value = (char *)linitial((List *)linitial(result->tuples));
+    uint len = strlen(value);
+    char* str_value = (char *)palloc(len + 1);
+    errno_t rc = strncpy_s(str_value, len + 1, value, len + 1);
+    securec_check(rc, "\0", "\0");
+    str_value[len] = '\0';
+    Datum str_datum = CStringGetDatum(str_value);
+    Oid atttypid = result->atttypids[0];
+    
+    /* convert value to const expression. */
+    if (atttypid == BOOLOID) {
+        if (strcmp(str_value, "t") == 0) {
+            con = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(true), false, true);
+        } else {
+            con = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(false), false, true);
+        }
+        res = (Node *)con;
+    } else {
+        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, str_datum, false, false);
+        res = type_transfer((Node *)con, atttypid, true);
+    }
+
+    (*result->pub.rDestroy)((DestReceiver *)result);
+
+    return res;
+}
+
 #endif

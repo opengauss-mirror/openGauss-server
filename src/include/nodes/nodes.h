@@ -783,7 +783,9 @@ typedef enum NodeTag {
     T_PLDebug_frame,
 
     T_TdigestData,
-    T_CentroidPoint
+    T_CentroidPoint,
+    T_UserSetElem,
+    T_UserVar
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

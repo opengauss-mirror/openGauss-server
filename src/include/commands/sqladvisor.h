@@ -30,6 +30,8 @@
 #include "lib/stringinfo.h"
 #include "commands/dbcommands.h"
 #include "nodes/parsenodes.h"
+#include "utils/palloc.h"
+#include "tcop/dest.h"
 
 #define GWC_NUM_OF_BUCKETS (64)
 #define GWC_HTAB_SIZE (64)
@@ -192,6 +194,14 @@ typedef struct {
 } JoinMaxHeap;
 
 typedef struct {
+    DestReceiver pub;
+    MemoryContext mxct;
+    List *tuples;
+    Oid *atttypids;   /* for sublink in user-defined variables */
+    bool *isnulls;     /* for sublink in user-defined variables */
+} StmtResult;
+
+typedef struct {
     List* currentSearchPathResult;
     List* allSearchPathResults;
     List* replicationTableList;
@@ -267,5 +277,6 @@ extern Datum end_collect_workload(PG_FUNCTION_ARGS);
 extern Datum analyze_workload(PG_FUNCTION_ARGS);
 extern bool checkSelectIntoParse(SelectStmt* stmt);
 extern PLpgSQL_datum* copypPlpgsqlDatum(PLpgSQL_datum* datum);
+extern StmtResult *execute_stmt(const char *query_string, bool need_result = false);
 
 #endif /* SQLADVISOR_H */

@@ -170,6 +170,11 @@ typedef struct {
     char* query;            /* set query string */
 } GucParamsEntry;
 
+typedef struct {
+    char name[NAMEDATALEN];   /* user-defined name */
+    Const *value;
+} GucUserParamsEntry;
+
 #define GUC_QUALIFIER_SEPARATOR '.'
 
 /*
@@ -274,7 +279,7 @@ extern TupleDesc GetPGVariableResultDesc(const char* name);
 extern char* RewriteBeginQuery(char* query_string, const char* name, List* args);
 #endif
 
-extern void ExecSetVariableStmt(VariableSetStmt* stmt);
+extern void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo);
 extern char* ExtractSetVariableArgs(VariableSetStmt* stmt);
 
 extern void ProcessGUCArray(ArrayType* array, GucContext context, GucSource source, GucAction action);
@@ -450,8 +455,10 @@ extern void reset_set_message(bool);
 extern void append_set_message(const char* str);
 
 extern void init_set_params_htab(void);
+extern void init_set_user_params_htab(void);
 extern void make_set_message(void);
 extern int check_set_message_to_send(const VariableSetStmt* stmt, const char* queryString);
+extern int check_set_user_message(const UserSetElem *elem);
 
 #define TRANS_ENCRYPT_SAMPLE_RNDM "1234567890ABCDEF"
 #define TRANS_ENCRYPT_SAMPLE_STRING "TRANS_ENCRY_SAMPLE_STRING"

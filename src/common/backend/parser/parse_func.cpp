@@ -1828,6 +1828,18 @@ void make_fn_arguments(ParseState* pstate, List* fargs, Oid* actual_arg_types, O
                     COERCE_IMPLICIT_CAST,
                     -1);
                 na->arg = (Expr*)node;
+            } else if (IsA(node, UserVar)) {
+                UserVar* uvar = (UserVar*)node;
+
+                node = coerce_type(pstate,
+                    (Node*)uvar->value,
+                    actual_arg_types[i],
+                    declared_arg_types[i],
+                    -1,
+                    COERCION_IMPLICIT,
+                    COERCE_IMPLICIT_CAST,
+                    -1);
+                uvar->value = (Expr*)node;
             } else {
                 node = coerce_type(pstate,
                     node,
