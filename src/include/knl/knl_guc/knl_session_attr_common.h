@@ -83,6 +83,10 @@ typedef struct knl_session_attr_common {
     int StatementTimeout;
     int SessionTimeout;
     int SessionTimeoutCount;
+#ifndef ENABLE_MULTIPLE_NODES
+    int IdleInTransactionSessionTimeout;
+    int IdleInTransactionSessionTimeoutCount;
+#endif
     int pgstat_collect_thread_status_interval;
     int extra_float_digits;
     int effective_io_concurrency;

@@ -95,6 +95,9 @@ void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
         scheduler->DynamicAdjustThreadPool();
         scheduler->GPCScheduleCleaner(&gpc_count);
         g_threadPoolControler->GetSessionCtrl()->CheckSessionTimeout();
+#ifndef ENABLE_MULTIPLE_NODES
+        g_threadPoolControler->GetSessionCtrl()->CheckIdleInTransactionSessionTimeout();
+#endif
     }
     proc_exit(0);
 }
