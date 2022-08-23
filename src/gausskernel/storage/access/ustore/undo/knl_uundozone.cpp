@@ -724,6 +724,10 @@ void UndoZoneGroup::ReleaseZone(int zid, UndoPersistence upersistence)
     Assert(IS_VALID_ZONE_ID(zid));
     WHITEBOX_TEST_STUB(UNDO_RELEASE_ZONE_FAILED, WhiteboxDefaultErrorEmit);
     if (g_instance.undo_cxt.uZones == NULL || g_instance.undo_cxt.uZoneCount == 0) {
+        // In situation where we set enable_ustore to on but never use ustore.
+        // We ALLOCATE_ZONEID() when AllocateZonesBeforXid(), so need to release them.
+        Assert(g_instance.attr.attr_storage.enable_ustore);
+        RELEASE_ZONEID(upersistence, zid);
         return;
     }
     UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zid];
