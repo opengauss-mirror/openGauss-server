@@ -764,3 +764,25 @@ drop procedure tableof_26;
 drop procedure tableof_27;
 drop table customers;
 drop schema if exists plpgsql_table_opengauss cascade;
+
+create database db_gbk encoding='gbk' template=template0 lc_collate='zh_CN.gbk' lc_ctype='zh_CN.gbk';
+\c db_gbk
+set client_encoding to 'utf8';
+CREATE OR REPLACE FUNCTION fun() RETURNS VOID AS $$
+DECLARE
+Type array_gbk_type IS TABLE OF int2 INDEX BY varchar(10);
+array_gbk array_gbk_type;
+BEGIN
+array_gbk('乁') := 6;
+array_gbk('丂') := 12;
+array_gbk('亇') := 2; 
+array_gbk('亅') := 4; 
+raise info 'FIRST=%',array_gbk.FIRST;
+raise info 'LAST=%',array_gbk.LAST; 
+END;
+$$
+LANGUAGE plpgsql;
+select fun();
+reset client_encoding;
+\c regression
+drop database db_gbk;
