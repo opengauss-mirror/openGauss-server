@@ -15090,7 +15090,15 @@ RuleStmt:	CREATE opt_or_replace RULE name AS
 
 RuleActionList:
 			NOTHING									{ $$ = NIL; }
-			| RuleActionStmt						{ $$ = list_make1($1); }
+			| RuleActionStmt {
+#ifndef ENABLE_MULTIPLE_NODES
+				if (IsA($1, CopyStmt) || IsA($1, AlterTableStmt)) {
+					ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Unsupported feature"),
+									errdetail("copy stmt or alter stmt in action is not allowed")));
+				}
+#endif
+			    $$ = list_make1($1); 
+            }
 			| '(' RuleActionMulti ')'				{ $$ = $2; }
 		;
 
