@@ -100,6 +100,144 @@ static void SetSessionTimeout(const char* session_timeout)
 
     PQclear(StRes);
 }
+
+static void JudgeEndStateInBFormat(const char* inputLine, bool &is_b_format, char* delimiter_name, bool is_new_lines)
+{
+    /* Convert inputLine to lowercase */ 
+    char *inputLine_temp = pg_strdup(inputLine);
+    inputLine_temp = pg_strtolower(inputLine_temp);
+
+    /* Determine whether the command is a delimiter command, and if so, save the result. */
+    static bool is_just_one_check = false;
+    static bool is_just_two_check = false;
+    PGresult* res = NULL ;
+    char *tokenPtr = strstr(inputLine_temp, "delimiter");
+    char *tokenPtr1 = strstr(inputLine_temp, "\\c" );
+    errno_t rc = 0;
+    
+    if (!is_just_one_check) {
+        res = PQexec(pset.db, "show sql_compatibility");
+        if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+            is_b_format = strcmp (PQgetvalue(res, 0, 0), "B") == 0;
+        }   
+        PQclear(res);
+        res = NULL;
+        is_just_one_check = true;
+    }
+
+    if (tokenPtr1 != NULL) {
+        is_just_one_check = false;
+    }
+
+    if (is_b_format) {
+        if (!is_just_two_check && is_new_lines) {
+            res = PQexec(pset.db, "show delimiter_name");
+            if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK) {
+                rc = strcpy_s(delimiter_name, DELIMITER_LENGTH, PQgetvalue(res, 0, 0));
+                securec_check_c(rc, "\0", "\0"); 
+            }
+            PQclear(res);
+            res = NULL;
+            is_just_two_check = true;
+        }
+    } else if (strcmp(delimiter_name,";") != 0) {
+        rc = strcpy_s(delimiter_name, DELIMITER_LENGTH, ";");
+        securec_check_c(rc, "\0", "\0"); 
+    }
+
+    if (tokenPtr != NULL || tokenPtr1 != NULL) {
+        is_just_two_check = false;
+    }
+
+    free(inputLine_temp);
+    inputLine_temp =NULL;
+}
+
+static bool is_match_delimiter_name(const char* left, const char* right)
+{
+    if (strlen(left) < strlen(right)) {
+        return false;
+    }
+    while (*right) {
+        if (*left++ != *right++) {
+            return false;
+        }
+    }
+    return true ;
+}
+
+static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_lines)
+{
+    /* Determine whether it is a delimiter command. */
+    char *str_temp = pg_strdup(str);
+    str_temp = pg_strtolower(str_temp);
+    bool is_delimiter = false;
+    char *token = strstr(str_temp, "delimiter");
+    errno_t rc = 0;
+    if(token != NULL) {
+        is_delimiter = true;
+        char* pos = str_temp;
+        while(pos != token) {
+            if(*pos == ' ') {
+                pos++;
+            } else {
+                is_delimiter = false;
+                break;
+            }
+        }
+        if(is_delimiter) {
+            char* end = pos + strlen("delimiter");
+            if(*end != ' ' && *end != '\0') {
+                is_delimiter = false;
+            }
+        }
+    }
+    if (is_new_lines && is_delimiter && strstr(str, delimiter_name) == NULL) {
+        Size slen1 = strlen(str) + strlen(delimiter_name) + DELIMITER_LENGTH;
+        char* result1 = (char *) pg_malloc(slen1);
+        rc = sprintf_s(result1, slen1, "%s %s", str, delimiter_name);
+        securec_check_ss_c(rc, "", ""); 
+        free(str_temp);
+        str_temp =NULL;
+        return result1;
+    } 
+    free(str_temp);
+    str_temp =NULL;
+
+    if (!((*delimiter_name >= 'a' && *delimiter_name <='z') || (*delimiter_name >= 'A' && *delimiter_name <= 'Z'))) {
+        return pg_strdup(str);
+    }
+    Size slen = 2 * strlen(str) + 1;
+    char* result = (char *) pg_malloc(slen + 2);
+    char* temp = result;
+    char* pos;
+    char* end_of_str = str + strlen(str);
+    char special_str = 0;
+    char in;
+    for (pos = str; pos < end_of_str; pos++) {
+        in = *pos;
+        if (!special_str && is_match_delimiter_name(pos , delimiter_name)) {
+            *temp++ =' ';
+            int delimiter_name_length = strlen(delimiter_name);
+            while ( delimiter_name_length > 0 && *pos != '\0') {
+                *temp++ = *pos++;
+                delimiter_name_length--;
+            }
+            pos--;
+            *temp++ = ' ';
+        } else {
+            if (in == special_str) {
+                 special_str = 0;
+            } else if (!special_str && (in == '\'' || in == '"' || in == '`')) {
+                special_str = (char)in; 
+            }
+            *temp++ = *pos;
+        }
+    }   
+    *temp = '\0';
+    return result;
+}
+
 /*
  * Main processing loop for reading lines of input
  *	and sending them to the backend.
@@ -142,6 +280,9 @@ int MainLoop(FILE* source, char* querystring)
     /* Save the stmts and counts info in parallel execute mode. */
     int query_count = 0;
     char** query_stmts = NULL;
+    bool is_b_format = false;
+    char delimiter_name[DELIMITER_LENGTH]=";";
+    char *line_temp = NULL;
 
     errno_t rc = 0;
 
@@ -318,11 +459,19 @@ int MainLoop(FILE* source, char* querystring)
 
         /* Setting this will not have effect until next line. */
         die_on_error = pset.on_error_stop;
-
+        /* Add processing of sql mode and terminator */
+        bool is_new_lines = query_buf->len == 0 ? true : false;
+        JudgeEndStateInBFormat(line, is_b_format, delimiter_name, is_new_lines);
         /*
          * Parse line, looking for command separators.
          */
-        psql_scan_setup(scan_state, line, (int)strlen(line));
+        if (is_b_format) {
+            line_temp = get_correct_str(line, delimiter_name, is_new_lines);
+            psql_scan_setup(scan_state, line_temp, (int)strlen(line_temp));
+            free(line_temp);
+        } else {
+            psql_scan_setup(scan_state, line, (int)strlen(line));
+        }
         success = true;
         line_saved_in_history = false;
 
@@ -330,7 +479,7 @@ int MainLoop(FILE* source, char* querystring)
             PsqlScanResult scan_result;
             promptStatus_t prompt_tmp = prompt_status;
 
-            scan_result = psql_scan(scan_state, query_buf, &prompt_tmp);
+            scan_result = psql_scan(scan_state, query_buf, &prompt_tmp,is_b_format,delimiter_name);
             prompt_status = prompt_tmp;
 
             if (PQExpBufferBroken(query_buf)) {

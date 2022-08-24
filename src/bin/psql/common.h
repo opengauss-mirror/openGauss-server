@@ -43,6 +43,7 @@ extern bool canAddHist;
 #define DEFAULT_RETRY_TIMES 5
 #define MAX_RETRY_TIMES 10
 #define ERRCODE_LENGTH 5
+#define DELIMITER_LENGTH 16
 
 #if defined(__LP64__) || defined(__64BIT__)
 typedef unsigned int GS_UINT32;

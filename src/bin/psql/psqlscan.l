@@ -146,6 +146,8 @@ typedef struct PsqlScanStateData
 						   For sql like "Declare foo CURSOR XXX, butt_num is 1.
 						   Using this we can judge if the sql is a DECLARE CURSOR stmt */
 	bool		include_ora_comment; /* dont igore comment when ture, such as single line comment after function/procedure param */
+    bool is_b_format;
+	char *delimiter_name;
 } PsqlScanStateData;
 
 static PsqlScanState cur_state;	/* current state while active */
@@ -196,6 +198,7 @@ static void analyze_state(const char* text,PsqlScanState state);
 static int upperstrcmp(const char *str1,const char *str2);
 static  GramIdentify keywordRead(const char* text);
 static bool IsTranscationTokens(char* yytext, char* token);
+static bool judge_end_state(const char* text);
 
 #define YY_DECL int yylex(PsqlScanState lex_param)
 
@@ -656,6 +659,13 @@ other			.
 						RESET_XP_STATUS();
 						return LEXRES_SEMI;
 					}
+
+					if (cur_state->is_b_format == true ) {
+						if (strstr(yytext, cur_state->delimiter_name) != NULL && strcmp(";" ,cur_state->delimiter_name) != 0) {
+							RESET_XP_STATUS();
+							return LEXRES_SEMI;
+						}
+					}
 				}
 	}
 
@@ -796,9 +806,13 @@ other			.
 
 ";"				{
 					ECHO;
-					
-					if (lex_param->begin_state == BEGIN_CURSOR || 
+					bool is_end = true;
+					if (cur_state->is_b_format && strcmp(yytext , cur_state->delimiter_name) != 0) {
+						is_end = false;
+					}
+					if ((lex_param->begin_state == BEGIN_CURSOR || 
 						(!lex_param->declare_encountered && cur_state->paren_depth == 0))
+					     && is_end == true)
 					{
 							RESET_XP_STATUS();
 							return LEXRES_SEMI;
@@ -889,6 +903,13 @@ other			.
 
 {self}			{
 					ECHO;
+					if ((lex_param->begin_state == BEGIN_CURSOR || 
+							( !lex_param->declare_encountered && cur_state->paren_depth == 0))
+							&& judge_end_state(yytext))
+					{
+						RESET_XP_STATUS() ;
+						return LEXRES_SEMI;
+					}
 				}
 
 {operator}		{
@@ -943,6 +964,13 @@ other			.
 						yyless(nchars);
 					}
 					ECHO;
+					if ((lex_param->begin_state == BEGIN_CURSOR || 
+							( !lex_param->declare_encountered && cur_state->paren_depth == 0))
+							&& judge_end_state(yytext))
+					{
+						RESET_XP_STATUS() ;
+						return LEXRES_SEMI;
+					}
 				}
 
 {param}			{
@@ -983,6 +1011,13 @@ other			.
 {identifier}	{
 					ECHO;
 					analyze_state(yytext,(PsqlScanStateData*)lex_param);
+					if ((lex_param->begin_state == BEGIN_CURSOR || 
+							( !lex_param->declare_encountered && cur_state->paren_depth == 0))
+							&& judge_end_state(yytext))
+					{
+						RESET_XP_STATUS() ;
+						return LEXRES_SEMI;
+					}
 				}
 
 {other}			{
@@ -1373,7 +1408,9 @@ psql_scan_setup(PsqlScanState state,
 PsqlScanResult
 psql_scan(PsqlScanState state,
 		  PQExpBuffer query_buf,
-		  promptStatus_t *prompt)
+		  promptStatus_t *prompt,
+		  bool is_b_format,
+		  char* delimiter_name)
 {
 	PsqlScanResult result;
 	int			lexresult;
@@ -1391,6 +1428,14 @@ psql_scan(PsqlScanState state,
 		yy_switch_to_buffer(state->scanbufhandle);
 
 	BEGIN(state->start_state);
+	state->is_b_format = is_b_format;
+	if (is_b_format) {
+		if (state->delimiter_name) {
+			free(state->delimiter_name);
+			state->delimiter_name = NULL;
+		}
+		state->delimiter_name = pg_strdup(delimiter_name);
+	}
 
 	/* And lex. */
 	lexresult = yylex((PsqlScanStateData*)state);
@@ -1522,6 +1567,10 @@ psql_scan_finish(PsqlScanState state)
 		free(state->scanbuf);
 	}
 	state->scanbuf = NULL;
+	if (state->delimiter_name) {
+		free(state->delimiter_name);
+	}
+	state->delimiter_name = NULL;
 }
 
 /*
@@ -1553,6 +1602,11 @@ psql_scan_reset(PsqlScanState state)
 	state->begin_state = BEGIN_UNDEFINED;
 	state->butt_num = 0;
 	state->declare_encountered = false;
+	state->is_b_format = false;
+	if (state->delimiter_name) {
+		free(state->delimiter_name);
+	}
+	state->delimiter_name = NULL;
 }
 
 /*
@@ -2058,6 +2112,14 @@ static bool IsTranscationTokens(char* yytext, char* token)
         return true;
     }
     return false;
+}
+
+static bool judge_end_state(const char* text)
+{	
+	if (cur_state->is_b_format == true) {
+		return (strcmp(yytext, cur_state->delimiter_name) ==0);
+	}
+	return false;
 }
 
 /*

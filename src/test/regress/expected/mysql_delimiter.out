@@ -1,0 +1,99 @@
+-- B db compatibility case
+drop database if exists my_test;
+NOTICE:  database "my_test" does not exist, skipping
+create database my_test dbcompatibility 'B';
+\c my_test
+--Test default delimiter
+select 1; 
+ ?column? 
+----------
+        1
+(1 row)
+
+--Test delimiter aa
+delimiter aa;
+select 1aa
+ ?column? 
+----------
+        1
+(1 row)
+
+select 1aaselect 1;aa
+ ?column? 
+----------
+        1
+(1 row)
+
+ ?column? 
+----------
+        1
+(1 row)
+
+select kaa
+ERROR:  column "k" does not exist
+LINE 1: select k aa
+               ^
+CONTEXT:  referenced column: k
+delimiter ;aa
+--Test delimiter //
+delimiter //;
+select 1//
+ ?column? 
+----------
+        1
+(1 row)
+
+delimiter ;//
+--Test delimiter length
+delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
+ERROR:  syntax error at or near ";"
+LINE 1: delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
+                                                      ^
+--Test delimiter %
+delimiter %;
+select 1%
+ ?column? 
+----------
+        1
+(1 row)
+
+delimiter ;%
+--Test delimiter 'Mysql'
+delimiter 'Mysql';
+select 1Mysql
+ ?column? 
+----------
+        1
+(1 row)
+
+delimiter ;Mysql
+--Test other
+delimiter sds;
+delimiter aasds
+select 1aa
+ ?column? 
+----------
+        1
+(1 row)
+
+delimiter ;aa
+--
+delimiter asd ss;
+select 1asd
+ ?column? 
+----------
+        1
+(1 row)
+
+delimiter ;asd
+delimiter bb
+delimiter aa
+select 1aa
+ ?column? 
+----------
+        1
+(1 row)
+
+delimiter ;
+\c regression
+drop database my_test;
