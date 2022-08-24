@@ -3,9 +3,8 @@
  * pgfincore.cpp 
  *	  This file let you see and mainpulate objects in the FS page cache
  *
- * Portions Copyright (c) 2022, Wuhan University
+ * Portions Copyright (c) 2022, Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2009-2011, Cédric Villemain
- *
  *
  * IDENTIFICATION
  *	  src/common/backend/utils/misc/pgfincore.cpp
@@ -13,7 +12,6 @@
  * -------------------------------------------------------------------------
  */
 
-#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -38,23 +36,23 @@
 #include "storage/lock/lock.h"
 #include "utils/relcache.h"
 
-#define PGSYSCONF_COLS  		3
-#define PGFADVISE_COLS			4
-#define PGFADVISE_LOADER_COLS	5
-#define PGFINCORE_COLS  		10
+#define PGSYSCONF_COLS 3
+#define PGFADVISE_COLS 4
+#define PGFADVISE_LOADER_COLS 5
+#define PGFINCORE_COLS 10
 
-#define PGF_WILLNEED	10
-#define PGF_DONTNEED	20
-#define PGF_NORMAL		30
-#define PGF_SEQUENTIAL	40
-#define PGF_RANDOM		50
+#define PGF_WILLNEED 10
+#define PGF_DONTNEED 20
+#define PGF_NORMAL 30
+#define PGF_SEQUENTIAL 40
+#define PGF_RANDOM 50
 
 #define FINCORE_PRESENT 0x1
-#define FINCORE_DIRTY   0x2
+#define FINCORE_DIRTY 0x2
 #ifndef HAVE_FINCORE
-#define FINCORE_BITS    1
+#define FINCORE_BITS 1
 #else
-#define FINCORE_BITS    2
+#define FINCORE_BITS 2
 #endif
 /*
  * pgfadvise_fctx structure is needed
@@ -209,9 +207,9 @@ static int pgfadvise_file(char *filename, int advice, pgfadviseStruct *pgfdv)
 	pgfdv->pageSize	= sysconf(_SC_PAGESIZE);
 
 	/*
-	 * Fopen and fstat file
+	 * Fopen and fstat file 
 	 * fd will be provided to posix_fadvise
-	 * if there is no file, just return 1, it is expected to leave the SRF
+	 * if there is no file, just return	1, it is expected to leave the SRF
 	 */
 	fp = AllocateFile(filename, "rb");
 	if (fp == NULL)
@@ -357,13 +355,13 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
                 errdetail("segment-page tables doesn't support pgfadvise yet")));
 		}
 
-		if(RelationIsSubPartitioned(fctx->rel)) {
-			fctx->isSubPartitionTable = RelationIsSubPartitioned(fctx->rel);
+		if (RelationIsSubPartitioned(fctx->rel)) {
+			fctx->isSubPartitionTable = true;
 			fctx->isPartitionTable = false;
-		} else if(RELATION_IS_PARTITIONED(fctx->rel)) {
-			fctx->isPartitionTable = RELATION_IS_PARTITIONED(fctx->rel);
+		} else if (RELATION_IS_PARTITIONED(fctx->rel)) {
+			fctx->isPartitionTable = true;
 			fctx->isSubPartitionTable = false;
-		}else {
+		} else {
 			fctx->isPartitionTable = false;
 			fctx->isSubPartitionTable = false;
 		}
@@ -375,7 +373,7 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 		fctx->isFirstIndexOid = true;;
 		if (!RelationIsIndex(fctx->rel)) {
 			fctx->indexoidlist = RelationGetIndexList(fctx->rel);
-    	}else {
+    	} else {
 			fctx->indexoidlist = NULL;
 		}
 		
@@ -383,7 +381,7 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 		/* Here we keep track of current action in all calls */
 		fctx->advice = advice;
 
-		if(!(fctx->isPartitionTable || fctx->isSubPartitionTable)) {
+		if (!(fctx->isPartitionTable || fctx->isSubPartitionTable)) {
 			/* we get the common part of the filename of each segment of a relation */
 			fctx->relationpath = relpathpg(fctx->rel, forkName);
 
@@ -432,9 +430,9 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 	}
 
 	FILE *fp = AllocateFile(filename, "rb");
-	if(fp == NULL) {
-		if(fctx->isPartitionTable || fctx->isSubPartitionTable) {
-			if(fctx->isSubPartitionTable && lnext(fctx->subPartitionCell)) {
+	if (fp == NULL) {
+		if (fctx->isPartitionTable || fctx->isSubPartitionTable) {
+			if (fctx->isSubPartitionTable && lnext(fctx->subPartitionCell)) {
 				fctx->subPartitionCell = lnext(fctx->subPartitionCell);
 				Partition subPartition = (Partition)lfirst(fctx->subPartitionCell);
 				Relation subPartionRel = SubPartitionGetRelation(fctx->rel,subPartition,AccessShareLock);
@@ -443,7 +441,7 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 				releaseDummyRelation(&subPartionRel);
 				errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
 				securec_check_ss(rc, "\0", "\0");
-			}else if(fctx->isPartitionTable && lnext(fctx->partitionCell)) {
+			} else if (fctx->isPartitionTable && lnext(fctx->partitionCell)) {
 				fctx->partitionCell = lnext(fctx->partitionCell);
 				Partition partition = (Partition)lfirst(fctx->partitionCell);
 				Relation partitionRel = partitionGetRelation(fctx->rel,partition);
@@ -452,9 +450,9 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 				releaseDummyRelation(&partitionRel);
 				errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
 				securec_check_ss(rc, "\0", "\0");
-			}else {
-				if(fctx->indexoidlist != NULL) {
-					if(fctx->isFirstIndexOid) {
+			} else {
+				if (fctx->indexoidlist != NULL) {
+					if (fctx->isFirstIndexOid) {
 						fctx->indexCell = list_head(fctx->indexoidlist);
 						fctx->isFirstIndexOid=false;
 						Oid indexId = lfirst_oid(fctx->indexCell);
@@ -464,8 +462,8 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 						index_close(currentIndex, NoLock);
 						errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
 						securec_check_ss(rc, "\0", "\0");
-					}else {
-						if(lnext(fctx->indexCell)) {
+					} else {
+						if (lnext(fctx->indexCell)) {
 							fctx->indexCell = lnext(fctx->indexCell);
 							Oid indexId = lfirst_oid(fctx->indexCell);
 							Relation currentIndex = index_open(indexId, AccessShareLock);
@@ -478,10 +476,10 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 					}
 				}
 			}
-		}else {
+		} else {
 			//process index 
-			if(fctx->indexoidlist != NULL) {
-				if(fctx->isFirstIndexOid) {
+			if (fctx->indexoidlist != NULL) {
+				if (fctx->isFirstIndexOid) {
 					fctx->indexCell = list_head(fctx->indexoidlist);
 					fctx->isFirstIndexOid=false;
 					Oid indexId = lfirst_oid(fctx->indexCell);
@@ -491,8 +489,8 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 					index_close(currentIndex, NoLock);
 					errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
 					securec_check_ss(rc, "\0", "\0");
-				}else {
-					if(lnext(fctx->indexCell)) {
+				} else {
+					if (lnext(fctx->indexCell)) {
 						fctx->indexCell = lnext(fctx->indexCell);
 						Oid indexId = lfirst_oid(fctx->indexCell);
 						Relation currentIndex = index_open(indexId, AccessShareLock);
@@ -522,9 +520,9 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
 	*/
 	if (result) {
 		ereport(DEBUG1, (errmsg("pgfadvise: closing %s", fctx->relationpath)));
-		if(fctx->isPartitionTable) {
+		if (fctx->isPartitionTable) {
 			releasePartitionList(fctx->rel, &(fctx->partitionIdList), AccessShareLock);
-		}else if(fctx->isSubPartitionTable) {
+		} else if (fctx->isSubPartitionTable) {
 			releasePartitionList(fctx->rel, &(fctx->subPartitionIdList), AccessShareLock);
 		}
 		relation_close(fctx->rel, AccessShareLock);
@@ -597,7 +595,7 @@ static int pgfadvise_loader_file(char *filename,
 	/*
 	 * Fopen and fstat file
 	 * fd will be provided to posix_fadvise
-	 * if there is no file, just return 1, it is expected to leave the SRF
+	 * if there is no file, just return	1, it is expected to leave the SRF
 	 */
 	fp = AllocateFile(filename, "rb");
 	if (fp == NULL)
@@ -626,8 +624,7 @@ static int pgfadvise_loader_file(char *filename,
 					                     POSIX_FADV_WILLNEED);
 					pgfloader->pagesLoaded++;
 				}
-			}
-			else if (dontneed) {	
+			} else if (dontneed) {	
 				(void) posix_fadvise(fd,
 				                     ((i+k) * pgfloader->pageSize),
 				                     pgfloader->pageSize,
@@ -654,8 +651,7 @@ static int pgfadvise_loader_file(char *filename,
 					                     POSIX_FADV_WILLNEED);
 					pgfloader->pagesLoaded++;
 				}
-			}
-			else if (dontneed) {
+			} else if (dontneed) {
 				(void) posix_fadvise(fd,
 				                     (k * pgfloader->pageSize),
 				                     pgfloader->pageSize,
@@ -831,7 +827,7 @@ static int pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
 	/*
 	 * Fopen and fstat file
 	 * fd will be provided to posix_fadvise
-	 * if there is no file, just return 1, it is expected to leave the SRF
+	 * if there is no file, just return	1, it is expected to leave the SRF
 	 */
 	fp = AllocateFile(filename, "rb");
 	if (fp == NULL)
@@ -858,7 +854,7 @@ static int pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
 		if (pa == MAP_FAILED) {
 			int	save_errno = errno;
 			FreeFile(fp);
-			ereport(ERROR, (errmsg("Can not mmap object file : %s, errno = %i,%s\nThis error can happen if there is not enought space in memory to do the projection. Please mail cedric@villemain.org with '[pgfincore] ENOMEM' as subject.",
+			ereport(ERROR, (errmsg("Can not mmap object file : %s, errno = %i,%s\nThis error can happen if there is not enought space in memory to do the projection.",
 				 filename, save_errno, strerror(save_errno))));
 			return 1;
 		}
@@ -924,9 +920,9 @@ static int pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
 						if (flag_dirty)
 							pgfncr->group_dirty++;
 						flag_dirty = 0;
-					}
-					else
+					} else {
 						flag_dirty = 1;
+					}
 				}
 				ereport(DEBUG5, (errmsg("in memory blocks : %lld / %lld",
 					  (long long int) pageIndex, (long long int) pgfncr->rel_os_pages)));
@@ -934,10 +930,9 @@ static int pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
 				if (flag)
 					pgfncr->group_mem++;
 				flag = 0;
-			}
-			else
+			} else {
 				flag=1;
-
+			}
 
 			x >>= FINCORE_BITS;
 			if (x == 0) {
@@ -1044,13 +1039,13 @@ Datum pgfincore(PG_FUNCTION_ARGS)
                 errdetail("segment-page tables doesn't support pgfincore yet")));
 		}
 
-		if(RelationIsSubPartitioned(fctx->rel)) {
-			fctx->isSubPartitionTable = RelationIsSubPartitioned(fctx->rel);
+		if (RelationIsSubPartitioned(fctx->rel)) {
+			fctx->isSubPartitionTable = true;
 			fctx->isPartitionTable = false;
-		} else if(RELATION_IS_PARTITIONED(fctx->rel)) {
-			fctx->isPartitionTable = RELATION_IS_PARTITIONED(fctx->rel);
+		} else if (RELATION_IS_PARTITIONED(fctx->rel)) {
+			fctx->isPartitionTable = true;
 			fctx->isSubPartitionTable = false;
-		}else {
+		} else {
 			fctx->isPartitionTable = false;
 			fctx->isSubPartitionTable = false;
 		}
@@ -1063,11 +1058,11 @@ Datum pgfincore(PG_FUNCTION_ARGS)
 		fctx->isFirstIndexOid = true;;
 		if (!RelationIsIndex(fctx->rel)) {
 			fctx->indexoidlist = RelationGetIndexList(fctx->rel);
-    	}else {
+    	} else {
 			fctx->indexoidlist = NULL;
 		}
 		
-		if(!(fctx->isPartitionTable || fctx->isSubPartitionTable)) {
+		if (!(fctx->isPartitionTable || fctx->isSubPartitionTable)) {
 			/* we get the common part of the filename of each segment of a relation */
 			fctx->relationpath = relpathpg(fctx->rel, forkName);
 
@@ -1116,9 +1111,9 @@ Datum pgfincore(PG_FUNCTION_ARGS)
 	}
 
 	FILE *fp = AllocateFile(filename, "rb");
-	if(fp == NULL) {
-		if(fctx->isPartitionTable || fctx->isSubPartitionTable) {
-			if(fctx->isSubPartitionTable && lnext(fctx->subPartitionCell)) {
+	if (fp == NULL) {
+		if (fctx->isPartitionTable || fctx->isSubPartitionTable) {
+			if (fctx->isSubPartitionTable && lnext(fctx->subPartitionCell)) {
 				fctx->subPartitionCell = lnext(fctx->subPartitionCell);
 				Partition subPartition = (Partition)lfirst(fctx->subPartitionCell);
 				Relation subPartionRel = SubPartitionGetRelation(fctx->rel,subPartition,AccessShareLock);
@@ -1127,7 +1122,7 @@ Datum pgfincore(PG_FUNCTION_ARGS)
 				releaseDummyRelation(&subPartionRel);
 				errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
 				securec_check_ss(rc, "\0", "\0");
-			}else if(fctx->isPartitionTable && lnext(fctx->partitionCell)) {
+			} else if (fctx->isPartitionTable && lnext(fctx->partitionCell)) {
 				fctx->partitionCell = lnext(fctx->partitionCell);
 				Partition partition = (Partition)lfirst(fctx->partitionCell);
 				Relation partitionRel = partitionGetRelation(fctx->rel,partition);
@@ -1136,9 +1131,9 @@ Datum pgfincore(PG_FUNCTION_ARGS)
 				releaseDummyRelation(&partitionRel);
 				errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
 				securec_check_ss(rc, "\0", "\0");
-			}else {
-				if(fctx->indexoidlist != NULL) {
-					if(fctx->isFirstIndexOid) {
+			} else {
+				if (fctx->indexoidlist != NULL) {
+					if (fctx->isFirstIndexOid) {
 						fctx->indexCell = list_head(fctx->indexoidlist);
 						fctx->isFirstIndexOid=false;
 						Oid indexId = lfirst_oid(fctx->indexCell);
@@ -1148,8 +1143,8 @@ Datum pgfincore(PG_FUNCTION_ARGS)
 						index_close(currentIndex, NoLock);
 						errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
 						securec_check_ss(rc, "\0", "\0");
-					}else {
-						if(lnext(fctx->indexCell)) {
+					} else {
+						if (lnext(fctx->indexCell)) {
 							fctx->indexCell = lnext(fctx->indexCell);
 							Oid indexId = lfirst_oid(fctx->indexCell);
 							Relation currentIndex = index_open(indexId, AccessShareLock);
@@ -1162,10 +1157,10 @@ Datum pgfincore(PG_FUNCTION_ARGS)
 					}
 				}
 			}
-		}else {
+		} else {
 			//process index 
-			if(fctx->indexoidlist != NULL) {
-				if(fctx->isFirstIndexOid) {
+			if (fctx->indexoidlist != NULL) {
+				if (fctx->isFirstIndexOid) {
 					fctx->indexCell = list_head(fctx->indexoidlist);
 					fctx->isFirstIndexOid=false;
 					Oid indexId = lfirst_oid(fctx->indexCell);
@@ -1175,8 +1170,8 @@ Datum pgfincore(PG_FUNCTION_ARGS)
 					index_close(currentIndex, NoLock);
 					errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
 					securec_check_ss(rc, "\0", "\0");
-				}else {
-					if(lnext(fctx->indexCell)) {
+				} else {
+					if (lnext(fctx->indexCell)) {
 						fctx->indexCell = lnext(fctx->indexCell);
 						Oid indexId = lfirst_oid(fctx->indexCell);
 						Relation currentIndex = index_open(indexId, AccessShareLock);
@@ -1206,9 +1201,9 @@ Datum pgfincore(PG_FUNCTION_ARGS)
 	if (result) {
 		ereport(DEBUG1, (errmsg("pgfincore: closing %s", fctx->relationpath)));
 		
-		if(fctx->isPartitionTable) {
+		if (fctx->isPartitionTable) {
 			releasePartitionList(fctx->rel, &(fctx->partitionIdList), AccessShareLock);
-		}else if(fctx->isSubPartitionTable) {
+		} else if (fctx->isSubPartitionTable) {
 			releasePartitionList(fctx->rel, &(fctx->subPartitionIdList), AccessShareLock);
 		}
 		relation_close(fctx->rel, AccessShareLock);
