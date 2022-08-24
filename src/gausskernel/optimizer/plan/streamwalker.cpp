@@ -817,8 +817,14 @@ static bool table_contain_unsupport_feature(Oid relid, Query* query)
 
 static bool contain_unsupport_function(Oid funcId)
 {
-    if (funcId >= FirstNormalObjectId)
+    if (funcId >= FirstNormalObjectId) {
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+        if (u_sess->hook_cxt.aggSmpHook != NULL) {
+            return ((aggSmpFunc)(u_sess->hook_cxt.aggSmpHook))(funcId);
+        }
+#endif
         return true;
+    }
 
     for (uint i = 0; i < lengthof(unsupport_func); i++) {
         if (funcId == unsupport_func[i])
