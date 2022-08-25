@@ -49,11 +49,8 @@
 
 #define FINCORE_PRESENT 0x1
 #define FINCORE_DIRTY 0x2
-#ifndef HAVE_FINCORE
 #define FINCORE_BITS 1
-#else
-#define FINCORE_BITS 2
-#endif
+
 /*
  * pgfadvise_fctx structure is needed
  * to keep track of relation path, segment number, ...
@@ -819,9 +816,8 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
     int	fd;
     struct stat st;
 
-#ifndef HAVE_FINCORE
     void *pa = (char *) 0;
-#endif
+
     unsigned char *vec = (unsigned char *) 0;
 
     /*
@@ -863,7 +859,6 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
         /* number of pages in the current file */
         pgfncr->rel_os_pages = (st.st_size+pgfncr->pageSize-1)/pgfncr->pageSize;
 
-#ifndef HAVE_FINCORE
         pa = mmap(NULL, st.st_size, PROT_NONE, MAP_SHARED, fd, 0);
         if (pa == MAP_FAILED) {
             int	save_errno = errno;
@@ -872,33 +867,22 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
                  filename, save_errno, strerror(save_errno))));
             return false;
         }
-#endif
 
         /* Prepare our vector containing all blocks information */
         vec = (unsigned char * ) calloc(1, (st.st_size+pgfncr->pageSize-1)/pgfncr->pageSize);
         if ((void *)0 == vec) {
-#ifndef HAVE_FINCORE
             munmap(pa, st.st_size);
-#endif
             FreeFile(fp);
             ereport(ERROR, (errmsg("Can not calloc object file : %s", filename)));
             return false;
         }
 
-#ifndef HAVE_FINCORE
         /* Affect vec with mincore */
         if (mincore(pa, st.st_size, vec) != 0) {
             int save_errno = errno;
             munmap(pa, st.st_size);
             ereport(ERROR, (errmsg("mincore(%p, %lld, %p): %s\n",
                  pa, (long long int)st.st_size, vec, strerror(save_errno))));
-#else
-        /* Affect vec with fincore */
-        if (fincore(fd, 0, st.st_size, vec) != 0) {
-            int save_errno = errno;
-            ereport(ERROR, (errmsg("fincore(%u, 0, %lld, %p): %s\n",
-                 fd, (long long int)st.st_size, vec, strerror(save_errno))));
-#endif
             free(vec);
             FreeFile(fp);
             return false;
@@ -962,9 +946,7 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
      * free and close
      */
     free(vec);
-#ifndef HAVE_FINCORE
     munmap(pa, st.st_size);
-#endif
     FreeFile(fp);
 
     /*
@@ -1099,7 +1081,6 @@ Datum pgfincore(PG_FUNCTION_ARGS)
             fctx->segcount = 0;
             releaseDummyRelation(&partitionRel);
         }
-
 
         /* And finally we keep track of our initialization */
         ereport(DEBUG1, (errmsg("pgfincore: init done for %s, in fork %s", 
