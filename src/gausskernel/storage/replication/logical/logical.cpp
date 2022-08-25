@@ -1115,3 +1115,52 @@ void NotifyPrimaryAdvance(XLogRecPtr restart, XLogRecPtr flush)
 
     PQclear(res);
 }
+
+/* Notify the primary to advance catalog_xmin of the logical replication slot. */
+void NotifyPrimaryCatalogXmin(TransactionId catalogXmin)
+{
+    const uint32 queryPath = 256;
+    const uint32 upperPart = 32;
+    char query[queryPath];
+    PGresult* res = NULL;
+
+    if (t_thrd.proc->workingVersionNum < ADVANCE_CATALOG_XMIN_OLD_VERSION_NUM) {
+        ereport(LOG, (errmsg("Current version %u is less than advance catalogXmin version %u, stop it",
+            t_thrd.proc->workingVersionNum, ADVANCE_CATALOG_XMIN_OLD_VERSION_NUM)));
+        return;
+    }
+
+    int nRet = snprintf_s(query, sizeof(query), sizeof(query) - 1,
+                      "ADVANCE_CATALOG_XMIN SLOT \"%s\" LOGICAL %X/%X",
+                      NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name),
+                      (uint32)(catalogXmin >> upperPart),
+                      (uint32)(catalogXmin));
+
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    if (t_thrd.walsender_cxt.advancePrimaryConn == NULL) {
+        LogicalAdvanceConnect();
+    }
+    res = PQexec(t_thrd.walsender_cxt.advancePrimaryConn, query);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("could not send replication command \"%s\": %s\n",
+                               query, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+        return;
+    }
+
+    if (PQnfields(res) != 2 || PQntuples(res) != 1) {
+            int numTuples = PQntuples(res);
+            int numFields = PQnfields(res);
+
+            PQclear(res);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("invalid response from remote server"),
+                            errdetail("Expected 1 tuple with 2 fields, got %d tuples with %d fields.",
+                                      numTuples, numFields)));
+            return;
+    }
+
+    PQclear(res);
+}

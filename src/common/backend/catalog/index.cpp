@@ -2721,6 +2721,18 @@ static inline bool IsRedisExtraIndex(const IndexInfo* indexInfo, const TupleTabl
         (indexInfo->ii_KeyAttrNumbers[0] == (slot->tts_tupleDescriptor->natts - 1)));
 }
 
+static TransactionId GetCatalogOldestXmin(Relation heapRelation)
+{
+    TransactionId oldestXmin = GetOldestXmin(heapRelation);
+    if (IsCatalogRelation(heapRelation) || RelationIsAccessibleInLogicalDecoding(heapRelation)) {
+        TransactionId catalogXmin = GetReplicationSlotCatalogXmin();
+        if (TransactionIdIsNormal(catalogXmin) && TransactionIdPrecedes(catalogXmin, oldestXmin)) {
+            oldestXmin = catalogXmin;
+        }
+    }
+    return oldestXmin;
+}
+
 /*
  * IndexBuildHeapScan - scan the heap relation to find tuples to be indexed
  *
@@ -2805,7 +2817,7 @@ double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexIn
     } else {
         snapshot = SnapshotAny;
         /* okay to ignore lazy VACUUMs here */
-        OldestXmin = GetOldestXmin(heapRelation);
+        OldestXmin = GetCatalogOldestXmin(heapRelation);
     }
 
     scan = heap_beginscan_strat(heapRelation, /* relation */

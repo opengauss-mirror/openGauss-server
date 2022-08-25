@@ -107,6 +107,7 @@ DROP_REPLICATION_SLOT		{ return K_DROP_REPLICATION_SLOT; }
 PHYSICAL			{ return K_PHYSICAL; }
 LOGICAL 			{ return K_LOGICAL; }
 SLOT				{ return K_SLOT; }
+ADVANCE_CATALOG_XMIN		{ return K_ADVANCE_CATALOG_XMIN; }
 
 ","				{ return ','; }
 ";"				{ return ';'; }

@@ -725,7 +725,9 @@ typedef enum NodeTag {
     T_ClientLogicColumnParam,
     T_CreateClientLogicColumn,
     T_ClientLogicColumnRef,
-    T_ExprWithComma
+    T_ExprWithComma,
+
+    T_AdvanceCatalogXminCmd
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

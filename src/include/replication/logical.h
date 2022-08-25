@@ -104,4 +104,5 @@ extern void LogicalConfirmReceivedLocation(XLogRecPtr lsn);
 extern bool filter_by_origin_cb_wrapper(LogicalDecodingContext* ctx, RepOriginId origin_id);
 extern void CloseLogicalAdvanceConnect();
 extern void NotifyPrimaryAdvance(XLogRecPtr restart, XLogRecPtr flush);
+extern void NotifyPrimaryCatalogXmin(TransactionId catalogXmin);
 #endif

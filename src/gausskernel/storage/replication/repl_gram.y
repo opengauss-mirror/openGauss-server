@@ -96,12 +96,13 @@
 %token K_ADVANCE_REPLICATION
 %token K_CREATE_REPLICATION_SLOT
 %token K_DROP_REPLICATION_SLOT
+%token K_ADVANCE_CATALOG_XMIN
 %token K_PHYSICAL
 %token K_LOGICAL
 %token K_SLOT
 
 %type <node>	command
-%type <node>	base_backup start_replication start_data_replication fetch_mot_checkpoint start_logical_replication advance_logical_replication identify_system identify_version identify_mode identify_consistence create_replication_slot drop_replication_slot identify_maxlsn identify_channel identify_az
+%type <node>	base_backup start_replication start_data_replication fetch_mot_checkpoint start_logical_replication advance_logical_replication advance_catalog_xmin identify_system identify_version identify_mode identify_consistence create_replication_slot drop_replication_slot identify_maxlsn identify_channel identify_az
 %type <list>	base_backup_opt_list
 %type <defelt>	base_backup_opt
 %type <list>    plugin_options plugin_opt_list
@@ -131,6 +132,7 @@ command:
 			| fetch_mot_checkpoint
 			| start_logical_replication
 			| advance_logical_replication
+			| advance_catalog_xmin
 			| create_replication_slot
 			| drop_replication_slot
 			| identify_maxlsn
@@ -333,6 +335,18 @@ advance_logical_replication:
 					cmd->slotname = $3;
 					cmd->restart_lsn = $5;
 					cmd->confirmed_flush = $6;
+					$$ = (Node *) cmd;
+				}
+			;
+
+/* ADVANCE_CATALOG_XMIN SLOT slot LOGICAL %X/%X */
+advance_catalog_xmin:
+		K_ADVANCE_CATALOG_XMIN K_SLOT IDENT K_LOGICAL RECPTR
+				{
+					AdvanceCatalogXminCmd *cmd;
+					cmd = makeNode(AdvanceCatalogXminCmd);
+					cmd->slotname = $3;
+					cmd->catalogXmin = $5;
 					$$ = (Node *) cmd;
 				}
 			;
