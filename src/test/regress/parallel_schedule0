@@ -929,3 +929,4 @@ test: composite_datum_record mysql_function b_comments
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition
+test: pgfincore
