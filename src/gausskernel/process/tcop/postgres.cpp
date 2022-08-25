@@ -7628,8 +7628,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     if (IS_PGXC_COORDINATOR)
         init_set_params_htab();
 
-#ifndef ENABLE_MULTIPLE_NODES
-    LoadSqlPlugin();
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    if (!IsInitdb) {
+        LoadSqlPlugin();
+    }
 #endif
 
     /*
