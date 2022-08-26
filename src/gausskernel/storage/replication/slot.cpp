@@ -123,8 +123,6 @@ void ReplicationSlotsShmemInit(void)
  */
 bool ReplicationSlotValidateName(const char *name, int elevel)
 {
-    const char *cp = NULL;
-
     if (name == NULL) {
         ereport(elevel, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name should not be NULL.")));
         return false;
@@ -140,9 +138,9 @@ bool ReplicationSlotValidateName(const char *name, int elevel)
         return false;
     }
 
-    for (cp = name; *cp; cp++) {
-        if (!((*cp >= 'a' && *cp <= 'z') || (*cp >= '0' && *cp <= '9') || (*cp == '_') || (*cp == '?') ||
-              (*cp == '<') || (*cp == '!') || (*cp == '-') || (*cp == '.'))) {
+    const char *danger_character_list[] = { ";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", "\n", NULL };
+    for (int i = 0; danger_character_list[i] != NULL; i++) {
+        if (strstr(name, danger_character_list[i]) != NULL) {
             ereport(elevel,
                     (errcode(ERRCODE_INVALID_NAME),
                      errmsg("replication slot name \"%s\" contains invalid character", name),
@@ -160,50 +158,6 @@ bool ReplicationSlotValidateName(const char *name, int elevel)
     }
 
     return true;
-}
-
-/*
- * Check whether the passed slot name is valid and report errors at elevel.
- *
- * Slot names may consist out of [a-z0-9_]{1,NAMEDATALEN-1} which should allow
- * the name to be used as a directory name on every supported OS.
- *
- * Returns whether the directory name is valid or not if elevel < ERROR.
- */
-void ValidateName(const char* name)
-{
-    if (name == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name should not be NULL.")));
-    }
-
-    if (strlen(name) == 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name \"%s\" is too short", name)));
-    }
-
-    if (strlen(name) >= NAMEDATALEN) {
-        ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("replication slot name \"%s\" is too long", name)));
-    }
-    const char *danger_character_list[] = { ";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", "\n", NULL };
-    int i = 0;
-
-    for (i = 0; danger_character_list[i] != NULL; i++) {
-        if (strstr(name, danger_character_list[i]) != NULL) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_NAME),
-                     errmsg("replication slot name \"%s\" contains invalid character", name),
-                     errhint("Replication slot names may only contain lower letters, "
-                             "numbers and the underscore character.")));
-        }
-    }
-
-    if (strncmp(name, "gs_roach", strlen("gs_roach")) == 0 &&
-        strcmp(u_sess->attr.attr_common.application_name, "gs_roach") != 0 && !RecoveryInProgress()) {
-        ereport(ERROR,
-               (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("replication slot name starting with gs_roach is internally reserverd")));
-    }
-
-    return;
 }
 
 /*

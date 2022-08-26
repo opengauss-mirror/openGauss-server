@@ -273,8 +273,7 @@ extern void ReplicationSlotMarkDirty(void);
 extern void CreateSlotOnDisk(ReplicationSlot* slot);
 
 /* misc stuff */
-extern bool ReplicationSlotValidateName(const char* name, int elevel);
-extern void ValidateName(const char* name);
+extern bool ReplicationSlotValidateName(const char* name, int elevel = ERROR);
 extern void ReplicationSlotsComputeRequiredXmin(bool already_locked);
 extern void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState* repl_slt_state);
 extern XLogRecPtr ReplicationSlotsComputeConfirmedLSN(void);

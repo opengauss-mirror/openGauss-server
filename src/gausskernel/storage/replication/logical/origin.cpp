@@ -1275,7 +1275,7 @@ Datum pg_replication_origin_xact_setup(PG_FUNCTION_ARGS)
 {
     XLogRecPtr location = InvalidXLogRecPtr;
     const char *str_location = TextDatumGetCString(PG_GETARG_DATUM(0));
-    ValidateName(str_location);
+    ReplicationSlotValidateName(str_location);
     if (!AssignLsn(&location, str_location)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
@@ -1310,7 +1310,7 @@ Datum pg_replication_origin_advance(PG_FUNCTION_ARGS)
     text *name = PG_GETARG_TEXT_P(0);
     XLogRecPtr remote_commit = InvalidXLogRecPtr;
     const char *str_remote_commit = TextDatumGetCString(PG_GETARG_DATUM(1));
-    ValidateName(str_remote_commit);
+    ReplicationSlotValidateName(str_remote_commit);
     if (!AssignLsn(&remote_commit, str_remote_commit)) {
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),

@@ -231,7 +231,7 @@ Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
     HeapTuple tuple;
     Datum result;
 
-    ValidateName(NameStr(*name));
+    ReplicationSlotValidateName(NameStr(*name));
 
     check_permissions();
 
@@ -279,7 +279,7 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
     bool for_backup = false;
     int ret;
 
-    ValidateName(NameStr(*name));
+    ReplicationSlotValidateName(NameStr(*name));
 
     for_backup = (strncmp(NameStr(*name), "gs_roach", strlen("gs_roach")) == 0);
 
@@ -453,8 +453,8 @@ Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
     char *str_tmp_lsn = NULL;
     NameData databaseName;
 
-    ValidateName(NameStr(*name));
-    ValidateName(NameStr(*plugin));
+    ReplicationSlotValidateName(NameStr(*name));
+    ReplicationSlotValidateName(NameStr(*plugin));
     str_tmp_lsn = (char *)palloc0(128);
 
     Oid userId = GetUserId();
@@ -494,7 +494,7 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
     bool for_backup = false;
     bool isLogical = false;
 
-    ValidateName(NameStr(*name));
+    ReplicationSlotValidateName(NameStr(*name));
 
     /* for gs_roach backup, acl is different and we always log slot drop */
     if (strncmp(NameStr(*name), "gs_roach", strlen("gs_roach")) == 0) {
@@ -877,7 +877,7 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
     char EndLsn[NAMEDATALEN];
     bool for_backup = false;
 
-    ValidateName(NameStr(*slotname));
+    ReplicationSlotValidateName(NameStr(*slotname));
 
     for_backup = (strncmp(NameStr(*slotname), "gs_roach", strlen("gs_roach")) == 0);
 
@@ -898,7 +898,7 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
             moveto = GetXLogReplayRecPtr(NULL);
     } else {
         const char *str_upto_lsn = TextDatumGetCString(PG_GETARG_DATUM(1));
-        ValidateName(str_upto_lsn);
+        ReplicationSlotValidateName(str_upto_lsn);
         if (!AssignLsn(&moveto, str_upto_lsn)) {
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type lsn: \"%s\" "
