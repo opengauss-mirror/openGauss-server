@@ -89,6 +89,9 @@ static void ProcKill(int code, Datum arg);
 static void AuxiliaryProcKill(int code, Datum arg);
 static bool CheckStatementTimeout(void);
 static void CheckSessionTimeout(void);
+#ifndef ENABLE_MULTIPLE_NODES
+static void CheckIdleInTransactionSessionTimeout(void);
+#endif
 
 static bool CheckStandbyTimeout(void);
 static void FiniNuma(int code, Datum arg);
@@ -2547,6 +2550,54 @@ bool enable_session_sig_alarm(int delayms)
     return true;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+/* Enable the idle_in_transaction_session_timeout timer. */
+bool enable_idle_in_transaction_session_sig_alarm(int delayms)
+{
+    TimestampTz fin_time;
+    struct itimerval timeval;
+    errno_t rc = EOK;
+
+    /* Session timer only work when connect form app, not work for inner conncection. */
+    if (!IsConnFromApp() || IS_THREAD_POOL_STREAM) {
+        return true;
+    }
+    /* disable idle_in_transaction session timeout */
+    if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout == 0) {
+        return true;
+    }
+    int delay_time_ms = delayms;
+    /* Set idle_in_transaction_session_timeout flag true. */
+    u_sess->storage_cxt.idle_in_transaction_session_timeout_active = true;
+
+    /* Calculate idle_in_transaction session timeout finish time. */
+    fin_time = GetCurrentTimestamp();
+    fin_time = TimestampTzPlusMilliseconds(fin_time, delay_time_ms);
+    u_sess->storage_cxt.idle_in_transaction_session_fin_time = fin_time;
+
+    /*
+     * threadpool session status must be UNINIT,ATTACH,DEATCH...
+     * KNL_SESS_FAKE only use in thread preinit
+     * if a new session is UNINIT
+     * 		if attached, t_thrd is valid.
+     * 		if not attach, t_thrd is invalid
+     * so we user USESS_STATUS to check again
+     * */
+    if (IS_THREAD_POOL_WORKER || u_sess->status != KNL_SESS_FAKE) {
+        return true;
+    }
+    /* Now we set the timer to interrupt. */
+    rc = memset_s(&timeval, sizeof(struct itimerval), 0, sizeof(struct itimerval));
+    securec_check(rc, "\0", "\0");
+    timeval.it_value.tv_sec = delay_time_ms / 1000;
+    timeval.it_value.tv_usec = (delay_time_ms % 1000) * 1000;
+    if (gs_signal_settimer(&timeval))
+        return false;
+
+    return true;
+}
+#endif
+
 /* Disable the session timeout timer. */
 bool disable_session_sig_alarm(void)
 {
@@ -2575,6 +2626,37 @@ bool disable_session_sig_alarm(void)
         return false;
     }
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+/* Disable the idle_in_transaction_session_timeout timer. */
+bool disable_idle_in_transaction_session_sig_alarm(void)
+{
+    if (IS_THREAD_POOL_WORKER) {
+        u_sess->storage_cxt.idle_in_transaction_session_timeout_active = false;
+        return true;
+    }
+    /* idle_in_transaction_session_timeout timer only work when connect from app, not work for inner conncection. */
+    if (!IsConnFromApp()) {
+        return true;
+    }
+
+    /* already disable */
+    if (!u_sess->attr.attr_common.IdleInTransactionSessionTimeout && \
+        (!u_sess->storage_cxt.idle_in_transaction_session_timeout_active)) {
+        return true;
+    }
+    /*
+     * Always disable the timer if it is active; this is for guarantee the
+     * atomicity of idle_in_transaction_session_timeout timer.
+     */
+    if (u_sess->storage_cxt.idle_in_transaction_session_timeout_active && !gs_signal_canceltimer()) {
+        u_sess->storage_cxt.idle_in_transaction_session_timeout_active = false;
+        return true;
+    } else {
+        return false;
+    }
+}
+#endif
 
 /*
  * Cancel the SIGALRM timer, either for a deadlock timeout or a statement
@@ -2722,6 +2804,28 @@ static bool CheckStatementTimeout(void)
     return true;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * Check for idle_in_transaction timeout.  If the timeout time has come,
+ * trigger a session-cancel interrupt;
+ */
+static void CheckIdleInTransactionSessionTimeout(void)
+{
+    if (IS_THREAD_POOL_WORKER) {
+        return;
+    }
+    TimestampTz now = GetCurrentTimestamp();
+    if (now >= u_sess->storage_cxt.idle_in_transaction_session_fin_time) {
+        u_sess->storage_cxt.idle_in_transaction_session_timeout_active = false;
+        if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0) {
+            ereport(WARNING, (errmsg("Idle in transaction session unused timeout.")));
+            (void)gs_signal_canceltimer();
+            (void)gs_signal_send(t_thrd.proc_cxt.MyProcPid, SIGTERM);
+        }
+    }
+}
+#endif
+
 /*
  * Check for session timeout.  If the timeout time has come,
  * trigger a session-cancel interrupt;
@@ -2786,6 +2890,12 @@ void handle_sig_alarm(SIGNAL_ARGS)
     if (t_thrd.proc) {
         SetLatch(&t_thrd.proc->procLatch);
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->storage_cxt.idle_in_transaction_session_timeout_active) {
+        CheckIdleInTransactionSessionTimeout();
+    }
+#endif
 
     if (u_sess->storage_cxt.session_timeout_active) {
         CheckSessionTimeout();

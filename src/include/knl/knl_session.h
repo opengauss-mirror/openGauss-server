@@ -1715,6 +1715,10 @@ typedef struct knl_u_storage_context {
     volatile bool session_timeout_active;
     /* session_fin_time is valid only if session_timeout_active is true */
     TimestampTz session_fin_time;
+#ifndef ENABLE_MULTIPLE_NODES
+    volatile bool idle_in_transaction_session_timeout_active;
+    TimestampTz idle_in_transaction_session_fin_time;
+#endif
 
     /* Number of file descriptors known to be in use by VFD entries. */
     int nfile;

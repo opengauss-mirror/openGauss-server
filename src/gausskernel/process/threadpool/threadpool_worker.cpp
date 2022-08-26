@@ -171,6 +171,13 @@ void ThreadPoolWorker::WaitMission()
     }
 
     (void)enable_session_sig_alarm(u_sess->attr.attr_common.SessionTimeout * 1000);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
+        (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock())) {
+        (void)enable_idle_in_transaction_session_sig_alarm(
+            u_sess->attr.attr_common.IdleInTransactionSessionTimeout * 1000);
+    }
+#endif
     bool isRawSession = false;
 
     Assert(t_thrd.int_cxt.InterruptHoldoffCount == 0);
@@ -226,6 +233,12 @@ void ThreadPoolWorker::WaitMission()
     }
     MemoryContextSwitchTo(old);
     (void)disable_session_sig_alarm();
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
+        (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock())) {
+        (void)disable_idle_in_transaction_session_sig_alarm();
+    }
+#endif
     /* now we can accept signal. out of this, we rely on signal handle. */
     AllowSignal();
     ShutDownIfNecessary();
