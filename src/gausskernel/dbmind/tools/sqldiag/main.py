@@ -21,7 +21,7 @@ from algorithm.diag import SQLDiag
 from utils import ResultSaver
 from preprocessing import LoadData, split_sql
 
-__version__ = '2.0.4'
+__version__ = '2.0.5'
 __description__ = 'SQLdiag integrated by openGauss.'
 
 
