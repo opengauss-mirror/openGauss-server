@@ -824,7 +824,8 @@ typedef enum AlterTableType {
     AT_SplitSubPartition,
     /* this will be in a more natural position in 9.3: */
     AT_ReAddConstraint, /* internal to commands/tablecmds.c */
-    AT_AddIntoCBI
+    AT_AddIntoCBI,
+    AT_COMMENTS,
 } AlterTableType;
 
 typedef enum AlterTableStatProperty { /* Additional Property for AlterTableCmd */
@@ -1318,6 +1319,7 @@ typedef struct Constraint {
     bool skip_validation; /* skip validation of existing rows? */
     bool initially_valid; /* mark the new constraint as valid? */
 
+    List* constraintOptions; /* opt_index_options from gram.y */
     /*
      * @hdfs
      * Field used for soft constraint, which works on HDFS foreign table.

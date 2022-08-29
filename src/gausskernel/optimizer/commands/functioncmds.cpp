@@ -86,6 +86,8 @@
 #include "storage/lmgr.h"
 #include "tcop/utility.h"
 #include "tsearch/ts_type.h"
+#include "commands/comment.h"
+
 
 typedef struct PendingLibraryDelete {
     char* filename; /* library file name. */
@@ -95,6 +97,23 @@ typedef struct PendingLibraryDelete {
 static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwnerId);
 static void checkAllowAlter(HeapTuple tup);
 static int2vector* GetDefaultArgPos(List* defargpos);
+
+static void CreateFunctionComment(Oid funcOid, List* options, bool lock = false)
+{
+    ListCell *cell = NULL;
+    foreach (cell, options) {
+        DefElem* defElem = (DefElem*)lfirst(cell);
+        if (strcmp(defElem->defname, "comment") == 0) {
+            /* lock until transaction commit or rollback */
+            if (lock) {
+                LockDatabaseObject(funcOid, ProcedureRelationId, 0, ShareUpdateExclusiveLock);
+            }
+            CreateComments(funcOid, ProcedureRelationId, 0, defGetString(defElem));
+            break;
+        }
+    }
+
+}
 
 /*
  *	 Examine the RETURNS clause of the CREATE FUNCTION statement
@@ -630,11 +649,19 @@ static ArrayType* update_proconfig_value(ArrayType* a, const List* set_items)
     return a;
 }
 
+static bool compute_b_attribute(DefElem* defel)
+{
+    if (strcmp(defel->defname, "comment") == 0) {
+        return true;
+    }
+    return false;
+}
+
 /*
  * Dissect the list of options assembled in gram.y into function
  * attributes.
  */
-static void compute_attributes_sql_style(const List* options, List** as, char** language, bool* windowfunc_p,
+static List* compute_attributes_sql_style(const List* options, List** as, char** language, bool* windowfunc_p,
     char* volatility_p, bool* strict_p, bool* security_definer, bool* leakproof_p, ArrayType** proconfig,
     float4* procost, float4* prorows, bool* fenced, bool* shippable, bool* package)
 {
@@ -652,7 +679,7 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
     DefElem* fencedItem = NULL;
     DefElem* shippable_item = NULL;
     DefElem* package_item = NULL;
-
+    List* bCompatibilities = NIL;
     foreach (option, options) {
         DefElem* defel = (DefElem*)lfirst(option);
 
@@ -681,6 +708,9 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
                        &package_item)) {
             /* recognized common option */
             continue;
+        } else if (compute_b_attribute(defel)) {
+            /* recognized b compatibility options */
+            bCompatibilities = lcons(defel, bCompatibilities);
         } else
             ereport(ERROR,
                 (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmsg("option \"%s\" not recognized", defel->defname)));
@@ -747,6 +777,7 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
         *package = intVal(package_item->arg);
     }
     list_free(set_items);
+    return bCompatibilities;
 }
 
 /* -------------
@@ -1021,8 +1052,9 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
     shippable = false;
 
     /* override attributes from explicit list */
-    compute_attributes_sql_style((const List*)stmt->options, &as_clause, &language, &isWindowFunc, &volatility,
-        &isStrict, &security, &isLeakProof, &proconfig, &procost, &prorows, &fenced, &shippable, &package);
+    List *functionOptions = compute_attributes_sql_style((const List *)stmt->options, &as_clause, &language,
+                                                         &isWindowFunc, &volatility, &isStrict, &security, &isLeakProof,
+                                                         &proconfig, &procost, &prorows, &fenced, &shippable, &package);
 
     /* Look up the language and validate permissions */
     languageTuple = SearchSysCache1(LANGNAME, PointerGetDatum(language));
@@ -1156,7 +1188,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
      * And now that we have all the parameters, and know we're permitted to do
      * so, go ahead and create the function.
      */
-    ProcedureCreate(funcname, namespaceId, pkg_oid, stmt->isOraStyle, stmt->replace,
+    Oid procedureOid = ProcedureCreate(funcname, namespaceId, pkg_oid, stmt->isOraStyle, stmt->replace,
                     returnsSet, prorettype, proowner, languageOid, languageValidator,
         prosrc_str, /* converted to text later */
         probin_str, /* converted to text later */
@@ -1175,6 +1207,9 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
         proIsProcedure,
         stmt->inputHeaderSrc,
         stmt->isPrivate);
+
+    CreateFunctionComment(procedureOid, functionOptions);
+
     u_sess->plsql_cxt.procedure_start_line = 0;
     u_sess->plsql_cxt.procedure_first_line = 0;
     if (u_sess->plsql_cxt.debug_query_string != NULL && !OidIsValid(pkg_oid)) {
@@ -1920,7 +1955,8 @@ void AlterFunction(AlterFunctionStmt* stmt)
     if (procForm->pronamespace == u_sess->catalog_cxt.myTempNamespace)
         ExecSetTempObjectIncluded();
 
-    /* Examine requested actions. */
+    /* Examine requested actions and add b compatibility options to alterOptions. */
+    List* alterOptions = NIL;
     foreach (l, stmt->actions) {
         DefElem* defel = (DefElem*)lfirst(l);
 
@@ -1934,9 +1970,15 @@ void AlterFunction(AlterFunctionStmt* stmt)
                 &rows_item,
                 &fencedItem,
                 &shippable_item,
-                &package_item) == false)
+                &package_item)) {
+            continue;
+        } else if (compute_b_attribute(defel)) {
+            /* recognized b compatibility options */
+            alterOptions = lcons(defel, alterOptions);
+        } else {
             ereport(ERROR,
                 (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmsg("option \"%s\" not recognized", defel->defname)));
+        }
     }
 
     if (volatility_item != NULL)
@@ -2031,6 +2073,8 @@ void AlterFunction(AlterFunctionStmt* stmt)
     /* Do the update */
     simple_heap_update(rel, &tup->t_self, tup);
     CatalogUpdateIndexes(rel, tup);
+
+    CreateFunctionComment(funcOid, alterOptions, true);
 
     /* Recode time of alter funciton. */
     if (OidIsValid(funcOid)) {

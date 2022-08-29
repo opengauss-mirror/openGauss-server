@@ -1438,6 +1438,18 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         &extra,
         false,
         indexsplitMethod);
+
+        /* index options */
+    List *indexOptions = stmt->indexOptions;
+    foreach (cell, indexOptions) {
+        void *pointer = lfirst(cell);
+        if (IsA(pointer, CommentStmt)) {
+            CommentStmt *commentStmt = (CommentStmt *)pointer;
+            CreateComments(indexRelationId, RelationRelationId, 0, commentStmt->comment);
+            break;
+        }
+    }
+
     /* Add any requested comment */
     if (stmt->idxcomment != NULL)
         CreateComments(indexRelationId, RelationRelationId, 0, stmt->idxcomment);

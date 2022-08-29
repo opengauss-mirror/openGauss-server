@@ -5085,6 +5085,9 @@ static void _outConstraint(StringInfo str, Constraint* node)
             appendStringInfo(str, "<unrecognized_constraint %d>", (int)node->contype);
             break;
     }
+    if (t_thrd.proc->workingVersionNum >= COMMENT_SUPPORT_VERSION_NUM) {
+        WRITE_NODE_FIELD(constraintOptions);
+    }
 }
 
 static void _outDistFdwDataNodeTask(StringInfo str, DistFdwDataNodeTask* node)

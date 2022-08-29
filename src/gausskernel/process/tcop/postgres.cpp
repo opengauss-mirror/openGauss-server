@@ -922,7 +922,9 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
 #endif
     }
     raw_parsetree_list = parser_hook(query_string, query_string_locationlist);
-
+    if (u_sess->parser_cxt.hasPartitionComment) {
+        ereport(WARNING, (errmsg("comment is not allowed in partition/subpartition.")));
+    }
     PGSTAT_END_TIME_RECORD(PARSE_TIME);
 
     if (u_sess->attr.attr_common.log_parser_stats)
