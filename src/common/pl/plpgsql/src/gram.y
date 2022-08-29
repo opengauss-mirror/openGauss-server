@@ -4047,7 +4047,7 @@ stmt_execsql			: K_ALTER
             }
         | T_ARRAY_EXTEND
             {
-                check_table_index(yylval.wdatum.datum, "trim");
+                check_table_index(yylval.wdatum.datum, "extend");
                 int dno = yylval.wdatum.dno;
                 StringInfoData sqlBuf;
 
