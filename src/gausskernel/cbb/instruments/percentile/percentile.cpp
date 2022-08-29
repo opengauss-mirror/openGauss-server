@@ -220,6 +220,7 @@ NON_EXEC_STATIC void PercentileMain()
         pgstat_report_activity(STATE_IDLE, NULL);
         t_thrd.percentile_cxt.need_reset_timer = true;
         g_instance.stat_cxt.force_process = false;
+        if (t_thrd.percentile_cxt.need_exit) break;
         sleep(SLEEP_INTERVAL);
     }
     elog(LOG, "instrumention percentile ended");
