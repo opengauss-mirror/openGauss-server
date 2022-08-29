@@ -422,8 +422,7 @@ static bool GetUpdateExprCol(TupleDesc tupdesc, int atti)
 
 static void RecoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdType cmdtype)
 {
-    Relation rel = resultRelInfo->ri_RelationDesc;
-    TupleDesc tupdesc = RelationGetDescr(rel);
+    TupleDesc tupdesc = RelationGetDescr(resultRelInfo->ri_RelationDesc);
     int natts = tupdesc->natts;
     MemoryContext oldContext;
 
@@ -446,8 +445,8 @@ static void RecoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdT
 
                 expr = (Expr *)build_column_default(rel, i + 1, false, true);
                 if (expr == NULL)
-                    elog(ERROR, "no update expression found for column number %d of table \"%s\"", i + 1,
-                        RelationGetRelationName(rel));
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("no update expression found for column number %d of table \"%s\"", i + 1,
+                        RelationGetRelationName(rel))));
 
                 resultRelInfo->ri_UpdatedExprs[i] = ExecPrepareExpr(expr, estate);
                 resultRelInfo->ri_NumUpdatedNeeded++;
@@ -481,16 +480,16 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     int attnum;
     uint32 updated_colnum_resno;
     Bitmapset* updatedCols = GetUpdatedColumns(node->resultRelInfo, node->ps.state);
-    HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
-
-    RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
-
     /*
      * If no generated columns have been affected by this change, then skip
      * the rest.
      */
     if (resultRelInfo->ri_NumUpdatedNeeded == 0)
         return true;
+
+    HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
+
+    RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
 
     /* compare update operator whether the newtuple is equal to the oldtuple, 
      * if equal, so update don't fix the default column value  */
@@ -503,10 +502,6 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     temp_id = attnum;
     for (int32 i = 0; i < (int32)natts; i++) {
         if (updated_colnum_resno  == (i + 1)) {
-            Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
-            opfuncoid = OpernameGetOprid(list_make1(makeString("=")), attr->atttypid, attr->atttypid);
-            RegProcedure oprcode = get_opcode(opfuncoid);
-            fmgr_info(oprcode, &eqproc);
             if (slot->tts_isnull[i] && oldnulls[i]) {
                 match = true;
             } else if (slot->tts_isnull[i] && !oldnulls[i]) {
@@ -514,6 +509,10 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
             } else if (!slot->tts_isnull[i] && oldnulls[i]) {
                 match = false;
             } else {
+                Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+                opfuncoid = OpernameGetOprid(list_make1(makeString("=")), attr->atttypid, attr->atttypid);
+                RegProcedure oprcode = get_opcode(opfuncoid);
+                fmgr_info(oprcode, &eqproc);
                 match = DatumGetBool(FunctionCall2Coll(&eqproc, DEFAULT_COLLATION_OID, slot->tts_values[i], oldvalues[i]));
             }
             update_fix_result = update_fix_result && match;
@@ -534,8 +533,6 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     values = (Datum *)palloc(sizeof(*values) * natts);
     nulls = (bool *)palloc(sizeof(*nulls) * natts);
     replaces = (bool *)palloc0(sizeof(*replaces) * natts);
-    rc = memset_s(replaces, sizeof(bool) * natts, 0, sizeof(bool) * natts);
-    securec_check(rc, "\0", "\0");
     temp_id = -1;
     attnum = bms_next_member(updatedCols, temp_id);
     updated_colnum_resno = attnum + FirstLowInvalidHeapAttributeNumber;
@@ -553,7 +550,7 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
         if (GetUpdateExprCol(tupdesc, i) && resultRelInfo->ri_UpdatedExprs[i]) {
             ExprContext *econtext;
             Datum val;
-            bool isnull;
+            bool isnull = false;
 
             econtext = GetPerTupleExprContext(estate);
             econtext->ecxt_scantuple = slot;
@@ -2069,7 +2066,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         LockTupleMode lockmode;
 
         /* acquire Form_pg_attrdef ad_on_update */
-        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update && DB_IS_CMPT(B_FORMAT)) {
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
             bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, node, tupleid, oldPartitionOid, bucketid);
             if (!update_fix_result) {
                 tuple = slot->tts_tuple;

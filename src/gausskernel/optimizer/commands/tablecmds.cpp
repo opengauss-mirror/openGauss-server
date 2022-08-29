@@ -10015,6 +10015,35 @@ static void ATExecSetNotNull(AlteredTableInfo* tab, Relation rel, const char* co
     heap_close(attr_rel, RowExclusiveLock);
 }
 
+bool FetchOnUpdateExpress(Relation rel, char* colName)
+{
+    HeapTuple htup = NULL;
+    bool isnull = false;
+    bool temp_on_update = FALSE;
+    htup = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
+    if (!HeapTupleIsValid(htup))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+            errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
+    Form_pg_attribute attTup = (Form_pg_attribute)GETSTRUCT(htup);
+    AttrNumber temp_attnum = attTup->attnum;
+
+    ScanKeyData skey[2];
+    Relation adrel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
+    ScanKeyInit(&skey[0], Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
+    ScanKeyInit(&skey[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(temp_attnum));
+    SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 2, skey);
+
+    if (HeapTupleIsValid(htup = systable_getnext(adscan))) {
+        Datum val = heap_getattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
+        if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
+            temp_on_update = TRUE;
+        }
+    }
+    systable_endscan(adscan);
+    heap_close(adrel, RowExclusiveLock);
+    return temp_on_update;
+}
+
 /*
  * ALTER TABLE ALTER COLUMN SET/DROP DEFAULT
  */
@@ -10050,32 +10079,7 @@ static void ATExecColumnDefault(Relation rel, const char* colName, Node* newDefa
             errmsg("column \"%s\" of relation \"%s\" is a generated column", colName, RelationGetRelationName(rel))));
     }
 
-    HeapTuple htup = NULL;
-    bool isnull = false;
-    char* tempUpdateExpr = NULL;
-    bool on_update = FALSE;
-    htup = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
-    if (!HeapTupleIsValid(htup))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg("column \"%s\" of relation \"%s\" does not exist", colName, RelationGetRelationName(rel))));
-    Form_pg_attribute attTup = (Form_pg_attribute)GETSTRUCT(htup);
-    AttrNumber temp_attnum = attTup->attnum;
-
-    ScanKeyData skey[2];
-    Relation adrel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
-    ScanKeyInit(&skey[0], Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
-    ScanKeyInit(&skey[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(temp_attnum));
-    SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 2, skey);
-
-    if (HeapTupleIsValid(htup = systable_getnext(adscan))) {
-        Datum val = heap_getattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
-        if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
-            tempUpdateExpr = TextDatumGetCString(val);
-            on_update = TRUE;
-        }
-    }
-    systable_endscan(adscan);
-    heap_close(adrel, RowExclusiveLock);
+    bool on_update = FetchOnUpdateExpress(rel, colName);
 
     /*
      * Remove any old default for the column.  We use RESTRICT here for

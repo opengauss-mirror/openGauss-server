@@ -2800,6 +2800,7 @@ modify_column_cmd:
 					$$ = (Node *)n;
 				}
 			| ColId Typename ON_UPDATE_TIME UPDATE b_expr
+#ifndef ENBALE_MULTI_NODE
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 					{
@@ -2828,6 +2829,7 @@ modify_column_cmd:
 						$$ = NULL;
 					}
 				}
+#endif
 			| ColId NOT NULL_P opt_enable
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -6328,6 +6330,7 @@ ColConstraintElem:
 					$$ = (Node *)n;
 				}
 			| ON_UPDATE_TIME UPDATE b_expr
+#ifndef ENBALE_MULTI_NODE
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 					{
@@ -6348,6 +6351,7 @@ ColConstraintElem:
 						$$ = NULL;
 					}
 				}
+#endif
 			| GENERATED ALWAYS AS '(' a_expr ')' STORED
 				{
 #ifdef ENABLE_MULTIPLE_NODES

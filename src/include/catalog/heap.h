@@ -29,7 +29,7 @@ typedef struct RawColumnDefault {
     AttrNumber attnum;         /* attribute to attach default to */
     Node      *raw_default;    /* default value (untransformed parse tree) */
     char       generatedCol;   /* generated column setting */
-    Node      *update_expr = NULL;
+    Node      *update_expr;
 } RawColumnDefault;
 
 typedef struct CookedConstraint {
@@ -42,7 +42,7 @@ typedef struct CookedConstraint {
 	int			inhcount;        /* number of times constraint is inherited */
 	bool		is_no_inherit;   /* constraint has local def and cannot be
 								 * inherited */
-    Node        *update_expr = NULL;
+    Node        *update_expr;
 } CookedConstraint;
 
 typedef struct CeHeapInfo {
