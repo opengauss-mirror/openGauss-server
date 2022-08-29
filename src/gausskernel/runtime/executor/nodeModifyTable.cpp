@@ -550,7 +550,7 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
         if (GetUpdateExprCol(tupdesc, i) && resultRelInfo->ri_UpdatedExprs[i]) {
             ExprContext *econtext;
             Datum val;
-            bool isnull = false;
+            bool isnull;
 
             econtext = GetPerTupleExprContext(estate);
             econtext->ecxt_scantuple = slot;

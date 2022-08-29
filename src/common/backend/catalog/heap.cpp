@@ -119,6 +119,7 @@
 #include "catalog/pgxc_class.h"
 #include "catalog/pgxc_node.h"
 #include "catalog/pgxc_slice.h"
+#include "commands/comment.h"
 #include "pgxc/locator.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/nodemgr.h"
@@ -156,7 +157,7 @@ static void heapDropPartitionTable(Relation relation);
 static Oid AddNewRelationType(const char* typeName, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid,
     Oid new_row_type, Oid new_array_type);
 static void RelationRemoveInheritance(Oid relid);
-static void StoreRelCheck(
+static Oid StoreRelCheck(
     Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit);
 static void StoreConstraints(Relation rel, List* cooked_constraints);
 static bool MergeWithExistingConstraint(
@@ -3790,7 +3791,7 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
  * Caller is responsible for updating the count of constraints
  * in the pg_class entry for the relation.
  */
-static void StoreRelCheck(
+static Oid StoreRelCheck(
     Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit)
 {
     char* ccbin = NULL;
@@ -3842,7 +3843,7 @@ static void StoreRelCheck(
     /*
      * Create the Check Constraint
      */
-    (void)CreateConstraintEntry(ccname, /* Constraint Name */
+    Oid oid = CreateConstraintEntry(ccname, /* Constraint Name */
         RelationGetNamespace(rel),      /* namespace */
         CONSTRAINT_CHECK,               /* Constraint Type */
         false,                          /* Is Deferrable */
@@ -3874,6 +3875,7 @@ static void StoreRelCheck(
 
     pfree(ccbin);
     pfree(ccsrc);
+    return oid;
 }
 
 /*
@@ -4126,8 +4128,16 @@ List* AddRelationNewConstraints(
         /*
          * OK, store it.
          */
-        StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, is_local, is_local ? 0 : 1, cdef->is_no_inherit);
-
+        Oid oid = StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, is_local, is_local ? 0 : 1, cdef->is_no_inherit);
+        ListCell *cell = NULL;
+        foreach (cell, cdef->constraintOptions) {
+            void *pointer = lfirst(cell);
+            if (IsA(pointer, CommentStmt)) {
+                CommentStmt *commentStmt = (CommentStmt *)pointer;
+                CreateComments(oid, ConstraintRelationId, 0, commentStmt->comment);
+                break;
+            }
+        }
         numchecks++;
 
         cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));

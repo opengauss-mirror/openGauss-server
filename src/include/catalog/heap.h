@@ -42,7 +42,7 @@ typedef struct CookedConstraint {
 	int			inhcount;        /* number of times constraint is inherited */
 	bool		is_no_inherit;   /* constraint has local def and cannot be
 								 * inherited */
-    Node        *update_expr;
+	Node        *update_expr;
 } CookedConstraint;
 
 typedef struct CeHeapInfo {

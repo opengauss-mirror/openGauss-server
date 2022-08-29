@@ -407,6 +407,20 @@ Oid *namespaceid, bool isFirstNode)
     if (stmt->ofTypename)
         transformOfType(&cxt, stmt->ofTypename);
 
+    ListCell *cell = NULL;
+    foreach (cell, stmt->tableOptions) {
+        void *pointer = lfirst(cell);
+        if (IsA(pointer, CommentStmt)) {
+            CommentStmt *commentStmt = (CommentStmt *)pointer;
+            commentStmt->objtype = OBJECT_TABLE;
+            commentStmt->objname = list_make1(makeString(cxt.relation->relname));
+            if (cxt.relation->schemaname) {
+                commentStmt->objname = lcons(makeString(cxt.relation->schemaname), commentStmt->objname);
+            }
+            cxt.alist = lappend(cxt.alist, commentStmt);
+            break;
+        }
+    }
     /*
      * Run through each primary element in the table creation clause. Separate
      * column defs from constraints, and do preliminary analysis.
@@ -1114,6 +1128,21 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
         stmt->cmds = lappend(stmt->cmds, cmd);
 
         cxt->alist = lappend(cxt->alist, stmt);
+    }
+
+    ListCell *columnOption = NULL;
+    foreach (columnOption, column->columnOptions) {
+        void *pointer = lfirst(columnOption);
+        if (IsA(pointer, CommentStmt)) {
+            CommentStmt *commentStmt = (CommentStmt *)pointer;
+            commentStmt->objtype = OBJECT_COLUMN;
+            commentStmt->objname = list_make2(makeString(cxt->relation->relname), makeString(column->colname));
+            if (cxt->relation->schemaname) {
+                commentStmt->objname = lcons(makeString(cxt->relation->schemaname) , commentStmt->objname);
+            }
+            cxt->alist = lappend(cxt->alist, commentStmt);
+            break;
+        }
     }
 }
 
@@ -3387,7 +3416,8 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
             index->indexParams = lappend(index->indexParams, iparam);
         }
     }
-
+    /* unique/primary key constraint is considered an index */
+    index->indexOptions = constraint->constraintOptions;
     /* Add included columns to index definition */
     foreach (lc, constraint->including) {
         char* key = strVal(lfirst(lc));

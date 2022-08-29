@@ -259,7 +259,8 @@ static const char* ORCSupportOption[] = {"orientation", "compression", "version"
 #define AT_PASS_MISC 9 /* other stuff */
 #ifdef PGXC
 #define AT_PASS_DISTRIB 10 /* Redistribution pass */
-#define AT_NUM_PASSES 11
+#define AT_COMMENT 11
+#define AT_NUM_PASSES 12
 #else
 #define AT_NUM_PASSES 10
 #endif
@@ -7630,6 +7631,9 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
             /* No command-specific prep needed */
             pass = AT_PASS_DISTRIB;
             break;
+        case AT_COMMENTS:
+            pass = AT_COMMENT;
+            break;
 #endif
         default: /* oops */
             ereport(ERROR,
@@ -7764,6 +7768,21 @@ static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode)
             }
             AlterTableCreateToastTable(tab->relid, toast_reloptions);
             relation_close(rel, NoLock);
+        }
+    }
+}
+
+static void ATCreateColumComments(Oid relOid, ColumnDef* columnDef)
+{
+    List *columnOptions = columnDef->columnOptions;
+    ListCell *ColumnOption = NULL;
+    foreach (ColumnOption, columnOptions) {
+        void *pointer = lfirst(ColumnOption);
+        if (IsA(pointer, CommentStmt)) {
+            CommentStmt *commentStmt = (CommentStmt *)pointer;
+            CreateComments(relOid, RelationRelationId, get_attnum(relOid, columnDef->colname),
+                           commentStmt->comment);
+            break;
         }
     }
 }
@@ -8031,6 +8050,14 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
             AtExecUpdateSliceLike(rel, cmd->exchange_with_rel);
             break;
 #endif
+        case AT_COMMENTS:
+            /* Modify Column comment or table comment */
+            if (cmd->def != NULL && IsA(cmd->def, ColumnDef)) {
+                ATCreateColumComments(rel->rd_id, (ColumnDef*)cmd->def);
+            } else {
+                CreateComments(rel->rd_id, RelationRelationId, 0, cmd->name);
+            }
+            break;
         default: /* oops */
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -9762,6 +9789,10 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
         colDef->inhcount = 1;
         colDef->is_local = false;
     }
+
+
+	/* column Options */
+    ATCreateColumComments(myrelid, colDef);
 
     foreach (child, children) {
         Oid childrelid = lfirst_oid(child);
