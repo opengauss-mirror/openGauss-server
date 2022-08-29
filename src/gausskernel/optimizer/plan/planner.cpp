@@ -3095,7 +3095,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                          * happen, because AggRef not in agg node.
                          */
                         if (lc2 != NULL) {
-                            tle->expr = (Expr*)makeNullConst(exprType(node), exprTypmod(node), exprCollation(node));
+                            tle->expr = (Expr*)makeNullConst(exprType((Node*)tle->expr), exprTypmod((Node*)tle->expr), exprCollation((Node*)tle->expr));
                         }
                         list_free_ext(exprList);
                     }
