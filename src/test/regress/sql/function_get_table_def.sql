@@ -216,3 +216,9 @@ drop table generated_test;
 
 reset current_schema;
 drop schema test_get_table_def cascade;
+
+create database mysql dbcompatibility 'B';
+\c mysql
+create table if not exists test(a int, b timestamp default now() on update current_timestamp);
+select * from pg_get_tabledef('test');
+\c regression

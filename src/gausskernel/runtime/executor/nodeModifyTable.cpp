@@ -42,6 +42,7 @@
 #include "access/xact.h"
 #include "access/tableam.h"
 #include "catalog/heap.h"
+#include "catalog/pg_attrdef.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/storage_gtt.h"
@@ -406,6 +407,173 @@ void ExecComputeStoredGenerated(ResultRelInfo *resultRelInfo, EState *estate, Tu
     (void)ExecStoreTuple(newtuple, slot, InvalidBuffer, false);
 
     (void)MemoryContextSwitchTo(oldContext);
+}
+
+static bool GetUpdateExprCol(TupleDesc tupdesc, int atti)
+{
+    if (!tupdesc->constr)
+        return false;
+
+    if (tupdesc->constr->num_defval == 0)
+        return false;
+
+    return tupdesc->constr->has_on_update[atti];
+}
+
+static void RecoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdType cmdtype)
+{
+    TupleDesc tupdesc = RelationGetDescr(resultRelInfo->ri_RelationDesc);
+    int natts = tupdesc->natts;
+    MemoryContext oldContext;
+
+    Assert(tupdesc->constr && tupdesc->constr->has_on_update);
+
+    /*
+     * If first time through for this result relation, build expression
+     * nodetrees for rel's stored generation expressions.  Keep them in the
+     * per-query memory context so they'll survive throughout the query.
+     */
+    if (resultRelInfo->ri_UpdatedExprs == NULL) {
+        oldContext = MemoryContextSwitchTo(estate->es_query_cxt);
+
+        resultRelInfo->ri_UpdatedExprs = (ExprState **)palloc(natts * sizeof(ExprState *));
+        resultRelInfo->ri_NumUpdatedNeeded = 0;
+
+        for (int i = 0; i < natts; i++) {
+            if (GetUpdateExprCol(tupdesc, i)) {
+                Expr *expr;
+
+                expr = (Expr *)build_column_default(resultRelInfo->ri_RelationDesc, i + 1, false, true);
+                if (expr == NULL)
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("no update expression found for column number %d of table \"%s\"", i + 1,
+                        RelationGetRelationName(resultRelInfo->ri_RelationDesc))));
+
+                resultRelInfo->ri_UpdatedExprs[i] = ExecPrepareExpr(expr, estate);
+                resultRelInfo->ri_NumUpdatedNeeded++;
+            }
+        }
+
+        (void)MemoryContextSwitchTo(oldContext);
+    }
+}
+
+/*
+ * Compute stored updated columns for a tuple
+ */
+bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot, Tuple tuple,
+    CmdType cmdtype, ModifyTableState* node, ItemPointer otid, Oid oldPartitionOid, int2 bucketid)
+{
+    Relation rel = resultRelInfo->ri_RelationDesc;
+    TupleDesc tupdesc = RelationGetDescr(rel);
+    uint32 natts = (uint32)tupdesc->natts;
+    MemoryContext oldContext;
+    Datum *values;
+    bool *nulls;
+    bool *replaces;
+    Tuple newtuple;
+    errno_t rc = EOK;
+    FmgrInfo eqproc;
+    Oid opfuncoid = InvalidOid;
+    bool match = false;
+    bool update_fix_result = true;
+    int temp_id = -1;
+    int attnum;
+    uint32 updated_colnum_resno;
+    Bitmapset* updatedCols = GetUpdatedColumns(node->resultRelInfo, node->ps.state);
+    /*
+     * If no generated columns have been affected by this change, then skip
+     * the rest.
+     */
+    if (resultRelInfo->ri_NumUpdatedNeeded == 0)
+        return true;
+
+    HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
+
+    RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
+
+    /* compare update operator whether the newtuple is equal to the oldtuple, 
+     * if equal, so update don't fix the default column value  */
+    Datum* oldvalues = (Datum*)palloc(natts * sizeof(Datum));
+    bool* oldnulls = (bool*)palloc(natts * sizeof(bool));
+    heap_deform_tuple(oldtup, tupdesc, oldvalues, oldnulls);
+    temp_id = -1;
+    attnum = bms_next_member(updatedCols, temp_id);
+    updated_colnum_resno = attnum + FirstLowInvalidHeapAttributeNumber;
+    temp_id = attnum;
+    for (int32 i = 0; i < (int32)natts; i++) {
+        if (updated_colnum_resno  == (i + 1)) {
+            if (slot->tts_isnull[i] && oldnulls[i]) {
+                match = true;
+            } else if (slot->tts_isnull[i] && !oldnulls[i]) {
+                match = false;
+            } else if (!slot->tts_isnull[i] && oldnulls[i]) {
+                match = false;
+            } else {
+                Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+                opfuncoid = OpernameGetOprid(list_make1(makeString("=")), attr->atttypid, attr->atttypid);
+                RegProcedure oprcode = get_opcode(opfuncoid);
+                fmgr_info(oprcode, &eqproc);
+                match = DatumGetBool(FunctionCall2Coll(&eqproc, DEFAULT_COLLATION_OID, slot->tts_values[i], oldvalues[i]));
+            }
+            update_fix_result = update_fix_result && match;
+            attnum = bms_next_member(updatedCols, temp_id);
+            if (attnum >= 0) {
+                updated_colnum_resno = attnum + FirstLowInvalidHeapAttributeNumber;
+                temp_id = attnum;
+            }
+        }
+    }
+    pfree_ext(oldvalues);
+    pfree_ext(oldnulls);
+
+    if (update_fix_result)
+        return true;
+
+    oldContext = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
+    values = (Datum *)palloc(sizeof(*values) * natts);
+    nulls = (bool *)palloc(sizeof(*nulls) * natts);
+    replaces = (bool *)palloc0(sizeof(*replaces) * natts);
+    temp_id = -1;
+    attnum = bms_next_member(updatedCols, temp_id);
+    updated_colnum_resno = attnum + FirstLowInvalidHeapAttributeNumber;
+    temp_id = attnum;
+    for (uint32 i = 0; i < natts; i++) {
+        Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+        if (updated_colnum_resno == (i + 1)) {
+            attnum = bms_next_member(updatedCols, temp_id);
+            if (attnum >= 0) {
+                updated_colnum_resno = attnum + FirstLowInvalidHeapAttributeNumber;
+                temp_id = attnum;
+            }
+            continue;
+        }
+        if (GetUpdateExprCol(tupdesc, i) && resultRelInfo->ri_UpdatedExprs[i]) {
+            ExprContext *econtext;
+            Datum val;
+            bool isnull;
+
+            econtext = GetPerTupleExprContext(estate);
+            econtext->ecxt_scantuple = slot;
+
+            val = ExecEvalExpr(resultRelInfo->ri_UpdatedExprs[i], econtext, &isnull, NULL);
+
+            /*
+            * We must make a copy of val as we have no guarantees about where
+            * memory for a pass-by-reference Datum is located.
+            */
+            if (!isnull)
+                val = datumCopy(val, attr->attbyval, attr->attlen);
+
+            values[i] = val;
+            nulls[i] = isnull;
+            replaces[i] = true;
+        }
+    }
+
+    newtuple = tableam_tops_modify_tuple(tuple, tupdesc, values, nulls, replaces);
+    (void)ExecStoreTuple(newtuple, slot, InvalidBuffer, false);
+    (void)MemoryContextSwitchTo(oldContext);
+    return false;
 }
 
 static bool ExecConflictUpdate(ModifyTableState* mtstate, ResultRelInfo* resultRelInfo, ConflictInfoData* conflictInfo,
@@ -1896,6 +2064,14 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     } else {
         bool update_indexes = false;
         LockTupleMode lockmode;
+
+        /* acquire Form_pg_attrdef ad_on_update */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_on_update) {
+            bool update_fix_result =  ExecComputeStoredUpdateExpr(result_rel_info, estate, slot, tuple, CMD_UPDATE, node, tupleid, oldPartitionOid, bucketid);
+            if (!update_fix_result) {
+                tuple = slot->tts_tuple;
+            }
+        }
 
         /*
          * Compute stored generated columns

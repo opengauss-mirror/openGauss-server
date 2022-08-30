@@ -54,6 +54,8 @@ typedef struct attrDefault {
     AttrNumber adnum;
     char* adbin; /* nodeToString representation of expr */
     char generatedCol; /* generated column setting */
+    bool has_on_update;
+    char* adbin_on_update;
 } AttrDefault;
 
 typedef struct constrCheck {
@@ -74,6 +76,7 @@ typedef struct tupleConstr {
     bool has_not_null;
     bool has_generated_stored;
     char* generatedCols;     /* attribute array */
+    bool* has_on_update;
 } TupleConstr;
 
 /* This structure contains initdefval of a tuple */

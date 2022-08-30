@@ -9221,6 +9221,7 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
             int numDefaults;
             ArchiveHandle* AH = (ArchiveHandle*)fout;
             bool hasGenColFeature = is_column_exists(AH->connection, AttrDefaultRelationId, "adgencol");
+            bool hasOnUpdateFeature = is_column_exists(AH->connection, AttrDefaultRelationId, "adbin_on_update");
 
             if (g_verbose)
                 write_msg(NULL,
@@ -9228,11 +9229,20 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                     fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, tbinfo->dobj.name));
 
             resetPQExpBuffer(q);
-            if (hasGenColFeature) {
+            if (hasGenColFeature && !hasOnUpdateFeature) {
                 appendPQExpBuffer(q,
                     "SELECT tableoid, oid, adnum, "
                     "pg_catalog.pg_get_expr(adbin, adrelid) AS adsrc "
                     ", adgencol AS generatedCol "
+                    "FROM pg_catalog.pg_attrdef "
+                    "WHERE adrelid = '%u'::pg_catalog.oid",
+                    tbinfo->dobj.catId.oid);
+            } else if (hasGenColFeature && hasOnUpdateFeature) {
+                appendPQExpBuffer(q,
+                    "SELECT tableoid, oid, adnum, "
+                    "pg_catalog.pg_get_expr(adbin, adrelid) AS adsrc "
+                    ", adgencol AS generatedCol, "
+                    "pg_catalog.pg_get_expr(adbin_on_update, adrelid) AS adsrc_on_update "
                     "FROM pg_catalog.pg_attrdef "
                     "WHERE adrelid = '%u'::pg_catalog.oid",
                     tbinfo->dobj.catId.oid);
@@ -9305,6 +9315,9 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 attrdefs[j].adnum = adnum;
                 attrdefs[j].generatedCol = *(PQgetvalue(res, j, 4));
                 attrdefs[j].adef_expr = gs_strdup(PQgetvalue(res, j, 3));
+                if (hasOnUpdateFeature) {
+                    attrdefs[j].adupd_expr = gs_strdup(PQgetvalue(res, j, 5));
+                }
 
                 attrdefs[j].dobj.name = gs_strdup(tbinfo->dobj.name);
                 attrdefs[j].dobj.nmspace = tbinfo->dobj.nmspace;
@@ -19008,6 +19021,12 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
 
                 if (has_default) {
                     char *default_value = tbinfo->attrdefs[j]->adef_expr;
+                    char *onUpdate_value = NULL;
+                    ArchiveHandle* AH = (ArchiveHandle*)fout;
+                    bool hasOnUpdateFeature = is_column_exists(AH->connection, AttrDefaultRelationId, "adbin_on_update");
+                    if (hasOnUpdateFeature) {
+                        onUpdate_value = tbinfo->attrdefs[j]->adupd_expr;
+                    }
 #ifdef HAVE_CE
                     if (is_clientlogic_datatype(tbinfo->typid[j])) {
                         size_t plainTextSize = 0;
@@ -19025,6 +19044,11 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                                           default_value);
                     else
                         appendPQExpBuffer(q, " DEFAULT %s", default_value);
+                    if (hasOnUpdateFeature) {
+                        if (pg_strcasecmp(onUpdate_value, "") != 0) {
+                            appendPQExpBuffer(q, " ON UPDATE %s", onUpdate_value);
+                        }
+                    }
 #ifdef HAVE_CE
                     if (is_clientlogic_datatype(tbinfo->typid[j])) {
                         libpq_free(default_value);

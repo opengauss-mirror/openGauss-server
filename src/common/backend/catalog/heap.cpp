@@ -3626,10 +3626,12 @@ void heap_drop_with_catalog(Oid relid)
 /*
  * Store a default expression for column attnum of relation rel.
  */
-void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generatedCol)
+void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generatedCol, Node* update_expr)
 {
     char* adbin = NULL;
+    char* adbin_on_update = NULL;
     char* adsrc = NULL;
+    char* update_src = NULL;
     Relation adrel;
     HeapTuple tuple;
     Datum values[Natts_pg_attrdef];
@@ -3638,11 +3640,39 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
     Form_pg_attribute attStruct;
     Oid attrdefOid;
     ObjectAddress colobject, defobject;
+    ScanKeyData skey[2];
+    HeapTuple htup = NULL;
+    bool isnull = false;
+    bool on_update_exist = false;
+    bool adin_on_update_exist = false;
 
     /*
      * Flatten expression to string form for storage.
      */
-    adbin = nodeToString(expr);
+    if (update_expr != NULL) {
+        adbin_on_update = nodeToString(update_expr);
+        update_src = deparse_expression(
+            update_expr, deparse_context_for(RelationGetRelationName(rel), RelationGetRelid(rel)), false, false);
+    } else {
+        Relation adrel_temp = heap_open(AttrDefaultRelationId, RowExclusiveLock);
+        ScanKeyInit(&skey[0], Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
+        ScanKeyInit(&skey[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(attnum));
+        SysScanDesc adscan = systable_beginscan(adrel_temp, AttrDefaultIndexId, true, NULL, 2, skey);
+        if (HeapTupleIsValid(htup = systable_getnext(adscan))) {
+            Datum val = heap_getattr(htup, Anum_pg_attrdef_adbin_on_update, adrel_temp->rd_att, &isnull);
+            if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
+                adbin_on_update = TextDatumGetCString(val);
+                on_update_exist = true;
+            }
+            val = heap_getattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel_temp->rd_att, &isnull);
+            if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
+                update_src = TextDatumGetCString(val);
+                adin_on_update_exist = true;
+            }
+        }
+        systable_endscan(adscan);
+        heap_close(adrel_temp, RowExclusiveLock);
+    }
 
     /*
      * Also deparse it to form the mostly-obsolete adsrc field.
@@ -3655,8 +3685,16 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
      */
     values[Anum_pg_attrdef_adrelid - 1] = RelationGetRelid(rel);
     values[Anum_pg_attrdef_adnum - 1] = attnum;
-    values[Anum_pg_attrdef_adbin - 1] = CStringGetTextDatum(adbin);
-    values[Anum_pg_attrdef_adsrc - 1] = CStringGetTextDatum(adsrc);
+    if (expr != NULL) {
+        adbin = nodeToString(expr);
+    }
+    values[Anum_pg_attrdef_adbin - 1] = adbin ? CStringGetTextDatum(adbin) : CStringGetTextDatum("");
+    values[Anum_pg_attrdef_adsrc - 1] = adsrc ? CStringGetTextDatum(adsrc) : CStringGetTextDatum("");
+    values[Anum_pg_attrdef_adbin_on_update - 1] = (update_expr != NULL || (on_update_exist && adin_on_update_exist)) ?
+        CStringGetTextDatum(adbin_on_update) : CStringGetTextDatum("");
+    values[Anum_pg_attrdef_adsrc_on_update - 1] = (update_expr != NULL || (on_update_exist && adin_on_update_exist)) ?
+        CStringGetTextDatum(update_src) : CStringGetTextDatum("");
+
     if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
         values[Anum_pg_attrdef_adgencol - 1] = CharGetDatum(generatedCol);
     }
@@ -3664,6 +3702,9 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
     adrel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
 
     tuple = heap_form_tuple(adrel->rd_att, values, u_sess->catalog_cxt.nulls);
+    if (on_update_exist) {
+        RemoveAttrDefault(RelationGetRelid(rel), attnum, DROP_RESTRICT, false, true);
+    }
     attrdefOid = simple_heap_insert(adrel, tuple);
 
     CatalogUpdateIndexes(adrel, tuple);
@@ -3677,9 +3718,19 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
     /* now can free some of the stuff allocated above */
     pfree(DatumGetPointer(values[Anum_pg_attrdef_adbin - 1]));
     pfree(DatumGetPointer(values[Anum_pg_attrdef_adsrc - 1]));
+    pfree(DatumGetPointer(values[Anum_pg_attrdef_adbin_on_update - 1]));
+    pfree(DatumGetPointer(values[Anum_pg_attrdef_adsrc_on_update - 1]));
     heap_freetuple(tuple);
-    pfree(adbin);
     pfree(adsrc);
+    if (adbin) {
+        pfree(adbin);
+    }
+    if (adbin_on_update) {
+        pfree(adbin_on_update);
+    }
+    if (update_src) {
+        pfree(update_src);
+    }
 
     /*
      * Update the pg_attribute entry for the column to show that a default
@@ -3855,10 +3906,10 @@ static void StoreConstraints(Relation rel, List* cooked_constraints)
 
         switch (con->contype) {
             case CONSTR_DEFAULT:
-                StoreAttrDefault(rel, con->attnum, con->expr, 0);
+                StoreAttrDefault(rel, con->attnum, con->expr, 0, con->update_expr);
                 break;
             case CONSTR_GENERATED:
-                StoreAttrDefault(rel, con->attnum, con->expr, ATTRIBUTE_GENERATED_STORED);
+                StoreAttrDefault(rel, con->attnum, con->expr, ATTRIBUTE_GENERATED_STORED, NULL);
                 break;
             case CONSTR_CHECK:
                 StoreRelCheck(
@@ -3915,6 +3966,7 @@ List* AddRelationNewConstraints(
     ListCell* cell = NULL;
     Node* expr = NULL;
     CookedConstraint* cooked = NULL;
+    Node* update_expr = NULL;
 
     /*
      * Get info about existing constraints.
@@ -3943,8 +3995,14 @@ List* AddRelationNewConstraints(
         RawColumnDefault* colDef = (RawColumnDefault*)lfirst(cell);
         Form_pg_attribute atp = rel->rd_att->attrs[colDef->attnum - 1];
 
-        expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
-            colDef->generatedCol);
+        if (colDef->raw_default != NULL) {
+            expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
+                colDef->generatedCol);
+        }
+        if (colDef->update_expr != NULL) {
+            update_expr = cookDefault(pstate, colDef->update_expr, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
+                colDef->generatedCol);
+        }
 
         /*
          * If the expression is just a NULL constant, we do not bother to make
@@ -3958,10 +4016,10 @@ List* AddRelationNewConstraints(
          * critical because the column default needs to be retained to
          * override any default that the domain might have.
          */
-        if (expr == NULL || (!colDef->generatedCol && IsA(expr, Const) && ((Const *)expr)->constisnull))
+        if (expr != NULL && !colDef->generatedCol && IsA(expr, Const) && ((Const *)expr)->constisnull)
             continue;
 
-        StoreAttrDefault(rel, colDef->attnum, expr, colDef->generatedCol);
+        StoreAttrDefault(rel, colDef->attnum, expr, colDef->generatedCol, update_expr);
 
         cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));
         cooked->contype = CONSTR_DEFAULT;
@@ -3973,6 +4031,8 @@ List* AddRelationNewConstraints(
         cooked->inhcount = is_local ? 0 : 1;
         cooked->is_no_inherit = false;
         cookedConstraints = lappend(cookedConstraints, cooked);
+        expr = NULL;
+        update_expr = NULL;
     }
 
     pstate->p_rawdefaultlist = NIL;

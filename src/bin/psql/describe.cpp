@@ -1301,6 +1301,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     bool retval = false;
     bool hasreplident = is_column_exists(pset.db, RelationRelationId, "relreplident");
     bool hasGenColFeature = is_column_exists(pset.db, AttrDefaultRelationId, "adgencol");
+    bool hasOnUpdateFeature = is_column_exists(pset.db, AttrDefaultRelationId, "adbin_on_update");
 
     bool has_rlspolicy = false;
     const char* has_rlspolicy_sql =
@@ -1503,12 +1504,24 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 #endif
 
     printfPQExpBuffer(&buf, "SELECT a.attname,");
-    appendPQExpBuffer(&buf,
-        "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
-        "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
-        "\n   FROM pg_catalog.pg_attrdef d"
-        "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
-        "\n  a.attnotnull, a.attnum,", exprForNum);
+    if (!hasOnUpdateFeature) {
+        appendPQExpBuffer(&buf,
+            "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
+            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
+            "\n   FROM pg_catalog.pg_attrdef d"
+            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
+            "\n  a.attnotnull, a.attnum,", exprForNum);
+    } else {
+        appendPQExpBuffer(&buf,
+            "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
+            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
+            "\n   FROM pg_catalog.pg_attrdef d"
+            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
+            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin_on_update, d.adrelid) for %d)"
+            "\n   FROM pg_catalog.pg_attrdef d"
+            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
+            "\n  a.attnotnull, a.attnum,", exprForNum, exprForNum);
+    }
     if (pset.sversion >= 90100) {
         appendPQExpBuffer(&buf,
             "\n  (SELECT c.collname FROM pg_catalog.pg_collation c, pg_catalog.pg_type t\n"
@@ -1714,17 +1727,35 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         if (show_modifiers) {
             resetPQExpBuffer(&tmpbuf);
 
+
+        if (hasOnUpdateFeature) {
+            if (!PQgetisnull(res, i, 6)) {
+                if (tmpbuf.len > 0)
+                    appendPQExpBufferStr(&tmpbuf, " ");
+                appendPQExpBuffer(&tmpbuf, _("collate %s"), PQgetvalue(res, i, 6));
+            }
+        } else {
             if (!PQgetisnull(res, i, 5)) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
                 appendPQExpBuffer(&tmpbuf, _("collate %s"), PQgetvalue(res, i, 5));
             }
+        }
 
+
+        if (hasOnUpdateFeature) {
+            if (strcmp(PQgetvalue(res, i, 4), "t") == 0) {
+                if (tmpbuf.len > 0)
+                    appendPQExpBufferStr(&tmpbuf, " ");
+                appendPQExpBufferStr(&tmpbuf, _("not null"));
+            }
+        } else {
             if (strcmp(PQgetvalue(res, i, 3), "t") == 0) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
                 appendPQExpBufferStr(&tmpbuf, _("not null"));
             }
+        }
 
             /* handle "default" here */
             /* (note: above we cut off the 'default' string at 128) */
@@ -1754,6 +1785,18 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                     appendPQExpBuffer(&tmpbuf, _("default %s"), default_value);
                 }
             }
+
+
+            if (hasOnUpdateFeature) {
+                char *on_update_value = PQgetvalue(res, i, 3);
+                if (strlen(on_update_value) > 0) {
+                    if (tmpbuf.len > 0) {
+                        appendPQExpBufferStr(&tmpbuf, " ");
+                    }
+                    /* translator: on_update values of column definitions */
+                    appendPQExpBuffer(&tmpbuf, _("on update %s"), on_update_value);
+                }
+            }
 #ifdef HAVE_CE
             if (hasFullEncryptFeature &&
                 strlen(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type"))) > 0) {
@@ -1774,20 +1817,33 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             printTableAddCell(&cont, seq_values[i], false, false);
 
         /* Expression for index column */
-        if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I')
-            printTableAddCell(&cont, PQgetvalue(res, i, 6), false, false);
+        if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I') {
+            if (hasOnUpdateFeature) {
+                printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
+            } else {
+                printTableAddCell(&cont, PQgetvalue(res, i, 6), false, false);
+            }
+        }
 
         /* FDW options for foreign table column, only for 9.2 or later */
-        if ((tableinfo.relkind == 'f' || tableinfo.relkind == 'e') && pset.sversion >= 90200)
-            printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
+        if ((tableinfo.relkind == 'f' || tableinfo.relkind == 'e') && pset.sversion >= 90200) {
+            if (hasOnUpdateFeature) {
+                printTableAddCell(&cont, PQgetvalue(res, i, 8), false, false);
+            } else {
+                printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
+            }
+        }
 
         /* Storage and Description */
         if (verbose) {
 #ifdef HAVE_CE
-            const int firstvcol = (hasFullEncryptFeature ? 10 : 8);
+            int firstvcol = (hasFullEncryptFeature ? 10 : 8);
 #else
-            const int firstvcol = 8;
+            int firstvcol = 8;
 #endif
+            if (hasOnUpdateFeature) {
+                firstvcol++;
+            }
             char* storage = PQgetvalue(res, i, firstvcol);
 
             /* these strings are literal in our syntax, so not translated. */

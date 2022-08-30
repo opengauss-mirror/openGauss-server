@@ -1015,6 +1015,7 @@ typedef struct ColumnDef {
     Position *position;
     Form_pg_attribute dropped_attr; /* strcuture for dropped attribute during create table like OE */
     char generatedCol;         /* generated column setting */
+    Node *update_default;
 } ColumnDef;
 
 /*
@@ -1327,6 +1328,7 @@ typedef struct Constraint {
     InformationalConstraint *inforConstraint;
     char generated_when; /* ALWAYS or BY DEFAULT */
     char generated_kind; /* currently always STORED */
+    Node *update_expr;
 } Constraint;
 
 /*

@@ -928,7 +928,7 @@ static Node* get_assignment_input(Node* node)
  * If auto truncation function enabled and it is insert statement then
  * we use this arg to determin if default should be casted explict.
  */
-Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
+Node* build_column_default(Relation rel, int attrno, bool isInsertCmd, bool needOnUpdate)
 {
     TupleDesc rd_att = rel->rd_att;
     Form_pg_attribute att_tup = rd_att->attrs[attrno - 1];
@@ -948,8 +948,21 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
             if (attrno == defval[ndef].adnum) {
                 /*
                  * Found it, convert string representation to node tree.
+                 *
+                 * isInsertCmd is false, has_on_update is true and adbin_on_update is not null character string,
+                 * then doing convert adbin_on_update to expression.
+                 * if adbin is not null character string, then doing convert adbin to expression.
                  */
-                expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin);
+                if (needOnUpdate && (!isInsertCmd) && defval[ndef].has_on_update &&
+                    pg_strcasecmp(defval[ndef].adbin_on_update, "") != 0) {
+                    expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin_on_update);
+                    break;
+                } else {
+                    if (pg_strcasecmp(defval[ndef].adbin, "") != 0) {
+                        expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin);
+                        break;
+                    }
+                }
                 break;
             }
         }
@@ -2911,6 +2924,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
         coldef->cmprs_mode = ATT_CMPR_UNDEFINED;
         coldef->raw_default = NULL;
         coldef->cooked_default = NULL;
+        coldef->update_default = NULL;
         coldef->constraints = NIL;
 
         /*

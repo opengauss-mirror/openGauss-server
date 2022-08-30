@@ -114,6 +114,7 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
             def->storage = 0;
             def->cmprs_mode = ATT_CMPR_NOCOMPRESS; /* dont compress */
             def->raw_default = NULL;
+            def->update_default = NULL;
             def->cooked_default = NULL;
             def->collClause = NULL;
             def->collOid = exprCollation((Node*)tle->expr);

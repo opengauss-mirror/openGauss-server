@@ -1390,6 +1390,7 @@ ColumnDef* makeColumnDef(const char* colname, char* coltype)
     col->collOid = InvalidOid;
     col->constraints = NIL;
     col->fdwoptions = NIL;
+    col->update_default = NULL;
     return col;
 }
 

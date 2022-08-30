@@ -218,10 +218,17 @@ TupleConstr *TupleConstrCopy(const TupleDesc tupdesc)
             if (constr->defval[i].adbin) {
                 cpy->defval[i].adbin = pstrdup(constr->defval[i].adbin);
             }
+            if (constr->defval[i].adbin_on_update) {
+                cpy->defval[i].adbin_on_update = pstrdup(constr->defval[i].adbin_on_update);
+            }
         }
         uint32 genColsLen = (uint32)tupdesc->natts * sizeof(char);
         cpy->generatedCols = (char *)palloc(genColsLen);
         rc = memcpy_s(cpy->generatedCols, genColsLen, constr->generatedCols, genColsLen);
+        securec_check(rc, "\0", "\0");
+        uint32 updateColsLen = (uint32)tupdesc->natts * sizeof(bool);
+        cpy->has_on_update = (bool *)palloc(updateColsLen);
+        rc = memcpy_s(cpy->has_on_update, updateColsLen, constr->has_on_update, updateColsLen);
         securec_check(rc, "\0", "\0");
     }
 
@@ -309,6 +316,7 @@ void FreeTupleDesc(TupleDesc tupdesc)
             }
             pfree(attrdef);
             pfree(tupdesc->constr->generatedCols);
+            pfree(tupdesc->constr->has_on_update);
         }
         if (tupdesc->constr->num_check > 0) {
             ConstrCheck *check = tupdesc->constr->check;
@@ -1072,6 +1080,7 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         constr->check = NULL;
         constr->num_check = 0;
         constr->generatedCols = NULL;
+        constr->has_on_update = NULL;
         desc->constr = constr;
     } else {
         desc->constr = NULL;
