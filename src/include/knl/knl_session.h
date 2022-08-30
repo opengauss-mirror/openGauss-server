@@ -2191,6 +2191,10 @@ typedef struct knl_u_percentile_context {
     int LocalCounter;
 } knl_u_percentile_context;
 
+typedef struct WaitEventEntry {
+    uint64 total_duration;
+} WaitEventEntry;
+
 #define STATEMENT_SQL_KIND 2
 #define INSTR_STMT_NULL_PORT (-2)
 typedef struct knl_u_statement_context {
@@ -2213,6 +2217,11 @@ typedef struct knl_u_statement_context {
     syscalllock list_protect;       /* concurrency control for above two lists */
     MemoryContext stmt_stat_cxt;    /* statement stat context */
     int executer_run_level;
+
+    WaitEventEntry *wait_events;
+    Bitmapset *wait_events_bms;
+    bool is_session_bms_active;     /* active after stmt handle copies wait events in backend entry */
+    bool enable_wait_events_bitmap; /* change to true in init stage of stmt handle */
 } knl_u_statement_context;
 
 struct Qid_key {
