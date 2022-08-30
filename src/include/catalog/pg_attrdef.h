@@ -40,8 +40,8 @@ CATALOG(pg_attrdef,2604) BKI_SCHEMA_MACRO
 #endif
     char adgencol; /* generated column setting */
 #ifdef CATALOG_VARLEN			/* variable-length fields start here */
-	pg_node_tree adbin_on_update
-	text adsrc_on_update;
+	pg_node_tree adbin_on_update    /* binrary format of on update express syntax */
+	text adsrc_on_update;        /* on update express syntax on Mysql Feature */
 #endif
 } FormData_pg_attrdef;
 
