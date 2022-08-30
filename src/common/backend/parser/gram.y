@@ -2804,8 +2804,8 @@ modify_column_cmd:
 					$$ = (Node *)n;
 				}
 			| ColId Typename ON_UPDATE_TIME UPDATE b_expr
-#ifndef ENBALE_MULTI_NODE
 				{
+#ifndef ENABLE_MULTIPLE_NODES
 					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 					{
 						AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -2832,8 +2832,8 @@ modify_column_cmd:
                                                                  parser_errposition(@1)));
 						$$ = NULL;
 					}
-				}
 #endif
+				}
 			| ColId NOT NULL_P opt_enable
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
@@ -6393,8 +6393,8 @@ ColConstraintElem:
 					$$ = (Node *)n;
 				}
 			| ON_UPDATE_TIME UPDATE b_expr
-#ifndef ENBALE_MULTI_NODE
 				{
+#ifndef ENABLE_MULTIPLE_NODES
 					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 					{
 						Constraint *n = makeNode(Constraint);
@@ -6413,8 +6413,8 @@ ColConstraintElem:
                                                                  parser_errposition(@1)));
 						$$ = NULL;
 					}
-				}
 #endif
+				}
 			| GENERATED ALWAYS AS '(' a_expr ')' STORED
 				{
 #ifdef ENABLE_MULTIPLE_NODES
