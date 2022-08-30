@@ -2740,7 +2740,8 @@ stmt_loop		: opt_block_label K_LOOP loop_body
                          * support "label: loop"
                          */
                         if(u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
-                            yyerror("syntax error");
+                            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("'label:' is only supported in database which dbcompatibility='B'.")));
 
                         PLpgSQL_stmt_loop  *newp;
                         newp = (PLpgSQL_stmt_loop *)palloc0(sizeof(PLpgSQL_stmt_loop));
