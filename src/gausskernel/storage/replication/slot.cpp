@@ -125,13 +125,8 @@ bool ReplicationSlotValidateName(const char *name, int elevel)
 {
     const char *cp = NULL;
 
-    if (name == NULL) {
+    if (name == NULL || strlen(name) == 0) {
         ereport(elevel, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name should not be NULL.")));
-        return false;
-    }
-
-    if (strlen(name) == 0) {
-        ereport(elevel, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name \"%s\" is too short", name)));
         return false;
     }
 
@@ -140,14 +135,21 @@ bool ReplicationSlotValidateName(const char *name, int elevel)
         return false;
     }
 
+    if ((strlen(name) == 1 && name[0] == '.') ||
+        (strlen(name) == strlen("..") && strncmp(name, "..", strlen("..")) == 0)) {
+        ereport(elevel, (errcode(ERRCODE_INVALID_NAME),
+            errmsg("'.' and '..' are not allowed to be slot names independently.")));
+    }
+
     for (cp = name; *cp; cp++) {
         if (!((*cp >= 'a' && *cp <= 'z') || (*cp >= '0' && *cp <= '9') || (*cp == '_') || (*cp == '?') ||
-              (*cp == '<') || (*cp == '!') || (*cp == '-') || (*cp == '.'))) {
+            (*cp == '.') || (*cp == '-'))) {
             ereport(elevel,
                     (errcode(ERRCODE_INVALID_NAME),
                      errmsg("replication slot name \"%s\" contains invalid character", name),
                      errhint("Replication slot names may only contain lower letters, "
-                             "numbers and the underscore character.")));
+                             "numbers and the 4 following special characters: '_', '?', '.', '-'.\n"
+                             "'.' and '..' are also not allowed to be slot names independently.")));
             return false;
         }
     }
