@@ -12995,13 +12995,6 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
     Node* update_expr = NULL;
     bool flagDropOnUpdateTimestamp = false;
     bool existOnUpdateTimestamp = false;
-    /* def->constraints maybe is null when execute sql(alter table x alter column type new_type) */
-    if (cmd->subtype == AT_AlterColumnType && def->constraints && def->constraints->head) {
-        Constraint* temp_cons = (Constraint*)lfirst(def->constraints->head);
-        if (temp_cons->contype == CONSTR_DEFAULT && temp_cons->update_expr != NULL) {
-            update_expr = temp_cons->update_expr;
-        }
-    }
 
     attrelation = heap_open(AttributeRelationId, RowExclusiveLock);
 
@@ -13325,6 +13318,14 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
         remove_gtt_att_statistic(RelationGetRelid(rel), attnum);
     } else {
         RemoveStatistics<'c'>(RelationGetRelid(rel), attnum);
+    }
+
+    /* def->constraints maybe is null when execute sql(alter table x alter column type new_type) */
+    if (cmd->subtype == AT_AlterColumnType && def->constraints && def->constraints->head) {
+        Constraint* temp_cons = (Constraint*)lfirst(def->constraints->head);
+        if (temp_cons->contype == CONSTR_DEFAULT && temp_cons->update_expr != NULL) {
+            update_expr = temp_cons->update_expr;
+        }
     }
 
     /* when the default expr is NULL and on update expr exist, the defaultexpr should be NULL.
