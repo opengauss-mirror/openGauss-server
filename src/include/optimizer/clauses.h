@@ -100,6 +100,8 @@ extern Node* strip_implicit_coercions(Node* node);
 
 extern Node* eval_const_expressions(PlannerInfo* root, Node* node);
 
+extern Node* eval_const_expression_value(PlannerInfo* root, Node* node);
+
 extern Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamListInfo boundParams);
 
 extern Node *eval_const_expression_value(PlannerInfo* root, Node* node, ParamListInfo boundParams);

@@ -1,0 +1,422 @@
+-- dbcompatibility is A Format
+set codegen_cost_threshold = default;
+set codegen_cost_threshold = 10000;
+set @@codegen_cost_threshold = 10000;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@codegen_cost_threshold = 10000;
+            ^
+set @@session.codegen_cost_threshold = 10000;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@session.codegen_cost_threshold = 10000;
+            ^
+set @@session.codegen_cost_threshold = default;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@session.codegen_cost_threshold = default;
+            ^
+select @@session.codegen_cost_threshold;
+ERROR:  missing FROM-clause entry for table "session"
+LINE 1: select @@session.codegen_cost_threshold;
+                 ^
+select @@session.codegen_cost_threshold  = 1001;
+ERROR:  missing FROM-clause entry for table "session"
+LINE 1: select @@session.codegen_cost_threshold  = 1001;
+                 ^
+set @@global.dcf_connect_timeout = 6000;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@global.dcf_connect_timeout = 6000;
+            ^
+select  @@global.dcf_connect_timeout;
+ERROR:  missing FROM-clause entry for table "global"
+LINE 1: select  @@global.dcf_connect_timeout;
+                  ^
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
+\! sleep 1
+-- dbcompatibility is B Format
+create database test_set dbcompatibility 'b';
+\c test_set
+-- test integer params, e.g. codegen_cost_threshold 
+set codegen_cost_threshold = default;
+set codegen_cost_threshold = 10000;
+set codegen_cost_threshold = 10000 + 1;
+set codegen_cost_threshold = @@session.codegen_cost_threshold + 1;
+set @@codegen_cost_threshold = 10000;
+set @@session.codegen_cost_threshold = 10000;
+set @@session.codegen_cost_threshold = '10000';
+set @@session.codegen_cost_threshold = '10000' + 1;
+set @@session.codegen_cost_threshold = default;
+set @@session.codegen_cost_threshold = 10000*2;
+set @@session.codegen_cost_threshold = @@session.codegen_cost_threshold * 2;
+set @@session.codegen_cost_threshold = abs(1000 + 1);
+set @@session.codegen_cost_threshold = (select abs(1000 + 1));
+select @@session.codegen_cost_threshold;
+ ?column? 
+----------
+     1001
+(1 row)
+
+select @@session.codegen_cost_threshold  = 1001;
+ ?column? 
+----------
+ t
+(1 row)
+
+select @@session.codegen_cost_threshold  = 1002;
+ ?column? 
+----------
+ f
+(1 row)
+
+select @@session.codegen_cost_threshold * 2;
+ ?column? 
+----------
+     2002
+(1 row)
+
+select abs(@@session.codegen_cost_threshold) + 1;
+ ?column? 
+----------
+     1002
+(1 row)
+
+set @@global.dcf_connect_timeout = '6000';
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+set @@global.dcf_connect_timeout = 6000 + 1;
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+set @@global.dcf_connect_timeout = @@global.dcf_connect_timeout * 2;
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+set @@global.dcf_connect_timeout = (select 6000 + 1);
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+set @@global.dcf_connect_timeout = 6000;
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select @@global.dcf_connect_timeout;
+ ?column? 
+----------
+    60000
+(1 row)
+
+select @@global.dcf_connect_timeout = 6000;
+ ?column? 
+----------
+ f
+(1 row)
+
+select @@global.dcf_connect_timeout = 6001;
+ ?column? 
+----------
+ f
+(1 row)
+
+select @@global.dcf_connect_timeout * 2;
+ ?column? 
+----------
+   120000
+(1 row)
+
+select @@global.dcf_connect_timeout + 1;
+ ?column? 
+----------
+    60001
+(1 row)
+
+select 1 + @@global.dcf_connect_timeout;
+ ?column? 
+----------
+    60001
+(1 row)
+
+select abs(@@global.dcf_connect_timeout) + 1;
+ ?column? 
+----------
+    60001
+(1 row)
+
+-- fail example
+set @@session.codegen_cost_threshold = 'aaa';
+ERROR:  invalid value for parameter "codegen_cost_threshold": "aaa"
+set dcf_connect_timeout = 6000;
+ERROR:  parameter "dcf_connect_timeout" cannot be changed without restarting the server
+set @@dcf_connect_timeout = 6000;
+ERROR:  parameter "dcf_connect_timeout" cannot be changed without restarting the server
+-- test bool params, e.g. enable_broadcast
+set enable_broadcast = default;
+set enable_broadcast = (true = true);
+set session enable_broadcast = @@enable_broadcast;
+set @@enable_broadcast = on;
+set @@enable_broadcast = 'on';
+set @@enable_broadcast = off;
+set @@enable_broadcast = true;
+set @@enable_broadcast = 'true';
+set @@enable_broadcast = false;
+set @@enable_broadcast = t;
+set @@enable_broadcast = f;
+set @@enable_broadcast = default;
+set @@session.enable_broadcast = on;
+set @@session.enable_broadcast = default;
+set @@enable_broadcast = (1 = 1);
+set @@enable_broadcast = (true = true);
+set @@enable_broadcast = (true = false);
+select @@enable_broadcast;
+ ?column? 
+----------
+ t
+(1 row)
+
+select @@session.enable_broadcast;
+ ?column? 
+----------
+ t
+(1 row)
+
+select @@session.enable_broadcast = 'true';
+ ?column? 
+----------
+ t
+(1 row)
+
+set global most_available_sync = t;
+set @@global.most_available_sync = t;
+set @@global.most_available_sync = true;
+set @@global.most_available_sync = 'true';
+set @@global.most_available_sync = false;
+set @@global.most_available_sync = on;
+set @@global.most_available_sync = off;
+-- fail example
+set enable_broadcast = 10000;
+ERROR:  parameter "enable_broadcast" requires a Boolean value
+set most_available_sync = t;
+ERROR:  parameter "most_available_sync" cannot be changed now
+set global most_available_sync = default;
+ERROR:  ALTER SYSTEM SET does not support 'set to default'.
+-- test string params, e.g. application_name
+set application_name = default;
+set application_name = gsql;
+set application_name = (select 'gsql');
+set session application_name = (select 'gsql');
+set @@application_name = '';
+set @@application_name = default;
+set @@session.application_name = aaa;
+set @@session.application_name = default;
+set @@session.application_name = 'aaa';
+set @@session.application_name = ('aaa' = 'aaa');
+select @@application_name;
+ ?column? 
+----------
+ t
+(1 row)
+
+select @@session.application_name;
+ ?column? 
+----------
+ t
+(1 row)
+
+select (@@session.application_name = 'gsql');
+ ?column? 
+----------
+ f
+(1 row)
+
+select char_length(@@application_name);
+ char_length 
+-------------
+           1
+(1 row)
+
+select char_length(@@session.application_name);
+ char_length 
+-------------
+           1
+(1 row)
+
+set @@global.syslog_ident = 'postgres1';
+set global syslog_ident = 'postgres1';
+set global syslog_ident = left('postgres1',8);
+set @@global.syslog_ident = ('postgres1' = 'postgres1');
+set @@global.syslog_ident = 'postgres';
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select @@global.syslog_ident;
+ ?column? 
+----------
+ postgres
+(1 row)
+
+select char_length(@@global.syslog_ident);
+ char_length 
+-------------
+           8
+(1 row)
+
+select (@@global.syslog_ident = 'postgres1');
+ ?column? 
+----------
+ f
+(1 row)
+
+-- fail example
+set @@session.application_name = (aaa = aaa);
+ERROR:  column "aaa" does not exist
+LINE 1: set @@session.application_name = (aaa = aaa);
+                                          ^
+set syslog_ident = 'postgres';
+ERROR:  parameter "syslog_ident" cannot be changed now
+-- test enum params, e.g. explain_perf_mode
+set explain_perf_mode = default;
+set explain_perf_mode = normal;
+set explain_perf_mode = @@explain_perf_mode;
+set session explain_perf_mode = (select @@explain_perf_mode);
+set @@explain_perf_mode = normal;
+set @@explain_perf_mode = default;
+set @@session.explain_perf_mode = normal;
+set @@session.explain_perf_mode = default;
+select @@session.explain_perf_mode;
+ ?column? 
+----------
+ normal
+(1 row)
+
+select @@explain_perf_mode;
+ ?column? 
+----------
+ normal
+(1 row)
+
+select char_length(@@session.explain_perf_mode);
+ char_length 
+-------------
+           6
+(1 row)
+
+select @@session.explain_perf_mode = 'normal';
+ ?column? 
+----------
+ t
+(1 row)
+
+set global trace_recovery_messages = log;
+set @@global.trace_recovery_messages = info;
+set @@global.trace_recovery_messages = log;
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select @@global.trace_recovery_messages;
+ ?column? 
+----------
+ log
+(1 row)
+
+select char_length(@@global.trace_recovery_messages);
+ char_length 
+-------------
+           3
+(1 row)
+
+-- fail example
+set @@session.explain_perf_mode = 'aa';
+ERROR:  invalid value for parameter "explain_perf_mode": "aa"
+HINT:  Available values: normal, pretty, summary, run.
+-- test enum params, e.g. explain_perf_mode
+set cpu_index_tuple_cost = default;
+set cpu_index_tuple_cost = 0.006;
+set cpu_index_tuple_cost = 0.006 +1;
+set session cpu_index_tuple_cost = (select @@cpu_index_tuple_cost);
+set @@cpu_index_tuple_cost = 0.006;
+set @@cpu_index_tuple_cost = default;
+set @@session.cpu_index_tuple_cost = 0.006;
+set @@session.cpu_index_tuple_cost = default;
+set @@session.cpu_index_tuple_cost = 0.006 +1;
+set @@session.cpu_index_tuple_cost = @@session.cpu_index_tuple_cost;
+set @@session.cpu_index_tuple_cost = @@session.cpu_index_tuple_cost * 2;
+select @@session.cpu_index_tuple_cost;
+ ?column? 
+----------
+    2.012
+(1 row)
+
+select @@cpu_index_tuple_cost;
+ ?column? 
+----------
+    2.012
+(1 row)
+
+select @@cpu_index_tuple_cost * 2;
+ ?column? 
+----------
+    4.024
+(1 row)
+
+select abs(@@cpu_index_tuple_cost);
+  abs  
+-------
+ 2.012
+(1 row)
+
+set global checkpoint_completion_target = 0.3;
+set global checkpoint_completion_target = 0.3 * 1;
+set global checkpoint_completion_target = abs(0.3);
+set @@global.checkpoint_completion_target = abs(0.3);
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select @@global.checkpoint_completion_target;
+ ?column? 
+----------
+       .3
+(1 row)
+
+select @@global.checkpoint_completion_target * 2;
+ ?column? 
+----------
+       .6
+(1 row)
+
+select @@global.checkpoint_completion_target + 1;
+ ?column? 
+----------
+      1.3
+(1 row)
+
+-- test expr
+set role = 'root';
+ERROR:  "SET role = rolename" not yet supported
+HINT:  Use "SET role rolename" clauses.
+set @@session.codegen_cost_threshold = 20000 / 2;
+set @@session.codegen_cost_threshold = 20000 % 10001;
+set @@session.enable_broadcast = (1 < 2);
+set @@session.enable_broadcast = (1 = 2);
+set @@session.enable_broadcast = (1 IS NOT DISTINCT FROM (select 2));
+set @@session.enable_broadcast = (1 IS OF (INT));
+set @@session.backwrite_quantity = generate_series(1024,20000);
+create table t1(f1 int);
+insert into t1 values (1024);
+set @@session.backwrite_quantity = (select * from t1);
+insert into t1 values (1025);
+set @@session.backwrite_quantity = (select * from t1);
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: f1
+\c regression
+drop database if exists test_set;
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
+\! sleep 1
+show enable_set_variable_b_format;
+ enable_set_variable_b_format 
+------------------------------
+ off
+(1 row)
+

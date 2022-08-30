@@ -2990,6 +2990,22 @@ static NullTest* _copyNullTest(const NullTest* from)
 }
 
 /*
+ * _copySetVariableExpr
+ */
+static SetVariableExpr* _copySetVariableExpr(const SetVariableExpr* from)
+{
+    SetVariableExpr* newnode = makeNode(SetVariableExpr);
+ 
+    COPY_SCALAR_FIELD(xpr.selec);
+    COPY_STRING_FIELD(name);
+    COPY_NODE_FIELD(value);
+    COPY_SCALAR_FIELD(is_session);
+    COPY_SCALAR_FIELD(is_global);
+
+    return newnode;
+}
+
+/*
  * _copyHashFilter
  */
 static HashFilter* _copyHashFilter(const HashFilter* from)
@@ -7374,6 +7390,9 @@ void* copyObject(const void* from)
             break;
         case T_NullTest:
             retval = _copyNullTest((NullTest*)from);
+            break;
+        case T_SetVariableExpr:
+            retval = _copySetVariableExpr((SetVariableExpr*)from);
             break;
         case T_HashFilter:
             retval = _copyHashFilter((HashFilter*)from);

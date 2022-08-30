@@ -325,6 +325,10 @@ dot_dot			\.\.
 colon_equals	":="
 para_equals	"=>"
 
+set_ident_start	"@@"
+set_ident_cont	[A-Za-z\200-\377_0-9\$\#]
+set_identifier	{set_ident_start}{set_ident_cont}*
+
 /*
  * "self" is the set of chars that should be returned as single-character
  * tokens.  "op_chars" is the set of chars that can make up "Op" tokens,
@@ -1044,6 +1048,35 @@ other			.
 					return VCONST;
 				}
 
+{set_identifier} {
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.enable_set_variable_b_format) {
+						char		   *set_ident;
+						SET_YYLLOC();
+ 
+						/*
+						* No.  Convert the identifier to lower case, and truncate
+						* if necessary.
+						*/
+						set_ident = downcase_truncate_identifier(yytext, yyleng, yyextra->warnOnTruncateIdent);
+						if (strcmp(set_ident, "@@session") == 0) {
+							yyextra->is_hint_str = false;
+							return SET_IDENT_SESSION;
+						} else if (strcmp(set_ident, "@@global") == 0) {
+							yyextra->is_hint_str = false;
+							return SET_IDENT_GLOBAL;
+						} else {
+							yylval->str = set_ident;
+							yyextra->ident_quoted = false;
+							return SET_IDENT;
+						}
+					} else {
+						SET_YYLLOC();
+						yyless(2);
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return Op;
+					}
+				}
 
 {identifier}	{
 					const ScanKeyword *keyword;

@@ -4295,7 +4295,7 @@ static void reapply_stacked_values(struct config_generic* variable, struct confi
     const char* curvalue, GucContext curscontext, GucSource cursource);
 static void ShowGUCConfigOption(const char* name, DestReceiver* dest);
 static void ShowAllGUCConfig(const char* likename, DestReceiver* dest);
-static char* _ShowOption(struct config_generic* record, bool use_units);
+static char* _ShowOption(struct config_generic* record, bool use_units, bool is_show);
 static bool validate_option_array_item(const char* name, const char* value, bool skipIfNoPermissions);
 #ifndef ENABLE_MULTIPLE_NODES
 static void replace_config_value(char** optlines, char* name, char* value, config_type vartype);
@@ -4947,7 +4947,7 @@ static struct config_generic* add_placeholder_variable(const char* name, int ele
  * else return NULL.  If create_placeholders is TRUE, we'll create a
  * placeholder record for a valid-looking custom variable name.
  */
-static struct config_generic* find_option(const char* name, bool create_placeholders, int elevel)
+struct config_generic* find_option(const char* name, bool create_placeholders, int elevel)
 {
     const char** key = &name;
     struct config_generic** res;
@@ -6369,7 +6369,7 @@ void BeginReportingGUCOptions(void)
 static void ReportGUCOption(struct config_generic* record)
 {
     if (u_sess->utils_cxt.reporting_enabled && (record->flags & GUC_REPORT)) {
-        char* val = _ShowOption(record, false);
+        char* val = _ShowOption(record, false, true);
         StringInfoData msgbuf;
 
         pq_beginmessage(&msgbuf, 'S');
@@ -9503,7 +9503,7 @@ static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
         /* assign to the values array */
         values[0] = PointerGetDatum(cstring_to_text(conf->name));
 
-        setting = _ShowOption(conf, true);
+        setting = _ShowOption(conf, true, true);
 
         if (setting != NULL) {
             values[1] = PointerGetDatum(cstring_to_text(setting));
@@ -9553,7 +9553,7 @@ char* GetConfigOptionByName(const char* name, const char** varname)
     if (varname != NULL)
         *varname = record->name;
 
-    return _ShowOption(record, true);
+    return _ShowOption(record, true, true);
 }
 
 /*
@@ -9585,7 +9585,7 @@ void GetConfigOptionByNum(int varnum, const char** values, bool* noshow)
     values[0] = conf->name;
 
     /* setting : use _ShowOption in order to avoid duplicating the logic */
-    values[1] = _ShowOption(conf, false);
+    values[1] = _ShowOption(conf, false, true);
 
     /* unit */
     if (conf->vartype == PGC_INT || conf->vartype == PGC_REAL) {
@@ -9844,6 +9844,43 @@ void GetConfigOptionByNum(int varnum, const char** values, bool* noshow)
 }
 
 /*
+ * Return GUC variable value by name; Only used for SetVariableExpr.
+ */
+char* SetVariableExprGetConfigOption(SetVariableExpr* set)
+{
+    struct config_generic* record = NULL;
+    record = find_option(set->name, false, ERROR);
+
+    if (record == NULL) {
+        if (set->is_session) {
+            ereport(
+                ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("unrecognized session configuration parameter \"%s\"", set->name)));
+        } else {
+            ereport(
+                ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("unrecognized global configuration parameter \"%s\"", set->name)));
+        }
+    } else {
+        if (set->is_session) {
+            if (!IsSessionGuc(record->context)) {
+                ereport(
+                    ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("parameter \"%s\" is not a session parameter", set->name)));
+            }
+        } else {
+            if (!IsGlobalGuc(record->context)) {
+                ereport(
+                    ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("parameter \"%s\" is not a global parameter", set->name)));
+            }
+        }
+    }
+
+    if ((record->flags & GUC_SUPERUSER_ONLY) && !superuser())
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be superuser to examine \"%s\"", set->name)));
+
+    return _ShowOption(record, false, false);
+}
+
+/*
  * Return the total number of GUC variables
  */
 int GetNumConfigOptions(void)
@@ -9973,7 +10010,7 @@ Datum show_all_settings(PG_FUNCTION_ARGS)
     }
 }
 
-static char* _ShowOption(struct config_generic* record, bool use_units)
+static char* _ShowOption(struct config_generic* record, bool use_units, bool is_show)
 {
     char buffer[256];
     const char* val = NULL;
@@ -9983,7 +10020,7 @@ static char* _ShowOption(struct config_generic* record, bool use_units)
         case PGC_BOOL: {
             struct config_bool* conf = (struct config_bool*)record;
 
-            if (conf->show_hook)
+            if (conf->show_hook && is_show)
                 val = (*conf->show_hook)();
             else
                 val = *conf->variable ? "on" : "off";
@@ -9992,7 +10029,7 @@ static char* _ShowOption(struct config_generic* record, bool use_units)
         case PGC_INT: {
             struct config_int* conf = (struct config_int*)record;
 
-            if (conf->show_hook)
+            if (conf->show_hook && is_show)
                 val = (*conf->show_hook)();
             else {
                 /*
@@ -10071,7 +10108,7 @@ static char* _ShowOption(struct config_generic* record, bool use_units)
         case PGC_INT64: {
             struct config_int64* conf = (struct config_int64*)record;
 
-            if (conf->show_hook)
+            if (conf->show_hook  && is_show)
                 val = (*conf->show_hook)();
             else {
                 rc = snprintf_s(buffer, sizeof(buffer), sizeof(buffer) - 1, INT64_FORMAT, *conf->variable);
@@ -10083,7 +10120,7 @@ static char* _ShowOption(struct config_generic* record, bool use_units)
         case PGC_REAL: {
             struct config_real* conf = (struct config_real*)record;
 
-            if (conf->show_hook) {
+            if (conf->show_hook && is_show) {
                 val = (*conf->show_hook)();
             } else {
                 double result = *conf->variable;
@@ -10157,7 +10194,7 @@ static char* _ShowOption(struct config_generic* record, bool use_units)
         case PGC_STRING: {
             struct config_string* conf = (struct config_string*)record;
 
-            if (conf->show_hook)
+            if (conf->show_hook && is_show)
                 val = (*conf->show_hook)();
             else if (*conf->variable && **conf->variable)
                 val = *conf->variable;
@@ -10168,7 +10205,7 @@ static char* _ShowOption(struct config_generic* record, bool use_units)
         case PGC_ENUM: {
             struct config_enum* conf = (struct config_enum*)record;
 
-            if (conf->show_hook)
+            if (conf->show_hook && is_show)
                 val = (*conf->show_hook)();
             else
                 val = config_enum_lookup_by_value(conf, *conf->variable);

@@ -232,6 +232,9 @@ Oid exprType(const Node* expr)
         case T_PrefixKey:
             type = exprType((Node*)((PrefixKey*)expr)->arg);
             break;
+        case T_SetVariableExpr:
+            type = ((const Const*)(((SetVariableExpr*)expr)->value))->consttype;
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -471,6 +474,8 @@ int32 exprTypmod(const Node* expr)
             return exprTypmod((Node*)((const PlaceHolderVar*)expr)->phexpr);
         case T_PrefixKey:
             return exprTypmod((Node*)((const PrefixKey*)expr)->arg);
+        case T_SetVariableExpr:
+            return ((const Const*)(((SetVariableExpr*)expr)->value))->consttypmod;
         default:
             break;
     }
@@ -855,6 +860,9 @@ Oid exprCollation(const Node* expr)
         case T_PrefixKey:
             coll = exprCollation((Node*)((const PrefixKey*)expr)->arg);
             break;
+        case T_SetVariableExpr:
+            coll = ((const Const*)(((SetVariableExpr*)expr)->value))->constcollid;
+            break;
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1057,6 +1065,9 @@ void exprSetCollation(Node* expr, Oid collation)
             break;
         case T_PrefixKey:
             return exprSetCollation((Node*)((const PrefixKey*)expr)->arg, collation);
+        case T_SetVariableExpr:
+            ((Const*)(((SetVariableExpr*)expr)->value))->constcollid = collation;
+            break;
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1576,6 +1587,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_PgFdwRemoteInfo:
         case T_Rownum:
         case T_UserVar:
+        case T_SetVariableExpr:
             /* primitive node types with no expression subnodes */
             break;
         case T_Aggref: {
@@ -2633,6 +2645,12 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
 
             FLATCOPY(newnode, pkey, PrefixKey, isCopy);
             MUTATE(newnode->arg, pkey->arg, Expr*);
+            return (Node*)newnode;
+        } break;
+        case T_SetVariableExpr: {
+            SetVariableExpr* oldnode = (SetVariableExpr *)node;
+            Const* newnode = NULL;
+            FLATCOPY(newnode, (Const *)(oldnode->value), Const, isCopy);
             return (Node*)newnode;
         } break;
         default:
