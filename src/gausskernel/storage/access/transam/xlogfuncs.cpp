@@ -991,7 +991,7 @@ Datum gs_roach_enable_delay_ddl_recycle(PG_FUNCTION_ARGS)
     char location[MAXFNAMELEN];
     errno_t rc = EOK;
 
-    (void)ReplicationSlotValidateName(NameStr(*name));
+    (void)ValidateName(NameStr(*name));
 
     pg_check_xlog_func_permission();
 
@@ -1018,7 +1018,7 @@ Datum gs_roach_disable_delay_ddl_recycle(PG_FUNCTION_ARGS)
     HeapTuple resultHeapTuple;
     Datum result;
 
-    (void)ReplicationSlotValidateName(NameStr(*name));
+    (void)ValidateName(NameStr(*name));
 
     pg_check_xlog_func_permission();
 
