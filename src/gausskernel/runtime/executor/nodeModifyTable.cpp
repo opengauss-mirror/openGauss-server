@@ -443,10 +443,10 @@ static void RecoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdT
             if (GetUpdateExprCol(tupdesc, i)) {
                 Expr *expr;
 
-                expr = (Expr *)build_column_default(rel, i + 1, false, true);
+                expr = (Expr *)build_column_default(resultRelInfo->ri_RelationDesc, i + 1, false, true);
                 if (expr == NULL)
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("no update expression found for column number %d of table \"%s\"", i + 1,
-                        RelationGetRelationName(rel))));
+                        RelationGetRelationName(resultRelInfo->ri_RelationDesc))));
 
                 resultRelInfo->ri_UpdatedExprs[i] = ExecPrepareExpr(expr, estate);
                 resultRelInfo->ri_NumUpdatedNeeded++;

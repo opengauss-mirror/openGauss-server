@@ -10046,7 +10046,7 @@ static void ATExecSetNotNull(AlteredTableInfo* tab, Relation rel, const char* co
     heap_close(attr_rel, RowExclusiveLock);
 }
 
-bool FetchOnUpdateExpress(Relation rel, char* colName)
+bool FetchOnUpdateExpress(Relation rel, const char* colName)
 {
     HeapTuple htup = NULL;
     bool isnull = false;
