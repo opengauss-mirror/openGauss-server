@@ -790,7 +790,8 @@ static ChainActionState ReCreateMFChainSDesc(MemFileChain* mfchain, Oid oid, Rel
 
     ChainActionState res = CHAIN_ACTION_SUCCESS;
     TupleDesc desc = RelationGetDescr(rel);
-    SimpleTupleDesc *sDesc = (SimpleTupleDesc*)palloc(sizeof(int) + sizeof(Oid) * desc->natts);
+    SimpleTupleDesc *sDesc = (SimpleTupleDesc*)MemoryContextAlloc(mfchain->memCxt,
+                                                                  sizeof(int) + sizeof(Oid) * desc->natts);
     sDesc->natts = desc->natts;
     for (int i = 0; i < desc->natts; i++) {
         sDesc->attrs[i] = desc->attrs[i]->atttypid;
