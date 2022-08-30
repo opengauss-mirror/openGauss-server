@@ -65,6 +65,7 @@
 #include "utils/fmgroids.h"
 #include "utils/relcache.h"
 #include "commands/copy.h"
+#include "storage/lmgr.h"
 #include "instruments/instr_func_control.h"
 
 #define MAX_SLOW_QUERY_RETENSION_DAYS 604800
@@ -72,9 +73,22 @@
 #define IS_NULL_STR(str) ((str) == NULL || (str)[0] == '\0')
 #define STRING_MAX_LEN 256
 
-#define STATEMENT_DETAILS_HEAD_SIZE (1 + 1)     /* [VERSION] + [TRUNCATED] */
+#define STATEMENT_DETAILS_HEAD_SIZE (1)     /* [VERSION] */
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
 #define INSTR_STATEMENT_ATTRNUM 52
+
+/* support different areas in stmt detail column */
+#define STATEMENT_DETAIL_TYPE_LEN (1)
+#define STATEMENT_DETAIL_DATA_LEN (4)
+
+#define STATEMENT_DETAIL_TYPE_EVENT 'A'
+#define STATEMENT_DETAIL_TYPE_LOCK 'B'
+
+#define STATEMENT_EVENT_TYPE_UNKNOWN     (0)
+#define STATEMENT_EVENT_TYPE_IO          (1)
+#define STATEMENT_EVENT_TYPE_LOCK        (2)
+#define STATEMENT_EVENT_TYPE_LWLOCK      (3)
+#define STATEMENT_EVENT_TYPE_STATUS      (4)
 
 /* stbyStmtHistSlow and stbyStmtHistFast always have the same life cycle. */
 #define STBYSTMTHIST_IS_READY (g_instance.stat_cxt.stbyStmtHistSlow->state != MFCHAIN_STATE_NOT_READY)
@@ -88,8 +102,36 @@ typedef struct {
     int lockmode;               /* lockmode for this request. */
 } StmtLockDetail;
 
-static bytea* get_statement_detail(StatementDetail *text, bool oom);
-static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, uint32 details_len);
+typedef struct {
+    char   *detail;
+    uint32 max_detail_len;
+    uint32 cur_offset;
+    uint32 data_len;
+} AreaInfo;
+
+typedef struct {
+    const char *event_type;
+    const char *event_name;
+    uint64 duration;
+} StmtEventRecord;
+
+static const int wait_event_io_event_max_index = IO_EVENT_NUM;
+static const int wait_event_lock_event_max_index = wait_event_io_event_max_index + LOCK_EVENT_NUM;
+static const int wait_event_lwlock_event_max_index = wait_event_lock_event_max_index + LWLOCK_EVENT_NUM;
+static const int wait_event_state_wait_max_index = wait_event_lwlock_event_max_index + STATE_WAIT_NUM;
+
+static bytea* get_statement_detail(StatementDetail *text, StringInfo wait_events_info, bool oom);
+static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, uint32 *details_len);
+static void get_wait_events_full_info(StatementStatContext *statement_stat, StringInfo wait_events_info);
+static void decode_stmt_locks(
+    StringInfo resultBuf, const char *details, uint32 detailsLen, bool *is_valid_record, bool pretty);
+static void mark_session_bms(uint32 index, uint64 total_duration, bool is_init = true);
+static bool instr_stmt_get_event_data(int32 event_idx, uint8 *event_type, int32 *event_real_id, uint64 *total_duration);
+
+static uint32 calc_area_data_len(uint32 area_total_data_len)
+{
+    return area_total_data_len - STATEMENT_DETAIL_TYPE_LEN - STATEMENT_DETAIL_DATA_LEN;
+}
 
 static RangeVar* InitStatementRel();
 
@@ -455,13 +497,19 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     /* lock summary */
     set_stmt_lock_summary(&statementInfo->lock_summary, values, &i);
 
-    /* lock detail */
-    if (unlikely(statementInfo->details.oom)) {
-        values[i++] = PointerGetDatum(get_statement_detail(&statementInfo->details, true));
-    } else if (statementInfo->details.n_items == 0) {
+    /* lock + wait event detail */
+    if (statementInfo->details.n_items == 0 && bms_num_members(statementInfo->wait_events_bitmap) == 0) {
         nulls[i++] = true;
     } else {
-        values[i++] = PointerGetDatum(get_statement_detail(&statementInfo->details, false));
+        /* generate stmt wait events */
+        StringInfoData wait_events_info;
+        initStringInfo(&wait_events_info);
+        get_wait_events_full_info(statementInfo, &wait_events_info);
+        values[i++] = PointerGetDatum(get_statement_detail(&statementInfo->details,
+            &wait_events_info, statementInfo->details.oom));
+        if (wait_events_info.data != NULL) {
+            FreeStringInfo(&wait_events_info);
+        }
     }
 
     /* is slow sql */
@@ -811,7 +859,7 @@ static void StatementFlush()
 
     while (!t_thrd.statement_cxt.need_exit && ENABLE_STATEMENT_TRACK) {
         ReloadInfo();
-        ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] start to flush statemnts.")));
+        ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] start to flush statemnts.")));
         StartCleanWorker(&count);
 
         HOLD_INTERRUPTS();
@@ -820,7 +868,7 @@ static void StatementFlush()
         RESUME_INTERRUPTS();
 
         count++;
-        ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] flush statemnts finished.")));
+        ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] flush statemnts finished.")));
         /* report statement_history state to pgstat */
         if (OidIsValid(u_sess->proc_cxt.MyDatabaseId))
             pgstat_report_stat(true);
@@ -1054,8 +1102,7 @@ static bool statement_extend_detail_item(StatementStatContext *ssctx, bool first
         ssctx->details.tail = item;
         // update list info
         ssctx->details.n_items = 1;
-        ssctx->details.head->buf[0] = (char)STATEMENT_DETAIL_VERSION;
-        ssctx->details.head->buf[1] = (char)STATEMENT_DETAIL_NOT_TRUNCATED;
+        ssctx->details.head->buf[0] = (char)STATEMENT_DETAIL_LOCK_NOT_TRUNCATED;
         ssctx->details.cur_pos = STATEMENT_DETAILS_HEAD_SIZE;
     } else {
         ssctx->details.tail->next = item;
@@ -1132,7 +1179,7 @@ static bool check_statement_detail_info_record(StatementStatContext *ssctx, cons
 
     if (ssctx->details.n_items > 0 && u_sess->attr.attr_common.track_stmt_details_size <
         (ssctx->details.n_items - 1) * STATEMENT_DETAIL_BUFSIZE + ssctx->details.cur_pos) {
-        ssctx->details.head->buf[1] = (char)STATEMENT_DETAIL_TRUNCATED;
+        ssctx->details.head->buf[1] = (char)STATEMENT_DETAIL_LOCK_TRUNCATED;
         return false;
     }
 
@@ -1397,52 +1444,367 @@ bool write_statement_detail_text(void *info, StmtDetailType type, StringInfo res
     return result;
 }
 
-static bytea* get_statement_detail(StatementDetail *detail, bool oom)
+static void copy_detail_area_type(AreaInfo *area_info, uint8 type)
 {
-    text *result = NULL;
-    uint32 size;
+    area_info->detail[area_info->cur_offset] = type;
+    area_info->cur_offset += 1;
+}
 
-    Assert (detail != NULL && (oom || detail->n_items > 0));
+static void copy_detail_area_data_len(AreaInfo *area_info)
+{
+    uint32 data_len = area_info->data_len;
+    errno_t rc = memcpy_s(area_info->detail + area_info->cur_offset,
+        area_info->max_detail_len - area_info->cur_offset, &data_len,
+        STATEMENT_DETAIL_DATA_LEN);
+    securec_check(rc, "", "");
+    area_info->cur_offset += STATEMENT_DETAIL_DATA_LEN;
+}
 
-    if (oom) {
-        size = sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE;
-    } else {
-        size = sizeof(uint32) + (uint32)((detail->n_items - 1) * STATEMENT_DETAIL_BUFSIZE) + detail->cur_pos;
+static void copy_detail_area_data(AreaInfo *area_info, StringInfo wait_events_info)
+{
+    errno_t rc = 0;
+    rc = memcpy_s(area_info->detail + area_info->cur_offset,
+        area_info->max_detail_len - area_info->cur_offset,
+        wait_events_info->data, wait_events_info->len);
+    securec_check(rc, "", "");
+    area_info->cur_offset += wait_events_info->len;
+}
+
+static bool should_ignore_append_area_events(StringInfo wait_events_info)
+{
+    return wait_events_info == NULL || wait_events_info->len == 0;
+}
+
+static uint32 get_wait_events_len_in_detail(StringInfo wait_events_info)
+{
+    return should_ignore_append_area_events(wait_events_info) ? 0 :
+        STATEMENT_DETAIL_TYPE_LEN + STATEMENT_DETAIL_DATA_LEN + wait_events_info->len;
+}
+
+static void append_wait_events_into_detail(AreaInfo *area_info, StringInfo wait_events_info)
+{
+    Assert(area_info);
+    if (should_ignore_append_area_events(wait_events_info)) {
+        return;
     }
 
+    copy_detail_area_type(area_info, STATEMENT_DETAIL_TYPE_EVENT);
+    copy_detail_area_data_len(area_info);
+
+    ereport(DEBUG2, (errmodule(MOD_INSTR), errmsg("[Statement] append wait events, binary len: %d",
+        wait_events_info->len)));
+    copy_detail_area_data(area_info, wait_events_info);
+}
+
+static bool should_ignore_append_area_lock(StatementDetail *detail)
+{
+    return detail == NULL || detail->n_items == 0;
+}
+
+static uint32 get_lock_len_in_detail(StatementDetail *detail, bool oom)
+{
+    if (should_ignore_append_area_lock(detail)) {
+        return 0;
+    }
+    uint32 size = STATEMENT_DETAIL_TYPE_LEN + STATEMENT_DETAIL_DATA_LEN;
+
+    if (oom) {
+        size += STATEMENT_DETAIL_LOCK_STATUS_LEN;
+    } else {
+        size += (uint32)((detail->n_items - 1) * STATEMENT_DETAIL_BUFSIZE) + detail->cur_pos;
+    }
+    return size;
+}
+
+static void append_lock_into_detail(AreaInfo *area_info, StatementDetail *stmt_detail, bool oom)
+{
+    Assert(area_info);
+    if (should_ignore_append_area_lock(stmt_detail)) {
+        return;
+    }
+    errno_t rc;
+
+    copy_detail_area_type(area_info, STATEMENT_DETAIL_TYPE_LOCK);
+    copy_detail_area_data_len(area_info);
+
+    if (oom) {
+        area_info->detail[area_info->cur_offset] = (char)STATEMENT_DETAIL_LOCK_MISSING_OOM;
+        area_info->cur_offset += 1;
+    } else {
+        size_t itemSize;
+        for (StatementDetailItem *item = stmt_detail->head; item != NULL; item = (StatementDetailItem *)(item->next)) {
+            itemSize = (item == stmt_detail->tail) ? stmt_detail->cur_pos : STATEMENT_DETAIL_BUFSIZE;
+
+            rc = memcpy_s(area_info->detail + area_info->cur_offset,
+                (area_info->max_detail_len - area_info->cur_offset), item->buf, itemSize);
+            securec_check(rc, "\0", "\0");
+            area_info->cur_offset += itemSize;
+        }
+    }
+}
+
+/* append total length and version number */
+static void append_basic_into_details(AreaInfo *area_info, uint32 total_size)
+{
+    int rc = memcpy_s(area_info->detail + area_info->cur_offset, area_info->max_detail_len - area_info->cur_offset,
+        &total_size, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+    area_info->cur_offset += sizeof(uint32);
+
+    area_info->detail[area_info->cur_offset] = STATEMENT_DETAIL_VERSION;
+    area_info->cur_offset += 1;
+}
+
+/*
+ * bytea data format:
+ *   Record format: TOTAL_LEN + VERSION + AREA_1 + AREA_2 + ... + AREA_N
+ *   Area format:   TYPE + DATA_LEN + DATA
+ */
+static bytea* get_statement_detail(StatementDetail *detail, StringInfo wait_events_info, bool oom)
+{
+    /* caculate bytea total len */
+    uint32 size = 0;
+    text *result = NULL;
+
+    size += sizeof(uint32);
+    size += STATEMENT_DETAILS_HEAD_SIZE;
+
+    uint32 wait_event_data_len = get_wait_events_len_in_detail(wait_events_info);
+    size += wait_event_data_len;
+
+    uint32 lock_data_len = get_lock_len_in_detail(detail, oom);
+    size += lock_data_len;
+
+    /* apply memory */
     result = (text*)palloc(size + VARHDRSZ);
     SET_VARSIZE(result, size + VARHDRSZ);
 
-    int rc = memcpy_s(VARDATA(result), size, &size, sizeof(uint32));
-    securec_check(rc, "\0", "\0");
+    char *detail_data = VARDATA(result);
 
-    char *details = VARDATA(result) + sizeof(uint32);
-    if (oom) {
-        details[0] = (char)STATEMENT_DETAIL_VERSION;
-        details[1] = (char)STATEMENT_DETAIL_MISSING_OOM;
-    } else {
-        uint32 pos = 0;
-        size_t itemSize;
+    /* ----append each areas into detail record---- */
+    AreaInfo area_info = {0};
+    area_info.detail = detail_data;
+    area_info.max_detail_len = size;
 
-        for (StatementDetailItem *item = detail->head; item != NULL; item = (StatementDetailItem *)(item->next)) {
-            itemSize = (item == detail->tail) ? detail->cur_pos : STATEMENT_DETAIL_BUFSIZE;
+    append_basic_into_details(&area_info, size);
 
-            rc = memcpy_s(details + pos, (size - pos - sizeof(uint32)), item->buf, itemSize);
-            securec_check(rc, "\0", "\0");
-            pos += itemSize;
-        }
-    }
+    /* wait event area */
+    area_info.data_len = calc_area_data_len(wait_event_data_len);
+    append_wait_events_into_detail(&area_info, wait_events_info);
+    ereport(DEBUG3,
+        (errmodule(MOD_INSTR), errmsg("[Statement] flush - wait event binary len: %u", wait_event_data_len)));
 
+    /* lock area */
+    area_info.data_len = calc_area_data_len(lock_data_len);
+    append_lock_into_detail(&area_info, detail, oom);
+    ereport(DEBUG3, (errmodule(MOD_INSTR), errmsg("[Statement] flush - lock binary len: %u", lock_data_len)));
     return result;
 }
 
 static void handle_detail_flag(char flag, StringInfo result)
 {
-    if (flag == STATEMENT_DETAIL_TRUNCATED) {
+    if (flag == STATEMENT_DETAIL_LOCK_TRUNCATED) {
         appendStringInfoString(result, "Truncated...");
-    } else if (flag == STATEMENT_DETAIL_MISSING_OOM) {
+    } else if (flag == STATEMENT_DETAIL_LOCK_MISSING_OOM) {
         appendStringInfoString(result, "Missing(OOM)...");
     }
+}
+
+static void check_stmt_detail_offset(uint32 total_len, uint32 offset, bool* is_valid_record)
+{
+    if (offset > total_len) {
+        *is_valid_record = false;
+    }
+}
+
+static const char *get_stmt_event_type_str(uint8 event_type)
+{
+    switch (event_type) {
+        case STATEMENT_EVENT_TYPE_IO:
+            return "IO_EVENT";
+        case STATEMENT_EVENT_TYPE_LOCK:
+            return "LOCK_EVENT";
+        case STATEMENT_EVENT_TYPE_LWLOCK:
+            return "LWLOCK_EVENT";
+        case STATEMENT_EVENT_TYPE_STATUS:
+            return "STATUS";
+        default:
+            return "UNKNOWN_TYPE";
+    }
+}
+
+
+static int stmt_compare_wait_events(const void *a, const void *b)
+{
+    if (a == NULL || b == NULL) {
+        return 0;
+    }return (((StmtEventRecord*)a)->duration > ((StmtEventRecord*)b)->duration ? -1 : 1);
+}
+
+/*
+ * Binary format as:
+ * uint32            +         2 bytes  + string     + 8         + EVENT
+ * wait_events_count + event_1(name_len + event_name + duration) + event_2
+ */
+void decode_stmt_wait_events(StringInfo resultBuf, const char *details,
+    uint32 total_len, bool *is_valid_record, bool pretty)
+{
+    if (total_len <= 0) {
+        *is_valid_record = false;
+        return;
+    }
+    appendStringInfoString(resultBuf, "\t---------------Wait Events Area---------------\n");
+
+    uint32 offset = 0;
+    uint32 events_total_count = 0, events_current_count = 0;
+    int rc = 0;
+
+    check_stmt_detail_offset(total_len, offset + sizeof(uint32), is_valid_record);
+    rc = memcpy_s(&events_total_count, sizeof(uint32), details + offset, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+    offset += sizeof(uint32);
+
+    if (events_total_count == 0) {
+        *is_valid_record = false;
+        return;
+    }
+    StmtEventRecord *records = (StmtEventRecord*)palloc0(sizeof(StmtEventRecord) * events_total_count);
+    uint16 event_name_len = 0;
+    uint64 event_duration = 0;
+    uint8  event_type = STATEMENT_EVENT_TYPE_UNKNOWN;
+    while (offset < total_len && *is_valid_record) {
+        check_stmt_detail_offset(total_len, offset + sizeof(uint8), is_valid_record);
+        rc = memcpy_s(&event_type, sizeof(uint8), details + offset, sizeof(uint8));
+        securec_check(rc, "\0", "\0");
+        offset += sizeof(uint8);
+
+        check_stmt_detail_offset(total_len, offset + sizeof(uint16), is_valid_record);
+        rc = memcpy_s(&event_name_len, sizeof(uint16), details + offset, sizeof(uint16));
+        securec_check(rc, "\0", "\0");
+        offset += sizeof(uint16);
+
+        check_stmt_detail_offset(total_len, offset + event_name_len, is_valid_record);
+        records[events_current_count].event_name = details + offset;
+        offset += event_name_len;
+
+        check_stmt_detail_offset(total_len, offset + sizeof(uint64), is_valid_record);
+        rc = memcpy_s(&event_duration, sizeof(uint64), details + offset, sizeof(uint64));
+        securec_check(rc, "\0", "\0");
+        offset += sizeof(uint64);
+
+        records[events_current_count].event_type = get_stmt_event_type_str(event_type);
+        records[events_current_count].duration = event_duration;
+
+        events_current_count++;
+        if (events_current_count > events_total_count) {
+            *is_valid_record = false;
+            pfree(records);
+            return;
+        }
+    }
+
+    qsort(records, events_total_count, sizeof(StmtEventRecord), &stmt_compare_wait_events);
+    for (uint32 i = 0; i < events_total_count; i++) {
+        appendStringInfo(resultBuf, "'%u'\t", i + 1);
+        appendStringInfo(resultBuf, "%-13s\t", records[i].event_type);
+        appendStringInfo(resultBuf, "%-45s", records[i].event_name);
+        appendStringInfoChar(resultBuf, '\t');
+        if (pretty) {
+            appendStringInfo(resultBuf, "%10lu (us)\n", records[i].duration);
+        } else {
+            appendStringInfo(resultBuf, "%10lu (us)", records[i].duration);
+        }
+    }
+    pfree(records);
+}
+
+void decode_statement_detail(StringInfo resultBuf, const char *details,
+    uint32 total_len, bool *is_valid_record, bool pretty)
+{
+    if (total_len <= 0) {
+        *is_valid_record = false;
+        return;
+    }
+
+    /* detail get area type */
+    uint32 offset = 0;
+    uint32 data_len = 0;
+    int rc = 0;
+
+    while (offset < total_len && is_valid_record) {
+        char area_type = details[offset];
+        check_stmt_detail_offset(total_len, offset + 1, is_valid_record);
+        offset += 1;
+
+        check_stmt_detail_offset(total_len, offset + sizeof(uint32), is_valid_record);
+        rc = memcpy_s(&data_len, sizeof(uint32), (void*)(details + offset), sizeof(uint32));
+        securec_check(rc, "\0", "\0");
+        offset += sizeof(uint32);
+
+        if (data_len > (total_len - STATEMENT_DETAIL_TYPE_LEN - STATEMENT_DETAIL_DATA_LEN)) {
+            *is_valid_record = false;
+            return;
+        }
+
+        switch (area_type) {
+            case STATEMENT_DETAIL_TYPE_EVENT:
+                decode_stmt_wait_events(resultBuf, details + offset, data_len, is_valid_record, pretty);
+                break;
+            case STATEMENT_DETAIL_TYPE_LOCK:
+                decode_stmt_locks(resultBuf, details + offset, data_len, is_valid_record, pretty);
+                break;
+            default:
+                *is_valid_record = false;
+                return;
+        }
+        offset += data_len;
+    }
+}
+
+static void decode_stmt_locks(StringInfo resultBuf, const char *area_data, uint32 detailsLen, bool *is_valid_record,
+    bool pretty)
+{
+    /* record flag area, should be
+     *   STATEMENT_DETAIL_LOCK_NOT_TRUNCATED/STATEMENT_DETAIL_LOCK_TRUNCATED/STATEMENT_DETAIL_LOCK_MISSING_OOM
+     */
+    uint32 offset = 0;
+    char flag = area_data[0];
+    if (flag != STATEMENT_DETAIL_LOCK_NOT_TRUNCATED &&
+        flag != STATEMENT_DETAIL_LOCK_TRUNCATED &&
+        flag != STATEMENT_DETAIL_LOCK_MISSING_OOM) {
+        *is_valid_record = false;
+        return;
+    }
+    offset += 1;
+
+    appendStringInfo(resultBuf, "\t---------------LOCK/LWLOCK Area---------------\n");
+    size_t detailsCnt = 1;
+    while (offset < detailsLen && *is_valid_record) {
+        StmtDetailType itemType = (StmtDetailType)area_data[offset];
+        size_t size = get_statement_detail_size(itemType);
+        if (size == INVALID_DETAIL_BUFSIZE) {
+            *is_valid_record = false;
+            return;
+        }
+        if (offset + size > detailsLen) {
+            /* invalid buf */
+            *is_valid_record = false;
+            return;
+        }
+        void *info = palloc_statement_detail(itemType);
+        if (info == NULL) {
+            return;
+        }
+        int rc = memcpy_s(info, size, area_data + offset, size);
+        securec_check(rc, "", "");
+        offset  += size;
+
+        /* write to string */
+        *is_valid_record = write_statement_detail_text(info, itemType, resultBuf, &detailsCnt, pretty);
+        pfree(info);
+    }
+
+    handle_detail_flag(flag, resultBuf);
 }
 
 static char *decode_statement_detail_text(bytea *detail, const char *format, bool pretty)
@@ -1459,44 +1821,24 @@ static char *decode_statement_detail_text(bytea *detail, const char *format, boo
 
     char *details = (char *)VARDATA(detail);
     uint32 detailsLen = 0;
-    int rc = memcpy_s(&detailsLen, sizeof(uint32), details, sizeof(uint32));
-    securec_check(rc, "\0", "\0");
 
-    if (!is_valid_detail_record(bytea_data_len, details, detailsLen)) {
+    if (!is_valid_detail_record(bytea_data_len, details, &detailsLen)) {
         return pstrdup("invalid_detail_header_format");
     }
 
+    bool is_valid_record = true;
+    uint32 offset = sizeof(uint32);
     StringInfoData resultBuf;
     initStringInfo(&resultBuf);
-    char flag = details[sizeof(uint32) + 1];
-    size_t pos = sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE;
-    bool is_valid_record = true;
-    size_t detailsCnt = 1;
 
-    while (pos < detailsLen && is_valid_record) {
-        StmtDetailType itemType = (StmtDetailType)details[pos];
-        size_t size = get_statement_detail_size(itemType);
-        if (size == INVALID_DETAIL_BUFSIZE) {
-            is_valid_record = false;
-            break;
-        }
-        if (pos + size > detailsLen) {
-            /* invalid buf */
-            is_valid_record = false;
-            break;
-        }
-        void *info = palloc_statement_detail(itemType);
-        if (info == NULL) {
-            break;
-        }
-        rc = memcpy_s(info, size, details + pos, size);
-        securec_check(rc, "", "");
-        pos += size;
-
-        /* write to string */
-        is_valid_record = write_statement_detail_text(info, itemType, &resultBuf, &detailsCnt, pretty);
-        pfree(info);
+    char detail_version = details[sizeof(uint32)];
+    offset += 1;
+    if (detail_version == STATEMENT_DETAIL_VERSION_v1) {
+        decode_stmt_locks(&resultBuf, details + offset, detailsLen - offset, &is_valid_record, pretty);
+    } else {
+        decode_statement_detail(&resultBuf, details + offset, detailsLen - offset, &is_valid_record, pretty);
     }
+
     if (!is_valid_record) {
         pfree(resultBuf.data);
         return pstrdup("invalid_detail_data_format");
@@ -1504,7 +1846,6 @@ static char *decode_statement_detail_text(bytea *detail, const char *format, boo
 
     /* after is_valid_detail_record called, resultBuf.len never equal to 0 */
     resultBuf.data[resultBuf.len - 1] = ' ';
-    handle_detail_flag(flag, &resultBuf);
     return resultBuf.data;
 }
 
@@ -1809,27 +2150,27 @@ void instr_stmt_report_unique_sql_info(const PgStat_TableCounts *agg_table_stat,
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
     if (agg_table_stat != NULL) {
         // row activity
-        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_fetched, (uint64)agg_table_stat->t_tuples_fetched);
-        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_returned, (uint64)agg_table_stat->t_tuples_returned);
+        ssctx->row_activity.tuples_fetched += (uint64)agg_table_stat->t_tuples_fetched;
+        ssctx->row_activity.tuples_returned += (uint64)agg_table_stat->t_tuples_returned;
 
-        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_inserted, (uint64)agg_table_stat->t_tuples_inserted);
-        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_updated, (uint64)agg_table_stat->t_tuples_updated);
-        (void)pg_atomic_fetch_add_u64(&ssctx->row_activity.tuples_deleted, (uint64)agg_table_stat->t_tuples_deleted);
+        ssctx->row_activity.tuples_inserted += (uint64)agg_table_stat->t_tuples_inserted;
+        ssctx->row_activity.tuples_updated += (uint64)agg_table_stat->t_tuples_updated;
+        ssctx->row_activity.tuples_deleted += (uint64)agg_table_stat->t_tuples_deleted;
 
         // cache_io
-        (void)pg_atomic_fetch_add_u64(&ssctx->cache_io.blocks_fetched, (uint64)agg_table_stat->t_blocks_fetched);
-        (void)pg_atomic_fetch_add_u64(&ssctx->cache_io.blocks_hit, (uint64)agg_table_stat->t_blocks_hit);
+        ssctx->cache_io.blocks_fetched += (uint64)agg_table_stat->t_blocks_fetched;
+        ssctx->cache_io.blocks_hit += (uint64)agg_table_stat->t_blocks_hit;
     }
 
     if (timeInfo != NULL) {
         for (int idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
-            (void)gs_atomic_add_64(&ssctx->timeModel[idx], timeInfo[idx]);
+            ssctx->timeModel[idx] += timeInfo[idx];
         }
     }
 
     if (netInfo != NULL) {
         for (int i = 0; i < TOTAL_NET_INFO_TYPES; i++) {
-            (void)pg_atomic_fetch_add_u64(&ssctx->networkInfo[i], netInfo[i]);
+            ssctx->networkInfo[i] += netInfo[i];
         }
     }
 }
@@ -1876,15 +2217,18 @@ void instr_stmt_report_query_plan(QueryDesc *queryDesc)
 }
 
 /* check the header and valid length of the detail binary data */
-static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, uint32 details_len)
+static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, uint32 *details_len)
 {
     /* VERSIZE(bytea) - VARHDRSZ should be > sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE */
     if (bytea_data_len <= (sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE)) {
         return false;
     }
 
+    int rc = memcpy_s(details_len, sizeof(uint32), details, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+
     /* details binary length should be same with VERSIZE(bytea) - VARHDRSZ */
-    if (bytea_data_len != details_len) {
+    if (bytea_data_len != *details_len) {
         return false;
     }
 
@@ -1893,18 +2237,335 @@ static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, u
     if (version == 0 || version > STATEMENT_DETAIL_VERSION) {
         return false;
     }
+    return true;
+}
 
-    /* record flag area, should be
-     *   STATEMENT_DETAIL_NOT_TRUNCATED/STATEMENT_DETAIL_TRUNCATED/STATEMENT_DETAIL_MISSING_OOM
-     */
-    int32 flag = (int32)details[sizeof(uint32) + 1];
-    if (flag != STATEMENT_DETAIL_NOT_TRUNCATED &&
-        flag != STATEMENT_DETAIL_TRUNCATED &&
-        flag != STATEMENT_DETAIL_MISSING_OOM) {
-        return false;
+static void instr_stmt_set_wait_events_in_session_bms(int32 bms_event_idx)
+{
+    if (u_sess->statement_cxt.stmt_stat_cxt == NULL || !u_sess->statement_cxt.is_session_bms_active ||
+        bms_event_idx == -1)
+        return;
+
+    mark_session_bms(bms_event_idx, 0, false);
+}
+
+static void instr_stmt_set_wait_events_in_handle_bms(int32 bms_event_idx)
+{
+    CHECK_STMT_HANDLE();
+    if (!u_sess->statement_cxt.enable_wait_events_bitmap) {
+        return;
     }
 
+    if (bms_event_idx >= 0) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+        PG_TRY();
+        {
+            ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] mark delta BMS in handle - ID: %d",
+                bms_event_idx)));
+            CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap =
+                bms_add_member(CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap, bms_event_idx);
+
+
+        }
+        PG_CATCH();
+        {
+            (void)MemoryContextSwitchTo(oldcontext);
+            ErrorData* edata = NULL;
+            edata = CopyErrorData();
+            FlushErrorState();
+            ereport(LOG, (errmodule(MOD_INSTR),
+                errmsg("[Statement] bms handle event failed - bms event idx: %d, msg: %s", bms_event_idx,
+                edata->message)));
+            FreeErrorData(edata);
+        }
+        PG_END_TRY();
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+}
+
+static int32 get_wait_events_idx_in_bms(uint32 class_id, uint32 event_id)
+{
+    int event_idx = -1;
+    switch (class_id) {
+        case PG_WAIT_IO:
+            ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - IO")));
+            event_idx = event_id;
+            break;
+        case PG_WAIT_LOCK:
+            ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - LOCK")));
+            event_idx = event_id + wait_event_io_event_max_index;
+            break;
+        case PG_WAIT_LWLOCK:
+            ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - LWLOCK")));
+            event_idx = event_id + wait_event_lock_event_max_index;
+            break;
+        case PG_WAIT_STATE:
+            ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] tracked event - STATE")));
+            event_idx = event_id + wait_event_lwlock_event_max_index;
+            break;
+        default:
+            break;
+    }
+    ereport(DEBUG4,
+        (errmodule(MOD_INSTR),
+        errmsg("[Statement] tracked BMS event - index: %d, real index: %u", event_idx, event_id)));
+
+    return event_idx;
+}
+
+void instr_stmt_set_wait_events_bitmap(uint32 class_id, uint32 event_id)
+{
+    if (u_sess->statement_cxt.stmt_stat_cxt == NULL)
+        return;
+
+    int32 bms_event_idx = -1;
+    bms_event_idx = get_wait_events_idx_in_bms(class_id, event_id);
+    if (bms_event_idx == -1) {
+        return;
+    }
+    /* 1, after session BMS inited, we always mark events in BMS */
+    if (u_sess->statement_cxt.is_session_bms_active) {
+        instr_stmt_set_wait_events_in_session_bms(bms_event_idx);
+    }
+
+    /* 2, for statement in handle, mark delta events in handle BMS */
+    instr_stmt_set_wait_events_in_handle_bms(bms_event_idx);
+}
+
+static void get_wait_events_full_info(StatementStatContext *statement_stat, StringInfo wait_events_info)
+{
+    if (statement_stat == NULL || statement_stat->wait_events == NULL) {
+        return;
+    }
+    uint32 wait_events_count = bms_num_members(statement_stat->wait_events_bitmap);
+    if (wait_events_count == 0) {
+        return;
+    }
+
+    const char *event_str = NULL;
+    uint16 event_str_len = 0;
+    uint8 event_type = 0;
+    int event_idx = -1;
+    int32 virt_event_idx = -1;
+
+    /*
+     * Binary format as:
+     * uint32            +         1 bytes + 2 bytes  + string     + 8         + EVENT
+     * wait_events_count + event_1(type    + name_len + event_name + duration) + event_2
+     */
+    ereport(DEBUG2, (errmodule(MOD_INSTR), errmsg("[Statement] flush wait events - count: %u", wait_events_count)));
+    appendBinaryStringInfo(wait_events_info, (const char *)(&wait_events_count), sizeof(uint32));
+    uint32 i = 0;
+    while ((virt_event_idx = bms_next_member(statement_stat->wait_events_bitmap, virt_event_idx)) >= 0) {
+        if (virt_event_idx < wait_event_io_event_max_index) {
+            event_idx = virt_event_idx;
+            event_str = pgstat_get_wait_io(WaitEventIO(event_idx + PG_WAIT_IO));
+            event_type = STATEMENT_EVENT_TYPE_IO;
+        } else if (virt_event_idx < wait_event_lock_event_max_index) {
+            event_idx = virt_event_idx - wait_event_io_event_max_index;
+            event_str = GetLockNameFromTagType(event_idx);
+            event_type = STATEMENT_EVENT_TYPE_LOCK;
+        } else if (virt_event_idx < wait_event_lwlock_event_max_index) {
+            event_idx = virt_event_idx - wait_event_lock_event_max_index;
+            event_str = GetLWLockIdentifier(PG_WAIT_LWLOCK, event_idx);
+            event_type = STATEMENT_EVENT_TYPE_LWLOCK;
+        } else if (virt_event_idx < wait_event_state_wait_max_index) {
+            event_idx = virt_event_idx - wait_event_lwlock_event_max_index;
+            event_str = pgstat_get_waitstatusname(event_idx);
+            event_type = STATEMENT_EVENT_TYPE_STATUS;
+        } else {
+            event_str = "UNKNOW_EVENT";
+            event_type = STATEMENT_EVENT_TYPE_UNKNOWN;
+        }
+        ereport(DEBUG4,
+            (errmodule(MOD_INSTR),
+            errmsg("[Statement] flushing event - (%s - %s) virtual index: %d real index: %d",
+            get_stmt_event_type_str(event_type), event_str, virt_event_idx, event_idx)));
+
+        /* with '\0' terminated */
+        event_str_len = strlen(event_str) + 1;
+        appendBinaryStringInfo(wait_events_info, (const char *)(&event_type), sizeof(uint8));
+        appendBinaryStringInfo(wait_events_info, (const char *)(&event_str_len), sizeof(uint16));
+        appendBinaryStringInfo(wait_events_info, event_str, event_str_len);
+        appendBinaryStringInfo(wait_events_info, (const char *)(&statement_stat->wait_events[i].total_duration),
+            sizeof(uint64));
+        i++;
+    }
+}
+
+static void mark_session_bms(uint32 index, uint64 total_duration, bool is_init)
+{
+    if (is_init && (total_duration == 0)) {
+        return;
+    }
+
+    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    PG_TRY();
+    {
+        u_sess->statement_cxt.wait_events_bms = bms_add_member(u_sess->statement_cxt.wait_events_bms, index);
+    }
+    PG_CATCH();
+    {
+        (void)MemoryContextSwitchTo(oldcontext);
+        ErrorData* edata = NULL;
+        edata = CopyErrorData();
+        FlushErrorState();
+        ereport(LOG, (errmodule(MOD_INSTR),
+            errmsg("[Statement] mark session bms failed - bms event idx: %d, msg: %s", index,
+            edata->message)));
+        FreeErrorData(edata);
+    }
+    PG_END_TRY();
+    (void)MemoryContextSwitchTo(oldcontext);
+    ereport(DEBUG4, (errmodule(MOD_INSTR),
+        errmsg("[Statement] %s base BMS - ID: %u", is_init ? "init" : "mark", index)));
+}
+
+/* full sql - wait events: copy wait events from backend entry to user session by using BMS */
+void instr_stmt_copy_wait_events()
+{
+    CHECK_STMT_HANDLE();
+    if (t_thrd.shemem_ptr_cxt.MyBEEntry == NULL) {
+        return;
+    }
+
+    /* 1, if the first time enter the function for the session */
+    /*   1.1 init bitmap by using the wait events info in backend entry */
+    /*   1.2 copy wait events from backend entry to statement handle */
+    if (!u_sess->statement_cxt.is_session_bms_active) {
+        /* maybe no events changed */
+        u_sess->statement_cxt.is_session_bms_active = true;
+        ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] begin to init base BMS")));
+
+        uint32 start_idx = 0, end_idx = wait_event_io_event_max_index;
+        WaitStatisticsInfo *wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.io_info;
+        for (; start_idx < end_idx; start_idx++) {
+            u_sess->statement_cxt.wait_events[start_idx].total_duration = wait_event_info[start_idx].total_duration;
+            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+        }
+
+        wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lock_info;
+        start_idx = wait_event_io_event_max_index;
+        end_idx = wait_event_lock_event_max_index;
+        for (; start_idx < end_idx; start_idx++) {
+            u_sess->statement_cxt.wait_events[start_idx].total_duration =
+                wait_event_info[start_idx - wait_event_io_event_max_index].total_duration;
+            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+        }
+
+        wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.event_info.lwlock_info;
+        start_idx = wait_event_lock_event_max_index;
+        end_idx = wait_event_lwlock_event_max_index;
+        for (; start_idx < end_idx; start_idx++) {
+            u_sess->statement_cxt.wait_events[start_idx].total_duration =
+                wait_event_info[start_idx - wait_event_lock_event_max_index].total_duration;
+            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+        }
+
+        wait_event_info = t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo.status_info.statistics_info;
+        start_idx = wait_event_lwlock_event_max_index;
+        end_idx = wait_event_state_wait_max_index + 1;
+        for (; start_idx < end_idx; start_idx++) {
+            u_sess->statement_cxt.wait_events[start_idx].total_duration =
+                wait_event_info[start_idx - wait_event_lwlock_event_max_index].total_duration;
+            mark_session_bms(start_idx, u_sess->statement_cxt.wait_events[start_idx].total_duration);
+        }
+    } else {
+        /* 2 if not the first time */
+        /*   2.1 copy wait events from backend entry by using session's BMS */
+        int event_idx = -1, event_real_id = 0;
+        uint8 event_type = 0;
+        uint64 total_duration = 0;
+
+        ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] begin to copy base event by using BMS")));
+        while ((event_idx = bms_next_member(u_sess->statement_cxt.wait_events_bms, event_idx)) >= 0) {
+            if (!instr_stmt_get_event_data(event_idx, &event_type, &event_real_id, &total_duration))
+                continue;
+            ereport(DEBUG4, (errmodule(MOD_INSTR), errmsg("[Statement] copy base - (%s) event index: %d, real index:%d",
+                get_stmt_event_type_str(event_type), event_idx, event_real_id)));
+            u_sess->statement_cxt.wait_events[event_idx].total_duration = total_duration;
+        }
+    }
+}
+
+void instr_stmt_diff_wait_events()
+{
+    CHECK_STMT_HANDLE();
+    if (!u_sess->statement_cxt.enable_wait_events_bitmap) {
+        return;
+    }
+    /*
+     * 1, get the bitmap count,
+     * 2, iterate bitmap to get event id,
+     * 3, get the event delta duration by using 'event in backend entry' - 'event in user session'
+     */
+    int count = bms_num_members(CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap);
+    if (count == 0) {
+        return;
+    }
+
+    ereport(DEBUG2, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS - changed events count - %d", count)));
+    MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+    WaitEventEntry *wait_events = (WaitEventEntry*)palloc0_noexcept(count * sizeof(WaitEventEntry));
+    (void)MemoryContextSwitchTo(oldcontext);
+    if (wait_events != NULL) {
+        int event_idx = -1, handle_idx = 0;
+        while ((event_idx = bms_next_member(CURRENT_STMT_METRIC_HANDLE->wait_events_bitmap, event_idx)) >= 0) {
+            Assert(handle_idx < count);
+
+            int event_real_id = 0;
+            uint8 event_type = 0;
+            uint64 total_duration = 0;
+
+            if (!instr_stmt_get_event_data(event_idx, &event_type, &event_real_id, &total_duration))
+                continue;
+            ereport(DEBUG3, (errmodule(MOD_INSTR), errmsg("[Statement] diff BMS - (%s) event index: %d, real index: %d",
+                get_stmt_event_type_str(event_type), event_idx, event_real_id)));
+            wait_events[handle_idx].total_duration =
+                total_duration - u_sess->statement_cxt.wait_events[event_idx].total_duration;
+            handle_idx++;
+        }
+
+        CURRENT_STMT_METRIC_HANDLE->wait_events = wait_events;
+    }
+}
+
+/* get event type/real id/duration */
+static bool instr_stmt_get_event_data(int32 event_idx, uint8 *event_type, int32 *event_real_id, uint64 *total_duration)
+{
+    WaitInfo *wait_info = &(t_thrd.shemem_ptr_cxt.MyBEEntry->waitInfo);
+    if (event_idx < wait_event_io_event_max_index) {
+        *event_real_id = event_idx;
+        *total_duration = wait_info->event_info.io_info[*event_real_id].total_duration;
+        *event_type = STATEMENT_EVENT_TYPE_IO;
+    } else if (event_idx < wait_event_lock_event_max_index) {
+        *event_real_id = event_idx - wait_event_io_event_max_index;
+        *total_duration = wait_info->event_info.lock_info[*event_real_id].total_duration;
+        *event_type = STATEMENT_EVENT_TYPE_LOCK;
+    } else if (event_idx < wait_event_lwlock_event_max_index) {
+        *event_real_id = event_idx - wait_event_lock_event_max_index;
+        *total_duration = wait_info->event_info.lwlock_info[*event_real_id].total_duration;
+        *event_type = STATEMENT_EVENT_TYPE_LWLOCK;
+    } else if (event_idx < wait_event_state_wait_max_index) {
+        *event_real_id = event_idx - wait_event_lwlock_event_max_index;
+        *total_duration = wait_info->status_info.statistics_info[*event_real_id].total_duration;
+        *event_type = STATEMENT_EVENT_TYPE_STATUS;
+    } else {
+        *event_type = STATEMENT_EVENT_TYPE_UNKNOWN;
+        return false;
+    }
     return true;
+}
+
+/* allocate memory for full sql wait events */
+void init_full_sql_wait_events()
+{
+    if (u_sess->statement_cxt.wait_events == NULL && u_sess->statement_cxt.stmt_stat_cxt != NULL) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+        u_sess->statement_cxt.wait_events = (WaitEventEntry*)palloc0_noexcept(sizeof(WaitEventEntry) *
+            (wait_event_state_wait_max_index + 1));
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
 }
 
 void instr_stmt_dynamic_change_level()
