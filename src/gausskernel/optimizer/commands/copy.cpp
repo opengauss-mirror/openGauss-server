@@ -3196,9 +3196,14 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
             } else {
                 if (!IS_BINARY(cstate)) {
                     bool use_quote = cstate->force_quote_flags[attnum - 1];
-
-		    string = OutputFunctionCall(&out_functions[attnum - 1], value);
-                    if (out_functions[attnum -1].fn_oid == 1702) {  /* numeric_out */
+                    string = OutputFunctionCall(&out_functions[attnum - 1], value);
+                    if (out_functions[attnum -1].fn_oid == F_NUMERIC_OUT ||
+                        out_functions[attnum -1].fn_oid == F_INT4OUT ||
+                        out_functions[attnum -1].fn_oid == F_INT8OUT ||
+                        out_functions[attnum -1].fn_oid == F_INT2OUT ||
+                        out_functions[attnum -1].fn_oid == F_INT1OUT ||
+                        out_functions[attnum -1].fn_oid == F_FLOAT4OUT ||
+                        out_functions[attnum -1].fn_oid == F_FLOAT8OUT) {
                         CopyNonEncodingAttributeOut(cstate, string, use_quote);
                     } else {
                         switch (cstate->fileformat) {
