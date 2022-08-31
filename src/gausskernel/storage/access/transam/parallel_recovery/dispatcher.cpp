@@ -1462,7 +1462,7 @@ void ProcessPendingRecords(bool fullSync)
 {
     // consider a simple transaction, at least 4 xlog, a heap insert ,a btree insert , a committing and a commit
     uint64 redoTxnMask = 0x3;
-    uint64 redoTxnCount = 0;
+    static uint64 redoTxnCount = 0;
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
         uint64 blockcnt = 0;
         pgstat_report_waitevent(WAIT_EVENT_PREDO_PROCESS_PENDING);
