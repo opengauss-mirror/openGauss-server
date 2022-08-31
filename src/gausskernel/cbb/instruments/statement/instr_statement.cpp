@@ -27,6 +27,7 @@
 #include "instruments/instr_handle_mgr.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_slow_query.h"
+#include "instruments/instr_mfchain.h"
 #include "postgres.h"
 #include "pgxc/pgxc.h"
 #include "pgstat.h"
@@ -75,6 +76,10 @@
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
 #define INSTR_STATEMENT_ATTRNUM 52
 
+/* stbyStmtHistSlow and stbyStmtHistFast always have the same life cycle. */
+#define STBYSTMTHIST_IS_READY (g_instance.stat_cxt.stbyStmtHistSlow->state != MFCHAIN_STATE_NOT_READY)
+
+
 /* lock/lwlock's detail information */
 typedef struct {
     StmtDetailType type;        /* statement details kind. */
@@ -85,6 +90,94 @@ typedef struct {
 
 static bytea* get_statement_detail(StatementDetail *text, bool oom);
 static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, uint32 details_len);
+
+static RangeVar* InitStatementRel();
+
+/* using for standby statement history */
+static void StartStbyStmtHistory();
+static void ShutdownStbyStmtHistory();
+static void AssignStbyStmtHistoryConf();
+static void CleanStbyStmtHistory();
+
+/* in standby, We record slow-sql and other queries separately, this is different from the primary. */
+static void StartStbyStmtHistory()
+{
+    if (pmState != PM_HOT_STANDBY || STBYSTMTHIST_IS_READY) {
+        return;
+    }
+
+    RangeVar* relrv = InitStatementRel();
+    Relation rel = heap_openrv(relrv, AccessShareLock);
+
+    MemFileChainCreateParam param;
+    param.notInit = false;
+    param.parent = g_instance.instance_context;
+    param.rel = rel;
+    param.dir = "dbe_perf_standby";
+    param.needClean = t_thrd.proc->workingVersionNum < STANDBY_STMTHIST_VERSION_NUM ? true : false;
+
+    param.name = "standby_statement_history_fast";
+    param.maxBlockNumM = t_thrd.statement_cxt.fast_max_mblock;
+    param.maxBlockNum = t_thrd.statement_cxt.fast_max_block;
+    param.retentionTime = t_thrd.statement_cxt.full_sql_retention_time;
+    param.lock  = GetMainLWLockByIndex(FirstStandbyStmtHistLock + 0);
+    param.initTarget = g_instance.stat_cxt.stbyStmtHistFast;
+    MemFileChainCreate(&param);
+
+    param.name = "standby_statement_history_slow";
+    param.maxBlockNumM = t_thrd.statement_cxt.slow_max_mblock;
+    param.maxBlockNum = t_thrd.statement_cxt.slow_max_block;
+    param.retentionTime = t_thrd.statement_cxt.slow_sql_retention_time;
+    param.lock  = GetMainLWLockByIndex(FirstStandbyStmtHistLock + 1);
+    param.initTarget = g_instance.stat_cxt.stbyStmtHistSlow;
+    MemFileChainCreate(&param);
+
+    heap_close(rel, AccessShareLock);
+}
+
+static void ShutdownStbyStmtHistory()
+{
+    if (!STBYSTMTHIST_IS_READY) {
+        return;
+    }
+
+    MemFileChainDestory(g_instance.stat_cxt.stbyStmtHistFast);
+    MemFileChainDestory(g_instance.stat_cxt.stbyStmtHistSlow);
+}
+
+static void AssignStbyStmtHistoryConf()
+{
+    if (pmState != PM_HOT_STANDBY || !STBYSTMTHIST_IS_READY) {
+        return;
+    }
+
+    MemFileChainRegulate(g_instance.stat_cxt.stbyStmtHistSlow,
+                         MFCHAIN_ASSIGN_NEW_SIZE,
+                         t_thrd.statement_cxt.slow_max_mblock,
+                         t_thrd.statement_cxt.slow_max_block,
+                         t_thrd.statement_cxt.slow_sql_retention_time);
+    MemFileChainRegulate(g_instance.stat_cxt.stbyStmtHistFast,
+                         MFCHAIN_ASSIGN_NEW_SIZE,
+                         t_thrd.statement_cxt.fast_max_mblock,
+                         t_thrd.statement_cxt.fast_max_block,
+                         t_thrd.statement_cxt.full_sql_retention_time);
+}
+
+static void CleanStbyStmtHistory()
+{
+    if (pmState != PM_HOT_STANDBY && STBYSTMTHIST_IS_READY) {
+        ShutdownStbyStmtHistory();
+        return;
+    }
+
+    if (!STBYSTMTHIST_IS_READY) {
+        return;
+    }
+
+    MemFileChainRegulate(g_instance.stat_cxt.stbyStmtHistSlow, MFCHAIN_TRIM_OLDEST);
+    MemFileChainRegulate(g_instance.stat_cxt.stbyStmtHistFast, MFCHAIN_TRIM_OLDEST);
+}
+
 
 static List* split_levels_into_list(const char* levels)
 {
@@ -205,6 +298,7 @@ static void ReloadInfo()
     if (t_thrd.statement_cxt.got_SIGHUP) {
         t_thrd.statement_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
+        AssignStbyStmtHistoryConf();
     }
 
     if (IsGotPoolReload()) {
@@ -313,7 +407,7 @@ static void set_stmt_lock_summary(const LockSummaryStat *lock_summary, Datum val
 }
 
 static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statementInfo,
-    const knl_u_statement_context* statementCxt)
+    const knl_u_statement_context* statementCxt, bool* isSlow = NULL)
 {
     int i = 0;
     Datum values[INSTR_STATEMENT_ATTRNUM];
@@ -375,6 +469,10 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     values[i++] = BoolGetDatum(
         (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold &&
         statementInfo->slow_query_threshold >= 0) ? true : false);
+    if (isSlow != NULL) {
+        *isSlow = values[i - 1];
+    }
+
     SET_TEXT_VALUES(statementInfo->trace_id, i++);
     Assert(INSTR_STATEMENT_ATTRNUM == i);
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
@@ -390,23 +488,33 @@ static RangeVar* InitStatementRel()
     return relrv;
 }
 
-bool check_statement_retention_time(char** newval, void** extra, GucSource source)
+/* parse value of GUC track_stmt_retention_time and track_stmt_standby_chain_size */
+static List* SplitTrackStatementGUCParam(const char* newval)
 {
     /* Do str copy and remove space. */
-    char* strs = TrimStr(*newval);
+    char* strs = TrimStr(newval);
     if (IS_NULL_STR(strs))
-        return false;
+        return NIL;
     const char* delim = ",";
     List *res = NULL;
     char* next_token = NULL;
 
-    /* Get slow query retention days */
     char* token = strtok_s(strs, delim, &next_token);
     while (token != NULL) {
         res = lappend(res, TrimStr(token));
         token = strtok_s(NULL, delim, &next_token);
     }
     pfree(strs);
+    return res;
+}
+
+bool check_statement_retention_time(char** newval, void** extra, GucSource source)
+{
+    List* res = SplitTrackStatementGUCParam(*newval);
+    if (res == NIL) {
+        return false;
+    }
+
     if (res->length != STATEMENT_SQL_KIND) {
         GUC_check_errdetail("attr num:%d is error,track_stmt_retention_time attr is 2", res->length);
         list_free_deep(res);
@@ -450,6 +558,68 @@ void assign_statement_retention_time(const char* newval, void* extra)
     t_thrd.statement_cxt.slow_sql_retention_time = level[1];
 }
 
+bool check_standby_statement_chain_size(char** newval, void** extra, GucSource source)
+{
+#define MFUNITS 16  // 16M each mfchain block
+#define STANDBY_STMTHIST_NATTR 4
+    static const char* attr_name[] = {
+        "fast sql memory size", "fast sql disk size",
+        "slow sql memory size", "slow sql disk size"};
+    static const int attr_min[] = {
+        MIN_MBLOCK_NUM * MFUNITS, MIN_FBLOCK_NUM * MFUNITS,
+        MIN_MBLOCK_NUM * MFUNITS, MIN_FBLOCK_NUM * MFUNITS};
+    static const int attr_max[] = {
+        MAX_MBLOCK_NUM * MFUNITS, MAX_FBLOCK_NUM * MFUNITS,
+        MAX_MBLOCK_NUM * MFUNITS, MAX_FBLOCK_NUM * MFUNITS};
+
+    List* res = SplitTrackStatementGUCParam(*newval);
+    if (res == NIL) {
+        return false;
+    } else if (res->length != STANDBY_STMTHIST_NATTR) {
+        GUC_check_errdetail("attr num:%d is error, track_stmt_standby_chain_size attr is 4", res->length);
+        return false;
+    }
+
+    int attr[STANDBY_STMTHIST_NATTR] = {0};
+    ListCell* lc = NULL;
+    int i = 0;
+    foreach(lc, res) {
+        if (!StrToInt32((char*)lfirst(lc), &attr[i])) {
+            GUC_check_errdetail("invalid input syntax");
+            return false;
+        }
+        if (attr[i] < attr_min[i] || attr[i] > attr_max[i]) {
+            GUC_check_errdetail("%s:%d(MB) is out of range [%d, %d].",
+            attr_name[i], attr[i], attr_min[i], attr_max[i]);
+            return false;
+        }
+
+        i++;
+    }
+
+    if (attr[0] > attr[1] || attr[2] > attr[3]) {   // see attr_name
+        GUC_check_errdetail("memory size can't not bigger than file size.");
+        return false;
+    }
+    list_free_deep(res);
+
+    *extra = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), STANDBY_STMTHIST_NATTR * sizeof(int));
+    ((int*)(*extra))[0] = attr[0] / MFUNITS;  // see attr_name
+    ((int*)(*extra))[1] = attr[1] / MFUNITS;  // see attr_name
+    ((int*)(*extra))[2] = attr[2] / MFUNITS;  // see attr_name
+    ((int*)(*extra))[3] = attr[3] / MFUNITS;  // see attr_name
+    return true;
+}
+
+void assign_standby_statement_chain_size(const char* newval, void* extra)
+{
+    int *size = (int*) extra;
+    t_thrd.statement_cxt.fast_max_mblock = size[0];  // see attr_name in check function
+    t_thrd.statement_cxt.fast_max_block  = size[1];  // see attr_name in check function
+    t_thrd.statement_cxt.slow_max_mblock = size[2];  // see attr_name in check function
+    t_thrd.statement_cxt.slow_max_block  = size[3];  // see attr_name in check function
+}
+
 static void CleanStatementByIdx(Relation rel, Oid statementTimeIndexId,
     int retentionTime, bool isSlowSQL)
 {
@@ -474,11 +644,25 @@ static void CleanStatementByIdx(Relation rel, Oid statementTimeIndexId,
 static void StartCleanWorker(int* count)
 {
     int maxCleanInterval = 600; // 600 * 100ms = 1min
-    if (*count < maxCleanInterval || g_instance.stat_cxt.instr_stmt_is_cleaning) {
+    if (*count < maxCleanInterval) {
         return;
     }
-    SendPostmasterSignal(PMSIGNAL_START_CLEAN_STATEMENT);
-    g_instance.stat_cxt.instr_stmt_is_cleaning = true;
+
+    /* We do clean work by starting clean worker in primary mode, do it ourself in standby mode. */
+    if (pmState == PM_RUN) { 
+        if (g_instance.stat_cxt.instr_stmt_is_cleaning) {
+            return;
+        }
+        SendPostmasterSignal(PMSIGNAL_START_CLEAN_STATEMENT);
+        g_instance.stat_cxt.instr_stmt_is_cleaning = true;
+    }
+
+    /*
+     * statement flush will not restart during switch over from standby to primary,
+     * so clean stbyStmtHistory is necessary.
+     */
+    CleanStbyStmtHistory();
+
     *count = 0;
 }
 /*
@@ -526,7 +710,8 @@ static void CleanStatementTable()
     PG_END_TRY();
 }
 
-static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u_statement_context* statementCxt)
+/* flush statement list info to statement_history table or mem-file chain */
+static void FlushStatementToTableOrMFChain(StatementStatContext* suspendList, const knl_u_statement_context* statementCxt)
 {
     Assert (suspendList != NULL);
     HeapTuple tuple = NULL;
@@ -540,10 +725,24 @@ static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u
         PushActiveSnapshot(GetTransactionSnapshot());
         RangeVar* relrv = InitStatementRel();
         Relation rel = heap_openrv(relrv, RowExclusiveLock);
+        bool isSlow = false;
+        MemFileChain* target = NULL;
         while (flushItem != NULL) {
-            tuple = GetStatementTuple(rel, flushItem, statementCxt);
-            (void)simple_heap_insert(rel, tuple);
-            CatalogUpdateIndexes(rel, tuple);
+            tuple = GetStatementTuple(rel, flushItem, statementCxt, &isSlow);
+            if (pmState == PM_HOT_STANDBY) {
+                /*
+                 * mefchain-insert action does not means this is a write transaction, it must be a read only trans,
+                 * also it's result not controled by transaction, but we still set it in, to release some lock and mem
+                 */
+                target = isSlow ? g_instance.stat_cxt.stbyStmtHistSlow : g_instance.stat_cxt.stbyStmtHistFast;
+                (void)MemFileChainInsert(target, tuple, rel);
+            } else {
+                /*
+                 * in primary node. it is a common write transaction.
+                 */
+                (void)simple_heap_insert(rel, tuple);
+                CatalogUpdateIndexes(rel, tuple);
+            }
             heap_freetuple_ext(tuple);
             flushItem = (StatementStatContext *)flushItem->next;
         }
@@ -590,8 +789,8 @@ static void FlushAllStatement()
         }
 
         if (suspendList != NULL) {
-            /* flush statement list info to statement_history table */
-            FlushStatementToTable(suspendList, statementCxt);
+            /* flush statement list info to statement_history table or mem-file chain */
+            FlushStatementToTableOrMFChain(suspendList, statementCxt);
 
             /* append list to free list */
             (void)syscalllockAcquire(&statementCxt->list_protect);
@@ -621,7 +820,7 @@ static void StatementFlush()
         StartCleanWorker(&count);
 
         HOLD_INTERRUPTS();
-        /* flush all session's statement info to statement_history table */
+        /* flush all session's statement info to statement_history table or mem-file chain */
         FlushAllStatement();
         RESUME_INTERRUPTS();
 
@@ -677,8 +876,11 @@ NON_EXEC_STATIC void StatementFlushMain()
     ereport(LOG, (errmsg("statement flush thread start")));
     pgstat_report_activity(STATE_IDLE, NULL);
 
+    StartStbyStmtHistory();
+
     /* flush statement into statement_history table */
     StatementFlush();
+    ShutdownStbyStmtHistory();
     gs_thread_exit(0);
 }
 
@@ -1729,4 +1931,301 @@ void instr_stmt_dynamic_change_level()
     CURRENT_STMT_METRIC_HANDLE->dynamic_track_level = specified_level;
     ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] change (%lu) track level to L%d",
         u_sess->unique_sql_cxt.unique_sql_id, CURRENT_STMT_METRIC_HANDLE->level - 1)));
+}
+
+
+/* **********************************************************************************************
+ * STANDBY STATEMENG HISTORY FUNCTIONS
+ * **********************************************************************************************
+ * 
+ * manage two scanner of mfchain. first is for full, second for slow.
+ * We simply merge the results of the two scanners, which does not result in a significant
+ * performance loss, but improves readability.
+ *
+ * Two candidates means two items from each scanner, and we know the who is the winner. Every time 
+ * the old winner will be replaced by a new candidate from it's scanner, then we check and get a new
+ * winner, and output it.
+ */
+typedef struct SStmtHistScanner {
+    TupleDesc desc;
+    int winner;
+    HeapTuple candidate[STATEMENT_SQL_KIND];
+    MemFileChainScanner* scanner[STATEMENT_SQL_KIND];
+    TimestampTz range_s;
+    TimestampTz range_e;
+    MemoryContext memcxt;
+} SStmtHistScanner;
+
+/*
+ * Only a HeapTuple struct without real data, every time it will bind real data from 
+ * a MemFileItem to become a real candidate.
+ * Because MemFileItem only store HeapTupleData, but some interface must using HeapTuple,
+ * so we create a HeapTuple struction, every time we get a MemFileItem, bind it's HeapTupleData
+ * into this HeapTuple, so we can access it. It seems silly, but it's necessary.
+ */
+static HeapTuple create_fake_candidate()
+{
+    HeapTuple candidate = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE);
+    candidate->t_len = 0;
+    ItemPointerSetInvalid(&(candidate->t_self));
+    candidate->t_tableOid = InvalidOid;
+    candidate->t_bucketId = InvalidBktId;
+    HeapTupleSetZeroBase(candidate);
+    candidate->t_xc_node_id = 0;
+    candidate->t_data = NULL;
+    return candidate;
+}
+
+static TimestampTz get_candidate_finish_time(HeapTuple candidate, TupleDesc desc)
+{
+    if (candidate == NULL) {
+        return DT_NOBEGIN;
+    }
+
+    Datum finish_time;
+    bool isnull = false;
+    finish_time = fastgetattr(candidate, Anum_statement_history_finish_time, desc, &isnull);
+    if (unlikely(isnull)) {
+        return DT_NOBEGIN;
+    }
+    return DatumGetTimestampTz(finish_time);
+}
+
+static bool get_next_candidate(SStmtHistScanner* scanner, int idx)
+{
+    MemFileItem* item = NULL;
+    TimestampTz finish_time = DT_NOBEGIN;
+    bool find = false;
+
+    while (!find) {
+        item = MemFileChainScanGetNext(scanner->scanner[idx]);
+        if (item == NULL) {
+            return false;
+        }
+
+        scanner->candidate[idx]->t_len = GetMemFileItemDataLen(item);
+        scanner->candidate[idx]->t_data = (HeapTupleHeader)item->data;
+        finish_time = get_candidate_finish_time(scanner->candidate[idx], scanner->desc);
+
+        if (finish_time > scanner->range_e) {
+            /* try next */
+        } else if (finish_time >= scanner->range_s) {
+            find = true;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+static SStmtHistScanner* sstmthist_scanner_start(MemoryContext memcxt, bool only_slow, TupleDesc desc, TimestampTz time1, TimestampTz time2)
+{
+    if (time1 > time2) {
+        ereport(ERROR, (errmsg("Invalid time param.")));
+    }
+    if (time1 > GetCurrentTimestamp()) {
+        return NULL;
+    }
+
+    MemoryContext oldcxt = MemoryContextSwitchTo(memcxt);
+    SStmtHistScanner* scanner = (SStmtHistScanner*)palloc(sizeof(SStmtHistScanner));
+
+    scanner->scanner[0] = NULL;
+    scanner->candidate[0] = NULL;
+    scanner->desc = desc;
+    scanner->memcxt = memcxt;
+    scanner->range_s = time1;
+    scanner->range_e = time2;
+
+    /* create mfscanner and fake candidate */
+    if (!only_slow) {
+        scanner->scanner[0] = MemFileChainScanStart(g_instance.stat_cxt.stbyStmtHistFast, time1, time2);
+        scanner->candidate[0] = scanner->scanner[0] == NULL ? NULL : create_fake_candidate();
+    }
+    scanner->scanner[1] = MemFileChainScanStart(g_instance.stat_cxt.stbyStmtHistSlow, time1, time2);
+    scanner->candidate[1] = scanner->scanner[1] == NULL ? NULL : create_fake_candidate();
+
+    /*
+     * Let's say 0 is the winner of two candidates, next time it will be replaced by a new candidate of 0.
+     * But we have to make sure that candidate 1 is valid or NULL, it will battle with new 
+     * candidate of 0 next time.
+     */
+    scanner->winner = 0;
+    if (scanner->scanner[1] != NULL && !get_next_candidate(scanner, 1)) {
+        pfree(scanner->candidate[1]);
+        scanner->candidate[1] = NULL;
+        MemFileChainScanEnd(scanner->scanner[1]);
+        scanner->scanner[1] = NULL;
+    }
+
+    MemoryContextSwitchTo(oldcxt);
+    return scanner;
+}
+
+static HeapTuple sstmthist_scanner_getnext(SStmtHistScanner* scanner)
+{
+    MemoryContext oldcxt = MemoryContextSwitchTo(scanner->memcxt);
+    TimestampTz finish_time[2] = {DT_NOBEGIN, DT_NOBEGIN};
+
+    if (scanner->candidate[scanner->winner] != NULL && !get_next_candidate(scanner, scanner->winner)) {
+        pfree(scanner->candidate[scanner->winner]);
+        scanner->candidate[scanner->winner] = NULL;
+        MemFileChainScanEnd(scanner->scanner[scanner->winner]);
+        scanner->scanner[scanner->winner] = NULL;
+    }
+
+    if (unlikely(scanner->candidate[0] == NULL && scanner->candidate[1] == NULL)) {
+        MemoryContextSwitchTo(oldcxt);
+        return NULL;
+    }
+
+    finish_time[0] = get_candidate_finish_time(scanner->candidate[0], scanner->desc);
+    finish_time[1] = get_candidate_finish_time(scanner->candidate[1], scanner->desc);
+
+    if (unlikely(finish_time[0] == DT_NOBEGIN && finish_time[1] == DT_NOBEGIN)) {
+        MemoryContextSwitchTo(oldcxt);
+        return NULL;
+    }
+
+    scanner->winner = finish_time[0] > finish_time[1] ? 0 : 1;
+    MemoryContextSwitchTo(oldcxt);
+    return scanner->candidate[scanner->winner];
+}
+
+static void sstmthist_scanner_end(SStmtHistScanner* scanner)
+{
+    pfree_ext(scanner->candidate[0]);
+    pfree_ext(scanner->candidate[1]);
+    MemFileChainScanEnd(scanner->scanner[0]);
+    MemFileChainScanEnd(scanner->scanner[1]);
+    // desc is a reference, so don't need free.
+    pfree(scanner);
+}
+
+static void check_sstmthist_permissions()
+{
+    if (pmState != PM_HOT_STANDBY) {
+        ereport(ERROR, 
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Functions series of standby statement history only supported in standby mode.")));
+    }
+
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            (errmsg("Only system/monitor admin can use this function."))));
+    }
+}
+
+static TupleDesc create_sstmthist_tuple_entry(FunctionCallInfo fcinfo)
+{
+    RangeVar* relrv = InitStatementRel();
+    Relation rel = heap_openrv(relrv, AccessShareLock);
+    TupleDesc desc = RelationGetDescr(rel);
+    TupleDesc expectedDesc = ((ReturnSetInfo*)fcinfo->resultinfo)->expectedDesc;
+
+    /* Because we only support append cloumn to system table in upgrade, so we just compare natts here. */
+    if (desc->natts != expectedDesc->natts) {
+        heap_close(rel, AccessShareLock);
+        ereport(ERROR, (errmsg("function standby_statement_history does not match relation statement_history.")));
+    }
+
+    TupleDesc tmpDesc = CreateTemplateTupleDesc(desc->natts, false, TAM_HEAP);
+    for (int i = 0; i < desc->natts; i++) {
+        TupleDescInitEntry(tmpDesc, (AttrNumber)(i + 1), 
+            NameStr(desc->attrs[i]->attname), desc->attrs[i]->atttypid, -1, 0);
+    }
+
+    heap_close(rel, AccessShareLock);
+    return tmpDesc;
+}
+
+static void parse_sstmthist_args(PG_FUNCTION_ARGS, bool* only_slow, TimestampTz* time1, TimestampTz* time2)
+{
+    *only_slow = PG_ARGISNULL(0) ? false : PG_GETARG_BOOL(0);
+    if (PG_NARGS() == 1) {
+        *time1 = DT_NOBEGIN;
+        *time2 = DT_NOEND;
+        return;
+    }
+    
+    const int max_time_args = 2;
+    Assert(PG_NARGS() == max_time_args);
+    ArrayType* arr = PG_GETARG_ARRAYTYPE_P(1);
+    Oid element_type = ARR_ELEMTYPE(arr);
+    int16 elmlen;
+    bool elmbyval = false;
+    char elmalign;
+    int nitems = 0;
+    Datum* elements = NULL;
+    bool* nulls = NULL;
+
+    get_typlenbyvalalign(element_type, &elmlen, &elmbyval, &elmalign);
+    deconstruct_array(arr, element_type, elmlen, elmbyval, elmalign, &elements, &nulls, &nitems);
+
+    if (nitems > max_time_args) {
+        pfree_ext(elements);
+        pfree_ext(nulls);
+        ereport(ERROR, (errmsg("Too many time parameters,  no more than two.")));
+    }
+
+    if (nitems == 1) {
+        *time1 = nulls[0] ? DT_NOBEGIN : DatumGetTimestampTz(elements[0]);
+        *time2 = DT_NOEND;
+    } else {
+        *time1 = nulls[0] ? DT_NOBEGIN : DatumGetTimestampTz(elements[0]);
+        *time2 = nulls[1] ? DT_NOEND : DatumGetTimestampTz(elements[1]);
+    }
+
+    pfree_ext(elements);
+    pfree_ext(nulls);
+
+    if (*time1 > *time2) {
+        ereport(ERROR, (errmsg("Invalid time param, time1 cannot bigger than time2.")));
+    }
+}
+
+Datum standby_statement_history(PG_FUNCTION_ARGS)
+{
+    check_sstmthist_permissions();
+
+    FuncCallContext* funcctx = NULL;
+    SStmtHistScanner* scanner = NULL;
+    if (SRF_IS_FIRSTCALL()) {
+        MemoryContext oldContext = NULL;
+        TupleDesc tupdesc = NULL;
+        TimestampTz time1 = 0;
+        TimestampTz time2 = 0;
+        bool only_slow = false;
+
+        parse_sstmthist_args(fcinfo, &only_slow, &time1, &time2);
+
+        funcctx = SRF_FIRSTCALL_INIT();
+        oldContext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        tupdesc = create_sstmthist_tuple_entry(fcinfo);
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        scanner = sstmthist_scanner_start(CurrentMemoryContext, only_slow, tupdesc, time1, time2);
+        MemoryContextSwitchTo(oldContext);
+
+        if (scanner == NULL) {
+            SRF_RETURN_DONE(funcctx);
+        } else {
+            funcctx->user_fctx = (void*)scanner;
+        }
+    }
+
+    funcctx = SRF_PERCALL_SETUP();
+    scanner = (SStmtHistScanner*)funcctx->user_fctx;
+    HeapTuple tuple = sstmthist_scanner_getnext(scanner);
+    if (tuple == NULL) {
+        sstmthist_scanner_end(scanner);
+        SRF_RETURN_DONE(funcctx);
+    } else {
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+}
+
+Datum standby_statement_history_1v(PG_FUNCTION_ARGS)
+{
+    return standby_statement_history(fcinfo);
 }

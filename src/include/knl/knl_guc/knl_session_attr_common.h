@@ -203,6 +203,8 @@ typedef struct knl_session_attr_common {
     char *track_stmt_stat_level;
     int64 track_stmt_details_size;
     char* track_stmt_retention_time;
+    // using for standby
+    char* track_stmt_standby_chain_size;
 
     bool enable_wdr_snapshot;
     bool enable_set_variable_b_format;

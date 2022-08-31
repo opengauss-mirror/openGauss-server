@@ -3,6 +3,7 @@ select provariadic,oid, proname from pg_proc where arraycontains(proargmodes::ch
 -------------+------+-------------------------------------
         2276 | 3058 | concat
         2276 | 3059 | concat_ws
+        1185 | 3119 | standby_statement_history
         2276 | 3239 | json_build_array
         2276 | 3261 | json_build_object
           25 | 3262 | json_extract_path
@@ -25,5 +26,5 @@ select provariadic,oid, proname from pg_proc where arraycontains(proargmodes::ch
         2276 | 7107 | db4ai_predict_by_numeric
         2276 | 7108 | db4ai_predict_by_text
         2276 | 7109 | db4ai_predict_by_float8_array
-(24 rows)
+(25 rows)
 

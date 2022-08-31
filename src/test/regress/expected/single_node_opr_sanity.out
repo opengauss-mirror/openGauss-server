@@ -722,6 +722,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3073 | pg_is_xlog_replay_paused
  3080 | pg_sequence_last_value
  3097 | varchar_transform
+ 3118 | standby_statement_history
+ 3119 | standby_statement_history
  3122 | oidvectorrecv_extend
  3123 | oidvectorsend_extend
  3124 | json_agg
