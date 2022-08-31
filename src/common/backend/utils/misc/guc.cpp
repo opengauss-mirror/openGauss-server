@@ -71,10 +71,12 @@
 #include "optimizer/planmain.h"
 #include "optimizer/prep.h"
 #include "optimizer/gtmfree.h"
+#include "optimizer/clauses.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_oper.h"
 #include "parser/parse_type.h"
 #include "parser/parser.h"
+#include "parser/parse_coerce.h"
 #include "parser/scansup.h"
 #include "pgstat.h"
 #include "pgxc/route.h"
@@ -121,6 +123,7 @@
 #include "replication/syncrep.h"
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
+#include "rewrite/rewriteHandler.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/cucache_mgr.h"
 #include "storage/smgr/fd.h"
@@ -164,6 +167,7 @@
 #include "utils/guc_memory.h"
 #include "utils/guc_network.h"
 #include "utils/guc_resource.h"
+#include "nodes/parsenodes_common.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -264,6 +268,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_instr_rt_percentile",
     "instr_rt_percentile_interval",
     "enable_wdr_snapshot",
+    "enable_set_variable_b_format",
     "wdr_snapshot_interval",
     "wdr_snapshot_retention_days",
     "wdr_snapshot_query_timeout",
@@ -1054,6 +1059,17 @@ static void InitConfigureNamesBool()
             NULL,
             NULL},
 #endif
+        {{"enable_set_variable_b_format",
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("enable set variable in b format."),
+            NULL},
+            &u_sess->attr.attr_common.enable_set_variable_b_format,
+            false,
+            NULL,
+            NULL,
+            NULL},
         {{"enable_wdr_snapshot",
             PGC_SIGHUP,
             NODE_ALL,
@@ -8537,7 +8553,7 @@ void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
 /*
  * SET command
  */
-void ExecSetVariableStmt(VariableSetStmt* stmt)
+void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
 {
     GucAction action = stmt->is_local ? GUC_ACTION_LOCAL : GUC_ACTION_SET;
 
@@ -8784,6 +8800,32 @@ void ExecSetVariableStmt(VariableSetStmt* stmt)
         case VAR_RESET_ALL:
             ResetAllOptions();
             break;
+        case VAR_SET_DEFINED:
+            if (strcmp(stmt->name, "USER DEFINED VARIABLE") == 0) {
+                ListCell *head = NULL;
+
+                foreach (head, stmt->defined_args) {
+                    UserSetElem *elem = (UserSetElem *)lfirst(head);
+                    Node *node = NULL;
+
+                    /* evaluates the value of expression, the boundParam only supported in PL/SQL. */
+                    node = eval_const_expression_value(NULL, (Node *)elem->val, paramInfo);
+
+                    if (nodeTag(node) == T_Const) {
+                        elem->val = (Expr *)const_expression_to_const(node);
+                    } else {
+                        elem->val = (Expr *)const_expression_to_const(QueryRewriteNonConstant(node));
+                    }
+
+                    int ret = check_set_user_message(elem);
+                    if (ret == -1) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid name or hash table is nill.")));
+                    }
+                }
+            }
+            break;
+
         default:
             break;
     }
@@ -12524,6 +12566,81 @@ int check_set_message_to_send(const VariableSetStmt* stmt, const char* queryStri
     securec_check_errval(errval, , LOG);
 
     entry->query = pstrdup(queryString);
+
+    return 0;
+}
+
+/*
+ * @Description: init user parameters hash table
+ * @IN void
+ * @Return: void
+ * @See also:
+ */
+void init_set_user_params_htab(void)
+{
+    HASHCTL hash_ctl;
+
+    errno_t errval = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+    securec_check_errval(errval, , LOG);
+
+    hash_ctl.keysize = NAMEDATALEN;
+    hash_ctl.hcxt = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB);
+    hash_ctl.entrysize = sizeof(GucUserParamsEntry);
+    hash_ctl.hash = string_hash;
+
+    u_sess->utils_cxt.set_user_params_htab = hash_create(
+        "set user params hash table", WORKLOAD_STAT_HASH_SIZE, &hash_ctl, HASH_CONTEXT | HASH_ELEM | HASH_FUNCTION);
+}
+
+/*
+ * @Description: find user_deined variable in hash table
+ * @IN elem: UserSetElem
+ * @Return: 0: append success
+ *          -1: append fail
+ * @See also:
+ */
+int check_set_user_message(const UserSetElem *elem)
+{
+    ListCell *head = NULL;
+    char *name = NULL;
+    bool found = false;
+
+    if (nodeTag(elem->val) != T_Const) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION), errmsg("The value of user_defined variable must be a const")));
+    }
+
+    /* no hash table, we can only choose appending mode */
+    if (u_sess->utils_cxt.set_user_params_htab == NULL) {
+        return -1;
+    }
+
+    foreach (head, elem->name) {
+        UserVar *n = (UserVar *)lfirst(head);
+        name = n->name;
+
+        if (!StringIsValid(name)) {
+            return -1;
+        }
+
+        GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab,
+            name, HASH_ENTER, &found);
+        if (entry == NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Failed to create user_defined entry due to out of memory")));
+        }
+
+        USE_MEMORY_CONTEXT(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+
+        if (found) {
+            entry->value = (Const *)copyObject((Const *)(elem->val));
+        } else {
+            errno_t errval = strncpy_s(entry->name, sizeof(entry->name), name, sizeof(entry->name) - 1);
+            securec_check_errval(errval, , LOG);
+
+            entry->value = (Const *)copyObject((Const *)(elem->val));
+        }
+    }
 
     return 0;
 }

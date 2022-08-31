@@ -594,7 +594,9 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_ExplainModelStmt, "ExplainModelStmt"},
     // End DB4AI
     {T_TdigestData, "TdigestData"},
-    {T_CentroidPoint, "CentroidPoint"}
+    {T_CentroidPoint, "CentroidPoint"},
+    {T_UserSetElem, "UserSetElem"},
+    {T_UserVar, "UserVar"}
 };
 
 char* nodeTagToString(NodeTag tag)

@@ -12245,6 +12245,16 @@ static bool needRecompilePlan(SPIPlanPtr plan)
             return true;
         }
 
+        /*
+         * if stmt is user_defined variables, recompile the query.
+         */
+        if (plansource->raw_parse_tree != NULL && IsA(plansource->raw_parse_tree, VariableSetStmt)) {
+            VariableSetStmt *stmt = (VariableSetStmt *)plansource->raw_parse_tree;
+            if (stmt->kind == VAR_SET_DEFINED) {
+                return true;
+            }
+        }
+
         ret_val = checkRecompileCondition(plansource);
 
         /* Once we find one need re-compile stmt in SP, all stored procedure should be re-compiled. */

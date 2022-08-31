@@ -42,7 +42,6 @@
 #include "parser/parsetree.h"
 #include "parser/analyze.h"
 #include "securec.h"
-#include "tcop/dest.h"
 #include "tcop/tcopprot.h"
 #include "tcop/utility.h"
 #include "tcop/pquery.h"
@@ -51,7 +50,6 @@
 #include "utils/relcache.h"
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
-#include "utils/palloc.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 
@@ -68,12 +66,6 @@ typedef struct {
     StringInfoData column;
     char index_type[NAMEDATALEN];
 } SuggestedIndex;
-
-typedef struct {
-    DestReceiver pub;
-    MemoryContext mxct;
-    List *tuples;
-} StmtResult;
 
 typedef struct {
     char *schema_name;
@@ -120,7 +112,6 @@ THR_LOCAL List *g_drived_tables = NIL;
 THR_LOCAL TableCell *g_driver_table = NULL;
 
 static SuggestedIndex *suggest_index(const char *, _out_ int *);
-static StmtResult *execute_stmt(const char *query_string, bool need_result = false);
 static List *get_table_indexes(Oid oid);
 static List *get_index_attname(Oid oid);
 static char *search_table_attname(Oid attrelid, int2 attnum);
@@ -627,6 +618,7 @@ StmtResult *execute_stmt(const char *query_string, bool need_result)
     int16 format = 0;
     List *parsetree_list = NULL;
     ListCell *parsetree_item = NULL;
+    bool snapshot_set = false;
     parsetree_list = pg_parse_query(query_string, NULL);
 
     Assert(list_length(parsetree_list) == 1); // ought to be one query
@@ -639,8 +631,17 @@ StmtResult *execute_stmt(const char *query_string, bool need_result)
     Node *parsetree = (Node *)lfirst(parsetree_item);
     const char *commandTag = CreateCommandTag(parsetree);
 
+    if (u_sess->utils_cxt.ActiveSnapshot == NULL && analyze_requires_snapshot(parsetree)) {
+        PushActiveSnapshot(GetTransactionSnapshot());
+        snapshot_set = true;
+    }
+
     querytree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
     plantree_list = pg_plan_queries(querytree_list, 0, NULL);
+
+    if (snapshot_set) {
+        PopActiveSnapshot();
+    }
 
     portal = CreatePortal(query_string, true, true);
     portal->visible = false;
@@ -675,6 +676,8 @@ DestReceiver *create_stmt_receiver()
     self->pub.mydest = DestTuplestore;
 
     self->tuples = NIL;
+    self->isnulls = NULL;
+    self->atttypids = NULL;
     self->mxct = CurrentMemoryContext;
 
     return (DestReceiver *)self;
@@ -692,13 +695,23 @@ void receive(TupleTableSlot *slot, DestReceiver *self)
     bool typisvarlena = false;
     List *values = NIL;
 
+    if (result->isnulls == NULL) {
+        result->isnulls = (bool *)pg_malloc(natts * sizeof(bool));
+    }
+    if (result->atttypids == NULL) {
+        result->atttypids = (Oid *)pg_malloc(natts * sizeof(Oid));
+    }
+    
     MemoryContext oldcontext = MemoryContextSwitchTo(result->mxct);
 
     for (int i = 0; i < natts; ++i) {
         origattr = tableam_tslot_getattr(slot, i + 1, &isnull);
         if (isnull) {
+            result->isnulls[i] = true;
             continue;
         }
+        
+        result->isnulls[i] = false;
         getTypeOutputInfo(typeinfo->attrs[i]->atttypid, &typoutput, &typisvarlena);
 
         if (typisvarlena) {
@@ -709,6 +722,7 @@ void receive(TupleTableSlot *slot, DestReceiver *self)
 
         value = OidOutputFunctionCall(typoutput, attr);
         values = lappend(values, value);
+        result->atttypids[i] = typeinfo->attrs[i]->atttypid;
 
         /* Clean up detoasted copy, if any */
         if (DatumGetPointer(attr) != DatumGetPointer(origattr)) {
@@ -739,6 +753,9 @@ void destroy(DestReceiver *self)
         list_free_deep((List *)lfirst(item));
     }
     list_free(tuples);
+
+    pfree_ext(result->isnulls);
+    pfree_ext(result->atttypids);
     pfree_ext(self);
 }
 

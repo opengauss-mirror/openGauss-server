@@ -202,6 +202,7 @@ typedef struct knl_session_attr_common {
     char* track_stmt_retention_time;
 
     bool enable_wdr_snapshot;
+    bool enable_set_variable_b_format;
     bool enable_asp;
     int wdr_snapshot_interval;
     int wdr_snapshot_retention_days;

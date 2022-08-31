@@ -28,6 +28,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
 #include "parser/parse_type.h"
+#include "nodes/parsenodes_common.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -1249,7 +1250,7 @@ static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist)
 	}
 
     if (unlikely(tupleDesc == NULL)) {
-        ereport(ERROR, 
+        ereport(ERROR,
             (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
                 errmsg("tupleDesc should not be null")));
     }
@@ -1670,6 +1671,15 @@ static int FigureColnameInternal(Node* node, char** name)
         case T_XmlSerialize:
             *name = "xmlserialize";
             return 2;
+        /* get name of user_defined variables. */
+        case T_UserVar: {
+            size_t len = strlen(((UserVar *)node)->name) + strlen("@") + 1;
+            char *colname = (char *)palloc0(len);
+            errno_t rc = snprintf_s(colname, len, len - 1, "@%s", ((UserVar *)node)->name);
+            securec_check_ss(rc, "\0", "\0");
+            *name = colname;
+            return 1;
+        } break;
         default:
             break;
     }

@@ -363,6 +363,12 @@ newParam		:({identifier}|{integer})
 
 newArray		:({identifier}|{integer}){space}*\]
 
+set_user_cont			[A-Za-z\377_0-9\$\.]
+set_user_escape_quote		[^']
+set_user_escape_dquote		[^"]
+set_user_escape_bquote		[^`]	
+setUserIdentifier		@(({set_user_cont}+)|(\'{set_user_escape_quote}+\')|(\"{set_user_escape_dquote}+\")|(\`{set_user_escape_bquote}+\`))
+
 other			.
 
 /*
@@ -1100,6 +1106,20 @@ other			.
 					yylval->str = ident;
 					yyextra->ident_quoted = false;
 					return IDENT;
+				}
+
+{setUserIdentifier}	{
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.enable_set_variable_b_format) {
+						SET_YYLLOC();
+						yylval->str = pstrdup(yytext + 1);
+						yyextra->is_hint_str = false;
+						return SET_USER_IDENT;
+					} else {
+						yyless(1);
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return yytext[0];
+					}
 				}
 
 {other}			{

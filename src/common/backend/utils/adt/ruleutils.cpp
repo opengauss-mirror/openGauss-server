@@ -9121,6 +9121,11 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             get_const_expr((Const*)node, context, 0);
             break;
 
+        case T_UserVar:
+            appendStringInfo(buf, "@");
+            appendStringInfo(buf, ((UserVar*)node)->name);
+            break;
+
         case T_Param:
             get_parameter((Param*)node, context);
             break;

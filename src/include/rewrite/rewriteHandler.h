@@ -27,5 +27,7 @@ extern void rewriteTargetListMerge(Query* parsetree, Index result_relation, List
 extern List* QueryRewriteCTAS(Query* parsetree);
 extern List* QueryRewriteRefresh(Query *parsetree);
 #endif
+extern List* QueryRewritePrepareStmt(Query *parsetree);
+extern Node* QueryRewriteNonConstant(Node *node);
 
 #endif /* REWRITEHANDLER_H */

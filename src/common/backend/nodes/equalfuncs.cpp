@@ -1783,6 +1783,7 @@ static bool _equalVariableSetStmt(const VariableSetStmt* a, const VariableSetStm
     COMPARE_STRING_FIELD(name);
     COMPARE_NODE_FIELD(args);
     COMPARE_SCALAR_FIELD(is_local);
+    COMPARE_NODE_FIELD(defined_args);
 
     return true;
 }
@@ -2546,6 +2547,22 @@ static bool _equalIndexElem(const IndexElem* a, const IndexElem* b)
     COMPARE_NODE_FIELD(opclass);
     COMPARE_SCALAR_FIELD(ordering);
     COMPARE_SCALAR_FIELD(nulls_ordering);
+
+    return true;
+}
+
+static bool _equalUserSetElem(const UserSetElem *a, const UserSetElem *b)
+{
+    COMPARE_NODE_FIELD(name);
+    COMPARE_NODE_FIELD(val);
+
+    return true;
+}
+
+static bool _equalUserVar(const UserVar *a, const UserVar *b)
+{
+    COMPARE_STRING_FIELD(name);
+    COMPARE_NODE_FIELD(value);
 
     return true;
 }
@@ -4088,6 +4105,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_AlterPublicationStmt:
             retval = _equalAlterPublicationStmt((AlterPublicationStmt *)a, (AlterPublicationStmt *)b);
+            break;
+        case T_UserSetElem:
+            retval = _equalUserSetElem((UserSetElem *)a, (UserSetElem *)b);
+            break;
+        case T_UserVar:
+            retval = _equalUserVar((UserVar *)a, (UserVar *)b);
             break;
         case T_CreateSubscriptionStmt:
             retval = _equalCreateSubscriptionStmt((CreateSubscriptionStmt *)a, (CreateSubscriptionStmt *)b);

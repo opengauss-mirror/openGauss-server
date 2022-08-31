@@ -62,6 +62,8 @@ static Node* transformAExprDistinct(ParseState* pstate, A_Expr* a);
 static Node* transformAExprNullIf(ParseState* pstate, A_Expr* a);
 static Node* transformAExprOf(ParseState* pstate, A_Expr* a);
 static Node* transformAExprIn(ParseState* pstate, A_Expr* a);
+static Node* transformUserSetElem(ParseState* pstate, UserSetElem *elem);
+static Node* transformUserVar(UserVar *uservar);
 static Node* transformFuncCall(ParseState* pstate, FuncCall* fn);
 static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c);
 static Node* transformSubLink(ParseState* pstate, SubLink* sublink);
@@ -232,6 +234,16 @@ Node* transformExpr(ParseState* pstate, Node* expr)
                     ereport(ERROR,
                         (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized A_Expr kind: %d", a->kind)));
             }
+            break;
+        }
+
+        case T_UserSetElem: {
+            result = transformUserSetElem(pstate, (UserSetElem *)expr);
+            break;
+        }
+
+        case T_UserVar: {
+            result = transformUserVar((UserVar *)expr);
             break;
         }
 
@@ -1429,6 +1441,51 @@ static bool NeedExtractOutParam(FuncCall* fn, Node* result)
 #else
     return false;
 #endif
+}
+
+/*
+ * rewrite userSetElem.
+ * extract name from old userSetElem into new userSetElem,
+ * such as, @var_name1 := @var_name2 := @var_name3 := ... := expr.
+ */
+static Node* transformUserSetElem(ParseState* pstate, UserSetElem *elem)
+{
+    UserSetElem *result = makeNode(UserSetElem);
+    result->name = elem->name;
+    Node *value = transformExpr(pstate, (Node*)elem->val);
+
+    if (IsA(elem->val, UserSetElem)) {
+        result->name = list_concat(result->name, ((UserSetElem *)value)->name);
+        result->val = ((UserSetElem *)value)->val;
+    } else {
+        result->val = (Expr *)value;
+    }
+
+    return (Node *)result;
+}
+
+/*
+ * Get user_defined varibales from hash table,
+ * if not found, NULL is returned.
+ */
+static Node* transformUserVar(UserVar *uservar)
+{
+    bool found = false;
+
+    GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab,
+        uservar->name, HASH_FIND, &found);
+
+    if (!found) {
+        /* return a null const */
+        Const *nullValue = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+        return (Node *)nullValue;
+    }
+
+    UserVar *result = makeNode(UserVar);
+    result->name = uservar->name;
+    result->value = (Expr *)copyObject(entry->value);
+
+    return (Node *)result;
 }
 
 static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
