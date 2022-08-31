@@ -2712,6 +2712,14 @@ DESCR("checksum aggregate text input into a numeric");
 DATA(insert OID = 4601 (  checksumtext_agg_transfn	   PGNSP PGUID 12 1 0 0 0 f f f f f f i 2 0 1700 "1700 25" _null_ _null_ _null_ _null_ checksumtext_agg_transfn _null_ _null_ _null_ "" f));
 DESCR("checksumtext aggregate transition function");
 
+DATA(insert OID = 4097 (  group_concat				PGNSP PGUID 12 1 0 2276 0 t f f f f f i 2 0 25 "25 2276" "{25,2276}" "{i,v}" _null_ _null_ aggregate_dummy _null_ _null_ _null_ "" f));
+DESCR("concatenate values in each grouping with separators");
+DATA(insert OID = 4098 (  group_concat_finalfn		PGNSP PGUID 12 1 0 0 0 f f f f f f i 1 0 25 "2281" _null_ _null_ _null_ _null_ group_concat_finalfn _null_ _null_ _null_ "" f));
+DESCR("aggregate final function");
+DATA(insert OID = 4099 (  group_concat_transfn		PGNSP PGUID 12 1 0 2276 0 f f f f f f i 3 0 2281 "2281 25 2276" "{2281,25,2276}" "{i,i,v}" _null_ _null_ group_concat_transfn _null_ _null_ _null_ "" f));
+DESCR("aggregate transition function");
+
+
 /* To ASCII conversion */
 DATA(insert OID = 1845 ( to_ascii	PGNSP PGUID 12 1 0 0 0 f f f f t f i 1 0 25 "25" _null_ _null_ _null_ _null_	to_ascii_default _null_ _null_ _null_ "" f));
 DESCR("encode text from DB encoding to ASCII text");

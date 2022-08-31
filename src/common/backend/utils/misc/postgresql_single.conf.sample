@@ -622,6 +622,7 @@ use_workload_manager = on		# Enables workload manager in the system.
 #xmloption = 'content'
 #max_compile_functions = 1000
 #gin_pending_list_limit = 4MB
+#group_concat_max_len=1024
 # - Locale and Formatting -
 
 #datestyle = 'iso, mdy'

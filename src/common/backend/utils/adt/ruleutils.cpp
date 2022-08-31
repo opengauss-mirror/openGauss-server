@@ -10202,15 +10202,21 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
             appendStringInfoChar(buf, '*');
         else {
             ListCell* l = NULL;
+            ListCell* init = list_head(aggref->args);
             int narg = 0;
-
-            foreach (l, aggref->args) {
+            int start = 0;
+            /* the first argument of group_concat() is separator, skip it */
+            if (pg_strcasecmp(funcname, "group_concat") == 0) {
+                init = init->next;
+                start++;
+            }
+            for_each_cell (l, init) {
                 TargetEntry* tle = (TargetEntry*)lfirst(l);
 
                 Assert(!IsA((Node*)tle->expr, NamedArgExpr));
                 if (tle->resjunk)
                     continue;
-                if (narg++ > 0)
+                if (narg++ > start)
                     appendStringInfoString(buf, ", ");
                 if (use_variadic && narg == nargs)
                     appendStringInfoString(buf, "VARIADIC ");
@@ -10227,6 +10233,13 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
                 appendStringInfoString(buf, " ORDER BY ");
                 get_rule_orderby(aggref->aggorder, aggref->args, false, context);
             }
+        }
+
+        if (pg_strcasecmp(funcname, "group_concat") == 0) {
+            /* parse back the first argument as separator */
+            TargetEntry* tle = (TargetEntry*)lfirst(list_head(aggref->args));
+            appendStringInfoString(buf, " SEPARATOR ");
+            get_rule_expr((Node*)tle->expr, context, true);
         }
     }
 

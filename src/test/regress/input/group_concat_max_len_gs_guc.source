@@ -1,0 +1,7 @@
+--gs_guc set
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "group_concat_max_len=1234"
+--gs_guc reload
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "group_concat_max_len=12345"
+--error cases
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "group_concat_max_len=9223372036854775808"
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "group_concat_max_len=-1"

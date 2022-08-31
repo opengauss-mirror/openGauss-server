@@ -435,7 +435,8 @@ static bool is_dn_agg_function_only(Oid funcId, List* args, bool hasgroupclause,
         TIMESTAMPTZLISTAGGFUNCOID,        // timestamptz_listagg
         TIMESTAMPTZLISTAGGNOARG2FUNCOID,  // timestamptz_listagg_without_delimiter
         INTERVALLISTAGGFUNCOID,           // interval_listagg
-        INTERVALLISTAGGNOARG2FUNCOID      // interval_listagg_without_delimiter
+        INTERVALLISTAGGNOARG2FUNCOID,     // interval_listagg_without_delimiter
+        GROUPCONCATFUNCOID                // group_concat
     };
 
     if (funcId >= FirstNormalObjectId)

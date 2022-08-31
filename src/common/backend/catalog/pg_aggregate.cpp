@@ -48,7 +48,8 @@ static void InternalAggIsSupported(const char *aggName)
         "json_object_agg",
         "st_summarystatsagg",
         "st_union",
-        "wm_concat"
+        "wm_concat",
+        "group_concat"
     };
 
     uint len = lengthof(supportList);

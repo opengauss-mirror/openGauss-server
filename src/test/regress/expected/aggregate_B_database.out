@@ -1,0 +1,783 @@
+-- test normal db
+create database test;
+\c test
+CREATE TABLE t(id int, v text);
+INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
+select id, group_concat(v separator ';') from t group by id order by id asc;
+ERROR:  group_concat is supported only in B-format database
+LINE 1: select id, group_concat(v separator ';') from t group by id ...
+                   ^
+\c regression
+drop database test;
+-- test group_concat (compatible with B db)
+create database test_group_concat_B_db dbcompatibility 'B';
+\c test_group_concat_B_db
+set group_concat_max_len to 20480;
+CREATE TABLE emp
+(
+   empno INTEGER CONSTRAINT pk_emp PRIMARY KEY,
+   phone BIGINT,
+   sign BLOB,
+   ename VARCHAR(20),
+   job CHAR(10),
+   address TEXT,
+   email TEXT,
+   mgrno INT4,
+   workhour INT2,
+   hiredate DATE,
+   termdate DATE,
+   offtime TIMESTAMP,
+   overtime TIMESTAMPTZ,
+   vacationTime INTERVAL,
+   salPerHour FLOAT4,
+   bonus NUMERIC(8,2),
+   deptno NUMERIC(2)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pk_emp" for table "emp"
+INSERT INTO emp VALUES (7369,08610086,'58','SMITH','CLERK','宝山区示范新村37号403室','smithWu@163.com',7902,8,to_date('17-12-1999', 'dd-mm-yyyy'),NULL, '2018/12/1','2019-2-20 pst', INTERVAL '5' DAY, 60.35, 2000.80,20);
+INSERT INTO emp VALUES (7499,08610086,'59','ALLEN','SALESMAN','虹口区西康南路125弄34号201室','66allen_mm@qq.com',7698,5,to_date('20-2-2015', 'dd-mm-yyyy'),'2018-1-1','2013-12-24 12:30:00','2017-12-12 UTC', '4 DAY 6 HOUR', 9.89,899.00,30);
+INSERT INTO emp VALUES (7521,08610010,'5A','WARD','SALESMAN','城东区亨达花园7栋702','hello702@163.com',7698,10,to_date('22-2-2010','dd-mm-yyyy'),'2016/12/30', '2016-06-12 8:12:00','2012-7-10 pst',INTERVAL '30 DAY', 52.98, 1000.01,30);
+INSERT INTO emp VALUES (7566,08610010,'58','JONES','MANAGER','莲花五村龙昌里34号601室','jonesishere@gmal.com',7839,3,to_date('2-4-2001','dd-mm-yyyy'),'2013-1-30','2010-10-13 24:00:00','2009-10-12 CST',NULL,200.00,999.10,20);
+INSERT INTO emp VALUES (7654,08610000,'59','MARTIN','SALESMAN','开平路53号国棉四厂二宿舍1号楼2单元','mm213n@qq.com',7698,12,to_date('28-9-1997','dd-mm-yyyy'),NULL,'2018/9/25 23:00:00','1999-1-18 CST', '24 HOUR', 1.28,99.99,30);
+INSERT INTO emp VALUES (7698,08610000,'5A','BLAKE','MANAGER','建国门大街23号楼302室','blake-life@fox.mail',7839,1,to_date('1-5-1981','dd-mm-yyyy'),'2012-10-13','2009-4-29 05:35:00','2010-12-1 pst','1 YEAR 1 MONTH', 38.25,2399.50,30);
+INSERT INTO emp VALUES (7782,08610145,'58','CLARK','MANAGER','花都大道100号世纪光花小区3023号','flower21@gmail.com',7839,5,to_date('9-6-1981','dd-mm-yyyy'),NULL,'1999-8-18 24:00:00','1999-5-12 pst','10 DAY',100.30,10000.01,10);
+INSERT INTO emp VALUES (7788,08610145,'59','SCOTT','ANALYST','温泉路四海花园1号楼','bigbigbang@sina.com',7566,9,to_date('13-7-1987','dd-mm-yyyy')-85,'2000-10-1','1998-1-19 00:29:00','2000-2-29 UTC','1 WEEK 2 DAY',99.25,1001.01,20);
+INSERT INTO emp VALUES (7839,08610086,'5A','KING','PRESIDENT','温江区OneHouse高级别墅1栋','houseme123@yahoo.com',NULL,2,to_date('17-11-1981','dd-mm-yyyy'),NULL,NULL,NULL,'1 YEAR 30 DAY',19999.99,23011.88,10);
+INSERT INTO emp VALUES (7844,08610012,'58','TURNER','SALESMAN','城北梁家巷132号','tur789@qq.com',7698,15,to_date('8-9-1981','dd-mm-yyyy'),'2011-07-15','1998-1-18 23:12:00','1999-1-16 pst','2 MONTH 10 DAY',99.12,9,30);
+INSERT INTO emp VALUES (7876,08610012,'59','ADAMS','CLERK','如北街江心美寓小区1号','aking_clerk@sina.com',7788,8,to_date('13-7-1987', 'dd-mm-yyyy')-51,'2018-10-23','1999-1-18 23:12:00','2017-12-30 pst','36 DAY',2600.12,1100.0,20);
+INSERT INTO emp VALUES (7900,08610012,'5A','JAMES','CLERK','锦尚路MOCO公寓10楼','whoMe@gmail.com',7698,10,to_date('3-12-1981','dd-mm-yyyy'),'2006/12/2','2005-9-10 5:00:00','2004-11-8 pst','12 DAY 12 HOUR',95,1000.22,30);
+INSERT INTO emp VALUES (7902,08610012,'58','FORD','ANALYST','方西区正街3号巷66号','analyse666@163.com',7566,8,to_date('3-12-1981','dd-mm-yyyy'),'2012-12-23','2012-05-12 23:00:00','2011-03-21 CST','10 WEEK',199.23,2002.12,20);
+INSERT INTO emp VALUES (7934,08610086,'59','MILLER','CLERK','四方区洛阳路34号3号楼4单元402户','Miller*mail@sina.com',7782,'10',to_date('23-1-1982','dd-mm-yyyy'),'2016-12-30','2015-10-12 24:00:00','2015-09-12 pst','40 DAY',112.23,10234.21,10);
+analyze emp;
+-- test for normal cases: different parameters or separator
+SELECT mgrno, group_concat(empno ORDER BY empno SEPARATOR '.') AS empno_order_by_empno_group_by_mgr_integer FROM emp GROUP BY mgrno ORDER BY 1;
+ mgrno | empno_order_by_empno_group_by_mgr_integer 
+-------+-------------------------------------------
+  7566 | 7788.7902
+  7698 | 7499.7521.7654.7844.7900
+  7782 | 7934
+  7788 | 7876
+  7839 | 7566.7698.7782
+  7902 | 7369
+       | 7839
+(7 rows)
+
+SELECT deptno, group_concat(ename ORDER BY ename SEPARATOR ',') AS ename_order_by_ename_varchar FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |     ename_order_by_ename_varchar     
+--------+--------------------------------------
+     10 | CLARK,KING,MILLER
+     20 | ADAMS,FORD,JONES,SCOTT,SMITH
+     30 | ALLEN,BLAKE,JAMES,MARTIN,TURNER,WARD
+(3 rows)
+
+SELECT deptno, group_concat(phone ORDER BY phone SEPARATOR '-') AS phone_order_by_phone_int8 FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |            phone_order_by_phone_int8            
+--------+-------------------------------------------------
+     10 | 8610086-8610086-8610145
+     20 | 8610010-8610012-8610012-8610086-8610145
+     30 | 8610000-8610000-8610010-8610012-8610012-8610086
+(3 rows)
+
+SELECT deptno, group_concat(sign,workhour ORDER BY sign SEPARATOR 'α') AS sign_workhour_order_by_sign_blob FROM emp GROUP BY deptno ORDER BY 1;
+ deptno | sign_workhour_order_by_sign_blob 
+--------+----------------------------------
+     10 | 585α5910α5A2
+     20 | 583α588α588α599α598
+     30 | 5815α595α5912α5A10α5A1α5A10
+(3 rows)
+
+SELECT deptno, group_concat(distinct sign ORDER BY sign SEPARATOR '''') AS dst_sign_order_by_sign_blob FROM emp GROUP BY deptno ORDER BY 1;
+ deptno | dst_sign_order_by_sign_blob 
+--------+-----------------------------
+     10 | 58'59'5A
+     20 | 58'59
+     30 | 58'59'5A
+(3 rows)
+
+SELECT deptno, group_concat(job ORDER BY job SEPARATOR '`') AS job_order_by_job_char FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                       job_order_by_job_char                       
+--------+-------------------------------------------------------------------
+     10 | CLERK     `MANAGER   `PRESIDENT 
+     20 | ANALYST   `ANALYST   `CLERK     `CLERK     `MANAGER   
+     30 | CLERK     `MANAGER   `SALESMAN  `SALESMAN  `SALESMAN  `SALESMAN  
+(3 rows)
+
+SELECT deptno, group_concat(distinct job ORDER BY job SEPARATOR '-') AS dst_job_order_by_job_char FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |    dst_job_order_by_job_char     
+--------+----------------------------------
+     10 | CLERK     -MANAGER   -PRESIDENT 
+     20 | ANALYST   -CLERK     -MANAGER   
+     30 | CLERK     -MANAGER   -SALESMAN  
+(3 rows)
+
+SELECT deptno, group_concat(address ORDER BY address SEPARATOR '//') AS address_order_by_address_text_zh FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                          address_order_by_address_text_zh                                                          
+--------+----------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | 四方区洛阳路34号3号楼4单元402户//温江区OneHouse高级别墅1栋//花都大道100号世纪光花小区3023号
+     20 | 如北街江心美寓小区1号//宝山区示范新村37号403室//方西区正街3号巷66号//温泉路四海花园1号楼//莲花五村龙昌里34号601室
+     30 | 城东区亨达花园7栋702//城北梁家巷132号//建国门大街23号楼302室//开平路53号国棉四厂二宿舍1号楼2单元//虹口区西康南路125弄34号201室//锦尚路MOCO公寓10楼
+(3 rows)
+
+SELECT deptno, group_concat(distinct address ORDER BY address SEPARATOR '//') AS dst_address_order_by_address_text_zh FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                        dst_address_order_by_address_text_zh                                                        
+--------+----------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | 四方区洛阳路34号3号楼4单元402户//温江区OneHouse高级别墅1栋//花都大道100号世纪光花小区3023号
+     20 | 如北街江心美寓小区1号//宝山区示范新村37号403室//方西区正街3号巷66号//温泉路四海花园1号楼//莲花五村龙昌里34号601室
+     30 | 城东区亨达花园7栋702//城北梁家巷132号//建国门大街23号楼302室//开平路53号国棉四厂二宿舍1号楼2单元//虹口区西康南路125弄34号201室//锦尚路MOCO公寓10楼
+(3 rows)
+
+SELECT deptno, group_concat(email ORDER BY email SEPARATOR '##') AS email_order_by_email_text_en FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                      email_order_by_email_text_en                                       
+--------+---------------------------------------------------------------------------------------------------------
+     10 | flower21@gmail.com##houseme123@yahoo.com##Miller*mail@sina.com
+     20 | aking_clerk@sina.com##analyse666@163.com##bigbigbang@sina.com##jonesishere@gmal.com##smithWu@163.com
+     30 | 66allen_mm@qq.com##blake-life@fox.mail##hello702@163.com##mm213n@qq.com##tur789@qq.com##whoMe@gmail.com
+(3 rows)
+
+SELECT deptno, group_concat(mgrno ORDER BY mgrno SEPARATOR 'separator') AS mgrno_order_by_mgrno_int4 FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                       mgrno_order_by_mgrno_int4                       
+--------+-----------------------------------------------------------------------
+     10 | 7782separator7839
+     20 | 7566separator7566separator7788separator7839separator7902
+     30 | 7698separator7698separator7698separator7698separator7698separator7839
+(3 rows)
+
+SELECT deptno, group_concat(distinct mgrno ORDER BY mgrno SEPARATOR 'separator') AS dst_mgrno_order_by_mgrno_int4 FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |        dst_mgrno_order_by_mgrno_int4        
+--------+---------------------------------------------
+     10 | 7782separator7839
+     20 | 7566separator7788separator7839separator7902
+     30 | 7698separator7839
+(3 rows)
+
+SELECT deptno, group_concat(workhour ORDER BY workhour SEPARATOR '(hours); ') AS workhour_order_by_workhour_int2 FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |             workhour_order_by_workhour_int2             
+--------+---------------------------------------------------------
+     10 | 2(hours); 5(hours); 10
+     20 | 3(hours); 8(hours); 8(hours); 8(hours); 9
+     30 | 1(hours); 5(hours); 10(hours); 10(hours); 12(hours); 15
+(3 rows)
+
+SELECT deptno, group_concat(hiredate ORDER BY hiredate SEPARATOR ' 日期：') AS hiredate_order_by_hiredate_date FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                 hiredate_order_by_hiredate_date                                 
+--------+-------------------------------------------------------------------------------------------------
+     10 | 06-09-1981 日期：11-17-1981 日期：01-23-1982
+     20 | 12-03-1981 日期：04-19-1987 日期：05-23-1987 日期：12-17-1999 日期：04-02-2001
+     30 | 05-01-1981 日期：09-08-1981 日期：12-03-1981 日期：09-28-1997 日期：02-22-2010 日期：02-20-2015
+(3 rows)
+
+SELECT deptno, group_concat(distinct hiredate ORDER BY hiredate SEPARATOR ' 日期：') AS dst_hiredate_order_by_hiredate_date FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                               dst_hiredate_order_by_hiredate_date                               
+--------+-------------------------------------------------------------------------------------------------
+     10 | 06-09-1981 日期：11-17-1981 日期：01-23-1982
+     20 | 12-03-1981 日期：04-19-1987 日期：05-23-1987 日期：12-17-1999 日期：04-02-2001
+     30 | 05-01-1981 日期：09-08-1981 日期：12-03-1981 日期：09-28-1997 日期：02-22-2010 日期：02-20-2015
+(3 rows)
+
+SELECT deptno, group_concat(offtime ORDER BY offtime SEPARATOR ' ~ ') AS offtime_order_by_offtime_timestamp FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                               offtime_order_by_offtime_timestamp                                                                
+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | Thu Aug 19 00:00:00 1999 ~ Tue Oct 13 00:00:00 2015
+     20 | Mon Jan 19 00:29:00 1998 ~ Mon Jan 18 23:12:00 1999 ~ Thu Oct 14 00:00:00 2010 ~ Sat May 12 23:00:00 2012 ~ Sat Dec 01 00:00:00 2018
+     30 | Sun Jan 18 23:12:00 1998 ~ Sat Sep 10 05:00:00 2005 ~ Wed Apr 29 05:35:00 2009 ~ Tue Dec 24 12:30:00 2013 ~ Sun Jun 12 08:12:00 2016 ~ Tue Sep 25 23:00:00 2018
+(3 rows)
+
+SELECT deptno, group_concat(distinct offtime ORDER BY offtime SEPARATOR ' ~ ') AS dst_offtime_order_by_offtime_timestamp FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                             dst_offtime_order_by_offtime_timestamp                                                              
+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | Thu Aug 19 00:00:00 1999 ~ Tue Oct 13 00:00:00 2015
+     20 | Mon Jan 19 00:29:00 1998 ~ Mon Jan 18 23:12:00 1999 ~ Thu Oct 14 00:00:00 2010 ~ Sat May 12 23:00:00 2012 ~ Sat Dec 01 00:00:00 2018
+     30 | Sun Jan 18 23:12:00 1998 ~ Sat Sep 10 05:00:00 2005 ~ Wed Apr 29 05:35:00 2009 ~ Tue Dec 24 12:30:00 2013 ~ Sun Jun 12 08:12:00 2016 ~ Tue Sep 25 23:00:00 2018
+(3 rows)
+
+SELECT deptno, group_concat(overtime ORDER BY overtime SEPARATOR ' & ') AS overtime_order_by_overtime_timestamptz FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                                         overtime_order_by_overtime_timestamptz                                                                          
+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | Wed May 12 01:00:00 1999 PDT & Sat Sep 12 01:00:00 2015 PDT
+     20 | Mon Feb 28 16:00:00 2000 PST & Sun Oct 11 23:00:00 2009 PDT & Sun Mar 20 23:00:00 2011 PDT & Sat Dec 30 00:00:00 2017 PST & Wed Feb 20 00:00:00 2019 PST
+     30 | Sat Jan 16 00:00:00 1999 PST & Sun Jan 17 22:00:00 1999 PST & Mon Nov 08 00:00:00 2004 PST & Wed Dec 01 00:00:00 2010 PST & Tue Jul 10 01:00:00 2012 PDT & Mon Dec 11 16:00:00 2017 PST
+(3 rows)
+
+SELECT deptno, group_concat(vacationTime ORDER BY vacationTime SEPARATOR '^') AS vacationTime_order_by_vtime_ASC_interval FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                         vacationtime_order_by_vtime_asc_interval                         
+--------+------------------------------------------------------------------------------------------
+     10 | @ 10 days^@ 40 days^@ 1 year 30 days
+     20 | @ 5 days^@ 9 days^@ 36 days^@ 70 days
+     30 | @ 24 hours^@ 4 days 6 hours^@ 12 days 12 hours^@ 30 days^@ 2 mons 10 days^@ 1 year 1 mon
+(3 rows)
+
+SELECT deptno, group_concat(distinct vacationTime ORDER BY vacationTime SEPARATOR '^') AS dst_vTime_order_by_vtime_ASC_interval FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                          dst_vtime_order_by_vtime_asc_interval                           
+--------+------------------------------------------------------------------------------------------
+     10 | @ 10 days^@ 40 days^@ 1 year 30 days
+     20 | @ 5 days^@ 9 days^@ 36 days^@ 70 days
+     30 | @ 24 hours^@ 4 days 6 hours^@ 12 days 12 hours^@ 30 days^@ 2 mons 10 days^@ 1 year 1 mon
+(3 rows)
+
+SELECT deptno, group_concat(termdate-hiredate ORDER BY 1 DESC SEPARATOR '; ') AS onwork_order_by_1_desc_interval FROM emp GROUP BY deptno ORDER BY 1;
+ deptno | onwork_order_by_1_desc_interval 
+--------+---------------------------------
+     10 | 12760
+     20 | 4914; 4321; 11476; 11343
+     30 | 2503; 10902; 1046; 11488; 9130
+(3 rows)
+
+SELECT deptno, group_concat(termdate-hiredate ORDER BY termdate-hiredate DESC SEPARATOR '; ') AS onwork_order_by_time_desc_interval FROM emp GROUP BY deptno ORDER BY 1;
+ deptno | onwork_order_by_time_desc_interval 
+--------+------------------------------------
+     10 | 12760
+     20 | 11476; 11343; 4914; 4321
+     30 | 11488; 10902; 9130; 2503; 1046
+(3 rows)
+
+SELECT deptno, group_concat(salPerHour ORDER BY salPerHour DESC SEPARATOR '"') AS salPH_order_by_salPH_desc_float4 FROM emp GROUP BY deptno ORDER BY 1;
+ deptno | salph_order_by_salph_desc_float4 
+--------+----------------------------------
+     10 | 20000"112.23"100.3
+     20 | 2600.12"200"199.23"99.25"60.35
+     30 | 99.12"95"52.98"38.25"9.89"1.28
+(3 rows)
+
+SELECT deptno, group_concat(salPerHour*workhour ORDER BY salPerHour*workhour SEPARATOR '\\') AS totalincome_order_by_tin_float8 FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                          totalincome_order_by_tin_float8                           
+--------+------------------------------------------------------------------------------------
+     10 | 501.500015258789\\1122.30003356934\\39999.98046875
+     20 | 482.799987792969\\600\\893.25\\1593.83996582031\\20800.9609375
+     30 | 15.3599996566772\\38.25\\49.4500017166138\\529.799995422363\\950\\1486.80004119873
+(3 rows)
+
+SELECT deptno, group_concat(CAST(workhour*7*30 AS INT8) ORDER BY CAST(workhour*7*30 AS INT8) DESC SEPARATOR '(Hours); ') AS hoursPerYear_order_by_hpy_DESC_int8 FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                 hoursperyear_order_by_hpy_desc_int8                  
+--------+----------------------------------------------------------------------
+     10 | 2100(Hours); 1050(Hours); 420
+     20 | 1890(Hours); 1680(Hours); 1680(Hours); 1680(Hours); 630
+     30 | 3150(Hours); 2520(Hours); 2100(Hours); 2100(Hours); 1050(Hours); 210
+(3 rows)
+
+SELECT deptno, group_concat(bonus ORDER BY bonus SEPARATOR '(￥); ') AS bonus_order_by_bonus_numeric FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                    bonus_order_by_bonus_numeric                    
+--------+--------------------------------------------------------------------
+     10 | 10000.01(￥); 10234.21(￥); 23011.88
+     20 | 999.10(￥); 1001.01(￥); 1100.00(￥); 2000.80(￥); 2002.12
+     30 | 9.00(￥); 99.99(￥); 899.00(￥); 1000.01(￥); 1000.22(￥); 2399.50
+(3 rows)
+
+SELECT deptno, group_concat(distinct bonus ORDER BY bonus SEPARATOR '(￥); ') AS dst_bonus_order_by_bonus_numeric FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                  dst_bonus_order_by_bonus_numeric                  
+--------+--------------------------------------------------------------------
+     10 | 10000.01(￥); 10234.21(￥); 23011.88
+     20 | 999.10(￥); 1001.01(￥); 1100.00(￥); 2000.80(￥); 2002.12
+     30 | 9.00(￥); 99.99(￥); 899.00(￥); 1000.01(￥); 1000.22(￥); 2399.50
+(3 rows)
+
+SELECT deptno, group_concat(termdate ORDER BY termdate ASC SEPARATOR '') AS termdate_order_by_termdate_date FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |          termdate_order_by_termdate_date           
+--------+----------------------------------------------------
+     10 | 12-30-2016
+     20 | 10-01-200012-23-201201-30-201310-23-2018
+     30 | 12-02-200607-15-201110-13-201212-30-201601-01-2018
+(3 rows)
+
+SELECT deptno, group_concat(mgrno ORDER BY mgrno SEPARATOR ' ') AS mgrno_order_by_mgrno_in4 FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |   mgrno_order_by_mgrno_in4    
+--------+-------------------------------
+     10 | 7782 7839
+     20 | 7566 7566 7788 7839 7902
+     30 | 7698 7698 7698 7698 7698 7839
+(3 rows)
+
+SELECT deptno, group_concat(address ORDER BY NLSSORT(address, 'NLS_SORT=SCHINESE_PINYIN_M') SEPARATOR ' || ') AS address_order_by_pinyin_text FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                                 address_order_by_pinyin_text                                                                 
+--------+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | 花都大道100号世纪光花小区3023号 || 四方区洛阳路34号3号楼4单元402户 || 温江区OneHouse高级别墅1栋
+     20 | 宝山区示范新村37号403室 || 方西区正街3号巷66号 || 莲花五村龙昌里34号601室 || 如北街江心美寓小区1号 || 温泉路四海花园1号楼
+     30 | 城北梁家巷132号 || 城东区亨达花园7栋702 || 虹口区西康南路125弄34号201室 || 建国门大街23号楼302室 || 锦尚路MOCO公寓10楼 || 开平路53号国棉四厂二宿舍1号楼2单元
+(3 rows)
+
+SELECT deptno, mgrno, group_concat(ename ORDER BY ename SEPARATOR ',') AS ename_order_by_ename_varchar FROM emp GROUP BY grouping sets(deptno,mgrno) ORDER BY 1,2;
+ deptno | mgrno |     ename_order_by_ename_varchar     
+--------+-------+--------------------------------------
+     10 |       | CLARK,KING,MILLER
+     20 |       | ADAMS,FORD,JONES,SCOTT,SMITH
+     30 |       | ALLEN,BLAKE,JAMES,MARTIN,TURNER,WARD
+        |  7566 | FORD,SCOTT
+        |  7698 | ALLEN,JAMES,MARTIN,TURNER,WARD
+        |  7782 | MILLER
+        |  7788 | ADAMS
+        |  7839 | BLAKE,CLARK,JONES
+        |  7902 | SMITH
+        |       | KING
+(10 rows)
+
+-- SEPARATOR can only be used in GROUP_CONCAT
+SELECT mgrno, max(empno ORDER BY empno SEPARATOR '.') AS empno_order_by_empno_group_by_mgr_integer FROM emp GROUP BY mgrno ORDER BY 1;
+ERROR:  SEPARATOR can only be used in GROUP_CONCAT.
+LINE 1: SELECT mgrno, max(empno ORDER BY empno SEPARATOR '.') AS emp...
+                                               ^
+SELECT deptno, min(distinct sign ORDER BY sign SEPARATOR '''') AS dst_sign_order_by_sign_blob FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  SEPARATOR can only be used in GROUP_CONCAT.
+LINE 1: SELECT deptno, min(distinct sign ORDER BY sign SEPARATOR '''...
+                                                       ^
+--test for group_concat return type
+create view v_emp(id,sign) as SELECT deptno, group_concat(ename ORDER BY ename SEPARATOR ',') AS employees_order_by_ename_varchar FROM emp GROUP BY deptno ORDER BY 1;
+\d v_emp;
+        View "public.v_emp"
+ Column |     Type     | Modifiers 
+--------+--------------+-----------
+ id     | numeric(2,0) | 
+ sign   | text         | 
+
+select * from v_emp;
+ id |                 sign                 
+----+--------------------------------------
+ 10 | CLARK,KING,MILLER
+ 20 | ADAMS,FORD,JONES,SCOTT,SMITH
+ 30 | ALLEN,BLAKE,JAMES,MARTIN,TURNER,WARD
+(3 rows)
+
+drop view v_emp;
+create view v_emp(id,sign) as SELECT deptno, group_concat(sign ORDER BY sign SEPARATOR ',') AS employees_order_by_sign FROM emp GROUP BY deptno ORDER BY 1;
+\d v_emp;
+        View "public.v_emp"
+ Column |     Type     | Modifiers 
+--------+--------------+-----------
+ id     | numeric(2,0) | 
+ sign   | text         | 
+
+select * from v_emp;
+ id |       sign        
+----+-------------------
+ 10 | 58,59,5A
+ 20 | 58,58,58,59,59
+ 30 | 58,59,59,5A,5A,5A
+(3 rows)
+
+drop view v_emp;
+create view v_emp(id,sign) as SELECT deptno, group_concat(sign,ename ORDER BY sign SEPARATOR ',') AS employees_order_by_sign FROM emp GROUP BY deptno ORDER BY 1;
+\d v_emp;
+        View "public.v_emp"
+ Column |     Type     | Modifiers 
+--------+--------------+-----------
+ id     | numeric(2,0) | 
+ sign   | text         | 
+
+select * from v_emp;
+ id |                       sign                       
+----+--------------------------------------------------
+ 10 | 58CLARK,59MILLER,5AKING
+ 20 | 58JONES,58SMITH,58FORD,59SCOTT,59ADAMS
+ 30 | 58TURNER,59ALLEN,59MARTIN,5AWARD,5ABLAKE,5AJAMES
+(3 rows)
+
+drop view v_emp;
+-- test for complex parameters
+SELECT deptno, group_concat(bonus,offtime,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address,address ORDER BY address SEPARATOR '//') AS multi_address_order_by_address_text FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              multi_address_order_by_address_text                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+--------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | 10234.21Tue Oct 13 00:00:00 2015四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户四方区洛阳路34号3号楼4单元402户//10000.01Thu Aug 19 00:00:00 1999花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号花都大道100号世纪光花小区3023号
+     20 | 1100.00Mon Jan 18 23:12:00 1999如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号如北街江心美寓小区1号//2000.80Sat Dec 01 00:00:00 2018宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室宝山区示范新村37号403室//2002.12Sat May 12 23:00:00 2012方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号方西区正街3号巷66号//1001.01Mon Jan 19 00:29:00 1998温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼温泉路四海花园1号楼//999.10Thu Oct 14 00:00:00 2010莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室莲花五村龙昌里34号601室
+     30 | 1000.01Sun Jun 12 08:12:00 2016城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702城东区亨达花园7栋702//9.00Sun Jan 18 23:12:00 1998城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号城北梁家巷132号//2399.50Wed Apr 29 05:35:00 2009建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室建国门大街23号楼302室//99.99Tue Sep 25 23:00:00 2018开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元开平路53号国棉四厂二宿舍1号楼2单元//899.00Tue Dec 24 12:30:00 2013虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室虹口区西康南路125弄34号201室//1000.22Sat Sep 10 05:00:00 2005锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼锦尚路MOCO公寓10楼
+(3 rows)
+
+SELECT deptno, group_concat(NULL ORDER BY NULL) AS default_sep_NULL FROM emp GROUP BY deptno ORDER BY 1;
+ deptno | default_sep_null 
+--------+------------------
+     10 | 
+     20 | 
+     30 | 
+(3 rows)
+
+SELECT deptno, group_concat('''拼接''') AS default_sep_const FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |             default_sep_const             
+--------+-------------------------------------------
+     10 | '拼接','拼接','拼接'
+     20 | '拼接','拼接','拼接','拼接','拼接'
+     30 | '拼接','拼接','拼接','拼接','拼接','拼接'
+(3 rows)
+
+SELECT deptno, group_concat(ARRAY[ename,job]  ORDER BY job) AS array_orderby_job_default_sep_text FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                 array_orderby_job_default_sep_text                                 
+--------+----------------------------------------------------------------------------------------------------
+     10 | {MILLER,CLERK},{CLARK,MANAGER},{KING,PRESIDENT}
+     20 | {SCOTT,ANALYST},{FORD,ANALYST},{SMITH,CLERK},{ADAMS,CLERK},{JONES,MANAGER}
+     30 | {JAMES,CLERK},{BLAKE,MANAGER},{WARD,SALESMAN},{TURNER,SALESMAN},{ALLEN,SALESMAN},{MARTIN,SALESMAN}
+(3 rows)
+
+SELECT deptno, group_concat(distinct empno,ARRAY[ename,job]) AS empno_array_default_sep_varchar FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                              empno_array_default_sep_varchar                                               
+--------+----------------------------------------------------------------------------------------------------------------------------
+     10 | 7782{CLARK,MANAGER},7839{KING,PRESIDENT},7934{MILLER,CLERK}
+     20 | 7369{SMITH,CLERK},7566{JONES,MANAGER},7788{SCOTT,ANALYST},7876{ADAMS,CLERK},7902{FORD,ANALYST}
+     30 | 7499{ALLEN,SALESMAN},7521{WARD,SALESMAN},7654{MARTIN,SALESMAN},7698{BLAKE,MANAGER},7844{TURNER,SALESMAN},7900{JAMES,CLERK}
+(3 rows)
+
+SELECT deptno, group_concat(VARIADIC ARRAY[ename,':',job]  ORDER BY ename) AS variadic_default_sep_varchar FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                              variadic_default_sep_varchar                              
+--------+----------------------------------------------------------------------------------------
+     10 | CLARK:MANAGER,KING:PRESIDENT,MILLER:CLERK
+     20 | ADAMS:CLERK,FORD:ANALYST,JONES:MANAGER,SCOTT:ANALYST,SMITH:CLERK
+     30 | ALLEN:SALESMAN,BLAKE:MANAGER,JAMES:CLERK,MARTIN:SALESMAN,TURNER:SALESMAN,WARD:SALESMAN
+(3 rows)
+
+SELECT mgrno, group_concat(all empno ORDER BY ename using >) AS all_empno_orderby_ename_default_sep_int FROM emp GROUP BY mgrno ORDER BY 1;
+ mgrno | all_empno_orderby_ename_default_sep_int 
+-------+-----------------------------------------
+  7566 | 7788,7902
+  7698 | 7521,7844,7654,7900,7499
+  7782 | 7934
+  7788 | 7876
+  7839 | 7566,7782,7698
+  7902 | 7369
+       | 7839
+(7 rows)
+
+SELECT deptno, group_concat(distinct empno,job ORDER BY job using >) AS dst_2args_orderby_1arg_default_sep FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                            dst_2args_orderby_1arg_default_sep                             
+--------+-------------------------------------------------------------------------------------------
+     10 | 7839PRESIDENT ,7782MANAGER   ,7934CLERK     
+     20 | 7566MANAGER   ,7369CLERK     ,7876CLERK     ,7788ANALYST   ,7902ANALYST   
+     30 | 7499SALESMAN  ,7521SALESMAN  ,7654SALESMAN  ,7844SALESMAN  ,7698MANAGER   ,7900CLERK     
+(3 rows)
+
+SELECT deptno, group_concat(concat(address,sign) ORDER BY NLSSORT(address, 'NLS_SORT=SCHINESE_PINYIN_M') desc) AS func_order_by_pinyin_text_blob FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                              func_order_by_pinyin_text_blob                                                               
+--------+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | 温江区OneHouse高级别墅1栋5A,四方区洛阳路34号3号楼4单元402户59,花都大道100号世纪光花小区3023号58
+     20 | 温泉路四海花园1号楼59,如北街江心美寓小区1号59,莲花五村龙昌里34号601室58,方西区正街3号巷66号58,宝山区示范新村37号403室58
+     30 | 开平路53号国棉四厂二宿舍1号楼2单元59,锦尚路MOCO公寓10楼5A,建国门大街23号楼302室5A,虹口区西康南路125弄34号201室59,城东区亨达花园7栋7025A,城北梁家巷132号58
+(3 rows)
+
+SELECT deptno, group_concat(email||email ORDER BY email,email||email desc) AS expr_orderby_2args_text FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                                                                                     expr_orderby_2args_text                                                                                     
+--------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+     10 | flower21@gmail.comflower21@gmail.com,houseme123@yahoo.comhouseme123@yahoo.com,Miller*mail@sina.comMiller*mail@sina.com
+     20 | aking_clerk@sina.comaking_clerk@sina.com,analyse666@163.comanalyse666@163.com,bigbigbang@sina.combigbigbang@sina.com,jonesishere@gmal.comjonesishere@gmal.com,smithWu@163.comsmithWu@163.com
+     30 | 66allen_mm@qq.com66allen_mm@qq.com,blake-life@fox.mailblake-life@fox.mail,hello702@163.comhello702@163.com,mm213n@qq.commm213n@qq.com,tur789@qq.comtur789@qq.com,whoMe@gmail.comwhoMe@gmail.com
+(3 rows)
+
+SELECT deptno, group_concat(sign order by deptno,empno) AS mgrno_order_by_mgrno_noarg2_blob FROM emp GROUP BY deptno ORDER BY 1;
+ deptno | mgrno_order_by_mgrno_noarg2_blob 
+--------+----------------------------------
+     10 | 58,5A,59
+     20 | 58,58,59,59,58
+     30 | 59,5A,59,5A,58,5A
+(3 rows)
+
+-- test for window function err cases
+SELECT job, address, ename, group_concat(bonus SEPARATOR '￥') OVER(PARTITION BY job) AS bonus FROM emp ORDER BY 1,2,3;
+ERROR:  syntax error at or near "OVER"
+LINE 1: ...ddress, ename, group_concat(bonus SEPARATOR '￥') OVER(PARTI...
+                                                             ^
+SELECT mgrno, ename, job, group_concat(ename,job) OVER(PARTITION BY mgrno) AS employees_in_manager FROM emp ORDER BY 1,2,3;
+ERROR:  group_concat does not support window function
+LINE 1: SELECT mgrno, ename, job, group_concat(ename,job) OVER(PARTI...
+                                  ^
+-- test for plan changes, dfx
+SET explain_perf_mode=pretty;
+EXPLAIN verbose SELECT deptno, group_concat(ename ORDER BY ename SEPARATOR ',') AS employees_order_by_ename_varchar FROM emp GROUP BY deptno;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ GroupAggregate  (cost=1.41..1.55 rows=3 width=8203)
+   Output: deptno, group_concat(ename ORDER BY ename SEPARATOR ','::text)
+   Group By Key: emp.deptno
+   ->  Sort  (cost=1.41..1.44 rows=14 width=11)
+         Output: deptno, ename
+         Sort Key: emp.deptno
+         ->  Seq Scan on public.emp  (cost=0.00..1.14 rows=14 width=11)
+               Output: deptno, ename
+(8 rows)
+
+EXPLAIN verbose SELECT deptno, group_concat(sign ORDER BY email SEPARATOR '##') AS email_order_by_email_text_en FROM emp GROUP BY deptno;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ GroupAggregate  (cost=1.41..1.55 rows=3 width=8217)
+   Output: deptno, group_concat(sign ORDER BY email SEPARATOR '##'::text)
+   Group By Key: emp.deptno
+   ->  Sort  (cost=1.41..1.44 rows=14 width=25)
+         Output: deptno, sign, email
+         Sort Key: emp.deptno
+         ->  Seq Scan on public.emp  (cost=0.00..1.14 rows=14 width=25)
+               Output: deptno, sign, email
+(8 rows)
+
+EXPLAIN verbose SELECT deptno, group_concat(VARIADIC ARRAY[ename,':',job]  ORDER BY ename) AS bonus_order_by_bonus_numeric FROM emp GROUP BY deptno;
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate  (cost=1.41..1.58 rows=3 width=8214)
+   Output: deptno, group_concat(ARRAY[ename, ':'::character varying, (job)::character varying] ORDER BY ename SEPARATOR ','::text)
+   Group By Key: emp.deptno
+   ->  Sort  (cost=1.41..1.44 rows=14 width=22)
+         Output: deptno, ename, job
+         Sort Key: emp.deptno
+         ->  Seq Scan on public.emp  (cost=0.00..1.14 rows=14 width=22)
+               Output: deptno, ename, job
+(8 rows)
+
+-- test for date print format
+SET datestyle = 'SQL,DMY';
+SELECT deptno, group_concat(hiredate ORDER BY hiredate SEPARATOR ', ') AS hiredate_dmy_order_by_hiredate_date FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                  hiredate_dmy_order_by_hiredate_date                   
+--------+------------------------------------------------------------------------
+     10 | 09/06/1981, 17/11/1981, 23/01/1982
+     20 | 03/12/1981, 19/04/1987, 23/05/1987, 17/12/1999, 02/04/2001
+     30 | 01/05/1981, 08/09/1981, 03/12/1981, 28/09/1997, 22/02/2010, 20/02/2015
+(3 rows)
+
+SET datestyle = 'SQL,MDY';
+SELECT deptno, group_concat(hiredate ORDER BY hiredate SEPARATOR ', ') AS hiredate_dmy_order_by_hiredate_date FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                  hiredate_dmy_order_by_hiredate_date                   
+--------+------------------------------------------------------------------------
+     10 | 06/09/1981, 11/17/1981, 01/23/1982
+     20 | 12/03/1981, 04/19/1987, 05/23/1987, 12/17/1999, 04/02/2001
+     30 | 05/01/1981, 09/08/1981, 12/03/1981, 09/28/1997, 02/22/2010, 02/20/2015
+(3 rows)
+
+SET datestyle = 'Postgres,DMY';
+SELECT deptno, group_concat(hiredate ORDER BY hiredate SEPARATOR ', ') AS hiredate_dmy_order_by_hiredate_date FROM emp GROUP BY deptno ORDER BY 1;
+ deptno |                  hiredate_dmy_order_by_hiredate_date                   
+--------+------------------------------------------------------------------------
+     10 | 09-06-1981, 17-11-1981, 23-01-1982
+     20 | 03-12-1981, 19-04-1987, 23-05-1987, 17-12-1999, 02-04-2001
+     30 | 01-05-1981, 08-09-1981, 03-12-1981, 28-09-1997, 22-02-2010, 20-02-2015
+(3 rows)
+
+-- test for abnormal cases: alias, no column, no keyword, invalid parameter, other orders, etc. errors.
+SELECT deptno, group_concat() AS no_args FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  function group_concat(unknown) does not exist
+LINE 1: SELECT deptno, group_concat() AS no_args FROM emp GROUP BY d...
+                       ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: no_args
+SELECT deptno, group_concat(ORDER BY ename) AS no_args FROM emp GROUP BY deptno;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: SELECT deptno, group_concat(ORDER BY ename) AS no_args FROM ...
+                                    ^
+SELECT deptno, group_concat(ORDER BY ename SEPARATOR ',') AS no_args FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: SELECT deptno, group_concat(ORDER BY ename SEPARATOR ',') AS...
+                                    ^
+SELECT deptno, group_concat(*) AS star_arg FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  function group_concat(unknown) does not exist
+LINE 1: SELECT deptno, group_concat(*) AS star_arg FROM emp GROUP BY...
+                       ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: star_arg
+SELECT deptno, group_concat(* ORDER BY ename SEPARATOR ',') AS star_arg FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: SELECT deptno, group_concat(* ORDER BY ename SEPARATOR ',') ...
+                                      ^
+SELECT deptno, group_concat(ename ',') AS no_sep_keyword FROM emp GROUP BY deptno;
+ERROR:  type "ename" does not exist
+LINE 1: SELECT deptno, group_concat(ename ',') AS no_sep_keyword FRO...
+                                    ^
+CONTEXT:  referenced column: no_sep_keyword
+SELECT deptno, group_concat(ename ORDER BY ename SEPARATOR '(' || ')') AS expr_sep FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  syntax error at or near "||"
+LINE 1: ..., group_concat(ename ORDER BY ename SEPARATOR '(' || ')') AS...
+                                                             ^
+SELECT mgrno, group_concat(empno ORDER BY empno SEPARATOR ) AS no_sep FROM emp GROUP BY mgrno ORDER BY 1;
+ERROR:  syntax error at or near ")"
+LINE 1: ...grno, group_concat(empno ORDER BY empno SEPARATOR ) AS no_se...
+                                                             ^
+SELECT deptno, group_concat(ename SEPARATOR ', ' ORDER BY hiredate) AS wrong_syntax FROM emp GROUP BY deptno;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: SELECT deptno, group_concat(ename SEPARATOR ', ' ORDER BY hi...
+                                                         ^
+SELECT deptno, group_concat(distinct job SEPARATOR ',' ORDER BY job) AS wrong_syntax FROM emp GROUP BY deptno;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: ...T deptno, group_concat(distinct job SEPARATOR ',' ORDER BY j...
+                                                             ^
+SELECT deptno, group_concat(distinct ename SEPARATOR '(' || MAX(deptno)|| ')' ORDER BY NULL) AS wrong_syntax FROM emp GROUP BY deptno;
+ERROR:  syntax error at or near "||"
+LINE 1: ...deptno, group_concat(distinct ename SEPARATOR '(' || MAX(dep...
+                                                             ^
+SELECT deptno, group_concat(mgrno ORDER BY mgrno SEPARATOR NULL) AS null_sep FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  syntax error at or near "NULL"
+LINE 1: ...ptno, group_concat(mgrno ORDER BY mgrno SEPARATOR NULL) AS n...
+                                                             ^
+SELECT deptno, group_concat(mgrno ORDER BY mgrno SEPARATOR ename) AS col_sep FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  syntax error at or near "ename"
+LINE 1: ...ptno, group_concat(mgrno ORDER BY mgrno SEPARATOR ename) AS ...
+                                                             ^
+SELECT deptno, group_concat(ename alias ORDER BY alias) AS arg_alias FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  syntax error at or near "alias"
+LINE 1: SELECT deptno, group_concat(ename alias ORDER BY alias) AS a...
+                                          ^
+SELECT deptno, group_concat(ename AS NM ORDER BY NM SEPARATOR ',') AS arg_alias FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  syntax error at or near "AS"
+LINE 1: SELECT deptno, group_concat(ename AS NM ORDER BY NM SEPARATO...
+                                          ^
+SELECT deptno, group_concat(distinct job ORDER BY empno) AS order_not_in_distinct FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  in an aggregate with DISTINCT, ORDER BY expressions must appear in argument list
+LINE 1: SELECT deptno, group_concat(distinct job ORDER BY empno) AS ...
+                                                          ^
+CONTEXT:  referenced column: order_not_in_distinct
+SELECT deptno, group_concat(VARIADIC ename ORDER BY 1) AS wrong_variadic FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  could not determine data type of concat() input to variadic
+SELECT deptno, group_concat(empno, VARIADIC ARRAY[ename,':',job]  ORDER BY ename) AS wrong_variadic FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  function group_concat(unknown, integer, character varying[]) does not exist
+LINE 1: SELECT deptno, group_concat(empno, VARIADIC ARRAY[ename,':',...
+                       ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: wrong_variadic
+SELECT deptno, group_concat(distinct VARIADIC ARRAY[ename,':',job]  ORDER BY 1) AS wrong_variadic FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  syntax error at or near "VARIADIC"
+LINE 1: SELECT deptno, group_concat(distinct VARIADIC ARRAY[ename,':...
+                                             ^
+SELECT deptno, group_concat(ename) WITHIN GROUP(ORDER BY ename) AS within_clause FROM emp GROUP BY deptno ORDER BY 1;
+ERROR:  group_concat is not an ordered-set aggregate, so it cannot have WITHIN GROUP
+LINE 1: SELECT deptno, group_concat(ename) WITHIN GROUP(ORDER BY ena...
+                       ^
+CONTEXT:  referenced column: within_clause
+-- test group_concat in pl/sql
+CREATE TABLE test_group_concat_bin
+(
+BT_COL1 INTEGER,
+BT_COL2 BLOB,
+BT_COL3 RAW,
+BT_COL4 BYTEA
+) ;
+INSERT INTO test_group_concat_bin VALUES(1, '3F', HEXTORAW('3F'),E'\\x3F');
+INSERT INTO test_group_concat_bin VALUES(2, '21', HEXTORAW('21'),E'\\x21');
+CREATE OR REPLACE PROCEDURE proc_insert_concat
+IS
+BEGIN
+    INSERT INTO test_group_concat_bin
+    SELECT deptno, 
+        hextoraw(group_concat(sign order by sign separator '')), 
+        hextoraw(group_concat(sign order by sign separator '')), 
+        decode(group_concat(sign order by sign separator '') , 'hex') 
+    FROM emp group by deptno;
+END;
+/
+CALL proc_insert_concat();
+ proc_insert_concat 
+--------------------
+ 
+(1 row)
+
+DROP PROCEDURE proc_insert_concat;
+-- test group_concat with blob/raw/bytea
+select * from test_group_concat_bin order by bt_col1;
+ bt_col1 |   bt_col2    |   bt_col3    |    bt_col4     
+---------+--------------+--------------+----------------
+       1 | 3F           | 3F           | \x3f
+       2 | 21           | 21           | \x21
+      10 | 58595A       | 58595A       | \x58595a
+      20 | 5858585959   | 5858585959   | \x5858585959
+      30 | 5859595A5A5A | 5859595A5A5A | \x5859595a5a5a
+(5 rows)
+
+select group_concat(BT_COL2,BT_COL3,BT_COL4 order by BT_COL1 separator '') from test_group_concat_bin;
+                                                group_concat                                                
+------------------------------------------------------------------------------------------------------------
+ 3F3F\x3f2121\x2158595A58595A\x58595a58585859595858585959\x58585859595859595A5A5A5859595A5A5A\x5859595a5a5a
+(1 row)
+
+set bytea_output=escape;
+select * from test_group_concat_bin order by bt_col1;
+ bt_col1 |   bt_col2    |   bt_col3    | bt_col4 
+---------+--------------+--------------+---------
+       1 | 3F           | 3F           | ?
+       2 | 21           | 21           | !
+      10 | 58595A       | 58595A       | XYZ
+      20 | 5858585959   | 5858585959   | XXXYY
+      30 | 5859595A5A5A | 5859595A5A5A | XYYZZZ
+(5 rows)
+
+select group_concat(BT_COL2,BT_COL3,BT_COL4 order by BT_COL1 separator '') from test_group_concat_bin;
+                                   group_concat                                   
+----------------------------------------------------------------------------------
+ 3F3F?2121!58595A58595AXYZ58585859595858585959XXXYY5859595A5A5A5859595A5A5AXYYZZZ
+(1 row)
+
+\c regression
+drop database test_group_concat_B_db;
+create database t dbcompatibility 'B';
+\c t;
+CREATE TABLE t(id int, v text);
+INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
+--show default value (current session)
+show group_concat_max_len;
+ group_concat_max_len 
+----------------------
+ 1024
+(1 row)
+
+select id, group_concat(v separator ';') from t group by id order by id asc;
+ id |          group_concat           
+----+---------------------------------
+  1 | A;C
+  2 | B;DDDDDDDDDDDDDDDDDDDDDDDDDDDDD
+(2 rows)
+
+--alter database XXX set XXX to XXX (current session)
+alter database t set group_concat_max_len to 10;
+show group_concat_max_len;
+ group_concat_max_len 
+----------------------
+ 1024
+(1 row)
+
+select id, group_concat(v separator ';') from t group by id order by id asc;
+ id |          group_concat           
+----+---------------------------------
+  1 | A;C
+  2 | B;DDDDDDDDDDDDDDDDDDDDDDDDDDDDD
+(2 rows)
+
+--new session
+\c regression
+\c t
+show group_concat_max_len;
+ group_concat_max_len 
+----------------------
+ 10
+(1 row)
+
+select id, group_concat(v separator ';') from t group by id order by id asc;
+ id | group_concat 
+----+--------------
+  1 | A;C
+  2 | B;DDDDDDDD
+(2 rows)
+
+--set XXX to XXX (current session)
+set group_concat_max_len to 1;
+--value changed
+show group_concat_max_len;
+ group_concat_max_len 
+----------------------
+ 1
+(1 row)
+
+select id, group_concat(v separator ';') from t group by id order by id asc;
+ id | group_concat 
+----+--------------
+  1 | A
+  2 | B
+(2 rows)
+
+--show database value above
+\c regression
+\c t
+show group_concat_max_len;
+ group_concat_max_len 
+----------------------
+ 10
+(1 row)
+
+select id, group_concat(v separator ';') from t group by id order by id asc;
+ id | group_concat 
+----+--------------
+  1 | A;C
+  2 | B;DDDDDDDD
+(2 rows)
+
+--error cases
+set group_concat_max_len to -1;
+ERROR:  -1 is outside the valid range for parameter "group_concat_max_len" (0 .. 9223372036854775807)
+set group_concat_max_len to 9223372036854775808;
+ERROR:  parameter "group_concat_max_len" requires a numeric value
+\c regression
+drop database t;

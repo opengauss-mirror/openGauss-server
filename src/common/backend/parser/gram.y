@@ -655,7 +655,7 @@ static int errstate;
 %type <ival>	document_or_content
 %type <boolean> xml_whitespace_option
 
-%type <node>	func_application func_expr_common_subexpr
+%type <node>	func_application func_with_separator func_expr_common_subexpr
 %type <node>	func_expr func_expr_windowless
 %type <node>	common_table_expr
 %type <with>	with_clause opt_with_clause
@@ -868,7 +868,7 @@ static int errstate;
 	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
 	ROTATION ROW ROWNUM ROWS ROWTYPE_P RULE
 
-	SAMPLE SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
+	SAMPLE SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEPARATOR_P SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN SIBLINGS
 	SIMILAR SIMPLE SIZE SKIP SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START STARTWITH
 	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBPARTITION SUBSCRIPTION SUBSTRING
@@ -918,7 +918,7 @@ static int errstate;
 %nonassoc   PARTIAL_EMPTY_PREC
 %nonassoc   CLUSTER
 %nonassoc	SET				/* see relation_expr_opt_alias */
-%right      PRIOR
+%right      PRIOR SEPARATOR_P
 %right      FEATURES TARGET // DB4AI
 %left		UNION EXCEPT MINUS_P
 %left		INTERSECT
@@ -22269,6 +22269,55 @@ func_expr:	func_application within_group_clause over_clause
 					{
 						n->over = $3;
 					}
+					if (pg_strcasecmp(strVal(linitial(n->funcname)), "group_concat") == 0)
+					{
+#ifdef			ENABLE_MULTIPLE_NODES
+						const char* message = "group_concat is not yet supported in distributed database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+						ereport(errstate,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("group_concat is not yet supported in distributed database.")));
+#endif
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+						{
+							const char* message = "group_concat is supported only in B-format database";
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate,
+									(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("group_concat is supported only in B-format database"),
+									parser_errposition(@1)));
+						}
+						WindowDef *wd = (WindowDef*) $3;
+						if (wd != NULL) {
+							ereport(errstate,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("group_concat does not support window function"),
+									 parser_errposition(@1)));
+						}
+						n->args = lappend3(list_make1(makeStringConst(",", n->location)), n->args);
+					}
+				}
+			| func_with_separator
+				{ 
+#ifdef			ENABLE_MULTIPLE_NODES
+					const char* message = "group_concat is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("group_concat is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						const char* message = "group_concat is supported only in B-format database";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("group_concat is supported only in B-format database"),
+								parser_errposition(@1)));
+					}
+					$$ = $1; 
 				}
 			| func_expr_common_subexpr
 				{ $$ = $1; }
@@ -22387,6 +22436,60 @@ func_application:	func_name '(' ')'
 					$$ = (Node *)n;
 				}
 		;
+
+/*
+ * Function with SEPARATOR keword arguments;
+ */
+func_with_separator:
+		func_name '(' func_arg_list opt_sort_clause SEPARATOR_P Sconst ')'
+			{
+				if (pg_strcasecmp(strVal(linitial($1)), "group_concat") != 0)
+				{
+					const char* message = "SEPARATOR can only be used in GROUP_CONCAT.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("SEPARATOR can only be used in GROUP_CONCAT."),
+							parser_errposition(@5)));
+				} else {
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = SystemFuncName("group_concat");
+					n->args = lappend3(list_make1(makeStringConst($6, @6)), $3);
+					n->agg_order = $4;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = NULL;
+					n->location = @1;
+					n->call_func = false;
+					$$ = (Node *)n;
+				}
+			}
+		| func_name '(' DISTINCT func_arg_list opt_sort_clause SEPARATOR_P Sconst ')'
+			{
+				if (pg_strcasecmp(strVal(linitial($1)), "group_concat") != 0)
+				{
+					const char* message = "SEPARATOR can only be used in GROUP_CONCAT.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("SEPARATOR can only be used in GROUP_CONCAT."),
+						parser_errposition(@6)));
+				} else {
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = SystemFuncName("group_concat");
+					n->args = lappend3(list_make1(makeStringConst($7, @7)), $4);
+					n->agg_order = $5;
+					n->agg_star = FALSE;
+					n->agg_distinct = TRUE;
+					n->func_variadic = FALSE;
+					n->over = NULL;
+					n->location = @1;
+					n->call_func = false;
+					$$ = (Node *)n;
+				}
+			}
+	;
 
 /*
  * As func_expr but does not accept WINDOW functions directly
@@ -24533,6 +24636,7 @@ unreserved_keyword:
 			| SESSION
 			| SET
 			| SETS
+			| SEPARATOR_P
 			| SHARE
 			| SHIPPABLE
 			| SHOW

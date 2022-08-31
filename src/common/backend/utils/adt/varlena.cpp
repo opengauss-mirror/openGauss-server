@@ -5903,6 +5903,65 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
 }
 
 /*
+ * Concatenate all arguments with separator. NULL arguments are ignored.
+ */
+Datum group_concat_transfn(PG_FUNCTION_ARGS)
+{
+    const int64 maxlength = u_sess->attr.attr_common.group_concat_max_len;
+    StringInfo state = PG_ARGISNULL(0) ? NULL : (StringInfo)PG_GETARG_POINTER(0);
+    /*
+     * The first argument is transValue, and the second is separator.
+     * Concat all the other arguments without separator.
+     */
+    if (state != NULL && state->len == maxlength) {
+        PG_RETURN_POINTER(state);
+    }
+    const text *argsconcat = concat_internal("", 0, 2, fcinfo, false);
+    /* Append the value unless null. */
+    if (argsconcat) {
+        /* On the first time through, we ignore the separator. */
+        if (state == NULL) {
+            state = makeStringAggState(fcinfo);
+        } else if (!PG_ARGISNULL(1)) {
+            appendStringInfoText(state, (const text*)PG_GETARG_TEXT_PP(1)); /* delimiter */
+        }
+        appendStringInfoText(state, argsconcat); /* value */
+        if (state->len > maxlength) {
+            state->len = maxlength;
+            state->data[state->len] = '\0';
+        }
+    } else {
+        /*
+         * When argsconcat is NULL, fcinfo->isnull has been set as true in concat_internal.
+         * The value of fcinfo->isnull should depend on the transValue.
+         */
+        fcinfo->isnull = PG_ARGISNULL(0);
+    }
+
+    /*
+     * The transition type for group_concat() is declared to be "internal",
+     * which is a pass-by-value type the same size as a pointer.
+     */
+    PG_RETURN_POINTER(state);
+}
+/*
+ * Concatenate all arguments with separator. NULL arguments are ignored.
+ */
+Datum group_concat_finalfn(PG_FUNCTION_ARGS)
+{
+    StringInfo state;
+
+    /* cannot be called directly because of internal-type argument */
+    Assert(AggCheckCallContext(fcinfo, NULL));
+
+    if (!PG_ARGISNULL(0)) { /* result not null */
+        state = (StringInfo)PG_GETARG_POINTER(0);
+        PG_RETURN_TEXT_P(cstring_to_text_with_len(state->data, state->len));
+    } else
+        PG_RETURN_NULL();
+}
+
+/*
  * Concatenate all arguments. NULL arguments are ignored.
  */
 Datum text_concat(PG_FUNCTION_ARGS)

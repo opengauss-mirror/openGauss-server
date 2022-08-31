@@ -107,6 +107,7 @@ typedef struct knl_session_attr_common {
     int gtm_rw_timeout;
     int transaction_sync_timeout;
     int fault_mon_timeout;
+    int64 group_concat_max_len;
     double ConnectionAlarmRate;
     char* client_encoding_string;
     char* Log_line_prefix;

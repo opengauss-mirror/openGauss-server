@@ -997,6 +997,9 @@ extern Datum string_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum checksumtext_agg_transfn(PG_FUNCTION_ARGS);
 
+extern Datum group_concat_transfn(PG_FUNCTION_ARGS);
+extern Datum group_concat_finalfn(PG_FUNCTION_ARGS);
+
 extern Datum list_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum list_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum list_agg_noarg2_transfn(PG_FUNCTION_ARGS);

@@ -2390,6 +2390,7 @@ bool pgxc_is_internal_agg_final_func(Oid funcid)
         case INTERVALLISTAGGNOARG2FUNCOID:     // interval_listagg_noarg2_finalfn
         case JSONAGGFUNCOID:                   // json_agg_finalfn
         case JSONOBJECTAGGFUNCOID:             // json_object_agg_finalfn
+        case GROUPCONCATFUNCOID:               // group_concat_finalfn
             is_internal_func = false;
             break;
         default:
