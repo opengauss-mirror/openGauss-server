@@ -228,6 +228,7 @@ typedef enum {
     GUC_PARA_BOOL,  /* bool    */
     GUC_PARA_ENUM,  /* enum    */
     GUC_PARA_INT,   /* int     */
+    GUC_PARA_INT64, /* int64   */
     GUC_PARA_REAL,  /* real    */
     GUC_PARA_STRING /* string  */
 } GucParaType;
@@ -3288,6 +3289,8 @@ GucParaType get_guc_type(const char* type)
         return GUC_PARA_ENUM;
     else if (0 == strncmp(type, "string", strlen("string")))
         return GUC_PARA_STRING;
+    else if (0 == strncmp(type, "int64", strlen("int64")))
+        return GUC_PARA_INT64;
     else
         return GUC_PARA_ERROR;
 }
