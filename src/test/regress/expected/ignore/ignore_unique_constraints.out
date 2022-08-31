@@ -365,5 +365,19 @@ select * from t_ignore;
    2
 (2 rows)
 
+-- test for column orientation table: not supported
+drop table if exists t_column_orien cascade;
+NOTICE:  table "t_column_orien" does not exist, skipping
+create table t_column_orien(c1 int primary key) with (orientation=column);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_column_orien_pkey" for table "t_column_orien"
+insert into t_column_orien values(1), (2);
+insert /*+ ignore_error */ into t_column_orien values(1);
+ERROR:  IGNORE is not supported on INSERT column orientated table.
+insert /*+ ignore_error */ into t_column_orien values(null);
+ERROR:  IGNORE is not supported on INSERT column orientated table.
+update /*+ ignore_error */ t_column_orien set c1 = null where c1 = 2;
+ERROR:  IGNORE is not supported on UPDATE column orientated table.
+update /*+ ignore_error */ t_column_orien set c1 = 1 where c1 = 2;
+ERROR:  IGNORE is not supported on UPDATE column orientated table.
 \c postgres
 drop database if exists sql_ignore_unique_test;
