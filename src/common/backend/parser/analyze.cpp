@@ -1466,6 +1466,14 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         }
     }
 
+    /* non-supported IGNORE cases */
+    if (pstate->p_has_ignore && pstate->p_target_relation != NULL) {
+        if (RelationIsColumnFormat(pstate->p_target_relation)) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("IGNORE is not supported on INSERT column orientated table."))));
+        }
+    }
+
     /* data redistribution for DFS table.
      * check if the target relation is being redistributed(insert mode).
      * For example, when table A is redistributing in session 1, operating table
@@ -3352,6 +3360,14 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Un-support feature"),
                 errdetail("replicated columnar table doesn't allow UPDATE")));
+    }
+
+    /* non-supported IGNORE cases */
+    if (pstate->p_has_ignore && pstate->p_target_relation != NULL) {
+        if (RelationIsColumnFormat(pstate->p_target_relation)) {
+            ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                             errmsg("IGNORE is not supported on UPDATE column orientated table."))));
+        }
     }
 
 #ifdef ENABLE_MULTIPLE_NODES
