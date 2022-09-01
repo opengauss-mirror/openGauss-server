@@ -2141,10 +2141,13 @@ lreplace:
                         estate->es_plannedstmt->hasIgnore &&
                         !ExecCheckIndexConstraints(slot, estate, result_relation_desc, partition, &isgpi, bucketid,
                                                    &conflictInfo, &conflictPartOid, &conflictBucketid)) {
-                        ereport(WARNING,
-                                (errmsg("duplicate key value violates unique constraint in table \"%s\"",
-                                        RelationGetRelationName(result_relation_desc))));
-                        return NULL;
+                        // check whether the conflicted info is the update tuple. If not, report warning and return.
+                        if (!ItemPointerEquals(&conflictInfo.conflictTid, tupleid)) {
+                            ereport(WARNING,
+                                    (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                            RelationGetRelationName(result_relation_desc))));
+                            return NULL;
+                        }
                     }
 
                     /*
@@ -2434,9 +2437,14 @@ lreplace:
                         if (can_ignore &&
                             !ExecCheckIndexConstraints(slot, estate, fake_relation, partition, &isgpi, bucketid,
                                                        &conflictInfo, &conflictPartOid, &conflictBucketid)) {
-                            ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
-                                                     RelationGetRelationName(result_relation_desc))));
-                            return NULL;
+                            // check whether the conflicted info is the update tuple. If not, report warning and return.
+                            bool is_same_pointer = ItemPointerEquals(&conflictInfo.conflictTid, tupleid);
+                            if (!is_same_pointer || oldPartitionOid != conflictPartOid) {
+                                ereport(WARNING,
+                                        (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                                RelationGetRelationName(result_relation_desc))));
+                                return NULL;
+                            }
                         }
 
                         if (result_relation_desc->rd_isblockchain) {
@@ -2646,9 +2654,14 @@ lreplace:
                         if (can_ignore &&
                             !ExecCheckIndexConstraints(slot, estate, fake_insert_relation, insert_partition, &isgpi,
                                                        bucketid, &conflictInfo, &conflictPartOid, &conflictBucketid)) {
-                            ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
-                                                     RelationGetRelationName(result_relation_desc))));
-                            return NULL;
+                            // check whether the conflicted info is the update tuple. If not, report warning and return.
+                            bool is_same_pointer = ItemPointerEquals(&conflictInfo.conflictTid, tupleid);
+                            if (!is_same_pointer || oldPartitionOid != conflictPartOid) {
+                                ereport(WARNING,
+                                        (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                                RelationGetRelationName(result_relation_desc))));
+                                return NULL;
+                            }
                         }
 
                         /* delete the old tuple */

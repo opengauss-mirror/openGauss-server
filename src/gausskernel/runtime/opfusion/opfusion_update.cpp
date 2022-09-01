@@ -372,9 +372,12 @@ lreplace:
         if (m_c_local.m_estate->es_plannedstmt && m_c_local.m_estate->es_plannedstmt->hasIgnore &&
             !ExecCheckIndexConstraints(m_local.m_reslot, m_c_local.m_estate, ledger_dest_rel, part, &isgpi, bucketid,
                                        &conflictInfo, &conflictPartOid, &conflictBucketid)) {
-            ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
-                                     RelationGetRelationName(ledger_dest_rel))));
-            break;
+            // check whether the conflicted info is the update tuple. If not, report warning and return.
+            if (!ItemPointerEquals(&((HeapTuple)tup)->t_self, &conflictInfo.conflictTid)) {
+                ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
+                                         RelationGetRelationName(ledger_dest_rel))));
+                break;
+            }
         }
 
         bool update_indexes = false;
