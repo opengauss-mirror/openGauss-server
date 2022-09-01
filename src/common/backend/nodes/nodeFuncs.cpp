@@ -228,6 +228,9 @@ Oid exprType(const Node* expr)
                 type = INT8OID;
             }
             break;
+        case T_PrefixKey:
+            type = exprType((Node*)((PrefixKey*)expr)->arg);
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -465,6 +468,8 @@ int32 exprTypmod(const Node* expr)
             return ((const SetToDefault*)expr)->typeMod;
         case T_PlaceHolderVar:
             return exprTypmod((Node*)((const PlaceHolderVar*)expr)->phexpr);
+        case T_PrefixKey:
+            return exprTypmod((Node*)((const PrefixKey*)expr)->arg);
         default:
             break;
     }
@@ -846,6 +851,9 @@ Oid exprCollation(const Node* expr)
         case T_PlaceHolderVar:
             coll = exprCollation((Node*)((const PlaceHolderVar*)expr)->phexpr);
             break;
+        case T_PrefixKey:
+            coll = exprCollation((Node*)((const PrefixKey*)expr)->arg);
+            break;
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1046,6 +1054,8 @@ void exprSetCollation(Node* expr, Oid collation)
         case T_CurrentOfExpr:
             Assert(!OidIsValid(collation)); /* result is always boolean */
             break;
+        case T_PrefixKey:
+            return exprSetCollation((Node*)((const PrefixKey*)expr)->arg, collation);
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1405,6 +1415,9 @@ int exprLocation(const Node* expr)
             break;
         case T_Rownum:
             loc = ((const Rownum*)expr)->location;
+            break;
+        case T_PrefixKey:
+            loc = exprLocation((Node*)((const PrefixKey*)expr)->arg);
             break;
         default:
             /* for any other node type it's just unknown... */
@@ -1876,6 +1889,8 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         } break;
         case T_PlaceHolderInfo:
             return p2walker(((PlaceHolderInfo*)node)->ph_var, context);
+        case T_PrefixKey:
+            return p2walker(((PrefixKey*)node)->arg, context);
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
@@ -2607,6 +2622,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
 
             FLATCOPY(newnode, tcc, TimeCapsuleClause, isCopy);
             MUTATE(newnode->tvver, tcc->tvver, Node*);
+            return (Node*)newnode;
+        } break;
+        case T_PrefixKey: {
+            PrefixKey* pkey = (PrefixKey*)node;
+            PrefixKey* newnode = NULL;
+
+            FLATCOPY(newnode, pkey, PrefixKey, isCopy);
+            MUTATE(newnode->arg, pkey->arg, Expr*);
             return (Node*)newnode;
         } break;
         default:

@@ -51,6 +51,12 @@
 #define IndexCollMatchesExprColl(idxcollation, exprcollation) \
     ((idxcollation) == InvalidOid || (idxcollation) == (exprcollation))
 
+#define PrefixKeyColumnMatched(indexkey, operand) \
+    ((indexkey) && IsA((indexkey), PrefixKey) && IsA(((PrefixKey*)(indexkey))->arg, Var) &&        \
+     (operand) && IsA((operand), Var) &&                                                           \
+     ((Var*)((PrefixKey*)(indexkey))->arg)->varno == ((Var*)(operand))->varno &&                   \
+     ((Var*)((PrefixKey*)(indexkey))->arg)->varattno == ((Var*)(operand))->varattno)
+
 /* Whether to use ScalarArrayOpExpr to build index qualifications */
 typedef enum {
     SAOP_PER_AM, /* Use ScalarArrayOpExpr if amsearcharray */
@@ -135,12 +141,18 @@ static Expr* match_clause_to_ordering_op(IndexOptInfo* index, int indexcol, Expr
 static bool match_boolean_index_clause(Node* clause, int indexcol, IndexOptInfo* index);
 static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcollation, bool indexkey_on_left);
 static Expr* expand_boolean_index_clause(Node* clause, int indexcol, IndexOptInfo* index);
-static List* expand_indexqual_opclause(RestrictInfo* rinfo, Oid opfamily, Oid idxcollation);
+static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo, Oid opfamily, Oid idxcollation,
+    int indexcol);
 static RestrictInfo* expand_indexqual_rowcompare(RestrictInfo* rinfo, IndexOptInfo* index, int indexcol);
-static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* prefix, Pattern_Prefix_Status pstatus);
+static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* prefix,
+    Pattern_Prefix_Status pstatus, int prefixkey_len);
 static List* network_prefix_quals(Node* leftop, Oid expr_op, Oid opfamily, Datum rightop);
 static Datum string_to_datum(const char* str, Oid datatype);
 static Const* string_to_const(const char* str, Oid datatype);
+static int get_index_column_prefix_lenth(IndexOptInfo *index, int indexcol);
+static Const* prefix_const_node(Const* con, int prefix_len, Oid datatype);
+static RestrictInfo* rewrite_opclause_for_prefixkey(
+    RestrictInfo *rinfo, IndexOptInfo* index, Oid opfamily, int prefix_len);
 
 /*
  * create_index_paths
@@ -2398,7 +2410,7 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
     } else if (index->amsearchnulls && IsA(clause, NullTest)) {
         NullTest* nt = (NullTest*)clause;
 
-        if (!nt->argisrow && match_index_to_operand((Node*)nt->arg, indexcol, index))
+        if (!nt->argisrow && match_index_to_operand((Node*)nt->arg, indexcol, index, true))
             return true;
         return false;
     } else
@@ -2408,7 +2420,7 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
      * Check for clauses of the form: (indexkey operator constant) or
      * (constant operator indexkey).  See above notes about const-ness.
      */
-    if (match_index_to_operand(leftop, indexcol, index) && !bms_is_member(index_relid, right_relids) &&
+    if (match_index_to_operand(leftop, indexcol, index, true) && !bms_is_member(index_relid, right_relids) &&
         !contain_volatile_functions(rightop)) {
         if (IndexCollMatchesExprColl(idxcollation, expr_coll) && is_indexable_operator(expr_op, opfamily, true))
             return true;
@@ -2422,8 +2434,8 @@ static bool match_clause_to_indexcol(IndexOptInfo* index, int indexcol, Restrict
         return false;
     }
 
-    if (plain_op && match_index_to_operand(rightop, indexcol, index) && !bms_is_member(index_relid, left_relids) &&
-        !contain_volatile_functions(leftop)) {
+    if (plain_op && match_index_to_operand(rightop, indexcol, index, true) &&
+        !bms_is_member(index_relid, left_relids) && !contain_volatile_functions(leftop)) {
         if (IndexCollMatchesExprColl(idxcollation, expr_coll) && is_indexable_operator(expr_op, opfamily, false))
             return true;
 
@@ -2849,7 +2861,7 @@ bool eclass_member_matches_indexcol(EquivalenceClass* ec, EquivalenceMember* em,
     if (!IndexCollMatchesExprColl(curCollation, ec->ec_collation))
         return false;
 
-    return match_index_to_operand((Node*)em->em_expr, indexcol, index);
+    return match_index_to_operand((Node*)em->em_expr, indexcol, index, true);
 }
 
 static bool relation_has_unique_index_for_no_index(PlannerInfo* root, RelOptInfo* rel)
@@ -2978,7 +2990,7 @@ bool relation_has_unique_index_for(
                 else
                     rexpr = get_leftop(rinfo->clause);
 
-                if (match_index_to_operand(rexpr, c, ind)) {
+                if (match_index_to_operand(rexpr, c, ind, true)) {
                     matched = true; /* column is unique */
                     break;
                 }
@@ -2993,7 +3005,7 @@ bool relation_has_unique_index_for(
                 Oid opr = lfirst_oid(lc2);
 
                 /* See if the expression matches the index key */
-                if (!match_index_to_operand(expr, c, ind))
+                if (!match_index_to_operand(expr, c, ind, true))
                     continue;
 
                 /*
@@ -3039,13 +3051,14 @@ bool relation_has_unique_index_for(
  * operand: the nodetree to be compared to the index
  * indexcol: the column number of the index (counting from 0)
  * index: the index of interest
+ * match_prefixkey: if match prefix key to column
  *
  * Note that we aren't interested in collations here; the caller must check
  * for a collation match, if it's dealing with an operator where that matters.
  *
  * This is exported for use in selfuncs.c.
  */
-bool match_index_to_operand(Node* operand, int indexcol, IndexOptInfo* index)
+bool match_index_to_operand(Node* operand, int indexcol, IndexOptInfo* index, bool match_prefixkey)
 {
     int indkey;
 
@@ -3099,7 +3112,12 @@ bool match_index_to_operand(Node* operand, int indexcol, IndexOptInfo* index)
          */
         if (indexkey && IsA(indexkey, RelabelType))
             indexkey = (Node*)((RelabelType*)indexkey)->arg;
-
+        /*
+         * PrefixKey is not a strict expression. It can be matched to column.
+         */
+        if (match_prefixkey && PrefixKeyColumnMatched(indexkey, operand)) {
+            return true;
+        }
         if (equal(indexkey, operand))
             return true;
     }
@@ -3405,7 +3423,8 @@ void expand_indexqual_conditions(
          * RowCompare, or NullTest
          */
         if (is_opclause(clause)) {
-            indexquals = list_concat(indexquals, expand_indexqual_opclause(rinfo, curFamily, curCollation));
+            indexquals = list_concat(indexquals,
+                expand_indexqual_opclause(index, rinfo, curFamily, curCollation, indexcol));
             /* expand_indexqual_opclause can produce multiple clauses */
             while (list_length(indexqualcols) < list_length(indexquals))
                 indexqualcols = lappend_int(indexqualcols, indexcol);
@@ -3508,7 +3527,8 @@ static Expr* expand_boolean_index_clause(Node* clause, int indexcol, IndexOptInf
  * In the base case this is just list_make1(), but we have to be prepared to
  * expand special cases that were accepted by match_special_index_operator().
  */
-static List* expand_indexqual_opclause(RestrictInfo* rinfo, Oid opfamily, Oid idxcollation)
+static List* expand_indexqual_opclause(IndexOptInfo* index, RestrictInfo* rinfo, Oid opfamily, Oid idxcollation,
+    int indexcol)
 {
     Expr* clause = rinfo->clause;
 
@@ -3520,6 +3540,7 @@ static List* expand_indexqual_opclause(RestrictInfo* rinfo, Oid opfamily, Oid id
     Const* patt = (Const*)rightop;
     Const* prefix = NULL;
     Pattern_Prefix_Status pstatus;
+    int prefixkey_len = get_index_column_prefix_lenth(index, indexcol);
 
     if (patt == NULL) {
         ereport(ERROR, (errmodule(MOD_OPT), errmsg("right operator can not be NULL")));
@@ -3540,7 +3561,7 @@ static List* expand_indexqual_opclause(RestrictInfo* rinfo, Oid opfamily, Oid id
         case OID_BYTEA_LIKE_OP:
             if (!op_in_opfamily(expr_op, opfamily)) {
                 pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like, expr_coll, &prefix, NULL);
-                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus);
+                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
 
@@ -3550,7 +3571,7 @@ static List* expand_indexqual_opclause(RestrictInfo* rinfo, Oid opfamily, Oid id
             if (!op_in_opfamily(expr_op, opfamily)) {
                 /* the right-hand const is type text for all of these */
                 pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like_IC, expr_coll, &prefix, NULL);
-                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus);
+                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
 
@@ -3560,7 +3581,7 @@ static List* expand_indexqual_opclause(RestrictInfo* rinfo, Oid opfamily, Oid id
             if (!op_in_opfamily(expr_op, opfamily)) {
                 /* the right-hand const is type text for all of these */
                 pstatus = pattern_fixed_prefix(patt, Pattern_Type_Regex, expr_coll, &prefix, NULL);
-                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus);
+                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
 
@@ -3570,7 +3591,7 @@ static List* expand_indexqual_opclause(RestrictInfo* rinfo, Oid opfamily, Oid id
             if (!op_in_opfamily(expr_op, opfamily)) {
                 /* the right-hand const is type text for all of these */
                 pstatus = pattern_fixed_prefix(patt, Pattern_Type_Regex_IC, expr_coll, &prefix, NULL);
-                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus);
+                return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus, prefixkey_len);
             }
             break;
 
@@ -3581,6 +3602,9 @@ static List* expand_indexqual_opclause(RestrictInfo* rinfo, Oid opfamily, Oid id
             }
             break;
         default:
+            if (prefixkey_len > 0 && op_in_opfamily(expr_op, opfamily)) {
+                return list_make1(rewrite_opclause_for_prefixkey(rinfo, index, opfamily, prefixkey_len));
+            }
             break;
     }
 
@@ -3838,7 +3862,8 @@ Expr* adjust_rowcompare_for_index(
  * operator family; we use it to deduce the appropriate comparison
  * operators and operand datatypes.  collation is the input collation to use.
  */
-static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* prefix_const, Pattern_Prefix_Status pstatus)
+static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* prefix_const,
+    Pattern_Prefix_Status pstatus, int prefixkey_len)
 {
     List* result = NIL;
     Oid datatype;
@@ -3909,7 +3934,28 @@ static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* pref
         prefix_const = string_to_const(prefix, datatype);
         pfree_ext(prefix);
     }
-
+    /*
+     * If matched key is prefix key, try generate an "=" indexqual firstly.
+     */
+    if (prefixkey_len > 0) {
+        /* Prefix key is not supported for "name" type, ignore it. */
+        int prefix_const_len = (datatype == BYTEAOID) ?
+                (int)VARSIZE_ANY_EXHDR(DatumGetPointer(prefix_const->constvalue)) :
+                text_length(prefix_const->constvalue);
+        if (prefixkey_len <= prefix_const_len) {
+            prefix_const = prefix_const_node(prefix_const, prefixkey_len, datatype);
+            oproid = get_opfamily_member(opfamily, datatype, datatype, BTEqualStrategyNumber);
+            if (oproid == InvalidOid)
+                ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                        errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        (errmsg("no = operator for opfamily %u when generate indexqual condition by prefix quals",
+                            opfamily))));
+            expr = make_opclause(oproid, BOOLOID, false, (Expr*)leftop, (Expr*)prefix_const, InvalidOid, collation);
+            result = list_make1(make_simple_restrictinfo(expr));
+            return result;
+        }
+    }
     /*
      * If we found an exact-match pattern, generate an "=" indexqual.
      */
@@ -4134,4 +4180,150 @@ static Const* string_to_const(const char* str, Oid datatype)
 
     return makeConst(datatype, -1, collation, constlen, conval, false, false);
 }
+
+/*
+ * get_index_column_prefix_lenth
+ *	  Get the prefix length of a specified index column.
+ *	  Returns length if it is a prefix key, otherwise returns 0.
+ */
+static int get_index_column_prefix_lenth(IndexOptInfo *index, int indexcol)
+{
+    if (index->indexkeys[indexcol] != 0) {
+        /* It's a simple index column, not a prefix key. */
+        return 0;
+    }
+
+    Node* indexkey = NULL;
+    ListCell* indexpr_item = list_head(index->indexprs);
+    if (indexpr_item == NULL) {
+        return 0;
+    }
+
+    for (int i = 0; i < indexcol; i++) {
+        if (index->indexkeys[i] != 0) {
+            continue;
+        }
+
+        indexpr_item = lnext(indexpr_item);
+        if (indexpr_item == NULL) {
+            return 0;
+        }
+    }
+
+    indexkey = (Node*)lfirst(indexpr_item);
+    if (indexkey && IsA(indexkey, RelabelType)) {
+        indexkey = (Node*)((RelabelType*)indexkey)->arg;
+    }
+
+    if (indexkey && IsA(indexkey, PrefixKey)) {
+        return ((PrefixKey*)indexkey)->length;
+    }
+
+    return 0;
+}
+
+static Const* prefix_const_node(Const* con, int prefix_len, Oid datatype)
+{
+    int prefix_const_len;
+    Datum prefix_value;
+    if (datatype == BYTEAOID || datatype == RAWOID || datatype == BLOBOID) {
+        /* length of bytes */
+        prefix_const_len = VARSIZE_ANY_EXHDR(DatumGetPointer(con->constvalue));
+        if (prefix_len < prefix_const_len) {
+            prefix_value = PointerGetDatum(bytea_substring(con->constvalue, 1, prefix_len, false));
+            return makeConst(datatype, -1, con->constcollid, con->constlen, prefix_value, false, false);
+        }
+    } else {
+        /* length of characters */
+        prefix_const_len = text_length(con->constvalue);
+        if (prefix_len < prefix_const_len) {
+            prefix_value = PointerGetDatum(text_substring(con->constvalue, 1, prefix_len, false));
+            return makeConst(datatype, -1, con->constcollid, con->constlen, prefix_value, false, false);
+        }
+    }
+    return con;
+}
+
+/*
+ * rewrite_opclause_for_prefixkey
+ *    Rewrite an indexqual for prefix key.
+ *
+ * The prefix key stores only the prefix of a column. Index scan using the original
+ * indexqual may miss some keys we need. The indexqual for index scanning must
+ * include all possible keys.
+ *
+ * For example:
+ * If index prefix key length is 3, we cannot use clause (prefixkey > 'ABC123') to
+ * approach index key 'ABC'. However, the column value corresponding to this key value
+ * may meets the clause. We can find right keys in index scan by converting the
+ * clause to (prefixkey >= 'ABC').
+ */
+static RestrictInfo* rewrite_opclause_for_prefixkey(RestrictInfo *rinfo, IndexOptInfo* index, Oid opfamily,
+    int prefix_len)
+{
+    OpExpr* op = (OpExpr*)rinfo->clause;
+    Oid oproid = op->opno;
+    Node *leftop = NULL;
+    Node *rightop = NULL;
+    Node *chgnode = NULL;
+    Expr* newop = NULL;
+    int strategy;
+
+    /*
+     * An index with a prefix key must be a btree index.
+     * We only need to rewrite binary OpExpr.
+     */
+    if (list_length(op->args) != 2) {
+        return rinfo;
+    }
+    leftop = (Node*)linitial(op->args);
+    rightop = (Node*)lsecond(op->args);
+
+    /*
+     * Check where indexkey is, rewrite the expression on the other side.
+     */
+    chgnode = (bms_equal(rinfo->left_relids, index->rel->relids)) ? rightop : leftop;
+
+    if (IsA(chgnode, Const)) {
+        /*
+         * Prefixes the Const if its length is longger than prefix length.
+         */
+        chgnode = (Node*)prefix_const_node((Const*)chgnode, prefix_len, ((Const*)chgnode)->consttype);
+    } else {
+        /*
+         * Add PrefixeKey node on the expression.
+         */
+        PrefixKey *pexpr = makeNode(PrefixKey);
+        pexpr->length = prefix_len;
+        pexpr->arg = (Expr*)chgnode;
+        chgnode = (Node*)pexpr;
+    }
+    if (bms_equal(rinfo->left_relids, index->rel->relids)) {
+        rightop = chgnode;
+    } else {
+        leftop = chgnode;
+    }
+
+    /*
+     * Operators "> and "<" may cause required keys to be skipped.
+     * Replace them with ">=" or "<=".
+     */
+    strategy = get_op_opfamily_strategy(oproid, opfamily);
+    if (strategy == BTGreaterStrategyNumber) {
+        oproid = get_opfamily_member(opfamily, exprType(leftop), exprType(rightop), BTGreaterEqualStrategyNumber);
+    } else if (strategy == BTLessStrategyNumber) {
+        oproid = get_opfamily_member(opfamily, exprType(leftop), exprType(rightop), BTLessEqualStrategyNumber);
+    }
+    if (oproid == InvalidOid)
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                (errmsg(
+                    "no >= or <= operator for opfamily %u when generate indexqual for prefix key", opfamily))));
+    newop = make_opclause(oproid, BOOLOID, op->opretset, (Expr*)leftop, (Expr*)rightop, op->opcollid, op->inputcollid);
+
+    return make_simple_restrictinfo(newop);
+}
+
+
 

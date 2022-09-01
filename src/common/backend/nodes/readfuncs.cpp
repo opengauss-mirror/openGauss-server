@@ -5754,6 +5754,16 @@ static TdigestData* _readTdigestData()
     READ_DONE();
 }
 
+static PrefixKey* _readPrefixKey()
+{
+    READ_LOCALS(PrefixKey);
+
+    READ_NODE_FIELD(arg);
+    READ_INT_FIELD(length);
+
+    READ_DONE();
+}
+
 static UserSetElem* _readUserSetElem()
 {
     READ_LOCALS(UserSetElem);
@@ -6233,6 +6243,8 @@ Node* parseNodeString(void)
         return_value = _readPLDebug_frame();
     } else if (MATCH("TdigestData", 11)) {
         return_value = _readTdigestData();
+    } else if (MATCH("PREFIXKEY", 9)) {
+        return_value = _readPrefixKey();
     } else if (MATCH("USERSETELEM", 11)) {
         return_value = _readUserSetElem();
     } else if (MATCH("USERVAR", 7)) {

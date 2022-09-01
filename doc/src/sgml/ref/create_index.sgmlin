@@ -11,7 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] [ [schema_name.] index_name ] ON table_name [ USING method ]
-    ({ { column_name | ( expression ) } [ COLLATE collation ] [ opclass ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ] }[, ...] )
+    ({ { column_name [ ( length ) ] | ( expression ) } [ COLLATE collation ] [ opclass ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ] }[, ...] )
     [ INCLUDE ( { column_name | ( expression ) }[, ...] ) ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ TABLESPACE tablespace_name ]
@@ -24,6 +24,7 @@ CREATE [ UNIQUE ] INDEX [ [schema_name.] index_name ] ON table_name [ USING meth
     [ TABLESPACE tablespace_name ];
 
 NOTICE: 'SUBPARTITION index_subpartition_name' is only avaliable in CENTRALIZED mode!
+NOTICE: 'column_name ( length )' is only avaliable in B-format database!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

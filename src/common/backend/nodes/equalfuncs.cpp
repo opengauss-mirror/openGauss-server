@@ -3248,6 +3248,13 @@ static bool _equalShutDown(const ShutdownStmt* a, const ShutdownStmt* b)
     return true;
 }
 
+static bool _equalPrefixKey(const PrefixKey* a, const PrefixKey* b)
+{
+    COMPARE_NODE_FIELD(arg);
+    COMPARE_SCALAR_FIELD(length);
+    return true;
+}
+
 /*
  * equal
  *	  returns whether two nodes are equal
@@ -4120,6 +4127,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_DropSubscriptionStmt:
             retval = _equalDropSubscriptionStmt((DropSubscriptionStmt *)a, (DropSubscriptionStmt *)b);
+            break;
+        case T_PrefixKey:
+            retval = _equalPrefixKey((PrefixKey *)a, (PrefixKey *)b);
             break;
 
         default:

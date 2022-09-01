@@ -89,9 +89,10 @@ static Node* transformConnectByRootFuncCall(ParseState* pstate, Node* funcNameVa
 static char *ColumnRefFindRelname(ParseState *pstate, const char *colname);
 static Node *transformStartWithColumnRef(ParseState *pstate, ColumnRef *cref, char **colname);
 static Node* tryTransformFunc(ParseState* pstate, List* fields, int location);
+static Node* transformPrefixKey(ParseState* pstate, PrefixKey* pkey);
 
 #define OrientedIsCOLorPAX(rte) ((rte)->orientation == REL_COL_ORIENTED || (rte)->orientation == REL_PAX_ORIENTED)
-
+#define INDEX_KEY_MAX_PREFIX_LENGTH (int)2676
 /*
  * transformExpr -
  *	  Analyze and transform expressions. Type checking and type casting is
@@ -310,6 +311,9 @@ Node* transformExpr(ParseState* pstate, Node* expr)
 
         case T_PredictByFunction:
             result = transformPredictByFunction(pstate, (PredictByFunction*) expr);
+            break;
+        case T_PrefixKey:
+            result = transformPrefixKey(pstate, (PrefixKey*)expr);
             break;
 
             /*********************************************
@@ -3104,4 +3108,61 @@ static char *ColumnRefFindRelname(ParseState *pstate, const char *colname)
     }
 
     return relname;
+}
+
+/*
+ * Transform a PrefixKey.
+ */
+static Node* transformPrefixKey(ParseState* pstate, PrefixKey* pkey)
+{
+    Node *argnode = (Node*)pkey->arg;
+    int maxlen;
+    int location = ((ColumnRef*)argnode)->location;
+
+    Assert(nodeTag(argnode) == T_ColumnRef);
+
+    if (pkey->length <= 0 || pkey->length > INDEX_KEY_MAX_PREFIX_LENGTH) {
+        ereport(ERROR,
+            (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+            errmsg("index key prefix length(%d) must be positive and cannot exceed %d",
+                pkey->length, INDEX_KEY_MAX_PREFIX_LENGTH),
+            parser_errposition(pstate, location)));
+    }
+    argnode = transformExpr(pstate, argnode);
+
+    Assert(nodeTag(argnode) == T_Var);
+
+    switch (((Var*)argnode)->vartype) {
+        case TEXTOID:
+        case CLOBOID:
+        case BPCHAROID:
+        case VARCHAROID:
+        case NVARCHAR2OID:
+        case BLOBOID:
+        case RAWOID:
+        case BYTEAOID:
+            pkey->arg = (Expr*)argnode;
+            break;
+
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("index prefix key are not supported by column type %s",
+                    format_type_be(((Var*)argnode)->vartype)),
+                parser_errposition(pstate, location)));
+    }
+
+    maxlen = ((Var*)argnode)->vartypmod;
+    if (maxlen > 0) {
+        maxlen -= VARHDRSZ;
+        if (pkey->length > maxlen) {
+            ereport(ERROR,
+                (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("index key prefix length(%d) too long for type %s(%d)",
+                    pkey->length, format_type_be(((Var*)argnode)->vartype), maxlen),
+                parser_errposition(pstate, location)));
+        }
+    }
+
+    return (Node*)pkey;
 }
