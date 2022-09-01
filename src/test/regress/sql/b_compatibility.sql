@@ -289,6 +289,235 @@ RESET ROLE;
 
 \c regression
 
+-- test label:loop
+--error
+create or replace procedure doiterate(p1 int)
+as
+begin
+label1: loop
+p1 := p1+1;
+if p1 < 10 then
+iterate label1;
+end if;
+leave label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+
+--error
+create or replace procedure doiterate(p1 int)
+as
+begin
+<<label1>> loop
+p1 := p1+1;
+if p1 < 10 then
+iterate label1;
+end if;
+leave label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+
+--error
+create or replace procedure doiterate(p1 int)
+as
+begin
+<<label1>> loop
+p1 := p1+1;
+if p1 < 10 then
+continue label1;
+end if;
+leave label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+<<label1>> loop
+p1 := p1+1;
+if p1 < 10 then
+continue label1;
+end if;
+exit label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+
+call doiterate(3);
+
+drop procedure if exists doiterate;
+\c b
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+label1   :
+loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit;
+end loop label1;
+end;
+/
+
+call doiterate(2);
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+LABEL1:
+loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit LABEL1;
+end loop LABEL1;
+end;
+/
+
+call doiterate(2);
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+LAbEL1:
+loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit LABeL1;
+end loop LaBEL1;
+end;
+/
+
+call doiterate(2);
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
+label1: loop
+p1 := p1+1;
+if p1 < 10 then
+iterate label1;
+end if;
+leave label1;
+end loop label1;
+raise notice 'p1:%',p1;
+end;
+/
+
+call doiterate(3);
+
+create or replace procedure doiterate(p1 int)
+as
+begin
+loop
+p1 := p1+1;
+if p1 < 10 then
+iterate;
+end if;
+leave;
+end loop;
+raise notice 'p1:%',p1;
+end;
+/
+
+call doiterate(3);
+
+create or replace function labeltest(n int) return int
+as
+p int;
+i int;
+begin
+p :=2;
+label1:  loop
+if p < n then
+p := p+1;
+iterate label1;
+end if;
+leave label1;
+end loop label1;
+return p;
+end;
+/
+
+call labeltest(5);
+
+create or replace function labeltest(n int) return int
+as
+p int;
+i int;
+begin
+p :=2;
+LABEL1:  loop
+if p < n then
+p := p+1;
+iterate LABEL1;
+end if;
+leave LABEL1;
+end loop LABEL1;
+return p;
+end;
+/
+
+call labeltest(3);
+
+create or replace function labeltest(n int) return int
+as
+p int;
+i int;
+begin
+p :=2;
+lAbel1:  loop
+if p < n then
+p := p+1;
+iterate labEl1;
+end if;
+leave LAbel1;
+end loop labEL1;
+return p;
+end;
+/
+
+call labeltest(7);
+
+create or replace function labeltest(n int) return int
+as
+p int;
+i int;
+begin
+p :=2;
+loop
+if p < n then
+p := p+1;
+iterate;
+end if;
+leave;
+end loop;
+return p;
+end;
+/
+
+call labeltest(9);
+drop procedure if exists doiterate;
+drop function if exists labeltest;
+
+\c regression
+
 drop database b;
 DROP USER test_c;
 DROP USER test_d;
