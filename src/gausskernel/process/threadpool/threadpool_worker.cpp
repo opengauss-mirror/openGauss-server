@@ -793,7 +793,6 @@ static void init_session_share_memory()
 #ifndef ENABLE_MULTIPLE_NODES
 extern void InitASqlPluginHookIfNeeded();
 extern void InitBSqlPluginHookIfNeeded();
-extern void LoadDolphinIfNeeded();
 #endif
 
 static bool InitSession(knl_session_context* session)

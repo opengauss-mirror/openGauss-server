@@ -2650,6 +2650,7 @@ typedef struct knl_u_hook_context {
     void *execInitExprHook;
     void *computeHashHook;
     void *aggSmpHook;
+    void *standardProcessUtilityHook;
 } knl_u_hook_context;
 
 typedef struct knl_session_context {

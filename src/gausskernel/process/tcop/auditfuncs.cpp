@@ -125,15 +125,6 @@ static const AuditFuncMap g_auditFuncMap[] = {
 static const int g_auditFuncMapNum = sizeof(g_auditFuncMap) / sizeof(AuditFuncMap);
 
 /*
- * This function is used for setting prev_ProcessUtility to rewrite
- * standard_ProcessUtility by extension.
- */
-void set_pgaudit_prehook(ProcessUtility_hook_type func)
-{
-    prev_ProcessUtility = func;
-}
-
-/*
  * Brief		    : perfstat_agent_init()
  * Description	: Module load callback.
  * Notes		    : Called from postmaster.
@@ -146,7 +137,7 @@ void pgaudit_agent_init(void)
     }
     prev_ExecutorEnd = ExecutorEnd_hook;
     ExecutorEnd_hook = pgaudit_ExecutorEnd;
-    set_pgaudit_prehook(ProcessUtility_hook);
+    prev_ProcessUtility = ProcessUtility_hook;
     ProcessUtility_hook = (ProcessUtility_hook_type)pgaudit_ProcessUtility;
     u_sess->exec_cxt.g_pgaudit_agent_attached = true;
 }

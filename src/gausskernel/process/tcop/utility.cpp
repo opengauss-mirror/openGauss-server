@@ -2408,6 +2408,12 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
     char* completion_tag,
     bool isCTAS)
 {
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    if (u_sess->hook_cxt.standardProcessUtilityHook) {
+        return ((ProcessUtility_hook_type)(u_sess->hook_cxt.standardProcessUtilityHook))(parse_tree, query_string,
+            params, is_top_level, dest, sent_to_remote, completion_tag, isCTAS);
+    }
+#endif
     /* This can recurse, so check for excessive recursion */
     check_stack_depth();
 
