@@ -104,19 +104,10 @@ void InitHypopg()
     isExplain = false;
 }
 
-/*
- * This function is used for setting prev_utility_hook to rewrite
- * standard_ProcessUtility by extension.
- */
-void set_hypopg_prehook(ProcessUtility_hook_type func)
-{
-    prev_utility_hook = func;
-}
-
 void hypopg_register_hook()
 {
     // register hooks
-    set_hypopg_prehook(ProcessUtility_hook);
+    prev_utility_hook = ProcessUtility_hook;
     ProcessUtility_hook = hypo_utility_hook;
 
     prev_ExecutorEnd_hook = ExecutorEnd_hook;

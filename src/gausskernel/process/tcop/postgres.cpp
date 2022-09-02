@@ -876,11 +876,13 @@ void InitBSqlPluginHookIfNeeded()
 }
 
 #define LOAD_DOLPHIN "create_dolphin_extension"
-void LoadDolphinIfNeeded()
+bool LoadDolphinIfNeeded()
 {
     if (IsFileExisted(DOLPHIN)) {
         ExecuteFunctionIfExisted(DOLPHIN, LOAD_DOLPHIN);
+        return true;
     }
+    return false;
 }
 #endif
 
@@ -7182,6 +7184,8 @@ void RemoveTempNamespace()
 void LoadSqlPlugin()
 {
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
+        bool loaded = true;
+
         if (!u_sess->attr.attr_sql.dolphin) {
             /* recheck and load dolphin within lock */
             pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
@@ -7191,12 +7195,12 @@ void LoadSqlPlugin()
             finish_xact_command();
 
             if (!u_sess->attr.attr_sql.dolphin) {
-                LoadDolphinIfNeeded();
-            } else {
-                InitBSqlPluginHookIfNeeded();
+                loaded = LoadDolphinIfNeeded();
             }
             pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
-        } else {
+        }
+
+        if (loaded) {
             InitBSqlPluginHookIfNeeded();
         }
     } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
