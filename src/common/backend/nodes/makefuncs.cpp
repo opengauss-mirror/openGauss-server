@@ -458,7 +458,8 @@ RangeVar* makeRangeVar(char* schemaname, char* relname, int location)
     r->buckets = NIL;
     r->length = 0;
     r->withVerExpr = false;
-
+    r->partitionNameList = NIL;
+    
     return r;
 }
 

@@ -2138,6 +2138,77 @@ end pck1;
 
 DROP PACKAGE pck1;
 DROP PACKAGE pck2;
+
+-- auto ref package with cursor, but not use, should not error
+create or replace package pck2 as
+cursor c1 for select * from t1;
+va int;
+procedure p1;
+end pck2;
+/
+create or replace package body pck2 as
+procedure p1 as
+begin
+open c1;
+end;
+begin
+va := 1;
+end pck2;
+/
+
+create or replace package pck1 as
+cursor c1 for select * from t1;
+procedure p1;
+end pck1;
+/
+create or replace package body pck1 as
+procedure p1 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+pck2.va := 1;
+end;
+end pck1;
+/
+
+call pck1.p1();
+DROP PACKAGE pck1;
+DROP PACKAGE pck2;
+
+-- auto call another normal procedure ref package cursor,should error when call
+create or replace package pck2 as
+cursor c1 for select * from t1;
+va int;
+procedure p1;
+end pck2;
+/
+
+create or replace procedure p2 as
+va t1;
+begin
+open pck2.c1;
+close pck2.c1;
+end;
+/
+
+create or replace package pck1 as
+cursor c1 for select * from t1;
+procedure p1;
+end pck1;
+/
+create or replace package body pck1 as
+procedure p1 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+p2();
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+DROP PACKAGE pck1;
+DROP PACKAGE pck2;
+DROP PROCEDURE p2();
 DROP TABLE t1;
 
 -- test check sql in for rec in query loop
@@ -2347,6 +2418,119 @@ drop package pck1;
 drop table testlog;
 drop type o1;
 
+-- package init src when annother package ref it
+create or replace package pkg062
+is
+type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob);
+type type002 is table of type001 index by integer;
+col1 type002:=type002();
+procedure proc062_1();
+end pkg062;
+/
+
+create or replace package body pkg062
+is
+procedure proc062_1()
+is
+begin
+null;
+end;
+begin
+col1(1):=(1,1,'varchar1',repeat('clob1',2),'abcdef1');
+col1(2):=(2,2,'varchar10',repeat('clob2',2),'abcdef2');
+end pkg062;
+/
+
+create or replace package pkg062_1
+is
+procedure p1();
+end pkg062_1;
+/
+
+create or replace package body pkg062_1
+is
+procedure p1()
+is
+begin
+raise info 'pkg062.col1 %',pkg062.col1;
+end;
+end pkg062_1;
+/
+
+drop package pkg062_1;
+drop package pkg062;
+
+-- tuple desc free in time
+create or replace package pkg048 is   
+type type000 is record (c1 number(9,3),c2 varchar2(30));   
+type type001 is table of type000;   
+type type002 is record (c1 type001,c2 type000);   
+end pkg048;
+/
+create or replace package pkg048_1 
+is
+function func048_1_1(c1 out pkg048.type002) return pkg048.type001;
+end pkg048_1;
+/
+create or replace package body pkg048_1
+is
+function func048_1_1(c1 out pkg048.type002) return pkg048.type001
+is
+a int;
+c2 pkg048.type001;
+begin
+c1.c1(1).c2 = 'ab';
+c1.c2.c2:=c1.c1(1).c2;
+return c1.c1;
+exception
+when others then
+raise info 'sqlerrm is %',sqlerrm;
+raise info 'sqlcode is %',sqlcode;
+return c1.c1;
+end;
+end pkg048_1;
+/
+call pkg048_1.func048_1_1(null);
+call pkg048_1.func048_1_1(null);
+
+drop package pkg048_1;
+drop package pkg048;
+
+-- test nest ref package
+create or replace package pck2 IS
+TYPE rateTable is TABLE of NUMBER INDEX by varchar2(50);
+v_ratetable pck2.rateTable;
+PROCEDURE p2(IN_NODE_CODE IN VARCHAR2,IN_CINO IN VARCHAR2);
+END pck2;
+/
+
+create or replace package pck1 IS
+v_ratetable pck2.rateTable;
+type r1 is record (a int, b int);
+PROCEDURE p1(OUT_FLAG OUT VARCHAR2,OUT_MSG OUT VARCHAR2);
+END pck1;
+/
+
+create or replace package body pck1 IS
+PROCEDURE p1(OUT_FLAG OUT VARCHAR2,OUT_MSG OUT VARCHAR2) as
+begin
+null;
+end;
+END pck1;
+/
+
+create or replace package body pck2 is
+PROCEDURE p2(IN_NODE_CODE IN VARCHAR2,IN_CINO IN VARCHAR2) as
+begin
+pck1.p1(IN_NODE_CODE,IN_CINO);
+end;
+end pck2;
+/
+
+call pck2.p2('a','b');
+
+drop package pck2;
+drop package pck1;
 -- clean 
 DROP SCHEMA IF EXISTS pkg_val_1 CASCADE;
 DROP SCHEMA IF EXISTS pkg_val_2 CASCADE;

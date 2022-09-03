@@ -13,7 +13,6 @@
  */
 #ifndef VACUUM_H
 #define VACUUM_H
-#include "dfsdesc.h"
 #include "access/htup.h"
 #include "access/genam.h"
 #include "catalog/pg_partition_fn.h"
@@ -133,6 +132,9 @@ typedef struct VacAttrStats {
      */
     int tupattnum;   /* attribute number within tuples */
     HeapTuple* rows; /* access info for std fetch function */
+#ifndef ENABLE_MULTIPLE_NODES
+    int numSamplerows; /* numbers of sample rows */
+#endif
     TupleDesc tupDesc;
     Datum* exprvals; /* access info for index fetch function */
     bool* exprnulls;
@@ -159,8 +161,8 @@ typedef struct vacuum_object {
 
     /*
      * we ues following flag to skip some check
-     * 1. for partitioned table , we vacuum all the partitiones when we
-     *    vacuum partitioned so we just skip check all partiitons
+     * 1. for partitioned table , we vacuum all the partitions when we
+     *    vacuum partitioned so we just skip check all partitions
      * 2. for main table, we vaccum toast table when we vacuum main table
      */
     bool dovacuum;
@@ -169,6 +171,7 @@ typedef struct vacuum_object {
     bool need_freeze;   /* flag to freeze old tuple for recycle clog */
     bool is_internal_relation; /* flag to mark if it is an internal relation */
     bool is_tsdb_deltamerge;    /* flag to mark if it is a tsdb deltamerge task */
+    bool gpi_vacuumed;           /* flag to mark if gpi has been vacuumed */
     int flags;                 /* flags for vacuum object */
 } vacuum_object;
 
@@ -255,8 +258,6 @@ typedef struct {
 #define vacuumMainPartition(flag) (((flag)&VACFLG_MAIN_PARTITION) == VACFLG_MAIN_PARTITION)
 
 #define vacuumPartition(flag) (((flag)&VACFLG_SUB_PARTITION) == VACFLG_SUB_PARTITION)
-
-#define hdfsVcuumAction(flag) (((flag)&VACOPT_HDFSDIRECTORY) || ((flag)&VACOPT_COMPACT) || ((flag)&VACOPT_MERGE))
 
 /* We need estimate total rows on datanode only sample rate is -1. */
 #define NEED_EST_TOTAL_ROWS_DN(vacstmt) \
@@ -441,7 +442,6 @@ extern double anl_init_selection_state(int n);
 extern double anl_get_next_S(double t, int n, double* stateptr);
 extern int compute_sample_size(
     VacuumStmt* vacstmt, int num_samples, bool** require_samp, Oid relid = 0, int tableidx = 0);
-extern void set_complex_sample(VacuumStmt* pStmt);
 extern void delete_attstats_replication(Oid relid, VacuumStmt* stmt);
 extern int compute_attr_target(Form_pg_attribute attr);
 
@@ -463,18 +463,10 @@ extern void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relati
 
 extern bool IsToastRelationbyOid(Oid relid);
 extern Oid pg_toast_get_baseid(Oid relOid, bool* isPartToast);
-extern void elogVacuumInfo(Relation rel, HeapTuple tuple, char* funcName, TransactionId oldestxmin);
 
 typedef Datum (*GetValFunc[2])(CU* cuPtr, int rowIdx);
 extern void InitGetValFunc(int attlen, GetValFunc* getValFuncPtr, int col);
 
-extern void DfsVacuumFull(Oid relid, VacuumStmt* vacstmt);
-extern void RemoveGarbageFiles(Relation rel, DFSDescHandler* handler);
-
-extern bool equal_string(const void* _str1, const void* _str2);
-extern List* GetDifference(const List* list1, const List* list2, EqualFunc fn);
-
-extern void merge_one_relation(void* _info);
 extern void merge_cu_relation(void* info, VacuumStmt* stmt);
 
 extern List* get_rel_oids(Oid relid, VacuumStmt* vacstmt);
@@ -498,5 +490,12 @@ extern void lazy_record_dead_tuple(LVRelStats *vacrelstats,
                                            ItemPointer itemptr);
 extern void vacuum_log_cleanup_info(Relation rel, LVRelStats *vacrelstats);
 extern void CBIOpenLocalCrossbucketIndex(Relation onerel, LOCKMODE lockmode, int* nindexes, Relation** iRel);
+extern int GetVacuumLogLevel(void);
+
+// used by aianalyzer only
+extern char *build_temptable_sample_agg_joined(Oid, AnalyzeSampleTableSpecInfo *, const uint32 *,
+    const char *, const char *, const char *, int);
+extern char *build_temptable_sample_agg(Oid, AnalyzeMode, bool,
+    VacuumStmt *, AnalyzeSampleTableSpecInfo *, const uint32 *, int);
 
 #endif /* VACUUM_H */

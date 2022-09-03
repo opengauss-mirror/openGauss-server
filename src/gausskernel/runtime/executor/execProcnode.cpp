@@ -124,7 +124,6 @@
 #include "miscadmin.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecnodecstoreindexscan.h"
-#include "vecexecutor/vecnodedfsindexscan.h"
 #include "vecexecutor/vecnodevectorow.h"
 #include "vecexecutor/vecnodecstoreindexctidscan.h"
 #include "vecexecutor/vecnodecstoreindexheapscan.h"
@@ -164,7 +163,6 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
 #include "executor/node/nodeTrainModel.h"
-
 #define NODENAMELEN 64
 
 /*
@@ -343,8 +341,6 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitVecStream((Stream*)node, estate, eflags);
         case T_CStoreScan:
             return (PlanState*)ExecInitCStoreScan((CStoreScan*)node, NULL, estate, eflags);
-        case T_DfsScan:
-            return (PlanState*)ExecInitDfsScan((DfsScan*)node, NULL, estate, eflags);
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             return (PlanState*)ExecInitTsStoreScan((TsStoreScan *)node, NULL, estate, eflags);
@@ -353,8 +349,6 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitVecHashJoin((VecHashJoin*)node, estate, eflags);
         case T_VecAgg:
             return (PlanState*)ExecInitVecAggregation((VecAgg*)node, estate, eflags);
-        case T_DfsIndexScan:
-            return (PlanState*)ExecInitDfsIndexScan((DfsIndexScan*)node, estate, eflags);
         case T_CStoreIndexScan:
             return (PlanState*)ExecInitCstoreIndexScan((CStoreIndexScan*)node, estate, eflags);
         case T_CStoreIndexCtidScan:
@@ -1389,10 +1383,6 @@ static void ExecEndNodeByType(PlanState* node)
         case T_CStoreScanState:
             ExecEndCStoreScan((CStoreScanState*)node, false);
             break;
-
-        case T_DfsScanState:
-            ExecEndDfsScan((DfsScanState*)node);
-            break;
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScanState:
             ExecEndTsStoreScan((TsStoreScanState *)node, false);
@@ -1400,10 +1390,6 @@ static void ExecEndNodeByType(PlanState* node)
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScanState:
             ExecEndIndexScan((IndexScanState*)node);
-            break;
-
-        case T_DfsIndexScanState:
-            ExecEndDfsIndexScan((DfsIndexScanState*)node);
             break;
 
         case T_CStoreIndexScanState:
@@ -1621,7 +1607,6 @@ static void ExecEndNodeByType(PlanState* node)
         case T_TrainModelState:
             ExecEndTrainModel((TrainModelState*)node);
             break;
-            
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),

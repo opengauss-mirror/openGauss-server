@@ -45,6 +45,8 @@
  */
 #define ON(var) ((var) ? _("on") : _("off"))
 
+static void HelpTopicSQL(const char* topic, unsigned short int pager);
+
 void usage(void)
 {
     char* tmp = NULL;
@@ -392,85 +394,93 @@ void helpSQL(const char* topic, unsigned short int pager)
         }
 
         ClosePager(output);
-    } else {
-        int i;
-        int j;
-        int x = 0;
-        bool help_found = false;
-        FILE* output = NULL;
-        size_t len, wordlen;
-        int nl_count = 0;
+        return;
+    }
 
-        /*
-         * We first try exact match, then first + second words, then first
-         * word only.
-         */
-        len = strlen(topic);
+    HelpTopicSQL(topic, pager);
+}
 
-        for (x = 1; x <= 3; x++) {
-            if (x > 1) { /* Nothing on first pass - try the opening
-                        * word(s) */
-                wordlen = j = 1;
-                while (topic[j] != ' ' && (unsigned int)(j++) < len)
-                    wordlen++;
-                if (x == 2) {
-                    j++;
-                    while (topic[j] != ' ' && (unsigned int)(j++) <= len)
-                        wordlen++;
-                }
-                if (wordlen >= len) { /* Don't try again if the same word */
-                    if (output == NULL)
-                        output = PageOutput(nl_count, pager);
-                    break;
-                }
-                len = wordlen;
-            }
+static void HelpTopicSQL(const char *topic, unsigned short int pager)
+{
+    int i;
+    int x;
+    bool helpFound = false;
+    bool recheck;
+    FILE *output = NULL;
+    size_t len, wordlen;
+    int nlCount = 0;
 
-            /* Count newlines for pager */
-            for (i = 0; QL_HELP[i].cmd != NULL; i++) {
-                if (pg_strncasecmp(topic, QL_HELP[i].cmd, len) == 0 || strcmp(topic, "*") == 0) {
-                    nl_count += 5 + QL_HELP[i].nl_count;
+    /*
+     * We first try exact match, then first + second words, then first
+     * word only.
+     */
+    wordlen = len = strlen(topic);
 
-                    /* If we have an exact match, exit.  Fixes \h SELECT */
-                    if (pg_strcasecmp(topic, QL_HELP[i].cmd) == 0)
-                        break;
-                }
-            }
-
+    /* A maximum of 3 words can be matched */
+    for (x = 1; x <= 3; x++) {
+        if (x > 1) { /* Nothing on first pass - try the opening word(s) */
+            wordlen = 1;
+            while (wordlen < len && topic[wordlen] != ' ')
+                wordlen++;
+        }
+        if (x == 2) { /* Matching 2 words for the second time */
+            wordlen++;
+            while (wordlen < len && topic[wordlen] != ' ')
+                wordlen++;
+        }
+        if (x > 1 && wordlen >= len) { /* Don't try again if the same word */
             if (output == NULL)
-                output = PageOutput(nl_count, pager);
+                output = PageOutput(nlCount, pager);
+            break;
+        }
+        len = wordlen;
 
-            for (i = 0; QL_HELP[i].cmd != NULL; i++) {
-                if (pg_strncasecmp(topic, QL_HELP[i].cmd, len) == 0 || strcmp(topic, "*") == 0) {
-                    PQExpBufferData buffer;
+        /* Count newlines for pager */
+        for (i = 0; QL_HELP[i].cmd != NULL; i++) {
+            recheck = false;
+            if (pg_strncasecmp(topic, QL_HELP[i].cmd, len) == 0 || strcmp(topic, "*") == 0) {
+                nlCount += 5 + QL_HELP[i].nl_count; /* Reserve 5 space */
 
-                    initPQExpBuffer(&buffer);
-                    QL_HELP[i].syntaxfunc(&buffer);
-                    help_found = true;
-                    fprintf(output,
-                        _("Command:     %s\n"
-                          "Description: %s\n"
-                          "Syntax:\n%s\n\n"),
-                        QL_HELP[i].cmd,
-                        _(QL_HELP[i].help),
-                        buffer.data);
-                    termPQExpBuffer(&buffer);
-                    /* If we have an exact match, exit.  Fixes \h SELECT */
-                    if (pg_strcasecmp(topic, QL_HELP[i].cmd) == 0)
-                        break;
-                }
+                recheck = true;
             }
-            if (help_found) { /* Don't keep trying if we got a match */
+            /* If we have an exact match, exit.  Fixes \h SELECT */
+            if (recheck && pg_strcasecmp(topic, QL_HELP[i].cmd) == 0)
                 break;
-            }
         }
 
-        if (!help_found)
-            fprintf(
-                output, _("No help available for \"%s\".\nTry \\h with no arguments to see available help.\n"), topic);
+        if (output == NULL)
+            output = PageOutput(nlCount, pager);
 
-        ClosePager(output);
+        for (i = 0; QL_HELP[i].cmd != NULL; i++) {
+            recheck = false;
+            if (pg_strncasecmp(topic, QL_HELP[i].cmd, len) == 0 || strcmp(topic, "*") == 0) {
+                PQExpBufferData buffer;
+
+                initPQExpBuffer(&buffer);
+                QL_HELP[i].syntaxfunc(&buffer);
+                helpFound = true;
+                (void)fprintf(output,
+                    _("Command:     %s\nDescription: %s\nSyntax:\n%s\n\n"),
+                    QL_HELP[i].cmd, _(QL_HELP[i].help), buffer.data);
+                termPQExpBuffer(&buffer);
+
+                recheck = true;
+            }
+            /* If we have an exact match, exit.  Fixes \h SELECT */
+            if (recheck && pg_strcasecmp(topic, QL_HELP[i].cmd) == 0)
+                break;
+        }
+        if (helpFound) { /* Don't keep trying if we got a match */
+            break;
+        }
     }
+
+    if (!helpFound)
+        (void)fprintf(output,
+            _("No help available for \"%s\".\nTry \\h with no arguments to see available help.\n"),
+            topic);
+
+    ClosePager(output);
 }
 
 void print_copyright(void)

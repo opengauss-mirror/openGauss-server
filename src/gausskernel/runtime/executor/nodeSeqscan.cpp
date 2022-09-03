@@ -191,16 +191,17 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node);
 
 template<TableAmType type, bool hashBucket>
 FORCE_INLINE
-void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection direction)
+void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection direction,
+    bool* has_cur_xact_write)
 {
     Tuple tuple;
     if(hashBucket) {
         /* fall back to orign slow function. */
-        tuple =  scan_handler_tbl_getnext(scan, direction, NULL);
+        tuple =  scan_handler_tbl_getnext(scan, direction, NULL, has_cur_xact_write);
     } else if(type == TAM_HEAP) {
-        tuple =  (Tuple)heap_getnext(scan, direction);
+        tuple =  (Tuple)heap_getnext(scan, direction, has_cur_xact_write);
     } else {
-        tuple =  (Tuple)UHeapGetNext(scan, direction);
+        tuple =  (Tuple)UHeapGetNext(scan, direction, has_cur_xact_write);
     }
     if (hashBucket) {
         scan = ((HBktTblScanDesc)scan)->currBktScan;
@@ -248,7 +249,7 @@ static TupleTableSlot* SeqNext(SeqScanState* node)
     /*
      * get the next tuple from the table for seqscan.
      */
-    node->fillNextSlotFunc(scanDesc, slot, estate->es_direction);
+    node->fillNextSlotFunc(scanDesc, slot, estate->es_direction, &node->ps.state->have_current_xact_date);
 
     return slot;
 }
@@ -319,7 +320,6 @@ bool FetchEpqTupleBatchMode(ScanState* node)
  
     return false;
 }
-
 static ScanBatchResult *SeqNextBatchMode(SeqScanState *node)
 {
     TableScanDesc scanDesc;
@@ -340,7 +340,6 @@ static ScanBatchResult *SeqNextBatchMode(SeqScanState *node)
 
     /* get information from the estate and scan state */
     scanDesc = node->ss_currentScanDesc;
-    estate = node->ps.state;
     direction = estate->es_direction;
 
     /* get tuples from the table. */
@@ -490,9 +489,11 @@ TableScanDesc BeginScanRelation(SeqScanState* node, Relation relation, Transacti
             if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                 !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                 TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_SNAPSHOT_INVALID),
-                         (errmsg("Snapshot too old."))));
+                ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID),
+                    (errmsg("Snapshot too old, ScanRelation, the info: snapxmax is %lu, "
+                        "snapxmin is %lu, csn is %lu, relfrozenxid64 is %lu, globalRecycleXid is %lu.",
+                        scanSnap->xmax, scanSnap->xmin, scanSnap->snapshotcsn, relfrozenxid64,
+                        g_instance.undo_cxt.globalRecycleXid))));
             }
         }
 
@@ -500,7 +501,7 @@ TableScanDesc BeginScanRelation(SeqScanState* node, Relation relation, Transacti
             (void)reset_scan_qual(relation, node);
         }
 
-        current_scan_desc = UHeapBeginScan(relation, scanSnap, 0);
+        current_scan_desc = UHeapBeginScan(relation, scanSnap, 0, NULL);
     } else {
         current_scan_desc = InitBeginScan(node, relation);
     }
@@ -610,7 +611,7 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
                 int partSeq = lfirst_int(cell);
                 List* subpartition = NIL;
 
-                tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq);
+                tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, plan->pruningInfo->partMap);
                 part = partitionOpen(current_relation, tablepartitionid, lockmode);
                 node->partitions = lappend(node->partitions, part);
                 if (resultPlan->ls_selectedSubPartitions != NIL) {
@@ -647,6 +648,9 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
             Partition currentPart = (Partition)list_nth(node->partitions, 0);
             current_part_rel = partitionGetRelation(current_relation, currentPart);
             node->ss_currentPartition = current_part_rel;
+            if (((Scan *)node->ps.plan)->partition_iterator_elimination) {
+                node->ps.qual = (List*)ExecInitExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
+            }
 
             /* add qual for redis */
             TransactionId relfrozenxid64 = InvalidTransactionId;
@@ -1216,7 +1220,7 @@ void ExecReScanSeqScan(SeqScanState* node)
     }
 
     scan = node->ss_currentScanDesc;
-    if (node->isPartTbl) {
+    if (node->isPartTbl && !(((Scan *)node->ps.plan)->partition_iterator_elimination)) {
         if (PointerIsValid(node->partitions)) {
             /* end scan the prev partition first, */
             scan_handler_tbl_endscan(scan);

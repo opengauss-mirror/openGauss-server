@@ -1,0 +1,547 @@
+----delete from table order by xxx limit xxx 
+drop table if exists sytc_t1;
+NOTICE:  table "sytc_t1" does not exist, skipping
+drop table if exists sytc_t2;
+NOTICE:  table "sytc_t2" does not exist, skipping
+drop table if exists sytc_t3;
+NOTICE:  table "sytc_t3" does not exist, skipping
+create table sytc_t1 (f1 int, f2 int ,f3 int);
+create index sytc_t1_idx on sytc_t1(f1);
+create table sytc_t2 (f1 int, f2 int ,f3 int);
+create index sytc_t2_idx on sytc_t2(f1);
+create table sytc_t3 (f1 int, f2 int ,f3 int);
+insert into sytc_t1 select generate_series(1,5000), generate_series(1,5000), generate_series(1,5000);
+insert into sytc_t2 select generate_series(1,5000), generate_series(1,5000), (random()*(6^2))::integer;
+insert into sytc_t3 select generate_series(100,5100), (random()*10000)::integer, (random()*(6^2))::integer;
+explain delete from sytc_t1 order by f1 limit 1;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Delete on sytc_t1  (cost=0.00..0.05 rows=1 width=10)
+   ->  Index Scan using sytc_t1_idx on sytc_t1  (cost=0.00..257.93 rows=5445 width=10)
+(2 rows)
+
+explain delete from sytc_t1 order by f1 desc limit 1;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Delete on sytc_t1  (cost=0.00..0.05 rows=1 width=10)
+   ->  Index Scan Backward using sytc_t1_idx on sytc_t1  (cost=0.00..257.93 rows=5445 width=10)
+(2 rows)
+
+explain delete from sytc_t1 order by f2 desc limit 1;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Delete on sytc_t1  (cost=109.68..109.68 rows=1 width=10)
+   ->  Sort  (cost=109.68..123.29 rows=5445 width=10)
+         Sort Key: f2 DESC
+         ->  Seq Scan on sytc_t1  (cost=0.00..82.45 rows=5445 width=10)
+(4 rows)
+
+explain select * from sytc_t1 where f1 in (select f1 from sytc_t2) order by f2 limit 10;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Limit  (cost=309.90..309.92 rows=10 width=12)
+   ->  Sort  (cost=309.90..316.70 rows=2722 width=12)
+         Sort Key: sytc_t1.f2
+         ->  Hash Join  (cost=100.56..251.08 rows=2722 width=12)
+               Hash Cond: (sytc_t1.f1 = sytc_t2.f1)
+               ->  Seq Scan on sytc_t1  (cost=0.00..82.45 rows=5445 width=12)
+               ->  Hash  (cost=98.06..98.06 rows=200 width=4)
+                     ->  HashAggregate  (cost=96.06..98.06 rows=200 width=4)
+                           Group By Key: sytc_t2.f1
+                           ->  Seq Scan on sytc_t2  (cost=0.00..82.45 rows=5445 width=4)
+(10 rows)
+
+begin;
+delete from sytc_t1 where f1 in (select f1 from sytc_t2) order by f2 desc limit 10;
+select * from sytc_t1 where f1 in (select f1 from sytc_t2) order by f2 desc limit 10;
+  f1  |  f2  |  f3  
+------+------+------
+ 4990 | 4990 | 4990
+ 4989 | 4989 | 4989
+ 4988 | 4988 | 4988
+ 4987 | 4987 | 4987
+ 4986 | 4986 | 4986
+ 4985 | 4985 | 4985
+ 4984 | 4984 | 4984
+ 4983 | 4983 | 4983
+ 4982 | 4982 | 4982
+ 4981 | 4981 | 4981
+(10 rows)
+
+rollback;
+explain (costs off) delete from sytc_t1 where f1 in (select f1 from sytc_t2) order by f1 limit 10;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Delete on sytc_t1
+   ->  Nested Loop Semi Join
+         ->  Index Scan using sytc_t1_idx on sytc_t1
+         ->  Index Scan using sytc_t2_idx on sytc_t2
+               Index Cond: (f1 = sytc_t1.f1)
+(5 rows)
+
+----delete mul-table report error
+explain delete from sytc_t1, sytc_t2 where sytc_t1.f1=sytc_t2.f1 order by f1 limit 1;
+ERROR:  multi-relation delete only support in B-format database
+----delete mul-table join
+explain delete from sytc_t1 using sytc_t2 where sytc_t1.f1=sytc_t2.f1 order by sytc_t1.f1 limit 1;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Delete on sytc_t1  (cost=0.00..0.02 rows=1 width=16)
+   ->  Merge Join  (cost=0.00..2753.06 rows=148240 width=16)
+         Merge Cond: (sytc_t1.f1 = sytc_t2.f1)
+         ->  Index Scan using sytc_t1_idx on sytc_t1  (cost=0.00..257.93 rows=5445 width=10)
+         ->  Materialize  (cost=0.00..271.54 rows=5445 width=10)
+               ->  Index Scan using sytc_t2_idx on sytc_t2  (cost=0.00..257.93 rows=5445 width=10)
+(6 rows)
+
+explain delete from sytc_t1 using sytc_t2 where sytc_t1.f1=sytc_t2.f1 order by sytc_t1.f2 limit 1;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Delete on sytc_t1  (cost=2653.94..2653.95 rows=1 width=16)
+   ->  Sort  (cost=2653.94..3024.54 rows=148240 width=16)
+         Sort Key: sytc_t1.f2
+         ->  Hash Join  (cost=150.51..1912.74 rows=148240 width=16)
+               Hash Cond: (sytc_t1.f1 = sytc_t2.f1)
+               ->  Seq Scan on sytc_t1  (cost=0.00..82.45 rows=5445 width=14)
+               ->  Hash  (cost=82.45..82.45 rows=5445 width=10)
+                     ->  Seq Scan on sytc_t2  (cost=0.00..82.45 rows=5445 width=10)
+(8 rows)
+
+----for with CTE
+begin;
+explain WITH max_table as (
+    SELECT f1, max(f2) mx FROM sytc_t2 GROUP BY f1 order by f1 desc
+) select sytc_t1.f1 FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f1 desc limit 1;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Limit  (cost=119.82..1037.38 rows=1 width=4)
+   CTE max_table
+     ->  Sort  (cost=119.32..119.82 rows=200 width=12)
+           Sort Key: sytc_t2.f1 DESC
+           ->  HashAggregate  (cost=109.67..111.67 rows=200 width=12)
+                 Group By Key: sytc_t2.f1
+                 ->  Seq Scan on sytc_t2  (cost=0.00..82.45 rows=5445 width=8)
+   ->  Index Only Scan Backward using sytc_t1_idx on sytc_t1  (cost=0.00..24774.04 rows=27 width=4)
+         Filter: (f1 = (SubPlan 2))
+         SubPlan 2
+           ->  CTE Scan on max_table  (cost=0.00..4.50 rows=1 width=4)
+                 Filter: (f1 = sytc_t1.f1)
+(12 rows)
+
+WITH max_table as (
+    SELECT f1, max(f2) mx FROM sytc_t2 GROUP BY f1 order by f1 desc
+) select sytc_t1.f1 FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f1 desc limit 1;
+  f1  
+------
+ 5000
+(1 row)
+
+WITH max_table as (
+    SELECT f1, max(f2) mx FROM sytc_t2 GROUP BY f1 order by f1 desc
+) delete FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f1 desc limit 1;
+WITH max_table as (
+    SELECT f1, max(f2) mx FROM sytc_t2 GROUP BY f1 order by f1 desc
+) select sytc_t1.f1 FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f1 desc limit 1;
+  f1  
+------
+ 4999
+(1 row)
+
+rollback;
+begin;
+explain WITH max_table as (
+    SELECT f1, max(f2) mx FROM sytc_t2 GROUP BY f1 order by f1 desc limit 20
+) DELETE FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f2 desc limit 5;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Delete on sytc_t1  (cost=2575.48..2575.49 rows=5 width=14)
+   CTE max_table
+     ->  Limit  (cost=0.00..28.72 rows=20 width=12)
+           ->  GroupAggregate  (cost=0.00..287.15 rows=200 width=12)
+                 Group By Key: sytc_t2.f1
+                 ->  Index Scan Backward using sytc_t2_idx on sytc_t2  (cost=0.00..257.93 rows=5445 width=8)
+   ->  Sort  (cost=2546.76..2546.83 rows=27 width=14)
+         Sort Key: sytc_t1.f2 DESC
+         ->  Seq Scan on sytc_t1  (cost=0.00..2546.31 rows=27 width=14)
+               Filter: (f1 = (SubPlan 2))
+               SubPlan 2
+                 ->  CTE Scan on max_table  (cost=0.00..0.45 rows=1 width=4)
+                       Filter: (f1 = sytc_t1.f1)
+(13 rows)
+
+WITH max_table as (
+    SELECT f1, max(f2) mx FROM sytc_t2 GROUP BY f1 order by f1 desc limit 20
+) select * FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f2 desc limit 5;
+  f1  |  f2  |  f3  
+------+------+------
+ 5000 | 5000 | 5000
+ 4999 | 4999 | 4999
+ 4998 | 4998 | 4998
+ 4997 | 4997 | 4997
+ 4996 | 4996 | 4996
+(5 rows)
+
+WITH max_table as (
+    SELECT f1, max(f2) mx FROM sytc_t2 GROUP BY f1 order by f1 desc limit 20
+) DELETE FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f2 desc limit 5;
+WITH max_table as (
+    SELECT f1, max(f2) mx FROM sytc_t2 GROUP BY f1 order by f1 desc limit 20
+) select * FROM sytc_t1 WHERE f1 = (SELECT mx FROM max_table where max_table.f1 = sytc_t1.f1) order by f2 desc limit 5;
+  f1  |  f2  |  f3  
+------+------+------
+ 4995 | 4995 | 4995
+ 4994 | 4994 | 4994
+ 4993 | 4993 | 4993
+ 4992 | 4992 | 4992
+ 4991 | 4991 | 4991
+(5 rows)
+
+rollback;
+----update table set col=xxx order by xxx limit xxx 
+explain update sytc_t1 set f2 = 1000 order by f2 desc;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Update on sytc_t1  (cost=0.00..82.45 rows=5445 width=18)
+   ->  Seq Scan on sytc_t1  (cost=0.00..82.45 rows=5445 width=18)
+(2 rows)
+
+explain update sytc_t1 set f2 = 1000 where f1 > 4900 order by f1 limit 10;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Update on sytc_t1  (cost=0.00..0.93 rows=10 width=14)
+   ->  Limit  (cost=0.00..0.93 rows=10 width=14)
+         ->  Index Scan using sytc_t1_idx on sytc_t1  (cost=0.00..168.01 rows=1815 width=14)
+               Index Cond: (f1 > 4900)
+(4 rows)
+
+begin;
+explain update sytc_t1 set f2 = 123 where f1 > 4900 order by f2 limit 10;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Update on sytc_t1  (cost=128.23..128.25 rows=10 width=18)
+   ->  Limit  (cost=128.23..128.25 rows=10 width=18)
+         ->  Sort  (cost=128.23..132.76 rows=1815 width=18)
+               Sort Key: f2
+               ->  Bitmap Heap Scan on sytc_t1  (cost=38.32..89.00 rows=1815 width=18)
+                     Recheck Cond: (f1 > 4900)
+                     ->  Bitmap Index Scan on sytc_t1_idx  (cost=0.00..37.86 rows=1815 width=0)
+                           Index Cond: (f1 > 4900)
+(8 rows)
+
+select f1,f2 from sytc_t1 where f2 = 123;
+ f1  | f2  
+-----+-----
+ 123 | 123
+(1 row)
+
+update sytc_t1 set f2 = 123 where f1 >4900 order by f2 limit 10;
+select f1,f2 from sytc_t1 where f2 = 123;
+  f1  | f2  
+------+-----
+  123 | 123
+ 4901 | 123
+ 4902 | 123
+ 4903 | 123
+ 4904 | 123
+ 4905 | 123
+ 4906 | 123
+ 4907 | 123
+ 4908 | 123
+ 4909 | 123
+ 4910 | 123
+(11 rows)
+
+rollback;
+begin;
+explain update sytc_t1 set f2 = 123 where f1 > 4900 order by f2 desc limit 10;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Update on sytc_t1  (cost=128.23..128.25 rows=10 width=18)
+   ->  Limit  (cost=128.23..128.25 rows=10 width=18)
+         ->  Sort  (cost=128.23..132.76 rows=1815 width=18)
+               Sort Key: f2 DESC
+               ->  Bitmap Heap Scan on sytc_t1  (cost=38.32..89.00 rows=1815 width=18)
+                     Recheck Cond: (f1 > 4900)
+                     ->  Bitmap Index Scan on sytc_t1_idx  (cost=0.00..37.86 rows=1815 width=0)
+                           Index Cond: (f1 > 4900)
+(8 rows)
+
+select f1,f2 from sytc_t1 where f2 = 123 order by f2 desc;
+ f1  | f2  
+-----+-----
+ 123 | 123
+(1 row)
+
+update sytc_t1 set f2 = 123 where f1 >4900 order by f2 desc limit 10;
+select f1,f2 from sytc_t1 where f2 = 123 order by f2 desc;
+  f1  | f2  
+------+-----
+  123 | 123
+ 5000 | 123
+ 4999 | 123
+ 4998 | 123
+ 4997 | 123
+ 4996 | 123
+ 4995 | 123
+ 4994 | 123
+ 4993 | 123
+ 4992 | 123
+ 4991 | 123
+(11 rows)
+
+rollback;
+begin;
+explain update sytc_t1 set f3 = 123 where f1 > 4900 order by f2 desc limit 10;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Update on sytc_t1  (cost=128.23..128.25 rows=10 width=14)
+   ->  Limit  (cost=128.23..128.25 rows=10 width=14)
+         ->  Sort  (cost=128.23..132.76 rows=1815 width=14)
+               Sort Key: f2 DESC
+               ->  Bitmap Heap Scan on sytc_t1  (cost=38.32..89.00 rows=1815 width=14)
+                     Recheck Cond: (f1 > 4900)
+                     ->  Bitmap Index Scan on sytc_t1_idx  (cost=0.00..37.86 rows=1815 width=0)
+                           Index Cond: (f1 > 4900)
+(8 rows)
+
+select f1,f2,f3 from sytc_t1 where f3 = 123 order by f2 desc;
+ f1  | f2  | f3  
+-----+-----+-----
+ 123 | 123 | 123
+(1 row)
+
+update sytc_t1 set f3 = 123 where f1 >4900 order by f2 desc limit 10;
+select f1,f2,f3 from sytc_t1 where f3 = 123 order by f2 desc;
+  f1  |  f2  | f3  
+------+------+-----
+ 5000 | 5000 | 123
+ 4999 | 4999 | 123
+ 4998 | 4998 | 123
+ 4997 | 4997 | 123
+ 4996 | 4996 | 123
+ 4995 | 4995 | 123
+ 4994 | 4994 | 123
+ 4993 | 4993 | 123
+ 4992 | 4992 | 123
+ 4991 | 4991 | 123
+  123 |  123 | 123
+(11 rows)
+
+rollback;
+begin;
+explain update sytc_t1 set f3 = 123 where f1 > 4900 order by f3 desc limit 10;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Update on sytc_t1  (cost=128.23..128.25 rows=10 width=18)
+   ->  Limit  (cost=128.23..128.25 rows=10 width=18)
+         ->  Sort  (cost=128.23..132.76 rows=1815 width=18)
+               Sort Key: f3 DESC
+               ->  Bitmap Heap Scan on sytc_t1  (cost=38.32..89.00 rows=1815 width=18)
+                     Recheck Cond: (f1 > 4900)
+                     ->  Bitmap Index Scan on sytc_t1_idx  (cost=0.00..37.86 rows=1815 width=0)
+                           Index Cond: (f1 > 4900)
+(8 rows)
+
+select f1,f2,f3 from sytc_t1 where f3 = 123 order by f3 desc;
+ f1  | f2  | f3  
+-----+-----+-----
+ 123 | 123 | 123
+(1 row)
+
+update sytc_t1 set f3 = 123 where f1 >4900 order by f3 desc limit 10;
+select f1,f2,f3 from sytc_t1 where f3 = 123 order by f3 desc;
+  f1  |  f2  | f3  
+------+------+-----
+  123 |  123 | 123
+ 5000 | 5000 | 123
+ 4999 | 4999 | 123
+ 4998 | 4998 | 123
+ 4997 | 4997 | 123
+ 4996 | 4996 | 123
+ 4995 | 4995 | 123
+ 4994 | 4994 | 123
+ 4993 | 4993 | 123
+ 4992 | 4992 | 123
+ 4991 | 4991 | 123
+(11 rows)
+
+rollback;
+begin;
+explain update sytc_t1 set f3 = 123 where f1 > 4900 order by f2 desc,f3 desc limit 10;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Update on sytc_t1  (cost=128.23..128.25 rows=10 width=18)
+   ->  Limit  (cost=128.23..128.25 rows=10 width=18)
+         ->  Sort  (cost=128.23..132.76 rows=1815 width=18)
+               Sort Key: f2 DESC, f3 DESC
+               ->  Bitmap Heap Scan on sytc_t1  (cost=38.32..89.00 rows=1815 width=18)
+                     Recheck Cond: (f1 > 4900)
+                     ->  Bitmap Index Scan on sytc_t1_idx  (cost=0.00..37.86 rows=1815 width=0)
+                           Index Cond: (f1 > 4900)
+(8 rows)
+
+select f1,f2,f3 from sytc_t1 where f3 = 123 order by f2 desc,f3 desc;
+ f1  | f2  | f3  
+-----+-----+-----
+ 123 | 123 | 123
+(1 row)
+
+update sytc_t1 set f3 = 123 where f1 >4900 order by f2 desc,f3 desc limit 10;
+select f1,f2,f3 from sytc_t1 where f3 = 123 order by f2 desc,f3 desc;
+  f1  |  f2  | f3  
+------+------+-----
+ 5000 | 5000 | 123
+ 4999 | 4999 | 123
+ 4998 | 4998 | 123
+ 4997 | 4997 | 123
+ 4996 | 4996 | 123
+ 4995 | 4995 | 123
+ 4994 | 4994 | 123
+ 4993 | 4993 | 123
+ 4992 | 4992 | 123
+ 4991 | 4991 | 123
+  123 |  123 | 123
+(11 rows)
+
+rollback;
+begin;
+explain update sytc_t1 set f3 = f1+10 where f1 > 4900 order by f2 desc,f3 desc limit 10;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Update on sytc_t1  (cost=132.76..132.79 rows=10 width=18)
+   ->  Limit  (cost=132.76..132.79 rows=10 width=18)
+         ->  Sort  (cost=132.76..137.30 rows=1815 width=18)
+               Sort Key: f2 DESC, f3 DESC
+               ->  Bitmap Heap Scan on sytc_t1  (cost=38.32..93.54 rows=1815 width=18)
+                     Recheck Cond: (f1 > 4900)
+                     ->  Bitmap Index Scan on sytc_t1_idx  (cost=0.00..37.86 rows=1815 width=0)
+                           Index Cond: (f1 > 4900)
+(8 rows)
+
+select f1,f2,f3 from sytc_t1 where f1 >4900 order by f2 desc,f3 desc limit 10;
+  f1  |  f2  |  f3  
+------+------+------
+ 5000 | 5000 | 5000
+ 4999 | 4999 | 4999
+ 4998 | 4998 | 4998
+ 4997 | 4997 | 4997
+ 4996 | 4996 | 4996
+ 4995 | 4995 | 4995
+ 4994 | 4994 | 4994
+ 4993 | 4993 | 4993
+ 4992 | 4992 | 4992
+ 4991 | 4991 | 4991
+(10 rows)
+
+update sytc_t1 set f3 = f1+10 where f1 >4900 order by f2 desc,f3 desc limit 10;
+select f1,f2,f3 from sytc_t1 where f1 >4900 order by f2 desc,f3 desc limit 10;
+  f1  |  f2  |  f3  
+------+------+------
+ 5000 | 5000 | 5010
+ 4999 | 4999 | 5009
+ 4998 | 4998 | 5008
+ 4997 | 4997 | 5007
+ 4996 | 4996 | 5006
+ 4995 | 4995 | 5005
+ 4994 | 4994 | 5004
+ 4993 | 4993 | 5003
+ 4992 | 4992 | 5002
+ 4991 | 4991 | 5001
+(10 rows)
+
+rollback;
+explain update sytc_t1 set f3 = 123 where f1 > 4900 order by nlssort(f2);
+ERROR:  function nlssort(integer) does not exist
+LINE 1: ...ate sytc_t1 set f3 = 123 where f1 > 4900 order by nlssort(f2...
+                                                             ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+explain delete sytc_t1 where f1 > 4900 order by nlssort(f2);
+ERROR:  function nlssort(integer) does not exist
+LINE 1: explain delete sytc_t1 where f1 > 4900 order by nlssort(f2);
+                                                        ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+update sytc_t1 set f3 = 123 where f1 > 4900 order by nlssort(f2);
+ERROR:  function nlssort(integer) does not exist
+LINE 1: ...ate sytc_t1 set f3 = 123 where f1 > 4900 order by nlssort(f2...
+                                                             ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+delete sytc_t1 where f1 > 4900 order by nlssort(f2);
+ERROR:  function nlssort(integer) does not exist
+LINE 1: delete sytc_t1 where f1 > 4900 order by nlssort(f2);
+                                                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+explain update sytc_t1 set f3 = 123 where f1 > 4900 order by abcdefg;
+ERROR:  column "abcdefg" does not exist
+LINE 1: ...pdate sytc_t1 set f3 = 123 where f1 > 4900 order by abcdefg;
+                                                               ^
+explain delete sytc_t1 where f1 > 4900 order by abcdefg;
+ERROR:  column "abcdefg" does not exist
+LINE 1: explain delete sytc_t1 where f1 > 4900 order by abcdefg;
+                                                        ^
+update sytc_t1 set f3 = 123 where f1 > 4900 order by abcdefg;
+ERROR:  column "abcdefg" does not exist
+LINE 1: ...pdate sytc_t1 set f3 = 123 where f1 > 4900 order by abcdefg;
+                                                               ^
+delete sytc_t1 where f1 > 4900 order by abcdefg;
+ERROR:  column "abcdefg" does not exist
+LINE 1: delete sytc_t1 where f1 > 4900 order by abcdefg;
+                                                ^
+drop table if exists sytc_test_sql1;
+NOTICE:  table "sytc_test_sql1" does not exist, skipping
+create table sytc_test_sql1(id int,name varchar(20),queryd int);
+drop index if exists sytc_test_index;
+NOTICE:  index "sytc_test_index" does not exist, skipping
+create index sytc_test_index on sytc_test_sql1(id);
+insert into sytc_test_sql1 values(generate_series(1,5),'name',generate_series(1,5));
+select * from sytc_test_sql1 where id<6 order by NLSSORT(id, 'NLS_SORT = generic_m_ci') limit 1;
+ id | name | queryd 
+----+------+--------
+  1 | name |      1
+(1 row)
+
+explain update sytc_test_sql1 set name ='fd' where id<6 order by NLSSORT(id,'NLS_SORT = generic_m_ci') limit 1;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Update on sytc_test_sql1  (cost=22.84..22.84 rows=1 width=14)
+   ->  Limit  (cost=22.84..22.84 rows=1 width=14)
+         ->  Sort  (cost=22.84..23.55 rows=284 width=14)
+               Sort Key: (nlssort((id)::text, 'NLS_SORT = generic_m_ci'::text))
+               ->  Bitmap Heap Scan on sytc_test_sql1  (cost=6.45..21.42 rows=284 width=14)
+                     Recheck Cond: (id < 6)
+                     ->  Bitmap Index Scan on sytc_test_index  (cost=0.00..6.38 rows=284 width=0)
+                           Index Cond: (id < 6)
+(8 rows)
+
+update sytc_test_sql1 set name ='fd' where id<6 order by NLSSORT(id,'NLS_SORT = generic_m_ci') limit 1;
+select * from sytc_test_sql1 where id<6 order by NLSSORT(id, 'NLS_SORT = generic_m_ci');
+ id | name | queryd 
+----+------+--------
+  1 | fd   |      1
+  2 | name |      2
+  3 | name |      3
+  4 | name |      4
+  5 | name |      5
+(5 rows)
+
+explain delete sytc_test_sql1 where id<6 order by NLSSORT(id,'NLS_SORT = generic_m_ci') limit 1;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Delete on sytc_test_sql1  (cost=22.84..22.84 rows=1 width=10)
+   ->  Sort  (cost=22.84..23.55 rows=284 width=10)
+         Sort Key: (nlssort((id)::text, 'NLS_SORT = generic_m_ci'::text))
+         ->  Bitmap Heap Scan on sytc_test_sql1  (cost=6.45..21.42 rows=284 width=10)
+               Recheck Cond: (id < 6)
+               ->  Bitmap Index Scan on sytc_test_index  (cost=0.00..6.38 rows=284 width=0)
+                     Index Cond: (id < 6)
+(7 rows)
+
+delete sytc_test_sql1 where id<6 order by NLSSORT(id,'NLS_SORT = generic_m_ci') limit 1;
+select * from sytc_test_sql1 where id<6 order by NLSSORT(id, 'NLS_SORT = generic_m_ci');
+ id | name | queryd 
+----+------+--------
+  2 | name |      2
+  3 | name |      3
+  4 | name |      4
+  5 | name |      5
+(4 rows)
+

@@ -116,7 +116,12 @@ public:
     {
         return m_streamProcRatio;
     }
-	
+
+    inline int GetThreadActualNum()
+    {
+        return m_threadNum;
+    }
+
 	void BindThreadToAllAvailCpu(ThreadId thread) const;
     void EnableAdjustPool();
     static int ParseRangeStr(char* attr, bool* arr, int totalNum, char* bindtype);

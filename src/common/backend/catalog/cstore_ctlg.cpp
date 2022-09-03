@@ -176,44 +176,15 @@ char* makeDeltaNameFormRel(Relation rel, bool isPartition)
 {
     char* deltaName = (char*)palloc0(sizeof(char) * NAMEDATALEN);
 
-    if (RelationIsDfsStore(rel)) {
-        errno_t rc;
+    Oid relOid = RelationGetRelid(rel);
+    errno_t rc = EOK;
 
-        char* nameSpace = get_namespace_name(RelationGetNamespace(rel));
-        char* deltaPartName = NULL;
-        int deltaPartNameLen = strlen(nameSpace) + 1 + strlen(RelationGetRelationName(rel)) + 1;
-        if (strlen("pg_delta_") + deltaPartNameLen > NAMEDATALEN) {
-            Oid mainTblOid = RelationGetRelid(rel);
-            rc = snprintf_s(deltaName, NAMEDATALEN, NAMEDATALEN - 1, "pg_delta_%u", mainTblOid);
-            securec_check_ss(rc, "", "");
-        } else {
-            deltaPartName = (char*)palloc0(sizeof(char) * deltaPartNameLen);
-            rc = memcpy_s(deltaPartName, deltaPartNameLen, nameSpace, strlen(nameSpace));
-            securec_check(rc, "\0", "\0");
-            rc = memcpy_s(deltaPartName + strlen(nameSpace), deltaPartNameLen - strlen(nameSpace), "_", strlen("_"));
-            securec_check(rc, "\0", "\0");
-            rc = memcpy_s(deltaPartName + strlen(nameSpace) + 1,
-                deltaPartNameLen - strlen(nameSpace) - 1,
-                RelationGetRelationName(rel),
-                strlen(RelationGetRelationName(rel)));
-            securec_check(rc, "\0", "\0");
-
-            rc = snprintf_s(deltaName, NAMEDATALEN, NAMEDATALEN - 1, "pg_delta_%s", deltaPartName);
-            securec_check_ss(rc, "", "");
-            pfree(deltaPartName);
-            deltaPartName = NULL;
-        }
+    if (!isPartition) {
+        rc = snprintf_s(deltaName, NAMEDATALEN, NAMEDATALEN - 1, "pg_delta_%u", relOid);
+        securec_check_ss(rc, "", "");
     } else {
-        Oid relOid = RelationGetRelid(rel);
-        errno_t rc = EOK;
-
-        if (!isPartition) {
-            rc = snprintf_s(deltaName, NAMEDATALEN, NAMEDATALEN - 1, "pg_delta_%u", relOid);
-            securec_check_ss(rc, "", "");
-        } else {
-            rc = snprintf_s(deltaName, NAMEDATALEN, NAMEDATALEN - 1, "pg_delta_part_%u", relOid);
-            securec_check_ss(rc, "", "");
-        }
+        rc = snprintf_s(deltaName, NAMEDATALEN, NAMEDATALEN - 1, "pg_delta_part_%u", relOid);
+        securec_check_ss(rc, "", "");
     }
 
     return deltaName;
@@ -250,9 +221,8 @@ bool CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateSt
     int catalogIndex = 0;
 
     deltaRelName = makeDeltaNameFormRel(rel, isPartition);
-    if (!RelationIsDfsStore(rel)) {
-        tablespaceid = rel->rd_rel->reltablespace;
-    }
+
+    tablespaceid = rel->rd_rel->reltablespace;
 
     TupleDesc mainTableTupDesc = rel->rd_att;
 
@@ -301,22 +271,6 @@ bool CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateSt
 
     /* make the delta relation visible, else heap_open will fail */
     CommandCounterIncrement();
-
-    /*
-     * Distribution info is to be added into pgxc_class.
-     * We need to do this after CommandCounterIncrement.
-     */
-    if (RelationIsDfsStore(rel) &&
-        (IS_PGXC_COORDINATOR || (isRestoreMode && mainTblStmt != NULL && mainTblStmt->distributeby != NULL))) {
-        if (mainTblStmt == NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("Failed to find the information of DFS table.")));
-        }
-        AddRelationDistribution(deltaRelName, delta_relid, mainTblStmt->distributeby, mainTblStmt->subcluster, NIL, tupdesc, true);
-        CommandCounterIncrement();
-        /* Make sure locator info gets rebuilt */
-        RelationCacheInvalidateEntry(delta_relid);
-    }
 
     /*
      * Store the delta table's OID in the parent relation's pg_class row

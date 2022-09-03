@@ -36,12 +36,15 @@
 #include "utils/numeric_gs.h"
 #include "utils/plancache.h"
 #include "utils/syscache.h"
+#include "instruments/instr_unique_sql.h"
 
 class OpFusion;
 typedef unsigned long (OpFusion::*OpFusionExecfuncType)(Relation rel, ResultRelInfo* resultRelInfo);
 
 extern void report_qps_type(CmdType commandType);
 extern void ExecCheckXactReadOnly(PlannedStmt* plannedstmt);
+EState* CreateExecutorStateForOpfusion(MemoryContext saveCxt, MemoryContext tmpCxt);
+void FreeExecutorStateForOpfusion(EState* estate);
 
 /*
  * The variables in OpFusion is always in two parts: global's variables and local's variables.
@@ -87,6 +90,8 @@ public:
     void fusionExecute(StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted);
 
     void CheckLogDuration();
+
+    void checkLogStatement(const char* portal_name, bool execute_is_fetch);
 
     virtual bool execute(long max_rows, char* completionTag)
     {
@@ -240,6 +245,8 @@ public:
         FusionType m_optype;
 
         ResourceOwner m_resOwner;
+
+        bool m_has_init_param;
     };
 
     OpFusionLocaleVariable m_local;

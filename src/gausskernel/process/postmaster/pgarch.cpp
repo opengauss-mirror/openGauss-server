@@ -229,6 +229,7 @@ NON_EXEC_STATIC void PgArchiverMain(knl_thread_arg* arg)
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -1045,7 +1046,9 @@ static void pgarch_archiveRoachForPitrStandby()
         ereport(LOG, (errmsg("PgArch standby receive invalid lsn for slot force advance")));
     }
     if (ArchiveReplicationAchiver(&archive_task_status->archive_task) == 0) {
+        SpinLockAcquire(&archive_task_status->mutex);
         archive_task_status->pitr_finish_result = true;
+        SpinLockRelease(&archive_task_status->mutex);
     } else {
         ereport(WARNING,
             (errmsg("error when pgarch_archiveRoachForPitrStandby %s : %X/%X, term:%d, subterm:%d", 
@@ -1054,8 +1057,9 @@ static void pgarch_archiveRoachForPitrStandby()
                 (uint32)(archive_task_status->archive_task.targetLsn), 
                 archive_task_status->archive_task.term, 
                 archive_task_status->archive_task.sub_term)));
-        
+        SpinLockAcquire(&archive_task_status->mutex);
         archive_task_status->pitr_finish_result = false;
+        SpinLockRelease(&archive_task_status->mutex);
     }
 }
 
@@ -1070,13 +1074,18 @@ static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn)
     if (archive_task_status == NULL) {
         return false;
     }
-    
+    SpinLockAcquire(&archive_task_status->mutex);
+    archive_task_status->pitr_finish_result = false;
     archive_task_status->archive_task.targetLsn = targetLsn;
     archive_task_status->archive_task.tli = get_controlfile_timeline();
     archive_task_status->archive_task.term = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file, 
         g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
+    SpinLockRelease(&archive_task_status->mutex);
     if (g_instance.roach_cxt.forceAdvanceSlotTigger) {
+        SpinLockAcquire(&archive_task_status->mutex);
+        archive_task_status->pitr_finish_result = false;
         archive_task_status->archive_task.targetLsn = InvalidXLogRecPtr;
+        SpinLockRelease(&archive_task_status->mutex);
         g_instance.roach_cxt.forceAdvanceSlotTigger = false;
         ereport(LOG, (errmsg("PgArch need force advance this time in primary")));
     }
@@ -1110,11 +1119,14 @@ static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn)
     /*
      * check targetLsn and g_instance.archive_obs_cxt.archive_task.targetLsn for deal message with wrong order
      */
+    SpinLockAcquire(&archive_task_status->mutex);
     if (archive_task_status->pitr_finish_result == true 
         && XLByteEQ(archive_task_status->archive_task.targetLsn, targetLsn)) {
         archive_task_status->pitr_finish_result = false;
+        SpinLockRelease(&archive_task_status->mutex);
         return true;
     } else {
+        SpinLockRelease(&archive_task_status->mutex);
         return false;
     }
 }
@@ -1171,6 +1183,9 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
 {
     int i;
     volatile WalSnd* walsnd = NULL;
+    ereport(DEBUG1, (errmsg("pgarch current walsender index: %d and last walsender index: %d",
+        t_thrd.arch.sync_walsender_idx, g_instance.archive_obs_cxt.chosen_walsender_index)));
+    t_thrd.arch.sync_walsender_idx = g_instance.archive_obs_cxt.chosen_walsender_index;
     if (t_thrd.arch.sync_walsender_idx >= 0) {
         walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[t_thrd.arch.sync_walsender_idx];
         SpinLockAcquire(&walsnd->mutex);
@@ -1178,6 +1193,10 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
             && !XLogRecPtrIsInvalid(walsnd->flush) && XLByteLE(targetLsn, walsnd->flush) &&
             walsnd->is_cross_cluster == false) {
             SpinLockRelease(&walsnd->mutex);
+            if (g_instance.roach_cxt.isXLogForceRecycled) {
+                ereport(LOG, (errmsg("pgarch choose walsender index:%d and pid is %ld, when force advance slot",
+                    t_thrd.arch.sync_walsender_idx, walsnd->pid)));
+            }
             return (WalSnd*)walsnd;
         }
         SpinLockRelease(&walsnd->mutex);
@@ -1196,16 +1215,14 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
                 ArchiveTaskStatus *archive_status = NULL;
                 archive_status = find_archive_task_status(t_thrd.arch.slot_name);
                 if (archive_status == NULL) {
-                    ereport(ERROR,
-                        (errmsg("pgarch_chooseWalsnd has change from %d to %d, but not find slot", 
-                            t_thrd.arch.sync_walsender_idx, i)));
+                    ereport(ERROR, (errmsg("pgarch_chooseWalsnd has change from %d to %d, but not find slot",
+                        t_thrd.arch.sync_walsender_idx, i)));
                 }
+                archive_status->sync_walsender_term++;
+                ereport(LOG, (errmsg("pgarch_chooseWalsnd has change from %d to %d , sub_term:%d",
+                    t_thrd.arch.sync_walsender_idx, i, archive_status->sync_walsender_term)));
                 t_thrd.arch.sync_walsender_idx = i;
                 g_instance.archive_obs_cxt.chosen_walsender_index = i;
-                archive_status->sync_walsender_term++;
-                ereport(LOG,
-                    (errmsg("pgarch_chooseWalsnd has change from %d to %d , sub_term:%d", 
-                        t_thrd.arch.sync_walsender_idx, i, archive_status->sync_walsender_term)));
                 return (WalSnd*)walsnd;
             }
         }

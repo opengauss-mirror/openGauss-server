@@ -44,6 +44,7 @@
 #include "utils/lsyscache.h"
 #include "utils/pg_locale.h"
 #include "utils/selfuncs.h"
+#include "optimizer/gplanmgr.h"
 
 #define IsBooleanOpfamily(opfamily) ((opfamily) == BOOL_BTREE_FAM_OID || \
     (opfamily) == BOOL_HASH_FAM_OID || (opfamily) == BOOL_UBTREE_FAM_OID)
@@ -195,10 +196,23 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
     IndexClauseSet eclauseset;
     ListCell* lc = NULL;
     Bitmapset* required_upper = NULL;
+    RangeTblEntry *rte = NULL;
 
     /* Skip the whole mess if no indexes */
     if (rel->indexlist == NIL)
         return;
+
+    /*
+     * Ignore index scan path when time capsule is enabled in base rel for correctess issue
+     */
+    rte = planner_rt_fetch(rel->relid, root);
+    if (rel->is_ustore && rte->timecapsule != NULL) {
+        ereport(DEBUG2, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Unsupported IndexScan timecapsule-enabled base rel, relName:%s relOid:%u",
+                rte->relname, rte->relid)));
+
+        return;
+    }
 
     /*
      * If there are any rels that have LATERAL references to this one, we
@@ -241,8 +255,7 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
          * The partition bounded tables should be handled by partition iterator
          * or local indexes.
          */
-        RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
-        if (index->isGlobal && rte && OidIsValid(rte->partitionOid)) {
+        if (index->isGlobal && rte && list_length(rte->partitionOidList) > 0) {
             continue;
         }
 
@@ -826,42 +839,6 @@ void MarkUniqueIndexFirstRule(const RelOptInfo* rel, const IndexOptInfo* index, 
     }
 }
 
-static bool PathkeysIsUnusefulForPartition(const IndexOptInfo* index)
-{
-    if (!index->ispartitionedindex) {
-        return false;
-    }
-    /*
-    * Only the local index's pathkeys is unuseful. 
-    * It can only ensure that the current partition data is in order.
-    * Hypothetical index is usefull by default.
-    */
-    if (index->isGlobal || (u_sess->attr.attr_sql.enable_hypo_index && index->hypothetical)) {
-        return false;
-    }
-    bool result = false;
-    Oid heapOid = IndexGetRelation(index->indexoid, false);
-    Relation rel = heap_open(heapOid, NoLock);
-
-    switch (rel->partMap->type) {
-        case PART_TYPE_LIST:
-        case PART_TYPE_HASH:
-            result = true;
-            break;
-        case PART_TYPE_RANGE:
-        case PART_TYPE_INTERVAL:
-        case PART_TYPE_VALUE:
-            result = false;
-            break;
-        default:
-            result = true;
-            break;
-    }
-
-    heap_close(rel, NoLock);
-    return result;
-}
-
 /*
  * build_index_paths
  *	  Given an index and a set of index clauses for it, construct zero
@@ -1057,7 +1034,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
      * predicate, OR an index-only scan is possible.
      */
     if (found_clause || useful_pathkeys != NIL || useful_predicate || index_only_scan) {
-        if ((relHasbkt && !index->crossbucket) || PathkeysIsUnusefulForPartition(index)) {
+        if ((relHasbkt && !index->crossbucket)) {
             useful_pathkeys = NIL;
         }
         ipath = create_index_path(root,
@@ -1082,7 +1059,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
         index_pathkeys = build_index_pathkeys(root, index, BackwardScanDirection);
         useful_pathkeys = truncate_useless_pathkeys(root, rel, index_pathkeys);
         if (useful_pathkeys != NIL) {
-            if ((relHasbkt && !index->crossbucket) || PathkeysIsUnusefulForPartition(index)) {
+            if ((relHasbkt && !index->crossbucket)) {
                 useful_pathkeys = NIL;
             }
             ipath = create_index_path(root,
@@ -1166,7 +1143,7 @@ static List* build_paths_for_OR(
          * or local indexes.
          */
         RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
-        if (index->isGlobal && rte && OidIsValid(rte->partitionOid)) {
+        if (index->isGlobal && rte && list_length(rte->partitionOidList) > 0)  {
             continue;
         }
 
@@ -2821,6 +2798,13 @@ void check_partial_indexes(PlannerInfo* root, RelOptInfo* rel)
 
         if (index->predOK)
             continue; /* don't repeat work if already proven OK */
+
+        if (ENABLE_CACHEDPLAN_MGR && root->glob->boundParams != NULL &&
+            root->glob->boundParams->uParamInfo == PARAM_VAL_SELECTIVITY_INFO){
+                root->glob->boundParams->params_lazy_bind = false;
+                clauselist = eval_const_clauses_params(root, clauselist);
+                root->glob->boundParams->params_lazy_bind = true;
+            }
 
         index->predOK = predicate_implied_by(index->indpred, clauselist);
     }

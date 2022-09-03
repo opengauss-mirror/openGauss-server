@@ -344,7 +344,6 @@ bool TrFetchName(const char *rcyname, TrObjType type, TrObjDesc *desc, TrOperMod
             ereport(ERROR,
                 (errmsg("recycle object \"%s\" desired does not exist", rcyname)));
         }
-        
         found = true;
         TrDescRead(desc, tup);
     }
@@ -984,6 +983,7 @@ static bool TrPurgeBatch(TrFetchBeginHook beginHook, TrFetchMatchHook matchHook,
             } else {
                 PG_RE_THROW();
             }
+            FlushErrorState();
         }
         PG_END_TRY();
 

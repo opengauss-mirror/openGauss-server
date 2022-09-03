@@ -168,21 +168,19 @@ set force_bitmapand = on;
 set enable_indexscan = off;
 -- use bitmapand local index and global index and use Partition Iterator
 explain (costs off) select * from gpi_index_test where a = 800 and b%4 <> 0 and b = 50;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Bitmap Heap Scan on gpi_index_test
-         Recheck Cond: ((b = 50) AND (a = 800))
-         Filter: ((b % 4) <> 0)
-         Selected Partitions:  4
-         ->  BitmapAnd
-               ->  Bitmap Index Scan on gpi_index_test_global_b
-                     Index Cond: (b = 50)
-               ->  Partitioned Bitmap Index Scan on gpi_index_test_local_a
-                     Index Cond: (a = 800)
-                     Selected Partitions:  4
-(12 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Partitioned Bitmap Heap Scan on gpi_index_test
+   Recheck Cond: ((b = 50) AND (a = 800))
+   Filter: ((b % 4) <> 0)
+   Selected Partitions:  4
+   ->  BitmapAnd
+         ->  Bitmap Index Scan on gpi_index_test_global_b
+               Index Cond: (b = 50)
+         ->  Partitioned Bitmap Index Scan on gpi_index_test_local_a
+               Index Cond: (a = 800)
+               Selected Partitions:  4
+(10 rows)
 
 select * from gpi_index_test where a < 800 and b%4 <> 0 and b <= 50;
  a  | b  |       c        
@@ -333,17 +331,23 @@ select count(*) from gpi_index_test1 a, gpi_index_test b where a.a = b.a;
 
 -- merge join
 explain (costs off) select * from gpi_index_test1 a, gpi_index_test b where a.a = b.a and (a.b < 10 or b.b > 9990) order by a.a;
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Nested Loop
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Index Scan using gpi_index_test_local_a on gpi_index_test b
-               Selected Partitions:  1..4
-   ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 a
-         Index Cond: (a = b.a)
-         Filter: ((b < 10) OR (b.b > 9990))
-(8 rows)
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Sort Key: a.a
+   ->  Hash Join
+         Hash Cond: (a.a = b.a)
+         Join Filter: ((a.b < 10) OR (b.b > 9990))
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on gpi_index_test1 a
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on gpi_index_test b
+                           Selected Partitions:  1..4
+(14 rows)
 
 select * from gpi_index_test1 a, gpi_index_test b where a.a = b.a and (a.b < 10 or b.b > 9990) order by a.a;
  a | b |       c        | a | b |       c        
@@ -409,21 +413,19 @@ select count(*) from (select a from gpi_index_test where gpi_index_test.b < 100)
 (1 row)
 
 explain (costs off) select count(*) from gpi_index_test as t1 NATURAL inner join gpi_index_test1 t2 where t1.b < 200 and t2.a = 50;
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Aggregate
    ->  Nested Loop
          Join Filter: ((t1.b = t2.b) AND (t1.c = t2.c))
-         ->  Partition Iterator
-               Iterations: 1
-               ->  Partitioned Index Scan using gpi_index_test_local_a on gpi_index_test t1
-                     Index Cond: (a = 50)
-                     Filter: (b < 200)
-                     Selected Partitions:  1
+         ->  Partitioned Index Scan using gpi_index_test_local_a on gpi_index_test t1
+               Index Cond: (a = 50)
+               Filter: (b < 200)
+               Selected Partitions:  1
          ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 t2
                Index Cond: (a = 50)
                Filter: (b < 200)
-(12 rows)
+(10 rows)
 
 select count(*) from gpi_index_test as t1 NATURAL inner join gpi_index_test1 t2 where t1.b < 200 and t2.a = 50;
  count 
@@ -432,16 +434,16 @@ select count(*) from gpi_index_test as t1 NATURAL inner join gpi_index_test1 t2 
 (1 row)
 
 explain (costs off) select * from gpi_index_test t1 full join gpi_index_test1 t2 on t1.b >= t2.a where t1.b < 200 and t2.a = 50 and t1.a = 100;
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
  Nested Loop
+   Join Filter: (t1.b >= t2.a)
+   ->  Partitioned Index Scan using gpi_index_test_local_a on gpi_index_test t1
+         Index Cond: (a = 100)
+         Filter: (b < 200)
+         Selected Partitions:  2
    ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 t2
          Index Cond: (a = 50)
-   ->  Bitmap Heap Scan on gpi_index_test t1
-         Recheck Cond: ((b >= t2.a) AND (b < 200))
-         Filter: (a = 100)
-         ->  Bitmap Index Scan on gpi_index_test_global_b
-               Index Cond: ((b >= t2.a) AND (b < 200))
 (8 rows)
 
 select * from gpi_index_test t1 full join gpi_index_test1 t2 on t1.b >= t2.a where t1.b < 200 and t2.a = 50 and t1.a = 100;
@@ -468,15 +470,15 @@ select count(*) from gpi_index_test t1 left join gpi_index_test1 t2 on (t1.b >= 
 (1 row)
 
 explain (costs off) select * from gpi_index_test t1 right join gpi_index_test1 t2 on (t1.b >= t2.a and (t1.a < 60 or t2.b != 30)) where t1.b < 200 and t2.a < 100;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Nested Loop
    Join Filter: ((t1.b >= t2.a) AND ((t1.a < 60) OR (t2.b <> 30)))
-   ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 t2
-         Index Cond: (a < 100)
+   ->  Index Scan using gpi_index_test_global_b on gpi_index_test t1
+         Index Cond: (b < 200)
    ->  Materialize
-         ->  Index Scan using gpi_index_test_global_b on gpi_index_test t1
-               Index Cond: (b < 200)
+         ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 t2
+               Index Cond: (a < 100)
 (7 rows)
 
 select count(*) from gpi_index_test t1 left join gpi_index_test1 t2 on (t1.b >= t2.a and (t1.a != 60 or t1.b != 30)) where t1.b < 200 and t2.a < 100;

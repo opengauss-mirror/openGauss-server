@@ -331,11 +331,10 @@ void AddStartWithTargetRelInfo(ParseState* pstate, Node* relNode,
             startInfo->aliasname = sub->alias->aliasname;
         }
 
-        SelectStmt *substmt = (SelectStmt*)sub->subquery;
+        SelectStmt *substmt = (SelectStmt *)sub->subquery;
         if (substmt->withClause == NULL) {
-            substmt->withClause = (WithClause*)copyObject(pstate->origin_with);
+            substmt->withClause = (WithClause *)copyObject(pstate->origin_with);
         }
-
         startInfo->rte = rte;
         startInfo->rtr = rtr;
         startInfo->rtekind = rte->rtekind;
@@ -695,17 +694,28 @@ static void HandleSWCBColumnRef(StartWithTransformContext *context, Node *node)
              */
             result = ExtractColumnRefStartInfo(pstate, column, NULL, colname, preResult);
 
-            if (prior) {
-                char *dummy = makeStartWithDummayColname(
-                                            strVal(linitial(column->fields)),
-                                            strVal(lsecond(column->fields)));
-
-                column->fields = list_make2(makeString("tmp_reuslt"), makeString(dummy));
-
-                /* record working table name */
-                context->connectby_prior_name = lappend(context->connectby_prior_name,
-                                                        makeString(dummy));
+            if (!prior) {
+                break;
             }
+
+            if (list_length(column->fields) <= 1) {
+                ereport(ERROR,
+                    (errmodule(MOD_PARSER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Invalid column reference in START WITH / CONNECT BY clause."),
+                        errdetail("The column referred to may not exist."),
+                        errcause("Usually this happens when the column referred to does not exist."),
+                        erraction("Check and revise your query or contact Huawei engineers.")));
+            }
+
+            char *dummy = makeStartWithDummayColname(
+                                        strVal(linitial(column->fields)),
+                                        strVal(lsecond(column->fields)));
+
+            column->fields = list_make2(makeString("tmp_reuslt"), makeString(dummy));
+
+            /* record working table name */
+            context->connectby_prior_name = lappend(context->connectby_prior_name,
+                                                        makeString(dummy));
 
             break;
         }
@@ -900,6 +910,12 @@ static void StartWithWalker(StartWithTransformContext *context, Node *expr)
             break;
         }
 
+        case T_CoalesceExpr: {
+            Node* node = (Node *)(((CoalesceExpr*)expr)->args);
+            StartWithWalker(context, node);
+            break;
+        }
+
         case T_CollateClause: {
             CollateClause *cc = (CollateClause*) expr;
             StartWithWalker(context, cc->arg);
@@ -918,6 +934,10 @@ static void StartWithWalker(StartWithTransformContext *context, Node *expr)
             foreach (lc, l) {
                 StartWithWalker(context, (Node*)lfirst(lc));
             }
+            break;
+        }
+
+        case T_A_ArrayExpr: {
             break;
         }
 
@@ -1319,6 +1339,7 @@ static bool walker_to_exclude_non_join_quals(Node *node, Node *context_node)
     if (expr->kind != AEXPR_OP) {
         return raw_expression_tree_walker(node, (bool (*)()) walker_to_exclude_non_join_quals, (void*)NULL);
     }
+
     /*
      * this is to achieve consistent result sets with those produced by the original
      * start with .. connect by syntax, which does not push filter quals down to connect quals.
@@ -1329,9 +1350,9 @@ static bool walker_to_exclude_non_join_quals(Node *node, Node *context_node)
      * from the where clause.
      */
     int columnref_count = 0;
-    raw_expression_tree_walker(node, (bool (*)()) count_columnref_walker, (void*)&columnref_count);
- 
-    if (columnref_count < 2) {
+    (void) raw_expression_tree_walker(node, (bool (*)()) count_columnref_walker, (void*)&columnref_count);
+
+    if (columnref_count <= 1) {
         expr->lexpr = makeBoolAConst(true, -1);
         expr->rexpr = makeBoolAConst(true, -1);
         expr->kind = AEXPR_OR;

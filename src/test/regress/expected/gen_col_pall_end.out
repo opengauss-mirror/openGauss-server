@@ -1,0 +1,7 @@
+select * from gtest1;
+         a          | b  
+--------------------+----
+ basethread1thread2 | 18
+(1 row)
+
+DROP TABLE gtest1;

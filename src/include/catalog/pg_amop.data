@@ -527,6 +527,9 @@ DATA(insert (	1990   26 26 1 s	607 405 0 ));
 DATA(insert (	1992   30 30 1 s	649 405 0 ));
 /* text_ops */
 DATA(insert (	1995   25 25 1 s	98	405 0 ));
+DATA(insert (	1995   3272 25 1 s 6553 405 0 ));
+DATA(insert (	1995   25 3272 1 s 6559 405 0 ));
+DATA(insert (	1995   3272 3272 1 s 6435 405 0 ));
 /* time_ops */
 DATA(insert (	1997   1083 1083 1 s 1108 405 0 ));
 /* timestamptz_ops */
@@ -675,6 +678,99 @@ DATA(insert (	3522   3500 3500 5 s 3519 403 0 ));
  * hash enum_ops
  */
 DATA(insert (	3523   3500 3500 1 s 3516 405 0 ));
+
+/*
+ * btree set_ops
+ */
+DATA(insert (	1976   3272 3272 1 s 6437 403 0 ));
+DATA(insert (	1976   3272 3272 2 s 6439 403 0 ));
+DATA(insert (	1976   3272 3272 3 s 6435 403 0 ));
+DATA(insert (	1976   3272 3272 4 s 6440 403 0 ));
+DATA(insert (	1976   3272 3272 5 s 6438 403 0 ));
+DATA(insert (	1976   3272 23 1 s 6455 403 0 ));
+DATA(insert (	1976   3272 23 2 s 6457 403 0 ));
+DATA(insert (	1976   3272 23 3 s 6453 403 0 ));
+DATA(insert (	1976   3272 23 4 s 6458 403 0 ));
+DATA(insert (	1976   3272 23 5 s 6456 403 0 ));
+DATA(insert (	1976   23 3272 1 s 6476 403 0 ));
+DATA(insert (	1976   23 3272 2 s 6478 403 0 ));
+DATA(insert (	1976   23 3272 3 s 6474 403 0 ));
+DATA(insert (	1976   23 3272 4 s 6479 403 0 ));
+DATA(insert (	1976   23 3272 5 s 6477 403 0 ));
+
+DATA(insert (	1976   3272 20 1 s 6443 403 0 ));
+DATA(insert (	1976   3272 20 2 s 6445 403 0 ));
+DATA(insert (	1976   3272 20 3 s 6441 403 0 ));
+DATA(insert (	1976   3272 20 4 s 6446 403 0 ));
+DATA(insert (	1976   3272 20 5 s 6444 403 0 ));
+DATA(insert (	1976   20 3272 1 s 6464 403 0 ));
+DATA(insert (	1976   20 3272 2 s 6466 403 0 ));
+DATA(insert (	1976   20 3272 3 s 6462 403 0 ));
+DATA(insert (	1976   20 3272 4 s 6467 403 0 ));
+DATA(insert (	1976   20 3272 5 s 6465 403 0 ));
+
+DATA(insert (	1976   3272 21 1 s 6449 403 0 ));
+DATA(insert (	1976   3272 21 2 s 6451 403 0 ));
+DATA(insert (	1976   3272 21 3 s 6447 403 0 ));
+DATA(insert (	1976   3272 21 4 s 6452 403 0 ));
+DATA(insert (	1976   3272 21 5 s 6450 403 0 ));
+DATA(insert (	1976   21 3272 1 s 6470 403 0 ));
+DATA(insert (	1976   21 3272 2 s 6472 403 0 ));
+DATA(insert (	1976   21 3272 3 s 6468 403 0 ));
+DATA(insert (	1976   21 3272 4 s 6473 403 0 ));
+DATA(insert (	1976   21 3272 5 s 6471 403 0 ));
+
+/*
+ * ubtree set_ops
+ */
+DATA(insert (	6976   3272 3272 1 s 6437 4439 0 ));
+DATA(insert (	6976   3272 3272 2 s 6439 4439 0 ));
+DATA(insert (	6976   3272 3272 3 s 6435 4439 0 ));
+DATA(insert (	6976   3272 3272 4 s 6440 4439 0 ));
+DATA(insert (	6976   3272 3272 5 s 6438 4439 0 ));
+DATA(insert (	6976   3272 23 1 s 6455 4439 0 ));
+DATA(insert (	6976   3272 23 2 s 6457 4439 0 ));
+DATA(insert (	6976   3272 23 3 s 6453 4439 0 ));
+DATA(insert (	6976   3272 23 4 s 6458 4439 0 ));
+DATA(insert (	6976   3272 23 5 s 6456 4439 0 ));
+DATA(insert (	6976   23 3272 1 s 6476 4439 0 ));
+DATA(insert (	6976   23 3272 2 s 6478 4439 0 ));
+DATA(insert (	6976   23 3272 3 s 6474 4439 0 ));
+DATA(insert (	6976   23 3272 4 s 6479 4439 0 ));
+DATA(insert (	6976   23 3272 5 s 6477 4439 0 ));
+
+DATA(insert (	6976   3272 20 1 s 6443 4439 0 ));
+DATA(insert (	6976   3272 20 2 s 6445 4439 0 ));
+DATA(insert (	6976   3272 20 3 s 6441 4439 0 ));
+DATA(insert (	6976   3272 20 4 s 6446 4439 0 ));
+DATA(insert (	6976   3272 20 5 s 6444 4439 0 ));
+DATA(insert (	6976   20 3272 1 s 6464 4439 0 ));
+DATA(insert (	6976   20 3272 2 s 6466 4439 0 ));
+DATA(insert (	6976   20 3272 3 s 6462 4439 0 ));
+DATA(insert (	6976   20 3272 4 s 6467 4439 0 ));
+DATA(insert (	6976   20 3272 5 s 6465 4439 0 ));
+
+DATA(insert (	6976   3272 21 1 s 6449 4439 0 ));
+DATA(insert (	6976   3272 21 2 s 6451 4439 0 ));
+DATA(insert (	6976   3272 21 3 s 6447 4439 0 ));
+DATA(insert (	6976   3272 21 4 s 6452 4439 0 ));
+DATA(insert (	6976   3272 21 5 s 6450 4439 0 ));
+DATA(insert (	6976   21 3272 1 s 6470 4439 0 ));
+DATA(insert (	6976   21 3272 2 s 6472 4439 0 ));
+DATA(insert (	6976   21 3272 3 s 6468 4439 0 ));
+DATA(insert (	6976   21 3272 4 s 6473 4439 0 ));
+DATA(insert (	6976   21 3272 5 s 6471 4439 0 ));
+
+/*
+ * hash set_ops
+ */
+DATA(insert (	1977   3272 23 1 s 6453 405 0 ));
+DATA(insert (	1977   23 3272 1 s 6474 405 0 ));
+DATA(insert (	1977   3272 20 1 s 6441 405 0 ));
+DATA(insert (	1977   20 3272 1 s 6462 405 0 ));
+DATA(insert (	1977   3272 21 1 s 6447 405 0 ));
+DATA(insert (	1977   21 3272 1 s 6468 405 0 ));
+DATA(insert (	8646   3272 3272 1 s 6435 405 0 ));
 
 /*
  * btree tsvector_ops

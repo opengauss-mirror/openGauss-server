@@ -37,7 +37,7 @@ bool IsSkipInsertUndo(UndoRecPtr urp);
 bool IsSkipInsertSlot(UndoSlotPtr urp);
 
 /* Check undo record valid.. */
-UndoRecordState CheckUndoRecordValid(UndoRecPtr urp, bool checkForceRecycle);
+UndoRecordState CheckUndoRecordValid(UndoRecPtr urp, bool checkForceRecycle, TransactionId *lastXid);
 
 void CheckPointUndoSystemMeta(XLogRecPtr checkPointRedo);
 
@@ -55,14 +55,16 @@ UndoRecPtr AdvanceUndoPtr(UndoRecPtr undoPtr, uint64 size);
 
 void PrepareUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence, 
     UndoRecPtr lastRecord, UndoRecPtr lastRecordSize);
-void FinishUndoMeta(XlogUndoMeta *meta, UndoPersistence upersistence);
+void FinishUndoMeta(UndoPersistence upersistence);
 void UpdateTransactionSlot(TransactionId xid, XlogUndoMeta *meta, UndoRecPtr startUndoPtr,
     UndoPersistence upersistence);
-void SetUndoMetaLSN(XlogUndoMeta *meta, XLogRecPtr lsn);
+void SetUndoMetaLSN(XLogRecPtr lsn);
 void RedoUndoMeta(XLogReaderState *record, XlogUndoMeta *meta, UndoRecPtr startUndoPtr, 
     UndoRecPtr lastRecord, uint32 lastRecordSize);
 void ReleaseSlotBuffer();
 void InitUndoCountThreshold();
+void CheckUndoZoneBitmap();
+void RebuildUndoZoneBitmap();
 UndoRecPtr GetPrevUrp(UndoRecPtr currUrp);
 } // namespace undo
 

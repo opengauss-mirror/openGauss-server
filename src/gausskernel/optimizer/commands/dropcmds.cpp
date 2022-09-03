@@ -19,6 +19,7 @@
 #include "utils/fmgroids.h"
 #include "access/heapam.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_db_privilege.h"
 #include "catalog/namespace.h"
 #include "catalog/objectaddress.h"
 #include "catalog/pg_class.h"
@@ -38,9 +39,10 @@
 
 static void does_not_exist_skipping(ObjectType objtype, List* objname, List* objargs, bool missing_ok);
 
-static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId)
+static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId, const Relation relation)
 {
     AclResult aclresult = ACLCHECK_NO_PRIV;
+    bool anyresult = false;
     switch (removeType) {
         case OBJECT_FUNCTION:
             aclresult = pg_proc_aclcheck(objectId, GetUserId(), ACL_DROP);
@@ -57,10 +59,16 @@ static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId)
         case OBJECT_FOREIGN_SERVER:
             aclresult = pg_foreign_server_aclcheck(objectId, GetUserId(), ACL_DROP);
             break;
+        case OBJECT_TRIGGER:
+            if (!IsSysSchema(RelationGetNamespace(relation))) {
+                anyresult = HasSpecAnyPriv(GetUserId(), DROP_ANY_TRIGGER, false);
+            }
+            break;
         default:
             break;
     }
-    return (aclresult == ACLCHECK_OK) ? true : false;
+
+    return ((aclresult == ACLCHECK_OK) ? true : false) || anyresult;
 }
 
 static void DropExtensionInListIsSupported(List* objname)
@@ -249,7 +257,7 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
 
         /* Check permissions. */
         if (!skip_check) {
-            skip_check = CheckObjectDropPrivilege(stmt->removeType, address.objectId);
+            skip_check = CheckObjectDropPrivilege(stmt->removeType, address.objectId, relation);
         }
         namespaceId = get_object_namespace(&address);
         if ((!is_securityadmin) && (!skip_check) &&

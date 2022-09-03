@@ -26,6 +26,7 @@
 #include "access/ubtree.h"
 #include "commands/tablespace.h"
 #include "storage/lmgr.h"
+#include "storage/procarray.h"
 #include "utils/aiomem.h"
 #include "utils/builtins.h"
 
@@ -75,7 +76,9 @@ static UBTRecycleQueueItem HeaderGetItem(UBTRecycleQueueHeader header, uint16 of
     if (offset >= 0 && offset <= UBTRecycleMaxItems) {
         return &header->items[offset];
     }
-    ereport(ERROR, (errmsg("HeaderGetItem: %d", offset)));
+    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+            errmsg("trying to fetch invalid recycle queue item with offset %u", offset),
+            errhint("Can fixed by REINDEX this index")));
     pg_unreachable(); /* won't reach here */
 }
 
@@ -171,8 +174,8 @@ static void LogInitRecycleQueuePage(Relation rel, Buffer buf, Buffer leftBuf, Bu
         XLogBeginInsert();
         XLogRegisterData((char *)&xlrec, SizeOfUBTree2RecycleQueueInitPage);
         XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_CURR_BLOCK_NUM, buf, REGBUF_WILL_INIT);
-        XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_LEFT_BLOCK_NUM, leftBuf, REGBUF_STANDARD);
-        XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_RIGHT_BLOCK_NUM, rightBuf, REGBUF_STANDARD);
+        XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_LEFT_BLOCK_NUM, leftBuf, 0);
+        XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_RIGHT_BLOCK_NUM, rightBuf, 0);
 
         XLogRecPtr recptr = XLogInsert(RM_UBTREE2_ID, XLOG_UBTREE2_RECYCLE_QUEUE_INIT_PAGE);
 
@@ -268,8 +271,8 @@ void UBTreeInitializeRecycleQueue(Relation rel)
         /* check that the blkno is what we expected */
         if (BufferGetBlockNumber(buf) != blkno) {
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("corrupted index recycle queue of index %u: expected blkno is %u, actual blkno is %u",
-                       rel->rd_id, blkno, BufferGetBlockNumber(buf))));
+                    errmsg("corrupted index recycle queue of index \"%s\": expected blkno is %u, actual blkno is %u",
+                           RelationGetRelationName(rel), blkno, BufferGetBlockNumber(buf))));
         }
         InitRecycleQueueInitialPage(rel, buf);
         UnlockReleaseBuffer(buf);
@@ -367,7 +370,21 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
         _bt_checkbuffer_valid(rel, targetBuf);
         if (ConditionalLockBuffer(targetBuf)) {
             _bt_checkpage(rel, targetBuf);
-            if (forkNumber == RECYCLE_EMPTY_FORK || UBTreePageRecyclable(BufferGetPage(targetBuf))) {
+            bool pageUsable = true;
+            if (forkNumber == RECYCLE_FREED_FORK) {
+                pageUsable = UBTreePageRecyclable(BufferGetPage(targetBuf));
+            } else if (forkNumber == RECYCLE_EMPTY_FORK) {
+                /* make sure that it's not half-dead or the deletion is not reserved yet */
+                Page indexPage = BufferGetPage(targetBuf);
+                UBTPageOpaque opaque = (UBTPageOpaque)PageGetSpecialPointer(indexPage);
+                if (P_ISHALFDEAD((UBTPageOpaqueInternal)opaque)) {
+                    TransactionId previousXact = opaque->xact;
+                    if (TransactionIdIsValid(previousXact) && TransactionIdIsInProgress(previousXact, NULL, true)) {
+                        pageUsable = false;
+                    }
+                }
+            }
+            if (pageUsable) {
                 WHITEBOX_TEST_STUB("GetAvailablePageOnPage-got", WhiteboxDefaultErrorEmit);
 
                 *continueScan = false;
@@ -394,17 +411,14 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
 
 Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress *addr)
 {
-    TransactionId frozenXid = g_instance.undo_cxt.oldestFrozenXid;
-    TransactionId recycleXid = g_instance.undo_cxt.oldestXidInUndo;
-
-    TransactionId waterLevelXid = ((forkNumber == RECYCLE_EMPTY_FORK) ? recycleXid : frozenXid);
+    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
 
     Buffer queueBuf = RecycleQueueGetEndpointPage(rel, forkNumber, true, BT_READ);
 
     Buffer indexBuf = InvalidBuffer;
     bool continueScan = false;
     for (;;) {
-        indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, waterLevelXid, addr, &continueScan);
+        indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, oldestXmin, addr, &continueScan);
         if (!continueScan) {
             break;
         }
@@ -518,8 +532,8 @@ static void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf,
 
         XLogBeginInsert();
         XLogRegisterData((char *)&xlrec, SizeOfUBTree2RecycleQueueEndpoint);
-        XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
-        XLogRegisterBuffer(1, nextBuf, REGBUF_STANDARD);
+        XLogRegisterBuffer(0, buf, 0);
+        XLogRegisterBuffer(1, nextBuf, 0);
 
         XLogRecPtr recptr = XLogInsert(RM_UBTREE2_ID, XLOG_UBTREE2_RECYCLE_QUEUE_ENDPOINT);
 
@@ -765,7 +779,7 @@ static void LogModifyPage(Buffer buf, bool isInsert, uint16 offset, UBTRecycleQu
 
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec, SizeOfUBTree2RecycleQueueModify);
-    XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+    XLogRegisterBuffer(0, buf, 0);
 
     XLogRecPtr recptr = XLogInsert(RM_UBTREE2_ID, XLOG_UBTREE2_RECYCLE_QUEUE_MODIFY);
 

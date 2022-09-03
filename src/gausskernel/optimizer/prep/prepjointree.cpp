@@ -702,6 +702,11 @@ static Node* pull_up_sublinks_qual_recurse(PlannerInfo* root, Node* node, Node**
             return (Node*)make_andclause(newclauses);
     }
 
+    /* stop if not support pull up expr sublinks */
+    if (DISABLE_SUBLINK_PULLUP_EXPR() && permit_from_rewrite_hint(root, SUBLINK_PULLUP_DISABLE_EXPR)) {
+        return node;
+    }
+    
     /* convert or_clause to left join. */
     if (or_clause(node)) {
         convert_ORCLAUSE_to_join(root, (BoolExpr*)node, jtlink1, available_rels1);
@@ -747,7 +752,6 @@ static Node* pull_up_sublinks_qual_recurse(PlannerInfo* root, Node* node, Node**
 
         return node;
     }
-
 
     /* Stop if not an AND */
     return node;
@@ -1191,7 +1195,8 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
      * flatten_join_alias_vars on the whole query tree at some earlier stage,
      * maybe even in the rewriter; but for now let's just fix this case here.)
      */
-    subquery->targetList = (List *) flatten_join_alias_vars(subroot, (Node *) subquery->targetList);
+    subquery->targetList =
+        (List *)flatten_join_alias_vars(subroot, (Node *)subquery->targetList);
 
     /*
      * Adjust level-0 varnos in subquery so that we can append its rangetable
@@ -2035,6 +2040,19 @@ static void replace_vars_in_jointree(Node* jtnode, pullup_replace_vars_context* 
         }
         replace_vars_in_jointree(j->larg, context, lowest_nulling_outer_join);
         replace_vars_in_jointree(j->rarg, context, lowest_nulling_outer_join);
+
+        /*
+         * Use PHVs within the join quals of a full join, even when it's the
+         * lowest nulling outer join.  Otherwise, we cannot identify which
+         * side of the join a pulled-up var-free expression came from, which
+         * can lead to failure to make a plan at all because none of the quals
+         * appear to be mergeable or hashable conditions.  For this purpose we
+         * don't care about the state of wrap_non_vars, so leave it alone.
+         */
+        if (j->jointype == JOIN_FULL) {
+            context->need_phvs = true;
+        }
+
         j->quals = pullup_replace_vars(j->quals, context);
 
         /*

@@ -335,7 +335,7 @@ void df_open_all_file(RepairFileKey key, int32 max_sliceno)
     eg->segfile->file_num = max_sliceno + 1;
     off_t size = lseek(maxopenslicefd, 0L, SEEK_END);
     if (max_sliceno == 0) {
-        eg->segfile->total_blocks = size;
+        eg->segfile->total_blocks = size / BLCKSZ;
     } else {
         eg->segfile->total_blocks = max_sliceno * RELSEG_SIZE + size / BLCKSZ;
     }

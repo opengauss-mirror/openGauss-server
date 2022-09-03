@@ -1759,6 +1759,7 @@ CREATE TABLE [ IF NOT EXISTS ] subpartition_table_name
     | LIKE source_table [ like_option [...] ] }
     [, ... ]
 )
+    [ AUTO_INCREMENT [ = ] value ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ COMPRESS | NOCOMPRESS ]
     [ TABLESPACE tablespace_name ]
@@ -1778,17 +1779,18 @@ where column_constraint can be:
   CHECK ( expression ) |
   DEFAULT default_expr |
   GENERATED ALWAYS AS ( generation_expr ) STORED |
+  AUTO_INCREMENT |
   UNIQUE index_parameters |
   PRIMARY KEY index_parameters |
   REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
     [ ON DELETE action ] [ ON UPDATE action ] }
 [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
 where table_constraint can be:
-[ CONSTRAINT constraint_name ]
+[ CONSTRAINT [ constraint_name ] ]
 { CHECK ( expression ) |
-  UNIQUE ( column_name [, ... ] ) index_parameters |
-  PRIMARY KEY ( column_name [, ... ] ) index_parameters |
-  FOREIGN KEY ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+  UNIQUE [ index_name ] [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters |
+  PRIMARY KEY [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters |
+  FOREIGN KEY [ index_name ] ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
     [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
 [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
 where like_option can be:
@@ -1796,5 +1798,11 @@ where like_option can be:
 where index_parameters can be:
 [ WITH ( {storage_parameter = value} [, ... ] ) ]
 [ USING INDEX TABLESPACE tablespace_name ]
+
 NOTICE: 'CREATE TABLE SUBPARTITION' is only avaliable in CENTRALIZED mode!
+NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
+NOTICE: '[ index_name ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only avaliable in CENTRALIZED mode and B-format database!
 

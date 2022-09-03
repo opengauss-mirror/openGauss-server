@@ -1,3 +1,4 @@
+set enable_ai_stats=0;
 drop table if exists test_range_gist;
 create table test_range_gist(ir int4range) ;
 set default_statistics_target=100;

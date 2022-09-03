@@ -111,7 +111,7 @@ const char *excludeFiles[] = {
     NULL
 };
 
-static char* datasegpath(RelFileNode rnode, ForkNumber forknum, BlockNumber segno);
+static char* datasegpath(RelFileNode rnode, ForkNumber forknum, BlockNumber segno, bool compress);
 static int path_cmp(const void* a, const void* b);
 static int final_filemap_cmp(const void* a, const void* b);
 static void filemap_list_to_array(filemap_t* map);
@@ -366,7 +366,7 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
      */
     for (int excludeIdx = 0; excludeFiles[excludeIdx] != NULL; excludeIdx++) {
         if (strstr(path, excludeFiles[excludeIdx]) != NULL) {
-            pg_log(PG_DEBUG, "entry \"%s\" excluded from source file list", path);
+            pg_log(PG_DEBUG, "entry \"%s\" excluded from source file list\n", path);
             return;
         }
     }
@@ -521,10 +521,13 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
                 } else if (sourceCompressed && targetCompressed) {
                     oldBlockNumber = oldRewindCompressInfo.oldBlockNumber;
                     oldsize = oldBlockNumber * BLCKSZ;
+                } else {
+                    oldsize = statbuf.oldsize;
                 }
+
                 if (oldsize % BLOCKSIZE != 0) {
+                    pg_log(PG_PROGRESS, "target file size mod BLOCKSIZE not equal 0 %s %ld \n", path, oldsize);
                     oldsize = oldsize - (oldsize % BLOCKSIZE);
-                    pg_log(PG_PROGRESS, "target file size mod BLOCKSIZE not equal 0 %s %ld \n", path, statbuf.oldsize);
                 }
                 if (oldsize < newsize)
                     action = FILE_ACTION_COPY_TAIL;
@@ -652,8 +655,7 @@ void process_target_file(const char* path, file_type_t type, size_t oldsize, con
         entry->isrelfile = isRelDataFile(path);
 
         COPY_REWIND_COMPRESS_INFO(entry, info, info == NULL ? 0 : info->oldBlockNumber, 0)
-        RewindCompressInfo *rewindCompressInfo = NULL;
-        COPY_REWIND_COMPRESS_INFO(entry, rewindCompressInfo, 0, 0)
+
         if (map->last == NULL)
             map->first = entry;
         else
@@ -684,13 +686,17 @@ void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blk
     filemap_t* map = filemap;
     file_entry_t** e;
     bool processed = false;
+    bool compress = false;
 
     Assert(map->array);
 
     segno = blkno / RELSEG_SIZE;
     blkno_inseg = blkno % RELSEG_SIZE;
 
-    path = datasegpath(rnode, forknum, segno);
+    if (rnode.opt != 0) {
+        compress = true;
+    }
+    path = datasegpath(rnode, forknum, segno, compress);
 
     key.path = (char*)path;
     key_ptr = &key;
@@ -924,6 +930,7 @@ bool isRelDataFile(const char* path)
     int nmatch;
     bool matched = false;
     char *fname = NULL;
+    bool compress = false;
 
     /* ----
      * Relation data files can be in one of the following directories:
@@ -948,22 +955,33 @@ bool isRelDataFile(const char* path)
     rnode.dbNode = InvalidOid;
     rnode.relNode = InvalidOid;
     rnode.bucketNode = InvalidBktId;
+    rnode.opt = 0;
     segNo = 0;
     matched = false;
     nmatch = 0;
     columnid = 0;
     forknum = 0;
 
-    nmatch = sscanf_s(path, "global/%u.%u", &rnode.relNode, &segNo);
+    /* memcpy path without "_compress" for row data file judge */
+    char tablePath[MAXPGPATH] = {0};
+    char *processPath = (char*)path;
+    if (IsCompressedFile(path, strlen(path))) {
+        auto rc = memcpy_s(tablePath, MAXPGPATH, path, strlen(path) - strlen(COMPRESS_STR));
+        securec_check_c(rc, "\0", "\0");
+        processPath = tablePath;
+        compress = true;
+    }
+
+    nmatch = sscanf_s(processPath, "global/%u.%u", &rnode.relNode, &segNo);
     if (nmatch == 1 || nmatch == 2) {
         rnode.spcNode = GLOBALTABLESPACE_OID;
         rnode.dbNode = 0;
         matched = true;
-    }  else if ((fname = strstr((char*)path, "base/")) != NULL) {
+    }  else if ((fname = strstr((char*)processPath, "base/")) != NULL) {
         matched =check_base_path(fname, &segNo, &rnode);
-    } else if ((fname = strstr((char*)path, "pg_tblspc/")) != NULL) {
+    } else if ((fname = strstr((char*)processPath, "pg_tblspc/")) != NULL) {
         matched = check_rel_tblspac_path(fname, &segNo, &rnode);
-    } else if ((fname = strstr((char*)path, "PG_9.2_201611171")) != NULL) {
+    } else if ((fname = strstr((char*)processPath, "PG_9.2_201611171")) != NULL) {
         matched = check_abs_tblspac_path(fname, &segNo, &rnode);
     } else {
         matched = false;
@@ -978,7 +996,7 @@ bool isRelDataFile(const char* path)
      * extracted from the filename.
      */
     if (matched) {
-        char* check_path = datasegpath(rnode, forknum, segNo);
+        char* check_path = datasegpath(rnode, forknum, segNo, compress);
 
         Assert(check_path != NULL);
         if (strcmp(check_path, path) != 0)
@@ -996,18 +1014,25 @@ bool isRelDataFile(const char* path)
  *
  * The returned path is palloc'd
  */
-static char* datasegpath(RelFileNode rnode, ForkNumber forknum, BlockNumber segno)
+static char* datasegpath(RelFileNode rnode, ForkNumber forknum, BlockNumber segno, bool compress)
 {
     char* path = NULL;
     char* segpath = NULL;
+    forknum = compress ? MAIN_FORKNUM : forknum;
 
     path = relpathbackend_t((rnode), InvalidBackendId, (forknum));
     if (segno > 0 || forknum > MAX_FORKNUM) {
-        segpath = format_text("%s.%u", path, segno);
+        segpath = compress ? format_text("%s.%u", path, segno) : format_text("%s.%u" COMPRESS_STR, path, segno);
         pg_free(path);
         path = NULL;
         return segpath;
     } else {
+        if (compress) {
+            segpath = format_text(COMPRESS_SUFFIX, path);
+            pg_free(path);
+            path = NULL;
+            return segpath;
+        }
         return path;
     }
 }

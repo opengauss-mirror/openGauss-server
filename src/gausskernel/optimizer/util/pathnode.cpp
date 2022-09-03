@@ -1177,7 +1177,6 @@ static void set_scan_hint(Path* new_path, HintState* hstate)
     switch (new_path->pathtype) {
         case T_SeqScan:
         case T_CStoreScan:
-        case T_DfsScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -1985,16 +1984,12 @@ Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop)
     }
 #endif
 
-    pathnode->pathtype = (REL_COL_ORIENTED == rel->orientation) ? T_CStoreScan : T_DfsScan;
+    pathnode->pathtype = T_CStoreScan;
 
     RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
     if (NULL == rte->tablesample) {
         if (REL_COL_ORIENTED == rel->orientation) {
             cost_cstorescan(pathnode, root, rel);
-        } else {
-            /* PAX on hdfs. */
-            AssertEreport(REL_PAX_ORIENTED == rel->orientation, MOD_OPT_JOIN, "Rel should be PAX on hdfs");
-            cost_dfsscan(pathnode, root, rel);
         }
     } else {
         AssertEreport(rte->rtekind == RTE_RELATION, MOD_OPT_JOIN, "Rel should be base relation");
@@ -2560,19 +2555,6 @@ AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpath
 
     bool all_parallelized = true;
 
-    /*
-     * Handle the HDFS scan situation.
-     */
-    if (2 == list_length(subpaths)) {
-        Path* p1 = (Path*)linitial(subpaths);
-        Path* p2 = (Path*)lsecond(subpaths);
-        if (p1->pathtype == T_DfsScan && p2->pathtype == T_SeqScan) {
-            if (p1->dop > 1) {
-                all_parallelized = true;
-                p2->dop = p1->dop;
-            }
-        }
-    }
 
     /*
      * Check if all the subpaths already paralleled,
@@ -4429,6 +4411,7 @@ Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, 
             errorno = memcpy_s(newpath, sizeof(PartIteratorPath), ppath, sizeof(PartIteratorPath));
             securec_check(errorno, "", "");
 
+            newpath->subPath = reparameterize_path(root, newpath->subPath, required_outer, loop_count);
             newpath->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
             return (Path *)newpath;
         }

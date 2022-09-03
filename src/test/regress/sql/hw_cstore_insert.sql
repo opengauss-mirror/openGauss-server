@@ -35,6 +35,8 @@ COPY colstore_engine.source(c_id, c_street_1, c_city, c_zip, c_d_id, c_w_id) FRO
 
 explain (verbose, costs off) insert into colstore_engine.target select c_id,c_street_1,c_city,c_zip,c_d_id,c_w_id from colstore_engine.source where c_d_id != 9 and c_w_id != 8 and (c_street_1  like '%cyx%' or c_street_1 like '%ced%' or c_street_1 like '%fty%');
 insert into colstore_engine.target select c_id,c_street_1,c_city,c_zip,c_d_id,c_w_id from colstore_engine.source where c_d_id != 9 and c_w_id != 8 and (c_street_1  like '%cyx%' or c_street_1 like '%ced%' or c_street_1 like '%fty%');
+insert into colstore_engine.target select c_id,c_street_1,c_city,c_zip,c_d_id,c_w_id from colstore_engine.source where c_d_id != 9 and c_w_id != 8 and (c_street_1  like '%cyx%' or c_street_1 like '%ced%' or c_street_1 like '%fty%') returning *;
+insert into colstore_engine.target select c_id,c_street_1,c_city,c_zip,c_d_id,c_w_id from colstore_engine.source where c_d_id != 9 and c_w_id != 8 and (c_street_1  like '%cyx%' or c_street_1 like '%ced%' or c_street_1 like '%fty%') returning c_id;
 select * from colstore_engine.target order by c_id;
 drop schema colstore_engine cascade;
 

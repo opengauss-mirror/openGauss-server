@@ -104,6 +104,7 @@ typedef struct GsSignalSlot {
     ThreadId thread_id;
     char* thread_name;
     GsSignal* gssignal;
+    pid_t lwtid;
 } GsSignalSlot;
 
 typedef volatile int gs_atomic_t;

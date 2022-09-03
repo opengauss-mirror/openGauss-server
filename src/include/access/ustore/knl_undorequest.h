@@ -51,6 +51,12 @@ typedef struct UndoRelationData {
     bool isPartitioned;
 } UndoRelationData;
 
+typedef enum RollbackReturnType {
+    ROLLBACK_OK         = 0,
+    ROLLBACK_ERR        = -1,
+    ROLLBACK_OK_NOEXIST = -2
+} RollbackReturnType;
+
 Size AsyncRollbackRequestsHashSize(void);
 Size AsyncRollbackHashShmemSize(void);
 void AsyncRollbackHashShmemInit(void);
@@ -58,13 +64,13 @@ void AsyncRollbackHashShmemInit(void);
 RollbackRequestsHashEntry *GetNextRollbackRequest();
 bool IsRollbackRequestHashFull();
 bool AddRollbackRequest(TransactionId xid, UndoRecPtr fromAddr, UndoRecPtr toAddr, Oid dbid, UndoSlotPtr slotPtr);
-bool RemoveRollbackRequest(TransactionId xid, UndoRecPtr startAddr);
+bool RemoveRollbackRequest(TransactionId xid, UndoRecPtr startAddr, ThreadId pid);
 void ReportFailedRollbackRequest(TransactionId xid, UndoRecPtr fromAddr, UndoRecPtr toAddr, Oid dbid);
 void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPtr toUrecptr, UndoSlotPtr slotPtr,
     bool nopartial);
 void ExecuteUndoActionsPage(UndoRecPtr urp, Relation relation, Buffer buf, TransactionId xid);
-bool UHeapUndoActions(URecVector *urecvector, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
-    BlockNumber blkno, bool isFullChain);
+int UHeapUndoActions(URecVector *urecvector, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
+    BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid);
 void ExecuteUndoForInsert(Relation rel, Buffer buffer, OffsetNumber off, TransactionId xid);
 void ExecuteUndoForInsertRecovery(Buffer buffer, OffsetNumber off, TransactionId xid, bool relhasindex, int *tdid);
 

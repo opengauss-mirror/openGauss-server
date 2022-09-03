@@ -1,0 +1,1083 @@
+drop schema smp_test2 cascade;
+ERROR:  schema "smp_test2" does not exist
+create schema smp_test2;
+set current_schema=smp_test2;
+create table t1(id int, val text);
+insert into t1 values(1,'abc'),(2,'bcd'),(3,'dafs');
+create or replace package pkg_smp IS
+procedure pp1();
+END pkg_smp;
+/
+create or replace package body pkg_smp is
+procedure pp1()
+is
+begin
+    execute 'select count(*) from t1';
+    execute 'select count(*) from t1';
+end;
+end pkg_smp;
+/
+create or replace procedure p1()
+is
+begin
+    execute 'select count(*) from t1';
+	call pkg_smp.pp1();
+end;
+/
+create or replace procedure p2()
+is
+begin
+    execute 'select count(*) from t1';
+	insert into t1 values(4, 'dsb');
+	rollback;
+	execute 'select count(*) from t1';
+	insert into t1 values(4, 'abc');
+	commit;
+end;
+/
+create or replace procedure p3()
+is
+begin
+    savepoint p7_1;
+    execute 'select count(*) from t1';
+	insert into t1 values(5, 'abc');
+    rollback to p7_1;
+	execute 'select count(*) from t1';
+	insert into t1 values(5, 'efg');
+	commit;
+end;
+/
+create or replace procedure p4()
+is
+begin
+    execute 'select count(*) from t1';
+	raise exception 'raise exception';
+exception
+    when others then
+        execute 'select count(*) from t1';
+end;
+/
+set enable_auto_explain=true;
+set auto_explain_level=log; 
+set client_min_messages=log;
+set query_dop=1004;
+LOG:  statement: set query_dop=1004;
+set sql_beta_feature='enable_plsql_smp';
+LOG:  statement: set sql_beta_feature='enable_plsql_smp';
+set current_schema=smp_test2;
+LOG:  statement: set current_schema=smp_test2;
+call p1();
+LOG:  statement: call p1();
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: call p1();
+Name: datanode1
+--?.*
+  Output: p1
+  Function Call: p1()
+
+
+LOG:  old system table pg_cast does not have castowner column, use old default permission
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: pg_catalog.count(*)
+--?.*
+        Output: (count(*))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(*)
+--?.*
+                    Output: id, val
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p1() line 3 at EXECUTE statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p1() line 3 at EXECUTE statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: call pkg_smp.pp1()
+Name: datanode1
+--?.*
+  Output: pp1
+  Function Call: smp_test2.pkg_smp.pp1()
+
+
+CONTEXT:  SQL statement "call pkg_smp.pp1()"
+PL/pgSQL function p1() line 4 at SQL statement
+LOG:  old system table pg_cast does not have castowner column, use old default permission
+CONTEXT:  SQL statement "call pkg_smp.pp1()"
+PL/pgSQL function p1() line 4 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: pg_catalog.count(*)
+--?.*
+        Output: (count(*))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(*)
+--?.*
+                    Output: id, val
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function pp1() line 3 at EXECUTE statement
+SQL statement "call pkg_smp.pp1()"
+PL/pgSQL function p1() line 4 at SQL statement
+LOG:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function pp1() line 3 at EXECUTE statement
+SQL statement "call pkg_smp.pp1()"
+PL/pgSQL function p1() line 4 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: pg_catalog.count(*)
+--?.*
+        Output: (count(*))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(*)
+--?.*
+                    Output: id, val
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function pp1() line 4 at EXECUTE statement
+SQL statement "call pkg_smp.pp1()"
+PL/pgSQL function p1() line 4 at SQL statement
+LOG:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function pp1() line 4 at EXECUTE statement
+SQL statement "call pkg_smp.pp1()"
+PL/pgSQL function p1() line 4 at SQL statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "call pkg_smp.pp1()"
+PL/pgSQL function p1() line 4 at SQL statement
+ERROR:  query has no destination for result data
+HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
+CONTEXT:  PL/pgSQL function p1() line 4 at SQL statement
+call p2();
+LOG:  statement: call p2();
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: call p2();
+Name: datanode1
+--?.*
+  Output: p2
+  Function Call: p2()
+
+
+LOG:  old system table pg_cast does not have castowner column, use old default permission
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: pg_catalog.count(*)
+--?.*
+        Output: (count(*))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(*)
+--?.*
+                    Output: id, val
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p2() line 3 at EXECUTE statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p2() line 3 at EXECUTE statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: insert into t1 values(4, 'dsb')
+Name: datanode1
+--?.*
+--?.*
+        Output: 4, 'dsb'::text
+
+
+CONTEXT:  SQL statement "insert into t1 values(4, 'dsb')"
+PL/pgSQL function p2() line 4 at SQL statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "insert into t1 values(4, 'dsb')"
+PL/pgSQL function p2() line 4 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: pg_catalog.count(*)
+--?.*
+        Output: (count(*))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(*)
+--?.*
+                    Output: id, val
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p2() line 6 at EXECUTE statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p2() line 6 at EXECUTE statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: insert into t1 values(4, 'abc')
+Name: datanode1
+--?.*
+--?.*
+        Output: 4, 'abc'::text
+
+
+CONTEXT:  SQL statement "insert into t1 values(4, 'abc')"
+PL/pgSQL function p2() line 7 at SQL statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "insert into t1 values(4, 'abc')"
+PL/pgSQL function p2() line 7 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ p2 
+----
+ 
+(1 row)
+
+call p3();
+LOG:  statement: call p3();
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: call p3();
+Name: datanode1
+--?.*
+  Output: p3
+  Function Call: p3()
+
+
+LOG:  old system table pg_cast does not have castowner column, use old default permission
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: pg_catalog.count(*)
+--?.*
+        Output: (count(*))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(*)
+--?.*
+                    Output: id, val
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p3() line 4 at EXECUTE statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p3() line 4 at EXECUTE statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: insert into t1 values(5, 'abc')
+Name: datanode1
+--?.*
+--?.*
+        Output: 5, 'abc'::text
+
+
+CONTEXT:  SQL statement "insert into t1 values(5, 'abc')"
+PL/pgSQL function p3() line 5 at SQL statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "insert into t1 values(5, 'abc')"
+PL/pgSQL function p3() line 5 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: pg_catalog.count(*)
+--?.*
+        Output: (count(*))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(*)
+--?.*
+                    Output: id, val
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p3() line 7 at EXECUTE statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p3() line 7 at EXECUTE statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: insert into t1 values(5, 'efg')
+Name: datanode1
+--?.*
+--?.*
+        Output: 5, 'efg'::text
+
+
+CONTEXT:  SQL statement "insert into t1 values(5, 'efg')"
+PL/pgSQL function p3() line 8 at SQL statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "insert into t1 values(5, 'efg')"
+PL/pgSQL function p3() line 8 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ p3 
+----
+ 
+(1 row)
+
+call p4();
+LOG:  statement: call p4();
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: call p4();
+Name: datanode1
+--?.*
+  Output: p4
+  Function Call: p4()
+
+
+LOG:  old system table pg_cast does not have castowner column, use old default permission
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: pg_catalog.count(*)
+--?.*
+        Output: (count(*))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(*)
+--?.*
+                    Output: id, val
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p4() line 3 at EXECUTE statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p4() line 3 at EXECUTE statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select count(*) from t1
+Name: datanode1
+--?.*
+  Output: count(*)
+  Exec Nodes: All datanodes
+--?.*
+        Output: id, val
+        Exec Nodes: All datanodes
+
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p4() line 7 at EXECUTE statement
+LOG:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(*) from t1"
+PL/pgSQL function p4() line 7 at EXECUTE statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ p4 
+----
+ 
+(1 row)
+
+set current_schema=public;
+LOG:  statement: set current_schema=public;
+set enable_indexscan=off;
+LOG:  statement: set enable_indexscan=off;
+set enable_bitmapscan=off;
+LOG:  statement: set enable_bitmapscan=off;
+drop schema smp_test2 cascade;
+LOG:  statement: drop schema smp_test2 cascade;
+--?.*
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to table smp_test2.t1
+--?.*
+drop cascades to function smp_test2.pp1()
+drop cascades to function smp_test2.p1()
+drop cascades to function smp_test2.p2()
+drop cascades to function smp_test2.p3()
+drop cascades to function smp_test2.p4()
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+--?.*
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid, id
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: ctid, id
+--?.*
+
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement
+LOG:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+--?.*
+PL/pgSQL function inline_code_block line 1 at SQL statement

@@ -48,7 +48,6 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
     switch (nodeTag(result_plan)) {
         case T_SeqScan:
         case T_CStoreScan:
-        case T_DfsScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -87,11 +86,6 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
         } break;
         case T_CStoreIndexScan: {
             CStoreIndexScan* splan = (CStoreIndexScan*)result_plan;
-
-            res_list = list_concat_unique(res_list, check_eval((Node*)splan->indexqual));
-        } break;
-        case T_DfsIndexScan: {
-            DfsIndexScan* splan = (DfsIndexScan*)result_plan;
 
             res_list = list_concat_unique(res_list, check_eval((Node*)splan->indexqual));
         } break;
@@ -1925,9 +1919,13 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                     subplan_ids[subplan->plan_id] = subplan_ids[0];
 
                 if (!has_finalized) {
+#ifdef ENABLE_MULTIPLE_NODES
                     /*
                      * subplan on dn and main plan on cn. In such case, we only
-                     * support initplan, and gather the result to cn
+                     * support initplan, and gather the result to cn.
+                     *
+                     * single no need to consider this situation, because subplan
+                     * and the node contains subplan will not parallel.
                      */
                     if (is_execute_on_coordinator(result_plan) ||
                         (is_execute_on_allnodes(result_plan) && !is_data_node_exec)) {
@@ -1998,7 +1996,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                         /* Push only nodelist but not entire exec_nodes here. */
                         pushdown_execnodes(plan, result_plan->exec_nodes, false, true);
                     }
-
+#endif
                     if (check_stream_support()) {
                         PlannerInfo* subroot = NULL;
                         Plan* child_root = NULL;

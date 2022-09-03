@@ -41,6 +41,9 @@
 #include "utils/plog.h"
 #include "utils/plog.h"
 #include "utils/inval.h"
+#include "storage/cfs/cfs_converter.h"
+#include "storage/cfs/cfs_repair.h"
+#include "commands/verify.h"
 
 const int MAX_THREAD_NAME_LEN = 64;
 const int XLOG_LSN_SWAP = 32;
@@ -412,6 +415,25 @@ int RemoteReadBlockNoError(RepairBlockKey *key, char *buf, XLogRecPtr lsn, const
 static void RepairPage(RepairBlockEntry *entry, char *page)
 {
     int retCode = 0;
+
+    /* we need check the pca header page first if the relation is compression relation,
+       and we need to try our best to repair this pca header page and the whole extent */
+    if (IS_COMPRESSED_RNODE(entry->key.relfilenode, MAIN_FORKNUM)) {
+        bool need_repair_pca = false;
+        SMgrRelation smgr = smgropen(entry->key.relfilenode, InvalidBackendId, GetColumnNum(MAIN_FORKNUM));
+        if (!IsSegmentPhysicalRelNode(entry->key.relfilenode)) {
+            CfsHeaderPageCheckAndRepair(smgr, entry->key.blocknum, NULL, ERR_MSG_LEN, &need_repair_pca);
+            if (need_repair_pca) {
+                /* clear local cache and smgr */
+                CacheInvalidateSmgr(smgr->smgr_rnode);
+
+                /* try repair the whole extent */
+                gs_tryrepair_compress_extent(smgr, entry->key.blocknum);
+            }
+        } else {
+            ;
+        }
+    }
 
     if (entry->pblk.relNode != InvalidOid) {
         retCode = RemoteReadBlockNoError(&entry->key, page, entry->page_old_lsn, &entry->pblk);
@@ -914,11 +936,13 @@ void CheckNeedRecordBadFile(RepairFileKey key, uint32 nblock, uint32 blocknum, c
     if (g_instance.pid_cxt.PageRepairPID != 0) {
         return;
     }
-    if (CheckVerionSupportRepair() && (nblock == 0 || blocknum / RELSEG_SIZE > nblock / RELSEG_SIZE) &&
+    BlockNumber relSegSize =
+        IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
+    if (CheckVerionSupportRepair() && (nblock == 0 || blocknum / relSegSize > nblock / relSegSize) &&
         IsPrimaryClusterStandbyDN() && g_instance.repair_cxt.support_repair) {
         if (pblk != NULL) {
             key.relfilenode.relNode = pblk->relNode;
-            key.segno = pblk->block / RELSEG_SIZE;
+            key.segno = pblk->block / relSegSize;
         }
         if (IsSegmentFileNode(key.relfilenode)) {
             key.relfilenode.bucketNode = SegmentBktId;
@@ -1029,21 +1053,27 @@ void RenameRepairFile(RepairFileKey *key, bool clear_entry)
     bool found = false;
     HTAB *file_hash = g_instance.repair_cxt.file_repair_hashtbl;
     char *path = relpathperm(key->relfilenode, key->forknum);
-    char *tempsegpath = (char *)palloc(strlen(path) + SEGLEN);
-    char *segpath = (char *)palloc(strlen(path) + SEGLEN);
+
+    int64 segpathlen = (int64)(strlen(path) + SEGLEN + strlen(COMPRESS_STR));
+    char *tempsegpath = (char *)palloc((Size)segpathlen);
+    char *segpath = (char *)palloc((Size)segpathlen);
 
     /* wait all dirty page flush */
     RequestCheckpoint(CHECKPOINT_FLUSH_DIRTY|CHECKPOINT_WAIT);
 
     if (key->segno == 0) {
-        rc = sprintf_s(segpath, strlen(path) + SEGLEN, "%s", path);
+        rc = sprintf_s(segpath, segpathlen, "%s%s", path,
+                       IS_COMPRESSED_RNODE(key->relfilenode, MAIN_FORKNUM) ? COMPRESS_STR : "");
         securec_check_ss(rc, "", "")
-        rc = sprintf_s(tempsegpath, strlen(path) + SEGLEN, "%s.repair", path);
+        rc = sprintf_s(tempsegpath, segpathlen, "%s%s.repair", path,
+                       IS_COMPRESSED_RNODE(key->relfilenode, MAIN_FORKNUM) ? COMPRESS_STR : "");
         securec_check_ss(rc, "", "")
     } else {
-        rc = sprintf_s(segpath, strlen(path) + SEGLEN, "%s.%u", path, key->segno);
+        rc = sprintf_s(segpath, segpathlen, "%s.%u%s", path, key->segno,
+                       IS_COMPRESSED_RNODE(key->relfilenode, MAIN_FORKNUM) ? COMPRESS_STR : "");
         securec_check_ss(rc, "", "")
-        rc = sprintf_s(tempsegpath, strlen(path) + SEGLEN, "%s.%u.repair", path, key->segno);
+        rc = sprintf_s(tempsegpath, segpathlen, "%s.%u%s.repair", path, key->segno,
+                       IS_COMPRESSED_RNODE(key->relfilenode, MAIN_FORKNUM) ? COMPRESS_STR : "");
         securec_check_ss(rc, "", "")
     }
 
@@ -1175,17 +1205,19 @@ void CheckIsStopRecovery(void)
     HASH_SEQ_STATUS status;
     RepairFileEntry *entry = NULL;
     HTAB *file_hash = g_instance.repair_cxt.file_repair_hashtbl;
-    XLogRecPtr repaly = GetXLogReplayRecPtr(NULL, NULL);
-    XLogRecPtr flush = GetStandbyFlushRecPtr(NULL);
 
     if (file_hash == NULL) {
         return;
     }
 
     if (LWLockConditionalAcquire(FILE_REPAIR_LOCK, LW_EXCLUSIVE)) {
+        if (hash_get_num_entries(file_hash) == 0) {
+            LWLockRelease(FILE_REPAIR_LOCK);
+            return;
+        }
+        XLogRecPtr repaly = GetXLogReplayRecPtr(NULL, NULL);
         hash_seq_init(&status, file_hash);
         while ((entry = (RepairFileEntry *)hash_seq_search(&status)) != NULL) {
-            flush = GetStandbyFlushRecPtr(NULL);
             if (!XLogRecPtrIsInvalid(entry->min_recovery_point) && XLByteLT(entry->min_recovery_point, repaly)
                 && entry->file_state == WAIT_FILE_CHECK_REPAIR) {
                 entry->file_state = WAIT_FILE_REMOTE_READ;
@@ -1223,8 +1255,6 @@ void CheckIsStopRecovery(void)
             }
         }
     }
-
-    return;
 }
 
 const int REPAIR_LEN = 8;
@@ -1351,6 +1381,8 @@ static void RepairSegFile(RepairFileKey key, char *segpath, uint32 seg_no, uint3
     XLogRecPtr remote_lsn = InvalidXLogRecPtr;
     XLogRecPtr standby_flush_lsn = InvalidXLogRecPtr;
     bool found = false;
+    BlockNumber relSegSize =
+        IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ? CFS_LOGIC_BLOCKS_PER_FILE : RELSEG_SIZE;
 
     fd = CreateRepairFile(segpath);
     if (fd < 0) {
@@ -1361,11 +1393,12 @@ static void RepairSegFile(RepairFileKey key, char *segpath, uint32 seg_no, uint3
     }
     read_key.relfilenode = key.relfilenode;
     read_key.forknum = key.forknum;
-    read_key.blockstart = seg_no * RELSEG_SIZE;
+    read_key.blockstart = seg_no * relSegSize;
 
-    buf = (char*)palloc(MAX_BATCH_READ_BLOCKNUM * BLCKSZ);
-    seg_size = (seg_no < max_segno ? (RELSEG_SIZE * BLCKSZ) : (size % (RELSEG_SIZE * BLCKSZ)));
     int batch_size = MAX_BATCH_READ_BLOCKNUM * BLCKSZ;
+    buf = (char*)palloc((uint32)batch_size);
+    seg_size  = (uint32)((seg_no < max_segno || (size % (relSegSize * BLCKSZ)) == 0) ?
+                        (relSegSize * BLCKSZ) : (size % (relSegSize * BLCKSZ)));
     int max_times = seg_size % batch_size == 0 ? seg_size / batch_size : (seg_size / batch_size + 1);
 
     for (int j = 0; j < max_times; j++) {
@@ -1376,10 +1409,15 @@ static void RepairSegFile(RepairFileKey key, char *segpath, uint32 seg_no, uint3
             read_size = batch_size;
         }
 
-        read_key.blockstart = seg_no * RELSEG_SIZE + j * MAX_BATCH_READ_BLOCKNUM;
+        read_key.blockstart = seg_no * relSegSize + j * MAX_BATCH_READ_BLOCKNUM;
         ret_code = RemoteReadFileNoError(&read_key, buf, InvalidXLogRecPtr, read_size, &remote_lsn, &remote_size);
         if (ret_code == REMOTE_READ_OK) {
-            rc = WriteRepairFile(fd, segpath, buf, j * batch_size, read_size);
+            if (IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM)) {
+                rc = WriteRepairFile_Compress(key.relfilenode, fd, segpath, buf,
+                                              (BlockNumber)(j * MAX_BATCH_READ_BLOCKNUM), (uint32)(read_size / BLCKSZ));
+            } else {
+                rc = WriteRepairFile(fd, segpath, buf, j * batch_size, read_size);
+            }
             if (rc != 0) {
                 ereport(WARNING, (errcode_for_file_access(),
                 errmsg("[file repair] could not write repair file \"%s\", segno is %d",
@@ -1453,7 +1491,7 @@ bool CheckAllSegmentFileRepair(RepairFileKey key, uint32 max_segno)
         temp_key.relfilenode.dbNode = key.relfilenode.dbNode;
         temp_key.relfilenode.spcNode = key.relfilenode.spcNode;
         temp_key.relfilenode.bucketNode = key.relfilenode.bucketNode;
-        temp_key.relfilenode.bucketNode = key.relfilenode.opt;
+        temp_key.relfilenode.bucketNode = (int2)key.relfilenode.opt;
         temp_key.forknum = key.forknum;
         temp_key.segno = i;
 
@@ -1526,7 +1564,8 @@ void StandbyRemoteReadFile(RepairFileKey key)
     errno_t rc;
     bool found = false;
     char *path = relpathperm(key.relfilenode, key.forknum);
-    char *segpath = (char *)palloc(strlen(path) + SEGLEN);
+    int64 segpathlen = (int64)(strlen(path) + SEGLEN + strlen(COMPRESS_STR));
+    char *segpath = (char *)palloc((Size)segpathlen);
 
 RETYR:
     ret_code = RemoteReadFileSizeNoError(&key, &size);
@@ -1546,7 +1585,9 @@ RETYR:
             return;
         }
 
-        max_segno = size / (RELSEG_SIZE * BLCKSZ); /* max_segno start from 0 */
+        BlockNumber relSegSize =
+            IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
+        max_segno = (uint64)size / (relSegSize * BLCKSZ); /* max_segno start from 0 */
         if (key.segno > max_segno) {
             ereport(WARNING, (errcode_for_file_access(),
                 errmsg("[file repair] primary this file %s , segno is %d also not exist, can not repair, wait clean",
@@ -1574,9 +1615,11 @@ RETYR:
         }
 
         if (key.segno == 0) {
-            rc = sprintf_s(segpath, strlen(path) + SEGLEN, "%s", path);
+            rc = sprintf_s(segpath, (uint64)segpathlen, "%s%s", path,
+                IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ? COMPRESS_STR : "");
         } else {
-            rc = sprintf_s(segpath, strlen(path) + SEGLEN, "%s.%u", path, key.segno);
+            rc = sprintf_s(segpath, (uint64)segpathlen, "%s.%u%s", path, key.segno,
+                IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ? COMPRESS_STR : "");
         }
         securec_check_ss(rc, "", "");
         RepairSegFile(key, segpath, key.segno, max_segno, size);
@@ -1598,14 +1641,17 @@ static void checkOtherFile(RepairFileKey key, uint32 max_segno, uint64 size)
     RepairFileKey temp_key;
     RepairFileEntry *temp_entry = NULL;
     char *path = relpathperm(key.relfilenode, key.forknum);
-    char *segpath = (char *)palloc(strlen(path) + SEGLEN);
+    int64 segpathlen = (int64)(strlen(path) + SEGLEN + strlen(COMPRESS_STR));
+    char *segpath = (char *)palloc((Size)segpathlen);
     HTAB *file_hash = g_instance.repair_cxt.file_repair_hashtbl;
 
     for (uint i = 0; i <= max_segno; i++) {
         if (i == 0) {
-            rc = sprintf_s(segpath, strlen(path) + SEGLEN, "%s", path);
+            rc = sprintf_s(segpath, segpathlen, "%s%s", path,
+                IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ? COMPRESS_STR : "");
         } else {
-            rc = sprintf_s(segpath, strlen(path) + SEGLEN, "%s.%u", path, i);
+            rc = sprintf_s(segpath, (uint64)segpathlen, "%s.%u%s", path, i,
+                IS_COMPRESSED_RNODE(key.relfilenode, MAIN_FORKNUM) ? COMPRESS_STR : "");
         }
         securec_check_ss(rc, "", "");
 

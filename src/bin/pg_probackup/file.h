@@ -112,7 +112,7 @@ extern size_t  fio_fwrite(FILE* f, void const* buf, size_t size);
 extern void fio_construct_compressed(void const* buf, size_t size);
 extern ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compress_alg);
 extern ssize_t fio_fread(FILE* f, void* buf, size_t size);
-extern int     fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression = NULL);
+extern int     fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression);
 extern int     fio_fprintf(FILE* f, char const* arg, ...);// pg_attribute_printf(2, 3);
 extern int     fio_fflush(FILE* f);
 extern int     fio_fseek(FILE* f, off_t offs);
@@ -148,7 +148,7 @@ extern int     fio_close_stream(FILE* f);
 
 struct CompressCommunicate {
     char path[MAXPGPATH];
-    uintptr_t segmentNo;
+    BlockNumber segmentNo;
     int chunkSize;
     int algorithm;
 };

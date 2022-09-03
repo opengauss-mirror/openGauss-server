@@ -165,6 +165,9 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     securec_check_ss(errorno, "\0", "\0");
     MemoryContextSwitchTo(oldContext);
 
+    /* instr unique sql - we assume that this is no nesting calling of Fusion::execute */
+    UniqueSQLStatCountReturnedRows(nprocessed);
+
     return success;
 }
 

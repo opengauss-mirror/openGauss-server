@@ -1407,7 +1407,7 @@ static void dumpAlterRolesForResourcePool(PGconn* conn)
     query = createPQExpBuffer();
     printfPQExpBuffer(query, "SELECT rolname, rolrespool, ");
     if (true == is_column_exists(conn, AuthIdRelationId, "rolparentid")) {
-        appendPQExpBuffer(query, "pg_stat_get_role_name(rolparentid) AS rolparentname ");
+        appendPQExpBuffer(query, "pg_catalog.pg_stat_get_role_name(rolparentid) AS rolparentname ");
     } else {
         appendPQExpBuffer(query, "NULL as rolparentid ");
     }
@@ -1522,7 +1522,7 @@ static void dumpRoles(PGconn* conn)
             appendPQExpBuffer(buf, "NULL as roluseft, ");
         }
         if (true == is_column_exists(conn, AuthIdRelationId, "rolparentid")) {
-            appendPQExpBuffer(buf, "pg_stat_get_role_name(rolparentid) AS rolparentname, ");
+            appendPQExpBuffer(buf, "pg_catalog.pg_stat_get_role_name(rolparentid) AS rolparentname, ");
             has_parent = true;
         } else {
             appendPQExpBuffer(buf, "NULL as rolparentid, ");
@@ -2095,7 +2095,7 @@ static void dumpTablespaces(PGconn* conn)
                 "SELECT oid, spcname, "
                 "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
                 "pg_catalog.pg_tablespace_location(oid), spcacl, "
-                "array_to_string(spcoptions, ', '),"
+                "pg_catalog.array_to_string(spcoptions, ', '),"
                 "pg_catalog.shobj_description(oid, 'pg_tablespace'), "
                 "spcmaxsize, "
                 "relative "
@@ -2107,7 +2107,7 @@ static void dumpTablespaces(PGconn* conn)
                 "SELECT oid, spcname, "
                 "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
                 "pg_catalog.pg_tablespace_location(oid), spcacl, "
-                "array_to_string(spcoptions, ', '),"
+                "pg_catalog.array_to_string(spcoptions, ', '),"
                 "pg_catalog.shobj_description(oid, 'pg_tablespace'), "
                 "spcmaxsize "
                 "FROM pg_catalog.pg_tablespace "
@@ -2118,7 +2118,7 @@ static void dumpTablespaces(PGconn* conn)
                 "SELECT oid, spcname, "
                 "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
                 "pg_catalog.pg_tablespace_location(oid), spcacl, "
-                "array_to_string(spcoptions, ', '),"
+                "pg_catalog.array_to_string(spcoptions, ', '),"
                 "pg_catalog.shobj_description(oid, 'pg_tablespace'), "
                 "'' AS spcmaxsize "
                 "FROM pg_catalog.pg_tablespace "
@@ -2130,7 +2130,7 @@ static void dumpTablespaces(PGconn* conn)
             "SELECT oid, spcname, "
             "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
             "spclocation, spcacl, "
-            "array_to_string(spcoptions, ', '),"
+            "pg_catalog.array_to_string(spcoptions, ', '),"
             "pg_catalog.shobj_description(oid, 'pg_tablespace') "
             "FROM pg_catalog.pg_tablespace "
             "WHERE spcname !~ '^pg_' "
@@ -2340,19 +2340,19 @@ static void dumpCreateDB(PGconn* conn)
      */
     if (server_version >= 80400)
         res = executeQuery(conn,
-            "SELECT pg_encoding_to_char(encoding), "
+            "SELECT pg_catalog.pg_encoding_to_char(encoding), "
             "datcollate, datctype "
             "FROM pg_database "
             "WHERE datname = 'template0'");
     else if (server_version >= 70100)
         res = executeQuery(conn,
-            "SELECT pg_encoding_to_char(encoding), "
+            "SELECT pg_catalog.pg_encoding_to_char(encoding), "
             "null::text AS datcollate, null::text AS datctype "
             "FROM pg_database "
             "WHERE datname = 'template0'");
     else
         res = executeQuery(conn,
-            "SELECT pg_encoding_to_char(encoding), "
+            "SELECT pg_catalog.pg_encoding_to_char(encoding), "
             "null::text AS datcollate, null::text AS datctype "
             "FROM pg_database "
             "WHERE datname = 'template1'");
@@ -2387,7 +2387,7 @@ static void dumpCreateDB(PGconn* conn)
                     "SELECT datname, "
                     "coalesce(rolname, (select rolname from pg_authid where oid=(select datdba from pg_database where "
                     "datname='template0'))), "
-                    "pg_encoding_to_char(d.encoding), "
+                    "pg_catalog.pg_encoding_to_char(d.encoding), "
                     "datcollate, datctype, datfrozenxid, datfrozenxid64, "
                     "datistemplate, datacl, datconnlimit, "
                     "(SELECT spcname FROM pg_tablespace t WHERE t.oid = d.dattablespace) AS dattablespace, "
@@ -2399,7 +2399,7 @@ static void dumpCreateDB(PGconn* conn)
                     "SELECT datname, "
                     "coalesce(rolname, (select rolname from pg_authid where oid=(select datdba from pg_database where "
                     "datname='template0'))), "
-                    "pg_encoding_to_char(d.encoding), "
+                    "pg_catalog.pg_encoding_to_char(d.encoding), "
                     "datcollate, datctype, datfrozenxid, 0 AS datfrozenxid64, "
                     "datistemplate, datacl, datconnlimit, "
                     "(SELECT spcname FROM pg_tablespace t WHERE t.oid = d.dattablespace) AS dattablespace, "
@@ -2412,7 +2412,7 @@ static void dumpCreateDB(PGconn* conn)
                     "SELECT datname, "
                     "coalesce(rolname, (select rolname from pg_authid where oid=(select datdba from pg_database where "
                     "datname='template0'))), "
-                    "pg_encoding_to_char(d.encoding), "
+                    "pg_catalog.pg_encoding_to_char(d.encoding), "
                     "datcollate, datctype, datfrozenxid, datfrozenxid64, "
                     "datistemplate, datacl, datconnlimit, "
                     "(SELECT spcname FROM pg_tablespace t WHERE t.oid = d.dattablespace) AS dattablespace "
@@ -2423,7 +2423,7 @@ static void dumpCreateDB(PGconn* conn)
                     "SELECT datname, "
                     "coalesce(rolname, (select rolname from pg_authid where oid=(select datdba from pg_database where "
                     "datname='template0'))), "
-                    "pg_encoding_to_char(d.encoding), "
+                    "pg_catalog.pg_encoding_to_char(d.encoding), "
                     "datcollate, datctype, datfrozenxid, 0 AS datfrozenxid64, "
                     "datistemplate, datacl, datconnlimit, "
                     "(SELECT spcname FROM pg_tablespace t WHERE t.oid = d.dattablespace) AS dattablespace "
@@ -2435,7 +2435,7 @@ static void dumpCreateDB(PGconn* conn)
             "SELECT datname, "
             "coalesce(rolname, (select rolname from pg_authid where oid=(select datdba from pg_database where "
             "datname='template0'))), "
-            "pg_encoding_to_char(d.encoding), "
+            "pg_catalog.pg_encoding_to_char(d.encoding), "
             "null::text AS datcollate, null::text AS datctype, datfrozenxid, "
             "datistemplate, datacl, datconnlimit, "
             "(SELECT spcname FROM pg_tablespace t WHERE t.oid = d.dattablespace) AS dattablespace "
@@ -2446,7 +2446,7 @@ static void dumpCreateDB(PGconn* conn)
             "SELECT datname, "
             "coalesce(usename, (select usename from pg_shadow where usesysid=(select datdba from pg_database where "
             "datname='template0'))), "
-            "pg_encoding_to_char(d.encoding), "
+            "pg_catalog.pg_encoding_to_char(d.encoding), "
             "null::text AS datcollate, null::text AS datctype, datfrozenxid, "
             "datistemplate, datacl, -1 as datconnlimit, "
             "(SELECT spcname FROM pg_tablespace t WHERE t.oid = d.dattablespace) AS dattablespace "
@@ -2457,7 +2457,7 @@ static void dumpCreateDB(PGconn* conn)
             "SELECT datname, "
             "coalesce(usename, (select usename from pg_shadow where usesysid=(select datdba from pg_database where "
             "datname='template0'))), "
-            "pg_encoding_to_char(d.encoding), "
+            "pg_catalog.pg_encoding_to_char(d.encoding), "
             "null::text AS datcollate, null::text AS datctype, datfrozenxid, "
             "datistemplate, datacl, -1 as datconnlimit, "
             "'pg_default' AS dattablespace "
@@ -2470,7 +2470,7 @@ static void dumpCreateDB(PGconn* conn)
             "(select usename from pg_shadow where usesysid=datdba), "
             "(select usename from pg_shadow where usesysid=(select datdba from pg_database where "
             "datname='template0'))), "
-            "pg_encoding_to_char(d.encoding), "
+            "pg_catalog.pg_encoding_to_char(d.encoding), "
             "null::text AS datcollate, null::text AS datctype, 0 AS datfrozenxid, "
             "datistemplate, '' as datacl, -1 as datconnlimit, "
             "'pg_default' AS dattablespace "
@@ -2484,7 +2484,7 @@ static void dumpCreateDB(PGconn* conn)
         res = executeQuery(conn,
             "SELECT datname, "
             "(select usename from pg_shadow where usesysid=datdba), "
-            "pg_encoding_to_char(d.encoding), "
+            "pg_catalog.pg_encoding_to_char(d.encoding), "
             "null::text AS datcollate, null::text AS datctype, 0 AS datfrozenxid, "
             "'f' as datistemplate, "
             "'' as datacl, -1 as datconnlimit, "
@@ -2713,7 +2713,7 @@ static void dumpDbRoleConfig(PGconn* conn)
     int i = 0;
 
     printfPQExpBuffer(buf,
-        "SELECT rolname, datname, unnest(setconfig) "
+        "SELECT rolname, datname, pg_catalog.unnest(setconfig) "
         "FROM pg_db_role_setting, pg_authid, pg_database "
         "WHERE setrole = pg_authid.oid AND setdatabase = pg_database.oid");
     res = executeQuery(conn, buf->data);
@@ -3427,10 +3427,11 @@ static void dumpNodes(PGconn* conn)
 
     query = createPQExpBuffer();
     appendPQExpBuffer(query,
-        "SELECT 'CREATE NODE \"' || node_name || '\"  WITH (TYPE = ' || chr(39) "
-        "  || (case when node_type='C'  then 'coordinator' else 'datanode' end) || chr(39)  "
-        "  || ' , HOST = ' || chr(39) || node_host || chr(39) || ' , HOST1 = ' || chr(39) "
-        "  || node_host1 || chr(39) || ', %s PORT = ' "
+        "SELECT 'CREATE NODE \"' || node_name || '\"  WITH (TYPE = ' || pg_catalog.chr(39) "
+        "  || (case when node_type='C'  then 'coordinator' else 'datanode' end) || pg_catalog.chr(39)  "
+        "  || ' , HOST = ' || pg_catalog.chr(39) || node_host || pg_catalog.chr(39) "
+        "  || ' , HOST1 = ' || pg_catalog.chr(39) "
+        "  || node_host1 || pg_catalog.chr(39) || ', %s PORT = ' "
         "  || (case when n.node_name = cn.setting then p.setting::int else node_port end) || ', PORT1 = ' "
         "  || (case when n.node_name = cn.setting then p.setting::int else node_port1 end) "
         "  || ' , SCTP_PORT = ' || sctp_port || ' , CONTROL_PORT = ' || control_port "
@@ -3492,7 +3493,8 @@ static void dumpNodeGroups(PGconn* conn)
         if (include_buckets) {
             if (is_group_kind_exists) {
                 appendPQExpBuffer(query,
-                    "SELECT 'CREATE NODE GROUP \"' || pgxc_group.group_name || '\" WITH(' || string_agg('\"' || "
+                    "SELECT 'CREATE NODE GROUP \"' || pgxc_group.group_name || '\" WITH(' || "
+                    "pg_catalog.string_agg('\"' || "
                     "pgxc_node.node_name || '\"',',') || ') BUCKETS(' || pgxc_group.group_buckets || ') ' || (CASE "
                     "WHEN pgxc_group.group_kind = 'v' THEN 'VCGROUP' ELSE '' END) || ';' AS group_query,"
                     " (CASE WHEN pgxc_group.is_installation = 'TRUE' THEN 'UPDATE pg_catalog.pgxc_group SET "
@@ -3507,7 +3509,8 @@ static void dumpNodeGroups(PGconn* conn)
                     " ORDER BY pgxc_group.is_installation desc ");
             } else {
                 appendPQExpBuffer(query,
-                    "SELECT 'CREATE NODE GROUP \"' || pgxc_group.group_name || '\" WITH(' || string_agg('\"' || "
+                    "SELECT 'CREATE NODE GROUP \"' || pgxc_group.group_name || '\" WITH(' || "
+                    "pg_catalog.string_agg('\"' || "
                     "pgxc_node.node_name || '\"',',') || ') BUCKETS(' || pgxc_group.group_buckets || ');' AS "
                     "group_query,"
                     " (CASE WHEN pgxc_group.is_installation = 'TRUE' THEN 'UPDATE pg_catalog.pgxc_group SET "
@@ -3524,7 +3527,8 @@ static void dumpNodeGroups(PGconn* conn)
         } else {
             if (is_group_kind_exists) {
                 appendPQExpBuffer(query,
-                    "SELECT 'CREATE NODE GROUP \"' || pgxc_group.group_name || '\" WITH(' || string_agg('\"' || "
+                    "SELECT 'CREATE NODE GROUP \"' || pgxc_group.group_name || '\" WITH(' || "
+                    "pg_catalog.string_agg('\"' || "
                     "pgxc_node.node_name || '\"',',') || ') ' || (CASE WHEN pgxc_group.group_kind = 'v' THEN 'VCGROUP' "
                     "ELSE '' END) || ';' AS group_query,"
                     " (CASE WHEN pgxc_group.is_installation = 'TRUE' THEN 'UPDATE pg_catalog.pgxc_group SET "
@@ -3539,8 +3543,8 @@ static void dumpNodeGroups(PGconn* conn)
                     " ORDER BY pgxc_group.is_installation desc ");
             } else {
                 appendPQExpBuffer(query,
-                    "SELECT 'CREATE NODE GROUP \"' || pgxc_group.group_name || '\" WITH(' || string_agg('\"' || "
-                    "pgxc_node.node_name || '\"',',') || ');' AS group_query,"
+                    "SELECT 'CREATE NODE GROUP \"' || pgxc_group.group_name || '\" WITH(' || "
+                    "pg_catalog.string_agg('\"' || pgxc_node.node_name || '\"',',') || ');' AS group_query,"
                     " (CASE WHEN pgxc_group.is_installation = 'TRUE' THEN 'UPDATE pg_catalog.pgxc_group SET "
                     "is_installation = TRUE, group_kind = ''i'' WHERE group_name = '\''||pgxc_group.group_name||'\'';'"
                     " WHEN pgxc_group.in_redistribution = 'y' THEN 'UPDATE pg_catalog.pgxc_group SET in_redistribution "
@@ -3556,11 +3560,12 @@ static void dumpNodeGroups(PGconn* conn)
         /*
          * We known that if not is_installation_exists, group_kind is not exists.
          */
-        const char* default_acl = "concat('{', concat(current_user,'=UCp/', current_user, ',=UCp/',current_user), '}')";
+        const char* default_acl = "pg_catalog.concat('{', pg_catalog.concat(current_user,'=UCp/', "
+                                  "current_user, ',=UCp/',current_user), '}')";
         if (include_buckets) {
             appendPQExpBuffer(query,
                 "select 'CREATE NODE GROUP \"' || pgxc_group.group_name"
-                " || '\" WITH(' || string_agg('\"' || node_name || '\"',',') || ')"
+                " || '\" WITH(' || pg_catalog.string_agg('\"' || node_name || '\"',',') || ')"
                 " BUCKETS(' || pgxc_group.group_buckets || ');' as group_query, "
                 " 'UPDATE pg_catalog.pgxc_group SET is_installation = TRUE, group_kind = ''i'' WHERE group_name = "
                 "'\''||pgxc_group.group_name||'\'';"
@@ -3574,7 +3579,7 @@ static void dumpNodeGroups(PGconn* conn)
         } else {
             appendPQExpBuffer(query,
                 "select 'CREATE NODE GROUP \"' || pgxc_group.group_name"
-                " || '\" WITH(' || string_agg('\"' || node_name || '\"',',') || ');' as group_query, "
+                " || '\" WITH(' || pg_catalog.string_agg('\"' || node_name || '\"',',') || ');' as group_query, "
                 " 'UPDATE pg_catalog.pgxc_group SET is_installation = TRUE, group_kind = ''i'' WHERE group_name = "
                 "'\''||pgxc_group.group_name||'\'';"
                 "\nUPDATE pg_catalog.pgxc_group SET group_acl = '\''||%s||'\''::aclitem[] WHERE is_installation = "
@@ -3924,7 +3929,7 @@ static void dumpResourcePools(PGconn* conn)
         fprintf(OPF, "%s", buf->data);
     }
     fprintf(OPF, "\n");
-    fprintf(OPF, "SELECT gs_wlm_rebuild_user_resource_pool(0);\n");
+    fprintf(OPF, "SELECT pg_catalog.gs_wlm_rebuild_user_resource_pool(0);\n");
 
     /* when dump the role information(-r/-g/default, not -t),
      * it should print out the relation about node group and resource pool
@@ -4056,8 +4061,8 @@ static void dumpDataSource(PGconn* conn)
     appendPQExpBuffer(query,
         " SELECT srcname, pg_catalog.pg_get_userbyid(srcowner) as ownername, "
         " srctype, srcversion, srcacl, "
-        " array_to_string(array(select quote_ident(option_name) || ' ' "
-        " || quote_literal(option_value) from pg_options_to_table(srcoptions) "
+        " pg_catalog.array_to_string(array(select pg_catalog.quote_ident(option_name) || ' ' "
+        " || pg_catalog.quote_literal(option_value) from pg_catalog.pg_options_to_table(srcoptions) "
         " order by option_name), E',\n  ') AS opts "
         " FROM pg_extension_data_source order by 1;");
 

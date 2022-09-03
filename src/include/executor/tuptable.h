@@ -167,6 +167,7 @@ extern TupleTableSlot* ExecStoreDataRowTuple(
     char* msg, size_t len, Oid msgnode_oid, TupleTableSlot* slot, bool shouldFree);
 #endif
 extern TupleTableSlot* ExecClearTuple(TupleTableSlot* slot);
+extern void ExecClearMutilTuple(List* slots);
 extern TupleTableSlot* ExecStoreVirtualTuple(TupleTableSlot* slot);
 extern TupleTableSlot* ExecStoreAllNullTuple(TupleTableSlot* slot);
 extern HeapTuple ExecCopySlotTuple(TupleTableSlot* slot);

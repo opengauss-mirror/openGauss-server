@@ -217,6 +217,92 @@ drop table generated_test;
 reset current_schema;
 drop schema test_get_table_def cascade;
 
+
+drop database if exists b1;
+create database b1 dbcompatibility 'b';
+ 
+\c b1
+
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    c  int,
+    unique u_range (c desc)
+) 
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+);
+select pg_get_tabledef('range_list');
+
+create table test_unique
+(
+    u1 int,
+    u2 int,
+    constraint con_test2 unique u_t1 using btree ((abs((u1+u2)*2)) desc)
+);
+select pg_get_tabledef('test_unique');
+ 
+create table test_primary
+(
+    p1 int,
+    p2 int,
+    constraint con_test1 primary key using btree (p1 desc)
+);
+select pg_get_tabledef('test_primary');
+ 
+create table test_primary1
+(
+    p11 int,
+    p21 int,
+    constraint primary key using btree (p11 asc)
+);
+select pg_get_tabledef('test_primary1');
+ 
+ 
+create table test_unique12
+(
+    u12 int,
+    u22 int,
+    constraint unique u_t12 using btree (u22 desc)
+);
+select pg_get_tabledef('test_unique12');
+ 
+create table test_fk
+(
+    f1 int,
+    f2 int,
+    constraint con_test3 foreign key fk_t3 (f1) references test_primary(p1)
+);
+select pg_get_tabledef('test_fk');
+ 
+CREATE TABLE test_us
+(
+    us1 int,
+    us2 varchar(20),
+    constraint u1 primary key (us2)
+)with (storage_type=USTORE);
+select pg_get_tabledef('test_us');
+ 
+drop table test_unique;
+drop table range_list;
+drop table test_unique12;
+drop table test_fk;
+drop table test_primary;
+drop table test_primary1;
+drop table test_us; 
+
 create database mysql dbcompatibility 'B';
 \c mysql
 create table if not exists test(a int, b timestamp default now() on update current_timestamp);

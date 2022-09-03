@@ -143,7 +143,6 @@
 /* Max tuple number && size of one batch tuples */
 const int DEFAULTBUFFEREDTUPLES = 10000;
 const Size DEFAULTBUFFERSIZE = (4 * 1024 * 1024);
-static const int DEFAULT_SPECIAL_SIZE = 32;
 
 #define REWRITE_BUFFERS_QUEUE_COUNT 1024
 
@@ -634,23 +633,25 @@ void
 RewriteUHeapTuple(RewriteState state,
                                    UHeapTuple oldTuple, UHeapTuple newTuple)
 {
-        Assert(oldTuple->tupTableType == UHEAP_TUPLE);
-        Assert(newTuple->tupTableType == UHEAP_TUPLE);
-        MemoryContext old_cxt;
+    Assert(oldTuple->tupTableType == UHEAP_TUPLE);
+    Assert(newTuple->tupTableType == UHEAP_TUPLE);
+    MemoryContext old_cxt;
 
-        old_cxt = MemoryContextSwitchTo(state->rs_cxt);
+    old_cxt = MemoryContextSwitchTo(state->rs_cxt);
 
-        /*
-         * As of now, we copy only LIVE tuples in UHeap, so we can mark them as
-         * frozen.
-         */
-        newTuple->disk_tuple->flag &= ~UHEAP_VIS_STATUS_MASK;
-        UHeapTupleHeaderSetTDSlot(newTuple->disk_tuple, UHEAPTUP_SLOT_FROZEN);
+    /*
+     * As of now, we copy only LIVE tuples in UHeap, so we can mark them as
+     * frozen.
+     */
+    newTuple->disk_tuple->flag &= ~UHEAP_VIS_STATUS_MASK;
+    newTuple->disk_tuple->xid = (ShortTransactionId)FrozenTransactionId;
+    UHeapTupleHeaderSetTDSlot(newTuple->disk_tuple, UHEAPTUP_SLOT_FROZEN);
 
-        /* Insert the tuple and find out where it's put in new_heap */
-        RawUHeapInsert(state, newTuple);
+    /* Insert the tuple and find out where it's put in new_heap */
+    RawUHeapInsert(state, newTuple);
 
-        MemoryContextSwitchTo(old_cxt);
+    MemoryContextSwitchTo(old_cxt);
+    FastVerifyUTuple(newTuple->disk_tuple, InvalidBuffer);
 }
 
 
@@ -1366,7 +1367,7 @@ static void RawUHeapInsert(RewriteState state, UHeapTuple tup)
     if (!state->rs_buffer_valid) {
         UHeapPageHeaderData *uheappage = (UHeapPageHeaderData *)page;
         /* Initialize a new empty page */
-        UPageInit<UPAGE_HEAP>(page, BLCKSZ, DEFAULT_SPECIAL_SIZE, RelationGetInitTd(state->rs_new_rel));
+        UPageInit<UPAGE_HEAP>(page, BLCKSZ, UHEAP_SPECIAL_SIZE, RelationGetInitTd(state->rs_new_rel));
         uheappage->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
         uheappage->pd_multi_base = 0;
         state->rs_buffer_valid = true;

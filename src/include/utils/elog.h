@@ -530,6 +530,7 @@ extern void FlushErrorStateWithoutDeleteChildrenContext(void);
 extern void ReThrowError(ErrorData* edata) __attribute__((noreturn));
 extern void pg_re_throw(void) __attribute__((noreturn));
 extern void PgRethrowAsFatal(void);
+extern char* pg_strdup(const char* in);
 
 /* GUC-configurable parameters */
 

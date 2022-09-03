@@ -1178,6 +1178,7 @@ typedef enum WaitState {
     STATE_WAIT_FLUSH_DATA,
     STATE_WAIT_RESERVE_TD,
     STATE_WAIT_TD_ROLLBACK,
+    STATE_WAIT_AVAILABLE_TD,
     STATE_WAIT_TRANSACTION_ROLLBACK,
     STATE_PRUNE_TABLE,
     STATE_PRUNE_INDEX,
@@ -1759,6 +1760,7 @@ extern void pgstat_report_unique_sql_id(bool resetUniqueSql);
 extern void pgstat_report_global_session_id(GlobalSessionId globalSessionId);
 extern void pgstat_report_jobid(uint64 jobid);
 extern void pgstat_report_parent_sessionid(uint64 sessionid, uint32 level = 0);
+extern void pgstat_report_bgworker_parent_sessionid(uint64 sessionid);
 extern void pgstat_report_smpid(uint32 smpid);
 
 extern void pgstat_report_blocksid(void* waitLockThrd, uint64 blockSessionId);

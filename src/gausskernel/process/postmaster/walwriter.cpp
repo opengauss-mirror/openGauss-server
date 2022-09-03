@@ -60,7 +60,6 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
-
 #include "gssignal/gs_signal.h"
 
 #define NANOSECONDS_PER_MILLISECOND 1000000L
@@ -137,7 +136,7 @@ void WalWriterMain(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, walwriter_sigusr1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN); /* not used */
-
+    (void)gspqsignal(SIGURG, print_stack);
     /*
      * Reset some signals that are accepted by postmaster but not here.
      */
@@ -358,6 +357,7 @@ static void wal_quickdie(SIGNAL_ARGS)
     pg_memory_barrier();
     /* Stop WalWriterAuxiliary from waiting. */
     WakeupWalSemaphore(&g_instance.wal_cxt.walInitSegLock->l.sem);
+    WakeupWalSemaphore(&g_instance.wal_cxt.walFlushWaitLock->l.sem);
 
     /*
      * We DO NOT want to run proc_exit() callbacks -- we're here because
@@ -409,6 +409,8 @@ static void WalShutdownHandler(SIGNAL_ARGS)
     pg_memory_barrier();
     /* Stop WalWriterAuxiliary from waiting. */
     WakeupWalSemaphore(&g_instance.wal_cxt.walInitSegLock->l.sem);
+    WakeupWalSemaphore(&g_instance.wal_cxt.walFlushWaitLock->l.sem);
+    
     
 }
 

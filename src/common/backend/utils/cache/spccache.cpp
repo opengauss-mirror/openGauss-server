@@ -48,6 +48,9 @@ void InvalidateTableSpaceCacheCallback(Datum arg, int cacheid, uint32 hashvalue)
     HASH_SEQ_STATUS status;
     TableSpaceCacheEntry* spc = NULL;
     struct HTAB *TableSpaceCacheHash = GetTableSpaceCacheHash();
+    if (TableSpaceCacheHash == NULL) {
+        return;
+    }
     hash_seq_init(&status, TableSpaceCacheHash);
     while ((spc = (TableSpaceCacheEntry*)hash_seq_search(&status)) != NULL) {
         if (spc->opts != NULL)

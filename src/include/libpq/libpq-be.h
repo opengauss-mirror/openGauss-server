@@ -70,7 +70,8 @@ typedef struct {
 #include "libpq/sha2.h"
 #include "libcomm/libcomm.h"
 
-typedef enum CAC_state { CAC_OK, CAC_STARTUP, CAC_SHUTDOWN, CAC_RECOVERY, CAC_TOOMANY, CAC_WAITBACKUP } CAC_state;
+typedef enum CAC_state { CAC_OK, CAC_STARTUP, CAC_SHUTDOWN, CAC_RECOVERY, CAC_TOOMANY, CAC_WAITBACKUP, CAC_OOM
+    } CAC_state;
 
 /*
  * GSSAPI specific state information
@@ -161,9 +162,11 @@ typedef struct Port {
     int default_keepalives_idle;
     int default_keepalives_interval;
     int default_keepalives_count;
+    int default_tcp_user_timeout;
     int keepalives_idle;
     int keepalives_interval;
     int keepalives_count;
+    int tcp_user_timeout;
 
 #if defined(ENABLE_GSS) || defined(ENABLE_SSPI)
 
@@ -222,10 +225,12 @@ extern THR_LOCAL ProtocolVersion FrontendProtocol;
 extern int pq_getkeepalivesidle(Port* port);
 extern int pq_getkeepalivesinterval(Port* port);
 extern int pq_getkeepalivescount(Port* port);
+extern int pq_gettcpusertimeout(Port *port);
 
 extern int pq_setkeepalivesidle(int idle, Port* port);
 extern int pq_setkeepalivesinterval(int interval, Port* port);
 extern int pq_setkeepalivescount(int count, Port* port);
+extern int pq_settcpusertimeout(int timeout, Port *port);
 
 extern CAC_state canAcceptConnections(bool isSession);
 

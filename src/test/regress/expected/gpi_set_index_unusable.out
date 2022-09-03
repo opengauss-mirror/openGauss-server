@@ -59,14 +59,12 @@ set enable_bitmapscan=off;
 set enable_seqscan=off;
 -- seqscan
 explain (costs false) select * from test_merge_llt where a=40;
-                  QUERY PLAN                  
-----------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Seq Scan on test_merge_llt
-         Filter: (a = 40)
-         Selected Partitions:  3
-(5 rows)
+               QUERY PLAN               
+----------------------------------------
+ Partitioned Seq Scan on test_merge_llt
+   Filter: (a = 40)
+   Selected Partitions:  3
+(3 rows)
 
 select * from test_merge_llt where a=40;
  a  | b  
@@ -153,14 +151,12 @@ set enable_bitmapscan=off;
 set enable_seqscan=off;
 -- seqscan
 explain (costs false) select * from test_truncate_llt where a = 40;
-                   QUERY PLAN                    
--------------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Seq Scan on test_truncate_llt
-         Filter: (a = 40)
-         Selected Partitions:  4
-(5 rows)
+                QUERY PLAN                 
+-------------------------------------------
+ Partitioned Seq Scan on test_truncate_llt
+   Filter: (a = 40)
+   Selected Partitions:  4
+(3 rows)
 
 select * from test_truncate_llt where a = 40;
  a  | b  
@@ -258,14 +254,12 @@ set enable_bitmapscan=off;
 set enable_seqscan=off;
 --seqcan
 explain (costs false) select * from test_exchange_llt where a=40;
-                   QUERY PLAN                    
--------------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Seq Scan on test_exchange_llt
-         Filter: (a = 40)
-         Selected Partitions:  4
-(5 rows)
+                QUERY PLAN                 
+-------------------------------------------
+ Partitioned Seq Scan on test_exchange_llt
+   Filter: (a = 40)
+   Selected Partitions:  4
+(3 rows)
 
 select * from test_exchange_llt where a=40;
  a  |  b  
@@ -286,14 +280,12 @@ set enable_bitmapscan=on;
 set enable_seqscan=on;
 -- indexscan
 explain (costs false) select * from test_exchange_llt where a=40;
-                   QUERY PLAN                    
--------------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Seq Scan on test_exchange_llt
-         Filter: (a = 40)
-         Selected Partitions:  4
-(5 rows)
+                QUERY PLAN                 
+-------------------------------------------
+ Partitioned Seq Scan on test_exchange_llt
+   Filter: (a = 40)
+   Selected Partitions:  4
+(3 rows)
 
 select * from test_exchange_llt where a=40;
  a  |  b  
@@ -378,14 +370,12 @@ set enable_bitmapscan=off;
 set enable_seqscan=off;
 --seqscan
 explain (costs false) select * from test_split_llt where a=40;
-                  QUERY PLAN                  
-----------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Seq Scan on test_split_llt
-         Filter: (a = 40)
-         Selected Partitions:  4
-(5 rows)
+               QUERY PLAN               
+----------------------------------------
+ Partitioned Seq Scan on test_split_llt
+   Filter: (a = 40)
+   Selected Partitions:  4
+(3 rows)
 
 select * from test_split_llt where a=40;
  a  | b  
@@ -406,14 +396,12 @@ select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid 
 
 --seqscan
 explain (costs false) select * from test_split_llt where a=40;
-                  QUERY PLAN                  
-----------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Seq Scan on test_split_llt
-         Filter: (a = 40)
-         Selected Partitions:  4
-(5 rows)
+               QUERY PLAN               
+----------------------------------------
+ Partitioned Seq Scan on test_split_llt
+   Filter: (a = 40)
+   Selected Partitions:  4
+(3 rows)
 
 select * from test_split_llt where a=40;
  a  | b  
@@ -482,14 +470,12 @@ set enable_bitmapscan=off;
 set enable_seqscan=off;
 --seqscan
 explain (costs false) select * from test_drop_llt where a=40;
-                 QUERY PLAN                  
----------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Seq Scan on test_drop_llt
-         Filter: (a = 40)
-         Selected Partitions:  3
-(5 rows)
+              QUERY PLAN               
+---------------------------------------
+ Partitioned Seq Scan on test_drop_llt
+   Filter: (a = 40)
+   Selected Partitions:  3
+(3 rows)
 
 select * from test_drop_llt where a=40;
  a  | b  
@@ -507,14 +493,12 @@ select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid 
 
 --seqscan
 explain (costs false) select * from test_drop_llt where a=40;
-                 QUERY PLAN                  
----------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Seq Scan on test_drop_llt
-         Filter: (a = 40)
-         Selected Partitions:  3
-(5 rows)
+              QUERY PLAN               
+---------------------------------------
+ Partitioned Seq Scan on test_drop_llt
+   Filter: (a = 40)
+   Selected Partitions:  3
+(3 rows)
 
 select * from test_drop_llt where a=40;
  a  | b  

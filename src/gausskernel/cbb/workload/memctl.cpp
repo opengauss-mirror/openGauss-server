@@ -344,7 +344,6 @@ static bool IsMemoryIntensiveOperator(Node* node)
         case T_HashJoin:
         case T_VecHashJoin:
         case T_VecSort:
-        case T_DfsScan:
             return true;
         /* only hashagg setop is memory intensive */
         case T_SetOp:
@@ -370,8 +369,7 @@ static bool IsMemoryIntensiveOperator(Node* node)
             }
         } break;
         case T_CStoreIndexScan:
-        case T_CStoreIndexHeapScan:
-        case T_DfsIndexScan: {
+        case T_CStoreIndexHeapScan: {
             Scan* scan = (Scan*)node;
             if (scan->mem_info.maxMem > 0) {
                 return true;
@@ -3192,19 +3190,8 @@ static void AssignMemOpConsumption(MethodPlanWalkerContext* context, Plan* node)
                 node->operatorMemKB[0] = 0;
             }
         } break;
-        case T_DfsScan: {
-            Scan* plan = (Scan*)node;
-            plan->mem_info.maxMem = DFSSCAN_MIN_MEM * SET_DOP(node->dop);
-            plan->mem_info.minMem = DFSSCAN_MIN_MEM * SET_DOP(node->dop);
-            if (plan->mem_info.maxMem > 0) {
-                ASS_AND_ADJ_MEM(0);
-            } else {
-                node->operatorMemKB[0] = non_operator_memory;
-            }
-        } break;
         case T_CStoreIndexScan:
-        case T_CStoreIndexHeapScan:
-        case T_DfsIndexScan: {
+        case T_CStoreIndexHeapScan: {
             Scan* plan = (Scan*)node;
             if (plan->mem_info.maxMem > 0) {
                 ASS_AND_ADJ_MEM(0);
@@ -3451,9 +3438,7 @@ static void AdjustMemOpConsumption(MethodPlanWalkerContext* context, Plan* node)
             }
         } break;
         case T_CStoreIndexScan:
-        case T_CStoreIndexHeapScan:
-        case T_DfsScan:
-        case T_DfsIndexScan: {
+        case T_CStoreIndexHeapScan: {
             Scan* plan = (Scan*)node;
             if (plan->mem_info.maxMem > 0) {
                 ADJ_OP_MEM;
@@ -3595,9 +3580,7 @@ static void CalcDecreaseRegressCost(OpMemItem* item, int dMem)
             }
         } break;
         case T_CStoreIndexScan:
-        case T_CStoreIndexHeapScan:
-        case T_DfsScan:
-        case T_DfsIndexScan: {
+        case T_CStoreIndexHeapScan: {
             Scan* plan = (Scan*)node;
             if (plan->mem_info.maxMem > 0) {
                 PLAN_REGRESSION_COST;

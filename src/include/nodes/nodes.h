@@ -132,8 +132,9 @@ typedef enum NodeTag {
     T_AlterMaskingPolicyStmt,
     T_DropMaskingPolicyStmt,
     T_CreateSecurityPolicyStmt,
-	T_AlterSecurityPolicyStmt,
-	T_DropSecurityPolicyStmt,
+
+    T_AlterSecurityPolicyStmt,
+    T_DropSecurityPolicyStmt,
     T_AlterSchemaStmt,
     /*
      * TAGS FOR PLAN STATE NODES (execnodes.h)
@@ -237,7 +238,8 @@ typedef enum NodeTag {
     T_RangeTblRef,
     T_JoinExpr,
     T_FromExpr,
-	T_UpsertExpr,
+
+    T_UpsertExpr,
     T_IntoClause,
     T_IndexVar,
 #ifdef PGXC
@@ -340,7 +342,8 @@ typedef enum NodeTag {
 #endif /* PGXC */
     T_StreamPath,
     T_MergeAction,
-	T_UpsertState,
+
+    T_UpsertState,
     T_SubqueryScanPath,
 
     /*
@@ -470,6 +473,7 @@ typedef enum NodeTag {
     T_CompositeTypeStmt,
     T_TableOfTypeStmt,
     T_CreateEnumStmt,
+    T_CreateSetStmt,
     T_CreateRangeStmt,
     T_AlterEnumStmt,
     T_AlterTSDictionaryStmt,
@@ -505,12 +509,13 @@ typedef enum NodeTag {
     T_CreatePackageStmt,
     T_CreatePackageBodyStmt,
     T_AddTableIntoCBIState,
-	T_CreatePublicationStmt,
-	T_AlterPublicationStmt,
-	T_CreateSubscriptionStmt,
-	T_AlterSubscriptionStmt,
-	T_DropSubscriptionStmt,
-    
+
+    T_CreatePublicationStmt,
+    T_AlterPublicationStmt,
+    T_CreateSubscriptionStmt,
+    T_AlterSubscriptionStmt,
+    T_DropSubscriptionStmt,
+    T_ShrinkStmt,
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h)
      */
@@ -561,8 +566,9 @@ typedef enum NodeTag {
     T_Position,
     T_LoadWhenExpr,
     T_MergeWhenClause,
-	T_UpsertClause,
-	T_CopyColExpr,
+
+    T_UpsertClause,
+    T_CopyColExpr,
     T_StartWithClause,
     T_StartWithTargetRelInfo,
     T_StartWithInfo,
@@ -572,6 +578,7 @@ typedef enum NodeTag {
     T_SqlLoadFillerInfo,
     T_SqlLoadConsInfo,
     T_SqlLoadColExpr,
+    T_AutoIncrement,
     /*
      * TAGS FOR REPLICATION GRAMMAR PARSE NODES (replnodes.h)
      */
@@ -599,7 +606,7 @@ typedef enum NodeTag {
      * purposes (usually because they are involved in APIs where we want to
      * pass multiple object types through the same pointer).
      */
-    T_TriggerData = 970, /* in commands/trigger.h */
+    T_TriggerData = 980, /* in commands/trigger.h */
     T_ReturnSetInfo,     /* in nodes/execnodes.h */
     T_WindowObjectData,  /* private in nodeWindowAgg.c */
     T_TIDBitmap,         /* in nodes/tidbitmap.h */
@@ -627,7 +634,6 @@ typedef enum NodeTag {
     T_VecRecursiveUnion,
     T_VecScan,
     T_CStoreScan,
-    T_DfsScan,
 #ifdef ENABLE_MULTIPLE_NODES
     T_TsStoreScan,
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -653,7 +659,6 @@ typedef enum NodeTag {
     T_VecStream,
     T_RowToVec,
     T_VecToRow,
-    T_DfsIndexScan,
     T_CStoreIndexScan,
     T_CStoreIndexCtidScan,
     T_CStoreIndexHeapScan,
@@ -678,11 +683,9 @@ typedef enum NodeTag {
     T_VecSortState,
     T_VecForeignScanState,
     T_CStoreScanState,
-    T_DfsScanState,
 #ifdef ENABLE_MULTIPLE_NODES
     T_TsStoreScanState,
 #endif   /* ENABLE_MULTIPLE_NODES */
-    T_DfsIndexScanState,
     T_CStoreIndexScanState,
     T_CStoreIndexCtidScanState,
     T_CStoreIndexHeapScanState,
@@ -706,7 +709,6 @@ typedef enum NodeTag {
     // this must put last for vector engine runtime state
     T_VecEndState,
 
-    /* @hdfs. support HDFS operation */
     T_HDFSTableAnalyze,
     T_ForeignTableDesc,
     T_AttrMetaData,
@@ -784,6 +786,14 @@ typedef enum NodeTag {
     T_PLDebug_frame,
 
     T_TdigestData,
+
+    T_AdvanceCatalogXminCmd,
+
+    /* adaptive cached plan selection */
+    T_CachedPlanInfo,
+    T_CondInterval,
+    T_IndexCI,
+    T_RelCI,
     T_CentroidPoint,
     T_UserSetElem,
     T_UserVar
@@ -1016,7 +1026,7 @@ typedef enum UpsertAction
 {
     UPSERT_NONE,            /* No "DUPLICATE KEY UPDATE" clause */
     UPSERT_NOTHING,         /* DUPLICATE KEY UPDATE NOTHING */
-    UPSERT_UPDATE           /* DUPLICATE KEY UPDATE ... */
+    UPSERT_UPDATE,          /* DUPLICATE KEY UPDATE ... */
 }UpsertAction;
 
 struct CentroidPoint {

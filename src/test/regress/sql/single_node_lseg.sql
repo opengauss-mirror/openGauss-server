@@ -23,3 +23,6 @@ select * from LSEG_TBL;
 SELECT * FROM LSEG_TBL WHERE s <= lseg '[(1,2),(3,4)]';
 
 SELECT * FROM LSEG_TBL WHERE (s <-> lseg '[(1,2),(3,4)]') < 10;
+
+set sql_beta_feature = sel_expr_instr;
+explain (costs off) SELECT s FROM LSEG_TBL WHERE ?| s;

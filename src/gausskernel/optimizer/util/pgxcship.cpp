@@ -61,8 +61,6 @@
 #include "pgxc/pgxc.h"
 #endif
 
-#define XOR(A, B) (((A) && !(B)) || (!(A) && (B)))
-
 typedef bool (*CheckColocateHook)(Query* query, RangeTblEntry* rte, void* plpgsql_func);
 
 /*
@@ -104,6 +102,8 @@ typedef struct {
     bool sc_disallow_volatile_func_shippability; /* If true disallow volatie func shippable */
     
     bool sc_inselect;
+
+    bool sc_security_barrier;                          /* true if contains security barrier */
 } Shippability_context;
 
 /*
@@ -261,6 +261,9 @@ static ExecNodes* pgxc_FQS_datanodes_for_rtr(Index varno, Shippability_context* 
 {
     Query* query = sc_context->sc_query;
     RangeTblEntry* rte = rt_fetch(varno, query->rtable);
+    if (rte->security_barrier) {
+        sc_context->sc_security_barrier = true;
+    }
     switch (rte->rtekind) {
         case RTE_RELATION: {
             /* For anything, other than a table, we can't find the datanodes */
@@ -327,7 +330,7 @@ static ExecNodes* pgxc_FQS_datanodes_for_rtr(Index varno, Shippability_context* 
              * In case of Values, we only optimize the INSERT case when the
              * result relation is located on a single node
              */
-            exec_nodes = pgxc_FQS_datanodes_for_rtr((Index)query->resultRelation, sc_context);
+            exec_nodes = pgxc_FQS_datanodes_for_rtr((Index)linitial_int(query->resultRelations), sc_context);
             if (exec_nodes != NULL && exec_nodes->nodeList != NIL &&
                 list_length(exec_nodes->nodeList) == 1)
                 return exec_nodes;
@@ -379,6 +382,14 @@ static List* match_equivclause_recurse(Node* var, Node* con, List* quals_v)
         Node* lvar = (Node*)linitial(op->args);
         Node* rvar = (Node*)lsecond(op->args);
         Node* tvar = NULL;  /* temporary placeholder */
+
+        if (IsA(lvar, RelabelType)) {
+            lvar = (Node*)((RelabelType*)lvar)->arg;
+        }
+
+        if (IsA(rvar, RelabelType)) {
+            rvar = (Node*)((RelabelType*)rvar)->arg;
+        }
 
         /* Skip if type doesn't match */
         if ((nodeTag(lvar) != nodeTag(var)) && (nodeTag(rvar) != nodeTag(var))) {
@@ -453,13 +464,24 @@ static List* match_equivclause(List* quals_c, List* quals_v)
         Expr* qual_expr = (Expr*)lfirst(qcell);
         OpExpr* op = (OpExpr*)qual_expr;
 
+        Node* arg1 = (Node*)linitial(op->args);
+        Node* arg2 = (Node*)lsecond(op->args);
+
+        if (IsA(arg1, RelabelType)) {
+            arg1 = (Node*)((RelabelType*)arg1)->arg;
+        }
+
+        if (IsA(arg2, RelabelType)) {
+            arg2 = (Node*)((RelabelType*)arg2)->arg;
+        }
+
         /* Var-Const relation */
-        if ((IsA((Node*)linitial(op->args), Const)) || (IsA((Node*)linitial(op->args), Param))) {
-            var = (Node*)lsecond(op->args);
-            con = (Node*)linitial(op->args);
-        } else if ((IsA((Node*)lsecond(op->args), Const)) || (IsA((Node*)lsecond(op->args), Param))) {
-            var = (Node*)linitial(op->args);
-            con = (Node*)lsecond(op->args);
+        if ((IsA(arg1, Const)) || (IsA(arg1, Param))) {
+            var = arg2;
+            con = arg1;
+        } else if ((IsA(arg2, Const)) || (IsA(arg2, Param))) {
+            var = arg1;
+            con = arg2;
         } else {
             return NIL; /* Breaking condition */
         }
@@ -486,6 +508,17 @@ static List* match_equivclause(List* quals_c, List* quals_v)
     }
 
     return ret_quals;
+}
+
+static bool IsVarConstCond(const Node* arg1, const Node* arg2)
+{
+    if ((IsA(arg1, Const) || IsA(arg1, Param)) && IsA(arg2, Var)) {
+        return true;
+    }
+    if ((IsA(arg2, Const) || IsA(arg2, Param)) && IsA(arg1, Var)) {
+        return true;
+    }
+    return false;
 }
 
 /*
@@ -525,15 +558,25 @@ static Node* rewrite_equivclause(Node *quals)
             continue;
         }
 
+        Node* arg1 = (Node*)linitial(op->args);
+        Node* arg2 = (Node*)lsecond(op->args);
+
+        if (IsA(arg1, RelabelType)) {
+            arg1 = (Node*)((RelabelType*)arg1)->arg;
+        }
+
+        if (IsA(arg2, RelabelType)) {
+            arg2 = (Node*)((RelabelType*)arg2)->arg;
+        }
+
         /* Var-Var relation with RelabelType support */
-        if (nodeTag((Node*)linitial(op->args)) == nodeTag((Node*)lsecond(op->args))) { 
-            if (nodeTag((Node*)linitial(op->args)) == T_Const) { /* (+) compatible */
+        if (nodeTag(arg1) == nodeTag(arg2)) { 
+            if (nodeTag(arg1) == T_Const) { /* (+) compatible */
                 ret_quals = lappend(ret_quals, (Node*)copyObject(op));
                 continue;
             }
             tmp_quals_v = lappend(tmp_quals_v, op);
-        } else if ((XOR(IsA((Node*)linitial(op->args), Const), IsA((Node*)lsecond(op->args), Const))) ||
-                  (XOR(IsA((Node*)linitial(op->args), Param), IsA((Node*)lsecond(op->args), Param)))) {
+        } else if (IsVarConstCond(arg1, arg2)) {
             tmp_quals_c = lappend(tmp_quals_c, op);
         } else {
             /* Other not handled cases, append */
@@ -590,7 +633,7 @@ static ExecNodes* pgxc_FQS_find_datanodes_recurse(Node* node, Shippability_conte
              * Get the datanodes using the resultRelation index.
              */
             if (query->commandType != CMD_SELECT && !from_expr->fromlist)
-                return pgxc_FQS_datanodes_for_rtr(query->resultRelation, sc_context);
+                return pgxc_FQS_datanodes_for_rtr(linitial_int(query->resultRelations), sc_context);
 
             /*
              * All the entries in the From list are considered to be INNER
@@ -1667,7 +1710,7 @@ static bool pgxc_shippability_walker(Node* node, Shippability_context* sc_contex
 
             /* Disallow volatile function shippable when the target relation is replicated. */
             if (query->commandType != CMD_SELECT) {
-                RangeTblEntry* rte = (RangeTblEntry*)list_nth(query->rtable, query->resultRelation - 1);
+                RangeTblEntry* rte = (RangeTblEntry*)list_nth(query->rtable, linitial_int(query->resultRelations) - 1);
                 RelationLocInfo* locator = GetRelationLocInfo(rte->relid);
 
                 if (NULL != locator && IsLocatorReplicated(locator->locatorType)) {
@@ -1720,7 +1763,7 @@ static bool pgxc_shippability_walker(Node* node, Shippability_context* sc_contex
              */
             if (query->commandType == CMD_UPDATE || query->commandType == CMD_INSERT ||
                 query->commandType == CMD_DELETE) {
-                RangeTblEntry* rte = (RangeTblEntry*)list_nth(query->rtable, query->resultRelation - 1);
+                RangeTblEntry* rte = (RangeTblEntry*)list_nth(query->rtable, linitial_int(query->resultRelations) - 1);
 
                 if (!pgxc_check_triggers_shippability(rte->relid, query->commandType, &hasTrigger)) {
                     pgxc_set_shippability_reason(sc_context, SS_UNSHIPPABLE_TRIGGER);
@@ -2163,6 +2206,7 @@ ExecNodes* pgxc_is_query_shippable(
     sc_context.sc_contain_column_store = (contain_column_store != NULL && *contain_column_store) ?
         true : contains_column_tables(query->rtable);
     sc_context.sc_use_star_upper_level = false;
+    sc_context.sc_security_barrier = false;
 
     /* Make the boundParams available for all subqueries if needed */
     if (query->boundParamsQ != NULL) {
@@ -2175,6 +2219,11 @@ ExecNodes* pgxc_is_query_shippable(
      * shipped.
      */
     pgxc_shippability_walker((Node*)query, &sc_context);
+
+    /* Do not ship query that refers to views with security barrier, which cannot be handle properly on DN. */
+    if (sc_context.sc_security_barrier) {
+        return NULL;
+    }
 
 #ifdef STREAMPLAN
     /*
@@ -2483,6 +2532,9 @@ bool pgxc_is_func_shippable(Oid funcid, shipping_context* context)
                 break;
 
             case NEXTVALFUNCOID:
+                if (t_thrd.proc->workingVersionNum < LARGE_SEQUENCE_VERSION_NUM) {
+                    return false;
+                }
                 return context->is_nextval_shippable;
                 break;
 
@@ -3774,7 +3826,7 @@ static bool has_shippable_insert_rte(RangeTblEntry* rte)
         return false;
 
     /* Partitoining is not supported */
-    if (rte->isContainPartition || rte->partitionOid != 0)
+    if (list_length(rte->partitionOidList) > 0)
         return false;
 
     /* Other featurs that is not currently supported by INSERT SELECT */
@@ -4259,7 +4311,8 @@ List* get_nodeList_from_dexprs(
     int i = 0;
 
     /* Get locator info from result relation */
-    RelationLocInfo* loc_info = GetRelationLocInfo((rt_fetch(query->resultRelation, query->rtable))->relid);
+    RelationLocInfo* loc_info =
+        GetRelationLocInfo((rt_fetch(linitial_int(query->resultRelations), query->rtable))->relid);
 
     /* Loop through token list */
     ListCell* lc = NULL;
@@ -4359,7 +4412,7 @@ bool check_insert_subquery_on_singlenode(
     Expr* dexpr = NULL;
 
     /* Get relation oid of result relation */
-    Oid relid_rte = (rt_fetch(query->resultRelation, query->rtable))->relid;
+    Oid relid_rte = (rt_fetch(linitial_int(query->resultRelations), query->rtable))->relid;
 
     /* We loop through targetlist and find the distribution column, or a value if lucky */
     ListCell* lc = NULL;
@@ -4440,7 +4493,7 @@ static void check_insert_subquery_shippability(Query* query, Query* subquery, Sh
         return;
     }
 
-    RangeTblEntry *rte = rt_fetch(query->resultRelation, query->rtable);
+    RangeTblEntry *rte = rt_fetch(linitial_int(query->resultRelations), query->rtable);
     if (!has_shippable_insert_rte(rte) || !is_insert_subquery_deparsable(query, subquery)) {
         return;
     }
@@ -4452,7 +4505,7 @@ static void check_insert_subquery_shippability(Query* query, Query* subquery, Sh
     Oid relid_rte = rte->relid;
 
     /* Get execution nodes from target table and subquery, save it temporarily */
-    exec_nodes_rte = pgxc_FQS_get_relation_nodes(rte, query->resultRelation, query);
+    exec_nodes_rte = pgxc_FQS_get_relation_nodes(rte, (Index)linitial_int(query->resultRelations), query);
     exec_nodes_qry = pgxc_is_query_shippable(subquery,
         sc_context->sc_query_level + 1,
         sc_context->sc_light_proxy,
@@ -4570,7 +4623,7 @@ static void check_insert_subquery_shippability(Query* query, Query* subquery, Sh
             /* Do nothing */
         }
 
-        int pos_r = get_relative_dist_pos(exec_nodes_rte, query->resultRelation, tar_rte->resno, true);
+        int pos_r = get_relative_dist_pos(exec_nodes_rte, linitial_int(query->resultRelations), tar_rte->resno, true);
         int pos_q = get_relative_dist_pos(exec_nodes_qry, tvar_qry->varno, tvar_qry->varattno, false);
         if (pos_r != pos_q) {   /* Distribution column relative position not aligned */
             return;
@@ -4637,7 +4690,7 @@ static void pgxc_set_insert_shippability(Query* query, Shippability_context* sc_
 
     Assert(query->commandType == CMD_INSERT);
 
-    rte = (RangeTblEntry*)list_nth(query->rtable, query->resultRelation - 1);
+    rte = (RangeTblEntry*)list_nth(query->rtable, linitial_int(query->resultRelations) - 1);
     if (list_length(query->rtable) == 1 &&
         (RELKIND_RELATION != rte->relkind || rte->partAttrNum == NIL)) {
         return;
@@ -4896,7 +4949,7 @@ static bool pgxc_check_shippability_in_trigger(Query* query, Shippability_contex
 {
     RangeTblEntry* rte = NULL;
 
-    rte = (RangeTblEntry*)list_nth(query->rtable, query->resultRelation - 1);
+    rte = (RangeTblEntry*)list_nth(query->rtable, linitial_int(query->resultRelations) - 1);
     if (rte->relkind != RELKIND_RELATION || rte->partAttrNum == NIL)
         return true;
 

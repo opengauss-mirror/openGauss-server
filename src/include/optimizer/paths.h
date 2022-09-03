@@ -36,6 +36,7 @@ extern THR_LOCAL PGDLLIMPORT set_join_pathlist_hook_type set_join_pathlist_hook;
 extern RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist);
 extern RelOptInfo* standard_join_search(PlannerInfo* root, int levels_needed, List* initial_rels);
 
+extern void set_base_rel_sizes(PlannerInfo* root, bool onlyRelatinalTable = false);
 extern void set_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* rte);
 
 #ifdef OPTIMIZER_DEBUG

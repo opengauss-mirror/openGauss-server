@@ -45,7 +45,7 @@ static void EndBarrier(PGXCNodeAllHandles* handles, const char* id, bool isSwitc
 static void CommitBarrier(PGXCNodeAllHandles* prepared_handles, const char* id);
 static void WriteBarrierLSNFile(XLogRecPtr barrierLSN, const char* barrier_id);
 static void replace_barrier_id_compatible(const char* id, char** log_id);
-static void RequestXLogFromStream();
+static void RequestXLogStreamForBarrier();
 static void barrier_redo_pause(char* barrierId);
 static bool TryBarrierLockWithTimeout();
 static void CheckBarrierCommandStatus(PGXCNodeAllHandles* conn_handles, const char* id, const char* command, bool isCn,
@@ -88,10 +88,11 @@ void ProcessCreateBarrierPrepare(const char* id, bool isSwitchoverBarrier)
         if (!LWLockHeldByMe(BarrierLock))
             LWLockAcquire(BarrierLock, LW_EXCLUSIVE);
     } else {
-        if (!TryBarrierLockWithTimeout())
+        if (!TryBarrierLockWithTimeout()) {
             ereport(ERROR,
                 (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
                     errmsg("Wait Barrier lock timeout barrierId:%s", id)));
+        }
     }
 
     pq_beginmessage(&buf, 'b');
@@ -199,6 +200,7 @@ void ProcessCreateBarrierExecute(const char* id, bool isSwitchoverBarrier)
 
     if (isSwitchoverBarrier == true) {
         ereport(LOG, (errmsg("Handling DISASTER RECOVERY SWITCHOVER BARRIER:<%s>.", id)));
+        ShutdownForDRSwitchover();
         // The access of all users is not blocked temporarily.
         /*
          * Force a checkpoint before starting the switchover. This will force dirty
@@ -324,11 +326,13 @@ void RequestBarrier(char* id, char* completionTag, bool isSwitchoverBarrier)
     }
 
     /*
-     * Step One. Prepare all Coordinators for upcoming barrier request
+     * Step One. Prepare all Coordinators for upcoming barrier request, in case of HADR or Roach or GTM-FREE process.
      */
     coord_handles =  get_handles(NIL, GetAllCoordNodes(), true);
-    PrepareBarrier(coord_handles, barrier_id, isSwitchoverBarrier);
-
+    if (t_thrd.postmaster_cxt.HaShmData->is_cross_region || isSwitchoverBarrier ||
+        IS_ROACH_BARRIER(id) || GTM_FREE_MODE) {
+        PrepareBarrier(coord_handles, barrier_id, isSwitchoverBarrier);
+    }
     if (isCsnBarrier)
         GetCsnBarrierName(barrier_id, isSwitchoverBarrier);
 
@@ -339,9 +343,12 @@ void RequestBarrier(char* id, char* completionTag, bool isSwitchoverBarrier)
     ExecuteBarrier(barrier_id, isSwitchoverBarrier);
 
     /*
-     * Step three. Inform Coordinators to release barrier lock
+     * Step three. Inform Coordinators to release barrier lock, in case of HADR or Roach or GTM-FREE process.
      */
-    EndBarrier(coord_handles, barrier_id, isSwitchoverBarrier);
+    if (t_thrd.postmaster_cxt.HaShmData->is_cross_region || isSwitchoverBarrier ||
+        IS_ROACH_BARRIER(id) || GTM_FREE_MODE) {
+        EndBarrier(coord_handles, barrier_id, isSwitchoverBarrier);
+    }
 
     /*
      * Step four. Inform Coordinators about a successfully completed barrier
@@ -422,7 +429,7 @@ void CreateHadrSwitchoverBarrier()
             (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), 
                 errmsg("DISASTER RECOVERY CREATE BARRIER command must be sent to a DataNode")));
 
-
+    ShutdownForDRSwitchover();
     // The access of all users is not blocked temporarily.
     /*
      * Force a checkpoint before starting the switchover. This will force dirty
@@ -495,7 +502,7 @@ void barrier_redo(XLogReaderState* record)
         return;
     }
 
-    if (g_instance.csn_barrier_cxt.barrier_hash_table != NULL) {
+    if (IS_BARRIER_HASH_INIT) {
         LWLockAcquire(g_instance.csn_barrier_cxt.barrier_hashtbl_lock, LW_EXCLUSIVE);
         BarrierCacheDeleteBarrierId(barrierId);
         LWLockRelease(g_instance.csn_barrier_cxt.barrier_hashtbl_lock);
@@ -718,10 +725,11 @@ static void PrepareBarrier(PGXCNodeAllHandles* coord_handles, const char* id, bo
         if (!LWLockHeldByMe(BarrierLock))
             LWLockAcquire(BarrierLock, LW_EXCLUSIVE);
     } else {
-        if (!TryBarrierLockWithTimeout())
+        if (!TryBarrierLockWithTimeout()) {
             ereport(ERROR,
                 (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
                     errmsg("Wait Barrier lock timeout barrierId:%s", id)));
+        }
     }
 
     ereport(DEBUG2, (errmsg("Disabled 2PC commits originating at the driving Coordinator")));
@@ -832,6 +840,7 @@ static void ExecuteBarrier(const char* id, bool isSwitchoverBarrier)
 
     if (isSwitchoverBarrier == true) {
         ereport(LOG, (errmsg("Sending DISASTER RECOVERY SWITCHOVER BARRIER:<%s>.", id)));
+        ShutdownForDRSwitchover();
         // The access of all users is not blocked temporarily.
         /*
          * Force a checkpoint before starting the switchover. This will force dirty
@@ -994,7 +1003,7 @@ void replace_barrier_id_compatible(const char* id, char** log_id) {
     *log_id = tmp_id;
 }
 
-static void RequestXLogFromStream()
+static void RequestXLogStreamForBarrier()
 {
     XLogRecPtr replayEndPtr = GetXLogReplayRecPtr(NULL);
     if (t_thrd.xlog_cxt.is_cascade_standby && (CheckForSwitchoverTrigger() || CheckForFailoverTrigger())) {
@@ -1007,14 +1016,13 @@ static void RequestXLogFromStream()
         walrcv->receivedUpto = 0;
         SpinLockRelease(&walrcv->mutex);
         if (t_thrd.xlog_cxt.readFile >= 0) {
-            close(t_thrd.xlog_cxt.readFile);
+            (void)close(t_thrd.xlog_cxt.readFile);
             t_thrd.xlog_cxt.readFile = -1;
         }
 
         RequestXLogStreaming(&replayEndPtr, t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
                              u_sess->attr.attr_storage.PrimarySlotName);
     }
-
 }
 
 static void barrier_redo_pause(char* barrierId)
@@ -1040,7 +1048,7 @@ static void barrier_redo_pause(char* barrierId)
             if (IS_OBS_DISASTER_RECOVER_MODE) {
                 update_recovery_barrier();
             } else if (IS_DISASTER_RECOVER_MODE) {
-                RequestXLogFromStream();
+                RequestXLogStreamForBarrier();
             }
             ereport(DEBUG4, ((errmodule(MOD_REDO), errcode(ERRCODE_LOG), 
                     errmsg("Sleeping to get a new target global barrier %s;"

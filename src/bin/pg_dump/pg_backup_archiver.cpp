@@ -621,7 +621,7 @@ static void take_down_nsname_in_drop_stmt(const char *stmt, char *result, int le
     while ((p = strsep(&first, " ")) != NULL) {
         if (strchr(p, '.') != NULL) {
             /* for cast object, should left the '(' */
-            if (strchr(p, '(') != NULL) {
+            if ((strchr(p, '(') != NULL) && (strchr(p, '(') < strchr(p, '.'))) {
                 p = strchr(p, '.');
                 *p = '(';
             } else {
@@ -3050,6 +3050,12 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
             last--;
         *(last + 1) = '\0';
 
+        /* remove " CASCADE" of te->dropStmt */
+        if ((last - first > (int)strlen("CASCADE"))
+            && (strncmp(last - strlen("CASCADE"), " CASCADE", strlen(" CASCADE")) == 0)) {
+            *(last - strlen("CASCADE")) = '\0';
+        }
+
         if (strcmp(type, "FUNCTION") == 0) {
             (void)appendPQExpBufferStr(buf, "FUNCTION ");
         }
@@ -5030,7 +5036,7 @@ bool checkAndCreateDir(const char* dirName)
 bool CheckIfStandby(struct Archive *fout)
 {
     bool isStandby = false;
-    const char *query = "select local_role from pg_stat_get_stream_replications()";
+    const char *query = "select local_role from pg_catalog.pg_stat_get_stream_replications()";
     PGresult* res = NULL;
     int ntups;
 
@@ -5057,3 +5063,28 @@ static void get_role_password(RestoreOptions* opts) {
         exit_horribly(NULL, "out of memory\n");
     }
 }
+
+size_t fread_file(void *buf, size_t size, size_t nmemb, FILE *fp)
+{
+    size_t res = fread(buf, size, nmemb, fp);
+    if (res != nmemb && !feof(fp)) {
+        int errcode = ferror(fp);
+        exit_horribly(modulename, "Cannot read from input file. errcode: %d\n", errcode);
+    }
+    return res;
+}
+
+#ifdef HAVE_LIBZ
+size_t gzread_file(void *buf, unsigned len, gzFile fp)
+{
+    int gzres = gzread(fp, buf, len);
+    size_t res = gzres;
+    if ((gzres < 0) || (res != len && !gzeof(fp))) {
+        int err;
+        const char *err_str = gzerror(fp, &err);
+        exit_horribly(modulename, "Cannot read from compressed file: %s\n", err_str);
+    }
+    return res;
+}
+#endif
+

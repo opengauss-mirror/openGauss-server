@@ -33,6 +33,7 @@
 #include "executor/lightProxy.h"
 #include "executor/spi_priv.h"
 #include "optimizer/nodegroups.h"
+#include "optimizer/sqlpatch.h"
 #include "opfusion/opfusion.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/pgxcnode.h"
@@ -44,6 +45,8 @@
 #include "utils/plpgsql.h"
 #include "nodes/pg_list.h"
 #include "commands/sqladvisor.h"
+
+extern bool IsTransactionExitStmt(Node* parsetree);
 
 template void GlobalPlanCache::RemovePlanSource<ACTION_RECREATE>(CachedPlanSource* plansource, const char* stmt_name);
 
@@ -282,11 +285,16 @@ bool GlobalPlanCache::TryStore(CachedPlanSource *plansource,  PreparedStatement 
 
     if (found == false) {
         START_CRIT_SECTION();
+        plansource->gpc_lockid = lock_id;
         /* Deep copy the query_string to the GPC entry's query_string */
         entry->key.query_string = key->query_string;
         entry->key.query_length = key->query_length;
         /* Set the magic number. */
         entry->val.plansource = plansource;
+        if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+            char *str = pg_ultostr(plansource->planManager->psrc_key, hashCode);
+            *str = '\0';
+        }
         entry->val.used_count = 0;
         INSTR_TIME_SET_CURRENT(entry->val.last_use_time);
         /* off the link */
@@ -508,6 +516,16 @@ void GlobalPlanCache::RemovePlanSource(CachedPlanSource* plansource, const char*
                 plansource->gplan->is_valid = false;
                 Assert(!plansource->gplan->isShared());
             }
+
+            /*
+             * All context under planManager should be invalid if any dependent
+             * relation has been changed. Thus, all candidate plans and the cached
+             * parsing context, 'GenericRoot', need to be rebuilt.
+             */
+            if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+                plansource->planManager->is_valid = false;
+            }
+
             if (action_type == ACTION_RELOAD) {
                 DropCachedPlanInternal(plansource);
                 if (plansource->gplan == NULL)
@@ -532,6 +550,13 @@ void GlobalPlanCache::RemoveEntry(uint32 htblIdx, GPCEntry *entry)
 
 bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGetLock)
 {
+    if (IsAbortedTransactionBlockState() && (!IsTransactionExitStmt(psrc->raw_parse_tree)))
+        ereport(ERROR,
+            (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                errmsg("current transaction is aborted, "
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar),
+                errdetail_abort()));
     /*
      * Start up a transaction command so we can run parse analysis etc. (Note
      * that this will normally change current memory context.) Nothing happens
@@ -556,6 +581,11 @@ bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGe
     if (!psrc->gpc.status.InShareTable()) {
         return false;
     }
+
+    /* If query_dop alreadly change, need build plan again. */
+    if (psrc->stream_enabled != IsStreamSupport()) {
+        return true;
+    }
 #endif
 
     if (u_sess->pcache_cxt.gpc_in_ddl == true) {
@@ -574,6 +604,12 @@ bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGe
     if (psrc->search_path && !OverrideSearchPathMatchesCurrent(psrc->search_path)) {
         return true;
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (CheckRecreateCachePlanBySqlPatch(psrc)) {
+        return true;
+    }
+#endif
 
     return false;
 }
@@ -663,6 +699,7 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
         // If the planSource is set to invalid, the AST must be analyzed again
         // because the meta has changed.
         newsource->is_valid = false;
+        newsource->gpc_lockid = -1;
         bool has_lp = false;
 
         if (spiplan != NULL) {

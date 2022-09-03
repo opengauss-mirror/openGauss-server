@@ -301,6 +301,24 @@ void tbm_free(TIDBitmap* tbm)
 }
 
 /*
+ * Estimate number of hashtable entries we can have within maxbytes.
+ */
+long tbm_calculate_entries(double maxbytes)
+{
+    /*
+     * This estimates the hash cost as sizeof(PagetableEntry), which is good enough
+     * for our purpose.  Also count an extra Pointer per entry for the arrays created
+     * during iteration readout.
+     */
+    long nbuckets = maxbytes / (sizeof(PagetableEntry) + sizeof(Pointer) + sizeof(Pointer));
+    nbuckets = Min(nbuckets, INT_MAX - 1); /* safety limit */
+    const int max_buckets_lower_limit = 16;
+    nbuckets = Max(nbuckets, max_buckets_lower_limit); /* sanity limit */
+
+    return nbuckets;
+}
+
+/*
  * tbm_add_tuples - add some tuple IDs to a TIDBitmap
  *
  * If recheck is true, then the recheck flag will be set in the

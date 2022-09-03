@@ -13,8 +13,6 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "storage/dfs/dfscache_mgr.h"
-
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "gs_bbox.h"
@@ -106,6 +104,11 @@ void InitBufferPool(void)
         (CkptSortItem *)ShmemInitStruct("Checkpoint BufferIds",
                                         TOTAL_BUFFER_NUM * sizeof(CkptSortItem), &found_buf_ckpt);
 
+    /* Init the snapshotBlockLock to block all the io in the process of snapshot of standy */
+    if (g_instance.ckpt_cxt_ctl->snapshotBlockLock == NULL) {
+        g_instance.ckpt_cxt_ctl->snapshotBlockLock = LWLockAssign(LWTRANCHE_IO_BLOCKED);
+    }
+
     if (ENABLE_INCRE_CKPT && g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
         g_instance.ckpt_cxt_ctl->dirty_page_queue_size = TOTAL_BUFFER_NUM *
                                                          PAGE_QUEUE_SLOT_MULTI_NBUFFERS;
@@ -162,9 +165,6 @@ void InitBufferPool(void)
 
     /* Init Vector Buffer management stuff */
     DataCacheMgr::NewSingletonInstance();
-
-    /* Init Meta data cache management stuff */
-    MetaCacheMgr::NewSingletonInstance();
 
     /* Initialize per-backend file flush context */
     WritebackContextInit(t_thrd.storage_cxt.BackendWritebackContext, &u_sess->attr.attr_common.backend_flush_after);

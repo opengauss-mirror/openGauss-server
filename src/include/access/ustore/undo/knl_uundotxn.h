@@ -38,17 +38,33 @@ public:
     {
         return xactId_;
     }
+    void SetXactId(TransactionId xid)
+    {
+        xactId_ = xid;
+    }
     volatile UndoRecPtr StartUndoPtr()
     {
         return startUndoPtr_;
+    }
+    void SetStartUndoPtr(UndoRecPtr startUndoPtr)
+    {
+        startUndoPtr_ = startUndoPtr;
     }
     UndoRecPtr EndUndoPtr()
     {
         return endUndoPtr_;
     }
+    void SetEndUndoPtr(UndoRecPtr endUndoPtr)
+    {
+        endUndoPtr_ = endUndoPtr;
+    }
     Oid DbId()
     {
         return dbId_;
+    }
+    void SetDbId(Oid dbId)
+    {
+        dbId_ = dbId;
     }
     void UpdateRollbackProgress()
     {
@@ -84,6 +100,11 @@ public:
     {
         return blk_;
     }
+
+    uint8 Info()
+    {
+        return info_;
+    }
     void Lock()
     {
         LockBuffer(buffer_, BUFFER_LOCK_EXCLUSIVE);
@@ -103,10 +124,6 @@ public:
     bool IsKeepBuffer() const
     {
         return info_ & UNDOSLOTBUFFER_KEEP;
-    }
-    bool IsReviseRBM() const
-    {
-        return info_ & UNDOSLOTBUFFER_RBM;
     }
     bool IsPrepared() const
     {
@@ -154,5 +171,8 @@ private:
 };
 
 UndoSlotPtr GetNextSlotPtr(UndoSlotPtr slotPtr);
+bool VerifyTransactionSlotValid(TransactionSlot *slot);
+bool VerifyTransactionSlotBuffer(Page page);
+
 } // namespace undo
 #endif // __KNL_UUNDOTXN_H__

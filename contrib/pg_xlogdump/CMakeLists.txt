@@ -26,6 +26,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/uheapdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/uheapdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/undologdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/undologdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/replorigindesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/replorigindesc.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/smgr/cfs/cfs_mddesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/cfs_mddesc.cpp
 )
 
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_xlogdump_SRC)
@@ -39,7 +40,7 @@ SET(xlogdump_LINK_LIBS libpgcommon.a -lpgport -lcrypt -ldl -lm -ledit -lssl -lcr
 add_bintarget(pg_xlogdump TGT_xlogdump_SRC TGT_xlogdump_INC "${xlogdump_DEF_OPTIONS}" "${xlogdump_COMPILE_OPTIONS}" "${xlogdump_LINK_OPTIONS}" "${xlogdump_LINK_LIBS}")
 add_dependencies(pg_xlogdump pgport_static pgcommon_static)
 target_link_directories(pg_xlogdump PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${SECURE_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${SECURE_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 

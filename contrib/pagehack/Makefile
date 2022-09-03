@@ -16,7 +16,7 @@ top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 override CPPFLAGS += -I${top_builddir}/src/lib/page_compression
 override LDFLAGS += -L${top_builddir}/src/lib/page_compression
-override CFLAGS += -lpagecompression -lzstd
+override CFLAGS += -lpagecompression -lzstd -llz4
 ifeq ($(enable_debug), yes)
 	PG_CPPFLAGS += -DDEBUG
 endif

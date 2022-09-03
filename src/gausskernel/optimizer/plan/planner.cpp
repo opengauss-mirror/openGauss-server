@@ -86,6 +86,7 @@
 #endif
 #include "optimizer/stream_remove.h"
 #include "executor/node/nodeModifyTable.h"
+#include "optimizer/gplanmgr.h"
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -105,11 +106,6 @@ const char* ESTIMATION_ITEM = "EstimationItem";
 
 /* From experiment, we assume 2.5 times dn number of distinct value can give all dn work to do */
 #define DN_MULTIPLIER_FOR_SATURATION 2.5
-
-#define PLAN_HAS_DELTA(plan)                                                                          \
-    ((IsA((plan), CStoreScan) && HDFS_STORE == ((CStoreScan*)(plan))->relStoreLocation) \
-		||(IsA((plan), CStoreIndexScan) && HDFS_STORE == ((CStoreIndexScan*)(plan)->relStoreLocation) \
-		|| IsA((plan), DfsScan) || IsA((plan), DfsIndexScan))
 
 /* For performance reasons, memory context will be dropped only when the totalSpace larger than 1MB. */
 #define MEMORY_CONTEXT_DELETE_THRESHOLD (1024 * 1024)
@@ -138,7 +134,6 @@ extern Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind);
 static Plan* inheritance_planner(PlannerInfo* root);
 static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 static void preprocess_rowmarks(PlannerInfo* root);
-static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est);
 static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* offset_est, int64* count_est);
 
 static bool grouping_is_can_hash(Query* parse, AggClauseCosts* agg_costs);
@@ -472,16 +467,19 @@ static void FillPlanBucketmap(PlannedStmt *result,
 static void checkTsstoreQuery(Query* query)
 {
     if (query->commandType == CMD_DELETE) {
-        RangeTblEntry *rte = rt_fetch(query->resultRelation, query->rtable);
-        Relation rel = heap_open(rte->relid, AccessShareLock);
-        if (RelationIsTsStore(rel)) {
-            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("PGXC Plan is not supported for tsdb deleting sql"),
-                        errdetail("modify parameters enable_stream_operator or enable_fast_query_shipping"),
-                        errcause("not supported"),
-                        erraction("modify parameters enable_stream_operator or enable_fast_query_shipping")));
+        foreach_cell(l, query->resultRelations) {
+            int resultRelation = lfirst_int(l);
+            RangeTblEntry *rte = rt_fetch(resultRelation, query->rtable);
+            Relation rel = heap_open(rte->relid, AccessShareLock);
+            if (RelationIsTsStore(rel)) {
+                ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("PGXC Plan is not supported for tsdb deleting sql"),
+                            errdetail("modify parameters enable_stream_operator or enable_fast_query_shipping"),
+                            errcause("not supported"),
+                            erraction("modify parameters enable_stream_operator or enable_fast_query_shipping")));
+            }
+            heap_close(rel, AccessShareLock);
         }
-        heap_close(rel, AccessShareLock);
     }
 }
 
@@ -892,6 +890,10 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     result->noanalyze_rellist = (List*)copyObject(t_thrd.postgres_cxt.g_NoAnalyzeRelNameList);
     result->hasIgnore = parse->hasIgnore;
 
+    if (ENABLE_CACHEDPLAN_MGR) {
+        u_sess->pcache_cxt.explored_plan_info = root;
+    }
+
     if (IS_PGXC_COORDINATOR &&
         (t_thrd.proc->workingVersionNum < 92097 || total_num_streams > 0)) {
         result->nodesDefinition = get_all_datanodes_def();
@@ -1233,7 +1235,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
 /* We used DEBUG5 log to print SQL after each rewrite */
 #define DEBUG_QRW(message)                                                                      \
     do {                                                                                        \
-        if (log_min_messages <= DEBUG5) {                                                       \
+        if (log_min_messages <= DEBUG5 && module_logging_is_on(MOD_OPT_REWRITE)) {              \
             initStringInfo(&buf);                                                               \
             deparse_query(root->parse, &buf, NIL, false, false, NULL, true);                    \
             ereport(DEBUG5, (errmodule(MOD_OPT_REWRITE), errmsg("%s: %s", message, buf.data))); \
@@ -1773,8 +1775,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      * Do the main planning.  If we have an inherited target relation, that
      * needs special processing, else go straight to grouping_planner.
      */
-    if (parse->resultRelation && parse->commandType != CMD_INSERT &&
-        rt_fetch(parse->resultRelation, parse->rtable)->inh)
+    if (parse->resultRelations && parse->commandType != CMD_INSERT &&
+        rt_fetch(linitial_int(parse->resultRelations), parse->rtable)->inh)
         plan = inheritance_planner(root);
     else {
         plan = grouping_planner(root, tuple_fraction);
@@ -1783,10 +1785,9 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             List* returningLists = NIL;
             List* rowMarks = NIL;
             Relation mainRel = NULL;
-            Oid taleOid = rt_fetch(parse->resultRelation, parse->rtable)->relid;
+            Oid taleOid = rt_fetch(linitial_int(parse->resultRelations), parse->rtable)->relid;
             bool partKeyUpdated = targetListHasPartitionKey(parse->targetList, taleOid);
             mainRel = RelationIdGetRelation(taleOid);
-            bool isDfsStore = RelationIsDfsStore(mainRel);
             RelationClose(mainRel);
 
             /*
@@ -1810,7 +1811,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             plan = (Plan*)make_modifytable(root,
                 parse->commandType,
                 parse->canSetTag,
-                list_make1_int(parse->resultRelation),
+                list_make1(parse->resultRelations),
                 list_make1(plan),
                 returningLists,
                 rowMarks,
@@ -1819,12 +1820,11 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->mergeTarget_relation,
                 parse->mergeSourceTargetList,
                 parse->mergeActionList,
-                parse->upsertClause,
-                isDfsStore);
+                parse->upsertClause);
 #else
             plan = (Plan*)make_modifytable(parse->commandType,
                 parse->canSetTag,
-                list_make1_int(parse->resultRelation),
+                list_make1(parse->resultRelations),
                 list_make1(plan),
                 returningLists,
                 rowMarks,
@@ -1833,8 +1833,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->mergeTarget_relation,
                 parse->mergeSourceTargetList,
                 parse->mergeActionList,
-                parse->upsertClause,
-                isDfsStore);
+                parse->upsertClause);
 #endif
 #ifdef PGXC
             plan = pgxc_make_modifytable(root, plan);
@@ -2098,7 +2097,7 @@ static Node* preprocess_const_params_worker(PlannerInfo* root, Node* expr, int k
 static Plan* inheritance_planner(PlannerInfo* root)
 {
     Query* parse = root->parse;
-    int parentRTindex = parse->resultRelation;
+    int parentRTindex = linitial2_int(parse->resultRelations);
     List* final_rtable = NIL;
     int save_rel_array_size = 0;
     RelOptInfo** save_rel_array = NULL;
@@ -2108,9 +2107,8 @@ static Plan* inheritance_planner(PlannerInfo* root)
     List* returningLists = NIL;
     List* rowMarks = NIL;
     ListCell* lc = NULL;
-    bool isDfsStore = false;
     bool partKeyUpdated = false;
-    Oid taleOid = rt_fetch(parse->resultRelation, parse->rtable)->relid;
+    Oid taleOid = rt_fetch(linitial_int(parse->resultRelations), parse->rtable)->relid;
     Relation mainRel = NULL;
     partKeyUpdated = targetListHasPartitionKey(parse->targetList, taleOid);
 
@@ -2120,7 +2118,6 @@ static Plan* inheritance_planner(PlannerInfo* root)
         "The relation descriptor is invalid"
         "when generating a query plan and the result relation is an inherient plan.");
 
-    isDfsStore = RelationIsDfsStore(mainRel);
     RelationClose(mainRel);
 
     /*
@@ -2281,7 +2278,7 @@ static Plan* inheritance_planner(PlannerInfo* root)
         root->init_plans = subroot.init_plans;
 
         /* Build list of target-relation RT indexes */
-        resultRelations = lappend_int(resultRelations, appinfo->child_relid);
+        resultRelations = lappend(resultRelations, list_make1_int(appinfo->child_relid));
 
         /* Build list of per-relation RETURNING targetlists */
         if (parse->returningList)
@@ -2336,7 +2333,6 @@ static Plan* inheritance_planner(PlannerInfo* root)
         rowMarks,
         SS_assign_special_param(root),
         partKeyUpdated,
-        isDfsStore,
         0,
         NULL,
         NULL,
@@ -2350,7 +2346,6 @@ static Plan* inheritance_planner(PlannerInfo* root)
         rowMarks,
         SS_assign_special_param(root),
         partKeyUpdated,
-        isDfsStore,
         0,
         NULL,
         NULL,
@@ -2531,19 +2526,30 @@ static void rebuild_pathkey_for_groupingSet(
 
 static inline Path* choose_best_path(bool use_cheapest_path, PlannerInfo* root, Path* cheapest_path, Path* sorted_path)
 {
-        Path* best_path;
-        if (use_cheapest_path) {
-            best_path = cheapest_path;
-        }
-        else {
-            best_path = sorted_path;
-            ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use presorted path instead of cheapest path."))));
-            /* print more details */
-            if (log_min_messages <= DEBUG2)
-                debug1_print_new_path(root, best_path, false);
-        }
+    Path* best_path;
 
-        return best_path;
+    if (sorted_path != NULL && cheapest_path->hint_value > sorted_path->hint_value) {
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use cheapest path for hint."))));
+        return cheapest_path;
+    } else if (sorted_path != NULL && sorted_path->hint_value > cheapest_path->hint_value) {
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use presorted path for hint."))));
+        if (log_min_messages <= DEBUG2) {
+            debug1_print_new_path(root, sorted_path, false);
+        }
+        return sorted_path;
+    }
+
+    if (use_cheapest_path) {
+        best_path = cheapest_path;
+    } else {
+        best_path = sorted_path;
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use presorted path instead of cheapest path."))));
+        /* print more details */
+        if (log_min_messages <= DEBUG2)
+            debug1_print_new_path(root, best_path, false);
+    }
+
+    return best_path;
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -2815,7 +2821,8 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         if (parse->upsertClause) {
             UpsertExpr* upsertClause = parse->upsertClause;
             upsertClause->updateTlist =
-                preprocess_upsert_targetlist(upsertClause->updateTlist, parse->resultRelation, parse->rtable);
+                preprocess_upsert_targetlist(upsertClause->updateTlist, linitial_int(parse->resultRelations),
+                                             parse->rtable);
         }
         /*
          * Locate any window functions in the tlist.  (We don't need to look
@@ -4879,8 +4886,10 @@ static void preprocess_rowmarks(PlannerInfo* root)
      * need or have FOR [KEY] UPDATE/SHARE marks for.
      */
     rels = get_base_rel_indexes((Node*)parse->jointree);
-    if (parse->resultRelation)
-        rels = bms_del_member(rels, parse->resultRelation);
+    foreach (l, parse->resultRelations) {
+        int resultRelation = lfirst_int(l);
+        rels = bms_del_member(rels, resultRelation);
+    }
 
     /*
      * Convert RowMarkClauses to PlanRowMark representation.
@@ -4896,7 +4905,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
          * applied to an update/delete target rel.	If that ever becomes
          * possible, we should drop the target from the PlanRowMark list.
          */
-        AssertEreport(rc->rti != (uint)parse->resultRelation,
+        AssertEreport(rc->rti != (uint)linitial2_int(parse->resultRelations),
             MOD_OPT,
             "invalid range table index when converting RowMarkClauses to PlanRowMark representation.");
 
@@ -5028,16 +5037,21 @@ static void separate_rowmarks(PlannerInfo* root)
  * Try to obtain the clause values.  We use estimate_expression_value
  * primarily because it can sometimes do something useful with Params.
  */
-static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est)
+void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est,
+    RelOptInfo* final_rel, bool* fix_param)
 {
     Query* parse = root->parse;
     Node* est = NULL;
+    ParamListInfo boundParams = root->glob->boundParams;
 
     /* Should not be called unless LIMIT or OFFSET */
     AssertEreport(parse->limitCount || parse->limitOffset,
         MOD_OPT,
         "invalid result tuples when doing pre-estimation for LIMIT and/or OFFSET clauses.");
-    
+    /* bind params and extract the real limitcount and offset */
+    if(ENABLE_CACHEDPLAN_MGR && boundParams != NULL && boundParams->uParamInfo != DEFUALT_INFO){
+        boundParams->params_lazy_bind = false;
+    }
     if (parse->limitCount) {
         est = estimate_expression_value(root, parse->limitCount);
         if (est && IsA(est, Const)) {
@@ -5051,7 +5065,14 @@ static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, in
                 }
             }
         } else {
-            *count_est = -1; /* can't estimate */
+            if (final_rel == NULL) {
+                *count_est = -1; /* can't estimate */
+            } else {
+                *count_est = clamp_row_est(adjust_limit_row_count(final_rel->rows));
+                if (fix_param != NULL) {
+                    *fix_param = true;
+                }
+            }
         }
     } else {
         *count_est = 0; /* not present */
@@ -5070,10 +5091,21 @@ static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, in
                 }
             }
         } else {
-            *offset_est = -1; /* can't estimate */
+            if (final_rel == NULL) {
+                *offset_est = -1; /* can't estimate */
+            } else {
+                *offset_est = Min(max_unknown_offset, clamp_row_est(final_rel->rows * 0.10));
+                if (fix_param != NULL) {
+                    *fix_param = true;
+                }
+            }
         }
     } else {
         *offset_est = 0; /* not present */
+    }
+    /* reset params_lazy_bind after getting limit/offset vals. */
+    if(ENABLE_CACHEDPLAN_MGR && boundParams != NULL && boundParams->uParamInfo != DEFUALT_INFO){
+        root->glob->boundParams->params_lazy_bind = true;
     }
 }
 
@@ -8295,8 +8327,6 @@ static bool has_column_store_relation(Plan* top_plan)
 {
     switch (nodeTag(top_plan)) {
         /* Node which vec_output is true */
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreScan:
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
@@ -8420,8 +8450,6 @@ bool is_vector_scan(Plan* plan)
     }
     switch (nodeTag(plan)) {
         case T_CStoreScan:
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
@@ -8520,7 +8548,7 @@ bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* pl
         case T_SubPlan: {
             SubPlan* subplan = (SubPlan*)node;
             /* make sure that subplan return type must supported by vector engine */
-            if (!IsTypeSupportedByCStore(subplan->firstColType)) {
+            if (!IsTypeSupportedByVectorEngine(subplan->firstColType)) {
                 return true;
             }
             break;
@@ -8536,7 +8564,7 @@ bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* pl
 	     * the result value is not passed up for calculation.
 	     */
             if (planContext && !planContext->currentExprIsFilter
-                && !IsTypeSupportedByCStore(exprType(node))) {
+                && !IsTypeSupportedByVectorEngine(exprType(node))) {
                 return true;
             }
             break;
@@ -8708,14 +8736,14 @@ bool CheckTypeSupportRowToVec(List* targetlist, int errLevel)
 {
     ListCell* cell = NULL;
     TargetEntry* entry = NULL;
-    Var* var = NULL;
+
     foreach(cell, targetlist) {
         entry = (TargetEntry*)lfirst(cell);
         if (IsA(entry->expr, Var)) {
-            var = (Var*)entry->expr;
+            Var* var = (Var*)entry->expr;
             if (var->varattno > 0 && var->varoattno > 0
                 && var->vartype != TIDOID // cstore support for hidden column CTID
-                && !IsTypeSupportedByCStore(var->vartype)) {
+                && !IsTypeSupportedByVectorEngine(var->vartype)) {
                 ereport(errLevel, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("type \"%s\" is not supported in column store",
                            format_type_with_typemod(var->vartype, var->vartypmod))));
@@ -8723,6 +8751,7 @@ bool CheckTypeSupportRowToVec(List* targetlist, int errLevel)
             }
         }
     }
+
     return true;
 }
 
@@ -9121,16 +9150,13 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
         case T_BitmapHeapScan:
         case T_TidScan:
         case T_FunctionScan: {
-            if (!planContext->forceVectorEngine || !CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
+            if (!planContext->forceVectorEngine) {
                 return true;
             }
 
             return CostVectorScan<false>((Scan*)result_plan, planContext);
         }
         case T_ValuesScan: {
-            if (!CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
-                return true;
-            }
             break;
         }
         case T_CteScan:
@@ -9172,9 +9198,6 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
                 return true;
             if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
-            if (!CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
-                return true;
-            }
         } break;
         case T_PartIterator:
         case T_SetOp:
@@ -9384,8 +9407,6 @@ static Plan* fallback_plan(Plan* result_plan)
     switch (nodeTag(result_plan)) {
         /* Add Row Adapter */
         case T_CStoreScan:
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreIndexScan:
         case T_CStoreIndexHeapScan:
         case T_CStoreIndexCtidScan:
@@ -9521,8 +9542,6 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery, bool forceVecto
         /*
          * For Scan node, just leave it.
          */
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
@@ -9774,8 +9793,6 @@ static Plan* build_vector_plan(Plan* plan)
         case T_Agg:
             plan->type = T_VecAgg;
             break;
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
@@ -9856,7 +9873,7 @@ bool CheckColumnsSuportedByBatchMode(List *targetList, List *qual)
 
         foreach (vl, vars) {
             Var *var = (Var *)lfirst(vl);
-            if (var->varattno < 0 || !IsTypeSupportedByCStore(var->vartype)) {
+            if (var->varattno < 0 || !IsTypeSupportedByVectorEngine(var->vartype)) {
                 return false;
             }
         }
@@ -9866,7 +9883,7 @@ bool CheckColumnsSuportedByBatchMode(List *targetList, List *qual)
     vars = pull_var_clause((Node *)qual, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
     foreach (l, vars) {
         Var *var = (Var *)lfirst(l);
-        if (var->varattno < 0 || !IsTypeSupportedByCStore(var->vartype)) {
+        if (var->varattno < 0 || !IsTypeSupportedByVectorEngine(var->vartype)) {
             return false;
         }
     }
@@ -12275,7 +12292,7 @@ static void set_root_matching_key(PlannerInfo* root, List* targetlist)
 
     /* we only set interesting matching key for non-select query */
     if (parse->commandType != CMD_SELECT) {
-        RangeTblEntry* rte = rt_fetch(parse->resultRelation, parse->rtable); /* target udi relation */
+        RangeTblEntry* rte = rt_fetch(linitial_int(parse->resultRelations), parse->rtable); /* target udi relation */
         List* partAttrNum = rte->partAttrNum;                                /* partition columns in target relation */
 
         /* only hash table is cared */
@@ -12308,7 +12325,7 @@ static void set_root_matching_key(PlannerInfo* root, List* targetlist)
                     foreach (lc2, targetlist) {
                         tle = (TargetEntry*)lfirst(lc2);
                         Var* var = (Var*)tle->expr;
-                        if (IsA(var, Var) && var->varno == (Index)parse->resultRelation &&
+                        if (IsA(var, Var) && var->varno == (Index)linitial_int(parse->resultRelations) &&
                             var->varattno == (AttrNumber)num)
                             break;
                     }
@@ -14388,9 +14405,6 @@ void check_gtm_free_plan(PlannedStmt *stmt, int elevel)
     if (IS_PGXC_DATANODE || IS_SINGLE_NODE)
         return;
 
-    /* In redistribution, the user's distributed query is allowed. */
-    elevel = (elevel > WARNING && ClusterResizingInProgress()) ? WARNING : elevel;
-
     FindNodesContext context;
 
     collect_query_info(stmt, &context);
@@ -14457,7 +14471,7 @@ void check_plan_mergeinto_replicate(PlannedStmt* stmt, int elevel)
     bool no_replicate = true;
     ListCell* lc = NULL;
     foreach(lc, stmt->resultRelations) {
-        Index rti = lfirst_int(lc);
+        Index rti = (Index)linitial_int((List*)lfirst(lc));
         RangeTblEntry* target = rt_fetch(rti, stmt->rtable);
         if (GetLocatorType(target->relid) == LOCATOR_TYPE_REPLICATED) {
             no_replicate = false;

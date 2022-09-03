@@ -13,7 +13,7 @@
  * See the Mulan PSL v2 for more details.
  *---------------------------------------------------------------------------------------
  *
- *  plannodes.h
+ *  aifuncs.h
  *
  * IDENTIFICATION
  *        src/include/db4ai/aifuncs.h
@@ -118,7 +118,7 @@ inline void kmeans_seeding_setter(const char *str, void *x)
     *static_cast<SeedingFunction *>(x) = get_kmeans_seeding(str);
 }
 
-
+///////////////////////////////////////////////////////////////////////////////
 extern const char *metric_ml_str[];
 extern const int32_t metric_ml_str_size;
 

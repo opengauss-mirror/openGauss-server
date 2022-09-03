@@ -1012,6 +1012,24 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
     pgstat_report_waitstatus(oldStatus);
 }
 
+void StreamNodeGroup::ReleaseStreamGroup(bool resetSession)
+{
+    if (u_sess->stream_cxt.global_obj != NULL) {
+        StreamTopConsumerIam();
+        /* Set sync point for waiting all stream threads complete. */
+        StreamNodeGroup::syncQuit(STREAM_COMPLETE);
+        UnRegisterStreamSnapshots();
+        StreamNodeGroup::destroy(STREAM_COMPLETE);
+        if (!resetSession) {
+            /* reset some flag related to stream */
+            ResetStreamEnv();
+        }
+    }
+    if (resetSession) {
+        ResetSessionEnv();
+    }
+}
+
 /*
  * @Description: Clear the stream node group
  *
@@ -1330,9 +1348,7 @@ void StreamNodeGroup::SyncProducerNextPlanStep(int controller_plannodeid, int pr
             } break;
             case T_Stream: {
                 ExecSyncStreamProducer((StreamController*)controller, need_rescan, target_iteration);
-            }
-
-            break;
+            } break;
             default:
                 elog(ERROR, "Unsupported SyncProducerType %d", controller->controller_type);
         }

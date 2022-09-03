@@ -407,46 +407,40 @@ explain(costs off) select * from part_col order by a desc, b desc, c desc limit 
 (8 rows)
 
 explain(costs off) select * from part_col where a = 50 order by b, c limit 10; -- OK
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: b, c
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Index Scan using idx_col_a_b_c on part_col
-                           Index Cond: (a = 50)
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Index Scan using idx_col_a_b_c on part_col
+                     Index Cond: (a = 50)
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col where a < 100 order by a, b, c limit 10; -- OK
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: a, b, c
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Index Scan using idx_col_a_b_c on part_col
-                           Index Cond: (a < 100)
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Index Scan using idx_col_a_b_c on part_col
+                     Index Cond: (a < 100)
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col where a = 10 and b = 10 order by a, b, c limit 10; -- OK
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: c
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Index Scan using idx_col_a_b_c on part_col
-                           Index Cond: ((a = 10) AND (b = 10))
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Index Scan using idx_col_a_b_c on part_col
+                     Index Cond: ((a = 10) AND (b = 10))
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col order by b, c limit 10;
                          QUERY PLAN                          
@@ -465,46 +459,40 @@ drop index idx_col_a_b_c;
 create index idx_col_a_b_c on part_col(a desc,b,c desc) local;
 ERROR:  access method "psort" does not support ASC/DESC options
 explain(costs off) select * from part_col where a < 100 order by a desc, b, c desc limit 10; -- OK
-                         QUERY PLAN                          
--------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: a DESC, b, c DESC
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Scan on part_col
-                           Filter: (a < 100)
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Scan on part_col
+                     Filter: (a < 100)
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col where a < 100 and b < 100 order by a desc, b, c desc limit 10; -- OK
-                         QUERY PLAN                          
--------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: a DESC, b, c DESC
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Scan on part_col
-                           Filter: ((a < 100) AND (b < 100))
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Scan on part_col
+                     Filter: ((a < 100) AND (b < 100))
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col where a < 100 and b < 100 order by a , b desc, c limit 10;  -- OK
-                         QUERY PLAN                          
--------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: a, b DESC, c
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Scan on part_col
-                           Filter: ((a < 100) AND (b < 100))
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Scan on part_col
+                     Filter: ((a < 100) AND (b < 100))
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col where b = 10 order by a desc, c desc limit 10; -- OK
                          QUERY PLAN                          
@@ -524,90 +512,78 @@ drop index idx_col_a_b_c;
 ERROR:  index "idx_col_a_b_c" does not exist
 create index idx_col_b_c on part_col(b,c) local;
 explain(costs off) select * from part_col where a = 80 order by b,c limit 10;  -- OK
-                         QUERY PLAN                          
--------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: b, c
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Scan on part_col
-                           Filter: (a = 80)
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Scan on part_col
+                     Filter: (a = 80)
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col where a < 80 order by b,c limit 10;  -- OK
-                         QUERY PLAN                          
--------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: b, c
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Scan on part_col
-                           Filter: (a < 80)
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Scan on part_col
+                     Filter: (a < 80)
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col where a = 80 order by b desc,c desc limit 10;  -- OK
-                         QUERY PLAN                          
--------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: b DESC, c DESC
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Scan on part_col
-                           Filter: (a = 80)
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Scan on part_col
+                     Filter: (a = 80)
+                     Selected Partitions:  1
+(7 rows)
 
 explain(costs off) select * from part_col where a = 80 and b = 10 order by c limit 10;  -- OK
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: c
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Index Scan using idx_col_b_c on part_col
-                           Index Cond: (b = 10)
-                           Filter: (a = 80)
-                           Selected Partitions:  1
-(10 rows)
+               ->  Partitioned CStore Index Scan using idx_col_b_c on part_col
+                     Index Cond: (b = 10)
+                     Filter: (a = 80)
+                     Selected Partitions:  1
+(8 rows)
 
 explain(costs off) select * from part_col where a = 80 and c = 10 order by b limit 10;  -- OK
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: b
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Index Scan using idx_col_b_c on part_col
-                           Index Cond: (c = 10)
-                           Filter: (a = 80)
-                           Selected Partitions:  1
-(10 rows)
+               ->  Partitioned CStore Index Scan using idx_col_b_c on part_col
+                     Index Cond: (c = 10)
+                     Filter: (a = 80)
+                     Selected Partitions:  1
+(8 rows)
 
 explain(costs off) select * from part_col where a < 200 and a > 100 order by b,c limit 10; -- OK
-                         QUERY PLAN                          
--------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: b, c
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Scan on part_col
-                           Filter: ((a < 200) AND (a > 100))
-                           Selected Partitions:  3
-(9 rows)
+               ->  Partitioned CStore Scan on part_col
+                     Filter: ((a < 200) AND (a > 100))
+                     Selected Partitions:  3
+(7 rows)
 
 explain(costs off) select * from part_col order by b,c limit 10;
                          QUERY PLAN                          
@@ -653,17 +629,15 @@ explain(costs off) select * from part_col where b = 10 order by a desc, d desc l
 (9 rows)
 
 explain(costs off) select * from part_col where a < 80 order by a, d limit 10;  -- OK
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
  Row Adapter
    ->  Vector Limit
          ->  Vector Sort
                Sort Key: a, d
-               ->  Vector Partition Iterator
-                     Iterations: 1
-                     ->  Partitioned CStore Index Scan using idx_col_a_d on part_col
-                           Index Cond: (a < 80)
-                           Selected Partitions:  1
-(9 rows)
+               ->  Partitioned CStore Index Scan using idx_col_a_d on part_col
+                     Index Cond: (a < 80)
+                     Selected Partitions:  1
+(7 rows)
 
 DROP TABLE part_col;

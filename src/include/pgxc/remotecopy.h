@@ -73,6 +73,7 @@ typedef struct RemoteCopyOptions {
     char* rco_smalldatetime_format;    /* customed smalldatetime format */
     bool rco_compatible_illegal_chars; /* compatible illegal chars conversion flag */
     int rco_fill_missing_fields;       /* 0 off;1 Compatible with the original copy; -1 trailing nullcols */
+    int rco_fixedEncoding;             /* copy encoding for fixed format */
     const char *transform_query_string;      /* source sql string for copy */
 } RemoteCopyOptions;
 

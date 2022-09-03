@@ -220,7 +220,7 @@ with_openeuler_os = @with_openeuler_os@
 # set globle paremeters about all depend libs                               #
 # including:                                                                #
 # jemalloc                                                                  #
-# event, libcgroup, kerberos, libxml and protobuf                           #
+# event, libcgroup, kerberos, libxml                                        #
 # libedit, zlib1.2.11, boost, openssl                                       #
 # if a new lib will be used, please add it here                             #
 #############################################################################
@@ -228,28 +228,13 @@ with_openeuler_os = @with_openeuler_os@
 #############################################################################
 
 #############################################################################
-# get  string from script get_PlatForm_str.sh
-#############################################################################
-PLAT_FORM_STR = $(shell sh $(top_builddir)/src/get_PlatForm_str.sh)
-ifeq ($(PLAT_FORM_STR), Failed)
-	exit 1;
-endif
-
 SUPPORT_HOTPATCH = @SUPPORT_HOTPATCH@
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-    ifeq ($(PLAT_FORM_STR), suse11_sp1_x86_64)
+    ifeq ($(CC_VERSION), 7.3.0)
         SUPPORT_HOTPATCH = yes
     else
-        ifneq ($(findstring $(PLAT_FORM_STR), euleros2.0_sp8_aarch64 euleros2.0_sp9_aarch64 euleros2.0_sp2_x86_64 euleros2.0_sp5_x86_64 kylinv10_sp1_aarch64 kylinv10_sp1_x86_64_intel),)
-            ifeq ($(CC_VERSION), 7.3.0)
-                SUPPORT_HOTPATCH = yes
-            else
-                SUPPORT_HOTPATCH = no
-            endif
-        else
-            SUPPORT_HOTPATCH = no
-        endif
+        SUPPORT_HOTPATCH = no
     endif
 else
     SUPPORT_HOTPATCH = no
@@ -265,7 +250,7 @@ endif
 # set globle paremeters about all depend libs's home path                   #
 # including:                                                                #
 # jemalloc                                                                  #
-# event, libcgroup, kerberos, libxml and protobuf                           #
+# event, libcgroup, kerberos, libxml                                        #
 # libedit, zlib1.2.11, boost, openssl                                       #
 # if a new lib will be used, please add it here                             #
 #############################################################################
@@ -275,21 +260,16 @@ with_3rd = @with_3rdpartydir@
 with_jdk = @with_jdk@
 
 ifeq ($(with_3rd), NONE)
-  BINARYPATH = binarylibs/dependency/$(PLAT_FORM_STR)
-  PLATFORMPATH = binarylibs/platform/$(PLAT_FORM_STR)
-  BUILD_TOOLS_PATH = binarylibs/buildtools/$(PLAT_FORM_STR)
-  INSTALL_TOOLS_PATH = dependency/$(PLAT_FORM_STR)
-  COMPONENTPATH = binarylibs/component/$(PLAT_FORM_STR)
+  BINARYPATH = binarylibs/kernel/dependency
+  PLATFORMPATH = binarylibs/kernel/platform
+  BUILD_TOOLS_PATH = binarylibs/buildtools
+  INSTALL_TOOLS_PATH = binarylibs/install_tools
+  COMPONENTPATH = binarylibs/component
 
   JEMALLOC_HOME = $(top_builddir)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
   MEMCHECK_HOME = $(top_builddir)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
   LIBOBS_HOME = $(top_builddir)/$(BINARYPATH)/libobs/$(LIB_NOT_SUPPORT_LLT)
-  ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)  
-    INSTALL_TOOLS_PATH = dependency/euleros2.0_sp5_x86_64
-    LIBODBC_HOME = $(top_builddir)/$(INSTALL_TOOLS_PATH)/unixodbc
-  else
-    LIBODBC_HOME = $(top_builddir)/$(INSTALL_TOOLS_PATH)/unixodbc
-  endif
+  LIBODBC_HOME = $(top_builddir)/$(BINARYPATH)/unixodbc
   LIBXML_HOME = $(top_builddir)/$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
   LIBHOTPATCH_HOME = $(top_builddir)/$(PLATFORMPATH)/hotpatch
   LIBCGROUP_HOME = $(top_builddir)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
@@ -299,11 +279,8 @@ ifeq ($(with_3rd), NONE)
   ZLIB_HOME = $(top_builddir)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
   LZ4_HOME  = $(top_builddir)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
   CJSON_HOME = $(top_builddir)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
-  PROTOBUF_HOME = $(top_builddir)/$(BINARYPATH)/protobuf/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(top_builddir)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
   BOOST_HOME = $(top_builddir)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
-  LIBORC_HOME = $(top_builddir)/$(BINARYPATH)/liborc/$(LIB_SUPPORT_LLT)
-  SNAPPY_HOME = $(top_builddir)/$(BINARYPATH)/snappy/$(LIB_SUPPORT_LLT)
   LIBOPENSSL_HOME = $(top_builddir)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
   SECURE_HOME = $(top_builddir)/$(PLATFORMPATH)/Huawei_Secure_C/$(LIB_NOT_SUPPORT_LLT)
   SECUREDYNAMICLIB_HOME = $(top_builddir)/$(PLATFORMPATH)/Huawei_Secure_C/Dynamic_Lib
@@ -311,21 +288,18 @@ ifeq ($(with_3rd), NONE)
   LIBSTD_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/libstd/gcc$(CC_VERSION)/$(LIB_NOT_SUPPORT_LLT)
   GTEST_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/gtest/$(LIB_NOT_SUPPORT_LLT)
   MOCKCPP_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
-  LIBPARQUET_HOME = $(top_builddir)/$(BINARYPATH)/libparquet/$(LIB_SUPPORT_LLT)
   NUMA_HOME = $(top_builddir)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
   LIBCURL_HOME = $(top_builddir)/$(BINARYPATH)/libcurl/$(LIB_SUPPORT_LLT)
-  LIBTHRIFT_HOME = $(top_builddir)/$(BINARYPATH)/thrift
   ZSTD_HOME = $(top_builddir)/$(BINARYPATH)/zstd
-  LIBNANOMSG_HOME = $(top_builddir)/$(BINARYPATH)/nanomsg/comm
+  LIBNANOMSG_HOME = $(top_builddir)/$(BINARYPATH)/nng/comm
   PLJAVA_HOME = $(top_builddir)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   MASSTREE_HOME = $(top_builddir)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME    = $(top_builddir)/dependency/mysql_fdw
-  ORCFDW_HOME   = $(top_builddir)/dependency/oracle_fdw
   DCF_HOME = $(top_builddir)/$(COMPONENTPATH)/dcf
 else
-  BINARYPATH = dependency/$(PLAT_FORM_STR)
-  PLATFORMPATH = platform/$(PLAT_FORM_STR)
-  BUILD_TOOLS_PATH = buildtools/$(PLAT_FORM_STR)
+  BINARYPATH = kernel/dependency
+  PLATFORMPATH = kernel/platform
+  BUILD_TOOLS_PATH = buildtools
 
   JEMALLOC_HOME = $(with_3rd)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
   MEMCHECK_HOME = $(with_3rd)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
@@ -341,11 +315,8 @@ else
   ZLIB_HOME = $(with_3rd)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
   LZ4_HOME  = $(with_3rd)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
   CJSON_HOME = $(with_3rd)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
-  PROTOBUF_HOME = $(with_3rd)/$(BINARYPATH)/protobuf/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(with_3rd)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
   BOOST_HOME = $(with_3rd)/$(BINARYPATH)/boost/$(LIB_SUPPORT_LLT)
-  LIBORC_HOME = $(with_3rd)/$(BINARYPATH)/liborc/$(LIB_SUPPORT_LLT)
-  SNAPPY_HOME = $(with_3rd)/$(BINARYPATH)/snappy/$(LIB_SUPPORT_LLT)
   LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
 ifneq ($(enable_lite_mode), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
@@ -358,34 +329,27 @@ endif
   LIBSTD_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/libstd/gcc$(CC_VERSION)/$(LIB_NOT_SUPPORT_LLT)
   GTEST_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/gtest/$(LIB_NOT_SUPPORT_LLT)
   MOCKCPP_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
-  LIBPARQUET_HOME = $(with_3rd)/$(BINARYPATH)/libparquet/$(LIB_SUPPORT_LLT)
   NUMA_HOME = $(with_3rd)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
   LIBCURL_HOME = $(with_3rd)/$(BINARYPATH)/libcurl/$(LIB_SUPPORT_LLT)
-  LIBTHRIFT_HOME = $(with_3rd)/$(BINARYPATH)/thrift
   ZSTD_HOME = $(with_3rd)/$(BINARYPATH)/zstd
-  LIBNANOMSG_HOME = $(with_3rd)/$(BINARYPATH)/nanomsg/comm
+  LIBNANOMSG_HOME = $(with_3rd)/$(BINARYPATH)/nng/comm
   PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   using_openjdk = $(shell if [ -d "$(with_3rd)/$(PLATFORMPATH)/openjdk8" ]; then echo "yes"; else echo "no"; fi;)
   ifeq ($(using_openjdk), yes)
     JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/openjdk8/jdk1.8.0_222
   else
-    JAVA_HOME = $(with_3rd)/platform/huaweijdk8/x86_64/jdk
+    JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/huaweijdk8/x86_64/jdk
   endif
   MASSTREE_HOME = $(with_3rd)/$(BINARYPATH)/masstree/comm
-  MYFDW_HOME = $(with_3rd)/dependency/mysql_fdw
-  ORCFDW_HOME = $(with_3rd)/dependency/oracle_fdw
-  DCF_HOME = $(with_3rd)/component/$(PLAT_FORM_STR)/dcf
+  MYFDW_HOME = $(with_3rd)/$(BINARYPATH)/mysql_fdw
+  DCF_HOME = $(with_3rd)/kernel/component/dcf
 endif
 
 ifeq ($(with_openeuler_os), yes)
   JAVA_HOME = /usr/lib/jvm/java/
-  LIBORC_HOME = $(with_3rd)/liborc/
   ZLIB_HOME = $(with_3rd)/zlib/
   CJSON_HOME = $(with_3rd)/cjson/
-  PROTOBUF_HOME = $(with_3rd)/protobuf/
 endif
-
-LIBCARBONDATA_HOME = $(top_builddir)/../contrib/carbondata
 
 ##############################################################################
 # jemalloc component 
@@ -469,8 +433,8 @@ MEMCHECK_LIB_PATH = $(MEMCHECK_HOME)/gcc$(CC_VERSION)/lib/
 #############################################################################
 # get the depend lib path
 #    1. libedit, event, libcgroup, kerberos, zlib1.2.11, boost,
-#	libxml and protobuf are support parameter --enable-llt and --enable-ut;
-#    	$(LIB_SUPPORT_LLT)
+#       libxml are support parameter --enable-llt and --enable-ut;
+#       $(LIB_SUPPORT_LLT)
 #    2. Huawei_Secure_C, gtest, mockcpp, unixodbc, libstd
 #       and openssl not support parameter --enable-llt and --enable-ut;
 #       $(LIB_NOT_SUPPORT_LLT)
@@ -565,11 +529,6 @@ LZ4_BIN_PATH = $(LZ4_HOME)/bin
 CJSON_INCLUDE_PATH = $(CJSON_HOME)/include
 CJSON_LIB_PATH = $(CJSON_HOME)/lib
 
-# protobuf component
-############################################################################# 
-PROTOBUF_INCLUDE_PATH = $(PROTOBUF_HOME)/include
-PROTOBUF_LIB_PATH = $(PROTOBUF_HOME)/lib
-
 #############################################################################
 # kerberos component
 #############################################################################
@@ -589,37 +548,6 @@ BOOST_LIB_PATH = $(BOOST_HOME)/lib
 #############################################################################
 LIBXML_INCLUDE_PATH = $(LIBXML_HOME)/include
 LIBXML_LIB_PATH = $(LIBXML_HOME)/lib
-
-#############################################################################
-# liborc component
-#############################################################################
-LIBORC_INCLUDE_PATH = $(LIBORC_HOME)/include
-LIBORC_LIB_PATH = $(LIBORC_HOME)/lib
-
-#############################################################################
-# libparquet component
-#############################################################################
-LIBPARQUET_INCLUDE_PATH = $(LIBPARQUET_HOME)/include
-LIBPARQUET_LIB_PATH = $(LIBPARQUET_HOME)/lib
-LIBPARQUET_ARROW_LIB_PATH = $(LIBPARQUET_HOME)/lib
-
-#############################################################################
-# libcarbondata component
-#############################################################################
-LIBCARBONDATA_INCLUDE_PATH = $(LIBCARBONDATA_HOME)
-LIBCARBONDATA_LIB_PATH = $(LIBCARBONDATA_HOME)
-
-#############################################################################
-# libthrift component
-#############################################################################
-LIBTHRIFT_INCLUDE_PATH = $(LIBTHRIFT_HOME)/include
-LIBTHRIFT_LIB_PATH = $(LIBTHRIFT_HOME)/lib
-
-#############################################################################
-# snappy component
-#############################################################################
-SNAPPY_INCLUDE_PATH = $(SNAPPY_HOME)/include
-SNAPPY_LIB_PATH = $(SNAPPY_HOME)/lib
 
 #############################################################################
 # openssl component
@@ -761,7 +689,7 @@ else # not PGXS
   endif  
 endif
 
-override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${LIBPARQUET_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH)
+override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH)
 
 # GDS links to libevent
 ifeq ($(enable_multiple_nodes), yes)
@@ -1136,9 +1064,10 @@ else
 libpq_pgport = -L$(top_builddir)/src/common/port -lpgport $(libpq)
 endif
 
-
+ifneq ($(enable_lite_mode), yes)
 submake-libpq_ce:
 	flock $(libpq_builddir)/libpq.lock $(MAKE) -C $(libpq_builddir) ENABLE_CE=1 && $(MAKE) -C $(libpq_builddir)/jdbc
+endif
 submake-libpq:
 	flock $(libpq_builddir)/libpq.lock $(MAKE) -C $(libpq_builddir) all
 
@@ -1154,10 +1083,7 @@ submake-pagecompression:
 submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/lib/alarm
 
-submake-libcarbondata:
-	$(MAKE) -C $(top_builddir)/../contrib/carbondata all
-
-.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-libcarbondata submake-pagecompression
+.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-pagecompression
 
 
 ##########################################################################

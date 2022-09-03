@@ -1,16 +1,9 @@
 #!/bin/bash
-#######################################################################
-# Copyright (c): 2020-2021, Huawei Tech. Co., Ltd.
+# Copyright (c) Huawei Technologies Co., Ltd. 2020-2025. All rights reserved.
 # descript: Compile opengauss
-#           Return 0 means OK.
-#           Return 1 means failed.
-# version:  1.0
-# date:     2020-11-28
-#######################################################################
 
 # It is just a wrapper to package_internal.sh
-# Example: ./build_opengauss.sh -3rd /path/to/your/third_party_binarylibs/
-
+# Example: ./build_opengauss.sh -3rd path/third_party_binarylibs/
 # change it to "N", if you want to build with original build system based on solely Makefiles
 declare CMAKE_PKG="N"
 declare SCRIPT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}"); pwd)
@@ -32,7 +25,7 @@ function print_help()
     -pkg|--package         provode type of installation packages, values parameter is server.
     -m|--version_mode      this values of paramenter is debug, release, memcheck, the default value is release.
     -pm                    product mode, values parameter is  opengauss.
-    -mc|--make_check       this values of paramenter is on or off, the default value is on.   
+    -mc|--make_check       this values of paramenter is on or off, the default value is on.
     -s|--symbol_mode       whether separate symbol in debug mode, the default value is on.
     -co|--cmake_opt        more cmake options
 "
@@ -93,7 +86,7 @@ while [ $# -gt 0 ]; do
             fi
             product_mode=$2
             shift 2
-            ;;    
+            ;;
         -mc|--make_check)
             if [ "$2"X = X ]; then
                 echo "no given make check  values"
@@ -101,7 +94,7 @@ while [ $# -gt 0 ]; do
             fi
             make_check=$2
             shift 2
-            ;;            
+            ;;
         -s|--symbol_mode)
             if [ "$2"X = X ]; then
                 echo "no given symbol parameter"
@@ -109,7 +102,7 @@ while [ $# -gt 0 ]; do
             fi
             separate_symbol=$2
             shift 2
-            ;;    
+            ;;
         --cmake_opt)
             if [ "$2"X = X ]; then
                 echo "no extra configure options provided"
@@ -125,7 +118,7 @@ while [ $# -gt 0 ]; do
             fi
             extra_config_opt=$2
             shift 2
-            ;;  
+            ;;
          *)
             echo "Internal Error: option processing error: $1" 1>&2
             echo "please input right paramtenter, the following command may help you"
@@ -149,7 +142,11 @@ else
     echo "begin config cmake options:" >> "$LOG_FILE" 2>&1
     declare BUILD_DIR="${ROOT_DIR}/mppdb_temp_install"
     declare CMAKE_BUILD_DIR=${ROOT_DIR}/tmp_build
-    declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON ${extra_cmake_opt}"
+    if [ "$product_mode"x == "lite"x ]; then
+        declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_PRIVATEGAUSS=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_LITE_MODE=ON ${extra_cmake_opt}"
+    else
+        declare CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON -DENABLE_MOT=ON ${extra_cmake_opt}"
+    fi
     echo "[cmake options] cmake options is:${CMAKE_OPT}" >> "$LOG_FILE" 2>&1
     source $SCRIPT_DIR/utils/cmake_compile.sh || exit 1
 fi
@@ -164,6 +161,5 @@ function main()
     gaussdb_build
 }
 main
-
 echo "now, all build has finished!"
 exit 0

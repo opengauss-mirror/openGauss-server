@@ -1529,7 +1529,7 @@ static void cgconf_display_exception(void)
         if (gsutil_exception_is_valid(cgutil_vaddr[cls], kinds) != 0) {
             fprintf(stdout,
                 "\nGID: %3d Type: %-6s Class: %-16s\n",
-                cgutil_vaddr[cls]->gid,
+                (int)cgutil_vaddr[cls]->gid,
                 "EXCEPTION",
                 cgutil_vaddr[cls]->grpname);
 
@@ -1548,7 +1548,7 @@ static void cgconf_display_exception(void)
                 /* display the Class group information */
                 fprintf(stdout,
                     "\nGID: %3d Type: %-6s Class: %-16s",
-                    cgutil_vaddr[cls]->gid,
+                    (int)cgutil_vaddr[cls]->gid,
                     "EXCEPTION",
                     cgutil_vaddr[cls]->grpname);
                 ++flag;
@@ -1556,7 +1556,7 @@ static void cgconf_display_exception(void)
 
             fprintf(stdout,
                 "\nGID: %3d Type: %-6s Group: %s:%-16s\n",
-                cgutil_vaddr[wd]->gid,
+                (int)cgutil_vaddr[wd]->gid,
                 "EXCEPTION",
                 cgutil_vaddr[cls]->grpname,
                 cgutil_vaddr[wd]->grpname);

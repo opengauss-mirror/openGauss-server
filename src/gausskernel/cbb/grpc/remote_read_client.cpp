@@ -22,7 +22,6 @@
  *
  * -------------------------------------------------------------------------
  */
-
 #include "securec.h"
 #include "service/remote_read_client.h"
 #include "catalog/catalog.h"
@@ -140,8 +139,8 @@ int RemoteGetCU(char* remoteAddress, uint32 spcnode, uint32 dbnode, uint32 relno
     }
 
     tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
-        "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, '%lu', %d, '%lu', true, %d);",
-        spcnode, dbnode, relnode, 0, colid, offset, size, lsn, DEFAULT_WAIT_TIMES);
+        "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, %d, '%lu', %d, '%lu', true, %d);",
+        spcnode, dbnode, relnode, 0, 0, colid, offset, size, lsn, DEFAULT_WAIT_TIMES);
     securec_check_ss(tnRet, "", "");
 
     res = PQexecParams(conGet, (const char*)sqlCommands, 0, NULL, NULL, NULL, NULL, 1);
@@ -278,16 +277,16 @@ extern int RemoteGetPage(char* remoteAddress, RepairBlockKey *key, uint32 blocks
 
     if (pblk != NULL) {
         tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
-                       "SELECT gs_read_segment_block_from_remote(%u, %u, %u, %d, %d, '%lu', %u, '%lu', %u, %u, %d);",
-                       key->relfilenode.spcNode, key->relfilenode.dbNode, key->relfilenode.relNode,
-                       key->relfilenode.bucketNode, key->forknum, key->blocknum, blocksize, lsn, pblk->relNode,
-                       pblk->block, timeout);
+            "SELECT pg_catalog.gs_read_segment_block_from_remote(%u, %u, %u, %d, %d, '%lu', %u, '%lu', %u, %u, %d);",
+            key->relfilenode.spcNode, key->relfilenode.dbNode, key->relfilenode.relNode,
+            key->relfilenode.bucketNode, key->forknum, key->blocknum, blocksize, lsn, pblk->relNode,
+            pblk->block, timeout);
     } else {
         tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
-                           "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, %d, '%lu', %u, '%lu', false, %d);",
-                           key->relfilenode.spcNode, key->relfilenode.dbNode, key->relfilenode.relNode,
-                           key->relfilenode.bucketNode, (int2)key->relfilenode.opt, key->forknum, key->blocknum,
-                           blocksize, lsn, timeout);
+            "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, %d, '%lu', %u, '%lu', false, %d);",
+            key->relfilenode.spcNode, key->relfilenode.dbNode, key->relfilenode.relNode,
+            key->relfilenode.bucketNode, (int2)key->relfilenode.opt, key->forknum, key->blocknum,
+            blocksize, lsn, timeout);
     }
 
     securec_check_ss(tnRet, "", "");
@@ -358,9 +357,9 @@ int RemoteGetFileSize(char* remoteAddress, RemoteReadFileKey *key, uint64 lsn, i
     }
 
     tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
-        "SELECT gs_read_file_size_from_remote(%u, %u, %u, %d, %d, '%lu', %d);",
+        "SELECT gs_read_file_size_from_remote(%u, %u, %u, %d, %d, %d, '%lu', %d);",
         key->relfilenode.spcNode, key->relfilenode.dbNode, key->relfilenode.relNode, key->relfilenode.bucketNode,
-        key->forknum, lsn, timeout);
+        (int2)key->relfilenode.opt, key->forknum, lsn, timeout);
     securec_check_ss(tnRet, "", "");
 
     res = PQexecParams(conGet, (const char*)sqlCommands, 0, NULL, NULL, NULL, NULL, 0);
@@ -431,9 +430,9 @@ int RemoteGetFile(char* remoteAddress, RemoteReadFileKey* key, uint64 lsn, uint3
     }
 
     tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
-        "SELECT * from gs_read_file_from_remote(%u, %u, %u, %d, %d, %d, '%lu', %d);",
+        "SELECT * from gs_read_file_from_remote(%u, %u, %u, %d, %d, %d, %d, %d, '%lu', %d);",
         key->relfilenode.spcNode, key->relfilenode.dbNode, key->relfilenode.relNode, key->relfilenode.bucketNode,
-        key->forknum, key->blockstart, lsn, timeout);
+        (int2)key->relfilenode.opt, (int4)size, key->forknum, key->blockstart, lsn, timeout);
     securec_check_ss(tnRet, "", "");
 
     res = PQexecParams(conGet, (const char*)sqlCommands, 0, NULL, NULL, NULL, NULL, 1);

@@ -38,6 +38,8 @@
 #include "gs_tar_const.h"
 #include "bin/elog.h"
 #include "lib/string.h"
+#include "PageCompression.h"
+
 
 #ifdef ENABLE_MOT
 #include "fetchmot.h"
@@ -623,6 +625,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
             } else
 #endif
                 tarfile = stdout;
+
             errorno = strcpy_s(filename, MAXPGPATH, "-");
             securec_check_c(errorno, "\0", "\0");
         } else {
@@ -893,6 +896,8 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
              * End of chunk
              */
             if (file != NULL) {
+                /* punch hole before closing file */
+                PunchHoleForCompressedFile(file, filename);
                 fclose(file);
                 file = NULL;
             }
@@ -1037,7 +1042,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
             /*
              * regular file
              */
-            file = fopen(filename, "wb");
+            file = fopen(filename, IsCompressedFile(filename, strlen(filename)) ? "w+r+b" : "wb");
             if (NULL == file) {
                 pg_log(stderr, _("%s: could not create file \"%s\": %s\n"), progname, filename, strerror(errno));
                 disconnect_and_exit(1);
@@ -1089,6 +1094,9 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
                  * expected. Close the file and move on to the next tar
                  * header.
                  */
+
+                /* punch hole before closing file */
+                PunchHoleForCompressedFile(file, filename);
                 fclose(file);
                 file = NULL;
                 continue;
@@ -1675,6 +1683,8 @@ static int GsTar(int argc, char** argv)
              * End of chunk
              */
             if (file != NULL) {
+                /* punch hole before closing file */
+                PunchHoleForCompressedFile(file, filename);
                 CLOSE_AND_SET_NULL(file);
             }
             break;
@@ -1853,6 +1863,9 @@ static int GsTar(int argc, char** argv)
                  * expected. Close the file and move on to the next tar
                  * header.
                  */
+
+                /* punch hole before closing file */
+                PunchHoleForCompressedFile(file, filename);
                 CLOSE_AND_SET_NULL(file);
                 continue;
             }

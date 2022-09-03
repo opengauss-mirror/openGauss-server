@@ -153,7 +153,7 @@ loop:
          */
         if (otherBuffer == InvalidBuffer) {
             /* easy case */
-            buffer = ReadBufferBI(relation, targetBlock, bistate);
+            buffer = ReadBufferBI(relation, targetBlock, RBM_NORMAL, bistate);
             if (!TryLockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE, !test_last_block)) {
                 Assert(test_last_block);
                 ReleaseBuffer(buffer);
@@ -302,19 +302,19 @@ loop:
      * it worth keeping an accurate file length in shared memory someplace,
      * rather than relying on the kernel to do it for us?
      */
-    buffer = ReadBufferBI(relation, P_NEW, bistate);
-
-    /*
-     * Now acquire lock on the new page. ReadBufferBI cannot do lock so have to lock it here.
-     */
-    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-
+    buffer = ReadBufferBI(relation, P_NEW, RBM_ZERO_AND_LOCK, bistate);
     /*
      * We need to initialize the empty new page.  Double-check that it really
      * is empty (this should never happen, but if it does we don't want to
      * risk wiping out valid data).
      */
     page = BufferGetPage(buffer);
+
+    if (!PageIsNew(page)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("page %u of relation \"%s\" should be empty but is not", BufferGetBlockNumber(buffer),
+                               RelationGetRelationName(relation))));
+    }
     /*
      * It is possible that by the time we added new block to the relation,
      * another thread initialized it from RelationPruneBlockAndReturn().
@@ -323,18 +323,15 @@ loop:
      * is initialized by the time the block creator thread could get the
      * buffer lock.
      */
-    if (PageIsNew(page)) {
-        if (relation->rd_rel->relkind == RELKIND_TOASTVALUE) {
-            UPageInit<UPAGE_TOAST>(page, BufferGetPageSize(buffer), UHEAP_SPECIAL_SIZE);
-        } else {
-            UPageInit<UPAGE_HEAP>(page, BufferGetPageSize(buffer), UHEAP_SPECIAL_SIZE, RelationGetInitTd(relation));
-        }
-        UHeapPageHeaderData *uheappage = (UHeapPageHeaderData *)page;
-        uheappage->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
-        uheappage->pd_multi_base = 0;
-        MarkBufferDirty(buffer);
+    if (relation->rd_rel->relkind == RELKIND_TOASTVALUE) {
+        UPageInit<UPAGE_TOAST>(page, BufferGetPageSize(buffer), UHEAP_SPECIAL_SIZE);
+    } else {
+        UPageInit<UPAGE_HEAP>(page, BufferGetPageSize(buffer), UHEAP_SPECIAL_SIZE, RelationGetInitTd(relation));
     }
-
+    UHeapPageHeaderData *uheappage = (UHeapPageHeaderData *)page;
+    uheappage->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
+    uheappage->pd_multi_base = 0;
+    MarkBufferDirty(buffer);
     /*
      * Release the file-extension lock; it's now OK for someone else to extend
      * the relation some more.
@@ -507,7 +504,6 @@ done:
     return result;
 }
 
-
 BlockNumber RelationPruneBlockAndReturn(Relation relation, BlockNumber start_block, BlockNumber max_blocks_to_scan,
     Size required_size, BlockNumber *next_block)
 {
@@ -623,7 +619,9 @@ BlockNumber RelationPruneBlockAndReturn(Relation relation, BlockNumber start_blo
     }
 
     if (pruneTryCnt) {
-        PgstatReportPrunestat(RelationGetRelid(relation), relation->parentId, relation->rd_rel->relisshared,
+        Oid statFlag = RelationIsPartitionOfSubPartitionTable(relation) ? partid_get_parentid(relation->parentId) :
+                                                                          relation->parentId;
+        PgstatReportPrunestat(RelationGetRelid(relation), statFlag, relation->rd_rel->relisshared,
             pruneTryCnt, (result != InvalidBlockNumber) ? 1 : 0);
     }
 

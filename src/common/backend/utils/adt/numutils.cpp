@@ -24,6 +24,41 @@
 #include "utils/builtins.h"
 
 /*
+ * A table of all two-digit numbers. This is used to speed up decimal digit
+ * generation by copying pairs of digits into the final output.
+ */
+static const char DIGIT_TABLE[] =
+"00" "01" "02" "03" "04" "05" "06" "07" "08" "09"
+"10" "11" "12" "13" "14" "15" "16" "17" "18" "19"
+"20" "21" "22" "23" "24" "25" "26" "27" "28" "29"
+"30" "31" "32" "33" "34" "35" "36" "37" "38" "39"
+"40" "41" "42" "43" "44" "45" "46" "47" "48" "49"
+"50" "51" "52" "53" "54" "55" "56" "57" "58" "59"
+"60" "61" "62" "63" "64" "65" "66" "67" "68" "69"
+"70" "71" "72" "73" "74" "75" "76" "77" "78" "79"
+"80" "81" "82" "83" "84" "85" "86" "87" "88" "89"
+"90" "91" "92" "93" "94" "95" "96" "97" "98" "99";
+
+static inline int
+decimalLength32(const uint32 v)
+{
+    int t;
+    static const uint32 PowersOfTen[] = {
+        1, 10, 100,
+        1000, 10000, 100000,
+        1000000, 10000000, 100000000,
+        1000000000
+    };
+
+    /*
+     * Compute base-10 logarithm by dividing the base-2 logarithm by a
+     * good-enough approximation of the base-2 logarithm of 10
+     */
+    t = (pg_leftmost_one_pos32(v) + 1) * 1233 / 4096;
+    return t + (v >= PowersOfTen[t]);
+}
+
+/*
  * pg_atoi: convert string to integer
  *
  * allows any number of leading or trailing whitespace characters.
@@ -449,6 +484,92 @@ void pg_i128toa(int128 value, char* a, int length)
         *start++ = *a;
         *a-- = swap;
     }
+}
+
+/*
+ * pg_ultoa_n: converts an unsigned 32-bit integer to its string representation,
+ * not NUL-terminated, and returns the length of that string representation
+ *
+ * Caller must ensure that 'a' points to enough memory to hold the result (at
+ * least 10 bytes)
+ */
+int pg_ultoa_n(uint32 value, char *a)
+{
+    int olength, i = 0;
+
+    /* Degenerate case */
+    if (value == 0) {
+        *a = '0';
+        return 1;
+    }
+
+    olength = decimalLength32(value);
+
+    /* Compute the result string. */
+    while (value >= 10000) {
+        const uint32 c = value - 10000 * (value / 10000);
+        const uint32 c0 = (c % 100) << 1;
+        const uint32 c1 = (c / 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value /= 10000;
+
+        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c0, 2);
+        securec_check(rc, "\0", "\0");
+        rc = memcpy_s(pos - 4, 2, DIGIT_TABLE + c1, 2);
+        securec_check(rc, "\0", "\0");
+        i += 4;
+    }
+    if (value >= 100) {
+        const uint32 c = (value % 100) << 1;
+
+        char *pos = a + olength - i;
+
+        value /= 100;
+
+        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c, 2);
+        securec_check(rc, "\0", "\0");
+        i += 2;
+    }
+    if (value >= 10) {
+        const uint32 c = value << 1;
+
+        char *pos = a + olength - i;
+
+        errno_t rc = memcpy_s(pos - 2, 2, DIGIT_TABLE + c, 2);
+        securec_check(rc, "\0", "\0");
+    } else {
+        *a = (char)('0' + value);
+    }
+
+    return olength;
+}
+
+/*
+ * pg_ultostr
+ *		Converts 'value' into a decimal string representation stored at 'str'.
+ *
+ * Returns the ending address of the string result (the last character written
+ * plus 1).  Note that no NUL terminator is written.
+ *
+ * The intended use-case for this function is to build strings that contain
+ * multiple individual numbers, for example:
+ *
+ *	str = pg_ultostr(str, a);
+ *	*str++ = ' ';
+ *	str = pg_ultostr(str, b);
+ *	*str = '\0';
+ *
+ * Note: Caller must ensure that 'str' points to enough memory to hold the
+ * result.
+ */
+char *
+pg_ultostr(char *str, uint32 value)
+{
+	int			len = pg_ultoa_n(value, str);
+
+	return str + len;
 }
 
 /*

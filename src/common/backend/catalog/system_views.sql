@@ -341,7 +341,8 @@ CREATE VIEW pg_catalog.pg_gtt_attached_pids WITH (security_barrier) AS
  SELECT n.nspname AS schemaname,
     c.relname AS tablename,
     c.oid AS relid,
-    array(select pid from pg_catalog.pg_gtt_attached_pid(c.oid)) AS pids
+    array(select pid from pg_catalog.pg_gtt_attached_pid(c.oid)) AS pids,
+    array(select sessionid from pg_catalog.pg_gtt_attached_pid(c.oid)) AS sessionids
  FROM
      pg_class c
      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -1672,11 +1673,11 @@ BEGIN
                       ON T.tid = S.threadid
                    )
                    SELECT * from SM
-                   UNION
+                   UNION ALL
                    SELECT 
                      Ssessid AS sessid, sesstype, contextname, level, parent, totalsize, freesize, usedsize
                    FROM TM WHERE Ssessid IS NOT NULL
-                   UNION
+                   UNION ALL
                    SELECT
                      Tsessid AS sessid, sesstype, contextname, level, parent, totalsize, freesize, usedsize
                    FROM TM WHERE Ssessid IS NULL;';
@@ -1753,7 +1754,8 @@ CREATE VIEW pg_replication_slots AS
             L.xmin,
             L.catalog_xmin,
             L.restart_lsn,
-            L.dummy_standby
+            L.dummy_standby,
+            L.confirmed_flush
     FROM pg_catalog.pg_get_replication_slots() AS L
             LEFT JOIN pg_database D ON (L.datoid = D.oid);
 

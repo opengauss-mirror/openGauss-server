@@ -477,6 +477,14 @@ TupleTableSlot* ExecClearTuple(TupleTableSlot* slot) /* return: slot passed slot
     return slot;
 }
 
+void ExecClearMutilTuple(List* slots)
+{
+    ListCell* l = NULL;
+    foreach (l, slots) {
+        TupleTableSlot* slot = (TupleTableSlot*)lfirst(l);
+        (void)ExecClearTuple(slot);
+    }
+}
 /* --------------------------------
  *		ExecStoreVirtualTuple
  *			Mark a slot as containing a virtual tuple.
@@ -499,12 +507,6 @@ TupleTableSlot* ExecStoreVirtualTuple(TupleTableSlot* slot)
 
     slot->tts_isempty = false;
     slot->tts_nvalid = slot->tts_tupleDescriptor->natts;
-
-    if (slot->tts_tupslotTableAm != slot->tts_tupleDescriptor->tdTableAmType) {
-        // XXX: Should tts_tupleDescriptor be cloned before changing its contents
-        // as some time it can be direct reference to the rd_att in RelationData.
-        slot->tts_tupleDescriptor->tdTableAmType = slot->tts_tupslotTableAm;
-    }
 
     return slot;
 }

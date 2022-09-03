@@ -12,9 +12,9 @@ WARNING:  replication slot "test_slot" already exists
 (1 row)
 
 select * from pg_get_replication_slots();
- slot_name | plugin | slot_type | datoid | active | xmin | catalog_xmin | restart_lsn | dummy_standby 
------------+--------+-----------+--------+--------+------+--------------+-------------+---------------
- test_slot |        | physical  |      0 | f      |      |              |             | t
+ slot_name | plugin | slot_type | datoid | active | xmin | catalog_xmin | restart_lsn | dummy_standby | confirmed_flush 
+-----------+--------+-----------+--------+--------+------+--------------+-------------+---------------+-----------------
+ test_slot |        | physical  |      0 | f      |      |              |             | t             | 
 (1 row)
 
 select * from pg_drop_replication_slot('test_slot');

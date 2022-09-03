@@ -53,6 +53,7 @@
 
 #include "access/transam.h"
 #include "catalog/namespace.h"
+#include "executor/node/nodeModifyTable.h"
 #include "executor/executor.h"
 #include "executor/lightProxy.h"
 #include "executor/spi.h"
@@ -63,6 +64,7 @@
 #include "optimizer/prep.h"
 #include "optimizer/planner.h"
 #include "optimizer/bucketpruning.h"
+#include "optimizer/sqlpatch.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
 #include "storage/lmgr.h"
@@ -74,10 +76,11 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/globalplancache.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_slow_query.h"
 #include "commands/sqladvisor.h"
+#include "optimizer/gplanmgr.h"
+#include "utils/globalplancache.h"
 
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
@@ -98,15 +101,8 @@ static void drop_datanode_statements(Plan* plannode);
 #define IsTransactionStmtPlan(plansource) \
     ((plansource)->raw_parse_tree && IsA((plansource)->raw_parse_tree, TransactionStmt))
 
-static void ReleaseGenericPlan(CachedPlanSource* plansource);
-static bool CheckCachedPlan(CachedPlanSource* plansource);
-static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamListInfo boundParams,
-                                           bool isBuildingCustomPlan);
-static void ReportReasonForPlanChoose(PlanChooseReason reason);
-static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundParams);
 static bool IsForceCustomplan(CachedPlanSource *plansource);
 static bool IsDeleteLimit(CachedPlanSource* plansource, ParamListInfo boundParams);
-static double cached_plan_cost(CachedPlan* plan);
 static void ScanQueryForLocks(Query* parsetree, bool acquire);
 static bool ScanQueryWalker(Node* node, bool* acquire);
 static TupleDesc PlanCacheComputeResultDesc(List* stmt_list);
@@ -122,7 +118,8 @@ bool IsStreamSupport()
 #ifdef ENABLE_MULTIPLE_NODES
     return u_sess->attr.attr_sql.enable_stream_operator;
 #else
-    return u_sess->opt_cxt.query_dop > 1;
+    bool res = (u_sess->opt_cxt.query_dop > 1) && (u_sess->opt_cxt.smp_enabled);
+    return res;
 #endif
 }
 
@@ -227,13 +224,13 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
         if (ENABLE_CN_GPC && enable_spi_gpc) {
             contextName =  "SPI_GPCCachedPlanSource";
         }
+        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         source_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
                                                contextName,
                                                ALLOCSET_SMALL_MINSIZE,
                                                ALLOCSET_SMALL_INITSIZE,
                                                ALLOCSET_DEFAULT_MAXSIZE,
                                                SHARED_CONTEXT);
-        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, source_context);
     }
 
@@ -288,6 +285,10 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->is_checked_opfusion = false;
     plansource->is_support_gplan = false;
     plansource->spi_signature = {(uint32)-1, 0, (uint32)-1, -1};
+    plansource->sql_patch_sequence = pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id);
+    plansource->planManager = NULL;
+    plansource->gpc_lockid = -1;
+
 
 #ifdef ENABLE_MOT
     plansource->storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -615,7 +616,6 @@ void DropCachedPlan(CachedPlanSource* plansource)
     Assert(plansource->magic == CACHEDPLANSOURCE_MAGIC);
     if (ENABLE_GPC && plansource->gpc.status.InShareTable())
         elog(PANIC, "should not drop shared plan");
-
     /* If it's been saved, remove it from the list */
     if (plansource->is_saved) {
         if (u_sess->pcache_cxt.first_saved_plan == plansource)
@@ -670,7 +670,7 @@ void DropCachedPlan(CachedPlanSource* plansource)
 /*
  * ReleaseGenericPlan: release a CachedPlanSource's generic plan, if any.
  */
-static void ReleaseGenericPlan(CachedPlanSource* plansource)
+void ReleaseGenericPlan(CachedPlanSource* plansource)
 {
     /* Be paranoid about the possibility that ReleaseCachedPlan fails */
     if (plansource->gplan || plansource->cplan) {
@@ -681,8 +681,9 @@ static void ReleaseGenericPlan(CachedPlanSource* plansource)
 
         if (plansource->gplan)
             plan = plansource->gplan;
-        else
+        else {
             plan = plansource->cplan;
+        }
 
 #ifdef PGXC
         /* Drop this plan on remote nodes */
@@ -704,6 +705,11 @@ static void ReleaseGenericPlan(CachedPlanSource* plansource)
         Assert(plan->magic == CACHEDPLAN_MAGIC);
         plansource->gplan = NULL;
         plansource->cplan = NULL;
+        if (ENABLE_CACHEDPLAN_MGR && plan->is_candidate) {
+            plansource->planManager->candidatePlans = list_delete_ptr(plansource->planManager->candidatePlans, plan);
+        }
+
+        /* release the plan */
         ReleaseCachedPlan(plan, false);
     }
 }
@@ -765,10 +771,17 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
         if (!OverrideSearchPathMatchesCurrent(plansource->search_path)) {
             /* Invalidate the querytree and generic plan */
             plansource->is_valid = false;
-            if (plansource->gplan)
+            if (plansource->gplan) {
                 plansource->gplan->is_valid = false;
+            }
+            /* generic root and all candidate plans need to be rebuilt. */
+            if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+                plansource->planManager->is_valid = false;
+            }
         }
     }
+
+    RevalidateGplanBySqlPatch(plansource);
 
     /*
      * If the query rewrite phase had a possible RLS dependency, we must redo
@@ -864,6 +877,12 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
     else
         tlist =
             pg_analyze_and_rewrite(rawtree, plansource->query_string, plansource->param_types, plansource->num_params);
+
+    ereport(DEBUG2, (errmodule(MOD_SQLPATCH),
+        errmsg("[SQLPatch] %lu after revalidation update from %lu to %lu", u_sess->unique_sql_cxt.unique_sql_id,
+        plansource->sql_patch_sequence, pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id))));
+    plansource->sql_patch_sequence = pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id);
+    plansource->nextval_default_expr_type = u_sess->opt_cxt.nextval_default_expr_type;
 
     /* Release snapshot if we got one */
     if (snapshot_set)
@@ -985,6 +1004,7 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
         OpFusion::tearDown((OpFusion*)plansource->opFusionObj);
         plansource->opFusionObj = NULL;
     }
+    plansource->is_checked_opfusion = false;
 
 #ifdef ENABLE_MOT
     /* clean JIT context if exists */
@@ -1019,16 +1039,14 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
  * On a "true" return, we have acquired the locks needed to run the plan.
  * (We must do this for the "true" result to be race-condition-free.)
  */
-static bool CheckCachedPlan(CachedPlanSource* plansource)
+bool CheckCachedPlan(CachedPlanSource* plansource, CachedPlan *plan)
 {
-    CachedPlan* plan = plansource->gplan;
-
     /* Assert that caller checked the querytree */
     Assert(plansource->is_valid);
 
     /* If there's no generic plan, just say "false" */
     if (plan == NULL) {
-        if (plansource->gpc.status.InShareTable()) {
+        if (plansource->gplan == NULL && plansource->gpc.status.InShareTable()) {
             elog(PANIC, "CheckCachedPlan no gplan for sharedplan %s", plansource->stmt_name);
         }
         return false;
@@ -1069,8 +1087,9 @@ static bool CheckCachedPlan(CachedPlanSource* plansource)
          * advanced, and if so invalidate it.
          */
         if (plan->is_valid && TransactionIdIsValid(plan->saved_xmin) &&
-            !TransactionIdEquals(plan->saved_xmin, u_sess->utils_cxt.TransactionXmin))
-            plan->is_valid = false;
+            !TransactionIdEquals(plan->saved_xmin, u_sess->utils_cxt.TransactionXmin)) {
+                plan->is_valid = false;
+            }
 
         /*
          * By now, if any invalidation has happened, the inval callback
@@ -1085,10 +1104,27 @@ static bool CheckCachedPlan(CachedPlanSource* plansource)
         AcquireExecutorLocks(plan->stmt_list, false);
     }
     Assert(!plansource->gpc.status.InShareTable());
+
     /*
      * Plan has been invalidated, so unlink it from the parent and release it.
      */
-    ReleaseGenericPlan(plansource);
+    if (ENABLE_CACHEDPLAN_MGR) {
+        if (plansource->planManager != NULL) {
+            if (plan->is_candidate) {
+                plansource->planManager->candidatePlans =
+                    list_delete_ptr(plansource->planManager->candidatePlans, plan);
+            }
+            DropStmtRoot(plansource->planManager->psrc_key);
+        }
+
+        if (plan == plansource->gplan) {
+            ReleaseGenericPlan(plansource);
+        } else {
+            ReleaseCachedPlan(plan, false);
+        }
+    } else {
+        ReleaseGenericPlan(plansource);
+    }
 
     return false;
 }
@@ -1117,7 +1153,7 @@ static inline void ResetStream(bool outer_is_stream, bool outer_is_stream_suppor
  * is in a child memory context, which typically should get reparented
  * (unless this is a one-shot plan, in which case we don't copy the plan).
  */
-static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamListInfo boundParams,
+CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamListInfo boundParams,
                                           bool isBuildingCustomPlan)
 {
     CachedPlan* plan = NULL;
@@ -1131,6 +1167,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     PLpgSQL_execstate *saved_estate = plpgsql_estate;
     bool        outer_is_stream = false;
     bool        outer_is_stream_support = false;
+
 
     /*
      * NOTE: GetCachedPlan should have called RevalidateCachedQuery first, so
@@ -1194,6 +1231,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
         outer_is_stream_support = u_sess->opt_cxt.is_stream_support;
         /* opengaussdb:jdbc to create vecplan */
         set_default_stream();
+
         plist = pg_plan_queries(qlist, plansource->cursor_options, boundParams);
     }
     PG_CATCH();
@@ -1222,6 +1260,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
      * memory context.
      */
     if (!plansource->is_oneshot) {
+        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         if (!plansource->gpc.status.IsPrivatePlan()) {
             plan_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
     											 "GPCCachedPlan",
@@ -1238,7 +1277,6 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
         }
 
         /* We must track shared memory context for handling exception */
-        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, plan_context);
         
         /*
@@ -1246,7 +1284,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
          */
         MemoryContextSwitchTo(plan_context);
 
-        plist = (List*)copyObject(plist);
+        plist = (List *)copyObject(plist);
     } else
         plan_context = CurrentMemoryContext;
 
@@ -1321,6 +1359,8 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     plan->is_oneshot = plansource->is_oneshot;
     plan->is_saved = false;
     plan->is_valid = true;
+    plan->cpi = NULL;
+    plan->is_candidate = false;
 
     /* assign generation number to new plan */
     plan->generation = ++(plansource->generation);
@@ -1337,10 +1377,13 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
 #ifdef ENABLE_MULTIPLE_NODES
         GPCCheckStreamPlan(plansource, plist);
 #endif
-        GPCFillPlanCache(plansource, isBuildingCustomPlan);
+        if (!ENABLE_CACHEDPLAN_MGR || plansource->gplan == NULL) {
+            GPCFillPlanCache(plansource, isBuildingCustomPlan);
+        }
     }
 
     plpgsql_estate = saved_estate;
+    u_sess->opt_cxt.nextval_default_expr_type = plansource->nextval_default_expr_type;
 
     return plan;
 }
@@ -1472,7 +1515,7 @@ static bool is_upsert_query_with_update_param(Node* raw_parse_tree)
     return false;
 }
 
-static bool choose_by_hint(const CachedPlanSource* plansource, bool* choose_cplan)
+static bool choose_cplan_by_hint(const CachedPlanSource* plansource, bool* choose_cplan)
 {
     if (list_length(plansource->query_list) != 1) {
         return false;
@@ -1491,40 +1534,12 @@ static bool choose_by_hint(const CachedPlanSource* plansource, bool* choose_cpla
     return false;
 }
 
-/* report the reason why we choose this plan, corresponding to enum PlanChooseReason */
-static void ReportReasonForPlanChoose(PlanChooseReason reason)
-{
-    char* msg[MAX_PLANCHOOSEREASON] =
-        {"GPlan, reason: shared plancache need choose gplan.",
-         "CPlan, reason: Upsert with update query can't choose gplan.",
-#ifdef ENABLE_MOT
-         "GPlan, reason: Don't choose custom plan if using pbe optimization and MOT engine.",
-#endif
-         "CPlan, reason: For PBE, such as col=$1+$2, generate cplan.",
-         "CPlan, reason: One-shot plans will always be considered custom.",
-         "GPlan, reason: No parameters.",
-         "GPlan, reason: Transaction control statements.",
-         "GPlan, reason: Caller wants to force the decision.",
-         "CPlan, reason: Caller wants to force the decision.",
-         "CPlan, reason: Contains cstore table.",
-         "Choose by hint.",
-         "GPlan, reason: Using pbe optimization.",
-         "GPlan, reason: Settings force the decision.",
-         "CPlan, reason: Settings force the decision.",
-         "CPlan, reason: First 5 times using CPlan.",
-         "GPlan, reason: GPlan's cost is less than 10% more expensive than average custom plan.",
-         "CPlan, reason: Default choosing."};
-    int elevel = (log_min_messages <= DEBUG2 && module_logging_is_on(MOD_OPT_CHOICE)) ? NOTICE : DEBUG2;
-    ereport(elevel, (errmodule(MOD_OPT_CHOICE), errmsg("[Choosing C/G Plan]: %s", msg[reason])));
-    return;
-}
-
 /*
  * ChooseCustomPlan: choose whether to use custom or generic plan
  *
  * This defines the policy followed by GetCachedPlan.
  */
-static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundParams)
+bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundParams)
 {
     double avg_custom_cost;
     bool ret = false;
@@ -1593,7 +1608,7 @@ static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundPa
     }
 
     /* Make decision according to hint */
-    if (choose_by_hint(plansource, &ret)) {
+    if (choose_cplan_by_hint(plansource, &ret)) {
         ReportReasonForPlanChoose(CHOOSE_BY_HINT);
         return ret;
     }
@@ -1647,10 +1662,11 @@ static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundPa
     return true;
 }
 
+
 /*
  * cached_plan_cost: calculate estimated cost of a plan
  */
-static double cached_plan_cost(CachedPlan* plan)
+double cached_plan_cost(CachedPlan* plan)
 {
     double result = 0;
     ListCell* lc = NULL;
@@ -1685,7 +1701,9 @@ static double cached_plan_cost(CachedPlan* plan)
  * Note: if any replanning activity is required, the caller's memory context
  * is used for that work.
  */
-CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParams, bool useResOwner)
+CachedPlan* GetWiseCachedPlan(CachedPlanSource* plansource,
+                          ParamListInfo boundParams,
+                          bool useResOwner)
 {
     CachedPlan* plan = NULL;
     List* qlist = NIL;
@@ -1699,6 +1717,152 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot apply ResourceOwner to non-saved cached plan")));
 
+    int elevel = u_sess->attr.attr_sql.explain_allow_multinode ? WARNING : ERROR;
+    if (elevel == ERROR && g_instance.attr.attr_storage.enable_gtm_free &&
+        !u_sess->attr.attr_sql.enable_cluster_resize && !IS_PGXC_DATANODE && !(g_instance.role == VSINGLENODE)) {
+        elevel = ClusterResizingInProgress() ? WARNING : ERROR;
+    }
+
+    /* Make sure the querytree list is valid and we have parse-time locks */
+    qlist = RevalidateCachedQuery(plansource);
+
+    /* Decide whether to use a custom plan */
+    customplan = ChooseCustomPlan(plansource, boundParams);
+    if (!customplan) {
+        if (ChooseAdaptivePlan(plansource, boundParams)) {
+            plan = GetAdaptGenericPlan(plansource, boundParams, &qlist);
+        } else {
+            plan = GetDefaultGenericPlan(plansource, boundParams, &qlist, &customplan);
+        }
+
+        /* In function BuildCachedPlan, we deparse query to obtain sql_statement,
+         * If we have generic plan, Sql_statement will have format parameter.
+         * We can not send this statement to DN directly. So we should replace format
+         * parameter with actual values. But, it will block pbe performance and
+         * have side effects, such as unexpected query rewrite. So,we suggest that
+         * u_sess->attr.attr_common.max_datanode_for_plan is 0 when testing performance.
+         */
+        if (u_sess->attr.attr_common.max_datanode_for_plan > 0 && !customplan && boundParams != NULL &&
+            boundParams->params_need_process == true && IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+            if (!plansource->gpc.status.InShareTable()) {
+                /* we just replace params with virtual values and do not use plan. */
+                CachedPlan *tmp_cplan = BuildCachedPlan(plansource, qlist, boundParams, false);
+                /* Mark it no longer valid */
+                tmp_cplan->magic = 0;
+                /* One-shot plans do not own their context, so we can't free them */
+                if (!tmp_cplan->is_oneshot) {
+                    ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, tmp_cplan->context);
+                    MemoryContextDelete(tmp_cplan->context);
+                }
+            } else {
+                /* for shared plan , just copy a plansource for explain with values */
+                CachedPlanSource *tmp_psrc = CopyCachedPlan(plansource, false);
+                CachedPlan *tmp_cplan = BuildCachedPlan(tmp_psrc, NIL, boundParams, false);
+                tmp_cplan->magic = 0;
+                ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, tmp_cplan->context);
+                MemoryContextDelete(tmp_cplan->context);
+                tmp_psrc->magic = 0;
+                ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, tmp_psrc->context);
+                MemoryContextDelete(tmp_psrc->context);
+            }
+        }
+    }
+
+    if (customplan) {
+        plan = GetCustomPlan(plansource, boundParams, &qlist);
+        ereport(DEBUG2, (errmodule(MOD_OPT), errmsg("Custom plan is used for \"%s\"", plansource->query_string)));
+    } else {
+        ereport(DEBUG2, (errmodule(MOD_OPT), errmsg("Generic plan is used for \"%s\"", plansource->query_string)));
+    }
+
+    /*
+     * Validate the plansource again
+     * The plansource may be invalidated by ResetPlanCache when handling invalid
+     * messages in BuildCachedPlan.
+     */
+    plansource->is_valid = true;
+
+    /* Flag the plan as in use by caller */
+    if (useResOwner)
+        ResourceOwnerEnlargePlanCacheRefs(t_thrd.utils_cxt.CurrentResourceOwner);
+    plan->refcount++;
+    if (useResOwner)
+        ResourceOwnerRememberPlanCacheRef(t_thrd.utils_cxt.CurrentResourceOwner, plan);
+
+    /*
+     * Saved plans should be under u_sess->cache_mem_cxt so they will not go away
+     * until their reference count goes to zero.  In the generic-plan cases we
+     * already took care of that, but for a custom plan, do it as soon as we
+     * have created a reference-counted link.
+     */
+    if (customplan && plansource->is_saved) {
+	    if (plansource->gpc.status.IsPrivatePlan()) {
+		    MemoryContextSetParent(plan->context, u_sess->cache_mem_cxt);
+        }
+        plan->is_saved = true;
+    }
+
+    if (!customplan) {
+        setCachedPlanBucketId(plan, boundParams);
+    }
+
+#ifdef ENABLE_MOT
+    /* set plan storageEngineType */
+    plan->storageEngineType = plansource->storageEngineType;
+    plan->mot_jit_context = plansource->mot_jit_context;
+#endif
+
+    ListCell *lc;
+    foreach (lc, plan->stmt_list) {
+        PlannedStmt* plannedstmt = (PlannedStmt*)lfirst(lc);
+
+        if (!IsA(plannedstmt, PlannedStmt))
+            continue; /* Ignore utility statements */
+
+        check_gtm_free_plan(plannedstmt, elevel);
+    }
+
+    return plan;
+}
+
+/*
+ * GetCachedPlan: get a cached plan from a CachedPlanSource.
+ *
+ * This function hides the logic that decides whether to use a generic
+ * plan or a custom plan for the given parameters: the caller does not know
+ * which it will get.
+ *
+ * On return, the plan is valid and we have sufficient locks to begin
+ * execution.
+ *
+ * On return, the refcount of the plan has been incremented; a later
+ * ReleaseCachedPlan() call is expected.  The refcount has been reported
+ * to the CurrentResourceOwner if useResOwner is true (note that that must
+ * only be true if it's a "saved" CachedPlanSource).
+ *
+ * Note: if any replanning activity is required, the caller's memory context
+ * is used for that work.
+ */
+CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParams, bool useResOwner)
+{
+    CachedPlan* plan = NULL;
+    List* qlist = NIL;
+    bool customplan = false;
+
+    /* Assert caller is doing things in a sane order */
+    Assert(plansource->magic == CACHEDPLANSOURCE_MAGIC);
+    Assert(plansource->is_complete);
+    /* This seems worth a real test, though */
+    if (useResOwner && !plansource->is_saved) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot apply ResourceOwner to non-saved cached plan")));
+    }
+    int elevel = u_sess->attr.attr_sql.explain_allow_multinode ? WARNING : ERROR;
+    if (elevel == ERROR && g_instance.attr.attr_storage.enable_gtm_free &&
+        !u_sess->attr.attr_sql.enable_cluster_resize && !IS_PGXC_DATANODE && !IS_SINGLE_NODE) {
+        elevel = ClusterResizingInProgress() ? WARNING : ERROR;
+    }
+
     /* Make sure the querytree list is valid and we have parse-time locks */
     qlist = RevalidateCachedQuery(plansource);
 
@@ -1706,7 +1870,7 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
     customplan = ChooseCustomPlan(plansource, boundParams);
     
     if (!customplan) {
-        if (CheckCachedPlan(plansource)) {
+        if (CheckCachedPlan(plansource, plansource->gplan)) {
             /* We want a generic plan, and we already have a valid one */
             plan = plansource->gplan;
             Assert(plan->magic == CACHEDPLAN_MAGIC);
@@ -1899,11 +2063,12 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         if (!IsA(plannedstmt, PlannedStmt))
             continue; /* Ignore utility statements */
 
-        check_gtm_free_plan(plannedstmt, u_sess->attr.attr_sql.explain_allow_multinode ? WARNING : ERROR);
+        check_gtm_free_plan(plannedstmt, elevel);
     }
 
     return plan;
 }
+
 
 /*
  * Find and release all Datanode statements referenced by the plan node and subnodes
@@ -2238,13 +2403,13 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot copy a one-shot cached plan")));
 
     if (ENABLE_GPC && is_share == true) {
+        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         source_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
                                                "GPCCachedPlanSource",
                                                ALLOCSET_SMALL_MINSIZE,
                                                ALLOCSET_SMALL_INITSIZE,
                                                ALLOCSET_DEFAULT_MAXSIZE,
                                                SHARED_CONTEXT);
-        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, source_context);
     } else {
         source_context = AllocSetContextCreate(u_sess->cache_mem_cxt,
@@ -2324,6 +2489,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
     newsource->is_checked_opfusion = false;
     newsource->spi_signature = plansource->spi_signature;
     newsource->gplan_is_fqs = plansource->gplan_is_fqs;
+    newsource->nextval_default_expr_type = plansource->nextval_default_expr_type;
 
 #ifdef ENABLE_MOT
     newsource->storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -2437,7 +2603,7 @@ void AcquireExecutorLocks(List* stmt_list, bool acquire)
              * fail if it's been dropped entirely --- we'll just transiently
              * acquire a non-conflicting lock.
              */
-            if (list_member_int(plannedstmt->resultRelations, rt_index))
+            if (list_member_int((List*)linitial2(plannedstmt->resultRelations), rt_index))
                 lockmode = RowExclusiveLock;
             else if ((rc = get_plan_rowmark(plannedstmt->rowMarks, rt_index)) != NULL &&
                      RowMarkRequiresRowShareLock(rc->markType))
@@ -2505,7 +2671,7 @@ static void ScanQueryForLocks(Query* parsetree, bool acquire)
         switch (rte->rtekind) {
             case RTE_RELATION:
                 /* Acquire or release the appropriate type of lock */
-                if (rt_index == parsetree->resultRelation)
+                if (rt_index == linitial2_int(parsetree->resultRelations))
                     lockmode = RowExclusiveLock;
                 else if (get_parse_rowmark(parsetree, rt_index) != NULL)
                     lockmode = RowShareLock;
@@ -2628,6 +2794,15 @@ CheckRelDependency(CachedPlanSource *plansource, Oid relid)
     		plansource->is_valid = false;
     		if (plansource->gplan) {
     			plansource->gplan->is_valid = false;
+            }
+
+            /*
+             * All context under planManager should be invalid if any dependent
+             * relation has been changed. Thus, all candidate plans and the cached
+             * parsing context, 'GenericRoot', need to be rebuilt.
+             */
+            if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+                plansource->planManager->is_valid = false;
             }
         }
 	}
@@ -2872,6 +3047,9 @@ ResetPlanCache(CachedPlanSource *plansource)
     			if (plansource->gplan) {
     				plansource->gplan->is_valid = false;
                 }
+                if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+                    plansource->planManager->is_valid = false;
+                }
             }
 			/* no need to look further */
 			break;
@@ -2930,7 +3108,7 @@ void ResetPlanCache(void)
  * Drop lightProxyObj/gplan/cplan inside CachedPlanSource,
  * and drop prepared statements on DN.
  */
-void DropCachedPlanInternal(CachedPlanSource* plansource)
+    void DropCachedPlanInternal(CachedPlanSource* plansource)
 {
 #ifdef ENABLE_MOT
     /* MOT: clean any JIT context */
@@ -2964,8 +3142,13 @@ void DropCachedPlanInternal(CachedPlanSource* plansource)
             }
             plansource->opFusionObj = NULL;
         }
+
         /* Decrement generic CachePlan's refcount and drop if no longer needed */
         ReleaseGenericPlan(plansource);
+        /* drop plan manager and all candidate plans. */
+        if (ENABLE_CACHEDPLAN_MGR && plansource->planManager != NULL) {
+            PMGR_ReleasePlanManager(plansource);
+        }
     }
 
 #ifdef MEMORY_CONTEXT_CHECKING
@@ -2983,3 +3166,32 @@ void DropCachedPlanInternal(CachedPlanSource* plansource)
     }
 #endif
 }
+
+/* report the reason why we choose this plan, corresponding to enum PlanChooseReason */
+void ReportReasonForPlanChoose(PlanChooseReason reason)
+{
+    char* msg[MAX_PLANCHOOSEREASON] =
+        {"GPlan, reason: shared plancache need choose gplan.",
+         "CPlan, reason: Upsert with update query can't choose gplan.",
+#ifdef ENABLE_MOT
+         "GPlan, reason: Don't choose custom plan if using pbe optimization and MOT engine.",
+#endif
+         "CPlan, reason: For PBE, such as col=$1+$2, generate cplan.",
+         "CPlan, reason: One-shot plans will always be considered custom.",
+         "GPlan, reason: No parameters.",
+         "GPlan, reason: Transaction control statements.",
+         "GPlan, reason: Caller wants to force the decision.",
+         "CPlan, reason: Caller wants to force the decision.",
+         "CPlan, reason: Contains cstore table.",
+         "Choose by hint.",
+         "GPlan, reason: Using pbe optimization.",
+         "GPlan, reason: Settings force the decision.",
+         "CPlan, reason: Settings force the decision.",
+         "CPlan, reason: First 5 times using CPlan.",
+         "GPlan, reason: GPlan's cost is less than 10% more expensive than average custom plan.",
+         "CPlan, reason: Default choosing."};
+    int elevel = (log_min_messages <= DEBUG2 && module_logging_is_on(MOD_OPT_CHOICE)) ? NOTICE : DEBUG2;
+    ereport(elevel, (errmodule(MOD_OPT_CHOICE), errmsg("[Choosing C/G Plan]: %s", msg[reason])));
+    return;
+}
+

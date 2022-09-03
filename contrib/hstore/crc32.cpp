@@ -285,12 +285,12 @@ static const unsigned int crc32tab[256] = {
 unsigned int crc32_sz(char* buf, int size)
 {
     unsigned int crc = ~((unsigned int)0);
-    char* p = NULL;
+    unsigned char* p = NULL;
     int len, nr;
 
     len = 0;
     nr = size;
-    for (len += nr, p = buf; nr--; ++p)
+    for (len += nr, p = (unsigned char*)buf; nr--; ++p)
         _CRC32_(crc, *p);
     return ~crc;
 }

@@ -847,7 +847,7 @@ bool FuncHardcodedValues::handle_body_quote(StatementData *statement_data, const
     }
 
     /* new body need one tag in the beggining and one in the end */
-    size_t temp_size = strlen(adjusted_body) + tag_length * 2; /* 2 is the num for $$ and $$ */
+    size_t temp_size = strlen(adjusted_body) + (size_t)(tag_length * 2); /* 2 is the num for $$ and $$ */
     char *temp_str = (char *)malloc(temp_size + 1);
     if (!temp_str) {
         return false;

@@ -15,6 +15,7 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
     | table_constraint
     | LIKE source_table [ like_option [...] ] }
     [, ... ])
+    [ AUTO_INCREMENT [ = ] value ]
     [ WITH ( {storage_parameter = value} [, ... ] ) ]
     [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
     [ COMPRESS | NOCOMPRESS ]
@@ -27,6 +28,7 @@ where column_constraint can be:
   CHECK ( expression ) |
   DEFAULT default_expr |
   GENERATED ALWAYS AS ( generation_expr ) STORED |
+  AUTO_INCREMENT |
   UNIQUE index_parameters |
   PRIMARY KEY index_parameters |
   ENCRYPTED WITH ( COLUMN_ENCRYPTION_KEY = column_encryption_key, ENCRYPTION_TYPE = encryption_type_value ) |
@@ -34,12 +36,12 @@ where column_constraint can be:
     [ ON DELETE action ] [ ON UPDATE action ] }
 [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
 where table_constraint can be:
-[ CONSTRAINT constraint_name ]
+[ CONSTRAINT [ constraint_name ] ]
 { CHECK ( expression ) |
-  UNIQUE ( column_name [, ... ] ) index_parameters |
-  PRIMARY KEY ( column_name [, ... ] ) index_parameters |
+  UNIQUE [ index_name ] [ USING method ] ( { { column_name | ( expression ) } [ ASC | DESC ] } [, ... ] ) index_parameters |
+  PRIMARY KEY [ USING method ] ( { column_name [ ASC | DESC ] } [, ... ] ) index_parameters |
   PARTIAL CLUSTER KEY ( column_name [, ... ] ) |
-  FOREIGN KEY ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+  FOREIGN KEY [ index_name ] ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
     [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
 [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
 where compress_mode can be:
@@ -49,7 +51,26 @@ where like_option can be:
 where index_parameters can be:
 [ WITH ( {storage_parameter = value} [, ... ] ) ]
 [ USING INDEX TABLESPACE tablespace_name ]
+where range_distribution_rules can be:
+[ ( SLICE name VALUES LESS THAN (expression | MAXVALUE [, ... ]) [DATANODE datanode_name]
+ [, ... ] ) |
+  ( SLICE name START (expression) END (expression) EVERY (expression) [DATANODE datanode_name]
+ [, ... ] ) |
+  SLICE REFERENCES table_name
+]
+where list_distribution_rules can be:
+[ ( SLICE name VALUES (expression [, ... ]) [DATANODE datanode_name]
+ [, ... ] ) |
+  ( SLICE name VALUES (DEFAULT) [DATANODE datanode_name] ) |
+  SLICE REFERENCES table_name
+]
+
+NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
+NOTICE: '[ index_name ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only avaliable in CENTRALIZED mode and B-format database!
 </synopsis>
 </refsynopsisdiv>
 </refentry>
-

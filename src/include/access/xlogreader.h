@@ -101,5 +101,5 @@ bool ValidXLogRecordHeader(
 bool ValidXLogRecord(XLogReaderState* state, XLogRecord* record, XLogRecPtr recptr);
 Size SimpleValidatePage(XLogRecPtr targetPagePtr, char* page,  XLogPageReadCB pagereadfunc);
 extern int read_library(char *bufptr, int nlibrary);
-extern char *GetRepOriginPtr(char *xnodes, uint64 xinfo, int nsubxacts, int nmsgs, int nrels, int nlibrary);
+extern char *GetRepOriginPtr(char *xnodes, uint64 xinfo, int nsubxacts, int nmsgs, int nrels, int nlibrary, bool compress);
 #endif /* XLOGREADER_H */

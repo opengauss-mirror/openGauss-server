@@ -188,6 +188,14 @@ typedef enum {
     IGNORE_REC_CRC
 } PredefinedRecCrc;
 
+/*
+ * replication auth mode
+ */
+typedef enum replauthmode{
+    REPL_AUTH_DEFAULT = 0, /* no extra replication auth */
+    REPL_AUTH_UUID /* uuid auth */
+} ReplAuthMode;
+
 extern bool data_catchup;
 extern bool wal_catchup;
 extern BuildMode build_mode;

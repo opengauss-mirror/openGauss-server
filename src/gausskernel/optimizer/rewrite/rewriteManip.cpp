@@ -413,8 +413,8 @@ void OffsetVarNodes(Node* node, int offset, int sublevels_up)
         if (sublevels_up == 0) {
             ListCell* l = NULL;
 
-            if (qry->resultRelation)
-                qry->resultRelation += offset;
+            if (qry->resultRelations)
+                linitial_int(qry->resultRelations) += offset;
             foreach (l, qry->rowMarks) {
                 RowMarkClause* rc = (RowMarkClause*)lfirst(l);
 
@@ -567,8 +567,8 @@ void ChangeVarNodes(Node* node, int rt_index, int new_index, int sublevels_up)
         if (sublevels_up == 0) {
             ListCell* l = NULL;
 
-            if (qry->resultRelation == rt_index)
-                qry->resultRelation = new_index;
+            if (linitial2_int(qry->resultRelations) == rt_index)
+                linitial_int(qry->resultRelations) = new_index;
             foreach (l, qry->rowMarks) {
                 RowMarkClause* rc = (RowMarkClause*)lfirst(l);
 

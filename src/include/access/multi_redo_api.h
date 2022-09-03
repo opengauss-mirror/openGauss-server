@@ -57,6 +57,7 @@ static const uint32 PAGE_REDO_WORKER_INVALID = 0;
 static const uint32 PAGE_REDO_WORKER_START = 1;
 static const uint32 PAGE_REDO_WORKER_READY = 2;
 static const uint32 PAGE_REDO_WORKER_EXIT = 3;
+static const uint32 BIG_RECORD_LENGTH = XLOG_BLCKSZ * 16;
 
 static inline int get_real_recovery_parallelism()
 {
@@ -93,6 +94,7 @@ void GetThreadNameIfMultiRedo(int argc, char* argv[], char** threadNamePtr);
 
 PGPROC* MultiRedoThreadPidGetProc(ThreadId pid);
 void MultiRedoUpdateStandbyState(HotStandbyState newState);
+void MultiRedoUpdateMinRecovery(XLogRecPtr newMinRecoveryPoint);
 uint32 MultiRedoGetWorkerId();
 bool IsAllPageWorkerExit();
 void SetPageRedoWorkerIndex(int index);

@@ -462,11 +462,17 @@ Instrumentation* InstrAlloc(int n, int instrument_options)
     if (instrument_options & (INSTRUMENT_BUFFERS | INSTRUMENT_TIMER)) {
         bool need_buffers = (instrument_options & INSTRUMENT_BUFFERS) != 0;
         bool need_timer = (instrument_options & INSTRUMENT_TIMER) != 0;
+#ifndef ENABLE_MULTIPLE_NODES
+        bool need_cpu = (instrument_options & INSTRUMENT_CPUS) != 0;
+#endif
         int i;
 
         for (i = 0; i < n; i++) {
             instr[i].need_bufusage = need_buffers;
             instr[i].need_timer = need_timer;
+#ifndef ENABLE_MULTIPLE_NODES
+            instr[i].need_cpu = need_cpu;
+#endif
         }
     }
 
@@ -476,12 +482,23 @@ Instrumentation* InstrAlloc(int n, int instrument_options)
 /* Entry to a plan node */
 void InstrStartNode(Instrumentation* instr)
 {
-    if (!instr->first_time) {
+
+    if (
+#ifndef ENABLE_MULTIPLE_NODES
+        !u_sess->attr.attr_common.enable_seqscan_fusion &&
+#endif
+        !instr->first_time) {
         instr->enter_time = GetCurrentTimestamp();
         instr->first_time = true;
     }
 
-    CPUUsageGetCurrent(&instr->cpuusage_start);
+    if (
+#ifndef ENABLE_MULTIPLE_NODES
+        !u_sess->attr.attr_common.enable_seqscan_fusion &&
+#endif
+        !instr->first_time) {
+        CPUUsageGetCurrent(&instr->cpuusage_start);
+    }
 
     if (instr->need_timer) {
         if (INSTR_TIME_IS_ZERO(instr->starttime)) {
@@ -528,7 +545,7 @@ void AddControlMemoryContext(Instrumentation* instr, MemoryContext context)
 void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
 {
     instr_time end_time;
-    CPUUsage cpu_usage;
+    CPUUsage cpu_usage = {0};
 
     /* count the returned tuples */
     instr->ntuples += n_tuples;
@@ -545,15 +562,21 @@ void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
 
         INSTR_TIME_SET_ZERO(instr->starttime);
     }
-    
-    CPUUsageGetCurrent(&cpu_usage);    
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!u_sess->attr.attr_common.enable_seqscan_fusion)
+#endif
+        CPUUsageGetCurrent(&cpu_usage);  
 
     /* Add delta of buffer usage since entry to node's totals */
     if (instr->need_bufusage) {
         BufferUsageAccumDiff(&instr->bufusage, u_sess->instr_cxt.pg_buffer_usage, &instr->bufusage_start);
     }
 
-    CPUUsageAccumDiff(&instr->cpuusage, &cpu_usage, &instr->cpuusage_start);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!u_sess->attr.attr_common.enable_seqscan_fusion)
+#endif
+        CPUUsageAccumDiff(&instr->cpuusage, &cpu_usage, &instr->cpuusage_start);
 
     /* Is this the first tuple of this cycle? */
     if (!instr->running) {
@@ -561,7 +584,11 @@ void InstrStopNode(Instrumentation* instr, double n_tuples, bool containMemory)
         instr->firsttuple = INSTR_TIME_GET_DOUBLE(instr->counter);
     }
 
-    if (containMemory) {
+    if (
+#ifndef ENABLE_MULTIPLE_NODES
+        !u_sess->attr.attr_common.enable_seqscan_fusion &&
+#endif
+        containMemory) {
         int64 memory_size = 0;
         int64 control_memory_size = 0;
         /* calculate the memory context size of this Node */
@@ -979,13 +1006,6 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
 
             plan_type = IO_OP;
             break;
-        case T_DfsScan:
-            if (((Scan*)plan)->isPartTbl)
-                pname = "Partitioned Dfs Scan";
-            else
-                pname = "Dfs Scan";
-            plan_type = IO_OP;
-            break;
         case T_CStoreScan:
             if (!((Scan*)plan)->tablesample) {
                 if (((Scan*)plan)->isPartTbl) {
@@ -1038,20 +1058,6 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
                 pname = "Partitioned Bitmap Heap Scan";
             else
                 pname = "Bitmap Heap Scan";
-            plan_type = IO_OP;
-            break;
-        case T_DfsIndexScan:
-            if (((Scan*)plan)->isPartTbl) {
-                if (((DfsIndexScan*)plan)->indexonly)
-                    pname = "Partitioned Dfs Index Only Scan";
-                else
-                    pname = "Partitioned Dfs Index Scan";
-            } else {
-                if (((DfsIndexScan*)plan)->indexonly)
-                    pname = "Dfs Index Only Scan";
-                else
-                    pname = "Dfs Index Scan";
-            }
             plan_type = IO_OP;
             break;
         case T_CStoreIndexScan:
@@ -1349,11 +1355,9 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
-        case T_DfsScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
-        case T_DfsIndexScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
         case T_BitmapHeapScan:

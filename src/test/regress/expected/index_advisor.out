@@ -279,23 +279,14 @@ select * from gs_index_advise('select * from range_part_a partition(p_range_1) w
 
 --subpartition
 select * from gs_index_advise('select * from range_subpart_a partition(p_range_1) where col_2 = 2');
- schema |      table      | column | indextype 
---------+-----------------+--------+-----------
- public | range_subpart_a | col_2  | local
-(1 row)
-
+WARNING:  can not advise for table range_subpart_a due to invalid oid or irregular table.
+ERROR:  can not advise for the query because can not recognize involved tables.
 select * from gs_index_advise('select * from range_subpart_a subpartition(p_range_1_1 ) where col_3 =''2''');
- schema |      table      | column | indextype 
---------+-----------------+--------+-----------
- public | range_subpart_a | col_3  | local
-(1 row)
-
+WARNING:  can not advise for table range_subpart_a due to invalid oid or irregular table.
+ERROR:  can not advise for the query because can not recognize involved tables.
 select * from gs_index_advise('select * from range_subpart_a where col_1 =2 and col_2 = 3');
- schema |      table      |   column    | indextype 
---------+-----------------+-------------+-----------
- public | range_subpart_a | col_1,col_2 | local
-(1 row)
-
+WARNING:  can not advise for table range_subpart_a due to invalid oid or irregular table.
+ERROR:  can not advise for the query because can not recognize involved tables.
 --test global index
 --partion
 select * from gs_index_advise('select * from range_part_a where stu_id = ''10''');
@@ -306,11 +297,8 @@ select * from gs_index_advise('select * from range_part_a where stu_id = ''10'''
 
 --subpartition
 select * from gs_index_advise('select * from range_subpart_a where col_1 = 10');
- schema |      table      | column | indextype 
---------+-----------------+--------+-----------
- public | range_subpart_a | col_1  | global
-(1 row)
-
+WARNING:  can not advise for table range_subpart_a due to invalid oid or irregular table.
+ERROR:  can not advise for the query because can not recognize involved tables.
 --test subquery
 --partition
 select * from gs_index_advise('select * from range_part_a where stu_id = (select stu_id from range_part_a where stu_id=''10'') and credit = 2');
@@ -322,11 +310,11 @@ select * from gs_index_advise('select * from range_part_a where stu_id = (select
 
 --subpartition
 select * from gs_index_advise('select * from range_subpart_a where col_1 = (select col_2 from range_part_a where col_3=''10'') and col_2 = 2');
- schema |      table      | column | indextype 
---------+-----------------+--------+-----------
- public | range_subpart_a | col_2  | global
- public | range_part_a    |        | 
-(2 rows)
+WARNING:  can not advise for table range_subpart_a due to invalid oid or irregular table.
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a |        | 
+(1 row)
 
 --test join
 --partition
@@ -353,26 +341,21 @@ select * from gs_index_advise('select * from range_part_a partition(p_range_1) j
 
 --subpartition
 select * from gs_index_advise('select * from range_subpart_a join range_subpart_b on range_subpart_b.col_2 = range_subpart_a.col_2  where range_subpart_a.col_3 = ''12''');
- schema |      table      | column | indextype 
---------+-----------------+--------+-----------
- public | range_subpart_a | col_3  | global
- public | range_subpart_b | col_2  | global
-(2 rows)
-
+WARNING:  can not advise for table range_subpart_a due to invalid oid or irregular table.
+WARNING:  can not advise for table range_subpart_b due to invalid oid or irregular table.
+ERROR:  can not advise for the query because can not recognize involved tables.
 select * from gs_index_advise('select * from range_part_a join range_subpart_b on range_part_a.credit = range_subpart_b.col_2  where range_subpart_b.col_3 = ''12''');
- schema |      table      | column | indextype 
---------+-----------------+--------+-----------
- public | range_part_a    | credit | local
- public | range_subpart_b | col_3  | global
-(2 rows)
+WARNING:  can not advise for table range_subpart_b due to invalid oid or irregular table.
+WARNING:  can not advise for table range_subpart_b due to invalid oid or irregular table.
+ schema |    table     | column | indextype 
+--------+--------------+--------+-----------
+ public | range_part_a |        | 
+(1 row)
 
 select * from gs_index_advise('select * from range_subpart_a partition(p_range_1) join range_subpart_b subpartition(p_range_1_1) on range_subpart_a.col_3 = range_subpart_b.col_3  where range_subpart_a.col_3 = ''12''');
- schema |      table      | column | indextype 
---------+-----------------+--------+-----------
- public | range_subpart_a | col_3  | global
- public | range_subpart_b | col_3  | local
-(2 rows)
-
+WARNING:  can not advise for table range_subpart_a due to invalid oid or irregular table.
+WARNING:  can not advise for table range_subpart_b due to invalid oid or irregular table.
+ERROR:  can not advise for the query because can not recognize involved tables.
 --virtual index
 select * from hypopg_create_index('create index on range_part_a(credit) local');
  indexrelid |               indexname                
@@ -387,15 +370,13 @@ select * from hypopg_create_index('create index on range_subpart_a(col_2) local'
 (1 row)
 
 explain select * from range_part_a where stu_id = '10' and credit = 2;
-                                                          QUERY PLAN                                                          
-------------------------------------------------------------------------------------------------------------------------------
---? Partition Iterator  (.*)
---?   Iterations: .*
---?   ->  Partitioned Index Scan using .*btree_local_range_part_a_credit on range_part_a  (.*)
-         Index Cond: (credit = 2)
-         Filter: ((stu_id)::text = '10'::text)
-         Selected Partitions:  1
---?(.* rows)
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+--? Partitioned Index Scan using .*btree_local_range_part_a_credit on range_part_a.*
+   Index Cond: (credit = 2)
+   Filter: ((stu_id)::text = '10'::text)
+--?   Selected Partitions:  .*
+--? (.* rows)
 
 select * from hypopg_create_index('create index on range_part_a(credit)');
  indexrelid |                indexname                

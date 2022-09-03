@@ -278,6 +278,7 @@ CStoreIndexCtidScanState* ExecInitCstoreIndexCtidScan(CStoreIndexCtidScan* node,
         cstorescan->itrs = node->scan.itrs;
         cstorescan->pruningInfo = node->scan.pruningInfo;
         cstorescan->partScanDirection = node->scan.partScanDirection;
+        cstorescan->partition_iterator_elimination = node->scan.partition_iterator_elimination;
 
         cstorescan->plan.targetlist = FixIndexCtidScanTargetList(node->indextlist, node->indexid, true);
 
@@ -466,7 +467,7 @@ void ExecInitNextPartitionForIndexCtidScan(CStoreIndexCtidScanState* state)
 void ExecReScanCstoreIndexCtidScan(CStoreIndexCtidScanState* state)
 {
     if (state->m_cstoreBitmapIndexScan == NULL) {
-        if (state->isPartTbl) {
+        if (state->isPartTbl && !(((Scan *)state->ps.plan)->partition_iterator_elimination)) {
             if (PointerIsValid(state->partitions)) {
                 ExecInitNextPartitionForIndexCtidScan(state);
             }

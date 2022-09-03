@@ -1069,8 +1069,6 @@ static bool CheckTimeout(bool *pingSent, TimestampTz lastRecvTimestamp)
 
         timeout =
             TimestampTzPlusMilliseconds(lastRecvTimestamp, u_sess->attr.attr_storage.wal_receiver_timeout);
-        if (now > timeout)
-            ereport(ERROR, (errmsg("terminating logical replication worker due to timeout")));
 
         /*
          * We didn't receive anything new, for half of

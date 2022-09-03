@@ -42,6 +42,7 @@ struct SPSCBlockingQueue {
     pg_atomic_uint32 maxUsage;
     pg_atomic_uint64 totalCnt;
     CallBackFunc callBackFunc;
+    uint64 lastTotalCnt;
     void *buffer[1]; /* Queue buffer, the actual size is capacity. */
 };
 

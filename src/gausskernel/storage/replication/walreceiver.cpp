@@ -88,9 +88,9 @@ bool wal_catchup = false;
 
 #define WAL_DATA_LEN ((sizeof(uint32) + 1 + sizeof(XLogRecPtr)))
 
-#define TEMP_CONF_FILE "postgresql.conf.bak"
+#define TEMP_WAL_CONF_FILE "postgresql.conf.wal.bak"
 
-const char *g_reserve_param[RESERVE_SIZE] = {
+const char *g_reserve_param[] = {
     "application_name",
     "archive_command",
     "audit_directory",
@@ -116,6 +116,8 @@ const char *g_reserve_param[RESERVE_SIZE] = {
     "cross_cluster_replconninfo6",
     "cross_cluster_replconninfo7",
     "cross_cluster_replconninfo8",
+    "repl_uuid",
+    "repl_auth_mode",
     "ssl",
     "ssl_ca_file",
     "ssl_cert_file",
@@ -155,6 +157,8 @@ const char *g_reserve_param[RESERVE_SIZE] = {
     NULL
 #endif
 };
+
+const int g_reserve_param_num = lengthof(g_reserve_param);
 
 const WalReceiverFunc WalReceiverFuncTable[] = {
     { libpqrcv_connect, libpqrcv_receive, libpqrcv_send, libpqrcv_disconnect, NULL, NULL, NULL, NULL },
@@ -398,6 +402,7 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         /* Receive any more data we can without sleeping */
         while ((t_thrd.walreceiver_cxt.start_switchover == false) &&
             (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_receive(0, &type, &buf, &len) ) {
+            ProcessWalRcvInterrupts();
             *last_recv_timestamp = GetCurrentTimestamp();
             *ping_sent = false;
             XLogWalRcvProcessMsg(type, buf, len);
@@ -570,7 +575,7 @@ void WalReceiverMain(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, sigusr1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /* Reset some signals that are accepted by postmaster but not here */
     (void)gspqsignal(SIGCHLD, SIG_DFL);
     (void)gspqsignal(SIGTTIN, SIG_DFL);
@@ -624,7 +629,7 @@ void WalReceiverMain(void)
         securec_check_ss(nRet, "\0", "\0");
 
         nRet = snprintf_s(t_thrd.walreceiver_cxt.temp_guc_conf_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
-                          t_thrd.proc_cxt.DataDir, TEMP_CONF_FILE);
+                          t_thrd.proc_cxt.DataDir, TEMP_WAL_CONF_FILE);
         securec_check_ss(nRet, "\0", "\0");
 
         nRet = snprintf_s(t_thrd.walreceiver_cxt.gucconf_lock_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf.lock",
@@ -1516,6 +1521,13 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     flushPtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->flushPtr;
     SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
 
+    /* In shared storage, standby receivePtr equal dorado insertHead */
+    if (IS_SHARED_STORAGE_STANBY_MODE) {
+        ShareStorageXLogCtl *ctlInfo = AlignAllocShareStorageCtl();
+        ReadShareStorageCtlInfo(ctlInfo);
+        receivePtr = ctlInfo->insertHead;
+        AlignFreeShareStorageCtl(ctlInfo);
+    }
     /* Get current timestamp. */
     now = GetCurrentTimestamp();
     /*
@@ -1644,6 +1656,7 @@ static void XLogWalRcvSendHSFeedback(void)
         xmin = GetOldestXmin(NULL);
     else
         xmin = InvalidTransactionId;
+    t_thrd.pgxact->xmin = InvalidTransactionId;
     /*
      * Always send feedback message.
      */
@@ -1902,10 +1915,11 @@ static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_mes
     errno_t errorno = EOK;
     ArchiveTaskStatus *archive_task = find_archive_task_status(archive_xlog_message->slot_name);
     if (archive_task == NULL) {
-        ereport(ERROR, (errmsg("get archive xlog message %s :%X/%X, but task slot not find", 
+        ereport(WARNING, (errmsg("get archive xlog message %s :%X/%X, but task slot not find",
             archive_xlog_message->slot_name, 
             (uint32)(archive_xlog_message->targetLsn >> 32), 
             (uint32)(archive_xlog_message->targetLsn))));
+        return;
     }
     volatile unsigned int *pitr_task_status = &archive_task->pitr_task_status;
     if (archive_xlog_message->targetLsn == InvalidXLogRecPtr) {
@@ -1981,8 +1995,10 @@ static void WalRecvSendArchiveXlogResponse(ArchiveTaskStatus *archive_task)
     char buf[sizeof(ArchiveXlogResponseMessage) + 1];
     ArchiveXlogResponseMessage reply;
     errno_t errorno = EOK;
+    SpinLockAcquire(&archive_task->mutex);
     reply.pitr_result = archive_task->pitr_finish_result;
     reply.targetLsn = archive_task->archive_task.targetLsn;
+    SpinLockRelease(&archive_task->mutex);
     errorno = memcpy_s(&reply.slot_name, NAMEDATALEN, archive_task->slotname, NAMEDATALEN);
     securec_check(errorno, "\0", "\0");
 
@@ -2497,7 +2513,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
         return false;
     }
 
-    reserve_item = alloc_opt_lines(RESERVE_SIZE);
+    reserve_item = alloc_opt_lines(g_reserve_param_num);
     if (reserve_item == NULL) {
         ereport(LOG, (errmsg("Alloc mem for reserved parameters failed")));
         return false;
@@ -2671,23 +2687,36 @@ static void ProcessHadrSwitchoverRequest(HadrSwitchoverMessage *hadrSwitchoverMe
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    XLogRecPtr last_flush_location = walrcv->receiver_flush_location;
+    XLogRecPtr last_replay_location = GetXLogReplayRecPtr(NULL);
     SpinLockAcquire(&walrcv->mutex);
     walrcv->targetSwitchoverBarrierLSN = hadrSwitchoverMessage->switchoverBarrierLsn;
+    walrcv->isMasterInstanceReady = hadrSwitchoverMessage->isMasterInstanceReady;
     SpinLockRelease(&walrcv->mutex);
 
     if (g_instance.streaming_dr_cxt.isInSwitchover && 
-        XLByteEQ(walrcv->targetSwitchoverBarrierLSN, walrcv->lastSwitchoverBarrierLSN)) {
-        g_instance.streaming_dr_cxt.isInteractionCompleted = true;
+        XLByteEQ(walrcv->targetSwitchoverBarrierLSN, walrcv->lastSwitchoverBarrierLSN) &&
+        XLByteEQ(last_flush_location, last_replay_location) &&
+        XLByteEQ(walrcv->targetSwitchoverBarrierLSN, last_replay_location)) {
         WalRecvHadrSwitchoverResponse();
+        if (walrcv->isMasterInstanceReady) {
+            g_instance.streaming_dr_cxt.isInteractionCompleted = true;
+        }
     }
 
-    ereport(LOG,
-        (errmsg("ProcessHadrSwitchoverRequest: target switchover barrier lsn  %X/%X, "
-            "receive switchover barrier lsn %X/%X, isInteractionCompleted %d",
+    ereport(LOG,(errmsg("ProcessHadrSwitchoverRequest: "
+            "is_hadr_main_standby: %d, is_cn: %d, target switchover barrier lsn  %X/%X, "
+            "receive switchover barrier lsn %X/%X, last_replay_location %X/%X, "
+            "last_flush_location %X/%X, isInteractionCompleted %d",
+            t_thrd.xlog_cxt.is_hadr_main_standby, IS_PGXC_COORDINATOR,
             (uint32)(walrcv->targetSwitchoverBarrierLSN >> 32),
             (uint32)(walrcv->targetSwitchoverBarrierLSN),
             (uint32)(walrcv->lastSwitchoverBarrierLSN >> 32),
             (uint32)(walrcv->lastSwitchoverBarrierLSN),
+            (uint32)(last_replay_location >> 32),
+            (uint32)(last_replay_location),
+            (uint32)(last_flush_location >> 32),
+            (uint32)(last_flush_location),
             g_instance.streaming_dr_cxt.isInteractionCompleted)));
 }
 

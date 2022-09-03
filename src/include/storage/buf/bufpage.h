@@ -180,8 +180,6 @@ typedef HeapPageHeaderData* HeapPageHeader;
 #define GetPageHeaderSize(page) (PageIs8BXidHeapVersion(page) ? SizeOfHeapPageHeaderData : SizeOfPageHeaderData)
 
 #define SizeOfHeapPageUpgradeData MAXALIGN(offsetof(HeapPageHeaderData, pd_linp) - offsetof(PageHeaderData, pd_linp))
-    
-#define GET_ITEMID_BY_IDX(buf, i) ((ItemIdData *)(buf + GetPageHeaderSize(buf) + (i) * sizeof(ItemIdData)))
 
 #define PageXLogRecPtrGet(val) \
 	((uint64) (val).xlogid << 32 | (val).xrecoff)

@@ -1,3 +1,4 @@
+--新增看护用例
 set enable_default_ustore_table = on;
 
 show undo_retention_time;
@@ -34,41 +35,260 @@ begin
 end;
 $BODY$;
 
---parition table
---timecapsule query normal table
+--timecapsule ordinary table
 drop table if exists t1;
-create table t1 (id int)
-partition by range (id)
-(
-partition p1 values less than (10),
-partition p2 values less than (20)
-);
-insert into t1 values(1);
-select pg_sleep(4);
-insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
-update t1 set id = 2 where id = 1;
-select * from t1 timecapsule csn findCsn(1);
-drop table t1;
+create table t1 (id int);
+create index index_t1 on t1(id);
 
-delete from t_timecapsule_test_tmp;
-
---timecapsule table normal table
-drop table if exists t1;
-create table t1 (id int)
-partition by range (id)
-(
-partition p1 values less than (10),
-partition p2 values less than (20)
-);
 insert into t1 values(1);
 insert into t1 values(2);
+insert into t1 values(3);
 select pg_sleep(4);
 insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
-delete from t1 where id = 1;
-select * from t1 order by id;
-TIMECAPSULE TABLE t1 TO csn findCsn(1);
-select * from t1;
-drop table t1;
+
+update t1 set id = 4 where id = 1;
+select * from t1 timecapsule csn findCsn(1);
+select count(*) from t1 timecapsule csn findCsn(1);
+select * from t1 timecapsule csn findCsn(1) order by id;
+select * from t1 timecapsule timestamp findTime(1);
+select count(*) from t1 timecapsule timestamp findTime(1);
+select * from t1 timecapsule timestamp findTime(1) order by id;
+
+timecapsule table t1 to csn findCsn(1);
+select * from t1 timecapsule csn findCsn(1);
+select count(*) from t1 timecapsule csn findCsn(1);
+select * from t1 timecapsule csn findCsn(1) order by id;
+select * from t1 timecapsule timestamp findTime(1);
+select count(*) from t1 timecapsule timestamp findTime(1);
+select * from t1 timecapsule timestamp findTime(1) order by id;
+
+truncate table t1;
+select * from t1 timecapsule csn findCsn(1);
+
+delete from t_timecapsule_test_tmp;
+drop table if exists t1;
+
+--timecapsule partition table
+drop table if exists PARTITION_TABLE_001;
+create table PARTITION_TABLE_001(a int, b int)
+partition by range (a)
+(
+partition PARTITION_TABLE_001_1  values less than (10),
+partition PARTITION_TABLE_001_2  values less than (50)
+); 
+
+create index index_PARTITION_TABLE_001_1 on PARTITION_TABLE_001(a) local
+(
+partition PARTITION_TABLE_001_1,
+partition PARTITION_TABLE_001_2   
+); 
+create index idx_c_smallint on PARTITION_TABLE_001(b);
+
+insert into PARTITION_TABLE_001 values(1, 3);
+insert into PARTITION_TABLE_001 values(2, 4);
+insert into PARTITION_TABLE_001 values(11, 33);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+update PARTITION_TABLE_001 set a = 5 where a = 1;
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(1);
+select count(*) from PARTITION_TABLE_001 timecapsule csn findCsn(1);
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(1) order by a;
+select * from PARTITION_TABLE_001 timecapsule timestamp findTime(1);
+select count(*) from PARTITION_TABLE_001 timecapsule timestamp findTime(1);
+select * from PARTITION_TABLE_001 timecapsule timestamp findTime(1) order by a;
+
+timecapsule table PARTITION_TABLE_001 to csn findCsn(1);
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(1);
+select count(*) from PARTITION_TABLE_001 timecapsule csn findCsn(1);
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(1) order by a;
+select * from PARTITION_TABLE_001 timecapsule timestamp findTime(1);
+select count(*) from PARTITION_TABLE_001 timecapsule timestamp findTime(1);
+select * from PARTITION_TABLE_001 timecapsule timestamp findTime(1) order by a;
+
+truncate table PARTITION_TABLE_001;
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(1);
+
+delete from t_timecapsule_test_tmp;
+drop table if exists PARTITION_TABLE_001;
+
+--timecapsule subpartition table
+drop schema if exists tsc cascade;
+drop table if exists tsource cascade;
+create schema tsc;
+create table tsc.tsource(ld int primary key,sd int not null,jn varchar2) with (orientation=row,fillfactor=80)partition by range(ld) subpartition by list(sd)
+(
+partition ts1 values less than(6)(
+	subpartition ts11 values(6,8),
+	subpartition ts12 values(16,18)),
+partition ts2 values less than(36)(
+	subpartition ts21 values(16,18),
+	subpartition ts22 values(default))
+) ;
+
+create index tsidx on tsc.tsource(sd) local(partition tsidx1(subpartition tsidx11,subpartition tsidx12),partition tsidx2(subpartition tsidx21,subpartition tsidx22));
+create unique index tsuidx on tsc.tsource(ld,sd) local(partition tsuidx1(subpartition tsuidx11,subpartition tsuidx12),partition tsidx2(subpartition tsuidx21,subpartition tsuidx22));
+create index g_tsidx on tsc.tsource(ld);
+
+insert into tsc.tsource values(4,8,'jadet1');
+insert into tsc.tsource partition(ts1) values(2,6,'jadet1');
+insert into tsc.tsource partition for(1) values(1,8,'jadet1');
+insert into tsc.tsource subpartition(ts11) values(3,6,'jadet1');
+insert into tsc.tsource subpartition for(1,6) values(5,6,'jadet1');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+update tsc.tsource set ld = 6 where ld = 1;
+select * from tsc.tsource timecapsule csn findCsn(1);
+select count(*) from tsc.tsource timecapsule csn findCsn(1);
+select * from tsc.tsource timecapsule csn findCsn(1) order by ld;
+select * from tsc.tsource timecapsule timestamp findTime(1);
+select count(*) from tsc.tsource timecapsule timestamp findTime(1);
+select * from tsc.tsource timecapsule timestamp findTime(1) order by ld;
+
+timecapsule table tsc.tsource to csn findCsn(1);
+select * from tsc.tsource timecapsule csn findCsn(1);
+select count(*) from tsc.tsource timecapsule csn findCsn(1);
+select * from tsc.tsource timecapsule csn findCsn(1) order by ld;
+select * from tsc.tsource timecapsule timestamp findTime(1);
+select count(*) from tsc.tsource timecapsule timestamp findTime(1);
+select * from tsc.tsource timecapsule timestamp findTime(1) order by ld;
+
+truncate table tsc.tsource;
+select * from tsc.tsource timecapsule csn findCsn(1);
+select * from tsc.tsource timecapsule timestamp findTime(1);
+
+delete from t_timecapsule_test_tmp;
+drop table if exists tsc.tsource cascade;
+drop schema if exists tsc cascade;
+
+--specific scene about partition table
+drop table if exists PARTITION_TABLE_001;
+create table PARTITION_TABLE_001(a int, b int)
+partition by range (a)
+(
+partition PARTITION_TABLE_001_1  values less than (10),
+partition PARTITION_TABLE_001_2  values less than (50)
+); 
+
+create index index_PARTITION_TABLE_001_1 on PARTITION_TABLE_001(a) local
+(
+partition PARTITION_TABLE_001_1,
+partition PARTITION_TABLE_001_2   
+); 
+create index idx_c_smallint on PARTITION_TABLE_001(b);
+
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+insert into PARTITION_TABLE_001 values(1, 3);
+insert into PARTITION_TABLE_001 values(2, 4);
+insert into PARTITION_TABLE_001 values(11, 33);
+
+delete from PARTITION_TABLE_001 where a = 11;
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(1);
+
+delete from t_timecapsule_test_tmp;
+drop table if exists PARTITION_TABLE_001;
+
+--DDL operation between the flashback point and the current point
+drop table if exists PARTITION_TABLE_001 cascade;
+CREATE TABLESPACE example1 RELATIVE LOCATION 'tablespace1/tablespace_1';
+CREATE TABLESPACE example2 RELATIVE LOCATION 'tablespace2/tablespace_2';
+
+create table PARTITION_TABLE_001
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double  double precision,
+c_character_1 character varying(1024000),
+c_varchar varchar(100),
+c_character_2 character(100),
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date,
+c_tsvector tsvector,
+c_tsquery tsquery,
+constraint PARTITION_TABLE_001_constraint primary key(c_smallint,c_integer,c_bigint,c_decimal,c_double)
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition PARTITION_TABLE_001_1  values less than (0,0,0,0),
+partition PARTITION_TABLE_001_2  values less than (30,30,300,400.3),
+partition PARTITION_TABLE_001_3  values less than (60,60,600,800.6),
+partition PARTITION_TABLE_001_4  values less than (100,100,1000,1100.2) TABLESPACE example2
+); 
+
+create index idx_c_smallint on PARTITION_TABLE_001(c_integer);
+
+create index index_PARTITION_TABLE_001_1 on PARTITION_TABLE_001(c_smallint) local
+(
+partition PARTITION_TABLE_001_1,
+partition PARTITION_TABLE_001_2,
+partition PARTITION_TABLE_001_3,
+partition PARTITION_TABLE_001_4
+); 
+
+insert into PARTITION_TABLE_001 values(generate_series(-10,99),-10,100,100.3,10.3,10.2,1000.25,rpad('xy',4096,'ab'),'ABCD','ABC','DEF','A','A','HK','FVT_DATA_PARTITIONFVT_DATA_PARTITION','b','1954-2-6 00:00:30+8','1954-2-6 23:12:12.2356','1954-2-6 13:12:12.2356','abc db','ege');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+ALTER TABLE PARTITION_TABLE_001 RENAME PARTITION PARTITION_TABLE_001_4 TO PARTITION_TABLE_001_5;
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(1);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+ALTER TABLE PARTITION_TABLE_001 TRUNCATE PARTITION PARTITION_TABLE_001_1;
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(2);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+ALTER TABLE PARTITION_TABLE_001 MERGE PARTITIONS PARTITION_TABLE_001_1,PARTITION_TABLE_001_2 INTO PARTITION PARTITION_TABLE_001_6;
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(3);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 4, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+alter table PARTITION_TABLE_001 split PARTITION PARTITION_TABLE_001_5 into (
+partition PARTITION_TABLE_001_5_1 values less than (80,80,900,900.2),
+partition PARTITION_TABLE_001_5_2  values less than (100,100,1000,1100.2)
+);
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(4);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 5, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+ALTER TABLE PARTITION_TABLE_001 ADD PARTITION PARTITION_TABLE_001_4 VALUES LESS THAN (MAXVALUE,MAXVALUE,MAXVALUE,MAXVALUE);
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(5);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 6, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+ALTER TABLE PARTITION_TABLE_001 DROP PARTITION PARTITION_TABLE_001_4;
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(6);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 7, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+ALTER TABLE PARTITION_TABLE_001 MOVE PARTITION PARTITION_TABLE_001_3 TABLESPACE example1;
+select * from PARTITION_TABLE_001 timecapsule csn findCsn(7);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 8, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+vacuum full PARTITION_TABLE_001;
+
+drop table if exists PARTITION_TABLE_001 cascade;
+drop tablespace if exists example1;
+drop tablespace if exists example2;
+
+drop table if exists t_timecapsule_test_tmp cascade;
+drop function if exists findCsn;
+drop function if exists findTime;
 
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "undo_retention_time = 0" > /dev/null 2>&1
 

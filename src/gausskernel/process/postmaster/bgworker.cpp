@@ -70,7 +70,7 @@ void InitBgworkerGlobal(void)
     MemoryContext oldContext = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
     if (g_instance.bgw_base == NULL) {
         /* Create the g_instance.proc_base shared structure */
-        bgworker_base = (BGW_HDR *)CACHELINEALIGN(palloc(sizeof(BGW_HDR) + PG_CACHE_LINE_SIZE));
+        bgworker_base = (BGW_HDR *)CACHELINEALIGN(palloc0(sizeof(BGW_HDR) + PG_CACHE_LINE_SIZE));
         g_instance.bgw_base = (void *)bgworker_base;
         needPalloc = true;
     } else {
@@ -196,7 +196,7 @@ static void BackgroundWorkerInit(void)
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /* Early initialization */
     BaseInit();
 
@@ -311,7 +311,12 @@ void BackgroundWorkerMain(void)
 
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(bwc->databaseName, InvalidOid, bwc->userName);
     t_thrd.proc_cxt.PostInit->InitBgWorker();
+    pgstat_report_appname("Bgworker");
+    pgstat_report_queryid(bwc->parent_query_id);
+    pgstat_report_bgworker_parent_sessionid(bwc->parent_session_id);
     t_thrd.proc_cxt.PostInit->GetDatabaseName(u_sess->proc_cxt.MyProcPort->database_name);
+    u_sess->catalog_cxt.myTempNamespace = bwc->myTempNamespace;
+    u_sess->catalog_cxt.myTempToastNamespace = bwc->myTempToastNamespace;
     ereport(LOG, (errmsg("bgworker threadId is %lu.", t_thrd.proc_cxt.MyProcPid)));
 
     StartTransactionCommand();
@@ -355,10 +360,14 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc)
     BackgroundWorker *bgw = NULL;
     BackgroundWorkerArgs *bwa = NULL;
 
+    /* Construct bgworker thread args */
+    bwa = (BackgroundWorkerArgs*)MemoryContextAllocZero(
+        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(BackgroundWorkerArgs));
     pthread_mutex_lock(&g_instance.bgw_base_lock);
     bgw = GetFreeBgworker();
     if (bgw == NULL) {
         pthread_mutex_unlock(&g_instance.bgw_base_lock);
+        pfree_ext(bwa);
         ereport(WARNING, (errmsg("There are no more free background workers available")));
         return false;
     }
@@ -369,9 +378,6 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc)
     bgw->bgw_status_dur = 0;
     bgw->disable_count = 0;
 
-    /* Construct bgworker thread args */
-    bwa = (BackgroundWorkerArgs*)MemoryContextAllocZero(
-        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(BackgroundWorkerArgs));
     bwa->bgwcontext = bwc;
     bwa->bgworker = bgw;
     bwa->bgworkerId = bgw->bgw_id;
@@ -381,7 +387,13 @@ bool RegisterBackgroundWorker(BgWorkerContext *bwc)
     /* failed to fork a new thread */
     if (bgw->bgw_notify_pid == 0) {
         pfree_ext(bwa);
+        BgworkerPutBackToFreeList(bgw);
         return false;
+    }
+
+    if (g_threadPoolControler) {
+        // Try to bind thread to available CPUs in threadpool
+        g_threadPoolControler->BindThreadToAllAvailCpu(bgw->bgw_notify_pid);
     }
 
     /* Copy the registration data into the registered workers list. */
@@ -543,6 +555,10 @@ int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, 
     /* pass enable_cluster_resize to bgwokers to optimize parallel index building performance during redistribution */
     bwc->enable_cluster_resize = u_sess->attr.attr_sql.enable_cluster_resize;
     bwc->leader = t_thrd.proc;
+    bwc->parent_query_id = u_sess->debug_query_id;
+    bwc->parent_session_id = t_thrd.proc->sessMemorySessionid;
+    bwc->myTempNamespace = u_sess->catalog_cxt.myTempNamespace;
+    bwc->myTempToastNamespace = u_sess->catalog_cxt.myTempToastNamespace;
     bwc->main_entry = bgmain;
     bwc->exit_entry = bgexit;
 

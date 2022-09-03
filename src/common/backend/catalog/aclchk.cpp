@@ -5008,9 +5008,13 @@ static AclMode check_dml_privilege(Form_pg_class classForm, AclMode mask, Oid ro
     switch (classForm->relkind) {
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX:
+        case RELKIND_COMPOSITE_TYPE:
+            break;
         case RELKIND_SEQUENCE:
         case RELKIND_LARGE_SEQUENCE:
-        case RELKIND_COMPOSITE_TYPE:
+            if (HasSpecAnyPriv(roleid, SELECT_ANY_SEQUENCE, false)) {
+                result |= ACL_USAGE | ACL_SELECT | ACL_UPDATE;
+            }
             break;
         /* table */
         default:
@@ -5045,10 +5049,21 @@ static AclMode check_ddl_privilege(char relkind, AclMode mask, Oid roleid, AclMo
     mask = REMOVE_DDL_FLAG(mask);
     switch (relkind) {
         case RELKIND_COMPOSITE_TYPE:
-        case RELKIND_SEQUENCE:
-        case RELKIND_LARGE_SEQUENCE:
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX:
+            break;
+        case RELKIND_LARGE_SEQUENCE:
+        case RELKIND_SEQUENCE:
+            if ((mask & ACL_ALTER) && !(result & ACL_ALTER)) {
+                if (HasSpecAnyPriv(roleid, ALTER_ANY_SEQUENCE, false)) {
+                    result |= ACL_ALTER;
+                }
+            }
+            if ((mask & ACL_DROP) && !(result & ACL_DROP)) {
+                if (HasSpecAnyPriv(roleid, DROP_ANY_SEQUENCE, false)) {
+                    result |= ACL_DROP;
+                }
+            }
             break;
         /* table */
         default:
@@ -5313,8 +5328,8 @@ AclMode pg_directory_aclmask(Oid dir_oid, Oid roleid, AclMode mask, AclMaskHow h
      * when enable_access_server_directory is off, only initial user bypass all permission checking
      * otherwise, superuser can bypass all permission checking
      */
-    if ((!g_instance.attr.attr_storage.enable_access_server_directory && superuser_arg_no_seperation(roleid)) ||
-        (g_instance.attr.attr_storage.enable_access_server_directory &&
+    if ((!u_sess->attr.attr_storage.enable_access_server_directory && superuser_arg_no_seperation(roleid)) ||
+        (u_sess->attr.attr_storage.enable_access_server_directory &&
             (superuser_arg(roleid) || systemDBA_arg(roleid))))
         return REMOVE_DDL_FLAG(mask);
 
@@ -6218,6 +6233,24 @@ AclMode pg_type_aclmask(Oid type_oid, Oid roleid, AclMode mask, AclMaskHow how)
 
     /* if we have a detoasted copy, free it */
     FREE_DETOASTED_ACL(acl, aclDatum);
+
+    if ((how == ACLMASK_ANY && result != 0) || IsSysSchema(typeForm->typnamespace)) {
+        ReleaseSysCache(tuple);
+        return result;
+    }
+    bool is_ddl_privileges = ACLMODE_FOR_DDL(mask);
+    if (is_ddl_privileges) {
+        if ((REMOVE_DDL_FLAG(mask) & ACL_ALTER) && !(result & ACL_ALTER)) {
+            if (HasSpecAnyPriv(roleid, ALTER_ANY_TYPE, false)) {
+                result |= ACL_ALTER;
+            }
+        }
+        if ((REMOVE_DDL_FLAG(mask) & ACL_DROP) && !(result & ACL_DROP)) {
+            if (HasSpecAnyPriv(roleid, DROP_ANY_TYPE, false)) {
+                result |= ACL_DROP;
+            }
+        }
+    }
 
     ReleaseSysCache(tuple);
 

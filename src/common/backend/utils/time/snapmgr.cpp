@@ -89,7 +89,18 @@ typedef struct ExportedSnapshot {
     char *snapfile;
     Snapshot snapshot;
 } ExportedSnapshot;
-
+#define XactExportFilePath(path, xid, num, suffix) \
+    {                                              \
+        int rc = snprintf_s(path,                  \
+            sizeof(path),                          \
+            sizeof(path) - 1,                      \
+            SNAPSHOT_EXPORT_DIR "/%08X%08X-%d%s",  \
+            (uint32)((xid) >> 32),                 \
+            (uint32)(xid),                         \
+            (num),                                 \
+            (suffix));                             \
+        securec_check_ss(rc, "", "");              \
+    }
 #define MAX_ULONG_LENGTH 22
 
 /* Static variables representing various special snapshot semantics */
@@ -1235,7 +1246,7 @@ char* ExportSnapshot(Snapshot snapshot, CommitSeqNo *snapshotCsn)
      * Generate file path for the snapshot.  We start numbering of snapshots
      * inside the transaction from 1.
      */
-    rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, SNAPSHOT_EXPORT_DIR "/%08X-%08X-%d",
+    rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/%08X-%08X-%d", SNAPSHOT_EXPORT_DIR,
         t_thrd.proc->backendId, t_thrd.proc->lxid, list_length(u_sess->utils_cxt.exportedSnapshots) + 1);
     securec_check_ss(rc, "", "");
 

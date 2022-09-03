@@ -50,6 +50,8 @@
 #include "access/ustore/knl_undoworker.h"
 #include "access/ustore/knl_undorequest.h"
 
+#define InvalidPid ((ThreadId)(-1))
+
 static void UndoworkerSighupHandler(SIGNAL_ARGS);
 static void UndoworkerSigusr2Handler(SIGNAL_ARGS);
 static void UndoworkerSigtermHandler(SIGNAL_ARGS);
@@ -95,14 +97,43 @@ static void UndoworkerSigtermHandler(SIGNAL_ARGS)
 
 static void UndoWorkerFreeInfo(int code, Datum arg)
 {
+    int idx = -1;
+    bool found = false;
+    ThreadId pid = gs_thread_self();
+    RollbackRequestsHashKey key;
+    RollbackRequestsHashEntry *entry = NULL;
+
+    int actualUndoWorkers = Min(g_instance.attr.attr_storage.max_undo_workers, MAX_UNDO_WORKERS);
+
+    for (int i = 0; i < actualUndoWorkers; i++) {
+        if (t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].pid == pid) {
+            idx = i;
+            key.xid = t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid;
+            key.startUndoPtr = t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].startUndoPtr;
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].pid = InvalidPid;
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid = InvalidTransactionId;
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].startUndoPtr = INVALID_UNDO_REC_PTR;
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].rollbackStartTime = (TimestampTz)0;
+            break;
+        }
+    }
+    
+    if (idx >= 0 && idx < actualUndoWorkers) {
+        LWLockAcquire(RollbackReqHashLock, LW_EXCLUSIVE);
+        entry = (RollbackRequestsHashEntry *)hash_search(t_thrd.rollback_requests_cxt.rollback_requests_hash, &key,
+            HASH_FIND, &found);
+        if (found) {
+            entry->launched = false;
+        }
+        LWLockRelease(RollbackReqHashLock);
+    }
+
     pg_atomic_sub_fetch_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->active_undo_workers, 1);
     return;
 }
 
 static void UndoWorkerGetWork(UndoWorkInfo undowork)
 {
-    Assert(pg_atomic_read_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->request_is_launched) == 0);
-
     errno_t rc = memcpy_s(undowork, sizeof(UndoWorkInfoData), t_thrd.undolauncher_cxt.UndoWorkerShmem->rollback_request,
         sizeof(UndoWorkInfoData));
     securec_check(rc, "\0", "\0");
@@ -154,7 +185,7 @@ static void UndoPerformWork(UndoWorkInfo undowork)
 
     if (!error) {
         CommitTransactionCommand();
-        RemoveRollbackRequest(undowork->xid, undowork->startUndoPtr);
+        RemoveRollbackRequest(undowork->xid, undowork->startUndoPtr, gs_thread_self());
     }
 }
 
@@ -166,6 +197,8 @@ bool IsUndoWorkerProcess(void)
 NON_EXEC_STATIC void UndoWorkerMain()
 {
     UndoWorkInfoData undowork;
+    bool databaseExists = false;
+    int actualUndoWorkers = Min(g_instance.attr.attr_storage.max_undo_workers, MAX_UNDO_WORKERS);
 
     sigjmp_buf localSigjmpBuf;
 
@@ -203,7 +236,7 @@ NON_EXEC_STATIC void UndoWorkerMain()
     gspqsignal(SIGUSR2, UndoworkerSigusr2Handler);
     gspqsignal(SIGFPE, FloatExceptionHandler);
     gspqsignal(SIGCHLD, SIG_DFL);
-
+    gspqsignal(SIGURG, print_stack);
     /* Early initialization */
     BaseInit();
 
@@ -257,23 +290,42 @@ NON_EXEC_STATIC void UndoWorkerMain()
         pg_usleep(1000000L);
     }
 
+    /* Let the UndoLauncher know we have picked up the job and that we're active. */
+    pg_atomic_add_fetch_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->active_undo_workers, 1);
+
     on_shmem_exit(UndoWorkerFreeInfo, 0);
 
     /* Get the work from the shared memory */
     UndoWorkerGetWork(&undowork);
+    
+    for (int i = 0; i < actualUndoWorkers; i++) {
+        if (TransactionIdEquals(t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid, undowork.xid)) {
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].pid = gs_thread_self();
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].rollbackStartTime = GetCurrentTimestamp();
+            break;
+        }
+    }
 
     Assert(undowork.dbid != InvalidOid);
+
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(NULL, undowork.dbid, NULL);
-    t_thrd.proc_cxt.PostInit->InitUndoWorker();
+    databaseExists = t_thrd.proc_cxt.PostInit->InitUndoWorker();
 
     SetProcessingMode(NormalProcessing);
 
-    /* Let the UndoLauncher know we have picked up the job and that we're active. */
-    pg_atomic_add_fetch_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->request_is_launched, 1);
-    pg_atomic_add_fetch_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->active_undo_workers, 1);
-
-    /* Perform the actual rollback */
-    UndoPerformWork(&undowork);
+    if (databaseExists) {
+        /* Perform the actual rollback */
+        UndoPerformWork(&undowork);
+    } else {
+        undo::UpdateRollbackFinish(undowork.slotPtr);
+        ereport(WARNING, (errmodule(MOD_UNDO),
+            errmsg(
+                "db dose not exists but we need rollback txn on it, "
+                "xid %lu, fromAddr %lu, toAddr %lu, dbid %u, slotptr %lu.",
+                undowork.xid, undowork.startUndoPtr, undowork.endUndoPtr, undowork.dbid,
+                undowork.slotPtr)));
+        RemoveRollbackRequest(undowork.xid, undowork.startUndoPtr, gs_thread_self());
+    }
 
 shutdown:
     ereport(LOG, (errmsg("UndoWorker: shutting down")));

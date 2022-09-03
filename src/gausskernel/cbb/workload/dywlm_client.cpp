@@ -1454,7 +1454,7 @@ void dywlm_client_max_reserve(void)
     list_lock.Lock();
 
     if (u_sess->wlm_cxt->reserved_in_active_statements > 0) {
-        ereport(LOG,
+        ereport(DEBUG2,
             (errmsg("When new query is arriving, thread is reserved %d statement and "
                     "the reserved debug query is %s.",
                 u_sess->wlm_cxt->reserved_in_active_statements,
@@ -1469,7 +1469,7 @@ void dywlm_client_max_reserve(void)
 
     /* Check if the central waiting count is changed */
     if (reserved_in_central_waiting > 0) {
-        ereport(LOG,
+        ereport(DEBUG2,
             (errmsg("When new query is waiting in central, thread is reserved %d statement and "
                     "the reserved debug query is %s.",
                 reserved_in_central_waiting,

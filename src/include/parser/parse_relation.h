@@ -56,9 +56,8 @@ extern int attnameAttNum(Relation rd, const char* attname, bool sysColOK);
 extern Name attnumAttName(Relation rd, int attid);
 extern Oid attnumTypeId(Relation rd, int attid);
 extern Oid attnumCollationId(Relation rd, int attid);
-extern Oid getPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
-extern Oid getSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel,
-                                    Oid *partOid);
+extern bool GetPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
+extern bool GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
 
 #ifdef PGXC
 extern int specialAttNum(const char* attname);

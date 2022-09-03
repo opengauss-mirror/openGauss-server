@@ -54,9 +54,9 @@ SELECT id, raintomorrow, round(PREDICT BY m3 (FEATURES raintoday), 1) as pred FR
 DROP MODEL m3;
 
 
-CREATE MODEL m4 USING xgboost_regression_gamma FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
-WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
-SELECT id, raintomorrow, round(PREDICT BY m4 (FEATURES raintoday), 1) as pred FROM db4ai_rain;
+CREATE MODEL m4 USING xgboost_regression_gamma FEATURES raintoday TARGET raintomorrow + 1 FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', nthread=4, seed=3141;
+SELECT id, raintomorrow + 1 as raintomorrow, round(PREDICT BY m4 (FEATURES raintoday), 1) as pred FROM db4ai_rain;
 
 DROP MODEL m4;
 
@@ -82,9 +82,9 @@ SELECT id, raintomorrow, round(PREDICT BY m3 (FEATURES raintoday), 1) as pred FR
 DROP MODEL m3;
 
 
-CREATE MODEL m4 USING xgboost_regression_gamma FEATURES raintoday TARGET raintomorrow FROM db4ai_rain
-WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', eval_metric='auc', nthread=4, seed=3141;
-SELECT id, raintomorrow, round(PREDICT BY m4 (FEATURES raintoday), 1) as pred FROM db4ai_rain where id < 0;
+CREATE MODEL m4 USING xgboost_regression_gamma FEATURES raintoday TARGET raintomorrow +1 FROM db4ai_rain
+WITH n_iter=10, batch_size=1000000, booster='gbtree', tree_method='exact', nthread=4, seed=3141;
+SELECT id, raintomorrow + 1 as raintomorrow, round(PREDICT BY m4 (FEATURES raintoday), 1) as pred FROM db4ai_rain where id < 0;
 
 DROP MODEL m4;
 

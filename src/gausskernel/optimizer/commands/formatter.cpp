@@ -96,6 +96,7 @@ int ReadAttributesFixedWith(CopyState cstate)
 
     char* curPtr = NULL;
     char* outptr = NULL;
+    char *fieldPtr = NULL;
     FixFormatter* formatter = (FixFormatter*)(cstate->formatter);
     IllegalCharErrInfo* err_info = NULL;
     ListCell* cur = NULL;
@@ -128,6 +129,20 @@ int ReadAttributesFixedWith(CopyState cstate)
     outptr = cstate->attribute_buf.data;
 
     ReadAttributeSequence(cstate);
+
+    
+    /*
+     * In Fixed format each field needs to be transcoded. Here, you need to apply for a
+     * double space to store the transcoded data.Because each field stores
+     * an extra '\0', you need to add the number of fields.
+     */
+    if (cstate->need_transcoding) {
+        resetStringInfo(&cstate->fieldBuf);
+        if (cstate->fieldBuf.maxlen <= cstate->line_buf.len * 2 + cstate->max_fields) {
+            enlargeStringInfo(&cstate->fieldBuf, cstate->line_buf.len * 2 + cstate->max_fields);
+        }
+        fieldPtr = cstate->fieldBuf.data;
+    }
 
     for (int i = 0; i < formatter->nfield; i++) {
         FieldDesc* desc = &(formatter->fieldDesc[i]);
@@ -169,6 +184,27 @@ int ReadAttributesFixedWith(CopyState cstate)
                         }
                     }
                 }
+            }
+        }
+
+        
+        /* Done reading the field.  Convert it to server encoding. */
+        if (cstate->need_transcoding && cstate->raw_fields[attnum - 1] != NULL) {
+            char *cvt = pg_any_to_server(cstate->raw_fields[attnum - 1],
+                                         inputSize,
+                                         cstate->file_encoding);
+            if (cvt != cstate->raw_fields[attnum - 1]) {
+
+                /* transfer converted data back to raw_field */
+                appendBinaryStringInfo(&cstate->fieldBuf, cvt, strlen(cvt));
+                cstate->raw_fields[attnum - 1] = fieldPtr;
+                /* skip the length of new field. */
+                fieldPtr += strlen(cvt);
+                /* skip '\0'. */
+                fieldPtr++;
+                /* the '\0' at the end of each field causes. */
+                cstate->fieldBuf.len++;
+                pfree_ext(cvt);
             }
         }
 

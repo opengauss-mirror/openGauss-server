@@ -520,7 +520,7 @@ static bool gen_cipher_file(KeyMode mode, /* SERVER_MODE or CLIENT_MODE or OBS_M
 
     char cipherkeyfile[MAXPGPATH] = {0x00};
     GS_UCHAR encrypt_rand[RANDOM_LEN] = {0};
-    GS_UCHAR ciphertext[CIPHER_LEN] = {0};
+    GS_UCHAR ciphertext[CIPHER_LEN+1] = {0};
     GS_UCHAR* key_salt = NULL;
 
     GS_UINT32 cipherlen = 0;

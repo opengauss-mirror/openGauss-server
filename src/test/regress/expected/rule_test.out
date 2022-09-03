@@ -310,11 +310,14 @@ drop table if exists test6;
 --
 create table ttt1 (a int4, b text);
 create table ttt2 (a int4, b text);
+-- 'on select' will transform table to view
 create rule "_RETURN" as on select to ttt1 do instead (
 	select * from ttt2;
 	);
 -- test
-insert into ttt1 values (1, 'hello');
+insert into ttt1 values (1, 'hello'); --error
+ERROR:  cannot insert into view "ttt1"
+HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
 insert into ttt2 values (10, 'world');
 select * from ttt1;
  a  |   b   
@@ -322,7 +325,10 @@ select * from ttt1;
  10 | world
 (1 row)
 
-drop table if exists ttt1;
+drop table if exists ttt1; --error
+ERROR:  "ttt1" is not a table
+HINT:  Use DROP VIEW to remove a view.
+drop view if exists ttt1;
 drop table if exists ttt2;
 -- 
 -- Tables and rules for question
@@ -347,6 +353,40 @@ select * from test_statement;
 drop rule if exists r1 on escapetest;
 drop table if exists test_statement;
 drop table if exists escapetest;
+--
+-- check for rules on view and table
+--
+drop view if exists rules_fooview;
+NOTICE:  view "rules_fooview" does not exist, skipping
+create view rules_fooview as select 'rules_foo'::text;
+drop rule "_RETURN" on rules_fooview;
+ERROR:  cannot drop rule _RETURN on view rules_fooview because view rules_fooview requires it
+HINT:  You can drop view rules_fooview instead.
+drop view rules_fooview;
+drop table if exists rules_fooview;
+NOTICE:  table "rules_fooview" does not exist, skipping
+create table rules_fooview (x int, y text);
+select xmin, * from rules_fooview;
+ xmin | x | y 
+------+---+---
+(0 rows)
+
+create rule "_RETURN" as on select to rules_fooview do instead select 1 as x, 'aaa'::text as y;
+select * from rules_fooview;
+ x |  y  
+---+-----
+ 1 | aaa
+(1 row)
+
+select xmin, * from rules_fooview;
+ERROR:  column "xmin" does not exist
+LINE 1: select xmin, * from rules_fooview;
+               ^
+CONTEXT:  referenced column: xmin
+drop table rules_fooview;
+ERROR:  "rules_fooview" is not a table
+HINT:  Use DROP VIEW to remove a view.
+drop view rules_fooview;
 -- unsupported rule
 create table t1 (id int, name varchar(10));
 create view v1 as select * from t1;

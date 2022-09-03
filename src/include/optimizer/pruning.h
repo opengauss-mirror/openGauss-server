@@ -52,6 +52,7 @@ typedef struct PruningContext {
     /* used for slice pruning */
     Index varno;
     ParamListInfo boundParams;
+    PartitionMap *partmap;
 } PruningContext;
 
 typedef enum PartKeyColumnRangeMode {
@@ -82,23 +83,23 @@ extern IndexesUsableType eliminate_partition_index_unusable(Oid IndexOid, Prunin
 
 void destroyPruningResult(PruningResult* pruningResult);
 void partitionPruningFromBoundary(PruningContext *context, PruningResult* pruningResult);
+List* restrictInfoListToExprList(List* restrictInfoList);
 void generateListFromPruningBM(PruningResult* result);
 PruningResult* partitionPruningWalker(Expr* expr, PruningContext* pruningCtx);
 PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Relation rel, Expr* expr);
 PruningResult* partitionPruningForRestrictInfo(
-    PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList);
-PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation rel);
-PruningResult* SingleSubPartitionPruningForRestrictInfo(Oid subPartitionOid, Relation rel, Oid partOid);
+    PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList, PartitionMap *partmap);
+PruningResult* PartitionPruningForPartitionList(RangeTblEntry* rte, Relation rel);
 extern PruningResult* copyPruningResult(PruningResult* srcPruningResult);
-extern Oid getPartitionOidFromSequence(Relation relation, int partSeq);
+extern Oid getPartitionOidFromSequence(Relation relation, int partSeq, PartitionMap *oldmap = NULL);
 extern int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum);
 extern bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* pruning_result);
 
 extern PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation current_relation);
 static inline PartitionMap* GetPartitionMap(PruningContext *context)
 {
-    return context->GetPartitionMap(context->relation);
+    return PointerIsValid(context->partmap) ? context->partmap : context->GetPartitionMap(context->relation);
 }
 extern SubPartitionPruningResult* GetSubPartitionPruningResult(List* selectedSubPartitions, int partSeq);
-
+void MergePartitionListsForPruning(RangeTblEntry* rte, Relation rel, PruningResult* pruningRes);
 #endif /* PRUNING_H_ */

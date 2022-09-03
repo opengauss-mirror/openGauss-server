@@ -26,16 +26,13 @@ select * from interval_tab1 where logdate < '2020-4-7 0:0:0' order by 1,2,3,4;
 (0 rows)
 
 explain (costs off, verbose on) select * from interval_tab1 where logdate < '2020-4-7 0:0:0';
-                                            QUERY PLAN                                             
----------------------------------------------------------------------------------------------------
- Partition Iterator
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Partitioned Seq Scan on public.interval_tab1
    Output: city_id, logdate, peaktemp, unitsales
-   Iterations: 1
-   ->  Partitioned Seq Scan on public.interval_tab1
-         Output: city_id, logdate, peaktemp, unitsales
-         Filter: (interval_tab1.logdate < 'Tue Apr 07 00:00:00 2020'::timestamp without time zone)
-         Selected Partitions:  1
-(7 rows)
+   Filter: (interval_tab1.logdate < 'Tue Apr 07 00:00:00 2020'::timestamp without time zone)
+   Selected Partitions:  1
+(4 rows)
 
 select * from interval_tab1 where logdate > '2020-4-6' order by 1,2,3,4;
  city_id |         logdate          | peaktemp | unitsales 

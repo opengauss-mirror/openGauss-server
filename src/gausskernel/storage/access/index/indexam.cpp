@@ -201,12 +201,14 @@ void index_close(Relation relation, LOCKMODE lockmode)
         UnlockRelationId(&relid, lockmode);
 }
 
-bool UBTreeDelete(Relation indexRelation, Datum* values, const bool* isnull, ItemPointer heapTCtid);
+bool UBTreeDelete(Relation indexRelation, Datum* values, const bool* isnull, ItemPointer heapTCtid,
+    bool isRollbackIndex);
 
-void index_delete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heap_t_ctid)
+void index_delete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heap_t_ctid,
+    bool isRollbackIndex)
 {
     /* Assert(Ustore) Assert(B tree) */
-    UBTreeDelete(index_relation, values, isnull, heap_t_ctid);
+    UBTreeDelete(index_relation, values, isnull, heap_t_ctid, isRollbackIndex);
 }
 
 
@@ -491,12 +493,12 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 }
 
 bool 
-IndexFetchSlot(IndexScanDesc scan, TupleTableSlot *slot, bool isUHeap)
+IndexFetchSlot(IndexScanDesc scan, TupleTableSlot *slot, bool isUHeap, bool* has_cur_xact_write)
 {
     if (isUHeap) {
         return IndexFetchUHeap(scan, slot);
     } else {
-        HeapTuple tuple = (HeapTuple)IndexFetchTuple(scan);
+        HeapTuple tuple = (HeapTuple)IndexFetchTuple(scan, has_cur_xact_write);
         return tuple != NULL;
     }
 }
@@ -519,13 +521,13 @@ IndexFetchSlot(IndexScanDesc scan, TupleTableSlot *slot, bool isUHeap)
  * enough information to do it efficiently in the general case.
  * ----------------
  */
-Tuple IndexFetchTuple(IndexScanDesc scan)
+Tuple IndexFetchTuple(IndexScanDesc scan, bool* has_cur_xact_write)
 {
     bool all_dead = false;
     Tuple fetchedTuple = NULL;
 
 
-    fetchedTuple = tableam_scan_index_fetch_tuple(scan, &all_dead);
+    fetchedTuple = tableam_scan_index_fetch_tuple(scan, &all_dead, has_cur_xact_write);
 
     if (fetchedTuple) {
         pgstat_count_heap_fetch(scan->indexRelation);
@@ -544,7 +546,7 @@ Tuple IndexFetchTuple(IndexScanDesc scan)
     return NULL;
 }
 
-UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead)
+UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write)
 {
     Relation rel = scan->heapRelation;
     Buffer xsCbuf = scan->xs_cbuf;
@@ -552,6 +554,15 @@ UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead)
 
     /* Switch to correct buffer if we don't have it already */
     scan->xs_cbuf = ReleaseAndReadBuffer(xsCbuf, rel, ItemPointerGetBlockNumber(tid));
+
+    /*
+     * In single mode and hot standby, we may get a null buffer if index
+     * replayed before the tid replayed. This is acceptable, so we return
+     * null without reporting error.
+     */
+    if (RecoveryInProgress() && !BufferIsValid(scan->xs_cbuf)) {
+        return NULL;
+    }
 
     LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
 
@@ -563,9 +574,9 @@ UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead)
      */
     if (scan->isUpsert && uheapTuple) {
         if (UHeapTupleHasMultiLockers((uheapTuple)->disk_tuple->flag)) {
-            uheapTuple->t_xid_base = UHeapTupleGetTransXid(uheapTuple, scan->xs_cbuf, false);
+            uheapTuple->t_xid_base = UHeapTupleGetTransXid(uheapTuple, scan->xs_cbuf, false, has_cur_xact_write);
         } else {
-            uheapTuple->t_multi_base = UHeapTupleGetTransXid(uheapTuple, scan->xs_cbuf, false);
+            uheapTuple->t_multi_base = UHeapTupleGetTransXid(uheapTuple, scan->xs_cbuf, false, has_cur_xact_write);
         }
     }
 
@@ -576,7 +587,7 @@ UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead)
 }
 
 bool UHeapamIndexFetchTupleInSlot(IndexScanDesc scan, ItemPointer tid, Snapshot snapshot,
-TupleTableSlot *slot, bool *callAgain, bool *allDead)
+TupleTableSlot *slot, bool *callAgain, bool *allDead, bool* has_cur_xact_write)
 {
     Relation rel = scan->heapRelation;
     Buffer xsCbuf = scan->xs_cbuf;
@@ -598,8 +609,18 @@ TupleTableSlot *slot, bool *callAgain, bool *allDead)
     /* Switch to correct buffer if we don't have it already */
     scan->xs_cbuf = ReleaseAndReadBuffer(xsCbuf, rel, ItemPointerGetBlockNumber(tid));
 
+    /*
+     * In single mode and hot standby, we may get a invalid buffer if index
+     * replayed before the tid replayed. This is acceptable, so we return
+     * null without reporting error.
+     */
+    if (RecoveryInProgress() && !BufferIsValid(scan->xs_cbuf)) {
+        return false;
+    }
+
     LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
-    UHeapTuple visibleTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, snapshot, allDead, dataPageTuple);
+    UHeapTuple visibleTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, snapshot, allDead, dataPageTuple,
+                                                has_cur_xact_write);
 
     LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
 
@@ -630,12 +651,12 @@ TupleTableSlot *slot, bool *callAgain, bool *allDead)
  * enough information to do it efficiently in the general case.
  * ----------------
  */
-bool IndexFetchUHeap(IndexScanDesc scan, TupleTableSlot *slot)
+bool IndexFetchUHeap(IndexScanDesc scan, TupleTableSlot *slot, bool* has_cur_xact_write)
 {
     ItemPointer tid = &scan->xs_ctup.t_self;
     bool allDead = false;
     bool found = UHeapamIndexFetchTupleInSlot(scan, tid, scan->xs_snapshot, 
-                                              slot, &scan->xs_continue_hot, &allDead);
+                                              slot, &scan->xs_continue_hot, &allDead, has_cur_xact_write);
 
     if (found) {
         pgstat_count_heap_fetch(scan->indexRelation);
@@ -670,7 +691,7 @@ bool IndexFetchUHeap(IndexScanDesc scan, TupleTableSlot *slot)
  * scan keys if required.  We do not do that here because we don't have
  * enough information to do it efficiently in the general case.
  */
-Tuple index_getnext(IndexScanDesc scan, ScanDirection direction)
+Tuple index_getnext(IndexScanDesc scan, ScanDirection direction, bool* has_cur_xact_write)
 {
     Tuple tuple;
     ItemPointer tid;
@@ -711,7 +732,7 @@ Tuple index_getnext(IndexScanDesc scan, ScanDirection direction)
          * If we don't find anything, loop around and grab the next TID from
          * the index.
          */
-        tuple = IndexFetchTuple(scan);
+        tuple = IndexFetchTuple(scan, has_cur_xact_write);
         if (tuple != NULL) {
             return tuple;
         }
@@ -741,7 +762,7 @@ bool UHeapSysIndexGetnextSlot(SysScanDesc scan, ScanDirection direction, TupleTa
 
  * ----------------
  */
-bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *slot)
+bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *slot, bool* has_cur_xact_write)
 {
     ItemPointer tid;
     TupleTableSlot* tmpslot = NULL;
@@ -786,10 +807,10 @@ bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlo
          * the index.
          */
 
-        if (IndexFetchUHeap(scan, slot)) {
+        if (IndexFetchUHeap(scan, slot, has_cur_xact_write)) {
             /* recheck IndexTuple when necessary */
             if (scan->xs_recheck_itup) {
-                if (!IndexFetchUHeap(scan, tmpslot))
+                if (!IndexFetchUHeap(scan, tmpslot, has_cur_xact_write))
                     ereport(PANIC, (errmsg("Failed to refetch UHeapTuple. This shouldn't happen.")));
                 if (!RecheckIndexTuple(scan, tmpslot))
                     continue;

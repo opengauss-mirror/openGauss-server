@@ -115,6 +115,7 @@ enum ModuleId {
     MOD_WALRECEIVER,  /* walreceiver */
     MOD_USTORE,     /* ustore */
     MOD_UNDO,       /* undo */
+    MOD_TIMECAPSULE, /* timecapsule */
     MOD_GEN_COL,   /* generated column */
     MOD_DCF,        /* DCF paxos */
     MOD_DB4AI,      /* DB4AI & AUTOML */
@@ -135,8 +136,13 @@ enum ModuleId {
     MOD_SPI,
     MOD_NEST_COMPILE,
     MOD_RESOWNER,
+    MOD_GSSTACK,
     MOD_LOGICAL_DECODE,    /* logical decode */
     MOD_GPRC, /* global package runtime cache */
+    MOD_DISASTER_READ,
+
+    MODE_REPSYNC, /* debug info for func SyncRepWaitForLSN */
+    MOD_SQLPATCH,
 
     /*
      * Add your module id above.

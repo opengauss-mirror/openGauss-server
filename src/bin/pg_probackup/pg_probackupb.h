@@ -32,9 +32,9 @@ typedef struct pgFile_t
     char   *rel_path;        /* relative path of the file */
     char   *linked;            /* path of the linked file */
     bool    is_datafile;    /* true if the file is PostgreSQL data file */
-    bool compressedFile;    /* true if the file is the openGauss compressed file */
-    uint16 compressedChunkSize;       /* chunk size of compressed file */
-    uint8 compressedAlgorithm;         /* algorithm of comrpessed file */
+    bool compressed_file;    /* true if the file is the openGauss compressed file */
+    uint16 compressed_chunk_size;       /* chunk size of compressed file */
+    uint8 compressed_algorithm;         /* algorithm of comrpessed file */
     Oid        tblspcOid;        /* tblspcOid extracted from path, if applicable */
     Oid        dbOid;            /* dbOid extracted from path, if applicable */
     Oid        relOid;            /* relOid extracted from path, if applicable */

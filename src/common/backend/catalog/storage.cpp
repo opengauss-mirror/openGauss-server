@@ -23,7 +23,6 @@
 #include "knl/knl_variable.h"
 
 #include "access/cstore_am.h"
-#include "access/dfs/dfs_insert.h"
 #include "access/visibilitymap.h"
 #include "access/xact.h"
 #include "access/xlog.h"
@@ -32,7 +31,6 @@
 #include "access/xlogproc.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/storage.h"
 #include "catalog/storage_gtt.h"
@@ -96,14 +94,6 @@ typedef struct PendingRelDelete {
 
 #define ColMainFileNodesDefNum 16
 
-typedef struct PendingDfsDelete {
-    StringInfo filename;
-    Oid ownerid;       /* owner id for user space statistics */
-    uint64 filesize;   /* file size of dfs file */
-    TransactionId xid; /* the transaction id */
-    bool atCommit;     /* T=delete at commit; F=delete at abort */
-} PendingDfsDelete;
-
 THR_LOCAL StringInfo vf_store_root = NULL;
 
 typedef struct MapperFileOptions {
@@ -114,12 +104,6 @@ typedef struct MapperFileOptions {
 } MapperFileOptions;
 
 extern int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber forknum);
-
-void DropDfsDirectory(ColFileNode* colFileNode, bool cfgFromMapper);
-void DropMapperFile(RelFileNode fNode);
-static int GetConnConfig(RelFileNode fNode, MapperFileOptions* options);
-static int SetConnConfig(RelFileNode fNode, DfsSrvOptions* srvOptions, StringInfo storePath, int64 timestamp);
-
 extern bool find_tmptable_cache_key(Oid relNode);
 extern void make_tmptable_cache_key(Oid relNode);
 
@@ -173,27 +157,10 @@ void InsertStorageIntoPendingList(_in_ const RelFileNode* rnode, _in_ AttrNumber
         SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(PendingRelDelete));
     pending->relnode = *rnode;
 
-    if (AttrNumberIsForUserDefinedAttr(attrnum))
+    if (AttrNumberIsForUserDefinedAttr(attrnum)) {
         pending->forknum = ColumnId2ColForkNum(attrnum);
-    else {
+    } else {
         pending->forknum = MAIN_FORKNUM;
-
-        /*
-         * For dfs table, we use special forknum to differentiate different operation
-         * If it's PAX_DFS_FORKNUM, means we will drop/create dfs table directory and mapper files
-         * on CN (remove file list for DN). It's used when drop/create dfs table.
-         * If it's PAX_DFS_TRUNCATE_FORKNUM, we will truncate the dfs table, it will read from
-         * the mapper file and mapper filelist to remove the corresponding files,
-         * under the dfs table directory
-         */
-        if (IsDfsStor(attrnum)) {
-            if (!isDfsTruncate) {
-                pending->forknum = PAX_DFS_FORKNUM;
-            } else {
-                if (!IS_PGXC_COORDINATOR)
-                    pending->forknum = PAX_DFS_TRUNCATE_FORKNUM;
-            }
-        }
     }
     pending->backend = backend;
     pending->relOid = InvalidOid;
@@ -221,7 +188,21 @@ void RelationCreateStorageInternal(RelFileNode rnode, char relpersistence, Oid o
     SMgrRelation srel;
     BackendId backend;
     bool needs_wal = false;
+    bool found = false;
+    HTAB *unlink_rel_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+   
+    /*
+     * Look up unlink_rel_hashtbl with target rnode, and if this key already exists in the hash table,
+     * we must invalidate by oursevles
+     */
+    LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_SHARED);
+    (void)hash_search(unlink_rel_hashtbl, (void *)&rnode, HASH_FIND, &found);
+    LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
     
+    if (found) {
+        drop_rel_all_forks_buffers();
+    }
+
     StorageSetBackendAndLogged(relpersistence, &backend, &needs_wal);
 
     srel = smgropen(rnode, backend);
@@ -302,7 +283,7 @@ void BucketCreateStorage(RelFileNode rnode, Oid bucketOid, Oid ownerid)
     ereport(LOG, (errmodule(MOD_SEGMENT_PAGE), errmsg("Bucket Create Storage, bucket dim: %d", bucketlist->dim1)));
     /* create file storage for each bucket relation */
     for (int i = 0; i < bucketlist->dim1; i++) {
-        newrnode.node.bucketNode = bucketlist->values[i];
+        newrnode.node.bucketNode = (int16)bucketlist->values[i];
         RelationCreateStorageInternal(newrnode.node, RELPERSISTENCE_PERMANENT, ownerid);
         smgrclosenode(newrnode);
     }
@@ -341,7 +322,7 @@ void log_smgrcreate(RelFileNode* rnode, ForkNumber forkNum)
     RelFileNodeRelCopy(xlrec.xlrec.rnode, *rnode);
 
     XLogBeginInsert();
-    XLogRegisterData((char*)&xlrec, size);
+    XLogRegisterData((char*)&xlrec, (int)size);
     XLogInsert(RM_SMGR_ID, info, rnode->bucketNode);
 }
 
@@ -527,21 +508,6 @@ void RelationDropStorage(Relation rel, bool isDfsTruncate)
     }
 #endif   /* ENABLE_MULTIPLE_NODES */
 
-    if (RelationIsPAXFormat(rel)) {
-        /*
-         * For dfs table, if it's drop table statement, we will drop the dfs storage
-         * on main CN.
-         * If it's truncate table statement, we will drop the dfs storage on DN.
-         */
-        if (isDfsTruncate) {
-            if (!IS_PGXC_COORDINATOR)
-                DropDfsStorage(rel, true);
-        } else {
-            /* drop dfs table */
-            DropDfsStorage(rel, false);
-        }
-    }
-
     /* Add the relation to the list of stuff to delete at commit */
     InsertStorageIntoPendingList(
         &rel->rd_node, InvalidAttrNumber, rel->rd_backend, rel->rd_rel->relowner, true, isDfsTruncate, rel);
@@ -651,9 +617,9 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
     bool bcm = false;
 
     /* decrease the permanent space on users' record */
-    uint64 size = GetSMgrRelSize(&(rel->rd_node), rel->rd_backend, InvalidForkNumber);
-    size -= nblocks * BLCKSZ; /* Ignore FSM VM BCM reserved space */
-    perm_space_decrease(rel->rd_rel->relowner, size, RelationUsesSpaceType(rel->rd_rel->relpersistence));
+    uint64 relSize = GetSMgrRelSize(&(rel->rd_node), rel->rd_backend, InvalidForkNumber);
+    relSize -= nblocks * BLCKSZ; /* Ignore FSM VM BCM reserved space */
+    perm_space_decrease(rel->rd_rel->relowner, relSize, RelationUsesSpaceType(rel->rd_rel->relpersistence));
 
     /* Open it at the smgr level if not already done */
     RelationOpenSmgr(rel);
@@ -721,7 +687,8 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
         RelFileNodeRelCopy(xlrec.xlrec.rnode, rel->rd_node);
 
         XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, size);
+        XLogRegisterData((char*)&xlrec, (int)size);
+
         lsn = XLogInsert(RM_SMGR_ID, info, rel->rd_node.bucketNode);
 
         /*
@@ -1028,10 +995,6 @@ void smgrDoPendingDeletes(bool isCommit)
                 u_sess->catalog_cxt.pendingDeletes = next;
             /* do deletion if called for */
             if (pending->atCommit == isCommit) {
-                if (IS_COMPRESS_DELETE_FORK(pending->forknum)) {
-                    SET_OPT_BY_NEGATIVE_FORK(pending->relnode, pending->forknum);
-                    pending->forknum = MAIN_FORKNUM;
-                }
                 if (!IsValidColForkNum(pending->forknum)) {
                     RowRelationDoDeleteFiles(
                         pending->relnode, pending->backend, pending->ownerid, pending->relOid, isCommit);
@@ -1047,27 +1010,13 @@ void smgrDoPendingDeletes(bool isCommit)
                 } else {
                     ColumnRelationDoDeleteFiles(
                         &pending->relnode, pending->forknum, pending->backend, pending->ownerid);
-#ifdef ENABLE_MULTIPLE_NODES                        
+#ifdef ENABLE_MULTIPLE_NODES
                     uint16 partid = ColForkNum2ColumnId(pending->forknum);
                     if (g_instance.attr.attr_common.enable_tsdb && partid >= TsConf::FIRST_PARTID && partid % 2 == 0) {
                         PartIdMgr::GetInstance().free_part_id(&pending->relnode, partid);
                     }
-#endif   /* ENABLE_MULTIPLE_NODES */                    
+#endif   /* ENABLE_MULTIPLE_NODES */
                 }
-            } else {
-                /* roll back */
-                if (IsTruncateDfsForkNum(pending->forknum)) {
-                    if (!IS_PGXC_COORDINATOR) {
-                        /* clear mapper if truncate roll back */
-                        DropMapperFile(pending->relnode);
-                        DropDfsFilelist(pending->relnode);
-                    }
-                }
-            }
-
-            if (IsValidPaxDfsForkNum(pending->forknum)) {
-                /* clear mapper file */
-                DropMapperFile(pending->relnode);
             }
 
             /* must explicitly free the list entry */
@@ -1081,9 +1030,6 @@ void smgrDoPendingDeletes(bool isCommit)
         END_CRIT_SECTION();
     }
 
-    /* just for "vacuum full" to delete files in hdfs */
-    if (u_sess->catalog_cxt.pendingDfsDeletes)
-        doPendingDfsDelete(isCommit, NULL);
 }
 
 /*
@@ -1103,11 +1049,11 @@ void smgrDoPendingDeletes(bool isCommit)
  * Note that the list does not include anything scheduled for termination
  * by upper-level transactions.
  */
-int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr, bool skipTemp, int *numTempRel)
+int smgrGetPendingDeletes(bool forCommit, ColFileNode** ptr, bool skipTemp, int *numTempRel)
 {
     int nestLevel = GetCurrentTransactionNestLevel();
     int nrels;
-    ColFileNodeRel* rptrRel = NULL;
+    ColFileNode* rptrRel = NULL;
     PendingRelDelete* pending = NULL;
 
     nrels = 0;
@@ -1121,7 +1067,7 @@ int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr, bool skipTemp, i
         return 0;
     }
 
-    rptrRel = (ColFileNodeRel*)palloc(nrels * sizeof(ColFileNodeRel));
+    rptrRel = (ColFileNode*)palloc(nrels * sizeof(ColFileNode));
     *ptr = rptrRel;
 
     /* Obtain the temporary table first */
@@ -1132,6 +1078,7 @@ int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr, bool skipTemp, i
                 rptrRel->filenode.spcNode = pending->relnode.spcNode;
                 rptrRel->filenode.dbNode = pending->relnode.dbNode;
                 rptrRel->filenode.relNode = pending->relnode.relNode;
+                rptrRel->filenode.opt = pending->relnode.opt;
                 rptrRel->forknum = pending->forknum;
                 rptrRel->ownerid = pending->ownerid;
                 /* Add bucketid into forknum */
@@ -1148,11 +1095,8 @@ int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr, bool skipTemp, i
             rptrRel->filenode.spcNode = pending->relnode.spcNode;
             rptrRel->filenode.dbNode = pending->relnode.dbNode;
             rptrRel->filenode.relNode = pending->relnode.relNode;
-            if (IS_COMPRESSED_RNODE(pending->relnode, pending->forknum)) {
-                rptrRel->forknum = COMPRESS_FORKNUM;
-            } else {
-                rptrRel->forknum = pending->forknum;
-            }
+            rptrRel->filenode.opt = pending->relnode.opt;
+            rptrRel->forknum = pending->forknum;
             rptrRel->ownerid = pending->ownerid;
             /* Add bucketid into forknum */
             forknum_add_bucketid(rptrRel->forknum, pending->relnode.bucketNode);
@@ -1160,6 +1104,22 @@ int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr, bool skipTemp, i
         }
     }
     return nrels;
+}
+
+ColFileNodeRel *ConvertToOldColFileNode(ColFileNode *colFileNodes, int size, bool freeNodes)
+{
+    ColFileNodeRel *colRels = (ColFileNodeRel *)palloc((uint32)size * sizeof(ColFileNodeRel));
+    for (int i = 0; i < size; i++) {
+        colRels[i].filenode.spcNode = colFileNodes[i].filenode.spcNode;
+        colRels[i].filenode.dbNode = colFileNodes[i].filenode.dbNode;
+        colRels[i].filenode.relNode = colFileNodes[i].filenode.relNode;
+        colRels[i].forknum = colFileNodes[i].forknum;
+        colRels[i].ownerid = colFileNodes[i].ownerid;
+    }
+    if (freeNodes) {
+        pfree(colFileNodes);
+    }
+    return colRels;
 }
 
 /*
@@ -1212,6 +1172,33 @@ void AtSubAbort_smgr()
 
 void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum, char *data)
 {
+    ForkRelFileNode key;
+    bool found = false;
+    HTAB *unlink_rel_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    HTAB *unlink_rel_fork_hashtbl = g_instance.bgwriter_cxt.unlink_rel_fork_hashtbl;
+
+    /* Look up the unlink_rel_hashtbl and invalidate the target rnodes buffers if necessary */
+    LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_SHARED);
+    (void)hash_search(unlink_rel_hashtbl, (void *)&rnode, HASH_FIND, &found);
+    LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+    
+    if (found) {
+        drop_rel_all_forks_buffers();
+    }
+
+    /* Look up the unlink_rel_fork_hashtbl and invalidate the target rnodes buffers if necessary */
+    if (forkNum != MAIN_FORKNUM) {
+        key.rnode = rnode;
+        key.forkNum = forkNum;
+        LWLockAcquire(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock, LW_SHARED);
+        (void)hash_search(unlink_rel_fork_hashtbl, (void *)&key, HASH_FIND, &found);
+        LWLockRelease(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock);
+
+        if (found) {
+            drop_rel_one_fork_buffers();
+        }
+    }
+
     if (!IsValidColForkNum(forkNum)) {
         SMgrRelation reln = smgropen(rnode, InvalidBackendId, 0);
         smgrcreate(reln, forkNum, true);
@@ -1224,6 +1211,7 @@ void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum, char *data)
         DELETE_EX(cuStorage);
     }
 }
+
 void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr lsn)
 {
     SMgrRelation reln = smgropen(rnode, InvalidBackendId);
@@ -1245,7 +1233,7 @@ void smgr_redo(XLogReaderState* record)
 {
     XLogRecPtr lsn = record->EndRecPtr;
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-    bool compress = XLogRecGetInfo(record) & XLR_REL_COMPRESS;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     /* Backup blocks are not used in smgr records */
     Assert(!XLogRecHasAnyBlockRefs(record));
 
@@ -1253,15 +1241,15 @@ void smgr_redo(XLogReaderState* record)
         xl_smgr_create* xlrec = (xl_smgr_create*)XLogRecGetData(record);
 
         RelFileNode rnode;
-        RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-        rnode.opt = compress ? ((xl_smgr_create_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
+        RelFileNodeCopy(rnode, xlrec->rnode, (int2)XLogRecGetBucketId(record));
+        rnode.opt = compress ? ((xl_smgr_create_compress*)(void *)XLogRecGetData(record))->pageCompressOpts : 0;
         smgr_redo_create(rnode, xlrec->forkNum, (char *)xlrec);
         /* Redo column file, attid is hidden in forkNum */
     } else if (info == XLOG_SMGR_TRUNCATE) {
         xl_smgr_truncate* xlrec = (xl_smgr_truncate*)XLogRecGetData(record);
         RelFileNode rnode;
-        RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-        rnode.opt = compress ? ((xl_smgr_truncate_compress*)XLogRecGetData(record))->pageCompressOpts : 0;
+        RelFileNodeCopy(rnode, xlrec->rnode, (int2)XLogRecGetBucketId(record));
+        rnode.opt = compress ? ((xl_smgr_truncate_compress*)(void *)XLogRecGetData(record))->pageCompressOpts : 0;
         /*
          * Forcibly create relation if it doesn't exist (which suggests that
          * it was dropped somewhere later in the WAL sequence).  As in
@@ -1297,7 +1285,7 @@ void smgrApplyXLogTruncateRelation(XLogReaderState* record)
     xl_smgr_truncate* xlrec = (xl_smgr_truncate*)XLogRecGetData(record);
 
     RelFileNodeBackend rbnode;
-    RelFileNodeCopy(rbnode.node, xlrec->rnode, XLogRecGetBucketId(record));
+    RelFileNodeCopy(rbnode.node, xlrec->rnode, (int2)XLogRecGetBucketId(record));
     rbnode.backend = InvalidBackendId;
 
     smgrclosenode(rbnode);
@@ -1305,860 +1293,6 @@ void smgrApplyXLogTruncateRelation(XLogReaderState* record)
     XLogTruncateRelation(rbnode.node, MAIN_FORKNUM, xlrec->blkno);
 }
 
-/*
- * Brief        : drop hdfs directories.
- * Input        : pFileNode, array of ColFileNode,
- *              : rels,      number of relation in pFileNode,
- *              : dropDir,   drop hdfs directory with transaction status,
- *              : cfgFromMapper, true if call is from xlog redo;
- *                               false if call from FinishPrepareTransactionPhase2()
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-void ClearDfsStorage(ColFileNode* pFileNode, int nrels, bool dropDir, bool cfgFromMapper)
-{
-    ColFileNode* colFileNode = NULL;
-
-    for (int i = 0; i < nrels; i++) {
-        colFileNode = pFileNode + i;
-
-        if (IsValidPaxDfsForkNum(colFileNode->forknum) && dropDir) {
-            DropDfsDirectory(colFileNode, cfgFromMapper);
-        }
-    }
-}
-
-/*
- * Brief        : clear hdfs directory.
- * Input        : colFileNode, including table, db, tablespace oid
- *              : cfgFromMapper, true if call is from xlog redo;
- *                               false if call from FinishPrepareTransactionPhase2()
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-void ClearDfsDirectory(ColFileNode* colFileNode, bool cfgFromMapper)
-{
-    Oid tblSpcOid;
-
-    MapperFileOptions options;
-    DfsSrvOptions* srvOptions = NULL;
-    dfs::DFSConnector* conn = NULL;
-
-    /* get configuration info from the mapper file. */
-    if (-1 == GetConnConfig(colFileNode->filenode, &options))
-        return;
-
-    ResetPendingDfsDelete();
-
-    if (cfgFromMapper) {
-        /* run here just by xlog redo */
-        srvOptions = (DfsSrvOptions*)palloc0(sizeof(DfsSrvOptions));
-
-        /* get connection information by mapper file */
-        srvOptions->filesystem = options.filesystem;
-        srvOptions->address = options.address;
-        srvOptions->cfgPath = options.cfgpath;
-        srvOptions->storePath = NULL;
-
-        bool err = false;
-        PG_TRY();
-        {
-            conn = dfs::createConnector(CurrentMemoryContext, srvOptions, colFileNode->filenode.spcNode);
-        }
-        PG_CATCH();
-        {
-            ereport(LOG,
-                (errmsg("Failed to connect to HDFS, address: %s, config path: %s", options.address, options.cfgpath)));
-            FlushErrorState();
-            err = true;
-        }
-        PG_END_TRY();
-
-        if (err)
-            return;
-    } else {
-        /* get connection information by tablespace oid */
-        tblSpcOid = colFileNode->filenode.spcNode;
-        srvOptions = GetDfsSrvOptions(tblSpcOid);
-
-        conn = dfs::createConnector(CurrentMemoryContext, srvOptions, tblSpcOid);
-    }
-
-    if (conn == NULL) {
-        ereport(LOG, (errmsg("Failed to connect to HDFS")));
-        return;
-    }
-
-    /* read the hdfs file list. */
-    if (-1 == ReadDfsFilelist(colFileNode->filenode, colFileNode->ownerid, &u_sess->catalog_cxt.pendingDfsDeletes))
-        return;
-
-    u_sess->catalog_cxt.delete_conn = conn;
-
-    u_sess->catalog_cxt.vf_store_root = makeStringInfo();
-    appendStringInfo(u_sess->catalog_cxt.vf_store_root, "%s", options.tblpath);
-
-    doPendingDfsDelete(true, NULL);
-
-    pfree(srvOptions);
-}
-
-/*
- * Brief        : drop hdfs directory.
- * Input        : colFileNode, including table, db, tablespace oid
- *              : cfgFromMapper, true if call is from xlog redo;
- *                               false if call from FinishPrepareTransactionPhase2()
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-void DropDfsDirectory(ColFileNode* colFileNode, bool cfgFromMapper)
-{
-    Oid tblSpcOid;
-
-    MapperFileOptions options;
-    DfsSrvOptions* srvOptions = NULL;
-    dfs::DFSConnector* conn = NULL;
-
-    /* get configuration info from the mapper file. */
-    if (-1 == GetConnConfig(colFileNode->filenode, &options))
-        return;
-
-    if (cfgFromMapper) {
-        /* run here just by xlog redo */
-        srvOptions = (DfsSrvOptions*)palloc0(sizeof(DfsSrvOptions));
-
-        /* get connection information by mapper file */
-        srvOptions->filesystem = options.filesystem;
-        srvOptions->address = options.address;
-        srvOptions->cfgPath = options.cfgpath;
-        srvOptions->storePath = NULL;
-
-        bool err = false;
-        PG_TRY();
-        {
-            conn = dfs::createConnector(CurrentMemoryContext, srvOptions, colFileNode->filenode.spcNode);
-        }
-        PG_CATCH();
-        {
-            ereport(LOG,
-                (errmsg("Failed to connect to HDFS, address: %s, config path: %s", options.address, options.cfgpath)));
-            FlushErrorState();
-            err = true;
-        }
-        PG_END_TRY();
-
-        if (err)
-            return;
-    } else {
-        /* get connection information by tablespace oid */
-        tblSpcOid = colFileNode->filenode.spcNode;
-        srvOptions = GetDfsSrvOptions(tblSpcOid);
-
-        conn = dfs::createConnector(CurrentMemoryContext, srvOptions, tblSpcOid);
-    }
-
-    if (conn == NULL) {
-        ereport(LOG, (errmsg("Failed to connect to HDFS")));
-        return;
-    }
-
-    /*
-     * if tblpath includes ':', then extract the timestamp and check it. If the
-     * timestamp is not the same, then we do not remove the directory and left it.
-     */
-    char* timestr = strrchr(options.tblpath, ':');
-    if (timestr != NULL) {
-        int64 timestmap = 0;
-        char* endStr = NULL;
-        timestmap = strtoll(timestr + 1, &endStr, 10);
-        *timestr = '\0';
-        if (conn->getLastModifyTime(options.tblpath) != timestmap) {
-            ereport(LOG,
-                (errmodule(MOD_DFS),
-                    errmsg("The directory of the relation to be dropped is changed "
-                           "by others, so skip delete the hdfs directory %s.",
-                        options.tblpath)));
-            delete (conn);
-            return;
-        }
-    }
-
-    /* drop relation directory on HDFS */
-    if (conn->pathExists(options.tblpath)) {
-        int retry_times = 2;
-        int ret = -1;
-
-        while ((retry_times > 0) && (ret != 0)) {
-            ret = conn->deleteFile(options.tblpath, 1);
-            --retry_times;
-        }
-
-        if (ret != 0) {
-            ereport(
-                WARNING, (errmodule(MOD_HDFS), errmsg("Failed to remove directory on HDFS, need to manually delete.")));
-        }
-    }
-
-    delete (conn);
-}
-
-/*
- * Brief        : drop the dfs file list.
- * Input        : fNode, relfilenode of the dfs table.
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-void DropDfsFilelist(RelFileNode fNode)
-{
-    int ret;
-    char mapper_path[MAXPGPATH];
-    errno_t rc = EOK;
-    rc = memset_s(mapper_path, MAXPGPATH, 0, MAXPGPATH);
-    securec_check(rc, "\0", "\0");
-
-    /*
-     * get the path of the dfs file list
-     */
-    char* db_path = GetDatabasePath(fNode.dbNode, fNode.spcNode);
-    ret = snprintf_s(mapper_path,
-        sizeof(mapper_path),
-        sizeof(mapper_path) - 1,
-        "%s/%u_%u_%u_snapshot",
-        db_path,
-        fNode.spcNode,
-        fNode.dbNode,
-        fNode.relNode);
-    securec_check_ss(ret, "\0", "\0");
-
-    pfree(db_path);
-
-    /*
-     * drop the dfs file list. note we ignore any error
-     */
-    if (unlink(mapper_path) < 0) {
-        ereport(LOG,
-            (errmodule(MOD_HDFS), errcode_for_file_access(), errmsg("could not unlink file \"%s\": %m", mapper_path)));
-    }
-
-    ereport(DEBUG1, (errmsg("Dropped the DfsFilelist:%s", mapper_path)));
-}
-
-/*
- * Brief        : drop the mapper file.
- * Input        : fNode, relfilenode of the mapper file.
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-void DropMapperFile(RelFileNode fNode)
-{
-    int ret;
-    char mapper_path[MAXPGPATH] = {0};
-
-    /*
-     * get the path of the mapper file
-     */
-    char* db_path = GetDatabasePath(fNode.dbNode, fNode.spcNode);
-    ret = snprintf_s(mapper_path,
-        sizeof(mapper_path),
-        sizeof(mapper_path) - 1,
-        "%s/%u_%u_%u",
-        db_path,
-        fNode.spcNode,
-        fNode.dbNode,
-        fNode.relNode);
-    securec_check_ss(ret, "\0", "\0");
-
-    pfree(db_path);
-
-    /*
-     * drop the mapper file. note we ignore any error
-     */
-    if (unlink(mapper_path) < 0) {
-        ereport(LOG,
-            (errmodule(MOD_HDFS), errcode_for_file_access(), errmsg("could not unlink file \"%s\": %m", mapper_path)));
-    }
-}
-
-/*
- * Brief        : drop the mapper files for hdfs relations.
- * Input        : pColFileNode, thr array of relfilenode;
- *              : nrels,        the number of relfilenode in pColFileNode;
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-void DropMapperFiles(ColFileNode* pColFileNode, int nrels)
-{
-    ColFileNode* colFileNode = NULL;
-
-    for (int i = 0; i < nrels; i++) {
-        colFileNode = pColFileNode + i;
-
-        if (IsValidPaxDfsForkNum(colFileNode->forknum)) {
-            DropMapperFile(colFileNode->filenode);
-        }
-    }
-}
-
-/*
- * Brief        : drop relation entry from global hash table.
- * Input        : pColFileNode, array of ColFileNode,
- *              : rels, number of relation in pColFileNode
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-void UnregisterDfsSpace(ColFileNode* pColFileNode, int rels)
-{
-    ColFileNode* colFileNode = NULL;
-
-    for (int i = 0; i < rels; i++) {
-        colFileNode = pColFileNode + i;
-
-        if (IsValidPaxDfsForkNum(colFileNode->forknum)) {
-            DfsInsert::InvalidSpaceAllocCache(colFileNode->filenode.relNode);
-        }
-    }
-}
-
-/*
- * Brief        : create hdfs directory.
- * Input        : rel, Relation structure.
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-void CreateDfsStorage(Relation rel)
-{
-    Oid tblSpcOid;
-
-    StringInfo storePath;
-    DfsSrvOptions* srvOptions = NULL;
-    dfs::DFSConnector* conn = NULL;
-    int64 timestamp = 0;
-
-    tblSpcOid = rel->rd_rel->reltablespace;
-    storePath = getDfsStorePath(rel);
-    srvOptions = GetDfsSrvOptions(tblSpcOid);
-
-    /* 1. create relation directory on HDFS */
-    conn = dfs::createConnector(CurrentMemoryContext, srvOptions, tblSpcOid);
-
-    /* 1. create relation directory on HDFS */
-    /* The create dfs directory's operator is only needed on current coordinate. */
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        /* Here we first delete the old directory without check if it succeed. */
-        (void)conn->deleteFile(storePath->data, 1);
-
-        /* sleep 1 millisecond to make sure that the access time is different in millisecond. */
-        (void)usleep(1);
-
-        if (-1 == conn->createDirectory(storePath->data)) {
-            delete (conn);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                    (errmsg("Failed to create directory on HDFS."),
-                        errdetail("Please check log information in %s.", g_instance.attr.attr_common.PGXCNodeName))));
-        }
-
-        /*
-         * Get the last modify time of the directory just created.
-         */
-        timestamp = conn->getLastModifyTime(storePath->data);
-    }
-
-    /* 2. write config info to the mapper file */
-    (void)SetConnConfig(rel->rd_node, srvOptions, storePath, timestamp);
-
-    /* 3. log the mapper file to pendingDelete, drop hdfs directory on abort */
-    InsertStorageIntoPendingList(&rel->rd_node, DFS_STOR_FLAG, InvalidBackendId, rel->rd_rel->relowner, false);
-
-    delete (conn);
-
-    pfree(storePath->data);
-    pfree(storePath);
-}
-
-/*
- * Brief        : do NOT drop hdfs directory really, just log into pendingDeletes.
- * Input        : rel, Relation structure.
- * Output       : None.
- * Return Value : None.
- * Notes        : Called by
- *                     DROP 		CN DN
- *                     TRUNCATE	DN
- * Notices     : Call  DropMapperFile to clean mapper file, otherwise will cause DROP TABLESPACE to fail.
- */
-void DropDfsStorage(Relation rel, bool isDfsTruncate)
-{
-    Oid tblSpcOid;
-
-    StringInfo storePath;
-    DfsSrvOptions* srvOptions = NULL;
-    dfs::DFSConnector* conn = NULL;
-    int64 timestamp = 0;
-
-    tblSpcOid = rel->rd_rel->reltablespace;
-    storePath = getDfsStorePath(rel);
-    srvOptions = GetDfsSrvOptions(tblSpcOid);
-
-    /* 1. just for getting hdfs server address which in srvOptions->address */
-    conn = dfs::createConnector(CurrentMemoryContext, srvOptions, tblSpcOid);
-
-    /*
-     * Get the last modify time of the directory to be dropped, which is not
-     * needed for truncate.
-     */
-    if (!isDfsTruncate && IS_PGXC_COORDINATOR)
-        timestamp = conn->getLastModifyTime(storePath->data);
-
-    /* 2. write config info to the mapper file,  call DropMapperFile to clean */
-    (void)SetConnConfig(rel->rd_node, srvOptions, storePath, timestamp);
-
-    if (isDfsTruncate) {
-        /* log the mapper file to pendingDelete, clear hdfs directory on commit */
-        InsertStorageIntoPendingList(&rel->rd_node, DFS_STOR_FLAG, rel->rd_backend, rel->rd_rel->relowner, true, true);
-    } else {
-        /* log the mapper file to pendingDelete, drop hdfs directory on commit */
-        InsertStorageIntoPendingList(&rel->rd_node, DFS_STOR_FLAG, rel->rd_backend, rel->rd_rel->relowner, true, false);
-    }
-
-    if (conn != NULL)
-        delete (conn);
-
-    pfree(storePath->data);
-    pfree(storePath);
-}
-
-/*
- * Brief        : get the content of mapper file.
- * Input        : fNode, relfilenode of the mapper file.
- *              : options, output argument, return config info.
- * Output       : None.
- * Return Value : 0 - success,  others - fail.
- * Notes        : None.
- */
-static int GetConnConfig(RelFileNode fNode, MapperFileOptions* options)
-{
-    Assert(options);
-
-    int ret;
-    char mapper_path[MAXPGPATH] = {0};
-
-    /*
-     * get the path of the mapper file
-     */
-    char* db_path = GetDatabasePath(fNode.dbNode, fNode.spcNode);
-    ret = snprintf_s(mapper_path,
-        sizeof(mapper_path),
-        sizeof(mapper_path) - 1,
-        "%s/%u_%u_%u",
-        db_path,
-        fNode.spcNode,
-        fNode.dbNode,
-        fNode.relNode);
-    securec_check_ss(ret, "\0", "\0");
-
-    pfree(db_path);
-
-    /*
-     * open the mapper file and get the content of the file.
-     */
-    int fd = open(mapper_path, O_RDONLY, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        ereport(LOG, (errmsg("Failed to open the mapper file, error code: %d", errno)));
-        return -1;
-    }
-
-    if (read(fd, options, sizeof(MapperFileOptions)) != sizeof(MapperFileOptions)) {
-        close(fd);
-        ereport(LOG, (errmsg("Failed to read data from the mapper file, error code: %d", errno)));
-        return -1;
-    }
-
-    close(fd);
-    return 0;
-}
-
-/*
- * Brief        : get the content of dfs file list.
- * Input        : fNode, relfilenode of the dfs table.
- * Input        : ownerid, owner id of the dfs table.
- * Output       : pendingDfsDeletes will be appended. the list cell will alloc mem in t_thrd.top_mem_cxt
- * Return Value : 0 - success,  others - fail.
- * Notes        : make sure free the pendingList after use
- */
-int ReadDfsFilelist(RelFileNode fNode, Oid ownerid, List** pendingList)
-{
-    Assert(pendingList);
-    int buffLen = 0;
-    int* buffLenPtr = &buffLen;
-    errno_t rc = EOK;
-    TransactionId currXid = GetCurrentTransactionIdIfAny();
-
-    char mapper_path[MAXPGPATH];
-    rc = memset_s(mapper_path, MAXPGPATH, 0, MAXPGPATH);
-    securec_check(rc, "\0", "\0");
-
-    int ret;
-    char* db_path = GetDatabasePath(fNode.dbNode, fNode.spcNode);
-    ret = snprintf_s(mapper_path,
-        sizeof(mapper_path),
-        sizeof(mapper_path) - 1,
-        "%s/%u_%u_%u_snapshot",
-        db_path,
-        fNode.spcNode,
-        fNode.dbNode,
-        fNode.relNode);
-    securec_check_ss(ret, "\0", "\0");
-    pfree(db_path);
-
-    int fd = open(mapper_path, O_RDONLY, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        ereport(LOG, (errmsg("Failed to open the dfs file list, error code: %d", errno)));
-        return -1;
-    }
-
-    if (read(fd, buffLenPtr, sizeof(int)) != sizeof(int)) {
-        close(fd);
-        ereport(LOG, (errmsg("Failed to read data from the dfs file list, error code: %d", errno)));
-        return -1;
-    }
-
-    char* buff = (char*)palloc(buffLen + 1);
-
-    if (read(fd, buff, buffLen) != buffLen) {
-        close(fd);
-        ereport(LOG, (errmsg("Failed to read data from the dfs file list, error code: %d", errno)));
-        pfree(buff);
-        return -1;
-    }
-    buff[buffLen] = '\0';
-
-    close(fd);
-
-    /* add them into the dfsPendingDelete */
-    char* tempStr = NULL;
-    char* fileName = strtok_r(buff, ",", &tempStr);
-    StringInfo fName = makeStringInfo();
-
-    while (fileName != NULL) {
-        resetStringInfo(fName);
-
-        /* parser file name */
-        char* pos = strrchr(fileName, ':');
-        if (pos != NULL) {
-            *pos = '\0';
-        }
-        appendStringInfo(fName, "%s", fileName);
-
-        if (pos != NULL) {
-            *pos = ':';
-        }
-
-        /* parser file size */
-        uint64 filesize = 0;
-        if ((pos + 1) != NULL) {
-            int64 size = atol(pos + 1);
-            if (size > 0)
-                filesize = (uint64)size;
-        }
-
-        /* add to list */
-        do {
-            AutoContextSwitch newContext(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-
-            PendingDfsDelete* pending = (PendingDfsDelete*)MemoryContextAlloc(
-                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(PendingDfsDelete));
-            pending->filename = makeStringInfo();
-            appendStringInfoString(pending->filename, fName->data);
-            pending->atCommit = true;
-            pending->ownerid = ownerid;
-            pending->xid = currXid;
-            pending->filesize = filesize;
-
-            *pendingList = lappend(*pendingList, pending);
-        } while (0);
-
-        /* next token */
-        fileName = strtok_r(NULL, ",", &tempStr);
-    }
-
-    pfree(fName->data);
-    pfree(fName);
-    pfree(buff);
-
-    return 0;
-}
-
-/*
- * Brief        : create the dfs file list.
- * Input        : rel, RelationData of the dfs table
- * Output       : dfs file list will be created on DN
- * Return Value : None.
- * Notes        : None.
- */
-void SaveDfsFilelist(Relation rel, DFSDescHandler* handler)
-{
-    /* get the path of the mapper file */
-    RelFileNode fNode = rel->rd_node;
-    char mapper_path[MAXPGPATH];
-    errno_t rc = EOK;
-    rc = memset_s(mapper_path, MAXPGPATH, 0, MAXPGPATH);
-    securec_check(rc, "\0", "\0");
-
-    int ret;
-    char* db_path = GetDatabasePath(fNode.dbNode, fNode.spcNode);
-    ret = snprintf_s(mapper_path,
-        sizeof(mapper_path),
-        sizeof(mapper_path) - 1,
-        "%s/%u_%u_%u_snapshot",
-        db_path,
-        fNode.spcNode,
-        fNode.dbNode,
-        fNode.relNode);
-    securec_check_ss(ret, "\0", "\0");
-    pfree(db_path);
-
-    /* open the mapper file and save the dfs file list */
-    int fd = open(mapper_path, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        ereport(WARNING, (errmsg("Failed to create the dfs file list.")));
-        return;
-    }
-
-    List* descs = handler->GetAllDescs(SnapshotNow);
-
-    StringInfo fullpath = makeStringInfo();
-
-    ListCell* lc = NULL;
-    foreach (lc, descs) {
-        DFSDesc* desc = (DFSDesc*)lfirst(lc);
-        /* make sure  not have any  char ',' and  ':' in desc */
-        appendStringInfo(fullpath, "%s:%ld,", desc->GetFileName(), desc->GetFileSize());
-    }
-
-    if (write(fd, &fullpath->len, sizeof(fullpath->len)) < 0) {
-        close(fd);
-        ereport(ERROR,
-            (errcode_for_file_access(), errmsg("Failed to write data to the dfs file list, error code: %d", errno)));
-    }
-
-    if (write(fd, fullpath->data, fullpath->len) < 0) {
-        close(fd);
-        ereport(ERROR,
-            (errcode_for_file_access(), errmsg("Failed to write data to the dfs file list, error code: %d", errno)));
-    }
-
-    close(fd);
-    ereport(DEBUG1, (errmsg("%s: %s", __FUNCTION__, fullpath->data)));
-
-    pfree(fullpath->data);
-    fullpath->data = NULL;
-    pfree(fullpath);
-}
-
-/*
- * Brief        : create the mapper file.
- * Input        : fNode, relfilenode of the mapper file.
- *              : srvOptions, connection information
- *              : storePath, data directory on HDFS for hdfs table.
- * Output       : None.
- * Return Value : None.
- * Notes        : None.
- */
-static int SetConnConfig(RelFileNode fNode, DfsSrvOptions* srvOptions, StringInfo storePath, int64 timestamp)
-{
-    char mapper_path[MAXPGPATH] = {0};
-    errno_t rs;
-    int ret;
-
-    MapperFileOptions options;
-
-    rs = memset_s(&options, sizeof(MapperFileOptions), 0, sizeof(MapperFileOptions));
-    securec_check(rs, "\0", "\0");
-
-    /*
-     * get the path of the mapper file
-     */
-    char* db_path = GetDatabasePath(fNode.dbNode, fNode.spcNode);
-    ret = snprintf_s(mapper_path,
-        sizeof(mapper_path),
-        sizeof(mapper_path) - 1,
-        "%s/%u_%u_%u",
-        db_path,
-        fNode.spcNode,
-        fNode.dbNode,
-        fNode.relNode);
-    securec_check_ss(ret, "\0", "\0");
-
-    pfree(db_path);
-
-    /*
-     * open the mapper file and write the configuration info.
-     */
-    int fd = open(mapper_path, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-    if (fd < 0) {
-        ereport(LOG, (errmsg("Failed to create the mapper file, error code: %d", errno)));
-        return -1;
-    }
-
-    ret = snprintf_s(options.filesystem, NAMEDATALEN, NAMEDATALEN - 1, "%s", srvOptions->filesystem);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(options.address, MAXPGPATH, MAXPGPATH - 1, "%s", srvOptions->address);
-    securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(options.cfgpath, MAXPGPATH, MAXPGPATH - 1, "%s", srvOptions->cfgPath);
-    securec_check_ss(ret, "\0", "\0");
-    if (timestamp == 0) {
-        ret = snprintf_s(options.tblpath, MAXPGPATH, MAXPGPATH - 1, "%s", storePath->data);
-    } else {
-        ret = snprintf_s(options.tblpath, MAXPGPATH, MAXPGPATH - 1, "%s:%ld", storePath->data, timestamp);
-    }
-    securec_check_ss(ret, "\0", "\0");
-    if (write(fd, &options, sizeof(options)) < 0) {
-        ereport(LOG, (errmsg("Failed to write data to the mapper file, error code: %d", errno)));
-        close(fd);
-        return -1;
-    }
-
-    close(fd);
-    return 0;
-}
-
-/*
- * release all resources in pendingDfsDeletes, and set NULL to all variables
- */
-void ResetPendingDfsDelete()
-{
-    /*
-     * reset pendingDfsDeletes
-     */
-    List* files = u_sess->catalog_cxt.pendingDfsDeletes;
-    u_sess->catalog_cxt.pendingDfsDeletes = NIL;
-
-    ListCell* lc = NULL;
-    foreach (lc, files) {
-        PendingDfsDelete* del_file = (PendingDfsDelete*)lfirst(lc);
-        if (NULL != del_file) {
-            if (NULL != del_file->filename) {
-                pfree(del_file->filename->data);
-                pfree(del_file->filename);
-            }
-            pfree(del_file);
-        }
-    }
-
-    /*
-     * reset connection obj used to delete files
-     */
-    if (u_sess->catalog_cxt.delete_conn != NULL) {
-        dfs::DFSConnector* conn = u_sess->catalog_cxt.delete_conn;
-        u_sess->catalog_cxt.delete_conn = NULL;
-        delete (conn);
-    }
-
-    /*
-     * reset root store path of data file of one table
-     */
-    if (u_sess->catalog_cxt.vf_store_root != NULL) {
-        StringInfo root = u_sess->catalog_cxt.vf_store_root;
-        u_sess->catalog_cxt.vf_store_root = NULL;
-        pfree(root->data);
-        pfree(root);
-    }
-}
-
-/*
- * append filename to pendingDfsDeletes
- */
-void InsertIntoPendingDfsDelete(const char* filename, bool atCommit, Oid ownerid, uint64 filesize)
-{
-    AutoContextSwitch newContext(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-
-    PendingDfsDelete* pending = (PendingDfsDelete*)MemoryContextAlloc(
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(PendingDfsDelete));
-    pending->filename = NULL;
-    pending->filename = makeStringInfo();
-
-    appendStringInfo(pending->filename, "%s", filename);
-    pending->atCommit = atCommit;
-
-    pending->ownerid = ownerid;
-    pending->xid = GetCurrentTransactionIdIfAny();
-    pending->filesize = filesize;
-
-    u_sess->catalog_cxt.pendingDfsDeletes = lappend(u_sess->catalog_cxt.pendingDfsDeletes, pending);
-}
-
-/*
- * delete files on commit or abort
- */
-void doPendingDfsDelete(bool isCommit, TransactionId* xid)
-{
-    if (u_sess->catalog_cxt.pendingDfsDeletes == NULL || u_sess->catalog_cxt.delete_conn == NULL ||
-        u_sess->catalog_cxt.vf_store_root == NULL) {
-        ResetPendingDfsDelete();
-        return;
-    }
-
-    Assert(
-        u_sess->catalog_cxt.pendingDfsDeletes && u_sess->catalog_cxt.delete_conn && u_sess->catalog_cxt.vf_store_root);
-
-    /*
-     * make sure that pendingDfsDeletes will be set to NULL whatever cases.
-     */
-    TransactionId currXid = (xid != NULL) ? *xid : GetCurrentTransactionIdIfAny();
-    List* files = u_sess->catalog_cxt.pendingDfsDeletes;
-    u_sess->catalog_cxt.pendingDfsDeletes = NIL;
-
-    dfs::DFSConnector* conn = u_sess->catalog_cxt.delete_conn;
-    u_sess->catalog_cxt.delete_conn = NULL;
-
-    StringInfo rootpath = makeStringInfo();
-    appendStringInfo(rootpath, "%s", u_sess->catalog_cxt.vf_store_root->data);
-    pfree(u_sess->catalog_cxt.vf_store_root->data);
-    u_sess->catalog_cxt.vf_store_root->data = NULL;
-    pfree(u_sess->catalog_cxt.vf_store_root);
-    u_sess->catalog_cxt.vf_store_root = NULL;
-
-    StringInfo fullpath = makeStringInfo();
-
-    ListCell* lc = NULL;
-    foreach (lc, files) {
-        PendingDfsDelete* del_file = (PendingDfsDelete*)lfirst(lc);
-
-        /* delete files according to status of transaction */
-        if (del_file->atCommit == isCommit && del_file->xid == currXid) {
-            resetStringInfo(fullpath);
-            appendStringInfo(fullpath, "%s/%s", rootpath->data, del_file->filename->data);
-
-            /* decrease the permanent space on users' record */
-            perm_space_decrease(del_file->ownerid, del_file->filesize, SP_PERM);
-
-            conn->deleteFile(fullpath->data, false);
-            ereport(
-                DEBUG1, (errmsg("Delete file %s by %s.", fullpath->data, g_instance.attr.attr_common.PGXCNodeName)));
-        }
-
-        /* release memory at commit or abort */
-        pfree(del_file->filename->data);
-        pfree(del_file->filename);
-        pfree(del_file);
-    }
-
-    pfree(fullpath->data);
-    pfree(fullpath);
-
-    pfree(rootpath->data);
-    pfree(rootpath);
-
-    delete (conn);
-}
 
 /* create Column Heap Main file list */
 void ColMainFileNodesCreate(void)
@@ -2349,26 +1483,6 @@ uint64 GetSMgrRelSize(RelFileNode* relfilenode, BackendId backend, ForkNumber fo
             size += fst.st_size;
         }
         custore.Destroy();
-    }
-
-    return size;
-}
-
-/*
- * @Description:  calculate delete file size from dfsfilelist
- * @IN dfsfilelist: dfs delete file list
- * @IN isCommit: is commit
- * @Return: delte file size
- */
-uint64 GetDfsDelFileSize(List* dfsfilelist, bool isCommit)
-{
-    uint64 size = 0;
-    ListCell* lc = NULL;
-
-    foreach (lc, dfsfilelist) {
-        PendingDfsDelete* del_file = (PendingDfsDelete*)lfirst(lc);
-        if (del_file->atCommit == isCommit)
-            size += del_file->filesize;
     }
 
     return size;

@@ -1,0 +1,59 @@
+column_name: id
+column_default: nextval('user_id_seq'::regclass)
+is_nullable: NO
+data_type: bigint
+character_maximum_length: NULL
+description: NULL
+primarykey: true
+uniquekey: false
+column_name: name
+column_default: NULL
+is_nullable: YES
+data_type: character varying
+character_maximum_length: 255
+description: NULL
+primarykey: false
+uniquekey: false
+column_name: salt
+column_default: NULL
+is_nullable: YES
+data_type: character varying
+character_maximum_length: 255
+description: NULL
+primarykey: false
+uniquekey: false
+column_name: age
+column_default: NULL
+is_nullable: YES
+data_type: integer
+character_maximum_length: NULL
+description: NULL
+primarykey: false
+uniquekey: false
+column_name: passwd
+column_default: NULL
+is_nullable: YES
+data_type: character varying
+character_maximum_length: 200
+description: NULL
+primarykey: false
+uniquekey: false
+column_name: created
+column_default: NULL
+is_nullable: YES
+data_type: timestamp without time zone
+character_maximum_length: NULL
+description: NULL
+primarykey: false
+uniquekey: false
+column_name: updated
+column_default: NULL
+is_nullable: YES
+data_type: timestamp without time zone
+character_maximum_length: NULL
+description: NULL
+primarykey: false
+uniquekey: false
+indexname: user_pkey
+indexdef: CREATE UNIQUE INDEX user_pkey ON "user" USING btree (id) TABLESPACE pg_default
+PASS

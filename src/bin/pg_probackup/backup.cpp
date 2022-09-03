@@ -140,11 +140,11 @@ static void run_backup_threads(char *external_prefix, char *database_path,
 {
     int i;
     int nRet = 0;
-    pthread_t   *threads;
+    pthread_t   *threads = NULL;
     bool    backup_isok = true;
     time_t  start_time, end_time;
     char    pretty_time[20];
-    backup_files_arg *threads_args;
+    backup_files_arg *threads_args = NULL;
 
     for (i = 0; i < (int)parray_num(backup_files_list); i++)
     {
@@ -190,7 +190,13 @@ static void run_backup_threads(char *external_prefix, char *database_path,
 
     /* init thread args with own file lists */
     threads = (pthread_t *) palloc(sizeof(pthread_t) * num_threads);
+    if (threads == NULL) {
+        elog(ERROR, "Out of memory");
+    }
     threads_args = (backup_files_arg *) palloc(sizeof(backup_files_arg)*num_threads);
+    if (threads_args == NULL) {
+        elog(ERROR, "Out of memory");
+    }
 
     for (i = 0; i < num_threads; i++)
     {

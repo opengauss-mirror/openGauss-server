@@ -652,15 +652,11 @@ void create_masking_policy(CreateMaskingPolicyStmt *stmt)
                  errmsg("%s", "failed to open policies relation")));
         return;
     }
-    /* no more than MAX_POLICIES_NUM is allowed */
+    
+    /* less than MAX_POLICIES_NUM is recommended */
     if (get_num_of_existing_policies<Form_gs_masking_policy>(policy_relation) >= MAX_POLICIES_NUM) {
-        /* out of limit */
-        heap_close(policy_relation, RowExclusiveLock);
-        send_manage_message(AUDIT_FAILED);
-        ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("%s", "Too many policies, adding new policiy is restricted")));
-        return;
+        ereport(WARNING,
+                (errmsg("%s", "Too many policies, adding new policy is not recommended")));
     }
 
     /* check whether such policy exists */
@@ -951,6 +947,42 @@ static void handle_alter_policy_params(const char* policy_name, Node* policy_ena
     heap_close(policy_relation, RowExclusiveLock);
 }
 
+/* alter masking actions */
+static void alter_masking_actions(const masking_actions_set actions_to_remove, const masking_actions_set actions_to_update,
+    const masking_actions_set actions_to_add, const Oid policyOid, const Datum curtime, masking_actions_set* existing_actions,
+    masking_label_to_actions_map* labels_to_actions)
+{
+    gs_stl::gs_string err_msg;
+    if ((actions_to_add.size() > 0) || (actions_to_remove.size() > 0) || (actions_to_update.size() > 0)) {
+        Relation masking_actions_relation = heap_open(GsMaskingPolicyActionsId, RowExclusiveLock);
+        if (masking_actions_relation == NULL) {
+            return;
+        }
+        for (masking_actions_set::const_iterator it = actions_to_add.begin(); it != actions_to_add.end(); ++it) {
+            add_labels_to_masking_action(it->m_type, it->m_params, it->m_label_name,
+                masking_actions_relation, policyOid, curtime);
+        }
+
+        for (masking_actions_set::const_iterator it = actions_to_remove.begin(); it != actions_to_remove.end(); ++it) {
+            if (!remove_labels_from_masking_action(&(*it), existing_actions, masking_actions_relation, &err_msg)) {
+                heap_close(masking_actions_relation, RowExclusiveLock);
+                ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("%s", err_msg.c_str())));
+                return;
+            }
+        }
+
+        for (masking_actions_set::const_iterator it = actions_to_update.begin(); it != actions_to_update.end(); ++it) {
+            if (!update_labels_in_masking_action(&(*it), labels_to_actions, masking_actions_relation, &err_msg)) {
+                heap_close(masking_actions_relation, RowExclusiveLock);
+                ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("%s", err_msg.c_str())));
+                return;
+            }
+        }
+        heap_close(masking_actions_relation, RowExclusiveLock);
+    }
+    return;
+}
+
 /*
  * handle_alter_add_remove_modify_action
  * 
@@ -1024,36 +1056,8 @@ static void handle_alter_add_remove_modify_action(List* policy_items, const char
             return;
         }
     }
-    gs_stl::gs_string err_msg;
-
-    /* alter masking actions */
-    if ((actions_to_add.size() > 0) || (actions_to_remove.size() > 0) || (actions_to_update.size() > 0)) {
-        Relation masking_actions_relation = heap_open(GsMaskingPolicyActionsId, RowExclusiveLock);
-        if (masking_actions_relation) {
-            for (masking_actions_set::const_iterator it = actions_to_add.begin(); it != actions_to_add.end(); ++it) {
-                add_labels_to_masking_action(it->m_type, it->m_params, it->m_label_name,
-                                             masking_actions_relation, policyOid, curtime);
-            }
-
-            for (masking_actions_set::const_iterator it = actions_to_remove.begin(); it != actions_to_remove.end(); ++it) {
-                if (!remove_labels_from_masking_action(&(*it), existing_actions, masking_actions_relation, &err_msg)) {
-                    heap_close(masking_actions_relation, RowExclusiveLock);
-                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("%s", err_msg.c_str())));
-                    return;
-                }
-            }
-
-            for (masking_actions_set::const_iterator it = actions_to_update.begin(); it != actions_to_update.end(); ++it) {
-                if (!update_labels_in_masking_action(&(*it), labels_to_actions, masking_actions_relation, &err_msg)) {
-                    heap_close(masking_actions_relation, RowExclusiveLock);
-                    ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("%s", err_msg.c_str())));
-                    return;
-                }
-            }
-
-            heap_close(masking_actions_relation, RowExclusiveLock);
-        }
-    }
+    alter_masking_actions(actions_to_remove, actions_to_update, actions_to_add,
+        policyOid, curtime, existing_actions, labels_to_actions);
 }
 
 /*

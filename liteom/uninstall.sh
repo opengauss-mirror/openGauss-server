@@ -23,6 +23,12 @@ then
 else
     touch ${log_file}
 fi
+env_file=$(echo $GAUSSENV)
+if [ "${env_file}" = "" ]
+then
+    env_file=~/.bashrc
+fi
+source ${env_file}
 
 function usage()
 {
@@ -76,22 +82,19 @@ log "delete-data is ${delete_data}"
 
 function uninstall() {
     log "cleaning up related processes"
-	pids=$(ps -u $user | grep gaussdb | awk '{print $1}')
-	if [ "${pids}" != "" ]
+    if [ "$GAUSSHOME" != "" ]
     then
-        kill -9 $pids
-        log "clean up related processes $pids"
+        pids=$(ps -ef | grep "$user" | grep "$GAUSSHOME/bin/gaussdb" | grep -v grep | awk '{print $2}')
+        if [ "${pids}" != "" ]
+        then
+            kill -9 $pids
+            log "clean up related processes $pids"
+        fi
     fi
-	log "clean up related processes success"
+    log "clean up related processes success"
 }
 
 function set_environment() {
-    env_file=$(echo $GAUSSENV)
-    if [ "${env_file}" = "" ]
-    then
-        env_file=~/.bashrc
-    fi
-	source ${env_file}
 	data_path=$(echo $GAUSSDATA)
 	if [[ -n "${data_path}" && -e "${data_path}" ]]
 	then
@@ -101,6 +104,7 @@ function set_environment() {
 	app_path=$(echo $GAUSSHOME)
 	if [[ -n "${app_path}" && -e "${app_path}" ]]
 	then
+	    chmod -R 700 ${app_path}
 		rm -rf ${app_path}
 	fi
 

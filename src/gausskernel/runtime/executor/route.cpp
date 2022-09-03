@@ -27,7 +27,7 @@
 #include "utils/date.h"
 #include "utils/nabstime.h"
 #include "utils/palloc.h"
-#include "utils/memutils.h"
+#include "utils/int8.h"
 #include "utils/syscache.h"
 #include "parser/parse_type.h"
 #include "pgxc/locator.h"
@@ -38,8 +38,166 @@
 #include "fmgr.h"
 
 extern void InitBuckets(RelationLocInfo* rel_loc_info, Relation relation);
-extern Datum GetDatumFromString(Oid typeOid, int4 typeMod, char* value);
 extern char* getNodenameByIndex(int index);
+
+/*
+ * Convert a char* to Datum according to the data type oid.
+ *
+ * @_in param typeOid: The oid of the type in pg_type catalog.
+ * @_in param typeMod: The mod of data type.
+ * @_in param value: The string value which need to be converted to datum.
+ * @return Return the datum converted from String.
+ */
+Datum GetDatumFromString(Oid typeOid, int4 typeMod, char *value)
+{
+    Datum datumValue = (Datum)0;
+
+    switch (typeOid) {
+        /* Numeric datatype */
+        /* 1. Towards to TINYINT */
+        case INT1OID: {
+            datumValue = UInt8GetDatum(pg_atoi(value, sizeof(uint8), '\0'));
+            break;
+        }
+
+        /* 2. Towards to SMALLINT */
+        case INT2OID: {
+            datumValue = Int16GetDatum(pg_strtoint16(value));
+            break;
+        }
+
+        /* 3. Towards to INTEGER */
+        case INT4OID: {
+            datumValue = Int32GetDatum(pg_strtoint32(value));
+            break;
+        }
+
+        /* 4. Towards to BIGINT */
+        case INT8OID: {
+            int64 result = 0;
+            (void)scanint8(value, false, &result);
+            datumValue = Int64GetDatum(result);
+            break;
+        }
+
+        /* 5. Towards to NUMERIC./DECIMAL */
+        case NUMERICOID: {
+            datumValue = DirectFunctionCall3(numeric_in, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+            break;
+        }
+
+        /* Textual type conversion
+         *
+         * 6. Towards to CHAR
+         */
+        case CHAROID: {
+            datumValue = DirectFunctionCall3(charin, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+
+            break;
+        }
+
+        /* 7. Towards to CHAR() */
+        case BPCHAROID: {
+            datumValue = DirectFunctionCall3(bpcharin, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+            break;
+        }
+
+        /* 8. Towards to VARCHAR(x) */
+        case VARCHAROID: {
+            datumValue = DirectFunctionCall3(varcharin, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+            break;
+        }
+
+        /* 9. Towards to NVARCHAR2 */
+        case NVARCHAR2OID: {
+            datumValue = DirectFunctionCall3(nvarchar2in, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+            break;
+        }
+
+        /* 10. Towards to TEXT */
+        case CLOBOID:
+        case TEXTOID: {
+            datumValue = CStringGetTextDatum(value);
+            break;
+        }
+
+        /* Temporal related type conversion */
+        /* 11. Towards to DATE */
+        case DATEOID: {
+            datumValue = DirectFunctionCall1(date_in, CStringGetDatum(value));
+            break;
+        }
+
+        /* 12. Towards to TIME WITHOUT TIME ZONE */
+        case TIMEOID: {
+            datumValue = DirectFunctionCall1(time_in, CStringGetDatum(value));
+            break;
+        }
+
+        /* 13. Towards to TIME WITH TIME ZONE */
+        case TIMETZOID: {
+            datumValue = DirectFunctionCall1(timetz_in, CStringGetDatum(value));
+            break;
+        }
+
+        /* 14. Towards to TIMESTAMP WITHOUT TIME ZONE */
+        case TIMESTAMPOID: {
+            datumValue = DirectFunctionCall3(timestamp_in, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+            break;
+        }
+
+        /* 15. Towards to TIMESTAMP WITH TIME ZONE */
+        case TIMESTAMPTZOID: {
+            datumValue = DirectFunctionCall3(timestamptz_in, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+            break;
+        }
+
+        /* 16. Towards to SMALLDATETIME */
+        case SMALLDATETIMEOID: {
+            datumValue = DirectFunctionCall3(smalldatetime_in, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+            break;
+        }
+
+        /* 17. Towards to INTERVAL */
+        case INTERVALOID: {
+            datumValue = DirectFunctionCall3(interval_in, CStringGetDatum(value), ObjectIdGetDatum(InvalidOid),
+                                             Int32GetDatum(typeMod));
+            break;
+        }
+
+        /* 18. Towards to float4 */
+        case FLOAT4OID: {
+            datumValue = DirectFunctionCall1(float4in, CStringGetDatum(value));
+            break;
+        }
+
+        /* 19. Towards to float8 */
+        case FLOAT8OID: {
+            datumValue = DirectFunctionCall1(float8in, CStringGetDatum(value));
+            break;
+        }
+
+        default: {
+            /*
+             * As we already blocked any un-supported datatype at table-creation
+             * time, so we shouldn't get here, otherwise the catalog information
+             * may gets corrupted.
+             */
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),
+                            errmsg("Unsupported data type on typeoid:%u when converting string to datum.", typeOid)));
+        }
+    }
+
+    return datumValue;
+}
 
 // check router_attr is valid or not
 bool check_router_attr(char** newval, void** extra, GucSource source)

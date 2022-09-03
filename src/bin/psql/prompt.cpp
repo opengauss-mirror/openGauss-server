@@ -133,8 +133,9 @@ char* get_prompt(promptStatus_t status)
                             psql_error("Unexpected NULL value in connection attribute.\n");
                             exit(EXIT_FAILURE);
                         }
+                        var = GetEnvStr("PGDATABASE");
                         if (strcmp(PQdb(pset.db), PQuser(pset.db)) == 0 ||
-                            (((var = GetEnvStr("PGDATABASE")) != NULL) && strcmp(var, PQdb(pset.db)) == 0)) {
+                            (var != NULL && strcmp(var, PQdb(pset.db)) == 0)) {
                             rc = strncpy_s(buf, sizeof(buf), "~", 2);
                             securec_check_c(rc, "\0", "\0");
                         } else {

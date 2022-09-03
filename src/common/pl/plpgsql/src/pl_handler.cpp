@@ -26,6 +26,7 @@
 #include "catalog/pg_proc_fn.h"
 #include "catalog/indexing.h"
 #include "catalog/catalog.h"
+#include "commands/proclang.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "tcop/autonomoustransaction.h"
@@ -40,6 +41,7 @@
 #include "pgstat.h"
 #include "utils/timestamp.h"
 #include "executor/spi_priv.h"
+#include "distributelayer/streamMain.h"
 
 #ifdef STREAMPLAN
 #include "optimizer/streamplan.h"
@@ -129,7 +131,7 @@ static void processError(CreateFunctionStmt* stmt, enum FunctionErrorType ErrorT
     }
 }
 
-static void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bool status)
+void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bool status)
 {
     bool notInsert = u_sess->attr.attr_common.upgrade_mode != 0 || IsSystemNamespace(nspid) || 
         IsToastNamespace(nspid) || IsCStoreNamespace(nspid) || 
@@ -303,7 +305,10 @@ static void ProcInsertGsSource(Oid funcOid, bool status)
     char* name = NameStr(procStruct->proname);
     Oid nspid = procStruct->pronamespace;
     const char* type = (prokind == PROKIND_PROCEDURE) ? ("procedure") : ("function");
-
+    if (strcasecmp(get_language_name((Oid)procStruct->prolang), "plpgsql") != 0) {
+        ReleaseSysCache(procTup);
+        return;
+    }
     InsertGsSource(funcOid, nspid, name, type, status);
 
     ReleaseSysCache(procTup);
@@ -425,7 +430,7 @@ void processPackageProcList(PLpgSQL_package* pkg)
                 rc = sprintf_s(message, MAXSTRLEN,
                                 "Function definition not found: %s",
                                 NameListToString(stmtArray[i]->funcname));
-                securec_check_ss_c(rc, "\0", "\0");
+                securec_check_ss(rc, "\0", "\0");
                 InsertErrorMessage(message, stmtArray[i]->startLineNumber);
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_FUNCTION),
@@ -698,7 +703,6 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     bool needRecord = false;
     PLpgSQL_package* pkg = NULL;
     MemoryContext oldContext = CurrentMemoryContext;
-    FormatCallStack* plcallstack = NULL;
     int pkgDatumsNumber = 0;
     bool savedisAllowCommitRollback = true;
     /*
@@ -749,8 +753,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     /* Saves the status of whether to send commandId. */
     bool saveSetSendCommandId = IsSendCommandId();
 #else
-    int outerDop = u_sess->opt_cxt.query_dop;
-    u_sess->opt_cxt.query_dop = 1;
+    AutoDopControl dopControl;
+    dopControl.CloseSmp();
 #endif
 
     _PG_init();
@@ -824,7 +828,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
         int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
         int save_compile_status = u_sess->plsql_cxt.compile_status;
-
+        FormatCallStack* saveplcallstack = t_thrd.log_cxt.call_stack;
         PG_TRY();
         {
             /*
@@ -870,16 +874,9 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         {
             /* reset cur_exception_cxt */
             u_sess->plsql_cxt.cur_exception_cxt = NULL;
-            /* Put the new code behind this code snippet. Otherwise, unexpected errors may occur. */
-            plcallstack = t_thrd.log_cxt.call_stack;
 
-#ifndef ENABLE_MULTIPLE_NODES
-            estate_cursor_set(plcallstack);
+            t_thrd.log_cxt.call_stack = saveplcallstack;
 
-#endif
-            if (plcallstack != NULL) {
-                t_thrd.log_cxt.call_stack = plcallstack->prev;
-            }
 
 #ifndef ENABLE_MULTIPLE_NODES
             /* for restore parent session and automn session package var values */
@@ -1015,8 +1012,6 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         u_sess->opt_cxt.is_stream = outer_is_stream;
         u_sess->opt_cxt.is_stream_support = outer_is_stream_support;
     }
-#else
-    u_sess->opt_cxt.query_dop = outerDop;
 #endif
     if (has_switch) {
         SetUserIdAndSecContext(old_user, save_sec_context);
@@ -1046,8 +1041,8 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     bool needRecord = false;
 
 #ifndef ENABLE_MULTIPLE_NODES
-    int outerDop = u_sess->opt_cxt.query_dop;
-    u_sess->opt_cxt.query_dop = 1;
+    AutoDopControl dopControl;
+    dopControl.CloseSmp();
 #else
     /* Saves the status of whether to send commandId. */
     bool saveSetSendCommandId = IsSendCommandId();
@@ -1112,6 +1107,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     save_compile_context = u_sess->plsql_cxt.curr_compile_context;
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
     int save_compile_status = u_sess->plsql_cxt.compile_status;
+    FormatCallStack* saveplcallstack = t_thrd.log_cxt.call_stack;
     PG_TRY();
     {
         if (IsAutonomousTransaction(func->action->isAutonomous)) {
@@ -1124,15 +1120,10 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        /* Put the new code behind this code snippet. Otherwise, unexpected errors may occur. */
-        FormatCallStack* plcallstack = t_thrd.log_cxt.call_stack;
-#ifndef ENABLE_MULTIPLE_NODES
-        estate_cursor_set(plcallstack);
-#endif
-
-        if (plcallstack != NULL) {
-            t_thrd.log_cxt.call_stack = plcallstack->prev;
+        if (u_sess->SPI_cxt._connected == 0) {
+            t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
         }
+        t_thrd.log_cxt.call_stack = saveplcallstack;
         /* Decrement package use-count */
         DecreasePackageUseCount(func);
 
@@ -1155,6 +1146,13 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
         PG_RE_THROW();
     }
     PG_END_TRY();
+    if (u_sess->SPI_cxt._connected == 0) {
+        t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
+    }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    SetSendCommandId(saveSetSendCommandId);
+#endif
 
 #ifdef ENABLE_MULTIPLE_NODES
     SetSendCommandId(saveSetSendCommandId);
@@ -1196,10 +1194,6 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
                 errmsg("SPI_finish failed: %s when execute anonymous block.", SPI_result_code_string(rc))));
     }
 
-#ifndef ENABLE_MULTIPLE_NODES
-    u_sess->opt_cxt.query_dop = outerDop;
-#endif
-
     return retval;
 }
 
@@ -1234,8 +1228,8 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    int outerDop = u_sess->opt_cxt.query_dop;
-    u_sess->opt_cxt.query_dop = 1;
+    AutoDopControl dopControl;
+    dopControl.CloseSmp();
 #endif
 
     _PG_init();
@@ -1321,12 +1315,15 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         PG_CATCH();
         {
 #ifndef ENABLE_MULTIPLE_NODES
+            u_sess->parser_cxt.isPerform = false;
             bool insertError = (u_sess->attr.attr_common.plsql_show_all_error ||
                                     !u_sess->attr.attr_sql.check_function_bodies) &&
                                     u_sess->plsql_cxt.isCreateFunction;
+            if (!SKIP_GS_SOURCE && !IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
+                ProcInsertGsSource(funcoid, false);
+            }
             if (insertError) {
                 if (!IsInitdb) {
-                    ProcInsertGsSource(funcoid, false);
                     int rc = CompileWhich();
                     if (rc == PLPGSQL_COMPILE_PACKAGE || rc == PLPGSQL_COMPILE_PACKAGE_PROC) {
                         InsertError(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid);
@@ -1358,8 +1355,7 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
         }
         PG_END_TRY();
         bool isNotComipilePkg = u_sess->plsql_cxt.curr_compile_context == NULL ||
-            (u_sess->plsql_cxt.curr_compile_context != NULL &&
-            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL);
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL;
 
         if (!IsInitdb && (
 #ifdef ENABLE_MULTIPLE_NODES
@@ -1381,10 +1377,6 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     if (!IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
         ProcInsertGsSource(funcoid, true);
     }
-#endif
-#ifndef ENABLE_MULTIPLE_NODES
-    u_sess->plsql_cxt.isCreateFunction = false;
-    u_sess->opt_cxt.query_dop = outerDop;
 #endif
 
     PG_RETURN_VOID();
@@ -1531,6 +1523,7 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
     }
     int package_line = 0;
     package_line = u_sess->plsql_cxt.package_as_line;
+    Oid old_value = saveCallFromPkgOid(pkg->pkg_oid);
     PushOverrideSearchPath(pkg->pkg_searchpath);
     ListCell* cell = NULL;
     int oldCompileStatus = getCompileStatus();
@@ -1617,6 +1610,7 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
     int save_compile_status = u_sess->plsql_cxt.compile_status;
+    List* temp_tableof_index = NULL;
     PG_TRY();
     {
         u_sess->plsql_cxt.is_package_instantiation = true;
@@ -1627,6 +1621,8 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
                 if (!isCreate) {
                     if (!doStmt->isExecuted) {
                         (void)CompileStatusSwtichTo(COMPILIE_PKG_ANON_BLOCK);
+                        temp_tableof_index = u_sess->plsql_cxt.func_tableof_index;
+                        u_sess->plsql_cxt.func_tableof_index = NULL;
                         if (u_sess->SPI_cxt._connected > -1 &&
                             u_sess->SPI_cxt._connected != u_sess->SPI_cxt._curid) {
                             SPI_STACK_LOG("begin", NULL, NULL);
@@ -1641,12 +1637,16 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
                             pkg->isInit = true;
                             
                         }
+                        free_func_tableof_index();
+                        u_sess->plsql_cxt.func_tableof_index = temp_tableof_index;
                         (void)CompileStatusSwtichTo(oldCompileStatus);
                         doStmt->isExecuted = true;
                     }
                 } else {
                     if (doStmt->isSpec && !doStmt->isExecuted) {
                         (void)CompileStatusSwtichTo(COMPILIE_PKG_ANON_BLOCK);
+                        temp_tableof_index = u_sess->plsql_cxt.func_tableof_index;
+                        u_sess->plsql_cxt.func_tableof_index = NULL;
                         if (u_sess->SPI_cxt._connected > -1 &&
                             u_sess->SPI_cxt._connected != u_sess->SPI_cxt._curid) {
                             SPI_STACK_LOG("begin", NULL, NULL);
@@ -1657,7 +1657,8 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
                         } else if (!doStmt->isExecuted) {
                             ExecuteDoStmt(doStmt, true);
                         }
-                        
+                        free_func_tableof_index();
+                        u_sess->plsql_cxt.func_tableof_index = temp_tableof_index;
                         (void)CompileStatusSwtichTo(oldCompileStatus);
                         doStmt->isExecuted = true;
                     }
@@ -1677,6 +1678,7 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
     {
         stp_reset_xact_state_and_err_msg(oldStatus, needResetErrMsg);
         u_sess->plsql_cxt.is_package_instantiation = false;
+        free_temp_func_tableof_index(temp_tableof_index);
         PopOverrideSearchPath();
         ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
             errmsg("%s clear curr_compile_context because of error.", __func__)));
@@ -1688,6 +1690,7 @@ void PackageInit(PLpgSQL_package* pkg, bool isCreate)
     }
     PG_END_TRY();
     PopOverrideSearchPath();
+    restoreCallFromPkgOid(old_value);
 }
 #endif
 void record_pkg_function_dependency(PLpgSQL_package* pkg, List** invalItems, Oid funcid, Oid pkgid)

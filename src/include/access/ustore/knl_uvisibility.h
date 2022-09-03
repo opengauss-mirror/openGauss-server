@@ -50,9 +50,10 @@ typedef enum {
 
 bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot snapshot, UHeapTuple *visibleTuple,
     ItemPointer newCtid, bool keepTup, UHeapTupleTransInfo *savedUinfo = NULL, bool *gotTdInfo = NULL,
-    const UHeapTuple *saved_tuple = NULL, int16 lastVar = -1, bool *boolArr = NULL);
+    const UHeapTuple *saved_tuple = NULL, int16 lastVar = -1, bool *boolArr = NULL, bool *has_cur_xact_write = NULL);
 
 bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer buffer);
+extern TransactionId UDiskTupleGetModifiedXid(UHeapDiskTuple diskTup, Page page);
 
 TM_Result UHeapTupleSatisfiesUpdate(Relation rel, Snapshot snapshot, ItemPointer tid, UHeapTuple utuple,
     CommandId cid, Buffer buffer, ItemPointer ctid, UHeapTupleTransInfo *uinfo,
@@ -60,19 +61,21 @@ TM_Result UHeapTupleSatisfiesUpdate(Relation rel, Snapshot snapshot, ItemPointer
     bool multixidIsMyself, bool *inplaceUpdated, bool selfVisible = false, bool isLockForUpdate = false,
     TransactionId conflictXid = InvalidTransactionId, bool isUpsert = false);
 
-TransactionId UHeapTupleGetTransXid(UHeapTuple uhtup, Buffer buf, bool nobuflock);
+TransactionId UHeapTupleGetTransXid(UHeapTuple uhtup, Buffer buf, bool nobuflock, bool* has_cur_xact_write = NULL);
 
-UndoTraversalState UHeapTupleGetTransInfo(Buffer buf, OffsetNumber offnum, UHeapTupleTransInfo *txactinfo);
+UndoTraversalState UHeapTupleGetTransInfo(Buffer buf, OffsetNumber offnum, UHeapTupleTransInfo *txactinfo,
+    bool* has_cur_xact_write = NULL, TransactionId *lastXid = NULL, UndoRecPtr *urp = NULL);
 
 UHTSVResult UHeapTupleSatisfiesOldestXmin(UHeapTuple inplacehtup, TransactionId OldestXmin, Buffer buffer,
-    bool resolve_abort_in_progress, UHeapTuple *preabort_tuple, TransactionId *xid, SubTransactionId *subxid);
+    bool resolve_abort_in_progress, UHeapTuple *preabort_tuple, TransactionId *xid, SubTransactionId *subxid,
+    Relation rel, bool *inplaceUpdated = NULL, TransactionId *lastXid = NULL);
 
 CommandId UHeapTupleGetCid(UHeapTuple uhtup, Buffer buf);
 
 void GetTDSlotInfo(Buffer buf, int tdId, UHeapTupleTransInfo *tdinfo);
 
 UndoTraversalState FetchTransInfoFromUndo(BlockNumber blocknum, OffsetNumber offnum, TransactionId xid,
-    UHeapTupleTransInfo *txactinfo, ItemPointer newCtid, bool needByPass);
+    UHeapTupleTransInfo *txactinfo, ItemPointer newCtid, bool needByPass, TransactionId *lastXid, UndoRecPtr *urp);
 
 bool UHeapTupleIsSurelyDead(UHeapTuple uhtup, Buffer buffer, OffsetNumber offnum,
     const UHeapTupleTransInfo *cachedTdInfo, const bool useCachedTdInfo);

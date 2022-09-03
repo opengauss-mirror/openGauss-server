@@ -17,7 +17,6 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "access/dfs/dfs_insert.h"
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
@@ -182,7 +181,6 @@ static bool object_address_present_add_flags(const ObjectAddress* object, int fl
 static bool stack_address_present_add_flags(const ObjectAddress* object, int flags, ObjectAddressStack* stack);
 static void getRelationDescription(StringInfo buffer, Oid relid);
 static void getOpFamilyDescription(StringInfo buffer, Oid opfid);
-static void PreCheckForDfsTable(ObjectAddresses* targetObjects);
 extern char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn);
 extern char* pg_get_functiondef_worker(Oid funcid, int* headerlines);
 
@@ -261,69 +259,6 @@ void performDeletion(const ObjectAddress* object, DropBehavior behavior, int fla
     free_object_addresses(targetObjects);
 
     heap_close(depRel, RowExclusiveLock);
-}
-
-/*
- * Don't allow "drop DFS table" to run inside a transaction block.
- *
- * "DfsDDLIsTopLevelXact" is set in "case T_DropStmt" of
- * standard_ProcessUtility()
- *
- * exception: allow "DROP DFS TABLE" operation in transaction block
- * during redis a table.
- */
-static void PreCheckForDfsTable(ObjectAddresses* targetObjects)
-{
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && false == u_sess->attr.attr_sql.enable_cluster_resize) {
-        for (int i = 0; i < targetObjects->numrefs; i++) {
-            ObjectAddress* thisobj = targetObjects->refs + i;
-
-            if (RelationRelationId == thisobj->classId) {
-                char relKind = get_rel_relkind(thisobj->objectId);
-
-                if (relKind != RELKIND_INDEX && 0 == thisobj->objectSubId) {
-                    if (RelationIsPaxFormatByOid(thisobj->objectId))
-                        PreventTransactionChain(u_sess->exec_cxt.DfsDDLIsTopLevelXact, "DROP DFS TABLE");
-                }
-            }
-        }
-    }
-}
-
-static void PreDropForDfsTable(ObjectAddresses* targetObjects)
-{
-    if (!(IS_PGXC_DATANODE))
-        return;
-
-    for (int i = 0; i < targetObjects->numrefs; i++) {
-        ObjectAddress* thisobj = targetObjects->refs + i;
-
-        if (RelationRelationId == thisobj->classId) {
-            char relKind = get_rel_relkind(thisobj->objectId);
-
-            if (relKind != RELKIND_INDEX && 0 == thisobj->objectSubId) {
-                Oid relid = thisobj->objectId;
-                Relation rel;
-
-                if (!OidIsValid(relid))
-                    continue;
-
-                // open relation
-                rel = try_relation_open(relid, AccessShareLock);
-                if (NULL == rel)
-                    continue;
-
-                // check DFS table
-                if (RelationIsPAXFormat(rel)) {
-                    // get DFS file name,  DFS file size from DFSDESC
-                    DFSDescHandler handler(MAX_LOADED_DFSDESC, rel->rd_att->natts, rel);
-                    SaveDfsFilelist(rel, &handler);
-                }
-
-                relation_close(rel, AccessShareLock);
-            }
-        }
-    }
 }
 
 /*
@@ -406,20 +341,6 @@ void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behav
     } else {
         reportDependentObjects(targetObjects, behavior, NOTICE, ((objects->numrefs == 1) ? objects->refs : NULL));
     }
-
-    /*
-     * Don't allow "drop DFS table" to run inside a transaction block.
-     *
-     * "DfsDDLIsTopLevelXact" is set in "case T_DropStmt" of
-     * standard_ProcessUtility()
-     */
-    PreCheckForDfsTable(targetObjects);
-
-    /*
-     * write down the delete file name and size for DFS table
-     * must called after the all delete objects are locked.
-     */
-    PreDropForDfsTable(targetObjects);
 
     MemoryContext oldCxt = CurrentMemoryContext;
     MemoryContext objDelCxt = AllocSetContextCreate(CurrentMemoryContext, "ObjectDeleteContext", ALLOCSET_SMALL_MINSIZE,
@@ -986,11 +907,13 @@ void reportDependentObjects(
                                 "cannot drop %s cascadely during upgrade because it may contain user data", objDesc)));
             }
             if (strstr(objDesc, "encrypted column") != NULL) {
+                char* desc = getObjectDescription(&extra->dependee);
                 ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
                     errmsg("cannot drop %s cascadely because encrypted column depend on it.",
-                    getObjectDescription(origObject)),
+                    desc),
                     errhint("we have to drop %s, ... before drop %s cascadely.", objDesc,
-                    getObjectDescription(origObject))));
+                    desc)));
+                pfree_ext(desc);
             }
 
             if (numReportedClient < MAX_REPORTED_DEPS || u_sess->attr.attr_common.IsInplaceUpgrade) {
@@ -1945,12 +1868,13 @@ static bool find_expr_references_walker(Node* node, find_expr_references_context
          */
         if (query->commandType == CMD_INSERT || query->commandType == CMD_UPDATE) {
             RangeTblEntry* rte = NULL;
+            int resultRelation = linitial_int(query->resultRelations);
 
-            if (query->resultRelation <= 0 || query->resultRelation > list_length(query->rtable))
+            if (resultRelation <= 0 || resultRelation > list_length(query->rtable))
                 ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("invalid resultRelation %d", query->resultRelation)));
+                        errmsg("invalid resultRelation %d", resultRelation)));
 
-            rte = rt_fetch(query->resultRelation, query->rtable);
+            rte = rt_fetch(resultRelation, query->rtable);
             if (rte->rtekind == RTE_RELATION) {
                 foreach (lc, query->targetList) {
                     TargetEntry* tle = (TargetEntry*)lfirst(lc);
@@ -2205,6 +2129,23 @@ void add_exact_object_address(const ObjectAddress* object, ObjectAddresses* addr
     item = addrs->refs + addrs->numrefs;
     *item = *object;
     addrs->numrefs++;
+}
+
+void add_type_object_address(List *typOidList, ObjectAddresses* objects)
+{
+    ObjectAddress obj;
+
+    if (typOidList == NULL) {
+        return;
+    }
+
+    foreach_cell(cell, typOidList) {
+        Oid typid = *(Oid *)lfirst(cell);
+        obj.classId = TypeRelationId;
+        obj.objectId = typid;
+        obj.objectSubId = 0;
+        add_exact_object_address(&obj, objects);
+    }
 }
 
 /*

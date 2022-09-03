@@ -274,7 +274,7 @@ extern void CreateSlotOnDisk(ReplicationSlot* slot);
 
 /* misc stuff */
 extern bool ReplicationSlotValidateName(const char* name, int elevel);
-extern void ValidateName(const char* name);
+extern void ValidateInputString(const char* inputString);
 extern void ReplicationSlotsComputeRequiredXmin(bool already_locked);
 extern void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState* repl_slt_state);
 extern XLogRecPtr ReplicationSlotsComputeConfirmedLSN(void);
@@ -335,5 +335,7 @@ extern void get_hadr_cn_info(char* keyCn, bool* isExitKey, char* deleteCn, bool*
     ArchiveSlotConfig *archive_conf);
 extern void ReplicationSlotNameForTablesync(Oid suboid, Oid relid, char *syncslotname, int szslot);
 extern void ReplicationSlotDropAtPubNode(char *slotname, bool missing_ok);
+extern void LogicalCleanSnapDirectory(bool rebuild);
+extern void CleanMyReplicationSlot();
 
 #endif /* SLOT_H */

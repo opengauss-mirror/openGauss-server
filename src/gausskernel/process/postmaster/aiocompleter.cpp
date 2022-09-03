@@ -490,6 +490,7 @@ void AioCompltrMain(int ac, char** av)
      * SIGQUIT causes immediate exit without cleanup.
      * SIGUSR1 is presently unused- reserved for future use.
      */
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, CompltrConfig); /* retrieve config */
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, CompltrShutdown); /* shutdown */

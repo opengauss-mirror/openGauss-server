@@ -357,26 +357,40 @@ bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid)
     bool ret = false;
     Relation rel;
 
-    rel = heap_open(partitiondtableid, NoLock);
+    rel = heap_open(partitiondtableid, AccessShareLock);
     if (RELATION_IS_PARTITIONED(rel)) {
         if (RelationIsSubPartitioned(rel)) {
             ret = IsPartkeyInTargetList(rel, targetList);
             if (!ret) {
                 List *partOidList = relationGetPartitionOidList(rel);
-                Oid partOid = list_nth_oid(partOidList, 0);
+                ListCell *cell = NULL;
+                Oid partOid = InvalidOid;
+                foreach (cell, partOidList) {
+                    partOid = lfirst_oid(cell);
+                    if (ConditionalLockPartitionOid(rel->rd_id, partOid, AccessShareLock)) {
+                        break;
+                    }
+                    if (cell->next == NULL) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+                                errmsg("cannot check partkey for relation \"%s\"", RelationGetRelationName(rel)),
+                                errdetail("all partitions of the target relation hold the lock")));
+                    }
+                }
+
                 Partition part = partitionOpen(rel, partOid, NoLock);
                 Relation partRel = partitionGetRelation(rel, part);
 
                 ret = IsPartkeyInTargetList(partRel, targetList);
 
                 releaseDummyRelation(&partRel);
-                partitionClose(rel, part, NoLock);
+                partitionClose(rel, part, AccessShareLock);
             }
         } else {
             ret = IsPartkeyInTargetList(rel, targetList);
         }
     }
-    heap_close(rel, NoLock);
+    heap_close(rel, AccessShareLock);
     return ret;
 }
 
@@ -445,14 +459,14 @@ int2vector* GetPartitionKey(const PartitionMap* partMap)
  * Target		: data partition
  * Brief		: select * from partition (partition_name)
  *				: or select from partition for (partition_values_list)
- * Description	: get partition oid for rte->partitionOid
+ * Description	: get partition oid for rte->partitionOidList
  */
-Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* pstate, Relation rel)
+bool GetPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* pstate, Relation rel)
 {
     Oid partitionOid = InvalidOid;
 
     if (!PointerIsValid(rte) || !PointerIsValid(relation) || !PointerIsValid(pstate) || !PointerIsValid(rel)) {
-        return InvalidOid;
+        return false;
     }
 
     /* relation is not partitioned table. */
@@ -486,9 +500,13 @@ Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* ps
             partitionOid =
                 GetPartitionOidFromPartitionKeyValuesList(rel, relation->partitionKeyValuesList, pstate, rte);
         }
+        rte->partitionOid = partitionOid;
+        rte->partitionOidList = lappend_oid(rte->partitionOidList, partitionOid);
+        /* InvalidOid means all subpartitions */
+        rte->subpartitionOidList = lappend_oid(rte->subpartitionOidList, InvalidOid);
     }
 
-    return partitionOid;
+    return true;
 }
 
 
@@ -502,7 +520,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
     if (rel->partMap->type == PART_TYPE_LIST) {
         ListPartitionDefState *listPartDef = NULL;
         listPartDef = makeNode(ListPartitionDefState);
-        listPartDef->boundary = partitionKeyValuesList;
+        listPartDef->boundary = (List *)copyObject(partitionKeyValuesList);
         listPartDef->boundary = transformListPartitionValue(pstate, listPartDef->boundary, false, true);
         listPartDef->boundary = transformIntoTargetType(
             rel->rd_att->attrs, (((ListPartitionMap *)rel->partMap)->partitionKey)->values[0], listPartDef->boundary);
@@ -515,7 +533,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
     } else if (rel->partMap->type == PART_TYPE_HASH) {
         HashPartitionDefState *hashPartDef = NULL;
         hashPartDef = makeNode(HashPartitionDefState);
-        hashPartDef->boundary = partitionKeyValuesList;
+        hashPartDef->boundary = (List *)copyObject(partitionKeyValuesList);
         hashPartDef->boundary = transformListPartitionValue(pstate, hashPartDef->boundary, false, true);
         hashPartDef->boundary = transformIntoTargetType(
             rel->rd_att->attrs, (((HashPartitionMap *)rel->partMap)->partitionKey)->values[0], hashPartDef->boundary);
@@ -528,7 +546,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
     } else if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
         RangePartitionDefState *rangePartDef = NULL;
         rangePartDef = makeNode(RangePartitionDefState);
-        rangePartDef->boundary = partitionKeyValuesList;
+        rangePartDef->boundary = (List *)copyObject(partitionKeyValuesList);
 
         transformPartitionValue(pstate, (Node *)rangePartDef, false);
 
@@ -598,7 +616,7 @@ static void CheckPartitionValuesList(Relation rel, List *subPartitionKeyValuesLi
 {
     int len = 0;
 
-    if (rel->partMap->type == PART_TYPE_RANGE) {
+    if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
         len = (((RangePartitionMap *)rel->partMap)->partitionKey)->dim1;
     } else if (rel->partMap->type == PART_TYPE_LIST) {
         len = (((ListPartitionMap *)rel->partMap)->partitionKey)->dim1;
@@ -622,14 +640,15 @@ static void CheckPartitionValuesList(Relation rel, List *subPartitionKeyValuesLi
  * @@GaussDB@@
  * Target		: data partition
  * Brief		: select * from subpartition (subpartition_name)
- * Description	: get partition oid for rte->partitionOid
+ * Description	: get partition oid for rte->subpartitionOidList
  */
-Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel, Oid *partOid)
+bool GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel)
 {
     Oid subPartitionOid = InvalidOid;
+    Oid partitionOid;
 
     if (!PointerIsValid(rte) || !PointerIsValid(relation) || !PointerIsValid(pstate) || !PointerIsValid(rel)) {
-        return InvalidOid;
+        return false;
     }
 
     /* relation is not partitioned table. */
@@ -649,7 +668,7 @@ Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState 
                 NULL,
                 NULL,
                 NoLock,
-                partOid);
+                &partitionOid);
             /* partiton does not exist. */
             if (!OidIsValid(subPartitionOid)) {
                 ereport(ERROR,
@@ -665,9 +684,9 @@ Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState 
             List *subPartitionKeyValuesList = NIL;
             List *tmpList = NIL;
             SplitValuesList(relation->partitionKeyValuesList, &partitionKeyValuesList, &subPartitionKeyValuesList, rel);
-            *partOid = GetPartitionOidFromPartitionKeyValuesList(rel, partitionKeyValuesList, pstate, rte);
+            partitionOid = GetPartitionOidFromPartitionKeyValuesList(rel, partitionKeyValuesList, pstate, rte);
             tmpList = rte->plist;
-            Partition part = partitionOpen(rel, *partOid, AccessShareLock);
+            Partition part = partitionOpen(rel, partitionOid, AccessShareLock);
             Relation partRel = partitionGetRelation(rel, part);
             CheckPartitionValuesList(partRel, subPartitionKeyValuesList);
             subPartitionOid =
@@ -676,6 +695,66 @@ Oid GetSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState 
             partitionClose(rel, part, AccessShareLock);
             rte->plist = list_concat(tmpList, rte->plist);
         }
+        rte->partitionOid = partitionOid;
+        rte->subpartitionOid = subPartitionOid;
+        rte->partitionOidList = lappend_oid(rte->partitionOidList, partitionOid);
+        rte->subpartitionOidList = lappend_oid(rte->subpartitionOidList, subPartitionOid);
     }
-    return subPartitionOid;
+    return true;
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: delete from table partition (partition_name, subpartition_name, ...)
+ * Description	: get (sub)partition oids for rte->partitionOidList and rte->subpartitionOidList
+ */
+void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation)
+{
+    ListCell *cell = NULL;
+    Oid partitionOid;
+    Oid subpartitionOid;
+
+    foreach(cell, relation->partitionNameList) {
+        const char* name = strVal(lfirst(cell));
+        partitionOid = partitionNameGetPartitionOid(rte->relid,
+            name,
+            PART_OBJ_TYPE_TABLE_PARTITION,
+            AccessShareLock,
+            true,
+            false,
+            NULL,
+            NULL,
+            NoLock);
+        if (OidIsValid(partitionOid)) {
+            rte->isContainPartition = true;
+            rte->partitionOidList = lappend_oid(rte->partitionOidList, partitionOid);
+            /* InvalidOid means full subpartitions */
+            rte->subpartitionOidList = lappend_oid(rte->subpartitionOidList, InvalidOid);
+            continue;
+        }
+
+        /* name is not a partiton name, try to get oid using it as a subpartition. */
+        subpartitionOid = partitionNameGetPartitionOid(rte->relid,
+            name,
+            PART_OBJ_TYPE_TABLE_SUB_PARTITION,
+            AccessShareLock,
+            true,
+            false,
+            NULL,
+            NULL,
+            NoLock,
+            &partitionOid);
+        /* partiton does not exist. */
+        if (!OidIsValid(subpartitionOid)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_TABLE),
+                    errmsg("partition or subpartition \"%s\" of relation \"%s\" does not exist",
+                        name,
+                        relation->relname)));
+        }
+        rte->isContainSubPartition = true;
+        rte->partitionOidList = lappend_oid(rte->partitionOidList, partitionOid);
+        rte->subpartitionOidList = lappend_oid(rte->subpartitionOidList, subpartitionOid);
+    }
 }

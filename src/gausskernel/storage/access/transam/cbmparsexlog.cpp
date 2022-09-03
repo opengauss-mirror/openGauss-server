@@ -689,7 +689,25 @@ extern void CBMFollowXlog(void)
     } else
         isRecEnd = true;
 
+    if (RecoveryInProgress()) {
+        XLogRecPtr standbyReplayLsn = GetXLogReplayRecPtr(NULL, NULL);
+        if (XLByteLT(standbyReplayLsn, tmpEndLSN)) {
+            ereport(LOG, (errmsg("The xlog LSN to be parsed %08X/%08X is larger than "
+                                 "already replay xlog LSN %08X/%08X, due to previous force "
+                                 "CBM track. Skip CBM track this time",
+                                 (uint32)(tmpEndLSN >> 32), (uint32)tmpEndLSN,
+                                 (uint32)(standbyReplayLsn >> 32),
+                                 (uint32)standbyReplayLsn)));
+            t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
+            LWLockRelease(CBMParseXlogLock);
+            return;
+        }
+    }
+
     if (XLByteLT(tmpEndLSN, t_thrd.cbm_cxt.XlogCbmSys->startLSN)) {
+        if (checkUserRequstAndRotateCbm()) {
+            RotateCBMFile();
+        }
         if (XLByteEQ(t_thrd.cbm_cxt.XlogCbmSys->startLSN, GetLatestCompTargetLSN())) {
             Assert(XLByteEQ(tmpEndLSN, checkPointRedo));
             ereport(LOG, (errmsg("The xlog LSN to be parsed %08X/%08X is smaller than "
@@ -1131,7 +1149,7 @@ static void TrackCuBlockModification(XLogReaderState *record)
         Assert(xlrec->blockSize % align_size == 0);
 
         RelFileNode tmp_node;
-        RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
+        RelFileNodeCopy(tmp_node, xlrec->node, (int2)XLogRecGetBucketId(record));
 
         for (blkNo = (xlrec->offset / align_size); blkNo < ((xlrec->offset + xlrec->blockSize) / align_size); blkNo++)
             RegisterBlockChange(tmp_node, ColumnId2ColForkNum(xlrec->attid), blkNo);
@@ -1141,6 +1159,7 @@ static void TrackCuBlockModification(XLogReaderState *record)
 static void TrackRelStorageDrop(XLogReaderState *record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     int nrels = 0;
     ColFileNodeRel *xnodes = NULL;
 
@@ -1168,14 +1187,12 @@ static void TrackRelStorageDrop(XLogReaderState *record)
 
     for (int i = 0; i < nrels; ++i) {
         ColFileNode colFileNodeData;
-        ColFileNodeRel *colFileNodeRel = xnodes + i;
-
-        ColFileNodeCopy(&colFileNodeData, colFileNodeRel);
-
-        /* set opt to compressOpt if FORKNUM is compress forknum */
-        if (IS_COMPRESS_DELETE_FORK(colFileNodeData.forknum)) {
-            SET_OPT_BY_NEGATIVE_FORK(colFileNodeData.filenode, colFileNodeData.forknum);
-            colFileNodeData.forknum = MAIN_FORKNUM;
+        if (compress) {
+            ColFileNode *colFileNodeRel = ((ColFileNode *)(void *)xnodes) + i;
+            ColFileNodeFullCopy(&colFileNodeData, colFileNodeRel);
+        } else {
+            ColFileNodeRel *colFileNodeRel = xnodes + i;
+            ColFileNodeCopy(&colFileNodeData, colFileNodeRel);
         }
 
         /* Logic relfilenode delete is ignored */
@@ -1210,7 +1227,7 @@ static void TrackRelStorageCreate(XLogReaderState *record)
         return;
 
     RelFileNode rnode;
-    RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
+    RelFileNodeCopy(rnode, xlrec->rnode, (int2)XLogRecGetBucketId(record));
 
     /* Logic relfilenode create is ignored */
     if (IsSegmentFileNode(rnode)) {
@@ -1224,7 +1241,7 @@ static void TrackRelStorageTruncate(XLogReaderState *record)
     xl_smgr_truncate *xlrec = (xl_smgr_truncate *)XLogRecGetData(record);
     BlockNumber mainTruncBlkNo, fsmTruncBlkNo, vmTruncBlkNo;
     RelFileNode rnode;
-    RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
+    RelFileNodeCopy(rnode, xlrec->rnode, (int2)XLogRecGetBucketId(record));
 
     /* Logic relfilenode create is ignored */
     if (IsSegmentFileNode(rnode)) {
@@ -1417,6 +1434,11 @@ static void skipUndoRecBody(char **currLogPtr, XlUndoHeader *xlundohdr)
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0) {
         *currLogPtr += sizeof(TransactionId);
     }
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_TOAST) != 0) {
+        uint32 toastLen = *(uint32 *)(*currLogPtr);
+        *currLogPtr += sizeof(toastLen) + toastLen;
+    }
 }
 
 static void TrackUheapInsert(XLogReaderState *record)
@@ -1425,8 +1447,9 @@ static void TrackUheapInsert(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + (hasCSN ? sizeof(CommitSeqNo) : 0));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1456,8 +1479,9 @@ static void TrackUheapDelete(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1488,8 +1512,9 @@ static void TrackUheapUpdate(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1536,6 +1561,7 @@ static void TrackUheapMultiInsert(XLogReaderState *record)
     int nranges;
     UndoRecPtr *urpvec = NULL;
     bool isinit = (XLogRecGetInfo(record) & XLOG_UHEAP_INIT_PAGE) != 0;
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUndoHeader *xlundohdr = (XlUndoHeader *)XLogRecGetData(record);
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
@@ -1549,7 +1575,7 @@ static void TrackUheapMultiInsert(XLogReaderState *record)
         currLogPtr += sizeof(uint16);
     }
 
-    if ((record->decoded_record->xl_term & XLOG_CONTAIN_CSN) != 0) {
+    if (hasCSN) {
         currLogPtr += sizeof(CommitSeqNo);
     }
 
@@ -1643,18 +1669,6 @@ static void TrackUndoStorageModification(XLogReaderState *record)
             undoFile = true;
             begUrp = ((undo::XlogUndoExtend *)xlrec)->prevtail;
             endUrp = ((undo::XlogUndoExtend *)xlrec)->tail;
-            break;
-        case XLOG_UNDO_CLEAN:
-            extend = false;
-            undoFile = true;
-            /* always clean the last undo seg, see CleanUndoSpace */
-            endUrp = ((undo::XlogUndoClean *)xlrec)->tail + UNDO_LOG_SEGMENT_SIZE;
-            break;
-        case XLOG_SLOT_CLEAN:
-            extend = false;
-            undoFile = false;
-            /* always clean the last undo seg, see CleanSlotSpace */
-            endUrp = ((undo::XlogUndoClean *)xlrec)->tail + UNDO_META_SEGMENT_SIZE;
             break;
         case XLOG_SLOT_UNLINK:
             extend = false;
@@ -2806,6 +2820,9 @@ static void CBMPageEtyTruncateBefore(const CBMPageTag &cbmPageTag, HTAB *cbmPage
                     }
                 }
 
+                appendStringInfo(log, " truncate %s page with first blocknum %u", needReserve ? "partial" : "whole",
+                                 cbmPageHeader->firstBlkNo);
+
                 if (needReserve) {
                     for (blkNo = cbmPageHeader->firstBlkNo; blkNo < truncBlkNo; blkNo++) {
                         mapByte = BLKNO_TO_CBMBYTEOFPAGE(blkNo);
@@ -2825,9 +2842,6 @@ static void CBMPageEtyTruncateBefore(const CBMPageTag &cbmPageTag, HTAB *cbmPage
                         DLFreeElem(eltPagelist);
                     }
                 }
-
-                appendStringInfo(log, " truncate %s page with first blocknum %u", needReserve ? "partial" : "whole",
-                                 cbmPageHeader->firstBlkNo);
             }
         }
     }

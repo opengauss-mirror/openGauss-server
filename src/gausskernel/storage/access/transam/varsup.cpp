@@ -40,6 +40,7 @@
 
 /* Number of OIDs to prefetch (preallocate) per XLOG write */
 #define VAR_OID_PREFETCH 8192
+#define WHITEBOX_EXTEND_XID 100000
 
 #ifdef PGXC /* PGXC_DATANODE */
 /*
@@ -81,6 +82,17 @@ bool GetForceXidFromGTM(void)
     return t_thrd.xact_cxt.force_get_xid_from_gtm;
 }
 #endif /* PGXC */
+
+#ifdef DEBUG
+bool FastAdvanceXid(void)
+{
+    if (u_sess->attr.attr_storage.ustore_verify_level <= USTORE_VERIFY_COMPLETE) {
+        return true;
+    }
+    t_thrd.xact_cxt.ShmemVariableCache->nextXid += WHITEBOX_EXTEND_XID;
+    return true;
+}
+#endif
 
 /*
  * Allocate the next XID for a new transaction or subtransaction.
@@ -167,7 +179,9 @@ TransactionId GetNewTransactionId(bool isSubXact)
     ExtendCSNLOG(xid);
 
     TransactionIdAdvance(t_thrd.xact_cxt.ShmemVariableCache->nextXid);
-
+#ifdef DEBUG
+    FastAdvanceXid();
+#endif
     /*
      * We must store the new XID into the shared ProcArray before releasing
      * XidGenLock.	This ensures that every active XID older than
@@ -309,42 +323,6 @@ void SetTransactionIdLimit(TransactionId oldest_datfrozenxid, Oid oldest_datoid)
      */
     if (TransactionIdFollowsOrEquals(curXid, xidVacLimit) && IsUnderPostmaster && !t_thrd.xlog_cxt.InRecovery)
         SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
-}
-
-/*
- * ForceTransactionIdLimitUpdate -- does the XID wrap-limit data need updating?
- *
- * We primarily check whether oldestXidDB is valid.  The cases we have in
- * mind are that that database was dropped, or the field was reset to zero
- * by pg_resetxlog.  In either case we should force recalculation of the
- * wrap limit.	Also do it if oldestXid is old enough to be forcing
- * autovacuums or other actions; this ensures we update our state as soon
- * as possible once extra overhead is being incurred.
- */
-bool ForceTransactionIdLimitUpdate(void)
-{
-    TransactionId nextXid;
-    TransactionId xidVacLimit;
-    TransactionId oldestXid;
-    Oid oldestXidDB;
-
-    /* Locking is probably not really necessary, but let's be careful */
-    (void)LWLockAcquire(XidGenLock, LW_SHARED);
-    nextXid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-    xidVacLimit = t_thrd.xact_cxt.ShmemVariableCache->xidVacLimit;
-    oldestXid = t_thrd.xact_cxt.ShmemVariableCache->oldestXid;
-    oldestXidDB = t_thrd.xact_cxt.ShmemVariableCache->oldestXidDB;
-    LWLockRelease(XidGenLock);
-
-    if (!TransactionIdIsNormal(oldestXid))
-        return true; /* shouldn't happen, but just in case */
-    if (!TransactionIdIsValid(xidVacLimit))
-        return true; /* this shouldn't happen anymore either */
-    if (TransactionIdFollowsOrEquals(nextXid, xidVacLimit))
-        return true; /* past VacLimit, don't delay updating */
-    if (!SearchSysCacheExists1(DATABASEOID, ObjectIdGetDatum(oldestXidDB)))
-        return true; /* could happen, per comments above */
-    return false;
 }
 
 /*

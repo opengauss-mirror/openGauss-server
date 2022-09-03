@@ -64,6 +64,7 @@ extern bool IsCatalogClass(Oid relid, Form_pg_class reltuple);
 extern bool IsSystemNamespace(Oid namespaceId);
 extern bool IsToastNamespace(Oid namespaceId);
 extern bool IsCStoreNamespace(Oid namespaceId);
+
 extern bool IsPerformanceNamespace(Oid namespaceId);
 extern bool IsSnapshotNamespace(Oid namespaceId);
 extern bool IsMonitorSpace(Oid namespaceId);
@@ -78,7 +79,8 @@ extern Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersi
 
 extern bool IsPackageSchemaOid(Oid relnamespace);
 extern bool IsPackageSchemaName(const char* schemaName);
-
-
+extern bool IsPldeveloper(Oid nspnamespace);
+extern bool IsAformatStyleFunctionOid(Oid relnamespace);
+extern bool IsAformatStyleFunctionName(const char* schemaName);
 
 #endif   /* CATALOG_H */

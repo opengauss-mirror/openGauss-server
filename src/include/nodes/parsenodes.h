@@ -51,9 +51,8 @@ typedef enum RelOrientation {
 /*
  * It keeps file system which the relatoin store.
  * LOCAL_STORE represents local file system.
- * HDFS_STORE represents Hadoop file system.
  */
-typedef enum RelstoreType { LOCAL_STORE, HDFS_STORE } RelstoreType;
+typedef enum RelstoreType { LOCAL_STORE } RelstoreType;
 
 #define SAMPLEARGSNUM 2
 /* Method of tablesample */
@@ -364,6 +363,17 @@ typedef struct RangeTblEntry {
     Bitmapset *extraUpdatedCols; /* generated columns being updated */
     bool pulled_from_subquery; /* mark whether it is pulled-up from subquery to the current level, for upsert remote
                                   query deparse */
+    List *partitionOidList;     /*
+                                 * OIDs of a partition if relation is partitioned table.
+                                 * Select * from table_name partition (partition_name);
+                                 * or select * from table_name partition for (partition_key_value_list)
+                                 * or delete from table_name partition (partition_name, ...)
+                                 */
+    List *subpartitionOidList;  /*
+                                 * OIDs of a subpartition if relation is partitioned table.
+                                 * Select * from table_name subpartition (subpartition_name);
+                                 * or delete from table_name partition (partition_name, ...)
+                                 */
 } RangeTblEntry;
 
 /*
@@ -792,6 +802,9 @@ typedef struct ShutdownStmt {
                 break;                         \
             case CONSTR_GENERATED:             \
                 tname = "GENERATED COL";       \
+                break;                         \
+            case CONSTR_AUTO_INCREMENT:        \
+                tname = "AUTO_INCREMENT";  \
                 break;                         \
         }                                      \
         tname;                                 \
@@ -1592,11 +1605,9 @@ typedef enum VacuumOption {
  * in pg_statistic. we define AnalyzeMode enum strunct to realize global
  * analyze.
  * ANALYZENORMAL:   Execute normal analyze command.
- * ANALYZEMAIN:     Collect only HDFS table information when execute global analyze.
  * ANALYZEDELTA:    Collect only Delta table information when execute global analyze.
- * ANALYZECOMPLEX:  Collect HDFS table and Delta table information when execute global analyze.
  */
-typedef enum AnalyzeMode { ANALYZENORMAL = 0, ANALYZEMAIN = 1, ANALYZEDELTA = 2, ANALYZECOMPLEX = 3 } AnalyzeMode;
+typedef enum AnalyzeMode { ANALYZENORMAL = 0, ANALYZEDELTA = 2 } AnalyzeMode;
 
 typedef struct GlobalStatInfoEx {
     AnalyzeMode eAnalyzeMode; /* The mode of table whitch will collect stat info, normal table or HDFS table.
@@ -1617,27 +1628,6 @@ typedef struct GlobalStatInfoEx {
     HeapTuple* sampleRows;  /* sample rows receive from DN. */
     TupleDesc tupleDesc;    /* sample row's tuple descriptor. */
 } GlobalStatInfoEx;
-
-typedef enum HdfsSampleRowsFlag {
-    SAMPLEFLAG_DFS = 1 << 0,   /* sample rows for dfs table. */
-    SAMPLEFLAG_DELTA = 1 << 1, /* sample rows for delta table */
-} HdfsSampleRowsFlag;
-
-/* One sample row of HDFS table. */
-typedef struct {
-    double totalrows;     /* estimate total rows */
-    double samplerows;    /* real sample rows num for first sampling. */
-    double secsamplerows; /* real sample rows num for second sampling. */
-    int8* flag;           /* Identify which category(main/delta/complex) the sample row belong. */
-    HeapTuple* rows;      /* sample row data. */
-} HDFS_SAMPLE_ROWS;
-
-/* All sample rows of HDFS table for global stats. */
-typedef struct {
-    MemoryContext hdfs_sample_context;                 /* using to save sample rows. */
-    double totalSampleRowCnt;                          /* total sample row count include dfs table and delta table */
-    HDFS_SAMPLE_ROWS stHdfsSampleRows[ANALYZECOMPLEX]; /* sample rows include dfs table and delta table. */
-} GBLSTAT_HDFS_SAMPLE_ROWS;
 
 struct SplitMap;
 
@@ -1667,13 +1657,6 @@ typedef struct VacuumStmt {
     bool isMOTForeignTable;
 #endif
 
-    /*
-     * @hdfs
-     * parameter totalFileCnt and nodeNo is set by CNSchedulingForAnalyze
-     * CNSchedulingForAnalyze(	  int *totalFilesCnt,
-     *						  int *nodeNo,
-     *                                         Oid foreignTableId)
-     */
     unsigned int totalFileCnt; /* @hdfs The count of file to be sampled in analyze foreign table operation */
     int nodeNo;                /* @hdfs Which data node will do analyze operation,
                                   @global stats: Other coordinators will get statistics from which coordinator node. */
@@ -1709,6 +1692,7 @@ typedef struct VacuumStmt {
     AdaptMem memUsage; /* adaptive memory assigned for the stmt */
     Oid curVerifyRel;  /* the current relation is for database mode to send remote query */
     bool isCascade;    /* used to verify table */
+    bool gpi_vacuumed;
 } VacuumStmt;
 /* Only support analyze, can not support vacuum analyze in transaction block. */
 #define IS_ONLY_ANALYZE_TMPTABLE (((stmt)->isAnalyzeTmpTable) && !((stmt)->options & VACOPT_VACUUM))
@@ -2287,6 +2271,15 @@ typedef struct DropDirectoryStmt {
     bool missing_ok;     /* skip error if db is missing? */
 
 } DropDirectoryStmt;
+
+/* ----------------------
+ *		Create Type Statement, set types
+ * ----------------------
+ */
+typedef struct CreateSetStmt {
+    NodeTag type;
+    TypeName *typname;  /* type of column */
+} CreateSetStmt;
 
 #endif /* PARSENODES_H */
 

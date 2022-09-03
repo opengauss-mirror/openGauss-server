@@ -67,7 +67,7 @@ class Pterodb():
 				                    " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd + " -c"
 				print datanode_cmd_init
 				os.system(datanode_cmd_init)
-			
+
 				#primary
 				conf_file = self.data_dir + "/" + self.dname_prefix + str(i) + "/postgresql.conf"
 				self.__modify_conf_port(conf_file,i+self.coordinator_num-1,1)
@@ -243,7 +243,7 @@ class Pterodb():
 			print datanode_cmd
 			os.system(datanode_cmd)
 			time.sleep(5)
-			
+
 			datanode_cmd = g_valgrind + install_path + "/bin/gs_ctl " + "notify -M standby" + " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1 &"
 			print datanode_cmd
 			os.system(datanode_cmd)
@@ -365,7 +365,7 @@ def main():
 	#1 start
 	#2 stop
 	run_type = 0
-	
+
 	for o, a in opts:
 		if o == "-v":
 			verbose = True

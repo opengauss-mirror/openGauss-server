@@ -1979,13 +1979,13 @@ void flush_and_close_file(pgBackup *backup, bool sync, FILE *out, char *control_
          control_path_temp, strerror(errno));
 }
 
-inline int WriteCompressOption(pgFile *file, char *line, int remainLen, int len)
+inline int write_compress_option(pgFile *file, char *line, int remain_len, int len)
 {
-    if (file->is_datafile && file->compressedFile) {
-        auto nRet =
-            snprintf_s(line + len, remainLen - len, remainLen - len - 1,
+    if (file->is_datafile && file->compressed_file) {
+        int nRet =
+            snprintf_s(line + len, (uint32)(remain_len - len), (uint32)((remain_len - len) - 1),
                        ",\"compressedFile\":\"%d\",\"compressedChunkSize\":\"%d\",\"compressedAlgorithm\":\"%d\"", 1,
-                       file->compressedChunkSize, file->compressedAlgorithm);
+                       file->compressed_chunk_size, file->compressed_algorithm);
         securec_check_ss_c(nRet, "\0", "\0");
         return nRet;
     }
@@ -2086,9 +2086,9 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
             securec_check_ss_c(nRet, "\0", "\0");
             len += nRet;
             /* persistence compress option */
-            len += WriteCompressOption(file, line, remainLen, len);
+            len += write_compress_option(file, line, remainLen, len);
         }
-
+        
         if (file->linked)
         {
             nRet = snprintf_s(line+len, remainLen - len,remainLen - len - 1,",\"linked\":\"%s\"", file->linked);

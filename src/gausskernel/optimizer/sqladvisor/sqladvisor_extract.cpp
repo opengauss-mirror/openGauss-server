@@ -245,18 +245,6 @@ static List* extractNodeCStoreIndexScan(Plan* plan, List* ancestors, List* rtabl
     return resSubplan;
 }
 
-static List* extractNodeDfsIndexScan(Plan* plan, List* ancestors, List* rtable, List* subplans)
-{
-    List* resSubplan = NIL;
-    DfsIndexScan* dfsIndexScan = (DfsIndexScan*)plan;
-
-    extractQual(dfsIndexScan->indexqualorig, plan, ancestors, rtable, subplans);
-    extractQual(plan->qual, plan, ancestors, rtable, subplans);
-    resSubplan = extractVecSubplan((Expr*)dfsIndexScan->dfsScan->plan.targetlist, resSubplan, subplans);
-    resSubplan = extractVecSubplan((Expr*)dfsIndexScan->dfsScan->plan.qual, resSubplan, subplans);
-    return resSubplan;
-}
-
 static List* extractNodeBitmapHeapScan(Plan* plan, List* ancestors, List* rtable, List* subplans)
 {
     List* resSubplan = NIL;
@@ -394,16 +382,6 @@ static List* extractNodeWorkTableScan(Plan* plan, List* ancestors, List* rtable,
     return resSubplan;
 }
 
-static List* extractNodeDfsScan(Plan* plan, List* ancestors, List* rtable, List* subplans)
-{
-    List* resSubplan = NIL;
-    DfsScan* dfsScan = (DfsScan*)plan;
-    extractQual(plan->qual, plan, ancestors, rtable, subplans);
-    resSubplan = extractVecSubplan((Expr*)dfsScan->plan.targetlist, resSubplan, subplans);
-    resSubplan = extractVecSubplan((Expr*)dfsScan->plan.qual, resSubplan, subplans);
-    return resSubplan;
-}
-
 static List* extractNodeFunctionScan(Plan* plan, List* ancestors, List* rtable, List* subplans)
 {
     List* resSubplan = NIL;
@@ -512,9 +490,6 @@ void extractNode(Plan* plan, List* ancestors, List* rtable, List* subplans)
         case T_CStoreIndexScan: {
             resSubplan = extractNodeCStoreIndexScan(plan, ancestors, rtable, subplans);
         } break;
-        case T_DfsIndexScan: {
-            resSubplan = extractNodeDfsIndexScan(plan, ancestors, rtable, subplans);
-        } break;
 
 #ifdef PGXC
         case T_ModifyTable:
@@ -561,9 +536,6 @@ void extractNode(Plan* plan, List* ancestors, List* rtable, List* subplans)
         case T_SubqueryScan: 
         case T_VecSubqueryScan:{
             extractQual(plan->qual, plan, ancestors, rtable, subplans);
-        } break;
-        case T_DfsScan: {
-            resSubplan = extractNodeDfsScan(plan, ancestors, rtable, subplans);
         } break;
         case T_Stream:
         case T_VecStream: 

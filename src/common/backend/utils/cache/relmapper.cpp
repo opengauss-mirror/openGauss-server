@@ -615,7 +615,7 @@ void load_relmap_file(bool shared, RelMapFile *map)
             sizeof(map_file_name[0]),
             sizeof(map_file_name[0]) - 1,
             "%s/%s",
-            GetMyDatabasePath(),
+            u_sess->proc_cxt.DatabasePath,
             RELMAPPER_FILENAME);
         securec_check_ss(rc, "\0", "\0");
 
@@ -623,7 +623,7 @@ void load_relmap_file(bool shared, RelMapFile *map)
             sizeof(map_file_name[1]),
             sizeof(map_file_name[1]) - 1,
             "%s/%s",
-            GetMyDatabasePath(),
+            u_sess->proc_cxt.DatabasePath,
             RELMAPPER_FILENAME_BAK);
         securec_check_ss(rc, "\0", "\0");
     }
@@ -969,7 +969,7 @@ static void recover_relmap_file(bool shared, bool backupfile, RelMapFile* real_m
             sizeof(map_file_name),
             sizeof(map_file_name) - 1,
             "%s/%s",
-            GetMyDatabasePath(),
+            u_sess->proc_cxt.DatabasePath,
             file_name);
         securec_check_ss(rc, "\0", "\0");
     }

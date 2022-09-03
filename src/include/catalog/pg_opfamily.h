@@ -159,6 +159,7 @@ DATA(insert OID = 4037 (2742    jsonb_hash_ops  PGNSP PGUID ));
 
 DATA(insert OID = 3806 (403        raw_ops         PGNSP PGUID));
 DATA(insert OID = 3807 (405        raw_ops         PGNSP PGUID));
+#define INT1_BTREE_FAM_OID 5535
 DATA(insert OID = 5535 (403        int1_ops         PGNSP PGUID));
 DATA(insert OID = 5536 (405        int1_ops         PGNSP PGUID));
 DATA(insert OID = 5570 (403        smalldatetime_ops         PGNSP PGUID));
@@ -286,8 +287,10 @@ DATA(insert OID = 8626 (4439       tsvector_ops    PGNSP PGUID));
 DATA(insert OID = 8683 (4439       tsquery_ops        PGNSP PGUID));
 DATA(insert OID = 8901 (4439       range_ops        PGNSP PGUID));
 DATA(insert OID = 8806 (4439       raw_ops         PGNSP PGUID));
+#define INT1_UBTREE_FAM_OID 9535
 DATA(insert OID = 9535 (4439       int1_ops         PGNSP PGUID));
 DATA(insert OID = 9570 (4439       smalldatetime_ops         PGNSP PGUID));
+DATA(insert OID = 8646 (405        set_ops        PGNSP PGUID));
 
 #endif   /* PG_OPFAMILY_H */
 

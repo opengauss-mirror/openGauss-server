@@ -32,6 +32,7 @@
 #include "replication/replicainternal.h"
 #include "rmgrdesc.h"
 #include "storage/smgr/segment.h"
+#include "storage/page_compression.h"
 
 static const char* progname;
 
@@ -518,6 +519,7 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
     int block_id;
     XLogRecPtr lsn;
     XLogRecPtr xl_prev = XLogRecGetPrev(record);
+    RelFileCompressOption compOpt;
 
     printf("REDO @ %X/%X; LSN %X/%X: prev %X/%X; xid " XID_FMT "; term %u; len %u; total %u; crc %u; "
            "desc: %s - ",
@@ -555,6 +557,15 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
         if (IsBucketFileNode(rnode)) {
             printf("/%d", rnode.bucketNode);
         }
+
+        if (rnode.opt != 0) {
+            TransCompressOptions(rnode, &compOpt);
+            printf(", compressed file: byteConvert: %u, diffConvert: %u, PreallocChunks: %u, compressLevel: %u"
+                ", compressAlgorithm: %u, compressChunkSize: %u.",
+                compOpt.byteConvert, compOpt.diffConvert, compOpt.compressPreallocChunks,
+                compOpt.compressLevelSymbol, compOpt.compressAlgorithm, CHUNK_SIZE_LIST[compOpt.compressChunkSize]);
+        }
+        
         StorageType storage_type = HEAP_DISK;
         if (IsSegmentFileNode(rnode)) {
             storage_type = SEGMENT_PAGE;

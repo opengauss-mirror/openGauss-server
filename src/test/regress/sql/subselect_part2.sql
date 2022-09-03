@@ -90,6 +90,11 @@ with q as (select max(f1) from int4_tbl group by f1 order by f1)
   select q from q;
 
 --
+-- check for over-optimization of whole-row Var referencing an Append plan
+--
+select (select q from (select 1,2,3 where f1 > 0 union all select 4,5,6.0 where f1 <= 0 ) q) from int4_tbl;
+
+--
 -- Test case for sublinks pushed down into subselects via join alias expansion
 --
 

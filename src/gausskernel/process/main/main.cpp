@@ -57,6 +57,8 @@
 #include "utils/plog.h"
 #include "gstrace/gstrace_infra.h"
 
+#include <sys/prctl.h>
+
 THR_LOCAL bool IsInitdb = false;
 
 size_t mmap_threshold = (size_t)0xffffffff;
@@ -77,6 +79,12 @@ extern int encrypte_main(int argc, char* const argv[]);
 int main(int argc, char* argv[])
 {
     char* mmap_env = NULL;
+
+    /* disable THP (transparent huge page) early before mallocs happen */
+#if defined(ENABLE_LITE_MODE) && defined(__linux__) && defined(PR_SET_THP_DISABLE)
+    prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
+#endif
+
     syscall_lock_init();
 
     mmap_env = gs_getenv_r("GAUSS_MMAP_THRESHOLD");

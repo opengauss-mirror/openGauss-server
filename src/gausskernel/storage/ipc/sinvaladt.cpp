@@ -289,12 +289,15 @@ static void SharedInvalReserveBackendInit(bool sendOnly)
     }
 
     if (stateP == NULL) {
+        /* Fetch slot from reserved procState entry */
         if (segP->lastreserveBackend < segP->maxreserveBackends) {
             stateP = &segP->procState[segP->lastreserveBackend];
             Assert(stateP->procPid == 0);
             segP->lastreserveBackend++;
         } else {
             /*
+             * no proc found
+             *
              * out of procState slots: g_instance.shmem_cxt.MaxBackends exceeded -- report normally
              */
             t_thrd.proc_cxt.MyBackendId = InvalidBackendId;

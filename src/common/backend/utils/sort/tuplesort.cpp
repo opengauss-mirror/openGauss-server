@@ -123,6 +123,7 @@
 #include "pg_trace.h"
 #ifdef PGXC
 #include "pgxc/execRemote.h"
+#include "pgxc/remoteHandler.h"
 #include "catalog/pgxc_node.h"
 #endif
 #include "instruments/instr_unique_sql.h"
@@ -4341,6 +4342,30 @@ static void readtup_stream(Tuplesortstate* state, SortTuple* stup, int tapenum, 
     stup->datum1 = tableam_tops_tuple_getattr(tmp, (unsigned short)state->sortKeys[0].ssup_attno, state->tupDesc, &stup->isnull1);
 }
 
+static void receive_msg_from_conn(PGXCNodeHandle* conn, RemoteQueryState* combiner)
+{
+    struct timeval timeout;
+    timeout.tv_sec = ERROR_CHECK_TIMEOUT;
+    timeout.tv_usec = 0;
+    /*
+     * If need check the other errors after getting a normal communcation error,
+     * set timeout first when coming to receive data again. If then get any poll
+     * error, report the former cached error in combiner(RemoteQueryState).
+     */
+    if (pgxc_node_receive(1, &conn, combiner->need_error_check ? &timeout : NULL)) {
+        if (!combiner->need_error_check) {
+            int error_code;
+            char* error_msg = getSocketError(&error_code);
+            ereport(ERROR,
+                (errcode(error_code),
+                    errmsg("Failed to read response from Datanodes Detail: %s\n", error_msg)));
+        } else {
+            combiner->need_error_check = false;
+            pgxc_node_report_error(combiner);
+        }
+    }
+}
+
 static unsigned int getlen_datanode(Tuplesortstate* state, int tapenum, bool eofOK)
 {
     RemoteQueryState* combiner = state->combiner;
@@ -4441,7 +4466,8 @@ static unsigned int getlen_datanode(Tuplesortstate* state, int tapenum, bool eof
     }
     /* Read data from the connection until get a row or EOF */
     for (;;) {
-        switch (handle_response(conn, combiner)) {
+        int ans = handle_response(conn, combiner);
+        switch (ans) {
             case RESPONSE_SUSPENDED:
                 /* Send Execute to request next row */
                 Assert(combiner->cursor);
@@ -4464,24 +4490,51 @@ static unsigned int getlen_datanode(Tuplesortstate* state, int tapenum, bool eof
                 struct timeval timeout;
                 timeout.tv_sec = ERROR_CHECK_TIMEOUT;
                 timeout.tv_usec = 0;
-
-                /*
-                 * If need check the other errors after getting a normal communcation error,
-                 * set timeout first when coming to receive data again. If then get any poll
-                 * error, report the former cached error in combiner(RemoteQueryState).
-                 */
-                if (pgxc_node_receive(1, &conn, combiner->need_error_check ? &timeout : NULL)) {
-                    if (!combiner->need_error_check) {
-                        int error_code;
-                        char* error_msg = getSocketError(&error_code);
-
-                        ereport(ERROR,
-                            (errcode(error_code),
-                                errmsg("Failed to read response from Datanodes Detail: %s\n", error_msg)));
-                    } else {
-                        combiner->need_error_check = false;
-                        pgxc_node_report_error(combiner);
+                /* receive more data */
+                if (ans == RESPONSE_EOF) {
+                    if (pgxc_node_receive(1, &conn, &timeout, true)) {
+                        /* did't get msg in time */
+                        bool *has_checked = (bool*)palloc0(sizeof(bool) * combiner->conn_count);
+                        int has_err_idx = -1;
+                        int cnt = 0;
+                        const int loopnum = 10;
+                        /* If waited conn has no receive data, we get data from other conns for ten times. */
+                        while (!HAS_MESSAGE_BUFFERED(conn) && cnt < loopnum) {
+                            /*
+                             * If need check the other errors after getting a normal communcation error,
+                             * set timeout first when coming to receive data again. If then get any poll
+                             * error, report the former cached error in combiner(RemoteQueryState).
+                             */
+                            if (pgxc_node_receive(combiner->conn_count, combiner->connections,
+                                                  combiner->need_error_check ? &timeout : NULL)) {
+                                if (!combiner->need_error_check) {
+                                    int error_code;
+                                    char* error_msg = getSocketError(&error_code);
+                                    ereport(ERROR,
+                                        (errcode(error_code),
+                                            errmsg("Failed to read response from Datanodes Detail: %s\n", error_msg)));
+                                } else {
+                                    combiner->need_error_check = false;
+                                    pgxc_node_report_error(combiner);
+                                }
+                            }
+                            cnt++;
+                            if (check_receive_buffer(combiner, tapenum, has_checked, &has_err_idx)) {
+                                break;
+                            } else if (has_err_idx != -1) {
+                                /* error accurs */
+                                pgxc_node_report_error(combiner);
+                                break;
+                            }
+                        }
+                        pfree_ext(has_checked);
+                        /* If still has no msg in current connection, get msg through normal way. */
+                        if (!HAS_MESSAGE_BUFFERED(conn) && has_err_idx == -1) {
+                            receive_msg_from_conn(conn, combiner);
+                        }
                     }
+                } else {
+                    receive_msg_from_conn(conn, combiner);
                 }
                 break;
             case RESPONSE_COMPLETE:

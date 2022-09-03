@@ -436,7 +436,7 @@ bool ProcessConfigFileMessage(char *buf, Size len)
         return false;
     }
 
-    reserve_item = alloc_opt_lines(RESERVE_SIZE);
+    reserve_item = alloc_opt_lines(g_reserve_param_num);
     if (reserve_item == NULL) {
         ereport(LOG, (errmsg("Alloc mem for reserved parameters failed")));
         return false;

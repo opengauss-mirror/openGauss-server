@@ -40,7 +40,6 @@
 #include "pgstat.h"
 #include "access/printtup.h"
 #include "access/tableam.h"
-#include "instruments/instr_unique_sql.h"
 #include "executor/lightProxy.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/tcop_gstrace.h"
@@ -1120,11 +1119,13 @@ bool PortalRun(
     int save_compile_status = u_sess->plsql_cxt.compile_status;
     int savePortalDepth = u_sess->plsql_cxt.portal_depth;
     bool savedisAllowCommitRollback = false;
+    int save_nextval_default_expr_type = u_sess->opt_cxt.nextval_default_expr_type;
     bool needResetErrMsg = false;
 
     PG_TRY();
     {
         ActivePortal = portal;
+        u_sess->opt_cxt.nextval_default_expr_type = portal->nextval_default_expr_type;
         t_thrd.utils_cxt.CurrentResourceOwner = portal->resowner;
         u_sess->plsql_cxt.portal_depth++;
         if (u_sess->plsql_cxt.portal_depth > 1) {
@@ -1209,6 +1210,7 @@ bool PortalRun(
     {
         /* Uncaught error while executing portal: mark it dead */
         MarkPortalFailed(portal);
+        u_sess->opt_cxt.nextval_default_expr_type = save_nextval_default_expr_type;
         u_sess->plsql_cxt.portal_depth = savePortalDepth;
         stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
 
@@ -1239,6 +1241,7 @@ bool PortalRun(
     }
     PG_END_TRY();
 
+    u_sess->opt_cxt.nextval_default_expr_type = save_nextval_default_expr_type;
     u_sess->plsql_cxt.portal_depth = savePortalDepth;
     stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
 
@@ -1306,7 +1309,7 @@ bool PortalRun(
 
         /* PortalRun using unique_sql_start_time as unique sql elapse start time */
         if (IsNeedUpdateUniqueSQLStat(portal) && IS_UNIQUE_SQL_TRACK_TOP && IsTopUniqueSQL()) {
-            UpdateUniqueSQLStat(NULL, NULL, u_sess->unique_sql_cxt.unique_sql_start_time);
+            instr_unique_sql_report_elapse_time(u_sess->unique_sql_cxt.unique_sql_start_time);
         }
 
         if (u_sess->unique_sql_cxt.unique_sql_start_time != 0) {

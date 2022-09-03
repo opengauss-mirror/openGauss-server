@@ -120,6 +120,7 @@ static void XLogDumpDisplayRecord(XLogReaderState *record, char *strOutput)
     RmgrTable[XLogRecGetRmid(record)].rm_desc(&buf, record);
     rc = strcat_s(strOutput, MAXOUTPUTLEN, buf.data);
     securec_check(rc, "\0", "\0");
+    pfree_ext(buf.data);
     if (!XLogRecHasAnyBlockRefs(record)) {
         rc = strcat_s(strOutput, MAXOUTPUTLEN, "\n\n");
         securec_check(rc, "\0", "\0");
@@ -170,16 +171,23 @@ void CheckOpenFile(FILE *outputfile, char *outputFilename)
         ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED), (errmsg("Cannot read %s", outputFilename))));
 }
 
-void CheckWriteFile(int result, int cnt_len, char *outputFilename)
+void CheckWriteFile(FILE *outputfile, char *outputFilename, char *strOutput)
 {
-    if (result != cnt_len)
+    uint result = fwrite(strOutput, 1, strlen(strOutput), outputfile);
+    if (result != strlen(strOutput)) {
+        CheckCloseFile(outputfile, outputFilename, false);
         ereport(ERROR, (errcode(ERRCODE_FILE_WRITE_FAILED), (errmsg("Cannot write %s", outputFilename))));
+    }
 }
 
-void CheckCloseFile(int result, char *outputFilename)
+void CheckCloseFile(FILE *outputfile, char *outputFilename, bool is_error)
 {
-    if (0 != result)
-        ereport(ERROR, (errcode(ERRCODE_IO_ERROR), (errmsg("Cannot close %s", outputFilename))));
+    if (0 != fclose(outputfile)) {
+        if (is_error)
+            ereport(ERROR, (errcode(ERRCODE_IO_ERROR), (errmsg("Cannot close %s", outputFilename))));
+        else
+            ereport(WARNING, (errcode(ERRCODE_IO_ERROR), (errmsg("Cannot close %s", outputFilename))));
+    }
 }
 
 static bool CheckValidRecord(XLogReaderState *xlogreader_state, XLogFilter *filter)
@@ -263,13 +271,14 @@ static void XLogDump(XLogRecPtr start_lsn, XLogRecPtr end_lsn, XLogFilter *filte
             XLByteDifference(first_record, start_lsn));
         securec_check_ss(rc, "\0", "\0");
     }
-    CheckWriteFile(fwrite(strOutput, 1, strlen(strOutput), outputfile), strlen(strOutput), outputFilename);
+    CheckWriteFile(outputfile, outputFilename, strOutput);
     pfree_ext(strOutput);
 
     int count = 0;
     char *errormsg = NULL;
     XLogRecord *record = NULL;
     while (XLByteLT(xlogreader_state->EndRecPtr, end_lsn)) {
+        CHECK_FOR_INTERRUPTS(); /* Allow cancel/die interrupts */
         record = XLogReadRecord(xlogreader_state, first_record, &errormsg);
         valid_end_lsn = xlogreader_state->EndRecPtr;
         if (!record && XLByteLT(valid_end_lsn, end_lsn)) {
@@ -322,7 +331,7 @@ static void XLogDump(XLogRecPtr start_lsn, XLogRecPtr end_lsn, XLogFilter *filte
         XLogDumpDisplayRecord(xlogreader_state, strOutput);
         count++;
 
-        CheckWriteFile(fwrite(strOutput, 1, strlen(strOutput), outputfile), strlen(strOutput), outputFilename);
+        CheckWriteFile(outputfile, outputFilename, strOutput);
         pfree_ext(strOutput);
     }
 
@@ -338,8 +347,8 @@ static void XLogDump(XLogRecPtr start_lsn, XLogRecPtr end_lsn, XLogFilter *filte
         (uint32)(valid_end_lsn));
     securec_check_ss(rc, "\0", "\0");
     /* generate output file */
-    CheckWriteFile(fwrite(strOutput, 1, strlen(strOutput), outputfile), strlen(strOutput), outputFilename);
-    CheckCloseFile(fclose(outputfile), outputFilename);
+    CheckWriteFile(outputfile, outputFilename, strOutput);
+    CheckCloseFile(outputfile, outputFilename, true);
     pfree_ext(strOutput);
     CloseXlogFile();
 }

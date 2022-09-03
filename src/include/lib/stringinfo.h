@@ -147,6 +147,13 @@ extern void appendStringInfoSpaces(StringInfo str, int count);
  */
 extern void appendBinaryStringInfo(StringInfo str, const char* data, int datalen);
 
+/*------------------------
+ * appendBinaryStringInfoNT
+ * Append arbitrary binary data to a StringInfo, allocating more space
+ * if necessary. Does not ensure a trailing null-byte exists.
+ */
+extern void appendBinaryStringInfoNT(StringInfo str, const char *data, int datalen);
+
 extern void copyStringInfo(StringInfo to, StringInfo from);
 
 /* ------------------------
@@ -154,6 +161,7 @@ extern void copyStringInfo(StringInfo to, StringInfo from);
  * Make sure a buffer can hold at least 'needed' more bytes.
  */
 void enlargeBuffer(int needed, int len, int* maxlen, char** data);
+
 void enlargeBufferSize(int needed, int len, size_t* maxlen, char** data);
 
 /* ------------------------
@@ -161,5 +169,85 @@ void enlargeBufferSize(int needed, int len, size_t* maxlen, char** data);
  * Make sure a StringInfo's buffer can hold at least 'needed' more bytes.
  */
 extern void enlargeStringInfo(StringInfo str, int needed);
+
+/*
+ * The following function is used to request the use of more than 1GB of memory
+ */
+
+/* -------------------------
+ * StringInfoDataHuge holds information about an extensible string.
+ *		data	is the current buffer for the string (allocated with palloc).
+ *		len		is the current string length.  There is guaranteed to be
+ *				a terminating '\0' at data[len], although this is not very
+ *				useful when the string holds binary data rather than text.
+ *		maxlen	is the allocated size in bytes of 'data', i.e. the maximum
+ *				string size (including the terminating '\0' char) that we can
+ *				currently store in 'data' without having to reallocate
+ *				more space.  We must always have maxlen > len.
+ *		cursor	is initialized to zero by makeStringInfo or initStringInfo,
+ *				but is not otherwise touched by the stringinfo.c routines.
+ *				Some routines use it to scan through a StringInfo.
+ * -------------------------
+ */
+typedef struct StringInfoDataHuge {
+    char* data;
+    int64 len;
+    int64 maxlen;
+    int64 cursor;
+} StringInfoDataHuge;
+
+typedef StringInfoDataHuge* StringInfoHuge;
+
+
+/* ------------------------
+ * initStringInfoHuge
+ * Initialize a StringInfoDataHuge struct (with previously undefined contents)
+ * to describe an empty string.
+ */
+extern void initStringInfoHuge(StringInfoHuge str);
+
+/* free a 'StringInfoDataHuge', use this function when call initStringInfo */
+extern void FreeStringInfoHuge(StringInfoHuge str);
+
+/* ------------------------
+ * resetStringInfoHuge
+ * Clears the current content of the StringInfoHuge, if any. The
+ * StringInfo remains valid.
+ */
+extern void resetStringInfoHuge(StringInfoHuge str);
+
+/* ------------------------
+ * enlargeBufferHuge
+ * Make sure a buffer can hold at least 'needed' more bytes.
+ */
+void enlargeBufferHuge(int64 needed, int64 len, int64* maxlen, char** data);
+
+/* ------------------------
+ * enlargeStringInfoHuge
+ * Make sure a StringInfoHuge's buffer can hold at least 'needed' more bytes.
+ */
+extern void enlargeStringInfoHuge(StringInfoHuge str, int64 needed);
+
+/* ------------------------
+ * appendStringInfoHugeVA
+ * Attempt to format text data under the control of fmt (an sprintf-style
+ * format string) and append it to whatever is already in str.	If successful
+ * return true; if not (because there's not enough space), return false
+ * without modifying str.  Typically the caller would enlarge str and retry
+ * on false return --- see appendStringInfo for standard usage pattern.
+ */
+extern bool appendStringInfoHugeVA(StringInfoHuge str, const char* fmt, va_list args)
+    __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 0)));
+
+/* ------------------------
+ * appendStringInfoHuge
+ * Format text data under the control of fmt (an sprintf-style format string)
+ * and append it to whatever is already in str.  More space is allocated
+ * to str if necessary.  This is sort of like a combination of sprintf and
+ * strcat.
+ */
+extern void appendStringInfoHuge(StringInfoHuge str, const char* fmt, ...)
+    /* This extension allows gcc to check the format string */
+    __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 
 #endif /* STRINGINFO_H */

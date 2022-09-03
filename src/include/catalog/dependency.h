@@ -18,7 +18,6 @@
 #define DEPENDENCY_H
 
 #include "catalog/objectaddress.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "catalog/pg_directory.h"
 
 
@@ -265,6 +264,8 @@ extern ObjectAddresses *new_object_addresses(const int maxRefs = 32);
 
 extern void add_exact_object_address(const ObjectAddress *object,
                                      ObjectAddresses *addrs);
+
+extern void add_type_object_address(List *typOidList, ObjectAddresses* objects);
 
 extern bool object_address_present(const ObjectAddress *object,
                                    const ObjectAddresses *addrs);

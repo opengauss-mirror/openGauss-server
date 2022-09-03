@@ -365,6 +365,7 @@ static int errstate;
 		AlterGlobalConfigStmt DropGlobalConfigStmt
 		CreatePublicationStmt AlterPublicationStmt
 		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
+		ShrinkStmt
 
 /* <DB4AI> */
 /* SNAPSHOTS */
@@ -383,8 +384,8 @@ static int errstate;
 %type <node>	select_no_parens select_with_parens select_clause
 				simple_select values_clause
 
-%type <node>	alter_column_default opclass_item opclass_drop alter_using
-%type <ival>	add_drop opt_asc_desc opt_nulls_order
+%type <node>	alter_column_default opclass_item opclass_drop alter_using AutoIncrementValue
+%type <ival>	add_drop opt_asc_desc opt_nulls_order con_asc_desc
 %type <ival>	OptNoLog
 
 %type <node>	alter_table_cmd alter_partition_cmd alter_type_cmd opt_collate_clause exchange_partition_cmd move_partition_cmd
@@ -473,7 +474,7 @@ static int errstate;
 				oper_argtypes RuleActionList RuleActionMulti
 				opt_column_list columnList opt_name_list opt_analyze_column_define opt_multi_name_list
 				opt_include opt_c_include index_including_params
-				sort_clause opt_sort_clause sortby_list index_params
+				sort_clause opt_sort_clause sortby_list index_params constraint_params
 				name_list from_clause from_list opt_array_bounds
 				qualified_name_list any_name any_name_list
 				any_operator expr_list attrs callfunc_args
@@ -490,6 +491,7 @@ static int errstate;
 				create_generic_options alter_generic_options
 				relation_expr_list dostmt_opt_list
 				merge_values_clause publication_name_list
+				relation_expr_opt_alias_list
 
 /* b compatibility: comment start */
 %type <list>	opt_index_options index_options opt_table_options table_options opt_column_options column_options
@@ -502,7 +504,7 @@ static int errstate;
 
 %type <list>	group_by_list
 %type <node>	group_by_item empty_grouping_set rollup_clause cube_clause
-%type <node>	grouping_sets_clause
+%type <node>	grouping_sets_clause OptAutoIncrement
 %type <node>	opt_publication_for_tables publication_for_tables
 %type <value>	publication_name_item
 
@@ -520,7 +522,6 @@ static int errstate;
 %type <boolean>  opt_trusted opt_restart_seqs opt_purge invoker_rights
 %type <ival>	 OptTemp OptKind
 %type <oncommit> OnCommitOption
-
 %type <lockstrength> for_locking_strength
 %type <node>	for_locking_item
 %type <list>	for_locking_clause opt_for_locking_clause for_locking_items
@@ -588,11 +589,11 @@ static int errstate;
 %type <list>	NumericOnly_list
 %type <alias>	alias_clause opt_alias_clause
 %type <sortby>	sortby
-%type <ielem>	index_elem
+%type <ielem>	index_elem constraint_elem
 %type <node>	table_ref
 %type <jexpr>	joined_table
 %type <range>	relation_expr
-%type <range>	relation_expr_opt_alias
+%type <range>	relation_expr_opt_alias delete_relation_expr_opt_alias
 %type <target>	target_el single_set_clause set_target insert_column_item connect_by_root_expr
 %type <node>	tablesample_clause timecapsule_clause opt_timecapsule_clause opt_repeatable_clause
 
@@ -613,7 +614,7 @@ static int errstate;
 				GenericType Numeric opt_float
 				Character ConstCharacter
 				CharacterWithLength CharacterWithoutLength
-				ConstDatetime ConstInterval
+				ConstDatetime ConstSet ConstInterval
 				Bit ConstBit BitWithLength BitWithoutLength client_logic_type
 				datatypecl OptCopyColTypename
 %type <str>		character
@@ -786,7 +787,7 @@ static int errstate;
  * DOT_DOT is unused in the core SQL grammar, and so will always provoke
  * parse errors.  It is needed by PL/pgsql.
  */
-%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp COMMENTSTRING SET_USER_IDENT
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS
 
@@ -801,7 +802,7 @@ static int errstate;
 /* PGXC - added DISTRIBUTE, DIRECT, COORDINATOR, CLEAN,  NODE, BARRIER, SLICE, DATANODE */
 %token <keyword> ABORT_P ABSOLUTE_P ACCESS ACCOUNT ACTION ADD_P ADMIN AFTER
 	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND ARCHIVE ARRAY AS ASC
-        ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED
+        ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTO_INCREMENT
 
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLANKS
 	BLOB_P BLOCKCHAIN BODY_P BOGUS BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
@@ -814,6 +815,7 @@ static int errstate;
 	CROSS CSN CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
+	SHRINK
 
 	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
@@ -922,6 +924,7 @@ static int errstate;
 %nonassoc   PARTIAL_EMPTY_PREC
 %nonassoc   CLUSTER
 %nonassoc	SET				/* see relation_expr_opt_alias */
+%nonassoc	AUTO_INCREMENT
 %right      PRIOR SEPARATOR_P
 %right      FEATURES TARGET // DB4AI
 %left		UNION EXCEPT MINUS_P
@@ -929,7 +932,7 @@ static int errstate;
 %left		OR
 %left		AND
 %right		NOT
-%right		'=' COLON_EQUALS
+%right		'=' CmpNullOp COLON_EQUALS
 %nonassoc	'<' '>' CmpOp
 %nonassoc	LIKE ILIKE SIMILAR
 %nonassoc	ESCAPE
@@ -1230,6 +1233,7 @@ stmt :
 			| VariableShowStmt
 			| VerifyStmt
 			| ViewStmt
+			| ShrinkStmt
 			| /*EMPTY*/
 				{ $$ = NULL; }
 		;
@@ -1241,18 +1245,35 @@ stmt :
  *****************************************************************************/
 
 CreateRoleStmt:
-			CREATE ROLE RoleId opt_with OptRoleList
+			CREATE ROLE RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
 				{
 					CreateRoleStmt *n = makeNode(CreateRoleStmt);
 					n->stmt_type = ROLESTMT_ROLE;
 					if (!isRestoreMode)
 						IsValidIdentUsername($3);
 					n->role = $3;
-					n->options = $5;
+					n->options = $6;
 					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
 				}
 		;
 
+ShrinkStmt:
+            SHRINK TABLE relation_expr_list opt_nowait
+                {
+                    ShrinkStmt *n = makeNode(ShrinkStmt);
+                    n->relations = $3;
+                    n->nowait = $4;
+                    $$ = (Node*)n;
+                }
+            |   SHRINK INDEX relation_expr_list opt_nowait
+                    {
+                        ShrinkStmt *n = makeNode(ShrinkStmt);
+                        n->relations = $3;
+                        n->nowait = $4;
+                        $$ = (Node*)n;
+                    }
+        ;
 
 opt_with:	WITH									{}
 			| /*EMPTY*/								{}
@@ -1560,14 +1581,15 @@ CreateOptRoleElem:
  *****************************************************************************/
 
 CreateUserStmt:
-			CREATE USER RoleId opt_with OptRoleList
+			CREATE USER RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
 				{
 					CreateRoleStmt *n = makeNode(CreateRoleStmt);
 					n->stmt_type = ROLESTMT_USER;
 					IsValidIdentUsername($3);
 					n->role = $3;
-					n->options = $5;
+					n->options = $6;
 					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
 				}
 		;
 
@@ -1579,14 +1601,15 @@ CreateUserStmt:
  *****************************************************************************/
 
 AlterRoleStmt:
-			ALTER ROLE RoleId opt_with AlterOptRoleList
+			ALTER ROLE RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} AlterOptRoleList
 				 {
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->role = $3;
 					n->action = +1;	/* add, if there are members */
-					n->options = $5;
+					n->options = $6;
 					n->lockstatus = DO_NOTHING;
 					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
 				 }
 			| ALTER ROLE RoleId opt_with ACCOUNT LOCK_P
 				{
@@ -1632,15 +1655,16 @@ AlterRoleSetStmt:
  *****************************************************************************/
 
 AlterUserStmt:
-			ALTER USER RoleId opt_with AlterOptRoleList
+			ALTER USER RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} AlterOptRoleList
 				 {
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->missing_ok = FALSE;
 					n->role = $3;
 					n->action = +1;	/* add, if there are members */
-					n->options = $5;
+					n->options = $6;
 					n->lockstatus = DO_NOTHING;
 					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
 				 }
 			| ALTER USER IF_P EXISTS RoleId opt_with AlterOptRoleList
 				 {
@@ -2210,20 +2234,22 @@ set_rest_more:  /* Generic SET syntaxes: */
 					n->args = list_make1(makeStringConst($2, @2));
 					$$ = n;
 				}
-			| ROLE ColId_or_Sconst PASSWORD password_string
+			| ROLE ColId_or_Sconst PASSWORD {u_sess->parser_cxt.isForbidTruncate = true;} password_string
 				{
+					u_sess->parser_cxt.isForbidTruncate = false;
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_ROLEPWD;
 					n->name = "role";
-					n->args = list_make2(makeStringConst($2, @2), makeStringConst($4, @4));
+					n->args = list_make2(makeStringConst($2, @2), makeStringConst($5, @5));
 					$$ = n;
 				}
-			| SESSION AUTHORIZATION ColId_or_Sconst PASSWORD password_string
+			| SESSION AUTHORIZATION ColId_or_Sconst PASSWORD {u_sess->parser_cxt.isForbidTruncate = true;} password_string
 				{
+					u_sess->parser_cxt.isForbidTruncate = false;
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_ROLEPWD;
 					n->name = "session_authorization";
-					n->args = list_make2(makeStringConst($3, @3), makeStringConst($5,@5));
+					n->args = list_make2(makeStringConst($3, @3), makeStringConst($6,@6));
 					$$ = n;
 				}
 			| SESSION AUTHORIZATION DEFAULT
@@ -4157,6 +4183,24 @@ alter_table_cmd:
 					n->subtype = AT_EncryptionKeyRotation;
 					$$ = (Node *)n;
 				}
+            | AutoIncrementValue
+                {
+#ifdef ENABLE_MULTIPLE_NODES
+            		const char* message = "auto_increment is not yet supported";
+            		InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("auto_increment is not yet supported")));
+#endif
+                    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+                        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("auto_increment is supported only in B-format database")));
+                    }
+                    AlterTableCmd *n = makeNode(AlterTableCmd);
+                    n->subtype = AT_SetAutoIncrement;
+                    n->def = $1;
+					$$ = (Node *)n;
+                }
 /* PGXC_END */
 /* table comments start */
             | COMMENT opt_equal Sconst
@@ -5212,7 +5256,7 @@ opt_rename:
  *****************************************************************************/
 
 CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
-			OptInherit OptWith OnCommitOption OptCompress OptPartitionElement
+			OptInherit OptAutoIncrement OptWith OnCommitOption OptCompress OptPartitionElement
 /* PGXC_BEGIN */
 			OptDistributeBy OptSubCluster
 /* PGXC_END */
@@ -5222,27 +5266,28 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 				{
 					CreateStmt *n = makeNode(CreateStmt);
 					$4->relpersistence = $2;
-					n->relkind = $18;
+					n->relkind = $19;
 					n->relation = $4;
 					n->tableElts = $6;
 					n->inhRelations = $8;
 					n->constraints = NIL;
-					n->options = $9;
-					n->oncommit = $10;
-					n->row_compress = $11;
-					n->tablespacename = $12;
+					n->options = $10;
+					n->oncommit = $11;
+					n->row_compress = $12;
+					n->tablespacename = $13;
 					n->if_not_exists = false;
 /* PGXC_BEGIN */
-					n->distributeby = $13;
-					n->subcluster = $14;
+					n->distributeby = $14;
+					n->subcluster = $15;
 /* PGXC_END */
-					n->tableOptions = $15;
-					n->partTableState = (PartitionState *)$16;
-					n->internalData = $17;
+					n->tableOptions = $16;
+                    n->partTableState = (PartitionState *)$17;
+					n->internalData = $18;
+					n->autoIncStart = $9;
 					$$ = (Node *)n;
 				}
 		| CREATE OptTemp TABLE IF_P NOT EXISTS qualified_name '('
-			OptTableElementList ')' OptInherit OptWith OnCommitOption
+			OptTableElementList ')' OptInherit OptAutoIncrement OptWith OnCommitOption
 			OptCompress OptPartitionElement
 /* PGXC_BEGIN */
 			OptDistributeBy OptSubCluster
@@ -5257,18 +5302,19 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->tableElts = $9;
 					n->inhRelations = $11;
 					n->constraints = NIL;
-					n->options = $12;
-					n->oncommit = $13;
-					n->row_compress = $14;
-					n->tablespacename = $15;
+					n->options = $13;
+					n->oncommit = $14;
+					n->row_compress = $15;
+					n->tablespacename = $16;
 					n->if_not_exists = true;
 /* PGXC_BEGIN */
-					n->distributeby = $16;
-					n->subcluster = $17;
+					n->distributeby = $17;
+					n->subcluster = $18;
 /* PGXC_END */
-					n->tableOptions = $18;
-					n->partTableState = (PartitionState *)$19;
-					n->internalData = $20;
+					n->tableOptions = $19;
+                    n->partTableState = (PartitionState *)$20;
+					n->internalData = $21;
+					n->autoIncStart = $12;
 					$$ = (Node *)n;
 				}
 		| CREATE OptTemp TABLE qualified_name OF any_name
@@ -6167,6 +6213,26 @@ ColConstraint:
 				{
 					$$=$2;
 				}
+			| AUTO_INCREMENT
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+            		const char* message = "auto_increment is not yet supported";
+            		InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("auto_increment is not yet supported")));
+#endif
+                    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+                        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("auto_increment is supported only in B-format database")));
+                    }
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_AUTO_INCREMENT;
+					n->location = @1;
+					n->raw_expr = NULL;
+					n->cooked_expr = NULL;
+					$$ = (Node *)n;
+				}
 		;	
 with_algorithm:
                        WITH '(' algorithm_desc ')'
@@ -6733,10 +6799,38 @@ TableConstraint:
 				{
 					Constraint *n = (Constraint *) $3;
 					Assert(IsA(n, Constraint));
-					n->conname = $2;
+					if ((n->conname == NULL) || (n->conname != NULL && n->contype == CONSTR_FOREIGN)) {
+						n->conname = $2;
+					}		
 					n->location = @1;
 					n->constraintOptions = $4;
 					$$ = (Node *) n;
+				}
+			| CONSTRAINT ConstraintElem opt_index_options
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "CONSTRAINT without constraint_name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("CONSTRAINT without constraint_name is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						Constraint *n = (Constraint *) $2;
+						Assert(IsA(n, Constraint));
+						n->location = @1;
+						n->constraintOptions = $3;
+						$$ = (Node *) n;
+					} else {
+						const char* message = "CONSTRAINT without constraint_name is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("CONSTRAINT without constraint_name is supported only in B-format database."),
+									parser_errposition(@1)));
+  						$$ = NULL;/* not reached */
+					}
 				}
 			| ConstraintElem opt_index_options
 			    {
@@ -6760,7 +6854,81 @@ ConstraintElem:
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *)n;
 				}
-			| UNIQUE '(' columnList ')' opt_c_include opt_definition OptConsTableSpace
+			| UNIQUE name access_method_clause '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "UNIQUE name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("UNIQUE name is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_UNIQUE;
+						n->location = @1;
+						n->conname = $2;
+						n->access_method = $3;
+						n->keys = $5;
+						n->including = $7;
+						n->options = $8;
+						n->indexname = NULL;
+						n->indexspace = $9;
+						processCASbits($10, @10, "UNIQUE",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						$$ = (Node *)n;
+					} else {
+						const char* message = "UNIQUE name is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("UNIQUE name is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+					
+				}
+			| UNIQUE USING access_method '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "UNIQUE access_method_clause is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("UNIQUE access_method_clause is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_UNIQUE;
+						n->location = @1;
+						n->access_method = $3;
+						n->keys = $5;
+						n->including = $7;
+						n->options = $8;
+						n->indexname = NULL;
+						n->indexspace = $9;
+						processCASbits($10, @10, "UNIQUE",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						$$ = (Node *)n;
+					} else {
+						const char* message = "UNIQUE access_method_clause is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("UNIQUE access_method_clause is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */						
+					}
+				}
+			| UNIQUE '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
@@ -6793,7 +6961,43 @@ ConstraintElem:
 					n->inforConstraint = (InformationalConstraint *) $4; /* informational constraint info */
 					$$ = (Node *)n;
 				}
-			| PRIMARY KEY '(' columnList ')' opt_c_include opt_definition OptConsTableSpace
+			| PRIMARY KEY USING access_method '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "PRIMARY KEY USING access_method is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("PRIMARY KEY USING access_method is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_PRIMARY;
+						n->location = @1;
+						n->access_method = $4;
+						n->keys = $6;
+						n->including = $8;
+						n->options = $9;
+						n->indexname = NULL;
+						n->indexspace = $10;
+						processCASbits($11, @11, "PRIMARY KEY",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $12; /* informational constraint info */
+						$$ = (Node *)n;
+					} else {
+						const char* message = "PRIMARY KEY USING access_method is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("PRIMARY KEY USING access_method is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */					
+					}
+				}
+			| PRIMARY KEY '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
@@ -6850,6 +7054,44 @@ ConstraintElem:
 								   NULL, yyscanner);
 					$$ = (Node *)n;
 				}
+			| FOREIGN KEY name '(' columnList ')' REFERENCES qualified_name
+				opt_column_list key_match key_actions ConstraintAttributeSpec
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "FOREIGN KEY name ... REFERENCES constraint is not yet supported.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("FOREIGN KEY name ... REFERENCES constraint is not yet supported.")));
+#endif						
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_FOREIGN;
+						n->location = @1;
+						n->conname = $3;
+						n->pktable			= $8;
+						n->fk_attrs			= $5;
+						n->pk_attrs			= $9;
+						n->fk_matchtype		= $10;
+						n->fk_upd_action	= (char) ($11 >> 8);
+						n->fk_del_action	= (char) ($11 & 0xFF);
+						processCASbits($12, @12, "FOREIGN KEY",
+									   &n->deferrable, &n->initdeferred,
+									   &n->skip_validation, NULL,
+									   yyscanner);
+						n->initially_valid = !n->skip_validation;
+						$$ = (Node *)n;
+					} else {
+						const char* message = "FOREIGN KEY name is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("FOREIGN KEY name is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */	
+					}
+				}
 			| FOREIGN KEY '(' columnList ')' REFERENCES qualified_name
 				opt_column_list key_match key_actions ConstraintAttributeSpec
 				{
@@ -6875,7 +7117,7 @@ ConstraintElem:
 								   yyscanner);
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *)n;
-				}
+				}			
 			| PARTIAL CLUSTER KEY '(' columnList ')' ConstraintAttributeSpec
 				{
 					Constraint *n = makeNode(Constraint);
@@ -7026,6 +7268,29 @@ OnCommitOption:  ON COMMIT DROP				{ $$ = ONCOMMIT_DROP; }
 			| ON COMMIT DELETE_P ROWS		{ $$ = ONCOMMIT_DELETE_ROWS; }
 			| ON COMMIT PRESERVE ROWS		{ $$ = ONCOMMIT_PRESERVE_ROWS; }
 			| /*EMPTY*/						{ $$ = ONCOMMIT_NOOP; }
+		;
+AutoIncrementValue: AUTO_INCREMENT Iconst	{ $$ = (Node *)makeInteger($2); }
+        | AUTO_INCREMENT '=' Iconst	{ $$ = (Node *)makeInteger($3); }
+        | AUTO_INCREMENT FCONST	{ $$ = (Node *)makeFloat($2); }
+		| AUTO_INCREMENT '=' FCONST	{ $$ = (Node *)makeFloat($3); }
+		;
+
+OptAutoIncrement: AutoIncrementValue
+            {
+#ifdef ENABLE_MULTIPLE_NODES
+                const char* message = "auto_increment is not yet supported";
+                InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                ereport(errstate,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("auto_increment is not yet supported")));
+#endif
+                if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+                    ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("auto_increment is supported only in B-format database")));
+                }
+                $$ = (Node*)makeDefElem("start", $1);
+            }
+            | /* EMPTY */ { $$ = NULL; }
 		;
 
 OptTableSpace:   TABLESPACE opt_equal name					{ $$ = $3; }
@@ -8742,10 +9007,11 @@ AlterExtensionContentsStmt:
  *****************************************************************************/
 
 CreateWeakPasswordDictionaryStmt:
-        CREATE WEAK PASSWORD DICTIONARY opt_vals weak_password_string_list
+        CREATE WEAK PASSWORD DICTIONARY opt_vals {u_sess->parser_cxt.isForbidTruncate = true;} weak_password_string_list
                {
+                       u_sess->parser_cxt.isForbidTruncate = false;
                        CreateWeakPasswordDictionaryStmt *n = makeNode(CreateWeakPasswordDictionaryStmt);
-                       n->weak_password_string_list = $6;
+                       n->weak_password_string_list = $7;
                        $$ = (Node*)n;
                }
 			   ;
@@ -9578,8 +9844,7 @@ DropModelStmt:
 		n->concurrent = false;
 		n->isProcedure = false;
 		$$ = (Node *)n;
-	}
-	;
+	};
 
 /*****************************************************************************
  *
@@ -11923,6 +12188,78 @@ db_privilege: CREATE ANY TABLE
                 n->db_priv_name = pstrdup("create any type");
                 $$ = n;
             }
+            | ALTER ANY TYPE_P
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("alter any type");
+                $$ = n;
+            }
+            | DROP ANY TYPE_P
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("drop any type");
+                $$ = n;
+            }
+            | ALTER ANY SEQUENCE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("alter any sequence");
+                $$ = n;
+            }
+            | DROP ANY SEQUENCE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("drop any sequence");
+                $$ = n;
+            }
+            | SELECT ANY SEQUENCE
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("select any sequence");
+                $$ = n;
+            }
+            | ALTER ANY INDEX
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("alter any index");
+                $$ = n;
+            }
+            | DROP ANY INDEX
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("drop any index");
+                $$ = n;
+            }
+            | CREATE ANY SYNONYM
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("create any synonym");
+                $$ = n;
+            }
+            | DROP ANY SYNONYM
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("drop any synonym");
+                $$ = n;
+            }
+            | CREATE ANY TRIGGER
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("create any trigger");
+                $$ = n;
+            }
+            | ALTER ANY TRIGGER
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("alter any trigger");
+                $$ = n;
+            }
+            | DROP ANY TRIGGER
+            {
+                DbPriv *n = makeNode(DbPriv);
+                n->db_priv_name = pstrdup("drop any trigger");
+                $$ = n;
+            }
         ;
 
 /*****************************************************************************
@@ -12208,6 +12545,86 @@ index_elem:	ColId opt_collate opt_class opt_asc_desc opt_nulls_order
 					$$->opclass = $5;
 					$$->ordering = (SortByDir)$6;
 					$$->nulls_ordering = (SortByNulls)$7;
+				}
+		;
+
+constraint_params:	constraint_elem							{ $$ = list_make1($1); }
+			| constraint_params ',' constraint_elem			{ $$ = lappend($1, $3); }
+		;
+
+con_asc_desc: ASC							{ $$ = SORTBY_ASC; }
+			| DESC							{ $$ = SORTBY_DESC; }
+		;
+
+constraint_elem: ColId con_asc_desc
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "ASC/DESC is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("ASC/DESC is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						$$ = makeNode(IndexElem);
+						$$->name = $1;
+						$$->expr = NULL;
+						$$->indexcolname = NULL;
+						$$->collation = NIL;
+						$$->opclass = NIL;
+						$$->ordering = (SortByDir)$2;
+						$$->nulls_ordering = SORTBY_NULLS_DEFAULT;
+					} else {
+						const char* message = "ASC/DESC is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("ASC/DESC is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+				}
+			| ColId
+				{
+					$$ = makeNode(IndexElem);
+					$$->name = $1;
+					$$->expr = NULL;
+					$$->indexcolname = NULL;
+					$$->collation = NIL;
+					$$->opclass = NIL;
+					$$->ordering = SORTBY_DEFAULT;
+					$$->nulls_ordering = SORTBY_NULLS_DEFAULT;
+				}
+			| '(' a_expr ')' opt_asc_desc
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "expression is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("expression is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						$$ = makeNode(IndexElem);
+						$$->name = NULL;
+						$$->expr = $2;
+						$$->indexcolname = NULL;
+						$$->collation = NIL;
+						$$->opclass = NIL;
+						$$->ordering = (SortByDir)$4;
+						$$->nulls_ordering = SORTBY_NULLS_DEFAULT;
+					} else {
+						const char* message = "expression is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("expression is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+					
 				}
 		;
 
@@ -12620,7 +13037,7 @@ CreatePackageStmt:
                         }
                         tok = YYLEX;
                     }
-                	yyextra->core_yy_extra.query_string_locationlist = 
+                	yyextra->core_yy_extra.query_string_locationlist =
                     	lappend_int(yyextra->core_yy_extra.query_string_locationlist, yylloc);
                     if (toks == NULL || toks->length < 1) {
                         parser_yyerror("package spec is not ended correctly");
@@ -15999,7 +16416,8 @@ load_col_data_type:
 		Numeric					{ $$ = $1; }
 		| Numeric EXTERNAL		{ $$ = $1; }
 		| Character				{ $$ = $1; }
-		| ConstDatetime			{ $$ = $1; }			
+		| ConstDatetime			{ $$ = $1; }
+		| ConstSet				{ $$ = $1; }
 		| /*EMPTY*/				{ $$ = NULL; }
 	;
 
@@ -19080,28 +19498,52 @@ upsert_clause:
  *
  *****************************************************************************/
 
-DeleteStmt: opt_with_clause DELETE_P hint_string FROM relation_expr_opt_alias
-			using_clause where_or_current_clause opt_delete_limit returning_clause
+DeleteStmt: opt_with_clause DELETE_P hint_string FROM relation_expr_opt_alias_list
+			using_clause where_or_current_clause opt_sort_clause opt_delete_limit returning_clause
 				{
 					DeleteStmt *n = makeNode(DeleteStmt);
-					n->relation = $5;
+					n->relations = $5;
+					if (list_length(n->relations) > 1) {
+#ifdef ENABLE_MULTIPLE_NODES
+						ereport(errstate, 
+							    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("multi-relation delete is not yet supported.")));
+#endif
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)						
+							ereport(errstate, 
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("multi-relation delete only support in B-format database")));
+					}
 					n->usingClause = $6;
 					n->whereClause = $7;
-					n->limitClause = (Node*)list_nth($8, 1);
-					n->returningList = $9;
+					n->sortClause = $8;
+					n->limitClause = (Node*)list_nth($9, 1);
+					n->returningList = $10;
 					n->withClause = $1;
 					n->hintState = create_hintstate($3);					
 					$$ = (Node *)n;
 				}
-		| opt_with_clause DELETE_P hint_string relation_expr_opt_alias
-			using_clause where_or_current_clause opt_delete_limit returning_clause
+		| opt_with_clause DELETE_P hint_string relation_expr_opt_alias_list
+			using_clause where_or_current_clause opt_sort_clause opt_delete_limit returning_clause
 				{
 					DeleteStmt *n = makeNode(DeleteStmt);
-					n->relation = $4;
+					n->relations = $4;
+					if (list_length(n->relations) > 1) {
+#ifdef ENABLE_MULTIPLE_NODES
+						ereport(errstate, 
+							    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("multi-relation delete is not yet supported.")));
+#endif
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)						
+							ereport(errstate, 
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("multi-relation delete only support in B-format database")));
+					}
 					n->usingClause = $5;
 					n->whereClause = $6;
-					n->limitClause = (Node*)list_nth($7, 1);
-					n->returningList = $8;
+					n->sortClause = $7;
+					n->limitClause = (Node*)list_nth($8, 1);
+					n->returningList = $9;
 					n->withClause = $1;
 					n->hintState = create_hintstate($3);				
 					$$ = (Node *)n;
@@ -19165,18 +19607,41 @@ opt_wait:	WAIT Iconst						{ $$ = $2; }
  *
  *****************************************************************************/
 
-UpdateStmt: opt_with_clause UPDATE hint_string relation_expr_opt_alias
+UpdateStmt: opt_with_clause UPDATE hint_string from_list
 			SET set_clause_list
 			from_clause
 			where_or_current_clause
+			opt_sort_clause
+			opt_delete_limit
 			returning_clause
 				{
 					UpdateStmt *n = makeNode(UpdateStmt);
-					n->relation = $4;
+					n->relation = NULL;
+					if (list_length($4) > 1) {
+#ifdef ENABLE_MULTIPLE_NODES
+						ereport(errstate, 
+							    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("multi-relation update is not yet supported.")));
+#endif
+						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+							ereport(errstate, 
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("multi-relation update only support in B-format database")));
+					} else {
+						if (!IsA(linitial($4), RangeVar)) {
+							ereport(errstate,
+								    (errcode(ERRCODE_SYNTAX_ERROR),
+								     errmsg("invalid target relation name."),
+								     parser_errposition(@4)));
+						}
+					}
+					n->relationClause = $4;
 					n->targetList = $6;
 					n->fromClause = $7;
 					n->whereClause = $8;
-					n->returningList = $9;
+					n->sortClause = $9;
+					n->limitClause = (Node*)list_nth($10, 1);
+					n->returningList = $11;
 					n->withClause = $1;
 					n->hintState = create_hintstate($3);
 					n->hasIgnore = (n->hintState != NULL && n->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
@@ -20268,7 +20733,7 @@ from_list:
  * and joined_table := '(' joined_table ')'.  So, we must have the
  * redundant-looking productions here instead.
  */
-table_ref:	relation_expr
+table_ref:	relation_expr		%prec UMINUS
 				{
 #ifndef ENABLE_MULTIPLE_NODES
         			StringInfoData detailInfo;
@@ -20385,7 +20850,7 @@ table_ref:	relation_expr
 					$1->issubpartition = true;
 					$$ = (Node *)$1;
 				}
-			| func_table
+			| func_table		%prec UMINUS
 				{
 					RangeFunction *n = makeNode(RangeFunction);
 					n->funccallnode = $1;
@@ -20427,7 +20892,7 @@ table_ref:	relation_expr
 					n->coldeflist = $4;
 					$$ = (Node *) n;
 				}
-			| select_with_parens
+			| select_with_parens		%prec UMINUS
 				{
 					/*
 					 * The SQL spec does not permit a subselect
@@ -20670,6 +21135,77 @@ relation_expr_list:
 			| relation_expr_list ',' relation_expr	{ $$ = lappend($1, $3); }
 		;
 
+delete_relation_expr_opt_alias:
+    relation_expr_opt_alias                 %prec UMINUS
+        {
+            /*
+             * When sql_compatibility is B, name in PARTITION(name) can be
+             * a subpartition name instead of a strict partition name.
+             * Put it in partitionNameList to avoid error reporting.
+             */
+            if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT &&
+                $1->partitionname != NULL && $1->alias == NULL) {
+                $1->partitionNameList = list_make1(makeString($1->partitionname));
+                $1->partitionname = NULL;
+                $1->ispartition = FALSE;
+            }
+            $$ = $1;
+        }
+    | relation_expr PARTITION '(' name ',' name_list ')'
+        {
+#ifdef ENABLE_MULTIPLE_NODES
+        const char* message = "partition syntax is not yet supported";
+        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+            ereport(errstate,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("partition syntax is not yet supported")));
+#endif
+	    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+	        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+	                        errmsg("this partition syntax is supported only in B-format database")));
+	    }
+            $1->partitionNameList = lcons(makeString($4), $6);
+            $$ = $1;
+        }
+    | relation_expr ColId PARTITION '(' name_list ')'
+        {
+#ifdef ENABLE_MULTIPLE_NODES
+        const char* message = "partition syntax is not yet supported";
+        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+            ereport(errstate,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("partition syntax is not yet supported")));
+#endif
+	    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+	        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+	                        errmsg("this partition syntax is supported only in B-format database")));
+	    }
+            Alias *alias = makeNode(Alias);
+            alias->aliasname = $2;
+            $1->alias = alias;
+            $1->partitionNameList = $5;
+            $$ = $1;
+        }
+    | relation_expr AS ColId PARTITION '(' name_list ')'
+        {
+#ifdef ENABLE_MULTIPLE_NODES
+        const char* message = "partition syntax is not yet supported";
+        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+            ereport(errstate,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("partition syntax is not yet supported")));
+#endif
+	    if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+	        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+	                        errmsg("this partition syntax is supported only in B-format database")));
+	    }
+            Alias *alias = makeNode(Alias);
+            alias->aliasname = $3;
+            $1->alias = alias;
+            $1->partitionNameList = $6;
+            $$ = $1;
+        }
+;
 
 /*
  * Given "UPDATE foo set set ...", we have to decide without looking any
@@ -20739,6 +21275,10 @@ relation_expr_opt_alias: relation_expr					%prec UMINUS
 				}
 		;
 
+relation_expr_opt_alias_list: 
+			delete_relation_expr_opt_alias                                      { $$ = list_make1($1); }
+			| relation_expr_opt_alias_list ',' delete_relation_expr_opt_alias   { $$ = lappend($1, $3); }
+		;
 /*
  * TABLESAMPLE decoration in a FROM item
  */
@@ -20910,6 +21450,7 @@ SimpleTypename:
 			| Bit									{ $$ = $1; }
 			| Character								{ $$ = $1; }
 			| ConstDatetime							{ $$ = $1; }
+			| ConstSet								{ $$ = $1; }
 			| ConstInterval opt_interval
 				{
 					$$ = $1;
@@ -20952,6 +21493,7 @@ ConstTypename:
 			| ConstBit								{ $$ = $1; }
 			| ConstCharacter						{ $$ = $1; }
 			| ConstDatetime							{ $$ = $1; }
+			| ConstSet								{ $$ = $1; }
 		;
 
 /*
@@ -21323,6 +21865,29 @@ ConstDatetime:
 				}
 		;
 
+ConstSet:
+            SET '(' opt_enum_val_list ')'
+                {
+#ifdef ENABLE_MULTIPLE_NODES
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("set type is not yet supported."),
+                        parser_errposition(@1)));
+#else
+                    if (!DB_IS_CMPT(B_FORMAT)) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("set type is not yet supported."),
+                            parser_errposition(@1)));
+                    } else {
+                        $$ = makeTypeName("set");
+                        $$->typmods = $3;
+                        $$->location = @1;
+                    }
+#endif
+                }
+        ;
+
 ConstInterval:
 			INTERVAL
 				{
@@ -21562,6 +22127,25 @@ a_expr:		c_expr									{ $$ = $1; }
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "=", $1, $3, @2); }
                         | a_expr '@' a_expr
                                 { $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, "@", $1, $3, @2); }
+			| a_expr CmpNullOp a_expr    %prec IS
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						$$ = (Node *) makeA_Expr(AEXPR_NOT, NIL,
+							NULL, (Node *) makeSimpleA_Expr(AEXPR_DISTINCT, "=", $1, $3, @2), @2);
+					}
+					else
+					{
+						const char* message = "<=> operator is supported only in B-format database";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+                                                                 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                                                 errmsg("<=> operator is supported only in B-format database"),
+                                                                 parser_errposition(@2)));
+						$$ = NULL;/* not reached */
+					}
+				}
 			| uservar_name COLON_EQUALS a_expr
 				{
 #ifdef			ENABLE_MULTIPLE_NODES
@@ -22042,6 +22626,25 @@ b_expr:		c_expr
 				{ $$ = (Node *) makeSimpleA_Expr(AEXPR_OP, $2, $1, $3, @2); }
 			| b_expr qual_Op b_expr				%prec Op
 				{ $$ = (Node *) makeA_Expr(AEXPR_OP, $2, $1, $3, @2); }
+			| b_expr CmpNullOp b_expr    %prec IS
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						$$ = (Node *) makeA_Expr(AEXPR_NOT, NIL,
+							NULL, (Node *) makeSimpleA_Expr(AEXPR_DISTINCT, "=", $1, $3, @2), @2);
+					}
+					else
+					{
+						const char* message = "<=> operator is supported only in B-format database";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+                                                                 errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                                                 errmsg("<=> operator is supported only in B-format database"),
+                                                                 parser_errposition(@2)));
+						$$ = NULL;/* not reached */
+					}
+				}
 			| qual_Op b_expr					%prec Op
 				{ $$ = (Node *) makeA_Expr(AEXPR_OP, $1, NULL, $2, @1); }
 			| b_expr qual_Op					%prec POSTFIXOP
@@ -22091,6 +22694,12 @@ c_expr:		columnref %prec UMINUS						        { $$ = $1; }
                                 {
                                     ColumnRef *col = (ColumnRef *)$3;
                                     col->prior = true;
+                                    /*
+                                     * Setting the location to a non-default 0
+                                     * to indicate that this is a parenthetical
+                                     * case of PRIOR reference.
+                                     */
+                                    col->location = 0;
                                     $$ = (Node *)col;
                                 }
                         | PRIOR '(' c_expr ',' func_arg_list ')'
@@ -23625,6 +24234,7 @@ sub_type:	ANY										{ $$ = ANY_SUBLINK; }
 
 all_Op:		Op										{ $$ = $1; }
 			| CmpOp									{ $$ = $1; }
+			| CmpNullOp								{ $$ = $1; }
 			| MathOp								{ $$ = $1; }
 		;
 
@@ -24124,7 +24734,7 @@ target_el:	a_expr AS ColLabel
 
                                         ColumnRef* cr = (ColumnRef*) $1;
                                         /* PRIOR(x) in target list implies func call */
-                                        if (IsA($1, ColumnRef) && cr->prior) {
+                                        if (IsA($1, ColumnRef) && cr->prior && cr->location == 0) {
                                             FuncCall *fn = MakePriorAsFunc();
                                             cr->prior = false;
                                             fn->args = list_make1(cr);
@@ -24517,6 +25127,7 @@ unreserved_keyword:
 			| AT
 			| ATTRIBUTE
 			| AUDIT
+			| AUTO_INCREMENT
 			| AUTOEXTEND
 			| AUTOMAPPED
 			| BACKWARD
@@ -25191,6 +25802,7 @@ reserved_keyword:
                         | ROWNUM
 			| SELECT
 			| SESSION_USER
+			| SHRINK
 			| SOME
 			| SYMMETRIC
 			| SYSDATE
@@ -26556,7 +27168,7 @@ makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
 	if (clist->next)
 	{
 		has_overload_func = true;
-		if (!IsPackageFunction(funcname))
+        if (IsPackageFunction(funcname) == false && IsPackageSchemaOid(SchemaNameGetSchemaOid(schemaname, true)) == false)
 		{
 			const char* message = "function isn't exclusive ";
 			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);

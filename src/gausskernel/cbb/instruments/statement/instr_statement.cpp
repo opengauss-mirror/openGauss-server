@@ -221,6 +221,7 @@ static void ProcessSignal(void)
      */
     (void)gspqsignal(SIGHUP, statement_sighup_handler);
     (void)gspqsignal(SIGINT, SIG_IGN);
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGTERM, statement_exit); /* cancel current query and exit */
     (void)gspqsignal(SIGQUIT, quickdie);
     (void)gspqsignal(SIGUSR1, procsignal_sigusr1_handler);
@@ -408,6 +409,7 @@ bool check_statement_retention_time(char** newval, void** extra, GucSource sourc
     pfree(strs);
     if (res->length != STATEMENT_SQL_KIND) {
         GUC_check_errdetail("attr num:%d is error,track_stmt_retention_time attr is 2", res->length);
+        list_free_deep(res);
         return false;
     }
 
@@ -417,17 +419,20 @@ bool check_statement_retention_time(char** newval, void** extra, GucSource sourc
     if (!StrToInt32((char*)linitial(res), &full_sql_retention_sec) ||
         !StrToInt32((char*)lsecond(res), &slow_query_retention_days)) {
         GUC_check_errdetail("invalid input syntax");
+        list_free_deep(res);
         return false;
     }
 
     if (slow_query_retention_days < 0 || slow_query_retention_days > MAX_SLOW_QUERY_RETENSION_DAYS) {
         GUC_check_errdetail("slow_query_retention_days:%d is out of range [%d, %d].",
             slow_query_retention_days, 0, MAX_SLOW_QUERY_RETENSION_DAYS);
+        list_free_deep(res);
         return false;
     }
     if (full_sql_retention_sec < 0 || full_sql_retention_sec > MAX_FULL_SQL_RETENSION_SEC) {
         GUC_check_errdetail("full_sql_retention_sec:%d is out of range [%d, %d].",
             full_sql_retention_sec, 0, MAX_FULL_SQL_RETENSION_SEC);
+        list_free_deep(res);
         return false;
     }
     list_free_deep(res);
@@ -1473,7 +1478,10 @@ void instr_stmt_report_query(uint64 unique_query_id)
     CURRENT_STMT_METRIC_HANDLE->unique_query_id = unique_query_id;
     CURRENT_STMT_METRIC_HANDLE->unique_sql_cn_id = u_sess->unique_sql_cxt.unique_sql_cn_id;
 
-    if (likely(!is_local_unique_sql() || CURRENT_STMT_METRIC_HANDLE->query)) {
+    if (likely(!is_local_unique_sql() || 
+        (!u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->query) ||
+        (u_sess->attr.attr_common.track_stmt_parameter && 
+         (u_sess->pbe_message == PARSE_MESSAGE_QUERY || u_sess->pbe_message == BIND_MESSAGE_QUERY)))) {
         return;
     }
 

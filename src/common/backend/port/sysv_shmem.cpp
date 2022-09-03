@@ -377,13 +377,7 @@ PGShmemHeader* PGSharedMemoryCreate(Size size, bool makePrivate, int port)
          */
         hdr = (PGShmemHeader*)memAddress;
         if (hdr->creatorPID != (ThreadId)getpid()) {
-            if (kill(hdr->creatorPID, SIGKILL) == 0 || errno != ESRCH) {
-                elog(DEBUG3, "shared memory that key is %d is owned by pid %lu ", NextShmemSegID, hdr->creatorPID);
-                shmdt(memAddress);
-                retry_count++;
-                NextShmemSegID--;
-                continue;
-            }
+            elog(LOG, "shared memory that key is %d is owned by pid %lu", NextShmemSegID, hdr->creatorPID);
         }
 
         /*

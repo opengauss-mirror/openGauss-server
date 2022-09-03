@@ -2669,7 +2669,7 @@ static void CheckInParameterConflicts(CatCList* catlist, const char* procedureNa
         }
     }
 }
- 
+
 /*
  * Due to procedure has no unique index on parameters, it maybe insert same data
  * and this function prevent insert procedure with same funcname and funcargs,

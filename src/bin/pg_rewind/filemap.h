@@ -105,6 +105,8 @@ extern void process_source_file(const char* path, file_type_t type, size_t newsi
 extern void process_target_file(const char* path, file_type_t type, size_t newsize, const char* link_target,
     const RewindCompressInfo* rewindCompressInfo = nullptr);
 extern void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blkno);
+extern void process_waldata_change(
+    ForkNumber forknum, RelFileNode rnode, StorageEngine store, off_t file_offset, size_t data_size);
 extern void filemap_finalize(void);
 extern int targetFilemapSearch(const char* path, file_entry_t* entry);
 extern bool isRelDataFile(const char* path);

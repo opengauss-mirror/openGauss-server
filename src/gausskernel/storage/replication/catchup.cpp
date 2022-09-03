@@ -208,6 +208,7 @@ NON_EXEC_STATIC void CatchupMain()
     (void)gspqsignal(SIGFPE, SIG_IGN);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
     (void)gspqsignal(SIGHUP, SIG_IGN);
+    (void)gspqsignal(SIGURG, print_stack);
 
     /* We allow SIGQUIT (quickdie) at all times */
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);

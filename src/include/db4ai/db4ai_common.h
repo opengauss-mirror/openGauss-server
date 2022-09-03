@@ -34,7 +34,6 @@ double interval_to_msec(double time_interval);
 
 Datum float8_get_datum(Oid type, float8 value);
 float8 datum_get_float8(Oid type, Datum datum);
-int32 datum_get_int(Oid type, Datum datum);
 
 Datum string_to_datum(const char *str, Oid datatype);
 

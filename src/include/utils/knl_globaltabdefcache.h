@@ -31,6 +31,7 @@
 #include "utils/relmapper.h"
 
 extern bool has_locator_info(GlobalBaseEntry *entry);
+extern PartitionMap *CopyPartitionMap(PartitionMap *oldmap);
 class GlobalTabDefCache : public GlobalBaseDefCache {
 public:
     GlobalTabDefCache(Oid dbOid, bool is_shared, struct GlobalSysDBCacheEntry *entry);

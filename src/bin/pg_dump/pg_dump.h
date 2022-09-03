@@ -239,7 +239,9 @@ typedef struct _tableInfo {
     bool isIncremental; /* for matview, true if is an incremental type */
 
     bool interesting; /* true if need to collect more data */
-
+    int autoinc_attnum;
+    DumpId autoincconstraint;
+    char* autoinc_seqname;
 #ifdef PGXC
     /* PGXC table locator Data */
     char pgxclocatortype;  /* Type of PGXC table locator */

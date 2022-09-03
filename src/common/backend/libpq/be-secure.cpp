@@ -129,11 +129,6 @@ static const char* ssl_ciphers_map[] = {
     TLS1_TXT_DHE_RSA_WITH_AES_128_GCM_SHA256,       /* TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, */
     TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,       /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
     NULL};
-
-#ifndef ENABLE_UT
-static
-#endif
-bool g_server_crl_err = false;
 #endif
 
 const char* ssl_cipher_file = "server.key.cipher";
@@ -433,6 +428,31 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
 /* ------------------------------------------------------------ */
 #ifdef USE_SSL
 
+static bool IsCrlInvalid(int errcode)
+{
+    const int err_scenarios[] = {
+        X509_V_ERR_UNABLE_TO_GET_CRL,
+        X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE,
+        X509_V_ERR_CRL_SIGNATURE_FAILURE,
+        X509_V_ERR_CRL_NOT_YET_VALID,
+        X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD,
+        X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD,
+        X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER,
+        X509_V_ERR_KEYUSAGE_NO_CRL_SIGN,
+        X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION,
+        X509_V_ERR_DIFFERENT_CRL_SCOPE,
+        X509_V_ERR_CRL_PATH_VALIDATION_ERROR
+    };
+
+    for (size_t i = 0; i < sizeof(err_scenarios) / sizeof(err_scenarios[0]); i++) {
+        if (errcode == err_scenarios[i]) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /*
  *  Certificate verification callback
  *
@@ -454,39 +474,30 @@ int be_verify_cb(int ok, X509_STORE_CTX* ctx)
     * When the CRL is abnormal, it won't be used to check whether the certificate is revoked,
     * and the services shouldn't be affected due to the CRL exception.
     */
-    const int crl_err_scenarios[] = {
-        X509_V_ERR_CRL_HAS_EXPIRED,
-        X509_V_ERR_UNABLE_TO_GET_CRL,
-        X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE,
-        X509_V_ERR_CRL_SIGNATURE_FAILURE,
-        X509_V_ERR_CRL_NOT_YET_VALID,
-        X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD,
-        X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD,
-        X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER,
-        X509_V_ERR_KEYUSAGE_NO_CRL_SIGN,
-        X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION,
-        X509_V_ERR_DIFFERENT_CRL_SCOPE,
-        X509_V_ERR_CRL_PATH_VALIDATION_ERROR
-    };
     bool ignore_crl_err = false;
 
     int err_code = X509_STORE_CTX_get_error(ctx);
     const char *err_msg = X509_verify_cert_error_string(err_code);
-    if (!g_server_crl_err) {
-        for (size_t i = 0; i < sizeof(crl_err_scenarios) / sizeof(crl_err_scenarios[0]); i++) {
-            if (err_code == crl_err_scenarios[i]) {
-                ereport(LOG,
-                    (errmsg("During SSL authentication, there are some errors in the CRL, so we just ignore the CRL. "
-                        "{ssl err code: %d, ssl err message: %s}\n", err_code, err_msg)));
-                
-                g_server_crl_err = true;
-                ignore_crl_err = true;
-                break;
-            }
+
+    knl_u_libpq_context *crlcxt = &u_sess->libpq_cxt;
+
+    if (!crlcxt->crl_check) {
+        if (err_code == X509_V_ERR_CRL_HAS_EXPIRED) {
+            ereport(LOG,
+                (errmsg("SSL connection warning: we find your CRL file has expired, but we are still using it now, "
+                    "please update it.")));
+            crlcxt->crl_expired = true;
+            ignore_crl_err = true;
+        } else if (IsCrlInvalid(err_code)) {
+            ereport(LOG,
+                (errmsg("SSL connection warning: there are some errors in the CRL, so we just ignore the "
+                    "CRL. {ssl err code: %d, ssl err message: %s}", err_code, err_msg)));
+            crlcxt->crl_invalid = true;
+            ignore_crl_err = true;
         }
-    } else {
-        if (err_code == X509_V_ERR_CERT_REVOKED) {
-            g_server_crl_err = false; /* reset */
+        crlcxt->crl_check = true;
+    } else { /* has done crl check */
+        if (err_code == X509_V_ERR_CERT_REVOKED && crlcxt->crl_invalid) {
             ignore_crl_err = true;
         }
     }
@@ -560,6 +571,11 @@ static void close_SSL(Port* port)
     if (u_sess->libpq_cxt.SSL_server_context != NULL) {
         SSL_CTX_free(u_sess->libpq_cxt.SSL_server_context);
         u_sess->libpq_cxt.SSL_server_context = NULL;
+
+        /* reset crl check info */
+        u_sess->libpq_cxt.crl_check = false;
+        u_sess->libpq_cxt.crl_expired = false;
+        u_sess->libpq_cxt.crl_invalid = false;
     }
 }
 /*
@@ -891,8 +907,6 @@ static int open_server_SSL(Port* port)
 
     Assert(port->ssl == NULL);
     Assert(port->peer == NULL);
-
-    g_server_crl_err = false;
 
     port->ssl = SSL_new(u_sess->libpq_cxt.SSL_server_context);
     if (port->ssl == NULL) {

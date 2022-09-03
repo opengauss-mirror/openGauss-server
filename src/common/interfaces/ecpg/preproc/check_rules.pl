@@ -171,8 +171,8 @@ while (<ECPG>)
 	$cc++;
 	if (not exists $found{ $Fld[1] })
 	{
-		print $Fld[1], " is not used for building parser!\n";
-		$ret = 1;
+		print $Fld[1], " is not used for building parser[Warning]!\n";
+		$ret = 0;
 	}
 }
 close ECPG;

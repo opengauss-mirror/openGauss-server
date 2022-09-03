@@ -1,3 +1,4 @@
+
 -- CREATE partition table
 create schema hw_subpartition_view;
 set search_path = hw_subpartition_view;

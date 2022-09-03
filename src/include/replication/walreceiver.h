@@ -225,6 +225,7 @@ typedef struct WalRcvData {
     XLogRecPtr lastReceivedBarrierLSN;
     XLogRecPtr lastSwitchoverBarrierLSN;
     XLogRecPtr targetSwitchoverBarrierLSN;
+    bool isMasterInstanceReady;
     bool isFirstTimeAccessStorage;
     bool isPauseByTargetBarrier;
     Latch* obsArchLatch;
@@ -258,7 +259,7 @@ extern XLogRecPtr latestValidRecord;
 extern pg_crc32 latestRecordCrc;
 extern uint32 latestRecordLen;
 
-extern const char *g_reserve_param[RESERVE_SIZE];
+extern const char *g_reserve_param[];
 extern bool ws_dummy_data_writer_use_file;
 extern THR_LOCAL uint32 ws_dummy_data_read_file_num;
 

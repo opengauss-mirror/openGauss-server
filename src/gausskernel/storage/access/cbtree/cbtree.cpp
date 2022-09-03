@@ -26,7 +26,6 @@
 #include "access/nbtree.h"
 #include "access/cbtree.h"
 #include "access/cstore_am.h"
-#include "access/dfs/dfs_am.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/relscan.h"
@@ -55,7 +54,7 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
     IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
 
     IndexBuildResult *result = NULL;
-    double reltuples;
+    double reltuples = 0;
     BTBuildState buildstate;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
@@ -63,14 +62,13 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
 
     /* 1. perpare for heap scan */
     Snapshot snapshot;
-    DfsScanState *dfsScanState = NULL;
     CStoreScanDesc scanstate = NULL;
     VectorBatch *vecScanBatch = NULL;
 
     /* Now we use snapshotNow for check tuple visibility */
     snapshot = SnapshotNow;
 
-    /* add index columns for cstore/dfs scan */
+    /* add index columns for cstore scan */
     int heapScanNumIndexAttrs = indexInfo->ii_NumIndexAttrs + 1;
     AttrNumber *heapScanAttrNumbers = (AttrNumber *)palloc(sizeof(AttrNumber) * heapScanNumIndexAttrs);
     for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
@@ -96,30 +94,15 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
     buildstate.spool = _bt_spoolinit(heapRel, indexRel, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
 
     /* 3. scan heap table and insert tuple into btree */
-    if (RelationIsDfsStore(heapRel)) {
-        /* for dfs table */
-        dfsScanState = dfs::reader::DFSBeginScan(heapRel, NIL, heapScanNumIndexAttrs, heapScanAttrNumbers, snapshot);
-        do {
-            vecScanBatch = dfs::reader::DFSGetNextBatch(dfsScanState);
-            if (vecScanBatch != NULL)
-                InsertToBtree(vecScanBatch, buildstate, indexInfo, reltuples, values, isnull, transferFuncs);
-        } while (!BatchIsNull(vecScanBatch));
-    } else {
-        /* for cstore table */
-        scanstate = CStoreBeginScan(heapRel, heapScanNumIndexAttrs, heapScanAttrNumbers, snapshot, false);
+    scanstate = CStoreBeginScan(heapRel, heapScanNumIndexAttrs, heapScanAttrNumbers, snapshot, false);
 
-        do {
-            vecScanBatch = CStoreGetNextBatch(scanstate);
-            InsertToBtree(vecScanBatch, buildstate, indexInfo, reltuples, values, isnull, transferFuncs);
-        } while (!CStoreIsEndScan(scanstate));
-    }
+    do {
+        vecScanBatch = CStoreGetNextBatch(scanstate);
+        InsertToBtree(vecScanBatch, buildstate, indexInfo, reltuples, values, isnull, transferFuncs);
+    } while (!CStoreIsEndScan(scanstate));
 
     /* 4. end scan */
-    if (RelationIsDfsStore(heapRel)) {
-        dfs::reader::DFSEndScan(dfsScanState);
-    } else {
-        CStoreEndScan(scanstate);
-    }
+    CStoreEndScan(scanstate);
 
     /* 5. clean btree pool */
     /*

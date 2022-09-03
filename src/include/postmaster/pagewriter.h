@@ -58,6 +58,7 @@ typedef struct PageWriterProc {
 
     volatile int buf_id_start;     /* buffer id start loc */
     int32 next_scan_normal_loc;
+    int32 next_scan_ratio_loc;
 
     /* thread candidate list, main thread store the segment buffer information */
     Buffer *cand_buf_list;   /* thread candidate buffer list */
@@ -174,5 +175,8 @@ extern void RequestPgwrSync(void);
 extern void PageWriterSync(void);
 extern bool PgwrForwardSyncRequest(const FileTag *ftag, SyncRequestType type);
 extern void PageWriterSyncWithAbsorption(void);
+
+void crps_create_ctxs(knl_thread_role role);
+void crps_destory_ctxs();
 
 #endif /* _PAGEWRITER_H */

@@ -116,13 +116,13 @@ GlobalTransactionId GetGxidGTM(GTM_TransactionKey txn, bool is_sub_xact)
  * @Description: get the next csn on success without really commit in gtm.
  * @return -  return the next csn on gtm without commit
  */
-CommitSeqNo GetCSNGTM()
+CommitSeqNo GetCSNGTM(GTM_Timestamp *timestamp)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return InvalidCommitSeqNo;
 }
 
-CommitSeqNo CommitCSNGTM(bool need_clean)
+CommitSeqNo CommitCSNGTM(bool need_clean, GTM_Timestamp *timestamp)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return InvalidCommitSeqNo;

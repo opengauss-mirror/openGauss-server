@@ -439,6 +439,9 @@ void gs_thread_exit(int code)
         t_thrd.port_cxt.m_pThreadArg = NULL;
     }
 
+    /* check if proc lock need to be release */
+    ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
+
     /* 
      * policy plugin is released when PM thread exit(existing as last one) 
      * so that we can make sure reset_policy_thr_hook is valid in gs_thread_exit
@@ -500,7 +503,8 @@ void gs_thread_exit(int code)
     /* release the signal slot in signal_base */
     (void)gs_signal_slot_release(gs_thread_self());
     if (IsPostmasterEnvironment && !t_thrd.postmaster_cxt.IsRPCWorkerThread) {
-        if (u_sess->attr.attr_resource.enable_reaper_backend && StreamThreadAmI() &&
+        if (u_sess->attr.attr_resource.enable_reaper_backend &&
+            (StreamThreadAmI() || ParallelLogicalWorkerThreadAmI()) &&
             g_instance.pid_cxt.ReaperBackendPID && g_instance.status == NoShutdown) {
             (void)gs_signal_send(g_instance.pid_cxt.ReaperBackendPID, SIGCHLD);
         } else {

@@ -93,5 +93,245 @@ truncate table split_partition_table_001;
 timecapsule table split_partition_table_001 to before truncate;
 select count(*) from split_partition_table_001;
 
+--drop partition table twice
+create table PARTITION_TABLE_001
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double double precision,
+c_character_1 character varying(1024000),
+c_varchar varchar(100),
+c_character_2 character(100),
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date,
+c_tsvector tsvector,
+c_tsquery tsquery,
+constraint PARTITION_TABLE_001_constraint primary key(c_smallint,c_integer,c_bigint,c_decimal,c_double)
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition PARTITION_TABLE_001_1 values less than (0,0,0,0),
+partition PARTITION_TABLE_001_2 values less than (30,30,300,400.3),
+partition PARTITION_TABLE_001_3 values less than (60,60,600,800.6),
+partition PARTITION_TABLE_001_4 values less than (100,100,1000,1100.2)
+);
+
+create index idx_c_smallint on PARTITION_TABLE_001(c_integer);
+
+create index index_PARTITION_TABLE_001_1 on PARTITION_TABLE_001(c_smallint) local
+(
+partition PARTITION_TABLE_001_1 ,
+partition PARTITION_TABLE_001_2 ,
+partition PARTITION_TABLE_001_3 ,
+partition PARTITION_TABLE_001_4
+);
+
+drop table PARTITION_TABLE_001;
+
+create table PARTITION_TABLE_001
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double double precision,
+c_character_1 character varying(1024000),
+c_varchar varchar(100),
+c_character_2 character(100),
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date,
+c_tsvector tsvector,
+c_tsquery tsquery,
+constraint PARTITION_TABLE_001_constraint primary key(c_smallint,c_integer,c_bigint,c_decimal,c_double)
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition PARTITION_TABLE_001_1 values less than (0,0,0,0),
+partition PARTITION_TABLE_001_2 values less than (30,30,300,400.3),
+partition PARTITION_TABLE_001_3 values less than (60,60,600,800.6),
+partition PARTITION_TABLE_001_4 values less than (100,100,1000,1100.2)
+);
+
+create index idx_c_smallint on PARTITION_TABLE_001(c_integer);
+
+create index index_PARTITION_TABLE_001_1 on PARTITION_TABLE_001(c_smallint) local
+(
+partition PARTITION_TABLE_001_1 ,
+partition PARTITION_TABLE_001_2 ,
+partition PARTITION_TABLE_001_3 ,
+partition PARTITION_TABLE_001_4
+);
+
+drop table PARTITION_TABLE_001;
+
+purge recyclebin;
+
+--interval partition table insert out-of-partition data 
+CREATE TABLE PARTITION_TABLE_001
+(c_integer integer,
+c_char_1 char,
+c_date date,
+c_char_2 char,
+constraint PARTITION_TABLE_001_constraint primary key(c_date)
+)
+PARTITION BY RANGE (c_date)
+INTERVAL('1 day')(
+PARTITION p1 VALUES LESS THAN ('2022-02-23 00:00:00'),
+PARTITION p2 VALUES LESS THAN ('2022-02-24 00:00:00')
+);
+
+create index idx_c_integer_01 on PARTITION_TABLE_001(c_integer);
+
+create index index_PARTITION_TABLE_001_1 on PARTITION_TABLE_001(c_char_1) local
+(
+partition p1,
+partition p2
+);
+
+insert into PARTITION_TABLE_001 values(1,'a','2022-02-16 13:12:12','b');
+insert into PARTITION_TABLE_001 values(2,'a','2022-02-17 13:12:12','b');
+insert into PARTITION_TABLE_001 values(3,'a','2022-02-18 13:12:12','b');
+insert into PARTITION_TABLE_001 values(4,'a','2022-02-19 13:12:12','b');
+insert into PARTITION_TABLE_001 values(5,'a','2022-02-20 13:12:12','b');
+insert into PARTITION_TABLE_001 values(6,'a','2022-02-21 13:12:12','b');
+insert into PARTITION_TABLE_001 values(7,'a','2022-02-22 13:12:12','b');
+insert into PARTITION_TABLE_001 values(8,'a','2022-02-23 13:12:12','b');
+insert into PARTITION_TABLE_001 values(9,'a','2022-02-24 13:12:12','b');
+
+truncate table PARTITION_TABLE_001;
+
+insert into PARTITION_TABLE_001 values(10,'a','2022-02-25 13:12:12','b');
+insert into PARTITION_TABLE_001 values(11,'a','2022-02-26 13:12:12','b');
+insert into PARTITION_TABLE_001 values(12,'a','2022-02-27 13:12:12','b');
+insert into PARTITION_TABLE_001 values(13,'a','2022-02-28 13:12:12','b');
+
+timecapsule table PARTITION_TABLE_001 to before truncate;
+
+drop table PARTITION_TABLE_001;
+purge recyclebin;
+
+--error info check
+create table PARTITION_TABLE_001
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double double precision,
+c_character_1 character varying(1024000),
+c_varchar varchar(100),
+c_character_2 character(100),
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date,
+c_tsvector tsvector,
+c_tsquery tsquery,
+constraint PARTITION_TABLE_001_constraint primary key(c_smallint,c_integer,c_bigint,c_decimal,c_double)
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition PARTITION_TABLE_001_1 values less than (0,0,0,0),
+partition PARTITION_TABLE_001_2 values less than (30,30,300,400.3),
+partition PARTITION_TABLE_001_3 values less than (60,60,600,800.6),
+partition PARTITION_TABLE_001_4 values less than (100,100,1000,1100.2)
+);
+
+create index idx_c_smallint on PARTITION_TABLE_001(c_integer);
+
+create index index_PARTITION_TABLE_001_1 on PARTITION_TABLE_001(c_smallint) local
+(
+partition PARTITION_TABLE_001_1 ,
+partition PARTITION_TABLE_001_2 ,
+partition PARTITION_TABLE_001_3 ,
+partition PARTITION_TABLE_001_4
+);
+
+truncate table PARTITION_TABLE_001 purge;
+timecapsule table PARTITION_TABLE_001 to before truncate;
+
+drop table PARTITION_TABLE_001;
+purge recyclebin;
+
+--combination test
+create table PARTITION_TABLE_001
+(
+c_smallint smallint,
+c_integer integer,
+c_bigint bigint,
+c_decimal decimal,
+c_numeric numeric,
+c_real real,
+c_double double precision,
+c_character_1 character varying(1024000),
+c_varchar varchar(100),
+c_character_2 character(100),
+c_char_1 char(100),
+c_character_3 character,
+c_char_2 char,
+c_text text,
+c_nvarchar2 nvarchar2,
+c_name name,
+c_timestamp_1 timestamp without time zone ,
+c_timestamp_2 timestamp with time zone,
+c_date date,
+c_tsvector tsvector,
+c_tsquery tsquery,
+constraint PARTITION_TABLE_001_constraint primary key(c_smallint,c_integer,c_bigint,c_decimal,c_double)
+)
+partition by range (c_smallint,c_integer,c_bigint,c_decimal)
+(
+partition PARTITION_TABLE_001_1 values less than (0,0,0,0),
+partition PARTITION_TABLE_001_2 values less than (30,30,300,400.3),
+partition PARTITION_TABLE_001_3 values less than (60,60,600,800.6),
+partition PARTITION_TABLE_001_4 values less than (100,100,1000,1100.2)
+);
+
+create index idx_c_smallint on PARTITION_TABLE_001(c_integer);
+
+create index index_PARTITION_TABLE_001_1 on PARTITION_TABLE_001(c_smallint) local
+(
+partition PARTITION_TABLE_001_1 ,
+partition PARTITION_TABLE_001_2 ,
+partition PARTITION_TABLE_001_3 ,
+partition PARTITION_TABLE_001_4
+);
+
+truncate table PARTITION_TABLE_001;
+select count(*) from gs_recyclebin where rcyoriginname = 'idx_c_smallint';
+select count(*) from gs_recyclebin where rcycanpurge = 'f';
+purge index idx_c_smallint;
+timecapsule table PARTITION_TABLE_001 to before drop;
+drop table PARTITION_TABLE_001 purge;
+purge recyclebin;
+select count(*) from gs_recyclebin;
+
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
 set enable_default_ustore_table = off;

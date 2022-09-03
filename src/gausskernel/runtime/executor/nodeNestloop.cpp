@@ -399,7 +399,6 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
      * the result in this case would hold only virtual data.
      */
     ExecAssignResultTypeFromTL(&nlstate->js.ps, TAM_HEAP);
-
     ExecAssignProjectionInfo(&nlstate->js.ps, NULL);
 
     /*
@@ -423,7 +422,6 @@ NestLoopState* ExecInitNestLoop(NestLoop* node, EState* estate, int eflags)
 void ExecEndNestLoop(NestLoopState* node)
 {
     NL1_printf("ExecEndNestLoop: %s\n", "ending node processing");
-
     /*
      * Free the exprcontext
      */

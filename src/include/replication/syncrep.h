@@ -65,8 +65,19 @@ typedef struct SyncRepConfigData {
     char member_names[FLEXIBLE_ARRAY_MEMBER];
 } SyncRepConfigData;
 
+typedef enum
+{
+	NOT_REQUEST,
+	NOT_SET_STANDBY_DEFINED,
+	REPSYNCED,
+	STAND_ALONE,
+	NOT_WAIT_CATCHUP,
+	SYNC_COMPLETE,
+	STOP_WAIT
+} SyncWaitRet;
+
 /* called by user backend */
-extern void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel = true);
+extern SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel = true);
 extern bool SyncPaxosWaitForLSN(XLogRecPtr PaxosConsensusLSN);
 
 /* called at backend exit */
@@ -125,4 +136,13 @@ typedef enum {
 } Sync_Config_Strategy;
 #endif
 
+const char *const SyncWaitRetDesc[] = {
+    "no sync rep request",
+    "sync standbys_defined not set",
+    "commit lsn has already synced",
+    "sync_master_standalone is set",
+    "no wait for standby catch up",
+    "sync standby complete",
+    "stop to wait sync, see warning detail"
+};
 #endif /* _SYNCREP_H */

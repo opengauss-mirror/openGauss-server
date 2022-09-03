@@ -53,4 +53,6 @@ extern void estimatePartitionSize(
 
 extern bool HasStoredGeneratedColumns(const PlannerInfo *root, Index rti);
 
+extern PlannerInfo *get_cte_root(PlannerInfo *root, int levelsup, char *ctename);
+
 #endif /* PLANCAT_H */

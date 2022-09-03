@@ -50,7 +50,7 @@
 #include "postgres_fe.h"
 
 #include <cipher.h>
-
+#include <fcntl.h>
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/ustore/undo/knl_uundotxn.h"
 #include "libpq/pqsignal.h"
@@ -154,6 +154,9 @@ static const char* authmethodhost = "";
 static const char* authmethodlocal = "";
 static bool debug = false;
 static bool noclean = false;
+#ifdef ENABLE_LITE_MODE
+static bool do_sync = true;
+#endif
 static bool show_setting = false;
 static char* xlog_dir = "";
 static bool security = false;
@@ -233,6 +236,9 @@ static const char* backend_options = NULL;
 /*
  * Centralized knowledge of switches to pass to backend
  *
+ * Note: we run the backend with -F (fsync disabled) and then do a single
+ * pass of fsync'ing at the end.  This is faster than fsync'ing each step.
+ *
  * Note: in the shell-script version, we also passed PGDATA as a -D switch,
  * but here it is more convenient to pass it as an environment variable
  * (no quoting to worry about).
@@ -265,6 +271,11 @@ static char** filter_lines_with_token(char** lines, const char* token);
 #endif
 static char** readfile(const char* path);
 static void writefile(char* path, char** lines);
+#ifdef ENABLE_LITE_MODE
+static void walkdir(char *path, void (*action)(char *fname, bool isdir));
+static void pre_sync_fname(char *fname, bool isdir);
+static void fsync_fname(char *fname, bool isdir);
+#endif
 static FILE* popen_check(const char* command, const char* mode);
 static void exit_nicely(void);
 static char* get_id(void);
@@ -301,7 +312,6 @@ static void setup_bucketmap_len(void);
 static void load_plpgsql(void);
 static void load_supported_extension(void);
 static void load_dist_fdw(void);
-static void load_hdfs_fdw(void);
 #ifdef ENABLE_MOT
 static void load_mot_fdw(void); /* load MOT fdw */
 #endif
@@ -316,6 +326,9 @@ static void load_gsredistribute_extension(void);
 static void vacuum_db(void);
 static void make_template0(void);
 static void make_postgres(void);
+#ifdef ENABLE_LITE_MODE
+static void perform_fsync(void);
+#endif
 static void trapsig(int signum);
 static void check_ok(void);
 static char* escape_quotes(const char* src);
@@ -708,6 +721,169 @@ static void writefile(char* path, char** lines)
         exit_nicely();
     }
 }
+
+#ifdef ENABLE_LITE_MODE
+/*
+ *  * walkdir: recursively walk a directory, applying the action to each
+ *   * regular file and directory (including the named directory itself).
+ *    *
+ *     * Adapted from copydir() in copydir.c.
+ *      */
+static void
+walkdir(char *path, void (*action) (char *fname, bool isdir))
+{
+    DIR    *dir;
+    struct dirent *direntry;
+    char    subpath[MAXPGPATH];
+    int     nRet = 0;
+
+    dir = opendir(path);
+    if (dir == NULL) {
+        fprintf(stderr, _("%s: could not open directory \"%s\": %s\n"),
+        progname, path, strerror(errno));
+        exit_nicely();
+    }
+
+    while (errno = 0, (direntry = readdir(dir)) != NULL) {
+        struct stat fst;
+    
+        if (strcmp(direntry->d_name, ".") == 0 ||
+            strcmp(direntry->d_name, "..") == 0)
+            continue;
+    
+        nRet = snprintf_s(subpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", path, direntry->d_name);
+        securec_check_ss_c(nRet, "\0", "\0");
+    
+        if (lstat(subpath, &fst) < 0)
+        {
+            fprintf(stderr, _("%s: could not stat file \"%s\": %s\n"),
+            progname, subpath, strerror(errno));
+            exit_nicely();
+        }
+    
+        if (S_ISDIR(fst.st_mode))
+            walkdir(subpath, action);
+        else if (S_ISREG(fst.st_mode))
+            (*action) (subpath, false);
+        }
+
+#ifdef WIN32
+    /*
+     * This fix is in mingw cvs (runtime/mingwex/dirent.c rev 1.4), but not in
+     * released version
+     */
+    if (GetLastError() == ERROR_NO_MORE_FILES)
+        errno = 0;
+#endif
+
+    if (errno) {
+        fprintf(stderr, _("%s: could not read directory \"%s\": %s\n"),
+                        progname, path, strerror(errno));
+        exit_nicely();
+    }
+
+    closedir(dir);
+
+    /*
+     * It's important to fsync the destination directory itself as individual
+     * file fsyncs don't guarantee that the directory entry for the file is
+     * synced.  Recent versions of ext4 have made the window much wider but
+     * it's been an issue for ext3 and other filesystems in the past.
+     */
+    (*action) (path, true);
+}
+
+/*
+ * Hint to the OS that it should get ready to fsync() this file.
+ */
+static void
+pre_sync_fname(char *fname, bool isdir)
+{
+#if defined(HAVE_SYNC_FILE_RANGE) || (defined(USE_POSIX_FADVISE) && defined(POSIX_FADV_DONTNEED))
+    int fd;
+    
+    fd = open(fname, O_RDONLY | PG_BINARY);
+
+    /*
+     * Some OSs don't allow us to open directories at all (Windows returns
+     * EACCES)
+     */
+    if (fd < 0 && isdir && (errno == EISDIR || errno == EACCES))
+        return;
+
+    if (fd < 0) {
+        fprintf(stderr, _("%s: could not open file \"%s\": %s\n"),
+                          progname, fname, strerror(errno));
+        exit_nicely();
+    }
+
+    /*
+     * Prefer sync_file_range, else use posix_fadvise.  We ignore any error
+     * here since this operation is only a hint anyway.
+     */
+#if defined(HAVE_SYNC_FILE_RANGE)
+    sync_file_range(fd, 0, 0, SYNC_FILE_RANGE_WRITE);
+#elif defined(USE_POSIX_FADVISE) && defined(POSIX_FADV_DONTNEED)
+    posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+#endif
+
+    close(fd);
+#endif
+}
+
+/*
+ * fsync a file or directory
+ *
+ * Try to fsync directories but ignore errors that indicate the OS
+ * just doesn't allow/require fsyncing directories.
+ *
+ * Adapted from fsync_fname() in copydir.c.
+ */
+static void
+fsync_fname(char *fname, bool isdir)
+{
+    int    fd;
+    int    returncode;
+
+    /*
+     * Some OSs require directories to be opened read-only whereas other
+     * systems don't allow us to fsync files opened read-only; so we need both
+     * cases here
+     */
+    if (!isdir)
+        fd = open(fname, O_RDWR | PG_BINARY);
+    else
+        fd = open(fname, O_RDONLY | PG_BINARY);
+
+    /*
+     * Some OSs don't allow us to open directories at all (Windows returns
+     * EACCES)
+     */
+    if (fd < 0 && isdir && (errno == EISDIR || errno == EACCES))
+        return;
+    else if (fd < 0) {
+        fprintf(stderr, _("%s: could not open file \"%s\": %s\n"),
+        progname, fname, strerror(errno));
+        exit_nicely();
+    }
+
+    returncode = fsync(fd);
+
+    /* Some OSs don't allow us to fsync directories at all */
+    if (returncode != 0 && isdir && errno == EBADF) {
+        close(fd);
+        return;
+    }
+
+    if (returncode != 0) {
+        fprintf(stderr, _("%s: could not fsync file \"%s\": %s\n"),
+        progname, fname, strerror(errno));
+        exit_nicely();
+    }
+
+    close(fd);
+}
+#endif
 
 /*
  * Open a subcommand with suitable error messaging
@@ -2379,7 +2555,7 @@ static void setup_privileges(void)
     PG_CMD_DECL;
     char** line;
     char** priv_lines;
-    static char** privileges_setup = (char**)pg_malloc(sizeof(char*) * 20);
+    static char** privileges_setup = (char**)pg_malloc(sizeof(char*) * 21);
     int nRet = 0;
 
     privileges_setup[0] = xstrdup("UPDATE pg_class "
@@ -2403,7 +2579,8 @@ static void setup_privileges(void)
     privileges_setup[16] = xstrdup("GRANT USAGE ON SCHEMA sqladvisor TO PUBLIC;\n");
     privileges_setup[17] = xstrdup("GRANT USAGE ON SCHEMA dbe_pldebugger TO PUBLIC;\n");
     privileges_setup[18] = xstrdup("GRANT USAGE ON SCHEMA dbe_pldeveloper TO PUBLIC;\n");
-    privileges_setup[19] = NULL;
+    privileges_setup[19] = xstrdup("GRANT USAGE ON SCHEMA dbe_sql_util TO PUBLIC;\n");
+    privileges_setup[20] = NULL;
     /* In security mode, we will revoke privilege of public on schema public. */
     if (security) {
         privileges_setup[7] = xstrdup("REVOKE ALL on schema public FROM public;\n");
@@ -2639,30 +2816,6 @@ static void load_dist_fdw(void)
     check_ok();
 }
 
-/*@hdfs
- *brief: Loading foreign-data wrapper for hdfs
- */
-static void load_hdfs_fdw(void)
-{
-    int nRet = 0;
-    PG_CMD_DECL;
-
-    fputs(_("loading foreign-data wrapper for hdfs access ... "), stdout);
-    (void)fflush(stdout);
-
-    nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
-    securec_check_ss_c(nRet, "\0", "\0");
-
-    PG_CMD_OPEN;
-
-    PG_CMD_PUTS("CREATE EXTENSION hdfs_fdw;\n");
-
-    PG_CMD_CLOSE;
-
-    check_ok();
-}
-
 #ifdef ENABLE_MULTIPLE_NODES
 static void load_gc_fdw(void)
 {
@@ -2886,8 +3039,6 @@ static void load_supported_extension(void)
 {
     /* loading foreign-data wrapper for distfs access */
     load_dist_fdw();
-    /* loading foreign-data wrapper for hdfs access */
-    load_hdfs_fdw();
 
     /* loading foreign-data wrapper for openGauss access */
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3060,6 +3211,51 @@ static void make_postgres(void)
 
     check_ok();
 }
+
+#ifdef ENABLE_LITE_MODE
+/*
+ * fsync everything down to disk
+ */
+static void
+perform_fsync(void)
+{
+    char    pdir[MAXPGPATH];
+    int     nRet = 0;
+
+    fputs(_("syncing data to disk ... "), stdout);
+    fflush(stdout);
+
+    /*
+     * We need to name the parent of PGDATA.  get_parent_directory() isn't
+     * enough here, because it can result in an empty string.
+     */
+    nRet = snprintf_s(pdir, MAXPGPATH, MAXPGPATH - 1, "%s/..", pg_data);
+    securec_check_ss_c(nRet, "\0", "\0");
+    canonicalize_path(pdir);
+
+    /*
+     * Hint to the OS so that we're going to fsync each of these files soon.
+     */
+
+    /* first the parent of the PGDATA directory */
+    pre_sync_fname(pdir, true);
+
+    /* then recursively through the directory */
+    walkdir(pg_data, pre_sync_fname);
+
+    /*
+     * Now, do the fsync()s in the same order.
+     */
+
+    /* first the parent of the PGDATA directory */
+    fsync_fname(pdir, true);
+
+    /* then recursively through the directory */
+    walkdir(pg_data, fsync_fname);
+
+    check_ok();
+}
+#endif
 
 /*
  * signal handler in case we are interrupted.
@@ -3514,6 +3710,9 @@ static void usage(const char* prog_name)
     printf(_("  -d, --debug               generate lots of debugging output\n"));
     printf(_("  -L DIRECTORY              where to find the input files\n"));
     printf(_("  -n, --noclean             do not clean up after errors\n"));
+#ifdef ENABLE_LITE_MODE
+    printf(_("  -N, --nosync              do not wait for changes to be written safely to disk\n"));
+#endif
     printf(_("  -s, --show                show internal settings\n"));
     printf(_("\nOther options:\n"));
     printf(_("  -H, --host-ip             node_host of openGauss node initialized\n"));
@@ -3602,6 +3801,9 @@ int main(int argc, char* argv[])
         {"debug", no_argument, NULL, 'd'},
         {"show", no_argument, NULL, 's'},
         {"noclean", no_argument, NULL, 'n'},
+#ifdef ENABLE_LITE_MODE
+        {"nosync", no_argument, NULL, 'N'},
+#endif
         {"xlogdir", required_argument, NULL, 'X'},
         {"security", no_argument, NULL, 'S'},
         {"host-ip", required_argument, NULL, 'H'},
@@ -3683,8 +3885,11 @@ int main(int argc, char* argv[])
     }
 
     /* process command-line options */
-
+#ifdef ENABLE_LITE_MODE
+    while ((c = getopt_long(argc, argv, "cdD:E:L:nNU:WA:SsT:X:C:w:H:g:", long_options, &option_index)) != -1) {
+#else
     while ((c = getopt_long(argc, argv, "cdD:E:L:nU:WA:SsT:X:C:w:H:g:", long_options, &option_index)) != -1) {
+#endif
 #define FREE_NOT_STATIC_ZERO_STRING(s)        \
     do {                                      \
         if ((s) && (char*)(s) != (char*)"") { \
@@ -3792,6 +3997,11 @@ int main(int argc, char* argv[])
                 noclean = true;
                 printf(_("Running in noclean mode.  Mistakes will not be cleaned up.\n"));
                 break;
+#ifdef ENABLE_LITE_MODE
+            case 'N':
+                do_sync = false;
+                break;
+#endif
             case 'L':
                 FREE_NOT_STATIC_ZERO_STRING(share_path);
                 check_input_spec_char(optarg);
@@ -4610,6 +4820,13 @@ int main(int argc, char* argv[])
     vacuumfreeze("postgres");
 #endif
 
+#ifdef ENABLE_LITE_MODE
+    if (do_sync)
+        perform_fsync();
+    else
+        printf(_("\nSync to disk skipped.\nThe data directory might become corrupt if the operating system crashes.\n"));
+#endif
+
     if (authwarning != NULL)
         write_stderr("%s", authwarning);
 
@@ -5043,12 +5260,12 @@ static bool InitUndoZoneMeta(int fd)
         uzoneMetaPoint = (undo::UndoZoneMetaInfo *)(metaPageBuffer + offset * sizeof(undo::UndoZoneMetaInfo));
         uzoneMetaPoint->version = UNDO_ZONE_META_VERSION;
         uzoneMetaPoint->lsn = 0;
-        uzoneMetaPoint->insert = UNDO_LOG_BLOCK_HEADER_SIZE;
-        uzoneMetaPoint->discard = UNDO_LOG_BLOCK_HEADER_SIZE;
-        uzoneMetaPoint->forceDiscard = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->insertURecPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->discardURecPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->forceDiscardURecPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
         uzoneMetaPoint->recycleXid = 0;
-        uzoneMetaPoint->allocate = UNDO_LOG_BLOCK_HEADER_SIZE;
-        uzoneMetaPoint->recycle = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->allocateTSlotPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->recycleTSlotPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
 
         if ((zoneId + 1) % UNDOZONE_COUNT_PER_PAGE == 0 || (zoneId == PERSIST_ZONE_COUNT - 1 &&
             ((uint32)(zoneId / UNDOZONE_COUNT_PER_PAGE) + 1 == totalZonePageCnt))) {

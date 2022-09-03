@@ -563,11 +563,11 @@ call test_clob_write();
  
 (1 row)
 
-select * from test_clob;
+select * from test_clob order by 1;
  a |  b  
 ---+-----
+ 1 | abc
  2 | zzz
- 1 | dbc
 (2 rows)
 
 create or replace procedure test_lob_write_nodyna
@@ -588,11 +588,11 @@ ezz
  
 (1 row)
 
-select * from test_clob;
+select * from test_clob order by 1;
  a |  b  
 ---+-----
+ 1 | abc
  2 | zzz
- 1 | dbc
 (2 rows)
 
 create or replace procedure test_blob_write
@@ -612,11 +612,11 @@ call test_blob_write();
  
 (1 row)
 
-select * from test_blob;
+select * from test_blob order by 1;
  a |    b     
 ---+----------
+ 1 | 0ABC
  2 | 0FFFFFFF
- 1 | 0DBC
 (2 rows)
 
 --test append+update
@@ -637,11 +637,11 @@ call test_clob_append();
  
 (1 row)
 
-select * from test_clob;
- a |   b    
----+--------
+select * from test_clob order by 1;
+ a |  b  
+---+-----
+ 1 | abc
  2 | zzz
- 1 | dbcddd
 (2 rows)
 
 create or replace procedure test_blob_append
@@ -661,11 +661,11 @@ call test_blob_append();
  
 (1 row)
 
-select * from test_blob;
+select * from test_blob order by 1;
  a |    b     
 ---+----------
+ 1 | 0ABC
  2 | 0FFFFFFF
- 1 | 0DBC0DDD
 (2 rows)
 
 --test read
@@ -683,7 +683,7 @@ begin
 end;
 /
 call test_clob_read();
-d
+a
  test_clob_read 
 ----------------
  

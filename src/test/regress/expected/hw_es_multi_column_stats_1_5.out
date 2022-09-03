@@ -1,6 +1,7 @@
 --==========================================================
 --==========================================================
 \set ECHO all
+set enable_ai_stats=0;
 set current_schema = hw_es_multi_column_stats;
 set default_statistics_target=-2;
 --========================================================== system column and system table

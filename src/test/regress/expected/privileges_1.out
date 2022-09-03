@@ -1250,6 +1250,70 @@ SELECT has_table_privilege('regressuser1', 'testns.t2', 'SELECT'); -- false
  f
 (1 row)
 
+-- security-restricted operations
+\c -
+CREATE ROLE regress_sro_user password 'Gauss_234';
+-- Check that index expressions and predicates are run as the table's owner
+-- A dummy index function checking current_user
+CREATE FUNCTION sro_ifun(int) RETURNS int AS $$
+BEGIN
+	-- Below we set the table's owner to regress_sro_user
+	if current_user != 'regress_sro_user' then
+        RAISE EXCEPTION 'sro_ifun(%) called by %', $1, current_user;
+    end if;
+	RETURN $1;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+-- Create a table owned by regress_sro_user
+CREATE TABLE sro_tab (a int);
+ALTER TABLE sro_tab OWNER TO regress_sro_user;
+INSERT INTO sro_tab VALUES (1), (2), (3);
+-- Create an expression index with a predicate
+CREATE INDEX sro_idx ON sro_tab ((sro_ifun(a) + sro_ifun(0)))
+	WHERE sro_ifun(a + 10) > sro_ifun(10);
+DROP INDEX sro_idx;
+-- Do the same concurrently
+CREATE INDEX CONCURRENTLY sro_idx ON sro_tab ((sro_ifun(a) + sro_ifun(0)))
+	WHERE sro_ifun(a + 10) > sro_ifun(10);
+-- REINDEX
+REINDEX TABLE sro_tab;
+REINDEX INDEX sro_idx;
+REINDEX TABLE CONCURRENTLY sro_tab;  -- reindex does not support CONCURRENTLY
+ERROR:  syntax error at or near "CONCURRENTLY"
+LINE 1: REINDEX TABLE CONCURRENTLY sro_tab;
+                      ^
+DROP INDEX sro_idx;
+-- CLUSTER
+CREATE INDEX sro_cluster_idx ON sro_tab ((sro_ifun(a) + sro_ifun(0)));
+CLUSTER sro_tab USING sro_cluster_idx;
+DROP INDEX sro_cluster_idx;
+DROP TABLE sro_tab;
+-- Check with a partitioned table
+CREATE TABLE sro_ptab (a int) PARTITION BY RANGE (a)
+(
+PARTITION P1 VALUES LESS THAN(5000),
+PARTITION P2 VALUES LESS THAN(10000),
+PARTITION P3 VALUES LESS THAN(15000),
+PARTITION P4 VALUES LESS THAN(20000),
+PARTITION P5 VALUES LESS THAN(25000),
+PARTITION P6 VALUES LESS THAN(30000),
+PARTITION P7 VALUES LESS THAN(40000),
+PARTITION P8 VALUES LESS THAN(MAXVALUE)
+)
+ENABLE ROW MOVEMENT;
+ALTER TABLE sro_ptab OWNER TO regress_sro_user;
+INSERT INTO sro_ptab VALUES (1), (2), (3);
+CREATE INDEX sro_pidx ON sro_ptab ((sro_ifun(a) + sro_ifun(0))) local;
+REINDEX TABLE sro_ptab;
+REINDEX INDEX CONCURRENTLY sro_pidx;  -- reindex does not support CONCURRENTLY
+ERROR:  syntax error at or near "CONCURRENTLY"
+LINE 1: REINDEX INDEX CONCURRENTLY sro_pidx;
+                      ^
+DROP INDEX sro_pidx;
+DROP TABLE sro_ptab;
+DROP FUNCTION sro_ifun(int) cascade;
+DROP OWNED BY regress_sro_user;
+DROP ROLE regress_sro_user;
 CREATE FUNCTION testns.testfunc(int) RETURNS int AS 'select 3 * $1;' LANGUAGE sql;
 SELECT has_function_privilege('regressuser1', 'testns.testfunc(int)', 'EXECUTE'); -- true by default
  has_function_privilege 

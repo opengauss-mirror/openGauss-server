@@ -1,0 +1,1809 @@
+DROP SCHEMA col_partition_iterator_elimination CASCADE;
+ERROR:  schema "col_partition_iterator_elimination" does not exist
+CREATE SCHEMA col_partition_iterator_elimination;
+SET CURRENT_SCHEMA TO col_partition_iterator_elimination;
+drop table test_range_pt;
+ERROR:  table "test_range_pt" does not exist
+create table test_range_pt (a int, b int, c int, d int) WITH (ORIENTATION = COLUMN)
+partition by range(a)
+(
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (40),
+	partition p4 values less than (50)
+)ENABLE ROW MOVEMENT;
+create index idx_range_local on test_range_pt(a) local;
+insert into test_range_pt values(generate_series(0,49), generate_series(1,100));
+drop table test_range_pt1;
+ERROR:  table "test_range_pt1" does not exist
+create table test_range_pt1 (a int, b int, c int, d int) WITH (ORIENTATION = COLUMN)
+partition by range(a)
+(
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (40),
+	partition p4 values less than (50)
+)ENABLE ROW MOVEMENT;
+create index idx_range_local1 on test_range_pt1(a) local;
+insert into test_range_pt1 values(generate_series(0,49), generate_series(1,100));
+--base 验证数据结果
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--设置参数
+set partition_iterator_elimination = on;
+set enable_material = off;
+--seqscan + nestloop
+set enable_seqscan = on;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+(18 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Nest Loop
+               Output: t1.a
+               Join Filter: (t1.b = t2.b)
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Vector Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+(17 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Filter: (t2.a = 5)
+                     Selected Partitions:  1
+(16 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Nest Loop
+               Output: t1.b
+               Join Filter: (t1.b = t2.b)
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.b
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Filter: (t2.a = 5)
+                     Selected Partitions:  1
+(15 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--seqscan + hashjoin
+set enable_seqscan = on;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Hash Cond: (t2.b = t1.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  1
+(18 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Sonic Hash Join
+               Output: t1.a
+               Hash Cond: (t2.b = t1.b)
+               ->  Vector Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  1
+(17 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Hash Cond: (t1.b = t2.b)
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Filter: (t2.a = 5)
+                     Selected Partitions:  1
+(16 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Sonic Hash Join
+               Output: t1.b
+               Hash Cond: (t1.b = t2.b)
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.b
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Filter: (t2.a = 5)
+                     Selected Partitions:  1
+(15 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--seqscan + mergejoin
+set enable_seqscan = on;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = off;
+set enable_mergejoin = on;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Filter: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Merge Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Filter: (t1.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Sort
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Sort Key: t2.b
+                     ->  Vector Partition Iterator
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Iterations: 4
+                           ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+(24 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Merge Join
+               Output: t1.a
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b
+                           Filter: (t1.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Sort
+                     Output: t2.b
+                     Sort Key: t2.b
+                     ->  Vector Partition Iterator
+                           Output: t2.b
+                           Iterations: 4
+                           ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.b
+                                 Selected Partitions:  1..4
+(23 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Merge Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Filter: (t1.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Sort
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Sort Key: t2.b
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Filter: (t2.a = 5)
+                           Selected Partitions:  1
+(22 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Merge Join
+               Output: t1.b
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.b
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.b
+                           Filter: (t1.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Sort
+                     Output: t2.b
+                     Sort Key: t2.b
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Filter: (t2.a = 5)
+                           Selected Partitions:  1
+(21 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--indexscan/indexonlyscan + nestloop
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Index Only Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  1
+(18 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Nest Loop
+               Output: t1.a
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  1
+(17 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+(16 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Nest Loop
+               Output: t1.b
+               Join Filter: (t1.b = t2.b)
+               ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.b
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+(15 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--indexscan/indexonlyscan + hashjoin
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Index Only Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Hash Cond: (t2.b = t1.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  1
+(18 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Sonic Hash Join
+               Output: t1.a
+               Hash Cond: (t2.b = t1.b)
+               ->  Vector Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  1
+(17 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Hash Cond: (t1.b = t2.b)
+               ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+(16 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Sonic Hash Join
+               Output: t1.b
+               Hash Cond: (t1.b = t2.b)
+               ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.b
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  1
+               ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+(15 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--indexscan/indexonlyscan + mergejoin
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = off;
+set enable_mergejoin = on;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Index Only Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(8 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Merge Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Sort
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Sort Key: t2.b
+                     ->  Vector Partition Iterator
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Iterations: 4
+                           ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+(24 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Merge Join
+               Output: t1.a
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Sort
+                     Output: t2.b
+                     Sort Key: t2.b
+                     ->  Vector Partition Iterator
+                           Output: t2.b
+                           Iterations: 4
+                           ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.b
+                                 Selected Partitions:  1..4
+(23 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Merge Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Sort
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Sort Key: t2.b
+                     ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Index Cond: (t2.a = 5)
+                           Selected Partitions:  1
+(22 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Merge Join
+               Output: t1.b
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.b
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Index Scan using idx_range_local1 on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.b
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Sort
+                     Output: t2.b
+                     Sort Key: t2.b
+                     ->  Partitioned CStore Index Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Index Cond: (t2.a = 5)
+                           Selected Partitions:  1
+(21 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--bitmapscan + nestloop
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = on;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(11 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(10 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(10 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                           Index Cond: (t1.a = 5)
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Nest Loop
+               Output: t1.a
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                           Index Cond: (t1.a = 5)
+(19 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                           Index Cond: (t1.a = 5)
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Recheck Cond: (t2.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                           Index Cond: (t2.a = 5)
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Nest Loop
+               Output: t1.b
+               Join Filter: (t1.b = t2.b)
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.b
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                           Index Cond: (t1.a = 5)
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Recheck Cond: (t2.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                           Index Cond: (t2.a = 5)
+(19 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--bitmapscan + hashjoin
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = on;
+set enable_nestloop = off;
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(11 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(10 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(10 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Hash Cond: (t2.b = t1.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                           Index Cond: (t1.a = 5)
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Sonic Hash Join
+               Output: t1.a
+               Hash Cond: (t2.b = t1.b)
+               ->  Vector Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                           Index Cond: (t1.a = 5)
+(19 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Sonic Hash Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Hash Cond: (t1.b = t2.b)
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                           Index Cond: (t1.a = 5)
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Recheck Cond: (t2.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                           Index Cond: (t2.a = 5)
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Sonic Hash Join
+               Output: t1.b
+               Hash Cond: (t1.b = t2.b)
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                     Output: t1.b
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                           Index Cond: (t1.a = 5)
+               ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Recheck Cond: (t2.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                           Index Cond: (t2.a = 5)
+(19 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--bitmapscan + mergejoin
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = on;
+set enable_nestloop = off;
+set enable_hashjoin = off;
+set enable_mergejoin = on;
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a, b, c, d
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(11 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: a
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(10 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+               Output: b
+               Recheck Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+               ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                     Index Cond: (test_range_pt.a = 30)
+(10 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Merge Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Recheck Cond: (t1.a = 5)
+                           Selected Partitions:  1
+                           ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                                 Index Cond: (t1.a = 5)
+               ->  Vector Sort
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Sort Key: t2.b
+                     ->  Vector Partition Iterator
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Iterations: 4
+                           ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+(26 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Merge Join
+               Output: t1.a
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b
+                           Recheck Cond: (t1.a = 5)
+                           Selected Partitions:  1
+                           ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                                 Index Cond: (t1.a = 5)
+               ->  Vector Sort
+                     Output: t2.b
+                     Sort Key: t2.b
+                     ->  Vector Partition Iterator
+                           Output: t2.b
+                           Iterations: 4
+                           ->  Partitioned CStore Scan on col_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.b
+                                 Selected Partitions:  1..4
+(25 rows)
+
+explain(costs off, verbose on) select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Merge Join
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Recheck Cond: (t1.a = 5)
+                           Selected Partitions:  1
+                           ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                                 Index Cond: (t1.a = 5)
+               ->  Vector Sort
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Sort Key: t2.b
+                     ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Recheck Cond: (t2.a = 5)
+                           Selected Partitions:  1
+                           ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                                 Index Cond: (t2.a = 5)
+(26 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Merge Join
+               Output: t1.b
+               Merge Cond: (t1.b = t2.b)
+               ->  Vector Sort
+                     Output: t1.b
+                     Sort Key: t1.b
+                     ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt1 t1
+                           Output: t1.b
+                           Recheck Cond: (t1.a = 5)
+                           Selected Partitions:  1
+                           ->  Partitioned CStore Index Ctid Scan on idx_range_local1
+                                 Index Cond: (t1.a = 5)
+               ->  Vector Sort
+                     Output: t2.b
+                     Sort Key: t2.b
+                     ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Recheck Cond: (t2.a = 5)
+                           Selected Partitions:  1
+                           ->  Partitioned CStore Index Ctid Scan on idx_range_local
+                                 Index Cond: (t2.a = 5)
+(25 rows)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_range_pt1 t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+DROP SCHEMA col_partition_iterator_elimination  CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table test_range_pt
+drop cascades to table test_range_pt1

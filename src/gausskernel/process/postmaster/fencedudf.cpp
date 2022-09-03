@@ -67,6 +67,7 @@
 #include "utils/relmapper.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
+#include "commands/user.h"
 #include "dynloader.h"
 #include "catalog/pg_type.h"
 #include "utils/memutils.h"
@@ -206,6 +207,7 @@ void FencedUDFMasterMain(int argc, char* argv[])
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
     gs_signal_block_sigusr2();
 
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, SIG_IGN);           /* reread config file and have
                                                   * children do same */
     (void)gspqsignal(SIGINT, SIGQUITUDFMaster);  /* send SIGTERM and shut down */
@@ -2563,6 +2565,16 @@ char* get_obsfile_local(char* pathname, const char* basename, const char* extens
     pfree_ext(tmp_path);
     /* get OBSInfo */
     obsinfo = parse_obsinfo(pathname, tmp.data);
+
+    /* check if ak/sk contains invalid character */
+    if (isStrHasInvalidCharacter(obsinfo->accesskey) || isStrHasInvalidCharacter(obsinfo->secretkey)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("OBS Path Keys cannot contain characters except numbers, alphabetic characters and "
+                    "specified special characters."),
+            errcause("OBS Path Keys contain invalid characters."),
+            erraction("Use valid characters in OBS Path Keys.")));
+    }
+
     resetStringInfo(&tmp);
 
     /* get the tmp path */

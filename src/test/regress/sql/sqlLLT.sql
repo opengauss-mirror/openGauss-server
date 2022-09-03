@@ -357,6 +357,21 @@ OPERATOR 2 <= (int4, int2) ,
 FUNCTION 1 btint24cmp(int2, int4) ;
 ALTER TEXT SEARCH DICTIONARY my_dict ( StopWords = newrussian ); 
 
+-- Test constants as join keys for full join
+drop table t1 cascade;
+drop table t2 cascade;
+CREATE TABLE t1 (name TEXT, n INTEGER);
+CREATE TABLE t2 (name TEXT, n INTEGER);
+INSERT INTO t1 VALUES ( 'bb', 11 );
+INSERT INTO t2 VALUES ( 'bb', 12 );
+INSERT INTO t2 VALUES ( 'cc', 22 );
+INSERT INTO t2 VALUES ( 'ee', 42 );
+SELECT * FROM
+  (SELECT name, n as s1_n FROM t1) as s1
+FULL JOIN
+  (SELECT name, 2 as s2_n FROM t2) as s2
+ON (s1_n = s2_n) order by 1, 2;
+
 drop table t1 CASCADE;
 drop table test_raw cascade;
 \c regression;

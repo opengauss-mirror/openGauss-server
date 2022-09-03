@@ -114,8 +114,8 @@ pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
     bool        corrupted = false;
     bool        validation_isok = true;
     /* arrays with meta info for multi threaded validate */
-    pthread_t  *threads;
-    validate_files_arg *threads_args;
+    pthread_t  *threads = NULL;
+    validate_files_arg *threads_args = NULL;
     int            i;
 
     if (!pre_check_backup(backup))
@@ -142,8 +142,14 @@ pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
 
     /* init thread args with own file lists */
     threads = (pthread_t *) palloc(sizeof(pthread_t) * num_threads);
+    if (threads == NULL) {
+        elog(ERROR, "Out of memory");
+    }
     threads_args = (validate_files_arg *)
         palloc(sizeof(validate_files_arg) * num_threads);
+    if (threads_args == NULL) {
+        elog(ERROR, "Out of memory");
+    }
 
     /* Validate files */
     thread_interrupted = false;

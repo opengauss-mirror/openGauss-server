@@ -55,7 +55,7 @@ UHeapTableScanFusion::UHeapTableScanFusion(SeqScan *node, PlannedStmt *planstmt,
 void UHeapTableScanFusion::Init(long max_rows)
 {
     m_rel = heap_open(m_reloid, AccessShareLock);
-    m_scan = (UHeapScanDesc)UHeapBeginScan(m_rel, GetActiveSnapshot(), m_tupDesc->natts);
+    m_scan = (UHeapScanDesc)UHeapBeginScan(m_rel, GetActiveSnapshot(), m_tupDesc->natts, NULL);
     *m_direction = ForwardScanDirection;
     Assert(m_scan != NULL);
 }

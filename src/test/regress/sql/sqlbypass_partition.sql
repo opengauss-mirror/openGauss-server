@@ -317,6 +317,70 @@ execute p1 (1);
 deallocate p1;
 drop table test_list_lt1;
 
+drop table test_list_lt;
+create table test_list_lt (a int, b int, c int)
+partition by list(a)
+(
+	partition p1 values (2000),
+	partition p2 values (3000),
+	partition p3 values (4000)
+) ;
+create index idx_list_c on test_list_lt(c) local;
+create index idx_list_b on test_list_lt(b) local;
+create index idx_list_bc on test_list_lt(b,c) local;
+
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain(costs off, verbose on) select *from test_list_lt where a = 2000 and b = 1 order by c;
+explain(costs off, verbose on) select *from test_list_lt where a = 5000 and b = 1 order by c;
+
+prepare p1 as  select *from test_list_lt where a = $1 and b = $2 order by c;
+explain(costs off, verbose on) execute p1(2000,1);
+explain(costs off, verbose on) execute p1(5000,1);
+deallocate p1;
+
+prepare p1 as  select *from test_list_lt where a = $1 order by b;
+explain(costs off, verbose on) execute p1(2000);
+deallocate p1;
+
+reset enable_seqscan;
+reset enable_bitmapscan;
+drop table test_list_lt;
+
+
+drop table test_hash_ht;
+create table test_hash_ht (a int, b int, c int)
+partition by hash(a)
+(
+	partition p1, 
+	partition p2,  
+	partition p3,
+	partition p4,
+	partition p5,
+	partition p6,
+	partition p7,
+	partition p8
+);
+
+create index idx_hash_c on test_hash_ht(c) local;
+create index idx_hash_b on test_hash_ht(b) local;
+create index idx_hash_bc on test_hash_ht(b,c) local;
+
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain(costs off, verbose on) select *from test_hash_ht where a = 2000 and b = 1 order by c;
+
+prepare p1 as  select *from test_hash_ht where a = $1 and b = $2 order by c;
+explain(costs off, verbose on) execute p1(2000,1);
+deallocate p1;
+
+prepare p1 as  select *from test_hash_ht where a = $1 order by b;
+explain(costs off, verbose on) execute p1(2000);
+deallocate p1;
+
+reset enable_seqscan;
+reset enable_bitmapscan;
+drop table test_hash_ht;
 reset enable_partition_opfusion;
 drop table test_bypass_sql_partition;
 

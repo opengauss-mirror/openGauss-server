@@ -59,7 +59,7 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;

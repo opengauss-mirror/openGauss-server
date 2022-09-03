@@ -139,6 +139,7 @@ static THR_LOCAL MngEventsVector *mng_events = NULL;
 using StrMap = gs_stl::gs_map<gs_stl::gs_string, masking_result>;
 
 static void gsaudit_next_PostParseAnalyze_hook(ParseState *pstate, Query *query);
+
 static void destroy_local_parameter();
 static void destory_thread_variables()
 {
@@ -409,18 +410,16 @@ bool verify_copy_command_is_reparsed(List* parsetree_list, const char* query_str
                                      gs_stl::gs_string& replaced_query_string)
 {
     /* do nothing when enable_security_policy is off */
-    if (!u_sess->attr.attr_security.Enable_Security_Policy || !is_masking_policy_exist()) {
-        return false;
-    }
+    bool is_exist = (!u_sess->attr.attr_security.Enable_Security_Policy ||
+        !is_masking_policy_exist());
+    if (is_exist) return false;
     ListCell* item = NULL;
     foreach(item, parsetree_list) {
         Node* parsetree = (Node *) lfirst(item);
         if (nodeTag(parsetree) == T_CopyStmt) {
             CopyStmt* stmt = (CopyStmt*)parsetree;
-            if (stmt->is_from || stmt->query) {
-                return false;
-            }
-
+            bool is_from_query = (stmt->is_from || stmt->query);
+            if (is_from_query) return false;
             /* verify policies */
             IPV6 ip;
             get_remote_addr(&ip);
@@ -432,10 +431,8 @@ bool verify_copy_command_is_reparsed(List* parsetree_list, const char* query_str
                     checkSecurityPolicyFilter_hook(filter_item, &policy_ids);
                 }
             }
-            if (policy_ids.empty() && !check_audit_policy_filter(&filter_item, &policy_ids)) {
-                return false;
-            }
-
+            bool is_empty_filter = (policy_ids.empty() && !check_audit_policy_filter(&filter_item, &policy_ids));
+            if (is_empty_filter) return false;
             gs_stl::gs_string replace_buffer("(select ");
 
             char replace_name[POLICY_TMP_BUFF_LEN] = {0};
@@ -558,7 +555,7 @@ static void gsaudit_next_PostParseAnalyze_hook(ParseState *pstate, Query *query)
         enable_dml_auditing = true;
     }
 
-    if (u_sess->proc_cxt.IsInnerMaintenanceTools || (t_thrd.role != WORKER && t_thrd.role != THREADPOOL_WORKER) ||
+    if (u_sess->proc_cxt.IsNoMaskingInnerTools || (t_thrd.role != WORKER && t_thrd.role != THREADPOOL_WORKER) ||
         (!enable_dml_auditing && !is_masking_policy_exist())) {
         if (next_post_parse_analyze_hook) {
             next_post_parse_analyze_hook(pstate, query);
@@ -711,7 +708,14 @@ static inline bool get_prepare_command_object_name(Node *parsetree, RangeVar *&r
         }
         case T_UpdateStmt: {
             UpdateStmt *_stmt = (UpdateStmt *)parsetree;
-            rel = _stmt->relation;
+            ListCell *l = NULL;
+            foreach (l, _stmt->relationClause) {
+                Node *n = (Node *)lfirst(l);
+                if (IsA(n, RangeVar)) {
+                    rel = (RangeVar *)n;
+                    return true;
+                }
+            }
             return true;
         }
         case T_SelectStmt: {
@@ -732,7 +736,7 @@ static inline bool get_prepare_command_object_name(Node *parsetree, RangeVar *&r
         }
         case T_DeleteStmt: {
             DeleteStmt *_stmt = (DeleteStmt *)parsetree;
-            rel = _stmt->relation;
+            rel = (RangeVar*)linitial(_stmt->relations);
             return true;
         }
         default:

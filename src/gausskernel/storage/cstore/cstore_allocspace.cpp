@@ -23,7 +23,6 @@
  */
 
 #include "access/cstore_am.h"
-#include "access/genam.h"
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "storage/cstore/cstorealloc.h"
@@ -383,8 +382,7 @@ bool CStoreAllocator::ColSpaceCacheExist(const CFileNode* cnodes, int nColumn)
 
     LWLockRelease(CStoreColspaceCacheLock);
     return found;
-}   
-
+}
 void CStoreFreeSpace::Initialize(int maxSize)
 {
     m_maxSize = maxSize;

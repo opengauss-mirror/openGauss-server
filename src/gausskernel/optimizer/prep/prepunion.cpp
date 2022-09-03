@@ -1458,9 +1458,7 @@ static void expand_inherited_rtentry(PlannerInfo* root, RangeTblEntry* rte, Inde
 
     if (!has_subclass(parentOID)) {
         /* Clear flag before returning */
-        if (!RelationIsDfsStore(parentRel) || (!u_sess->opt_cxt.is_stream && IS_PGXC_COORDINATOR)) {
-            rte->inh = false;
-        }
+        rte->inh = false;
         RelationClose(parentRel);
         return;
     }
@@ -1481,7 +1479,7 @@ static void expand_inherited_rtentry(PlannerInfo* root, RangeTblEntry* rte, Inde
      * parser and rewriter.)
      */
     oldrc = get_plan_rowmark(root->rowMarks, rti);
-    if (rti == (unsigned int)parse->resultRelation)
+    if (rti == (unsigned int)linitial2_int(parse->resultRelations))
         lockmode = RowExclusiveLock;
     else if (oldrc && RowMarkRequiresRowShareLock(oldrc->markType))
         lockmode = RowShareLock;
@@ -1688,7 +1686,7 @@ void make_inh_translation_list(Relation oldrelation, Relation newrelation, Index
          * logic must be covered.
          */
         if (old_attno < newnatts && (att = new_tupdesc->attrs[old_attno]) != NULL &&
-            ((att->attisdropped && att->attinhcount != 0) || RelationIsDfsStore(oldrelation)) &&
+            (att->attisdropped && att->attinhcount != 0) &&
             strcmp(attname, NameStr(att->attname)) == 0)
             new_attno = old_attno;
         else {
@@ -1802,8 +1800,8 @@ Node* adjust_appendrel_attrs(PlannerInfo* root, Node* node, AppendRelInfo* appin
             (Node* (*)(Node*, void*)) adjust_appendrel_attrs_mutator,
             (void*)&context,
             QTW_IGNORE_RC_SUBQUERIES);
-        if ((unsigned int)newnode->resultRelation == appinfo->parent_relid) {
-            newnode->resultRelation = appinfo->child_relid;
+        if ((unsigned int)linitial2_int(newnode->resultRelations) == appinfo->parent_relid) {
+            linitial_int(newnode->resultRelations) = appinfo->child_relid;
             /* Fix tlist resnos too, if it's inherited UPDATE */
             if (newnode->commandType == CMD_UPDATE)
                 newnode->targetList = adjust_inherited_tlist(newnode->targetList, appinfo);
@@ -2169,14 +2167,8 @@ void expand_dfs_tables(PlannerInfo* root)
  */
 void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti)
 {
-    Query* parse = root->parse;
     Oid parentOid = InvalidOid;
     Relation prarentRel;
-    PlanRowMark* oldrc = NULL;
-    LOCKMODE lockmode;
-    List* interOids = NIL;
-    List* appinfos = NIL;
-    ListCell* l = NULL;
 
     rte->mainRelName = NULL;
     rte->mainRelNameSpace = NULL;
@@ -2203,201 +2195,12 @@ void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti)
         ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("No Such Relation")));
     }
 
-    if (!RelationIsDfsStore(prarentRel)) {
-        /*
-         * Do not set rte->inh = false here, because the inherits table
-         * dose not need deal with.
-         */
-        RelationClose(prarentRel);
-        return;
-    }
-
     /*
-     * The rewriter should already have obtained an appropriate lock on each
-     * relation named in the query.  However, for each child relation we add
-     * to the query, we must obtain an appropriate lock, because this will be
-     * the first use of those relations in the parse/rewrite/plan pipeline.
-     *
-     * If the parent relation is the query's result relation, then we need
-     * RowExclusiveLock.  Otherwise, if it's accessed FOR UPDATE/SHARE, we
-     * need RowShareLock; otherwise AccessShareLock.  We can't just grab
-     * AccessShareLock because then the executor would be trying to upgrade
-     * the lock, leading to possible deadlocks.  (This code should match the
-     * parser and rewriter.)
+     * Do not set rte->inh = false here, because the inherits table
+     * dose not need deal with.
      */
-    oldrc = get_plan_rowmark(root->rowMarks, rti);
-    if (rti == (unsigned int)parse->resultRelation) {
-        lockmode = RowExclusiveLock;
-    } else if (oldrc && RowMarkRequiresRowShareLock(oldrc->markType)) {
-        lockmode = RowShareLock;
-    } else {
-        lockmode = AccessShareLock;
-    }
-    /*
-     * Scan for all members of internal set, acquire needed locks.
-     */
-    interOids = find_all_internal_tableOids(parentOid);
-    /*
-     * Check that there's at least one descendant, else treat as no-child
-     * case.  This could happen despite above has_subclass() check, if table
-     * once had a child but no longer does.
-     */
-    if (list_length(interOids) < 2) { /* 2 is the least one descendant. Clear flag before returning. */
-        rte->inh = false;
-        RelationClose(prarentRel);
-        return;
-    }
-
-    /*
-     * If parent relation is selected FOR UPDATE/SHARE, we need to mark its
-     * PlanRowMark as isParent = true, and generate a new PlanRowMark for each
-     * child.
-     */
-    if (oldrc != NULL) {
-        oldrc->isParent = true;
-    }
-
-    /*
-     * Must open the parent relation to examine its tupdesc.  We need not lock
-     * it; we assume the rewriter already did.
-     */
-    /*
-     * Scan the internal set and expand it.
-     */
-    appinfos = NIL;
-    foreach (l, interOids) {
-        Oid childOid = lfirst_oid(l);
-        Relation newRel;
-        RangeTblEntry* childrte = NULL;
-        Index childRTindex;
-        AppendRelInfo* appinfo = NULL;
-
-        if (childOid != parentOid) {
-            newRel = heap_open(childOid, NoLock);
-        } else {
-            newRel = prarentRel;
-        }
-
-        /*
-         * It is possible that the parent table has children that are temp
-         * tables of other backends.  We cannot safely access such tables
-         * (because of buffering issues), and the best thing to do seems to be
-         * to silently ignore them.
-         */
-        if (childOid != parentOid && RELATION_IS_OTHER_TEMP(newRel)) {
-            heap_close(newRel, lockmode);
-            continue;
-        }
-
-        /*
-         * Build an RTE for the child, and attach to query's rangetable list.
-         * We copy most fields of the parent's RTE, but replace relation OID,
-         * and set inh = false.  Also, set requiredPerms to zero since all
-         * required permissions checks are done on the original RTE.
-         */
-        childrte = (RangeTblEntry*)copyObject(rte);
-        childrte->relid = childOid;
-        childrte->inh = false;
-        childrte->requiredPerms = 0;
-        if (childOid != parentOid) {
-            /*
-             * Check if table is in UStore format.
-             */
-            childrte->is_ustore = RelationIsUstoreFormat(prarentRel);
-
-            /*
-             * Set delta table orientation.
-             */
-            childrte->orientation = REL_ROW_ORIENTED;
-
-            /*
-             * fill main table name and schema name.
-             */
-            childrte->mainRelName = pstrdup(RelationGetRelationName(prarentRel));
-            Oid nameSpaceOid = RelationGetNamespace(prarentRel);
-            childrte->mainRelNameSpace = pstrdup(get_namespace_name(nameSpaceOid));
-        }
-        parse->rtable = lappend(parse->rtable, childrte);
-        childRTindex = list_length(parse->rtable);
-
-        /* For hdfs table, we should push scan hint to hdfs main table */
-        adjust_scanhint_relid(parse->hintState, rti, childRTindex);
-
-        if (RELATION_IS_PARTITIONED(newRel)) {
-            childrte->ispartrel = true;
-        } else {
-            childrte->ispartrel = false;
-        }
-
-        /*
-         * Build an AppendRelInfo for this parent and child.
-         */
-        appinfo = makeNode(AppendRelInfo);
-        appinfo->parent_relid = rti;
-        appinfo->child_relid = childRTindex;
-        appinfo->parent_reltype = prarentRel->rd_rel->reltype;
-        appinfo->child_reltype = newRel->rd_rel->reltype;
-        make_inh_translation_list(prarentRel, newRel, childRTindex, &appinfo->translated_vars);
-        appinfo->parent_reloid = parentOid;
-        appinfos = lappend(appinfos, appinfo);
-
-        /*
-         * Translate the column permissions bitmaps to the child's attnums (we
-         * have to build the translated_vars list before we can do this). But
-         * if this is the parent table, leave copyObject's result alone.
-         *
-         * Note: we need to do this even though the executor won't run any
-         * permissions checks on the child RTE.  The modifiedCols bitmap may
-         * be examined for trigger-firing purposes.
-         */
-        if (childOid != parentOid) {
-            childrte->selectedCols = translate_col_privs(rte->selectedCols, appinfo->translated_vars);
-            childrte->insertedCols = translate_col_privs(rte->insertedCols, appinfo->translated_vars);
-            childrte->updatedCols = translate_col_privs(rte->updatedCols, appinfo->translated_vars);
-            childrte->extraUpdatedCols = translate_col_privs(rte->extraUpdatedCols, appinfo->translated_vars);
-        }
-
-        /*
-         * Build a PlanRowMark if parent is marked FOR UPDATE/SHARE.
-         */
-        if (oldrc != NULL) {
-            PlanRowMark* newrc = makeNode(PlanRowMark);
-
-            newrc->rti = childRTindex;
-            newrc->prti = rti;
-            newrc->rowmarkId = oldrc->rowmarkId;
-            newrc->markType = oldrc->markType;
-            newrc->noWait = oldrc->noWait;
-            newrc->waitSec = oldrc->waitSec;
-            newrc->isParent = false;
-
-            root->rowMarks = lappend(root->rowMarks, newrc);
-        }
-
-        /*
-         * Close child relations, but keep locks.
-         */
-        if (childOid != parentOid)
-            heap_close(newRel, NoLock);
-    }
-
     RelationClose(prarentRel);
-
-    /*
-     * If all the children were temp tables, pretend it's a non-inheritance
-     * situation.  The duplicate RTE we added for the parent table is
-     * harmless, so we don't bother to get rid of it.
-     */
-    if (list_length(appinfos) < 2) { /* 2 is the least one descendant. Clear flag before returning. */
-        rte->inh = false;
-        list_free_deep(appinfos);
-        return;
-    }
-
-    /*
-     * Otherwise, OK to add to root->append_rel_list.
-     */
-    root->append_rel_list = list_concat(root->append_rel_list, appinfos);
+    return;
 }
 
 /*

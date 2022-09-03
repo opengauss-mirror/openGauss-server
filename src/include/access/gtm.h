@@ -38,8 +38,8 @@ extern bool GetDisasterClusterGTM(char** disasterCluster);
 
 extern GTM_TransactionKey BeginTranGTM(GTM_Timestamp *timestamp);
 extern GlobalTransactionId GetGxidGTM(GTM_TransactionKey txnKey, bool is_sub_xact);
-extern CommitSeqNo GetCSNGTM();
-extern CommitSeqNo CommitCSNGTM(bool need_clean);
+extern CommitSeqNo GetCSNGTM(GTM_Timestamp *timestamp);
+extern CommitSeqNo CommitCSNGTM(bool need_clean, GTM_Timestamp *timestamp);
 extern TransactionId GetGTMGlobalXmin();
 extern GlobalTransactionId BeginTranAutovacuumGTM(void);
 extern int CommitTranGTM(GlobalTransactionId gxid, TransactionId *childXids, int nChildXids);

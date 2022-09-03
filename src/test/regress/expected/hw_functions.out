@@ -459,7 +459,7 @@ select func_get_partition_filepath('p0_partition_filepath_table1');
 select func_get_partition_filepath('p1_partition_filepath_table1');
 --? func_get_partition_filepath 
 --?.*
---?.base/.*/.*
+--? base/.*/.*
 (1 row)
 
 select func_get_partition_filepath('p2_partition_filepath_table1');
@@ -476,4 +476,65 @@ select func_get_partition_filepath('p3_partition_filepath_table1');
 
 drop function func_get_partition_filepath;
 drop table test_func_partition_filepath_table;
+--test function pg_partition_filepath with subpartition
+CREATE TABLE test_func_subpartition_table
+(
+    c1 int,
+    c2 int,
+    c3 int
+)
+partition by range (c1) subpartition by range (c2)
+(
+    partition p1 VALUES less than (100)
+    (
+        subpartition p1_1 VALUES less than (100),
+        subpartition p1_2 VALUES less than (200)
+    ),
+    partition p2 VALUES less than (200)
+    (
+        subpartition p2_1 VALUES less than (100),
+        subpartition p2_2 VALUES less than (200)
+    )
+);
+create or replace function func_get_subpartition_filepath(tablename text, partname text, subpartname text)
+returns text as $$
+declare
+    relid integer;
+    partoid integer;
+    subpartoid integer;
+    filepath text;
+begin
+    select c.oid from pg_class c, pg_namespace t where c.relnamespace=t.oid and c.relname = tablename into  relid;
+    select oid from pg_partition where relname = partname and parentid = relid into partoid;
+    select oid from pg_partition where relname = subpartname and parentid = partoid into subpartoid;
+    select * from pg_partition_filepath(subpartoid) into filepath;
+    return filepath;
+end;
+$$ language plpgsql;
+select func_get_subpartition_filepath('test_func_subpartition_table', 'p1', 'p1_1');
+--? func_get_subpartition_filepath 
+--?.*
+--? base/.*/.*
+(1 row)
+
+select func_get_subpartition_filepath('test_func_subpartition_table', 'p1', 'p1_1');
+--? func_get_subpartition_filepath 
+--?.*
+--? base/.*/.*
+(1 row)
+
+select func_get_subpartition_filepath('test_func_subpartition_table', 'p1', 'p1_1');
+--? func_get_subpartition_filepath 
+--?.*
+--? base/.*/.*
+(1 row)
+
+select func_get_subpartition_filepath('test_func_subpartition_table', 'p1', 'p1_1');
+--? func_get_subpartition_filepath 
+--?.*
+--? base/.*/.*
+(1 row)
+
+drop function func_get_subpartition_filepath;
+drop table test_func_subpartition_table;
 drop schema basefunc cascade;

@@ -385,7 +385,7 @@ extern bool plpgsql_check_opexpr_colocate(
             Expr* qual_expr = (Expr*)lfirst(opexpr_cell);
 
             /* Check all opexpr with distribute column */
-            expr = pgxc_check_distcol_opexpr(query->resultRelation, attnum2, (OpExpr*)qual_expr);
+            expr = pgxc_check_distcol_opexpr(linitial_int(query->resultRelations), attnum2, (OpExpr*)qual_expr);
             if (expr == NULL) {
                 is_colocate = false;
                 continue;
@@ -1117,6 +1117,7 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
         }
     }
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+    Oid old_value = saveCallFromPkgOid(pkgOid);
     PG_TRY();
     {
         if (!pkg_valid) {
@@ -1173,6 +1174,7 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
         ReleaseSysCache(pkg_tup);
         pkg_tup = NULL;
     }
+    restoreCallFromPkgOid(old_value);
     /*
      * Finally return the compiled function
      */

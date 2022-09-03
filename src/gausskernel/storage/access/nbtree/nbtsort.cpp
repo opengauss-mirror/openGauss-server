@@ -69,6 +69,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/nbtree.h"
+#include "access/ubtree.h"
 #include "access/tableam.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
@@ -88,6 +89,7 @@
 #include "utils/tuplesort.h"
 #include "catalog/index.h"
 #include "postmaster/bgworker.h"
+#include "access/ubtree.h"
 
 static Page _bt_blnewpage(uint32 level);
 static void _bt_slideleft(Page page);
@@ -842,7 +844,7 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
             if (itup == NULL && itup2 == NULL) {
                 break;
             }
-            load1 = _index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2);
+            load1 = _bt_index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2);
 
             /* When we see first tuple, create first index page */
             if (state == NULL)
@@ -904,17 +906,22 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
     }
 }
 
+static int IndexTupleGetNAttsByDefault(IndexTuple itup, int defValue)
+{
+    return UBTreeTupleIsPivot(itup) ?
+           ItemPointerGetOffsetNumberNoCheck(&(itup)->t_tid) & UBT_OFFSET_MASK :
+           defValue;
+}
+
 /*
  * if itup < itup2, return true;
  * if itup > itup2, return false;
  * if itup == itup2, Take TID as the tie-breaker.
  * itup == NULL && itup2 == NULL take care by caller
  */
-bool _index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup, IndexTuple itup2)
+bool _bt_index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup, IndexTuple itup2)
 {
     /* defaultly load itup, including the itup != NULL && itup2 == NULL case. */
-    int i;
-
     if (itup == NULL && itup2 != NULL) {
         return false;
     }
@@ -922,7 +929,10 @@ bool _index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, Ind
         return true;
     }
     Assert(itup != NULL && itup2 != NULL);
-    for (i = 1; i <= keysz; i++) {
+    int ntupkeys = IndexTupleGetNAttsByDefault(itup, keysz);
+    int ntupkeys2 = IndexTupleGetNAttsByDefault(itup2, keysz);
+    keysz = Min(keysz, Min(ntupkeys, ntupkeys2));
+    for (int i = 1; i <= keysz; i++) {
         ScanKey entry;
         Datum attrDatum1, attrDatum2;
         bool isNull1 = false;
@@ -958,12 +968,22 @@ bool _index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, Ind
             return true;
         }
     }
+    if (ntupkeys != ntupkeys2) {
+        return ntupkeys < ntupkeys2;
+    }
 
     /* we got here, key attrs are all equal, take TID as tie-breaker */
-    int compare = ItemPointerCompare(&itup->t_tid, &itup2->t_tid);
-    /* TIDs can still be equal in global index  */
-
-    return compare <= 0;
+    ItemPointer tid = UBTreeTupleGetHeapTID(itup);
+    ItemPointer tid2 = UBTreeTupleGetHeapTID(itup2);
+    /* NULL means that TID is truncated, we treat it as minus infinity and return true when they are both NULL*/
+    if (tid == NULL) {
+        return true;
+    }
+    if (tid2 == NULL) {
+        return false;
+    }
+    /* TIDs can still be equal in global index */
+    return ItemPointerCompare(tid, tid2) <= 0;
 }
 
 List *insert_ordered_index(List *list, TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup,
@@ -995,7 +1015,7 @@ List *insert_ordered_index(List *list, TupleDesc tupdes, ScanKey indexScanKey, i
                  erraction("Contact engineer to support.")));
     }
     /* Does the datum belong at the front? */
-    if (_index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2)) {
+    if (_bt_index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2)) {
         ele->itup = itup;
         ele->heapModifiedOffset = heapModifiedOffset;
         ele->indexScanDesc = srcIdxRelScan;
@@ -1018,7 +1038,7 @@ List *insert_ordered_index(List *list, TupleDesc tupdes, ScanKey indexScanKey, i
                      errcause("System error."),
                      erraction("Contact engineer to support.")));
         }
-        if (_index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2)) {
+        if (_bt_index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2)) {
             break; /* it belongs after 'prev', before 'curr' */
         }
 
@@ -1074,8 +1094,8 @@ static BTShared* _bt_parallel_initshared(BTSpool *btspool, int *workmem, int sca
 
     /* Initialize immutable state */
     if (RelationIsPartition(btspool->heap)) {
-        btshared->heaprelid = btspool->heap->parentId;
-        btshared->indexrelid = btspool->index->parentId;
+        btshared->heaprelid = GetBaseRelOidOfParition(btspool->heap);
+        btshared->indexrelid = GetBaseRelOidOfParition(btspool->index);
         btshared->heappartid = RelationGetRelid(btspool->heap);
         btshared->indexpartid = RelationGetRelid(btspool->index);
     } else {
@@ -1156,8 +1176,13 @@ static void _bt_begin_parallel(BTBuildState *buildstate, int request, int *workm
     /* Launch workers, saving status for leader/caller */
     btleader->nparticipanttuplesorts =
             LaunchBackgroundWorkers(request, btshared, _bt_parallel_build_main, _bt_parallel_cleanup);
+    /* if all workers start failed, will series index */
+    if (btleader->nparticipanttuplesorts == 0) {
+        pfree_ext(btshared);
+        pfree_ext(btleader);
+        return;
+    }
     btleader->btshared = btshared;
-
     /* Save leader state now that it's clear build will be parallel */
     buildstate->btleader = btleader;
 }
@@ -1295,7 +1320,7 @@ static void _bt_parallel_scan_and_sort(BTSpool *btspool, BTSpool *btspool2, BTSh
 {
     SortCoordinate coordinate;
     BTBuildState buildstate;
-    HeapScanDesc scan;
+    TableScanDesc scan;
     double reltuples;
     IndexInfo *indexInfo;
 
@@ -1345,14 +1370,15 @@ static void _bt_parallel_scan_and_sort(BTSpool *btspool, BTSpool *btspool2, BTSh
     indexInfo->ii_Concurrent = false;
 
     /* do the heap scan */
+    IndexBuildCallback callback = (btspool->heap->rd_tam_type == TAM_USTORE)? UBTreeBuildCallback : btbuildCallback;
     if (btshared->isplain) {
         /* plain table or partition */
-        scan = HeapBeginscanParallel(btspool->heap, &btshared->heapdesc);
-        reltuples = tableam_index_build_scan(btspool->heap, btspool->index, indexInfo, true, btbuildCallback,
+        scan = tableam_scan_begin_parallel(btspool->heap, &btshared->heapdesc);
+        reltuples = tableam_index_build_scan(btspool->heap, btspool->index, indexInfo, true, callback,
                                              (void*)&buildstate, (TableScanDesc)scan);
     } else {
         /* global partitioned index or crossbucket index */
-        reltuples = _bt_parallel_scan_cross_level(btspool->heap, btspool->index, indexInfo, btbuildCallback,
+        reltuples = _bt_parallel_scan_cross_level(btspool->heap, btspool->index, indexInfo, callback,
             (void*)&buildstate, btshared);
     }
 
@@ -1518,12 +1544,13 @@ static double _bt_spools_heapscan_utility(Relation heap, Relation index,  BTBuil
     /* Fill spool using either serial or parallel heap scan */
     if (!buildstate->btleader) {
 serial_build:
+        IndexBuildCallback callback = (heap->rd_tam_type == TAM_USTORE)? UBTreeBuildCallback : btbuildCallback;
         if (RelationIsGlobalIndex(index)) {
-            *allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, btbuildCallback, (void *)buildstate);
+            *allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, callback, (void *)buildstate);
         } else if (RelationIsCrossBucketIndex(index)) {
-            reltuples = IndexBuildHeapScanCrossBucket(heap, index, indexInfo, btbuildCallback, (void *)buildstate);
+            reltuples = IndexBuildHeapScanCrossBucket(heap, index, indexInfo, callback, (void *)buildstate);
         } else {
-            reltuples = tableam_index_build_scan(heap, index, indexInfo, true, btbuildCallback, (void *)buildstate,
+            reltuples = tableam_index_build_scan(heap, index, indexInfo, true, callback, (void *)buildstate,
                 NULL);
         }
     } else {

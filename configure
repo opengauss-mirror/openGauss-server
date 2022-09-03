@@ -5890,8 +5890,7 @@ fi
 
 llvm_version_str='10.0.0'
 if [[ ! -z "${with_3rdpartydir}" ]] && [[ "$enable_lite_mode" != yes ]]; then
-    platstr=$(sh src/get_PlatForm_str.sh)
-    llvm_version_str=`${with_3rdpartydir}/dependency/${platstr}/llvm/comm/bin/llvm-config --version`
+    llvm_version_str=`${with_3rdpartydir}/kernel/dependency/llvm/comm/bin/llvm-config --version`
 fi
 llvm_major_version=$(echo $llvm_version_str | awk -F "." '{print $1}')
 llvm_minor_version=$(echo $llvm_version_str | awk -F "." '{print $2}')
@@ -6622,18 +6621,17 @@ fi
 #
 with_jdk=''
 if [[ ! -z "${with_3rdpartydir}" ]] && [[ "$with_openeuler_os" != yes ]]; then
-    platstr=$(sh src/get_PlatForm_str.sh)
     cpuarch=$(uname -m)
     for d in "openjdk8" "huaweijdk8"; do
-        $as_echo "$as_me:$LINENO: checking for jdk in ${with_3rdpartydir}/platform/${d}/${cpuarch}" >&5
-        if [ ! -d "${with_3rdpartydir}/platform/${d}/${cpuarch}" ]; then
+        $as_echo "$as_me:$LINENO: checking for jdk in ${with_3rdpartydir}/kernel/platform/${d}/${cpuarch}" >&5
+        if [ ! -d "${with_3rdpartydir}/kernel/platform/${d}/${cpuarch}" ]; then
             $as_echo "$as_me:$LINENO: result: no" >&5
             continue
         fi
 
-        for d2 in $(ls "${with_3rdpartydir}/platform/${d}/${cpuarch}" | sort -r  2>/dev/null); do
-            if [ -f "${with_3rdpartydir}/platform/${d}/${cpuarch}/${d2}/jre/bin/java" ]; then
-                with_jdk="${with_3rdpartydir}/platform/${d}/${cpuarch}/${d2}"
+        for d2 in $(ls "${with_3rdpartydir}/kernel/platform/${d}/${cpuarch}" | sort -r  2>/dev/null); do
+            if [ -f "${with_3rdpartydir}/kernel/platform/${d}/${cpuarch}/${d2}/jre/bin/java" ]; then
+                with_jdk="${with_3rdpartydir}/kernel/platform/${d}/${cpuarch}/${d2}"
                 break;
             fi
         done
@@ -6643,15 +6641,15 @@ if [[ ! -z "${with_3rdpartydir}" ]] && [[ "$with_openeuler_os" != yes ]]; then
             break;
         fi
 
-        $as_echo "$as_me:$LINENO: checking for jdk in ${with_3rdpartydir}/platform/${platstr}/${d}" >&5
-        if [ ! -d "${with_3rdpartydir}/platform/${platstr}/${d}" ]; then
+        $as_echo "$as_me:$LINENO: checking for jdk in ${with_3rdpartydir}/kernel/platform/${d}" >&5
+        if [ ! -d "${with_3rdpartydir}/kernel/platform/${d}" ]; then
             $as_echo "$as_me:$LINENO: result: no" >&5
             continue
         fi
 
-        for d2 in $(ls "${with_3rdpartydir}/platform/${platstr}/${d}" | sort -r  2>/dev/null); do
-            if [ -f "${with_3rdpartydir}/platform/${platstr}/${d}/${d2}/jre/bin/java" ]; then
-                with_jdk="${with_3rdpartydir}/platform/${platstr}/${d}/${d2}"
+        for d2 in $(ls "${with_3rdpartydir}/kernel/platform/${d}" | sort -r  2>/dev/null); do
+            if [ -f "${with_3rdpartydir}/kernel/platform/${d}/${d2}/jre/bin/java" ]; then
+                with_jdk="${with_3rdpartydir}/kernel/platform/${d}/${d2}"
                 break;
             fi
         done
@@ -29832,8 +29830,8 @@ CFLAGS="-DSTREAMPLAN $CFLAGS"
 # force set char to signed char
 CFLAGS="-fsigned-char $CFLAGS"
 
-platform_version=`sh ./src/get_PlatForm_str.sh`
-is_euler=`echo $platform_version | grep euleros`
+release_file=`find /etc/ -name "euleros-release"`
+is_euler=`echo $release_file | grep EulerOS`
 # New gcc version should be compatible to old one
 if test "$CC_VERSION" = "$NEW_GCC"; then
   CFLAGS=" -std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 $CFLAGS -fno-aggressive-loop-optimizations -Wno-attributes -fno-omit-frame-pointer -fno-expensive-optimizations"

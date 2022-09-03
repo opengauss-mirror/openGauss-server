@@ -17,12 +17,10 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "access/dfs/dfs_query.h" /* stay here, otherwise compile errors */
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
 #include "access/cstore_delta.h"
-#include "access/dfs/dfs_insert.h"
 #include "access/heapam.h"
 #include "access/relscan.h"
 #include "access/rewriteheap.h"
@@ -120,11 +118,6 @@ typedef struct {
     ExecNodes* nodes;
 } RedisSwitchNode;
 
-extern List* GetDifference(const List* list1, const List* list2, EqualFunc fn);
-extern void InsertNewFileToDfsPending(const char* filename, Oid ownerid, uint64 filesize);
-extern void InsertIntoPendingDfsDelete(const char* filename, bool atCommit, Oid ownerid, uint64 filesize);
-extern DfsSrvOptions* GetDfsSrvOptions(Oid spcNode);
-
 static void swap_relation_names(Oid r1, Oid r2);
 
 static void swapCascadeHeapTables(
@@ -146,11 +139,7 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
     TransactionId* pFreezeXid, MultiXactId* pFreezeMulti, AdaptMem* mem_info, double* ptrDeleteTupleNum = NULL);
 static void CopyCStoreData(Relation oldRel, Relation newRel, int freeze_min_age, int freeze_table_age, bool verbose,
     bool* pSwapToastByContent, TransactionId* pFreezeXid, AdaptMem* mem_info);
-static void DoCopyPaxFormatData(Relation oldRel, Relation newRel);
-static void CopyOldDeltaToNewRel(Oid oldRel, Oid newRel);
 static void DoCopyCUFormatData(Relation oldRel, Relation newRel, TupleDesc oldTupDesc, AdaptMem* mem_info);
-static List* FindMergedDescs(Relation oldRel, Relation newRel);
-extern ValuePartitionMap* buildValuePartitionMap(Relation relation, Relation pg_partition, HeapTuple partitioned_tuple);
 static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int freeze_min_age, int freeze_table_age,
     bool verbose, bool* pSwapToastByContent, TransactionId* pFreezeXid, MultiXactId *pFreezeMulti,
     double* ptrDeleteTupleNum, AdaptMem* mem_info);
@@ -385,6 +374,9 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
     LOCKMODE lockMode = NoLock;
     Oid amid = InvalidOid;
     AdaptMem* memUsage = (AdaptMem*)mem_info;
+    Oid save_userid;
+    int save_sec_context;
+    int save_nestlevel;
 
     /* Check for user-requested abort. */
     CHECK_FOR_INTERRUPTS();
@@ -431,6 +423,25 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
     }
 
     /*
+     * Switch to the table owner's userid, so that any index functions are run
+     * as that user.  Also lock down security-restricted operations and
+     * arrange to make GUC variable changes local to this command.
+     */
+    GetUserIdAndSecContext(&save_userid, &save_sec_context);
+    SetUserIdAndSecContext(OldHeap->rd_rel->relowner,
+            save_sec_context | SECURITY_RESTRICTED_OPERATION);
+    save_nestlevel = NewGUCNestLevel();
+
+    /* Forbid cluster on shared relation during upgrade, to protect global/pg_filenode.map not changed */
+    if (u_sess->attr.attr_common.upgrade_mode != 0 &&
+        tableOid < FirstBootstrapObjectId && OldHeap->rd_rel->relisshared &&
+        t_thrd.proc->workingVersionNum < RELMAP_4K_VERSION_NUM) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("cannot cluster shared relation during upgrade")));
+    }
+
+    /*
      * Since we may open a new transaction for each relation, we have to check
      * that the relation still is what we think it is.
      *
@@ -445,8 +456,7 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
         /* Check that the user still owns the relation */
         if (!pg_class_ownercheck(tableOid, GetUserId())) {
             relation_close(OldHeap, lockMode);
-            gstrace_exit(GS_TRC_ID_cluster_rel);
-            return;
+            goto out;
         }
 
         /*
@@ -459,8 +469,7 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
          */
         if (RELATION_IS_OTHER_TEMP(OldHeap)) {
             relation_close(OldHeap, lockMode);
-            gstrace_exit(GS_TRC_ID_cluster_rel);
-            return;
+            goto out;
         }
 
         if (OidIsValid(indexOid)) {
@@ -469,8 +478,7 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
              */
             if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(indexOid))) {
                 relation_close(OldHeap, lockMode);
-                gstrace_exit(GS_TRC_ID_cluster_rel);
-                return;
+                goto out;
             }
 
             /*
@@ -480,15 +488,13 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
             if (!HeapTupleIsValid(tuple)) {
                 /* probably can't happen */
                 relation_close(OldHeap, lockMode);
-                gstrace_exit(GS_TRC_ID_cluster_rel);
-                return;
+                goto out;
             }
             indexForm = (Form_pg_index)GETSTRUCT(tuple);
             if (!indexForm->indisclustered) {
                 ReleaseSysCache(tuple);
                 relation_close(OldHeap, lockMode);
-                gstrace_exit(GS_TRC_ID_cluster_rel);
-                return;
+                goto out;
             }
             ReleaseSysCache(tuple);
         }
@@ -523,15 +529,14 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
 
     if (RELATION_IS_GLOBAL_TEMP(OldHeap) && !gtt_storage_attached(RelationGetRelid(OldHeap))) {
         relation_close(OldHeap, lockMode);
-        gstrace_exit(GS_TRC_ID_cluster_rel);
-        return;
+        goto out;
     }
 
     if (OldHeap->storage_type == SEGMENT_PAGE) {
         ereport(INFO, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
             "to recycle segment space.", RelationGetRelationName(OldHeap))));
         relation_close(OldHeap, lockMode);
-        return;
+        goto out;
     }
 
     /*
@@ -597,8 +602,7 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
         }
 
         pgstat_report_vacuum(relid, parentid, false, 0);
-        gstrace_exit(GS_TRC_ID_cluster_rel);
-        return;
+        goto out;
     }
 
     /*
@@ -611,7 +615,7 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
         !OldHeap->rd_isscannable)
     {
         relation_close(OldHeap, AccessExclusiveLock);
-        return;
+        goto out;
     }
 #ifndef ENABLE_MULTIPLE_NODES
     if (OldHeap->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
@@ -646,6 +650,14 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
         /* for a specific partition */
         rebuildPartition(OldHeap, partitionOid, indexOid, freeze_min_age, freeze_table_age, verbose, memUsage);
     }
+
+out:
+    /* Roll back any GUC changes executed by index functions */
+    AtEOXact_GUC(false, save_nestlevel);
+
+    /* Restore userid and security context */
+    SetUserIdAndSecContext(save_userid, save_sec_context);
+
     gstrace_exit(GS_TRC_ID_cluster_rel);
 }
 
@@ -1512,8 +1524,6 @@ Oid make_new_heap(Oid OIDOldHeap, Oid NewTableSpace, int lockMode)
     if (RelationIsColStore(OldHeap)) {
         if (RelationIsCUFormat(OldHeap))
             AlterCStoreCreateTables(OIDNewHeap, 0, NULL);
-        else
-            AlterDfsCreateTables(OIDNewHeap, 0, NULL);
     }
     heap_close(OldHeap, NoLock);
 
@@ -1720,7 +1730,7 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
         }
         index_rescan(indexScan, NULL, 0, NULL, 0);
     } else {
-        heapScan = (UHeapScanDesc)UHeapBeginScan(oldHeap, SnapshotAny, 0);
+        heapScan = (UHeapScanDesc)UHeapBeginScan(oldHeap, SnapshotAny, 0, NULL);
         indexScan = NULL;
         ADIO_RUN()
         {
@@ -1799,13 +1809,11 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
         LockBuffer(buf, BUFFER_LOCK_SHARE);
         page = BufferGetPage(buf);
 
-        if (u_sess->attr.attr_storage.enable_debug_vacuum)
-            t_thrd.utils_cxt.pRelatedRel = oldHeap;
-
         TransactionId xwait;
         SubTransactionId subxidXwait = InvalidSubTransactionId;
 
-        switch (UHeapTupleSatisfiesOldestXmin(utuple, oldestXmin, buf, true, &utuple, &xwait, &subxidXwait)) {
+        switch (UHeapTupleSatisfiesOldestXmin(utuple, oldestXmin, buf, true, &utuple, &xwait,
+            &subxidXwait, oldHeap)) {
             case UHEAPTUPLE_DEAD:
                 /* Definitely dead */
                 isdead = true;
@@ -1850,9 +1858,6 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
                     errmsg("unexpected HeapTupleSatisfiesVacuum result")));
                 break;
         }
-
-        if (u_sess->attr.attr_storage.enable_debug_vacuum)
-            t_thrd.utils_cxt.pRelatedRel = NULL;
 
         LockBuffer(buf, BUFFER_LOCK_UNLOCK);
 
@@ -1929,9 +1934,10 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
     return tups_vacuumed;
 }
 
-static inline bool tuple_invisible_not_hotupdate(HeapTuple tuple, Relation relation)
+static inline bool tuple_invisible_not_hotupdate(HeapTuple tuple, Relation relation, bool* have_invisible_tuple)
 {
     if (HeapKeepInvisibleTuple(tuple, RelationGetDescr(relation)) && !HeapTupleIsHotUpdated(tuple)) {
+        *have_invisible_tuple = true;
         return false;
     } else {
         return true;
@@ -2082,14 +2088,12 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
 
         LockBuffer(buf, BUFFER_LOCK_SHARE);
         page = BufferGetPage(buf);
-
-        if (u_sess->attr.attr_storage.enable_debug_vacuum)
-            t_thrd.utils_cxt.pRelatedRel = OldHeap;
+        bool have_invisible_tuple = false;
 
         switch (HeapTupleSatisfiesVacuum(tuple, OldestXmin, buf)) {
             case HEAPTUPLE_DEAD:
                 /* Definitely dead */
-                isdead = tuple_invisible_not_hotupdate(tuple, OldHeap);
+                isdead = tuple_invisible_not_hotupdate(tuple, OldHeap, &have_invisible_tuple);
                 break;
             case HEAPTUPLE_RECENTLY_DEAD:
                 tups_recently_dead += 1;
@@ -2139,9 +2143,6 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
                 break;
         }
 
-        if (u_sess->attr.attr_storage.enable_debug_vacuum)
-            t_thrd.utils_cxt.pRelatedRel = NULL;
-
         LockBuffer(buf, BUFFER_LOCK_UNLOCK);
 
         /* IO collector and IO scheduler for vacuum full -- for write */
@@ -2149,8 +2150,6 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
             IOSchedulerAndUpdate(IO_TYPE_WRITE, 1, IO_TYPE_ROW);
 
         if (isdead) {
-            if (u_sess->attr.attr_storage.enable_debug_vacuum)
-                elogVacuumInfo(OldHeap, tuple, "copy heap data", OldestXmin);
             tups_vacuumed += 1;
             /* heap rewrite module still needs to see it... */
             /*
@@ -2166,12 +2165,46 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
             continue;
         }
 
+        if (have_invisible_tuple) {
+            HeapTuple copiedTuple;
+            MemoryContext oldMemCxt = NULL;
+
+            tableam_tops_deform_tuple(tuple, oldTupDesc, values, isnull);
+
+            /* Be sure to null out any dropped columns */
+            for (int i = 0; i < newTupDesc->natts; i++) {
+                if (newTupDesc->attrs[i]->attisdropped)
+                    isnull[i] = true;
+            }
+
+            bool usePrivateMemcxt = use_heap_rewrite_memcxt(rwstate);
+            if (usePrivateMemcxt) {
+                oldMemCxt = MemoryContextSwitchTo(get_heap_rewrite_memcxt(rwstate));
+            }
+            copiedTuple = (HeapTuple)heap_form_tuple(newTupDesc, values, isnull);
+
+            /* Preserve OID, if any */
+            if (NewHeap->rd_rel->relhasoids) {
+                HeapTupleSetOid(copiedTuple, HeapTupleGetOid(tuple));
+            }
+
+            heap_invalid_invisible_tuple(copiedTuple);
+            tuple = copiedTuple;
+            if (usePrivateMemcxt) {
+                (void)MemoryContextSwitchTo(oldMemCxt);
+            }
+        }
+
         num_tuples += 1;
         if (tuplesort != NULL)
             TuplesortPutheaptuple(tuplesort, tuple);
         else
             reform_and_rewrite_tuple(
                 tuple, oldTupDesc, newTupDesc, values, isnull, NewHeap->rd_rel->relhasoids, rwstate);
+
+        if (have_invisible_tuple) {
+            tableam_tops_free_tuple(tuple);
+        }
     }
 
     if (indexScan != NULL) {
@@ -3337,10 +3370,10 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
     if (get_rel_persistence(OIDOldHeap) == RELPERSISTENCE_GLOBAL_TEMP) {
         Assert(!is_system_catalog);
         GttSwapRelationFiles(OIDOldHeap, OIDNewHeap);
-    } else {
-        swap_relation_files(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId), 
-            swap_toast_by_content, frozenXid, frozenMulti, mapped_tables);
     }
+
+    swap_relation_files(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId), 
+        swap_toast_by_content, frozenXid, frozenMulti, mapped_tables);
 
     /*
      * If it's a system catalog, queue an sinval message to flush all
@@ -3560,14 +3593,6 @@ static void GttSwapRelationFiles(Oid r1, Oid r2)
 
     CacheInvalidateRelcache(rel1);
     CacheInvalidateRelcache(rel2);
-
-    if (rel1->rd_rel->reltoastrelid && rel2->rd_rel->reltoastrelid) {
-        GttSwapRelationFiles(rel1->rd_rel->reltoastrelid, rel2->rd_rel->reltoastrelid);
-    }
-
-    if (rel1->rd_rel->relkind == RELKIND_TOASTVALUE && rel2->rd_rel->relkind == RELKIND_TOASTVALUE) {
-        GttSwapRelationFiles(rel1->rd_rel->reltoastidxid, rel2->rd_rel->reltoastidxid);
-    }
 
     relation_close(rel1, NoLock);
     relation_close(rel2, NoLock);
@@ -3895,7 +3920,7 @@ static void VacFullCompaction(Relation oldHeap, Oid partOid)
 static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, int freezeTableAge, VacuumStmt* vacstmt)
 {
     Oid tableOid = RelationGetRelid(oldHeap);
-    uint32 statFlag = RelationIsSubPartitioned(oldHeap) ? partid_get_parentid(partOid) : tableOid;
+    uint32 statFlag = tableOid;
     Oid OIDNewHeap = InvalidOid;
     bool swapToastByContent = false;
     TransactionId frozenXid = InvalidTransactionId;
@@ -4193,64 +4218,6 @@ static void CopyCStoreData(Relation oldRel, Relation newRel, int freeze_min_age,
     if (RelationIsCUFormat(oldRel)) {
         /* for col store table */
         DoCopyCUFormatData(oldRel, newRel, oldTupDesc, mem_info);
-    } else {
-        /*
-         * for data on hdfs
-         *
-         * make_new_heap() can not copy partiton info from old dfs table to new one,
-         * so do it here, it's a little tricky.
-         *
-         * NB: new heap is temp heap and just visible in this transaction, and will
-         *     be droped whatever transaction commit or abort, so any changes of the
-         *     newRel is safe here.
-         */
-        char parttype;
-        PartitionMap* partmap = NULL;
-        if (RelationIsValuePartitioned(oldRel)) {
-            /* new value for parttype */
-            parttype = newRel->rd_rel->parttype;
-            newRel->rd_rel->parttype = PARTTYPE_VALUE_PARTITIONED_RELATION;
-
-            /* new value for partmap */
-            Relation pg_relation = heap_open(PartitionRelationId, AccessShareLock);
-
-            HeapTuple partitioned_tuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, oldRel->rd_id);
-            if (partitioned_tuple == NULL) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                        errmodule(MOD_CACHE),
-                        errmsg("Failed on finding partitioned tuple!\n")));
-            }
-            PartitionMap* copy_oldRel_partmap =
-                (PartitionMap*)buildValuePartitionMap(oldRel, pg_relation, partitioned_tuple);
-
-            heap_close(pg_relation, AccessShareLock);
-
-            partmap = newRel->partMap;
-            newRel->partMap = copy_oldRel_partmap;
-        }
-
-        PG_TRY();
-        {
-            DoCopyPaxFormatData(oldRel, newRel);
-            CopyOldDeltaToNewRel(oldRel->rd_id, newRel->rd_id);
-        }
-        PG_CATCH();
-        {
-            /* restore old value for newRel */
-            if (RelationIsValuePartitioned(oldRel)) {
-                newRel->rd_rel->parttype = parttype;
-                newRel->partMap = partmap;
-            }
-            PG_RE_THROW();
-        }
-        PG_END_TRY();
-
-        /* restore old value for newRel */
-        if (RelationIsValuePartitioned(oldRel)) {
-            newRel->rd_rel->parttype = parttype;
-            newRel->partMap = partmap;
-        }
     }
 }
 
@@ -4326,192 +4293,6 @@ static void DoCopyCUFormatData(Relation oldRel, Relation newRel, TupleDesc oldTu
     pfree_ext(colIdx);
     CStoreEndScan(scan);
     CStoreInsert::DeInitInsertArg(args);
-}
-
-/*
- * equal helper function for dfs table
- */
-bool equal_dfsdesc(const void* _data1, const void* _data2)
-{
-    DFSDesc* desc1 = (DFSDesc*)_data1;
-    DFSDesc* desc2 = (DFSDesc*)_data2;
-
-    return desc1->GetDescId() == desc2->GetDescId();
-}
-
-void InsertNewFileToDfsPending(const char* filename, Oid ownerid, uint64 filesize)
-{
-    InsertIntoPendingDfsDelete(filename, false, ownerid, filesize);
-}
-
-/*
- * find all desc tuples needed to be merged from desc table.
- */
-static List* FindMergedDescs(Relation oldRel, Relation newRel)
-{
-    List* merged_descs = NIL;
-    List* all_descs = NIL;
-
-    DFSDescHandler* old_handler =
-        New(CurrentMemoryContext) DFSDescHandler(MAX_LOADED_DFSDESC, oldRel->rd_att->natts, oldRel);
-
-    DFSDescHandler* new_handler =
-        New(CurrentMemoryContext) DFSDescHandler(MAX_LOADED_DFSDESC, newRel->rd_att->natts, newRel);
-
-    /*
-     * decide the set of the desc tuples whether COMPACT is enabled
-     */
-    all_descs = old_handler->GetAllDescs(SnapshotNow);
-    if (t_thrd.vacuum_cxt.vacuum_full_compact) {
-        merged_descs = old_handler->GetDescsToBeMerged(SnapshotNow);
-
-        /*
-         * move desc tuple which no invalid data to the desc table of new dfs
-         * table if <<COMPACT is enabled>>. This action must be done before
-         * any data is inserted into the new one.
-         */
-        List* to_newrel_desc = GetDifference(all_descs, merged_descs, equal_dfsdesc);
-
-        ListCell* lc = NULL;
-        foreach (lc, to_newrel_desc)
-            new_handler->Add((DFSDesc*)lfirst(lc), 1, GetCurrentCommandId(true), TABLE_INSERT_FROZEN);
-    }
-
-    return t_thrd.vacuum_cxt.vacuum_full_compact ? merged_descs : all_descs;
-}
-
-static void CopyOldDeltaToNewRel(Oid OIDOldHeap, Oid OIDNewHeap)
-{
-    Relation NewHeap, OldHeap;
-    TupleDesc oldTupDesc;
-    int natts;
-    Datum* values = NULL;
-    bool* isnull = NULL;
-
-    TableScanDesc heapScan;
-    HeapTuple tuple;
-
-    /*
-     * Open the relations we need.
-     */
-    NewHeap = heap_open(OIDNewHeap, ExclusiveLock);
-    OldHeap = heap_open(OIDOldHeap, ExclusiveLock);
-
-    Relation OldDeltaHeap = heap_open(OldHeap->rd_rel->reldeltarelid, ExclusiveLock);
-
-    /* Preallocate values/isnull arrays */
-    oldTupDesc = OldHeap->rd_att;
-    natts = oldTupDesc->natts;
-    values = (Datum*)palloc(natts * sizeof(Datum));
-    isnull = (bool*)palloc(natts * sizeof(bool));
-
-    DfsInsertInter* insert = NULL;
-    insert = (DfsInsert*)CreateDfsInsert(NewHeap, false, OldHeap);
-    insert->BeginBatchInsert(TUPLE_SORT);
-    insert->RegisterInsertPendingFunc(InsertNewFileToDfsPending);
-
-    heapScan = tableam_scan_begin(OldDeltaHeap, SnapshotNow, 0, (ScanKey)NULL);
-
-    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(heapScan, ForwardScanDirection)) != NULL) {
-        tableam_tops_deform_tuple(tuple, oldTupDesc, values, isnull);
-        insert->TupleInsert(values, isnull, TABLE_INSERT_FROZEN);
-    }
-
-    tableam_scan_end(heapScan);
-
-    insert->SetEndFlag();
-    insert->TupleInsert(NULL, NULL, TABLE_INSERT_FROZEN);
-    DELETE_EX(insert);
-
-    /* Clean up */
-    pfree_ext(values);
-    pfree_ext(isnull);
-
-    heap_close(OldDeltaHeap, NoLock);
-    heap_close(OldHeap, NoLock);
-    heap_close(NewHeap, NoLock);
-}
-
-/*
- * copy the data of old dfs table to new dfs table
- */
-static void DoCopyPaxFormatData(Relation oldRel, Relation newRel)
-{
-    /*
-     * if no files to be merged, return directly
-     */
-    List* todo_descs = FindMergedDescs(oldRel, newRel);
-    if (todo_descs == NULL)
-        return;
-
-    /*
-     * save path for relation, and this path will be used in doPendingDfsDelete()
-     */
-    StringInfo store_path = getDfsStorePath(oldRel);
-    MemoryContext oldcontext =
-        MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
-    u_sess->catalog_cxt.vf_store_root = makeStringInfo();
-    MemoryContextSwitchTo(oldcontext);
-
-    appendStringInfo(u_sess->catalog_cxt.vf_store_root, "%s", store_path->data);
-
-    /*
-     * get connection object and will be used in doPendingDfsDelete()
-     */
-    DfsSrvOptions* dfsoptions = GetDfsSrvOptions(oldRel->rd_rel->reltablespace);
-    dfs::DFSConnector* conn = dfs::createConnector(
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), dfsoptions, oldRel->rd_rel->reltablespace);
-    u_sess->catalog_cxt.delete_conn = conn;
-
-    /*
-     * init dfs insert object
-     */
-    DfsInsertInter* insert = NULL;
-
-    insert = (DfsInsert*)CreateDfsInsert(newRel, false, oldRel);
-    insert->BeginBatchInsert(BATCH_SORT);
-    insert->RegisterInsertPendingFunc(InsertNewFileToDfsPending);
-
-    StringInfo rootDir = getDfsStorePath(oldRel);
-    ListCell* lc = NULL;
-    List* splitList = NIL;
-    foreach (lc, todo_descs) {
-        DFSDesc* desc = (DFSDesc*)lfirst(lc);
-
-        StringInfo filePath = makeStringInfo();
-        appendStringInfo(filePath, "%s/%s", rootDir->data, desc->GetFileName());
-
-        SplitInfo* split = InitFileSplit(filePath->data, NULL, desc->GetFileSize());
-        splitList = lappend(splitList, split);
-
-        InsertIntoPendingDfsDelete(desc->GetFileName(), true, newRel->rd_rel->relowner, (uint64)desc->GetFileSize());
-    }
-
-    DfsScanState* scan = dfs::reader::DFSBeginScan(oldRel, splitList, 0, NULL, SnapshotNow);
-
-    /*
-     * compact all files which contain invalid data.
-     */
-    VectorBatch* batch = NULL;
-    do {
-        CHECK_FOR_INTERRUPTS();
-
-        batch = dfs::reader::DFSGetNextBatch(scan);
-        if (BatchIsNull(batch)) {
-            insert->SetEndFlag();
-            insert->BatchInsert((VectorBatch*)NULL, TABLE_INSERT_FROZEN);
-        } else {
-            insert->BatchInsert(batch, TABLE_INSERT_FROZEN);
-        }
-
-        if (BatchIsNull(batch))
-            break;
-
-    } while (true);
-
-    DELETE_EX(insert);
-
-    dfs::reader::DFSEndScan(scan);
 }
 
 // now this function servers VACUUM FULL cstore tables

@@ -703,8 +703,10 @@ HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull
     int i;
 
     if (numberOfAttributes > MaxTupleAttributeNumber) {
-        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
-                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
+        ereport(ERROR,
+                (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                 errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
+                        MaxTupleAttributeNumber, tupleDescriptor->tdTableAmType, tupleDescriptor->tdtypeid)));
     }
 
     /*
@@ -1994,8 +1996,10 @@ static Size heap_compute_cmprs_data_size(TupleDesc tupleDesc, FormCmprTupleData 
     int numberOfAttributes = tupleDesc->natts;
     Form_pg_attribute *att = tupleDesc->attrs;
     if (numberOfAttributes > MaxTupleAttributeNumber) {
-        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
-                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
+        ereport(ERROR,
+                (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                 errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
+                        MaxTupleAttributeNumber, tupleDesc->tdTableAmType, tupleDesc->tdtypeid)));
     }
 
     /*
@@ -2534,8 +2538,10 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
     int i;
 
     if (numberOfAttributes > MaxTupleAttributeNumber) {
-        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
-                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
+        ereport(ERROR,
+                (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                 errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
+                        MaxTupleAttributeNumber, tupleDescriptor->tdTableAmType, tupleDescriptor->tdtypeid)));
     }
 
     /*
@@ -3396,6 +3402,7 @@ void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer bu
     }
 }
 
+const int CheckPartOidIndex = 1;
 /*
  * Checks whether a dead tuple can be retained
  *
@@ -3425,7 +3432,16 @@ bool HeapKeepInvisibleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTu
         if (checkKeepFunc != NULL) {
             ret &= checkKeepFunc(checkDatum);
         } else if (keepOpt.checkKeepFunc != NULL) {
-            ret &= keepOpt.checkKeepFunc(checkDatum);
+            if (i == CheckPartOidIndex) {
+                char parttype = fastgetattr(tuple, Anum_pg_partition_parttype, tupleDesc, &isNull);
+                if (isNull) {
+                    return false;
+                }
+                bool isSubpart = parttype == 's' ? true : false;
+                ret &= (isSubpart || keepOpt.checkKeepFunc(checkDatum));
+            } else {
+                ret &= keepOpt.checkKeepFunc(checkDatum);
+            }
         } else {
             return false;
         }

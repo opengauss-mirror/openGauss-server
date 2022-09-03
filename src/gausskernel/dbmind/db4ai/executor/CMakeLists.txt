@@ -15,9 +15,7 @@ set(TGT_executor_INC
     ${PROJECT_SRC_DIR}/lib/gstrace
     ${LZ4_INCLUDE_PATH}
     ${LIBCGROUP_INCLUDE_PATH}
-    ${LIBORC_INCLUDE_PATH}
     ${EVENT_INCLUDE_PATH}
-    ${PROTOBUF_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
 )
 set(executor_DEF_OPTIONS ${MACRO_OPTIONS})
@@ -28,6 +26,5 @@ endif()
 set(executor_LINK_OPTIONS ${BIN_LINK_OPTIONS})
 add_static_objtarget(gausskernel_db4ai_executor TGT_executor_SRC TGT_executor_INC "${executor_DEF_OPTIONS}" "${executor_COMPILE_OPTIONS}" "${executor_LINK_OPTIONS}")
 
-add_subdirectory(gd)
-add_subdirectory(kmeans)
-add_subdirectory(xgboost)
+add_subdirectory(optimize)
+add_subdirectory(algorithms)

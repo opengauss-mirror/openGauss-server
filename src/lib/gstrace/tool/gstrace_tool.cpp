@@ -293,7 +293,7 @@ void ThreadFlow::flushStepStatsToFile(func_stat* funcStats_flow, uint32_t stepCo
         ret = snprintf_s(buff,
             max_step_analyze_line_size,
             max_step_analyze_line_size - 1,
-            "%10d %30s %10d %15.0lf %15.0lf %15.0lf %15.0lf\n",
+            "%10u %30s %10u %15.0lf %15.0lf %15.0lf %15.0lf\n",
             stepCounter,
             getTraceFunctionName(funcStats_it->first),
             func_stat->counter,
@@ -576,7 +576,7 @@ void DumpFileFlowVisitor::outputStat(FILE* fp)
         ret = snprintf_s(buff,
             max_analyze_line_size,
             max_analyze_line_size - 1,
-            "%10s %30s %10d %15.0lf %15.0lf %15.0lf %16.0lf %14d %14d\n",
+            "%10s %30s %10u %15.0lf %15.0lf %15.0lf %16.0lf %14u %14u\n",
             getCompNameById(func_it->first),
             getTraceFunctionName(func_it->first),
             func_info->counter,
@@ -1029,7 +1029,7 @@ static void gsTrcFormatUint32(char* out_buf, size_t size, const void* in_ptr, si
     char* out_buf_start = out_buf;
     int s = getRemaining(size, out_buf_start);
 
-    int written = snprintf_s(out_buf + (size - s), s, s - 1, "%d", *(uint32_t*)in_ptr);
+    int written = snprintf_s(out_buf + (size - s), s, s - 1, "%u", *(uint32_t*)in_ptr);
     securec_check_ss_c(written, "\0", "\0");
 }
 
@@ -1468,7 +1468,7 @@ trace_msg_t trace_message[] = {
     {TRACE_SEQ_ERR, "Trace sequence check failed."},
     {TRACE_VERSION_ERR, "trace version not match."},
     {TRACE_CONFIG_SIZE_ERR, "invalid config size in trace file."},
-    {TRACE_PROCESS_NOT_EXIST, "The database process is not exist."},
+    {TRACE_PROCESS_NOT_EXIST, "Trace process is not exists."},
     {TRACE_MSG_MAX, "Failed!"},
 };
 

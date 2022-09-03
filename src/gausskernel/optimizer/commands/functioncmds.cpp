@@ -904,6 +904,45 @@ static void CheckWindowFuncValid(Oid languageOid, const char* prosrc_str)
     }
 }
 
+static bool isForbiddenSchema (Oid namespaceId)
+{
+    return IsPackageSchemaOid(namespaceId) || namespaceId == PG_DB4AI_NAMESPACE;
+}
+
+void CheckCreateFunctionPrivilege(Oid namespaceId, const char* funcname)
+{
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade && isForbiddenSchema(namespaceId)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Permission denied to create function \"%s\"", funcname),
+                errdetail("Object creation is not supported for %s schema.", get_namespace_name(namespaceId)),
+                errcause("The schema in the package does not support object creation.."),
+                erraction("Please create an object in another schema.")));
+    }
+
+    if (!isRelSuperuser() &&
+        (namespaceId == PG_CATALOG_NAMESPACE ||
+        namespaceId == PG_PUBLIC_NAMESPACE ||
+        namespaceId == PG_DB4AI_NAMESPACE)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create function \"%s\"", funcname),
+                errhint("must be %s to create a function in %s schema.",
+                    g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin",
+                    get_namespace_name(namespaceId))));
+    }
+
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        !g_instance.attr.attr_common.allow_create_sysobject &&
+        IsSysSchema(namespaceId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create function \"%s\"", funcname),
+                errhint("not allowd to create a function in %s schema when allow_create_sysobject is off.",
+                    get_namespace_name(namespaceId))));
+    }
+}
+
 /*
  * CreateFunction
  *	 Execute a CREATE FUNCTION utility statement.
@@ -995,22 +1034,8 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
         ReleaseSysCache(tuple);
     }
 
-    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade && IsPackageSchemaOid(namespaceId)) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Permission denied to create function \"%s\"", funcname),
-                errdetail("Object creation is not supported for %s schema.", get_namespace_name(namespaceId)),
-                errcause("The schema in the package does not support object creation.."),
-                erraction("Please create an object in another schema.")));
-    }
+    CheckCreateFunctionPrivilege(namespaceId, funcname);
     bool anyResult = CheckCreatePrivilegeInNamespace(namespaceId, GetUserId(), CREATE_ANY_FUNCTION);
-    if (namespaceId == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied to create function \"%s\"", funcname),
-                errhint("must be %s to create a function in public schema.",
-                    g_instance.attr.attr_security.enablePrivilegesSeparate  ? "initial user" : "sysadmin")));
-    }
 
     //@Temp Table. Lock Cluster after determine whether is a temp object,
     // so we can decide if locking other coordinator
@@ -1064,7 +1089,9 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
                                             : 0)));
 
     languageOid = HeapTupleGetOid(languageTuple);
-
+    if (strcasecmp(get_language_name(languageOid), "plpgsql") != 0) {
+        u_sess->plsql_cxt.isCreateFunction = false;
+    }
 #ifdef ENABLE_MULTIPLE_NODES
     if (languageOid == JavalanguageId) {
         /*
@@ -1212,6 +1239,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
 
     u_sess->plsql_cxt.procedure_start_line = 0;
     u_sess->plsql_cxt.procedure_first_line = 0;
+    u_sess->plsql_cxt.isCreateFunction = false;
     if (u_sess->plsql_cxt.debug_query_string != NULL && !OidIsValid(pkg_oid)) {
         pfree_ext(u_sess->plsql_cxt.debug_query_string);
     }
@@ -1894,7 +1922,7 @@ void AlterFunction(AlterFunctionStmt* stmt)
     bool isNull = false;
 
     funcOid = LookupFuncNameTypeNames(stmt->func->funcname, stmt->func->funcargs, false);
-    #ifndef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_MULTIPLE_NODES
     char* schemaName = NULL;
     char* pkgname = NULL;
     char* procedureName = NULL;
@@ -2592,12 +2620,13 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
     CheckSetNamespace(oldNspOid, nspOid, ProcedureRelationId, procOid);
 
     /* disallow move objects into public schemas for non-admin user */
-    if (nspOid == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
+    if ((nspOid == PG_PUBLIC_NAMESPACE || nspOid == PG_DB4AI_NAMESPACE) && !isRelSuperuser()) {
         ereport(ERROR,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), 
                  errmsg("permission denied to move objects into public schema"),
-                 errhint("must be %s to move objects into public schema.",
-                         g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin")));
+                 errhint("must be %s to move objects into %s schema.",
+                         g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin",
+                         get_namespace_name(nspOid))));
     }
 
     /* check for duplicate name (more friendly than unique-index failure) */

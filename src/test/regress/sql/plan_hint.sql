@@ -764,6 +764,14 @@ on(t1.a = t2.b)
 join hint_t3 as t3
 on (t2.a = t3.b);
 
+-- test distribute hint
+explain (costs off) select /*+ multinode */ a from hint_vec where a = 10;
+explain (costs off) select /*+ broadcast(hint_vec) */ a from hint_vec where a = 10;
+explain (costs off) select /*+ redistribute(hint_vec) */ a from hint_vec where a = 10;
+explain (costs off) select /*+ no broadcast(hint_vec) */ a from hint_vec where a = 10;
+explain (costs off) select /*+ no redistribute(hint_vec) */ a from hint_vec where a = 10;
+explain (costs off) select /*+ skew(hint_vec(a)) */ a from hint_vec where a = 10;
+
 drop view hint_view_1;
 drop view hint_view_2;
 drop view hint_view_3;

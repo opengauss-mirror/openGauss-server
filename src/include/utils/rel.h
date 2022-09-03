@@ -152,6 +152,7 @@ typedef struct RelationData {
     TupleDesc rd_att;     /* tuple descriptor */
     Oid rd_id;            /* relation's object id */
     bool rd_isblockchain; /* relation is in blockchain schema */
+    char relreplident;    /* see REPLICA_IDENTITY_xxx constants  */
 
     LockInfoData rd_lockInfo;  /* lock mgr's info for locking relation */
     RuleLock* rd_rules;        /* rewrite rules */
@@ -292,8 +293,9 @@ typedef struct RelationData {
     bool newcbi;
 
     bool is_compressed;
+    bool come_from_partrel;
     /* used only for gsc, keep it preserved if you modify the rel, otherwise set it null */
-    struct LocalRelationEntry *entry; 
+    struct LocalRelationEntry *entry;
 } RelationData;
 
 /*
@@ -332,10 +334,8 @@ typedef enum RedisRelAction {
 
 /* PageCompressOpts->compressType values */
 typedef enum CompressTypeOption {
-    COMPRESS_TYPE_NONE = 0, COMPRESS_TYPE_PGLZ = 1, COMPRESS_TYPE_ZSTD = 2
+    COMPRESS_TYPE_NONE = 0, COMPRESS_TYPE_PGLZ = 1, COMPRESS_TYPE_ZSTD = 2, COMPRESS_TYPE_PGZSTD = 3
 } CompressTypeOption;
-
-
 typedef struct StdRdOptions {
     int32 vl_len_;           /* varlena header (do not touch directly!) */
     int fillfactor;          /* page fill factor in percent (0..100) */
@@ -612,6 +612,7 @@ extern TransactionId PartGetRelFrozenxid64(Partition part);
  */
 #define RelationIsMapped(relation) ((relation)->rd_rel->relfilenode == InvalidOid)
 
+extern void TryFreshSmgrCache(struct SMgrRelationData *smgr);
 /*
  * RelationOpenSmgr
  *		Open the relation at the smgr level, if not already done.
@@ -620,6 +621,9 @@ extern TransactionId PartGetRelFrozenxid64(Partition part);
     do {                                                                                                 \
         if ((relation)->rd_smgr == NULL)                                                                 \
             smgrsetowner(&((relation)->rd_smgr), smgropen((relation)->rd_node, (relation)->rd_backend)); \
+        else {                                                                                           \
+            TryFreshSmgrCache((relation)->rd_smgr);                                                      \
+        }                                                                                                \
     } while (0)
 
 /*
