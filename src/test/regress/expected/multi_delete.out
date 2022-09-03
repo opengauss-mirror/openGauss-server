@@ -559,7 +559,6 @@ insert into t_p_mutil_t1 values('201902', '1', '1', 1);
 insert into t_p_mutil_t1 values('201903', '2', '1', 1);
 insert into t_p_mutil_t1 values('201903', '1', '1', 1);
 insert into t_p_mutil_t1 values('201903', '2', '1', 1);
-
 CREATE TABLE t_p_mutil_t2
 (
     month_code VARCHAR2 ( 30 ) NOT NULL ,
@@ -677,7 +676,6 @@ CREATE TRIGGER delete_ar_trigger1
 AFTER delete ON test_trigger_src_tbl1 
 FOR EACH ROW
 EXECUTE PROCEDURE tri_delete_func1();
-
 CREATE TRIGGER delete_ar_trigger2
 AFTER delete ON test_trigger_src_tbl2 
 FOR EACH ROW
@@ -736,7 +734,6 @@ CREATE TRIGGER delete_ar_trigger1
 BEFORE delete ON test_trigger_src_tbl1 
 FOR EACH ROW
 EXECUTE PROCEDURE tri_delete_func1();
-
 CREATE TRIGGER delete_ar_trigger2
 BEFORE delete ON test_trigger_src_tbl2 
 FOR EACH ROW
@@ -797,7 +794,6 @@ CREATE TRIGGER delete_ar_trigger1
 BEFORE delete ON test_trigger_src_tbl1 
 FOR EACH STATEMENT
 EXECUTE PROCEDURE tri_delete_func1();
-
 CREATE TRIGGER delete_ar_trigger2
 BEFORE delete ON test_trigger_src_tbl2 
 FOR EACH STATEMENT
@@ -856,7 +852,6 @@ CREATE TRIGGER delete_ar_trigger1
 BEFORE delete ON test_trigger_src_tbl1 
 FOR EACH STATEMENT
 EXECUTE PROCEDURE tri_delete_func1();
-
 CREATE TRIGGER delete_ar_trigger2
 BEFORE delete ON test_trigger_src_tbl2 
 FOR EACH STATEMENT
@@ -915,7 +910,6 @@ CREATE TRIGGER delete_ar_trigger1
 AFTER delete ON test_trigger_src_tbl1 
 FOR EACH STATEMENT
 EXECUTE PROCEDURE tri_delete_func1();
-
 CREATE TRIGGER delete_ar_trigger2
 AFTER delete ON test_trigger_src_tbl2 
 FOR EACH STATEMENT

@@ -674,7 +674,6 @@ insert into t_p_mutil_t1 values('201902', '1', '1', 1);
 insert into t_p_mutil_t1 values('201903', '2', '1', 1);
 insert into t_p_mutil_t1 values('201903', '1', '1', 1);
 insert into t_p_mutil_t1 values('201903', '2', '1', 1);
-
 CREATE TABLE t_p_mutil_t2
 (
     month_code VARCHAR2 ( 30 ) NOT NULL ,
@@ -909,7 +908,6 @@ CREATE TRIGGER update_ar_trigger1
 AFTER UPDATE ON test_trigger_src_tbl1 
 FOR EACH ROW
 EXECUTE PROCEDURE tri_update_func1();
-
 CREATE TRIGGER update_ar_trigger2
 AFTER UPDATE ON test_trigger_src_tbl2 
 FOR EACH ROW
@@ -972,7 +970,6 @@ CREATE TRIGGER update_ar_trigger1
 BEFORE UPDATE ON test_trigger_src_tbl1 
 FOR EACH ROW
 EXECUTE PROCEDURE tri_update_func1();
-
 CREATE TRIGGER update_ar_trigger2
 BEFORE UPDATE ON test_trigger_src_tbl2 
 FOR EACH ROW
@@ -1035,7 +1032,6 @@ CREATE TRIGGER update_ar_trigger1
 BEFORE UPDATE ON test_trigger_src_tbl1 
 FOR EACH STATEMENT
 EXECUTE PROCEDURE tri_update_func1();
-
 CREATE TRIGGER update_ar_trigger2
 BEFORE UPDATE ON test_trigger_src_tbl2 
 FOR EACH STATEMENT
@@ -1098,7 +1094,6 @@ CREATE TRIGGER update_ar_trigger1
 BEFORE UPDATE ON test_trigger_src_tbl1 
 FOR EACH STATEMENT
 EXECUTE PROCEDURE tri_update_func1();
-
 CREATE TRIGGER update_ar_trigger2
 BEFORE UPDATE ON test_trigger_src_tbl2 
 FOR EACH STATEMENT
@@ -1161,7 +1156,6 @@ CREATE TRIGGER update_ar_trigger1
 AFTER UPDATE ON test_trigger_src_tbl1 
 FOR EACH STATEMENT
 EXECUTE PROCEDURE tri_update_func1();
-
 CREATE TRIGGER update_ar_trigger2
 AFTER UPDATE ON test_trigger_src_tbl2 
 FOR EACH STATEMENT
@@ -1224,6 +1218,5 @@ insert into settest07 values(1,'开席');
 create table settest01(id int,rowid number);
 insert into settest01 values(3,5);
 update settest01 a,settest07 b set b.c2=4 where a.id>b.c1;
-
 \c regression
 drop database multiupdate;

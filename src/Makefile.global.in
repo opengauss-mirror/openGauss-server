@@ -336,9 +336,9 @@ endif
   PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   using_openjdk = $(shell if [ -d "$(with_3rd)/$(PLATFORMPATH)/openjdk8" ]; then echo "yes"; else echo "no"; fi;)
   ifeq ($(using_openjdk), yes)
-    JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/openjdk8/jdk1.8.0_222
+    JAVA_HOME = $(with_3rd)/${PLATFORMPATH}/openjdk8/$(shell uname -p)/jdk
   else
-    JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/huaweijdk8/x86_64/jdk
+    JAVA_HOME = $(with_3rd)/${PLATFORMPATH}/huaweijdk8/$(shell uname -p)/jdk
   endif
   MASSTREE_HOME = $(with_3rd)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME = $(with_3rd)/$(BINARYPATH)/mysql_fdw

@@ -901,7 +901,7 @@ test: hw_cipher_aes128
 test: hw_pwd_encryption_sm3
 test: rule_test
 test: test_auto_increment
-test: dump_auto_increment
+#test: dump_auto_increment
 
 #delete limit
 test: delete_limit
@@ -952,7 +952,7 @@ test: procedure_privilege_test
 # global temporary table: parallel truncate
 test: gtt_trunc_pre
 test: gtt_trunc_parallel_dml1 gtt_trunc_parallel_dml2 gtt_trunc_parallel_ddl1 gtt_trunc_parallel_ddl2
-test: gtt_trunc_clean
+#test: gtt_trunc_clean
 
 test: toomanyparams
 

@@ -15,6 +15,7 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 1005;
 CREATE OR REPLACE FUNCTION pg_catalog.compress_statistic_info(IN input_path text, IN step smallint, OUT path text, OUT extent_count bigint, OUT dispersion_count bigint, OUT void_count bigint) RETURNS record LANGUAGE INTERNAL AS 'compress_statistic_info';
 
 -- compress read page/file from remote
+DROP FUNCTION IF EXISTS pg_catalog.gs_read_block_from_remote(int4, int4, int4, int2, int2, int4, xid, int4, xid, boolean, int4) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5843;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_read_block_from_remote(oid, oid, oid, smallint, smallint, integer, xid, integer, xid, boolean, integer)
  RETURNS bytea
@@ -36,5 +37,10 @@ CREATE OR REPLACE FUNCTION pg_catalog.gs_read_file_size_from_remote(oid, oid, oi
  NOT FENCED NOT SHIPPABLE
 AS 'gs_read_file_size_from_remote';
 
+DROP FUNCTION IF EXISTS pg_catalog.pg_read_binary_file_blocks(IN inputpath text, IN startblocknum int8, IN count int8,
+                                           OUT path text,
+                                           OUT blocknum int4,
+                                           OUT len int4,
+                                           OUT data bytea);
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5846;
 CREATE OR REPLACE FUNCTION pg_catalog.pg_read_binary_file_blocks(IN input text, IN blocknum bigint, IN blockcount bigint, OUT path text, OUT blocknum integer, OUT len integer, OUT algorithm integer, OUT chunk_size integer, OUT data bytea) RETURNS SETOF record AS 'pg_read_binary_file_blocks' LANGUAGE INTERNAL IMMUTABLE;
